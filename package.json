@@ -1,0 +1,39 @@
+{
+  "name": "solace-queue-browser-utility",
+  "version": "1.2.0",
+  "description": "Solace Queue Browser Web Utility - A client-side web application for browsing and managing Solace message queues",
+  "main": "src/solaceutil.js",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js --dev",
+    "dev:live": "node dev-server.js",
+    "serve": "python3 -m http.server 8080 -d dist",
+    "test": "node test/runner.js",
+    "clean": "rm -rf dist/*",
+    "watch": "node build.js --watch"
+  },
+  "keywords": [
+    "solace",
+    "queue",
+    "browser",
+    "messaging",
+    "pubsub",
+    "websocket"
+  ],
+  "author": "Solace Professional Services",
+  "license": "MIT",
+  "devDependencies": {
+    "fs-extra": "^11.1.1",
+    "chokidar": "^3.5.3",
+    "terser": "^5.19.2",
+    "ws": "^8.14.0"
+  },
+  "dependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SolacePSGSolutions/solace-queue-browser.git"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
