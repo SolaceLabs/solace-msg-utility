@@ -16,6 +16,8 @@ This version, as compared to other Solace Queue Browsers available, does not req
 
 Users are expected to know the connection parameters / details.
 
+![Screenshot](images/screenshot.png)
+
 ## Pre-requisite
 
 1. Modern Browser (only browsers tested with are listed below)
@@ -63,3 +65,4 @@ Users are expected to know the connection parameters / details.
 | [Solace Queue Browser](https://github.com/solacecommunity/solace-queue-browser) | Browser | .Net (Container) | Basic, OAuth, Client Certiticate | View, Filter, Download | - |
 | [Chrome Extension](https://github.com/solacecommunity/solace-queue-browser-extension) | Browser | None | Basic | View | Requires SEMP Credentials |
 | [Solace Queue Browser GUI](https://github.com/SolaceServices/SolaceQueueBrowserGui) | Java Desktop App | None | Basic | View, Delete, Copy, Move (Drag & Drop) | Requires SEMP |
+| [Solace Message Viewer](https://github.com/richard-lawrence/Solace-Message-Viewer) | Browser | None | Basic | View | - |
