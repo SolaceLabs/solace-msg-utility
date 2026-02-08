@@ -1796,270 +1796,6 @@ const config = {};
 })();
 
 
-const serviceSemp = {};
-
-(function () {
-
-    serviceSemp.connect = async function (cfg) {
-        const els = ui.getElements();
-
-        // Loading State
-        els.btnSemp.disabled = true;
-        els.btnSemp.innerHTML = '<span class="spinner">⌛</span> Connecting...';
-        ui.showConnectError(els.elSempError, null);
-
-        const baseUrl = `${cfg.protocol}://${cfg.host}:${cfg.port}`;
-        const validationUrl = `${baseUrl}/SEMP/v2/config/msgVpns?count=1`;
-        const authHeader = 'Basic ' + btoa(`${cfg.user}:${cfg.pass}`);
-
-        try {
-            // MOCK
-            if (cfg.host.includes('untrust.com')) {
-                throw new Error('Certificate Not Trusted (Mock)');
-            }
-
-            const res = await fetch(validationUrl, {
-                method: 'GET',
-                headers: { 'Authorization': authHeader }
-            });
-
-            if (res.ok) {
-                console.log('SEMP Connection Established');
-
-                // Update State
-                window.App.setState('sempCredentials', { user: cfg.user, pass: cfg.pass, baseUrl });
-                window.App.setState('isSempConnected', true);
-                window.dispatchEvent(new CustomEvent('semp:connected'));
-
-                // Update UI Local
-                els.btnSemp.textContent = 'Disconnect';
-                els.btnSemp.classList.remove('btn-primary');
-                els.btnSemp.classList.add('btn-danger');
-
-                ui.showError(els.elSempUser, false);
-                ui.showError(els.elSempPass, false);
-
-            } else if (res.status === 401) {
-                console.error('SEMP Auth Failed');
-                ui.showConnectError(els.elSempError, 'Authentication Failed (401). Check username/password.');
-            } else {
-                console.error(`SEMP Error: ${res.status}`);
-                ui.showConnectError(els.elSempError, `SEMP Connection Failed: ${res.status} ${res.statusText}`);
-            }
-
-        } catch (err) {
-            console.error('SEMP Network Error', err);
-
-            let helpUrl = null;
-            if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))) {
-                helpUrl = `${cfg.protocol}://${cfg.host}:${cfg.port}`;
-            }
-            ui.showConnectError(els.elSempError, `SEMP Network Error: ${err.message}`, helpUrl);
-
-        } finally {
-            els.btnSemp.disabled = false;
-            // Restore text if failed
-            if (!window.App.getState().isSempConnected) {
-                els.btnSemp.innerHTML = 'Connect'; // Restore HTML or Text
-            } else {
-                els.btnSemp.innerHTML = 'Disconnect';
-            }
-        }
-    };
-
-    serviceSemp.disconnect = function () {
-        console.log('Disconnecting SEMP...');
-        window.App.setState('isSempConnected', false);
-        window.App.setState('sempCredentials', null);
-        window.dispatchEvent(new CustomEvent('semp:disconnected'));
-
-        const els = ui.getElements();
-        if (els.btnSemp) {
-            els.btnSemp.textContent = 'Connect';
-            els.btnSemp.classList.remove('btn-danger');
-            els.btnSemp.classList.add('btn-primary');
-        }
-    };
-
-})();
-
-
-const serviceSolace = {};
-
-(function () {
-    let session = null;
-    let isInitialized = false;
-
-    // CRITICAL: Factory Initialization called by index.js setup()
-    serviceSolace.init = function () {
-        if (isInitialized) return;
-        if (!window.solace) {
-            console.warn('Solace API not loaded yet.');
-            return;
-        }
-
-        try {
-            const factoryProps = new solace.SolclientFactoryProperties();
-            factoryProps.profile = solace.SolclientFactoryProfiles.version10;
-            factoryProps.logLevel = solace.LogLevel.WARN; // Can be adjusted
-            solace.SolclientFactory.init(factoryProps);
-            isInitialized = true;
-            console.log('SolClientFactory Initialized.');
-        } catch (e) {
-            console.error('Failed to initialize SolClientFactory:', e);
-        }
-    };
-
-    serviceSolace.connect = function (cfg) {
-        if (session) {
-            try { session.disconnect(); } catch (e) { }
-        }
-
-        if (!window.solace) {
-            ui.showConnectError(ui.getElements().elSolError, 'Solace API not loaded.');
-            return;
-        }
-
-        if (!isInitialized) serviceSolace.init(); // Just in case
-
-        // Clear UI Errors via UI module
-        const els = ui.getElements();
-        ui.showConnectError(els.elSolError, null);
-        ui.showFeedback(els.btnSolace, 'Connecting...'); // Feedback on button
-
-        try {
-            const props = new solace.SessionProperties();
-            props.url = `${cfg.protocol}://${cfg.host}:${cfg.port}`;
-            props.vpnName = cfg.vpn;
-            props.userName = cfg.user;
-            props.publisherProperties = { acknowledgeMode: solace.MessagePublisherAcknowledgeMode.PER_MESSAGE, };
-
-            if (cfg.authMode === 'oauth') {
-                props.authenticationScheme = solace.AuthenticationScheme.OAUTH2;
-                props.accessToken = cfg.user; // Token in user field
-                props.idToken = cfg.password; // Token in pass field
-            } else {
-                props.authenticationScheme = solace.AuthenticationScheme.BASIC;
-                props.password = cfg.password;
-            }
-
-            // Advanced Props
-            if (cfg.connectRetries !== undefined) props.connectRetries = cfg.connectRetries;
-            if (cfg.connectTimeout !== undefined) props.connectTimeoutInMsecs = cfg.connectTimeout;
-            if (cfg.reconnectRetries !== undefined) props.reconnectRetries = cfg.reconnectRetries;
-            if (cfg.reconnectRetriesInMsecs !== undefined) props.reconnectRetryWaitInMsecs = cfg.reconnectWait;
-
-            // MOCK: Simulate Untrusted
-            
-
-            console.log('Creating Session:', props);
-            session = solace.SolclientFactory.createSession(props);
-            window.App.session = session; // Global Ref
-
-            // Event Listeners
-            session.on(solace.SessionEventCode.UP_NOTICE, (sessionEvent) => {
-                console.log('Solace Session UP');
-                ui.showConnectError(els.elSolError, null);
-
-                const btn = ui.getElements().btnSolace;
-                if (btn) {
-                    btn.textContent = 'Disconnect';
-                    btn.classList.remove('btn-primary');
-                    btn.classList.add('btn-danger');
-                    btn.disabled = false;
-                }
-
-                // Global State & Events
-                window.App.setState('isConnected', true);
-                window.App.setState('selectedVpn', cfg.vpn);
-                window.dispatchEvent(new CustomEvent('client:connected'));
-
-                // Trigger UI Update directly via index -> which listens to event, but we can also trigger helper?
-                // The event listener in index.js handles `ui.updateInputState()`.
-            });
-
-            session.on(solace.SessionEventCode.CONNECT_FAILED_ERROR, (sessionEvent) => {
-                console.error('Connection Failed:', sessionEvent);
-
-                let helpUrl = null;
-                if (sessionEvent.infoStr && sessionEvent.infoStr.includes('Connection error')) {
-                    // Try to guess Management URL based on current inputs?
-                    // We need Semp settings... access via UI elements? 
-                    // Better to rely on what was passed or access UI.
-                    const sempEl = ui.getElements();
-                    helpUrl = `${sempEl.elSempProtocol.value}://${cfg.host}:${sempEl.elSempPort.value}`;
-                }
-
-                ui.showConnectError(els.elSolError, `Connection Failed: ${sessionEvent.infoStr}`, helpUrl);
-                serviceSolace.cleanup();
-            });
-
-            session.on(solace.SessionEventCode.DISCONNECTED, (sessionEvent) => {
-                console.log('Disconnected');
-                serviceSolace.cleanup();
-                window.dispatchEvent(new CustomEvent('client:disconnected'));
-            });
-
-            // Global Event Dispatching for ACK/REJECT (Forwarding Support)
-            session.on(solace.SessionEventCode.ACKNOWLEDGED_MESSAGE, (sessionEvent) => {
-                window.dispatchEvent(new CustomEvent('client:session-ack', { detail: sessionEvent }));
-            });
-            session.on(solace.SessionEventCode.REJECTED_MESSAGE_ERROR, (sessionEvent) => {
-                window.dispatchEvent(new CustomEvent('client:session-reject', { detail: sessionEvent }));
-            });
-
-            // Other events...
-            session.on(solace.SessionEventCode.MESSAGE, (message) => {
-                // Generic handler
-            });
-
-            session.connect();
-
-        } catch (e) {
-            console.error('Session Creation Error', e);
-
-            // Mock Help URL Check
-            let helpUrl = null;
-            if (e.message && e.message.includes('Certificate')) {
-                const sempEl = ui.getElements();
-                helpUrl = `${sempEl.elSempProtocol.value}://${cfg.host}:${sempEl.elSempPort.value}`;
-            }
-
-            ui.showConnectError(els.elSolError, e.message, helpUrl);
-            serviceSolace.cleanup();
-        }
-    };
-
-    serviceSolace.disconnect = function () {
-        if (session) {
-            try { session.disconnect(); } catch (e) { }
-        } else {
-            serviceSolace.cleanup();
-        }
-    };
-
-    serviceSolace.cleanup = function () {
-        const els = ui.getElements();
-        if (els.btnSolace) {
-            els.btnSolace.textContent = 'Connect';
-            els.btnSolace.classList.remove('btn-danger');
-            els.btnSolace.classList.add('btn-primary');
-            els.btnSolace.disabled = false;
-        }
-
-        window.App.setState('isConnected', false);
-        window.App.setState('selectedVpn', null);
-
-        if (window.App.session) {
-            try { window.App.session.dispose(); } catch (e) { }
-            window.App.session = null;
-        }
-        session = null;
-    };
-
-})();
-
-
 const ui = {};
 
 (function () {
@@ -2262,6 +1998,275 @@ const ui = {};
 
 })();
 
+
+const serviceSolace = {};
+
+(function () {
+    let session = null;
+    let isInitialized = false;
+
+    // CRITICAL: Factory Initialization called by index.js setup()
+    serviceSolace.init = function () {
+        if (isInitialized) return;
+        if (!window.solace) {
+            console.warn('Solace API not loaded yet.');
+            return;
+        }
+
+        try {
+            const factoryProps = new solace.SolclientFactoryProperties();
+            factoryProps.profile = solace.SolclientFactoryProfiles.version10;
+            factoryProps.logLevel = solace.LogLevel.WARN; // Can be adjusted
+            solace.SolclientFactory.init(factoryProps);
+            isInitialized = true;
+            console.log('SolClientFactory Initialized.');
+        } catch (e) {
+            console.error('Failed to initialize SolClientFactory:', e);
+        }
+    };
+
+    serviceSolace.connect = function (cfg) {
+        if (session) {
+            try { session.disconnect(); } catch (e) { }
+        }
+
+        if (!window.solace) {
+            ui.showConnectError(ui.getElements().elSolError, 'Solace API not loaded.');
+            return;
+        }
+
+        if (!isInitialized) serviceSolace.init(); // Just in case
+
+        // Clear UI Errors via UI module
+        const els = ui.getElements();
+        ui.showConnectError(els.elSolError, null);
+        ui.showFeedback(els.btnSolace, 'Connecting...'); // Feedback on button
+
+        try {
+            const props = new solace.SessionProperties();
+            props.url = `${cfg.protocol}://${cfg.host}:${cfg.port}`;
+            props.vpnName = cfg.vpn;
+            props.userName = cfg.user;
+            props.publisherProperties = { acknowledgeMode: solace.MessagePublisherAcknowledgeMode.PER_MESSAGE, };
+
+            if (cfg.authMode === 'oauth') {
+                props.authenticationScheme = solace.AuthenticationScheme.OAUTH2;
+                props.accessToken = cfg.user; // Token in user field
+                props.idToken = cfg.password; // Token in pass field
+            } else {
+                props.authenticationScheme = solace.AuthenticationScheme.BASIC;
+                props.password = cfg.password;
+            }
+
+            // Advanced Props
+            if (cfg.connectRetries !== undefined) props.connectRetries = cfg.connectRetries;
+            if (cfg.connectTimeout !== undefined) props.connectTimeoutInMsecs = cfg.connectTimeout;
+            if (cfg.reconnectRetries !== undefined) props.reconnectRetries = cfg.reconnectRetries;
+            if (cfg.reconnectRetriesInMsecs !== undefined) props.reconnectRetryWaitInMsecs = cfg.reconnectWait;
+
+            // MOCK: Simulate Untrusted
+            
+
+            console.log('Creating Session:', props);
+            session = solace.SolclientFactory.createSession(props);
+            window.App.session = session; // Global Ref
+
+            // Event Listeners
+            session.on(solace.SessionEventCode.UP_NOTICE, (sessionEvent) => {
+                console.log('Solace Session UP');
+                ui.showConnectError(els.elSolError, null);
+
+                const btn = ui.getElements().btnSolace;
+                if (btn) {
+                    btn.textContent = 'Disconnect';
+                    btn.classList.remove('btn-primary');
+                    btn.classList.add('btn-danger');
+                    btn.disabled = false;
+                }
+
+                // Global State & Events
+                window.App.setState('isConnected', true);
+                window.App.setState('selectedVpn', cfg.vpn);
+                window.dispatchEvent(new CustomEvent('client:connected'));
+
+                // Trigger UI Update directly via index -> which listens to event, but we can also trigger helper?
+                // The event listener in index.js handles `ui.updateInputState()`.
+            });
+
+            session.on(solace.SessionEventCode.CONNECT_FAILED_ERROR, (sessionEvent) => {
+                console.error('Connection Failed:', sessionEvent);
+
+                let helpUrl = null;
+                if (sessionEvent.infoStr && sessionEvent.infoStr.includes('Connection error')) {
+                    // Try to guess Management URL based on current inputs?
+                    // We need Semp settings... access via UI elements? 
+                    // Better to rely on what was passed or access UI.
+                    const sempEl = ui.getElements();
+                    helpUrl = `${sempEl.elSempProtocol.value}://${cfg.host}:${sempEl.elSempPort.value}`;
+                }
+
+                ui.showConnectError(els.elSolError, `Connection Failed: ${sessionEvent.infoStr}`, helpUrl);
+                serviceSolace.cleanup();
+            });
+
+            session.on(solace.SessionEventCode.DISCONNECTED, (sessionEvent) => {
+                console.log('Disconnected');
+                serviceSolace.cleanup();
+                window.dispatchEvent(new CustomEvent('client:disconnected'));
+            });
+
+            // Global Event Dispatching for ACK/REJECT (Forwarding Support)
+            session.on(solace.SessionEventCode.ACKNOWLEDGED_MESSAGE, (sessionEvent) => {
+                window.dispatchEvent(new CustomEvent('client:session-ack', { detail: sessionEvent }));
+            });
+            session.on(solace.SessionEventCode.REJECTED_MESSAGE_ERROR, (sessionEvent) => {
+                window.dispatchEvent(new CustomEvent('client:session-reject', { detail: sessionEvent }));
+            });
+
+            // Other events...
+            session.on(solace.SessionEventCode.MESSAGE, (message) => {
+                // Generic handler
+            });
+
+            session.connect();
+
+        } catch (e) {
+            console.error('Session Creation Error', e);
+
+            // Mock Help URL Check
+            let helpUrl = null;
+            if (e.message && e.message.includes('Certificate')) {
+                const sempEl = ui.getElements();
+                helpUrl = `${sempEl.elSempProtocol.value}://${cfg.host}:${sempEl.elSempPort.value}`;
+            }
+
+            ui.showConnectError(els.elSolError, e.message, helpUrl);
+            serviceSolace.cleanup();
+        }
+    };
+
+    serviceSolace.disconnect = function () {
+        if (session) {
+            try { session.disconnect(); } catch (e) { }
+        } else {
+            serviceSolace.cleanup();
+        }
+    };
+
+    serviceSolace.cleanup = function () {
+        const els = ui.getElements();
+        if (els.btnSolace) {
+            els.btnSolace.textContent = 'Connect';
+            els.btnSolace.classList.remove('btn-danger');
+            els.btnSolace.classList.add('btn-primary');
+            els.btnSolace.disabled = false;
+        }
+
+        window.App.setState('isConnected', false);
+        window.App.setState('selectedVpn', null);
+
+        if (window.App.session) {
+            try { window.App.session.dispose(); } catch (e) { }
+            window.App.session = null;
+        }
+        session = null;
+    };
+
+})();
+
+
+const serviceSemp = {};
+
+(function () {
+
+    serviceSemp.connect = async function (cfg) {
+        const els = ui.getElements();
+
+        // Loading State
+        els.btnSemp.disabled = true;
+        els.btnSemp.innerHTML = '<span class="spinner">⌛</span> Connecting...';
+        ui.showConnectError(els.elSempError, null);
+
+        const baseUrl = `${cfg.protocol}://${cfg.host}:${cfg.port}`;
+        const validationUrl = `${baseUrl}/SEMP/v2/config/msgVpns?count=1`;
+        const authHeader = 'Basic ' + btoa(`${cfg.user}:${cfg.pass}`);
+
+        try {
+            // MOCK
+            if (cfg.host.includes('untrust.com')) {
+                throw new Error('Certificate Not Trusted (Mock)');
+            }
+
+            const res = await fetch(validationUrl, {
+                method: 'GET',
+                headers: { 'Authorization': authHeader }
+            });
+
+            if (res.ok) {
+                console.log('SEMP Connection Established');
+
+                // Update State
+                window.App.setState('sempCredentials', { user: cfg.user, pass: cfg.pass, baseUrl });
+                window.App.setState('isSempConnected', true);
+                window.dispatchEvent(new CustomEvent('semp:connected'));
+
+                // Update UI Local
+                els.btnSemp.textContent = 'Disconnect';
+                els.btnSemp.classList.remove('btn-primary');
+                els.btnSemp.classList.add('btn-danger');
+
+                ui.showError(els.elSempUser, false);
+                ui.showError(els.elSempPass, false);
+
+            } else if (res.status === 401) {
+                console.error('SEMP Auth Failed');
+                ui.showConnectError(els.elSempError, 'Authentication Failed (401). Check username/password.');
+            } else {
+                console.error(`SEMP Error: ${res.status}`);
+                ui.showConnectError(els.elSempError, `SEMP Connection Failed: ${res.status} ${res.statusText}`);
+            }
+
+        } catch (err) {
+            console.error('SEMP Network Error', err);
+
+            let helpUrl = null;
+            if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))) {
+                helpUrl = `${cfg.protocol}://${cfg.host}:${cfg.port}`;
+            }
+            ui.showConnectError(els.elSempError, `SEMP Network Error: ${err.message}`, helpUrl);
+
+        } finally {
+            els.btnSemp.disabled = false;
+            // Restore text if failed
+            if (!window.App.getState().isSempConnected) {
+                els.btnSemp.innerHTML = 'Connect'; // Restore HTML or Text
+            } else {
+                els.btnSemp.innerHTML = 'Disconnect';
+            }
+        }
+    };
+
+    serviceSemp.disconnect = function () {
+        console.log('Disconnecting SEMP...');
+        window.App.setState('isSempConnected', false);
+        window.App.setState('sempCredentials', null);
+        window.dispatchEvent(new CustomEvent('semp:disconnected'));
+
+        const els = ui.getElements();
+        if (els.btnSemp) {
+            els.btnSemp.textContent = 'Connect';
+            els.btnSemp.classList.remove('btn-danger');
+            els.btnSemp.classList.add('btn-primary');
+        }
+    };
+
+})();
+
+
+// @include config.js
+// @include ui.js
+// @include service-solace.js
+// @include service-semp.js
 
 function setup(context) {
     const { container, appState, loadSelf } = context;
@@ -2492,9 +2497,6 @@ function setup(context) {
         // 1. Switch View to Connections
         if (loadSelf) {
             loadSelf();
-        } else {
-            const navItem = document.querySelector('.nav-item[data-module-id="01-connections"]');
-            if (navItem) navItem.click();
         }
 
         // 2. Helper to finish
@@ -2584,90 +2586,172 @@ function setup(context) {
         const moduleLogic = (function() {
             const moduleContainerId = '02-queue-discovery';
             
+// Extract SEMP fetching logic
+const service = {};
+
+service.fetchVpns = async function (maxCount = 100) {
+    const state = window.App.getState();
+    const useMocks = window.App.config.useMocks;
+
+    
+
+    if (!state.isSempConnected) {
+        return { ok: false, error: 'SEMP Not Connected' };
+    }
+
+    const { baseUrl } = state.sempCredentials;
+    const url = `${baseUrl}/SEMP/v2/monitor/msgVpns?count=${maxCount}`;
+
+    try {
+        const res = await window.App.sempFetch(url);
+        if (res.ok) {
+            const json = await res.json();
+            if (json.data) {
+                return { ok: true, data: json.data.map(v => v.msgVpnName).sort() };
+            }
+        }
+        return { ok: false, error: res.statusText };
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+};
+
+service.fetchQueues = async function (vpnName, maxCount = 100) {
+    const state = window.App.getState();
+    const useMocks = window.App.config.useMocks;
+
+    
+
+    if (!state.isSempConnected) {
+        return { ok: false, error: 'SEMP Not Connected' };
+    }
+
+    const { baseUrl } = state.sempCredentials;
+    const url = `${baseUrl}/SEMP/v2/monitor/msgVpns/${vpnName}/queues?count=${maxCount}`;
+
+    try {
+        const res = await window.App.sempFetch(url);
+        if (res.ok) {
+            const json = await res.json();
+            if (json.data) {
+                return { ok: true, data: json.data.map(q => q.queueName).sort() };
+            }
+        }
+        return { ok: false, error: res.statusText };
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+};
+
+// Export (attached to window or returned if module system allows, but for now global scope or window attachment is common in this app pattern?)
+// The app.js loader wraps modules in IIFE, so `const service = {}` is local.
+// We need to return it or expose it if other files need it.
+// BUT wait, `build.js` concatenates files. So if I define `const service = {}` in `service.js` and it is loaded BEFORE `index.js`, then `index.js` can use `service`.
+// `build.js` sorts files, ensuring `index.js` is last. So `service.js` comes before.
+// I should make `const service` global to the module scope (which is inside the IIFE wrapper).
+// So just defining it here works!
+
+
+const ui = {};
+
+ui.setupSearchableSelect = function (inputEl, listEl, onSelectCallback) {
+    // Filter Logic
+    inputEl.addEventListener('input', () => {
+        const term = inputEl.value.toLowerCase();
+        const options = listEl.querySelectorAll('.dropdown-option');
+        let hasVisible = false;
+        options.forEach(opt => {
+            const text = opt.textContent.toLowerCase();
+            if (text.includes(term)) {
+                opt.style.display = 'block';
+                hasVisible = true;
+            } else {
+                opt.style.display = 'none';
+            }
+        });
+        listEl.classList.add('show');
+    });
+
+    // Show on focus
+    inputEl.addEventListener('focus', () => {
+        if (inputEl.value === '') {
+            listEl.querySelectorAll('.dropdown-option').forEach(o => o.style.display = 'block');
+        }
+        listEl.classList.add('show');
+    });
+
+    // Hide on outside click
+    document.addEventListener('click', (e) => {
+        if (!inputEl.contains(e.target) && !listEl.contains(e.target)) {
+            listEl.classList.remove('show');
+        }
+    });
+};
+
+ui.renderOptions = function (listEl, items, onSelect) {
+    listEl.innerHTML = '';
+    if (!items || items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'dropdown-option';
+        empty.textContent = 'No items found';
+        empty.style.fontStyle = 'italic';
+        listEl.appendChild(empty);
+        return;
+    }
+
+    items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'dropdown-option';
+        div.textContent = item;
+        div.addEventListener('click', () => {
+            onSelect(item);
+            listEl.classList.remove('show');
+        });
+        listEl.appendChild(div);
+    });
+};
+
+ui.updateVisibility = function (elWarning, elContent, isConnected) {
+    if (!isConnected) {
+        if (elWarning) elWarning.classList.remove('hidden');
+        if (elContent) elContent.classList.add('hidden');
+    } else {
+        if (elWarning) elWarning.classList.add('hidden');
+        if (elContent) elContent.classList.remove('hidden');
+    }
+};
+
+ui.clearInputs = function (vpnInput, queueInput, btnCopy) {
+    if (vpnInput) vpnInput.value = '';
+    if (queueInput) {
+        queueInput.value = '';
+        queueInput.disabled = true;
+    }
+    if (btnCopy) btnCopy.disabled = true;
+};
+
+// @include service.js
+// @include ui.js
+
 function setup(context) {
     const { container, appState } = context;
 
+    // Elements
     const elWarning = container.querySelector('#discovery-warning');
     const elContent = container.querySelector('#discovery-content');
-
-    // VPN Elements
     const vpnInput = container.querySelector('#discovery-vpn-input');
     const vpnList = container.querySelector('#discovery-vpn-list');
     const btnRefreshVpns = container.querySelector('#btn-refresh-vpns');
-
-    // Queue Elements
     const queueInput = container.querySelector('#discovery-queue-input');
     const queueList = container.querySelector('#discovery-queue-list');
     const btnRefreshQueues = container.querySelector('#btn-refresh-queues');
     const btnCopy = container.querySelector('#btn-copy-config');
 
     // State
-    // State
-    
     let selectedVpn = null;
     let selectedQueue = null;
-
-    // Available lists for validation
     let currentVpnList = [];
     let currentQueueList = [];
-
-    // --- Searchable Dropdown Helper ---
-    function setupSearchableSelect(inputEl, listEl, onSelectCallback) {
-        // Filter Logic
-        inputEl.addEventListener('input', () => {
-            const term = inputEl.value.toLowerCase();
-            const options = listEl.querySelectorAll('.dropdown-option');
-            let hasVisible = false;
-            options.forEach(opt => {
-                const text = opt.textContent.toLowerCase();
-                if (text.includes(term)) {
-                    opt.style.display = 'block';
-                    hasVisible = true;
-                } else {
-                    opt.style.display = 'none';
-                }
-            });
-            listEl.classList.add('show');
-        });
-
-        // Show on focus
-        inputEl.addEventListener('focus', () => {
-            if (inputEl.value === '') {
-                listEl.querySelectorAll('.dropdown-option').forEach(o => o.style.display = 'block');
-            }
-            listEl.classList.add('show');
-        });
-
-        // Hide on outside click
-        document.addEventListener('click', (e) => {
-            if (!inputEl.contains(e.target) && !listEl.contains(e.target)) {
-                listEl.classList.remove('show');
-            }
-        });
-    }
-
-    function renderOptions(listEl, items, onSelect) {
-        listEl.innerHTML = '';
-        if (!items || items.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'dropdown-option';
-            empty.textContent = 'No items found';
-            empty.style.fontStyle = 'italic';
-            listEl.appendChild(empty);
-            return;
-        }
-
-        items.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'dropdown-option';
-            div.textContent = item;
-            div.addEventListener('click', () => {
-                onSelect(item);
-                listEl.classList.remove('show');
-            });
-            listEl.appendChild(div);
-        });
-    }
 
     // --- Logic ---
 
@@ -2676,12 +2760,12 @@ function setup(context) {
         vpnInput.value = vpn;
         console.log(`VPN Selected: ${vpn}`);
 
-        // Update Global State
         if (window.App && window.App.setState) {
             window.App.setState('selectedVpn', vpn);
         }
 
-        fetchQueues(); // Auto-fetch queues
+        // Auto-fetch queues
+        fetchQueues();
     }
 
     function handleQueueSelect(queue) {
@@ -2695,50 +2779,14 @@ function setup(context) {
         console.log('Fetching VPNs...');
         vpnInput.placeholder = 'Loading...';
 
-        // Mock Fallback if configured (or if we want to support both)
-        // For now, if sempConnected, use real.
-        const state = window.App.getState();
-
-        
-
-        if (!state.isSempConnected) {
-            // Fallback or just empty
-            vpnInput.placeholder = 'SEMP Not Connected';
-            return;
-        }
-
-        const { baseUrl } = state.sempCredentials;
-        const url = `${baseUrl}/SEMP/v2/monitor/msgVpns?count=100`; // Limit 100 for now
-
-        try {
-            const res = await window.App.sempFetch(url);
-            if (res.ok) {
-                const data = await res.json();
-                if (data.data) {
-                    const vpnNames = data.data.map(v => v.msgVpnName).sort();
-                    currentVpnList = vpnNames;
-                    renderOptions(vpnList, vpnNames, handleVpnSelect);
-
-                    vpnInput.placeholder = 'Select a Message VPN';
-
-                    // Auto-select first if available and nothing selected
-                    if (vpnNames.length > 0 && !selectedVpn) {
-                        // Optional: Auto select default? Or just first?
-                        // User didn't strictly ask for auto-select, but "populate the vpn list".
-                        // I will just populate for now to be safe, or maybe select "default" if exists?
-                        // Let's just ready the list.
-                        if (vpnNames.includes('default')) {
-                            // handleVpnSelect('default'); // Maybe too aggressive?
-                        }
-                    }
-                }
-            } else {
-                console.error('Failed to fetch VPNs', res.statusText);
-                vpnInput.placeholder = 'Error fetching VPNs';
-            }
-        } catch (e) {
-            console.error('Error fetching VPNs', e);
-            vpnInput.placeholder = 'Network Error';
+        const res = await service.fetchVpns();
+        if (res.ok) {
+            currentVpnList = res.data;
+            ui.renderOptions(vpnList, currentVpnList, handleVpnSelect);
+            vpnInput.placeholder = 'Select a Message VPN';
+        } else {
+            console.error('Failed to fetch VPNs', res.error);
+            vpnInput.placeholder = res.error || 'Error fetching VPNs';
         }
     }
 
@@ -2752,166 +2800,112 @@ function setup(context) {
 
         console.log(`Fetching Queues for ${selectedVpn}...`);
         queueInput.placeholder = 'Loading...';
-        queueInput.value = ''; // Reset queue selection
+        queueInput.value = '';
         selectedQueue = null;
         if (btnCopy) btnCopy.disabled = true;
+        ui.renderOptions(queueList, [], handleQueueSelect);
 
-        renderOptions(queueList, [], handleQueueSelect);
-
-        const state = window.App.getState();
-
-        
-
-        if (!state.isSempConnected) {
-            queueInput.placeholder = 'SEMP Not Connected';
-            return;
-        }
-
-        const { baseUrl } = state.sempCredentials;
-        // Monitor endpoint for queues
-        const url = `${baseUrl}/SEMP/v2/monitor/msgVpns/${selectedVpn}/queues?count=100`;
-
-        try {
-            const res = await window.App.sempFetch(url);
-            if (res.ok) {
-                const data = await res.json();
-                if (data.data) {
-                    const queueNames = data.data.map(q => q.queueName).sort();
-                    currentQueueList = queueNames;
-
-                    if (queueNames.length === 0) {
-                        queueInput.value = 'No queues in Message VPN';
-                        queueInput.disabled = true;
-                        renderOptions(queueList, [], handleQueueSelect);
-                    } else {
-                        queueInput.disabled = false;
-                        queueInput.placeholder = 'Select a Queue';
-                        renderOptions(queueList, queueNames, handleQueueSelect);
-                    }
-                }
+        const res = await service.fetchQueues(selectedVpn);
+        if (res.ok) {
+            currentQueueList = res.data;
+            if (currentQueueList.length === 0) {
+                queueInput.value = 'No queues in Message VPN';
+                queueInput.disabled = true;
+                ui.renderOptions(queueList, [], handleQueueSelect);
             } else {
-                console.error('Failed to fetch Queues', res.statusText);
-                queueInput.placeholder = 'Error fetching Queues';
+                queueInput.disabled = false;
+                queueInput.placeholder = 'Select a Queue';
+                ui.renderOptions(queueList, currentQueueList, handleQueueSelect);
             }
-        } catch (e) {
-            console.error('Error fetching Queues', e);
-            queueInput.placeholder = 'Network Error';
-        }
-    }
-
-    function updateVisibility(isConnected) {
-        if (!isConnected) {
-            if (elWarning) elWarning.classList.remove('hidden');
-            if (elContent) elContent.classList.add('hidden');
         } else {
-            if (elWarning) elWarning.classList.add('hidden');
-            if (elContent) elContent.classList.remove('hidden');
+            console.error('Failed to fetch Queues', res.error);
+            queueInput.placeholder = res.error || 'Error fetching Queues';
         }
     }
 
-    // Setup Components
-    setupSearchableSelect(vpnInput, vpnList, handleVpnSelect);
-    setupSearchableSelect(queueInput, queueList, handleQueueSelect);
+    // --- Setup Components ---
+    if (vpnInput && vpnList) ui.setupSearchableSelect(vpnInput, vpnList, handleVpnSelect);
+    if (queueInput && queueList) ui.setupSearchableSelect(queueInput, queueList, handleQueueSelect);
 
     // Initial State
-    queueInput.disabled = true; // Disabled until VPN selected
+    if (queueInput) queueInput.disabled = true;
+    ui.updateVisibility(elWarning, elContent, appState.isSempConnected);
 
-    // Blur Validation for VPN
-    vpnInput.addEventListener('blur', () => {
-        setTimeout(() => {
-            const val = vpnInput.value;
-            // Validate against list
-            if (val && !currentVpnList.includes(val)) {
-                console.log('Invalid VPN entered. Clearing.');
-                vpnInput.value = '';
-                selectedVpn = null;
-
-                // Cascade Effect: Reset Queue
-                queueInput.value = '';
-                queueInput.disabled = true;
-                selectedQueue = null;
-                if (btnCopy) btnCopy.disabled = true;
-            } else if (!val) {
-                // Also handle empty
-                selectedVpn = null;
-                queueInput.value = '';
-                queueInput.disabled = true;
-                if (btnCopy) btnCopy.disabled = true;
-            }
-        }, 150);
-    });
-
-    // Blur Validation for Queues
-    queueInput.addEventListener('blur', () => {
-        // Small delay to allow click on option to register first
-        setTimeout(() => {
-            if (queueInput.disabled) return;
-
-            const val = queueInput.value;
-            // If value is not in the list of valid queues
-            // (Only checks strict match; could be case-insensitive if desired, but user said "valid names")
-            if (val && !currentQueueList.includes(val)) {
-                console.log('Invalid queue entered. Clearing.');
-                queueInput.value = '';
-                selectedQueue = null;
-                btnCopy.disabled = true;
-            }
-        }, 150);
-    });
-
-    // Initial State Check
-    updateVisibility(appState.isSempConnected);
+    // Initial Fetch if Connected
     if (appState.isSempConnected) {
         fetchVpns();
     }
 
-    function clearAll() {
-        // Clear VPNs
-        vpnInput.value = '';
-        selectedVpn = null;
-        currentVpnList = [];
+    // Validation (Blur) logic
+    if (vpnInput) {
+        vpnInput.addEventListener('blur', () => {
+            setTimeout(() => {
+                const val = vpnInput.value;
+                if ((val && !currentVpnList.includes(val)) || !val) {
+                    if (val) console.log('Invalid VPN entered. Clearing.');
 
-        // Clear Queues
-        queueInput.value = '';
-        queueInput.disabled = true;
-        selectedQueue = null;
-        currentQueueList = [];
-        if (btnCopy) btnCopy.disabled = true;
+                    // Clear State
+                    selectedVpn = null;
+                    selectedQueue = null;
 
-        renderOptions(vpnList, [], handleVpnSelect);
-        renderOptions(queueList, [], handleQueueSelect);
+                    // Clear UI
+                    vpnInput.value = '';
+                    ui.clearInputs(null, queueInput, btnCopy);
+                }
+            }, 150);
+        });
     }
 
-    // Event Listeners
-    btnRefreshVpns.addEventListener('click', () => {
-        clearAll();
-        fetchVpns();
-    });
+    if (queueInput) {
+        queueInput.addEventListener('blur', () => {
+            setTimeout(() => {
+                if (queueInput.disabled) return;
+                const val = queueInput.value;
+                if (val && !currentQueueList.includes(val)) {
+                    console.log('Invalid queue entered. Clearing.');
+                    queueInput.value = '';
+                    selectedQueue = null;
+                    if (btnCopy) btnCopy.disabled = true;
+                }
+            }, 150);
+        });
+    }
 
-    btnRefreshQueues.addEventListener('click', () => {
-        if (!selectedVpn) return;
+    // event Listeners
+    if (btnRefreshVpns) {
+        btnRefreshVpns.addEventListener('click', () => {
+            // Clear All
+            selectedVpn = null;
+            selectedQueue = null;
+            currentVpnList = [];
+            currentQueueList = [];
+            vpnInput.value = '';
+            ui.clearInputs(null, queueInput, btnCopy);
+            ui.renderOptions(vpnList, [], handleVpnSelect); // Clear list UI
+            ui.renderOptions(queueList, [], handleQueueSelect);
 
-        // Clear Queues
-        queueInput.value = '';
-        selectedQueue = null;
-        currentQueueList = [];
-        if (btnCopy) btnCopy.disabled = true;
+            fetchVpns();
+        });
+    }
 
-        renderOptions(queueList, [], handleQueueSelect);
-
-        fetchQueues();
-    });
+    if (btnRefreshQueues) {
+        btnRefreshQueues.addEventListener('click', () => {
+            if (!selectedVpn) return;
+            selectedQueue = null;
+            currentQueueList = [];
+            queueInput.value = '';
+            if (btnCopy) btnCopy.disabled = true;
+            ui.renderOptions(queueList, [], handleQueueSelect);
+            fetchQueues();
+        });
+    }
 
     if (btnCopy) {
         btnCopy.addEventListener('click', () => {
             if (selectedVpn && selectedQueue) {
-                // Emit Cross-Module Event
                 console.log(`[Discovery] Requesting Open in Browser: VPN=${selectedVpn}, Queue=${selectedQueue}`);
                 window.dispatchEvent(new CustomEvent('connection:check-connection', {
-                    detail: {
-                        vpn: selectedVpn,
-                        queue: selectedQueue
-                    }
+                    detail: { vpn: selectedVpn, queue: selectedQueue }
                 }));
             } else {
                 alert('Please select a VPN and Queue first.');
@@ -2920,32 +2914,26 @@ function setup(context) {
     }
 
     // Enter Key Support
-    vpnInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            btnRefreshVpns.click();
-        }
-    });
-
-    queueInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            btnRefreshQueues.click();
-        }
-    });
+    if (vpnInput) vpnInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (btnRefreshVpns) btnRefreshVpns.click(); } });
+    if (queueInput) queueInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (btnRefreshQueues) btnRefreshQueues.click(); } });
 
     // Global State Listener
     window.addEventListener('app:state-change', (e) => {
         if (e.detail.key === 'isSempConnected') {
             const isConnected = e.detail.value;
-            updateVisibility(isConnected);
+            ui.updateVisibility(elWarning, elContent, isConnected);
             if (isConnected) {
                 fetchVpns();
             } else {
-                clearAll();
+                // Clear All
+                selectedVpn = null;
+                selectedQueue = null;
+                vpnInput.value = '';
+                ui.clearInputs(null, queueInput, btnCopy);
             }
         }
     });
+
 }
 
             // Explicitly return the exported setup function if it exists
@@ -2977,211 +2965,1059 @@ const icons = {
 
 
 
+const state = {
+    browserInstances: new Map(), // queueName -> solace.QueueBrowser
+    messageStore: new Map(),     // queueName -> Array<Message>
+    currentQueue: '',
+    currentQueuePermissions: null,
+    allMessages: [],
+    displayedMessages: [],
+    forwardQueue: [], // Array of messages to forward
+    activeFilters: { content: '', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'OR' }
+};
 
-// import state, { addMessage, getMessages } from './state.js';
-// import * as ui from './ui.js';
+// No default export needed in closure scope
 
-const serviceEvents = {};
+function getBrowser(queueName) {
+    return state.browserInstances.get(queueName);
+}
 
-serviceEvents.onBrowserUp = function (queueName) {
-    console.log(`[${queueName}] Browser UP`);
+function setBrowser(queueName, browser) {
+    state.browserInstances.set(queueName, browser);
+}
 
-    // Finalize Bind in UI
-    ui.addQueueToDropdown(queueName);
+function deleteBrowser(queueName) {
+    state.browserInstances.delete(queueName);
+}
 
-    // Clear Input on success if matching
-    const els = ui.getElements();
-    if (els.inputBind && els.inputBind.value.trim() === queueName) {
-        els.inputBind.value = '';
-    }
+function getMessages(queueName) {
+    return state.messageStore.get(queueName);
+}
 
-    if (state.currentQueue === queueName) {
-        ui.showBrowserError(null);
-        // Duplicate call removed - handled by dropdown change event
+function setMessages(queueName, messages) {
+    state.messageStore.set(queueName, messages);
+}
+
+function addMessage(queueName, message) {
+    const store = state.messageStore.get(queueName);
+    if (store) {
+        store.push(message);
     }
 }
 
-serviceEvents.onConnectFailed = function (queueName, err) {
-    console.error(`[${queueName}] Connect Failed:`, err);
-
-    // Show Inline Error for binding
-    ui.showBindError(`Connection Failed: ${err.message || 'Unknown Error'}`);
-
-    // If active view
-    if (state.currentQueue === queueName) {
-        ui.showBrowserError(`Connection Failed: ${err.message || 'Unknown Error'}`);
-    }
-
-    // Cleanup browser instance so it can be retried
-    if (service.disconnectBrowser) {
-        service.disconnectBrowser(queueName);
-    }
+function clearStore() {
+    state.messageStore.clear();
 }
 
-serviceEvents.onBrowserDown = function (queueName, err) {
-    console.error(`[${queueName}] Browser Down:`, err);
-    if (state.currentQueue === queueName) {
-        ui.showBrowserError(`Browser connection error: ${err.message || err}`);
+// Helper for Wildcard Match
+function matchString(text, pattern) {
+    if (!pattern) return true;
+
+    // If pattern contains '*', use regex for wildcard
+    if (pattern.includes('*')) {
+        // Escape regex characters except *
+        const escapeRegex = (str) => str.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+        // Split by * to create regex parts AND join by .*
+        const regexStr = '^' + pattern.split('*').map(escapeRegex).join('.*') + '$';
+        const regex = new RegExp(regexStr, 'i'); // Case insensitive
+        return regex.test(text);
     }
+
+    // Otherwise, Exact Match (Case Insensitive)
+    return text.toLowerCase() === pattern.toLowerCase();
 }
 
-// Session Events (for Forwarding)
-serviceEvents.onSessionAck = function (sessionEvent) {
-    if (sessionEvent && sessionEvent["correlationKey"] && sessionEvent["correlationKey"]["Solace_Msg_Utility_Seq_Num"]) {
-        const seqNum = sessionEvent["correlationKey"]["Solace_Msg_Utility_Seq_Num"];
-        console.log(`ACK Received for ${seqNum}`);
-        ui.updateForwardItemStatus(seqNum, 'SUCCESS');
-        return;
+// Logic extracted from ui-events to be shared with service-events
+function shouldShowMessage(msg) {
+    // Current Active Filters - DO NOT lower() here, let matchString handle casing
+    const fContent = state.activeFilters.content;
+    const fId = state.activeFilters.msgId;
+    const fDest = state.activeFilters.dest;
+    const fDestType = state.activeFilters.type;
+    const fMsgType = state.activeFilters.msgType;
+    const criteria = state.activeFilters.criteria || 'OR';
+
+    // Define Conditions: { active: boolean, match: boolean }
+    const conditions = [];
+
+    // 1. Content
+    if (fContent) {
+        // Use 'Contains' matching for content/body as per user request
+        //if (!fContent.includes('*')) {
+        const content = msg.content || '';
+        conditions.push({ active: true, match: content.toLowerCase().includes(fContent.toLowerCase()) });
+        //} else {
+        // Fallback to matchString for wildcards
+        //    conditions.push({ active: true, match: matchString(msg.content, fContent) });
+        //}
     }
-}
 
-serviceEvents.onSessionReject = function (sessionEvent) {
-    if (sessionEvent && sessionEvent["correlationKey"] && sessionEvent["correlationKey"]["Solace_Msg_Utility_Seq_Num"]) {
-        const seqNum = sessionEvent["correlationKey"]["Solace_Msg_Utility_Seq_Num"];
-        console.error(`REJECT Received for ${seqNum}`, sessionEvent.infoStr);
-        ui.updateForwardItemStatus(seqNum, 'FAILED', sessionEvent.infoStr);
-        return;
+    // 2. ID
+    if (fId) {
+        conditions.push({ active: true, match: matchString(msg.id, fId) });
     }
-}
 
-serviceEvents.onGmDisabled = function (queueName) {
-    console.error(`[${queueName}] GM Disabled`);
-    if (state.currentQueue === queueName) {
-        ui.showBrowserError('Guaranteed Messaging is disabled on the broker.');
+    // 3. Message Type (Check State UI logic for values)
+    if (fMsgType !== 'ANY') {
+        const currentType = msg.type || '';
+        conditions.push({ active: true, match: currentType === fMsgType }); // Enum match
     }
-}
 
-serviceEvents.onMessage = function (queueName, msg) {
-    let typeStr = 'Message';
-    try {
-        if (msg.getType() === solace.MessageType.TEXT) typeStr = 'Text';
-        else if (msg.getType() === solace.MessageType.BINARY) typeStr = 'Binary';
-        else if (msg.getType() === solace.MessageType.MAP) typeStr = 'Map';
-        else if (msg.getType() === solace.MessageType.STREAM) typeStr = 'Stream';
-    } catch (e) { }
+    // 4. Destination (Composite)
+    if (fDest || fDestType !== 'ANY') {
+        let matchDest = true;
 
-    // Safely extract content
-    let contentStr = '';
-    const attachment = msg.getBinaryAttachment();
-    const sdtCnt = msg.getSdtContainer();
-    if (sdtCnt !== null) {
-        if (sdtCnt.getType() === solace.SDTFieldType.STRING) {
-            contentStr = sdtCnt.getValue();
-        } else if (sdtCnt.getType() === solace.SDTFieldType.MAP) {
-            contentStr = '[SDT Map Data - Not Supported Yet]';
-        } else if (sdtCnt.getType() === solace.SDTFieldType.STREAM) {
-            contentStr = '[SDT Stream Data - Not Supported Yet]';
-        } else {
-            contentStr = '[SDT Unknown Data - Not Supported Yet]';
+        let msgDestName = '';
+        let msgDestType = '';
+
+        // Extract dest info
+        if (msg._originalMsg && msg._originalMsg.getDestination()) {
+            msgDestName = msg._originalMsg.getDestination().getName() || '';
+            const t = msg._originalMsg.getDestination().getType();
+            if (window.solace) {
+                if (t === window.solace.DestinationType.TOPIC) msgDestType = 'Topic';
+                else if (t === window.solace.DestinationType.QUEUE) msgDestType = 'Queue';
+            }
         }
-    } else if (attachment) {
-        if (typeof attachment === 'string') {
-            contentStr = attachment;
-        } else if (attachment instanceof Uint8Array || attachment instanceof ArrayBuffer) {
-            try {
-                contentStr = new TextDecoder().decode(attachment);
-            } catch (e) { contentStr = '[Binary Data Error]'; }
+
+        if (fDest && !matchString(msgDestName, fDest)) matchDest = false;
+        if (fDestType !== 'ANY' && msgDestType !== fDestType) matchDest = false;
+
+        conditions.push({ active: true, match: matchDest });
+    }
+
+    // 5. Properties (Multiple)
+    if (state.activeFilters.properties && state.activeFilters.properties.length > 0) {
+        state.activeFilters.properties.forEach(prop => {
+            const fKey = prop.key.trim();
+            // Key is case-insensitive exact match
+            const fKeyLower = fKey.toLowerCase();
+            const fVal = prop.value;
+
+            let matchProp = false;
+
+            // Check Standard Properties
+            if (msg.msgProperties) {
+                // Find matching key (case-insensitive)
+                const foundKey = Object.keys(msg.msgProperties).find(k => k.toLowerCase() === fKeyLower);
+                if (foundKey) {
+                    const val = String(msg.msgProperties[foundKey] || '');
+                    if (matchString(val, fVal)) matchProp = true;
+                }
+            }
+
+            // Check App Properties
+            if (!matchProp && msg.appProperties) {
+                const foundKey = Object.keys(msg.appProperties).find(k => k.toLowerCase() === fKeyLower);
+                if (foundKey) {
+                    const val = String(msg.appProperties[foundKey] || '');
+                    if (matchString(val, fVal)) matchProp = true;
+                }
+            }
+
+            conditions.push({ active: true, match: matchProp });
+        });
+    }
+
+    // Evaluate
+    if (conditions.length === 0) return true;
+    else if (criteria === 'AND') {
+        // All conditions must match. If NO filter is active, it's a pass.
+        // Array only contains active conditions logic above if written differently
+        // But here `conditions` only contains filters the user actually set.
+        return conditions.every(c => c.match);
+    } else {
+        // OR: At least one active must match.
+        return conditions.some(c => c.match);
+    }
+}
+
+
+const ui = {};
+
+const els = {};
+
+ui.initElements = function (container) {
+    els.container = container;
+
+    // Headers
+    els.hdrVpnName = container.querySelector('#browser-vpn-name');
+    els.hdrQueueName = container.querySelector('#browser-queue-name');
+    els.hdrPermissions = container.querySelector('#browser-permissions');
+
+    // Bind Controls
+    els.inputBind = container.querySelector('#browser-bind-input');
+    els.btnBind = container.querySelector('#btn-browser-bind');
+    els.selectBound = container.querySelector('#browser-bound-queues');
+    els.btnUnbind = container.querySelector('#btn-browser-unbind');
+    els.elBindError = container.querySelector('#browser-bind-error');
+
+    // Message List & Counts
+    els.msgList = container.querySelector('#browser-msg-list');
+    els.checkAll = container.querySelector('#browser-select-all');
+    els.countTotal = container.querySelector('#count-total');
+    els.countDisplayed = container.querySelector('#count-displayed');
+    els.countSelected = container.querySelector('#count-selected');
+    els.btnRefresh = container.querySelector('#btn-browser-refresh');
+
+    // Details Panel
+    els.detailId = container.querySelector('#detail-msg-id');
+    els.detailDest = container.querySelector('#detail-destination');
+    els.detailTypeBadge = container.querySelector('#detail-type-badge');
+    els.detailDestBadge = container.querySelector('#detail-dest-badge');
+    els.detailReplMsgId = container.querySelector('#detail-repl-msg-id');
+    els.btnCopyDest = container.querySelector('#btn-copy-dest');
+    els.btnCopyReplMsgId = container.querySelector('#btn-copy-repl-msg-id');
+    els.propContainer = container.querySelector('#detail-properties-container');
+    els.headerContainer = container.querySelector('#detail-headers-container');
+    els.detailContent = container.querySelector('#detail-content');
+    els.btnCopyContent = container.querySelector('#btn-copy-content');
+
+    // Raw Content
+    els.btnShowRaw = container.querySelector('#btn-show-raw');
+    els.modalRaw = container.querySelector('#browser-raw-content-modal');
+    els.btnRawClose = container.querySelector('#btn-raw-close');
+    els.rawContentText = container.querySelector('#raw-content-text');
+
+    // Forward Modal Elements
+    els.modalForward = container.querySelector('#browser-forward-modal');
+    els.inputForwardDestName = container.querySelector('#forward-dest-name');
+    els.inputForwardDestType = container.querySelector('#forward-dest-type');
+    els.btnForwardCancel = container.querySelector('#btn-forward-cancel');
+    els.btnForwardSend = container.querySelector('#btn-forward-send');
+    els.btnForwardClose = container.querySelector('#btn-forward-close');
+    els.elForwardError = container.querySelector('#forward-error');
+    els.listForwardMsgs = container.querySelector('#forward-msg-list');
+
+    // Filter Controls
+    els.btnFilter = container.querySelector('#btn-browser-filter');
+    els.modalFilter = container.querySelector('#browser-filter-modal');
+    els.btnFilterCancel = container.querySelector('#btn-filter-cancel');
+    els.btnFilterClear = container.querySelector('#btn-filter-clear');
+    els.btnFilterApply = container.querySelector('#btn-filter-apply');
+    els.inputFilterContent = container.querySelector('#filter-content');
+    els.inputFilterId = container.querySelector('#filter-msg-id');
+    els.inputFilterMsgType = container.querySelector('#filter-msg-type');
+    els.inputFilterDest = container.querySelector('#filter-destination');
+    els.inputFilterType = container.querySelector('#filter-destination-type');
+    els.radFilterCriteria = container.querySelectorAll('input[name="filter-criteria"]');
+    els.btnAddPropFilter = container.querySelector('#btn-add-prop-filter');
+    els.filterPropsRows = container.querySelector('#filter-properties-rows');
+
+    // Bulk Actions
+    els.btnBrowserDownloadContent = container.querySelector('#btn-browser-download-content');
+    els.btnBrowserDownloadFull = container.querySelector('#btn-browser-download-full');
+    els.btnBrowserForward = container.querySelector('#btn-browser-forward');
+    els.btnBrowserDelete = container.querySelector('#btn-browser-delete');
+
+    // Error
+    els.elBrowserError = container.querySelector('#browser-connect-error');
+
+    // Visibility
+    els.elPrompt = container.querySelector('#browser-connect-prompt');
+    els.elActiveView = container.querySelector('#browser-active-view');
+
+    return els;
+};
+
+ui.getElements = function () {
+    return els;
+};
+
+ui.showBrowserError = function (msg) {
+    if (els.elBrowserError) {
+        if (msg) {
+            els.elBrowserError.textContent = msg;
+            els.elBrowserError.style.display = 'block';
         } else {
-            contentStr = '[Unknown Binary Data]';
+            els.elBrowserError.style.display = 'none';
+        }
+    }
+};
+
+ui.showBindError = function (msg) {
+    if (els.elBindError && els.inputBind) {
+        if (msg) {
+            els.elBindError.textContent = msg;
+            els.elBindError.style.display = 'block';
+            els.inputBind.classList.add('is-invalid');
+        } else {
+            els.elBindError.textContent = '';
+            els.elBindError.style.display = 'none';
+            els.inputBind.classList.remove('is-invalid');
+        }
+    }
+};
+
+ui.formatBytes = function (bytes, decimals = 2) {
+    bytes = Number(bytes);
+    if (bytes === 0 || isNaN(bytes)) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (bytes >= 1000 && i < sizes.length - 1) {
+        bytes /= k;
+        i++;
+    }
+    return parseFloat(bytes.toFixed(decimals)) + ' ' + sizes[i];
+};
+
+ui.generateUuid = function () {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+};
+
+ui.updateVisibility = function (isConnected) {
+    if (!isConnected) {
+        if (els.elPrompt) els.elPrompt.classList.remove('hidden');
+        if (els.elActiveView) els.elActiveView.classList.add('hidden');
+    } else {
+        if (els.elPrompt) els.elPrompt.classList.add('hidden');
+        if (els.elActiveView) els.elActiveView.classList.remove('hidden');
+
+        if (els.selectBound && els.selectBound.value) {
+            els.hdrQueueName.textContent = els.selectBound.value;
+        } else {
+            els.hdrQueueName.textContent = '';
+            els.hdrPermissions.classList.add('hidden');
+        }
+    }
+};
+
+ui.resetUI = function () {
+    if (els.selectBound) {
+        while (els.selectBound.options.length > 1) {
+            els.selectBound.remove(1);
+        }
+        els.selectBound.selectedIndex = 0;
+        els.selectBound.dispatchEvent(new Event('change'));
+    }
+    ui.updateVisibility(false);
+};
+
+// Reset selection only (don't hide panel)
+ui.resetQueueSelection = function () {
+    if (els.hdrQueueName) els.hdrQueueName.textContent = '';
+    if (els.hdrPermissions) els.hdrPermissions.classList.add('hidden');
+    state.currentQueue = '';
+    state.allMessages = [];
+    state.displayedMessages = [];
+    state.currentQueuePermissions = null;
+
+    // Reset Filters
+    state.activeFilters = { content: '', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'OR' };
+    if (els.inputFilterContent) els.inputFilterContent.value = '';
+    if (els.inputFilterId) els.inputFilterId.value = '';
+    if (els.inputFilterDest) els.inputFilterDest.value = '';
+    if (els.inputFilterType) els.inputFilterType.value = 'ANY';
+    if (els.inputFilterMsgType) els.inputFilterMsgType.value = 'ANY';
+    if (els.radFilterCriteria) {
+        els.radFilterCriteria.forEach(r => r.checked = (r.value === 'OR'));
+    }
+
+    if (els.btnFilter) {
+        els.btnFilter.classList.remove('filter-active');
+        els.btnFilter.disabled = true;
+    }
+
+    if (ui.renderList) ui.renderList();
+    if (ui.clearDetails) ui.clearDetails();
+};
+
+ui.addQueueToDropdown = function (queueName) {
+    if (!els.selectBound) return;
+
+    let exists = false;
+    for (let i = 0; i < els.selectBound.options.length; i++) {
+        if (els.selectBound.options[i].value === queueName) exists = true;
+    }
+
+    if (!exists) {
+        const opt = document.createElement('option');
+        opt.value = queueName;
+        opt.textContent = queueName;
+        els.selectBound.appendChild(opt);
+    }
+
+    // Auto-select
+    els.selectBound.value = queueName;
+    els.selectBound.dispatchEvent(new Event('change'));
+};
+
+
+// ui-table.js - Message List & Table Logic
+
+ui.getSelectedMessageIds = function () {
+    const els = ui.getElements();
+    if (!els.msgList) return [];
+    const checkedBoxes = Array.from(els.msgList.querySelectorAll('.msg-check:checked'));
+    return checkedBoxes.map(cb => cb.closest('tr').dataset.id);
+};
+
+ui.createRowHtml = function (msg) {
+    const isReadOnly = state.currentQueuePermissions && state.currentQueuePermissions.READ_ONLY;
+    // Note: icons global is expected
+    return `
+        <tr data-id="${msg.id}" class="clickable-row">
+            <td class="row-checkbox"><input type="checkbox" class="msg-check"></td>
+            <td>${msg.id}</td>
+            <td>${msg.date}</td>
+            <td>${ui.formatBytes(msg.size)}</td>
+            <td>
+                <div class="browser-actions">
+                    <button class="btn-icon btn-download-content" title="Download Content (Payload)">${icons.downloadContent}</button>
+                    <button class="btn-icon btn-download-full" title="Download Full Message (JSON)">${icons.downloadFull}</button>
+                    <button class="btn-icon btn-forward-row" title="Forward Message">${icons.forward}</button>
+                    ${!isReadOnly ? `<button class="btn-icon btn-delete-row" title="Delete" style="color: var(--status-disconnected);">${icons.delete}</button>` : ''}
+                </div>
+            </td>
+        </tr>
+    `;
+};
+
+ui.attachRowListeners = function (tr) {
+    // Row Click (Select)
+    tr.addEventListener('click', (e) => {
+        if (e.target.closest('input') || e.target.closest('button')) return;
+        ui.selectMessage(tr.dataset.id);
+    });
+
+    // Download Content Trigger
+    const btnDownContent = tr.querySelector('.btn-download-content');
+    if (btnDownContent) {
+        btnDownContent.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const msg = state.displayedMessages.find(m => m.id === tr.dataset.id);
+            if (msg) ui.downloadMessageContent(msg);
+        });
+    }
+
+    // Download Full Trigger
+    const btnDownFull = tr.querySelector('.btn-download-full');
+    if (btnDownFull) {
+        btnDownFull.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const msg = state.displayedMessages.find(m => m.id === tr.dataset.id);
+            if (msg) ui.downloadMessageFull(msg);
+        });
+    }
+
+    // Forward Trigger
+    const btnForward = tr.querySelector('.btn-forward-row');
+    if (btnForward) {
+        btnForward.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const msg = state.displayedMessages.find(m => m.id === tr.dataset.id);
+            if (msg) ui.showForwardModal(msg);
+        });
+    }
+
+    // Checkbox Trigger
+    const chk = tr.querySelector('.msg-check');
+    if (chk) {
+        chk.addEventListener('change', ui.updateCounts);
+    }
+
+    // Delete Button Trigger
+    const btnDel = tr.querySelector('.btn-delete-row');
+    if (btnDel) {
+        btnDel.addEventListener('click', (e) => {
+            e.stopPropagation();
+            window.dispatchEvent(new CustomEvent('app:message-delete', { detail: { id: tr.dataset.id } }));
+        });
+    }
+};
+
+ui.renderList = function () {
+    const els = ui.getElements();
+    if (!els.msgList) return;
+
+    // Reset Check All
+    if (els.checkAll) els.checkAll.checked = false;
+
+    // Render
+    els.msgList.innerHTML = state.displayedMessages.map(msg => ui.createRowHtml(msg)).join('');
+
+    ui.updateCounts();
+
+    // Attach Listeners
+    els.msgList.querySelectorAll('tr').forEach(tr => ui.attachRowListeners(tr));
+};
+
+ui.addMessageRow = function (msg) {
+    const els = ui.getElements();
+    if (!els.msgList) return;
+
+    const temp = document.createElement('tbody');
+    temp.innerHTML = ui.createRowHtml(msg);
+    const tr = temp.firstElementChild;
+
+    if (tr) {
+        ui.attachRowListeners(tr);
+        els.msgList.appendChild(tr);
+        tr.style.animation = 'highlight-fade 2s';
+        ui.updateCounts();
+    }
+};
+
+ui.removeMessageRow = function (msgId) {
+    const els = ui.getElements();
+    if (!els.msgList) return;
+
+    const tr = els.msgList.querySelector(`tr[data-id="${msgId}"]`);
+    if (tr) {
+        tr.remove();
+        ui.updateCounts();
+
+        // If selected, clear details
+        if (els.detailId && els.detailId.textContent === msgId.toString()) {
+            ui.clearDetails();
+        }
+    }
+};
+
+ui.updateCounts = function () {
+    const els = ui.getElements();
+    if (els.countTotal) els.countTotal.textContent = state.allMessages.length;
+    if (els.countDisplayed) els.countDisplayed.textContent = state.displayedMessages.length;
+
+    const checked = els.msgList ? els.msgList.querySelectorAll('.msg-check:checked').length : 0;
+    if (els.countSelected) els.countSelected.textContent = checked;
+
+    const hasSelection = checked > 0;
+    const isReadOnly = state.currentQueuePermissions && state.currentQueuePermissions.READ_ONLY;
+
+    if (els.btnBrowserDownloadContent) els.btnBrowserDownloadContent.disabled = !hasSelection;
+    if (els.btnBrowserDownloadFull) els.btnBrowserDownloadFull.disabled = !hasSelection;
+    if (els.btnBrowserForward) els.btnBrowserForward.disabled = (checked === 0);
+
+    if (els.btnBrowserDelete) {
+        if (isReadOnly) {
+            els.btnBrowserDelete.classList.add('hidden');
+        } else {
+            els.btnBrowserDelete.classList.remove('hidden');
+            els.btnBrowserDelete.disabled = !hasSelection;
+        }
+    }
+};
+
+ui.updatePermissionUI = function (queueName) {
+    const els = ui.getElements();
+    // Re-calculating permission here might be redundant if state is updated elsewhere,
+    // but preserving original logic structure.
+    // However, state.currentQueuePermissions is updated here in original.
+
+    // Using global getBrowser helper if available or just passing perms?
+    // Original used `getBrowser(queueName)`. Assuming `getBrowser` is available in scope (imported in scope).
+    // If not, we might need to rely on passed args.
+    // For now assuming `getBrowser` is available as it was in `ui.js`.
+
+    let isReadOnly = false;
+    let perms = null;
+    if (typeof getBrowser === 'function') {
+        const browser = getBrowser(queueName);
+        const consumer = browser ? browser._messageConsumer : null;
+        perms = consumer ? consumer._permissions : null;
+    }
+
+    if (perms) {
+        if (typeof perms === 'string' && perms === 'READ_ONLY') isReadOnly = true;
+    }
+
+    state.currentQueuePermissions = isReadOnly ? { READ_ONLY: true } : { READ_ONLY: false };
+
+    if (perms) {
+        els.hdrPermissions.classList.remove('hidden');
+        if (isReadOnly) {
+            els.hdrPermissions.textContent = 'Read-Only';
+            els.hdrPermissions.className = 'badge badge-outline-warning';
+        } else {
+            els.hdrPermissions.textContent = 'Read-Write';
+            els.hdrPermissions.className = 'badge badge-outline-success';
         }
     } else {
-        contentStr = msg.getXmlContent() || '';
+        els.hdrPermissions.classList.add('hidden');
+        state.currentQueuePermissions = null;
     }
 
-    // TIMESTAMP Handling - Sender Timestamp preference
-    let dateStr = 'N/A';
+    ui.renderList();
+    ui.updateCounts();
+};
+
+ui.downloadMessagesZip = async function (type) {
+    if (!window.JSZip) {
+        alert('JSZip library not loaded. Cannot create ZIP.');
+        return;
+    }
+
+    // Get Checked Messages
+    const ids = ui.getSelectedMessageIds();
+    if (ids.length === 0) {
+        alert('No messages selected.');
+        return;
+    }
+    const msgs = state.displayedMessages.filter(m => ids.includes(String(m.id)));
+
+    if (msgs.length === 0) return;
+
+    const zip = new JSZip();
+    const now = new Date();
+    const pad = n => n.toString().padStart(2, '0');
+    const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+
+    let zipFilename = '';
+
+    if (type === 'content') {
+        zipFilename = `solace-messages-content-${timestamp}.zip`;
+        msgs.forEach(msg => {
+            const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}`;
+            const content = msg.content || '';
+            zip.file(filename, content);
+        });
+    } else if (type === 'full') {
+        zipFilename = `solace-messages-full-${timestamp}.zip`;
+        msgs.forEach(msg => {
+            const fullObj = ui.getFullMessageJson(msg);
+            const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}-full.json`;
+            zip.file(filename, JSON.stringify(fullObj, null, 2));
+        });
+    }
+
     try {
-        const ts = msg.getSenderTimestamp();
-        if (ts) {
-            const timeVal = (typeof ts.toNumber === 'function') ? ts.toNumber() : ts;
-            const d = new Date(timeVal);
-            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const dd = String(d.getDate()).padStart(2, '0');
-            const mon = months[d.getMonth()];
-            const yy = String(d.getFullYear()).slice(-2);
-            const hh = String(d.getHours()).padStart(2, '0');
-            const mm = String(d.getMinutes()).padStart(2, '0');
-            const ss = String(d.getSeconds()).padStart(2, '0');
-            dateStr = `${dd}-${mon}-${yy} ${hh}:${mm}:${ss}`;
-        }
-        else
-            dateStr = '(No Timestamp)';
-    } catch (e) { }
+        const content = await zip.generateAsync({ type: 'blob' });
+        ui.triggerDownloadBlob(content, zipFilename);
+    } catch (err) {
+        console.error('Failed to generate ZIP:', err);
+        alert('Failed to generate ZIP file.');
+    }
+};
 
-    const m = {
-        id: msg.getGuaranteedMessageId() ? msg.getGuaranteedMessageId().toString() : 'N/A',
-        date: dateStr,
-        size: msg.smfHeader ? msg.smfHeader.messageLength : 0,
-        type: typeStr,
-        // Standard Properties
-        msgProperties: (function () {
-            const props = {};
-            const m = msg;
-            try { if (m.getApplicationMessageId()) props['App Msg Id'] = m.getApplicationMessageId(); } catch (e) { }
-            try { if (m.getCacheRequestId()) props['Cache Id'] = m.getCacheRequestId(); } catch (e) { }
-            try { if (m.getCorrelationId()) props['Corr Id'] = m.getCorrelationId(); } catch (e) { }
-            try { if (m.getDeliveryCount()) props['Delivery Count'] = m.getDeliveryCount(); } catch (e) { }
 
-            try {
-                if (m.getDeliveryMode() !== null && m.getDeliveryMode() !== undefined) {
-                    let modeStr = 'UNKNOWN';
-                    const dm = m.getDeliveryMode();
-                    if (dm === 0) modeStr = 'DIRECT';
-                    else if (dm === 2) modeStr = 'NON_PERSISTENT';
-                    else if (dm === 1) modeStr = 'PERSISTENT';
-                    props['Delivery Mode'] = modeStr;
-                }
-            } catch (e) { }
+// ui-details.js - Message Details & Properties
 
-            try { if (m.getHttpContentEncoding()) props['HTTP Encoding'] = m.getHttpContentEncoding(); } catch (e) { }
-            try { if (m.getHttpContentType()) props['HTTP Type'] = m.getHttpContentType(); } catch (e) { }
-            try { if (m.getPriority() !== null) props['Priority'] = m.getPriority(); } catch (e) { }
-            try { if (m.getReplyTo()) props['Reply To'] = m.getReplyTo().toString(); } catch (e) { }
-            try { if (m.getSenderId()) props['Sender Id'] = m.getSenderId(); } catch (e) { }
-            try { if (m.getSequenceNumber()) props['SeqNumber'] = m.getSequenceNumber(); } catch (e) { }
-            try { if (m.getTimeToLive()) props['TTL'] = m.getTimeToLive(); } catch (e) { }
-            try { if (m.getTopicSequenceNumber()) props['TopicSeqNum'] = m.getTopicSequenceNumber(); } catch (e) { }
-            return props;
-        })(),
-        // User/Application Properties (formerly headers)
-        appProperties: (function () {
-            try {
-                const map = msg.getUserPropertyMap();
-                if (!map) return {};
-                const obj = {};
-                const keys = map.getKeys();
-                keys.forEach(key => {
-                    const field = map.getField(key);
-                    if (field && typeof field.getValue === 'function') {
-                        obj[key] = field.getValue();
-                    } else {
-                        obj[key] = field;
-                    }
-                });
-                return obj;
-            } catch (e) { return {}; }
-        })(),
-        content: contentStr,
-        _originalMsg: msg // Store original for details
+ui.triggerDownload = function (filename, content, type = 'text/plain') {
+    const blob = new Blob([content], { type: type });
+    ui.triggerDownloadBlob(blob, filename);
+};
+
+ui.triggerDownloadBlob = function (blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+};
+
+ui.downloadMessageContent = function (msg) {
+    if (!msg) return;
+    const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}`;
+    const content = msg.content || '';
+    ui.triggerDownload(filename, content);
+};
+
+ui.getFullMessageJson = function (msg) {
+    if (!msg) return null;
+    const fullObj = {
+        messageProperties: {
+            ...msg.msgProperties,
+            destination: { name: 'Unknown', type: 'Unknown' },
+            messageType: msg.type
+        },
+        applicationProperties: msg.appProperties,
+        payload: msg.content
     };
 
-    // Store in State
-    addMessage(queueName, m); // Scope function
-
-    // Check if this queue is currently active in UI
-    if (state.currentQueue === queueName) {
-        state.allMessages = getMessages(queueName);
-
-        // Filter Check for Incoming Message
-        if (shouldShowMessage(m)) {
-            // If we are in a filtered view, manually add to displayed list
-            if (state.displayedMessages !== state.allMessages) {
-                state.displayedMessages.push(m);
+    if (msg._originalMsg) {
+        try {
+            const dest = msg._originalMsg.getDestination();
+            if (dest) {
+                fullObj.messageProperties.destination.name = dest.getName();
+                const dType = dest.getType();
+                if (window.solace) {
+                    if (dType === window.solace.DestinationType.TOPIC) fullObj.messageProperties.destination.type = 'Topic';
+                    else if (dType === window.solace.DestinationType.QUEUE) fullObj.messageProperties.destination.type = 'Queue';
+                    else fullObj.messageProperties.destination.type = dType.toString();
+                } else {
+                    fullObj.messageProperties.destination.type = dType.toString();
+                }
             }
-            ui.addMessageRow(m);
+        } catch (e) { console.warn('Failed to extract destination details', e); }
+    }
+    return fullObj;
+};
+
+ui.downloadMessageFull = function (msg) {
+    const fullObj = ui.getFullMessageJson(msg);
+    if (!fullObj) return;
+    const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}-full.json`;
+    ui.triggerDownload(filename, JSON.stringify(fullObj, null, 2), 'application/json');
+};
+
+ui.selectMessage = function (id) {
+    const els = ui.getElements();
+
+    // Highlight row
+    if (els.msgList) {
+        els.msgList.querySelectorAll('tr').forEach(tr => {
+            if (tr.dataset.id === id) tr.classList.add('selected');
+            else tr.classList.remove('selected');
+        });
+    }
+
+    const msg = state.displayedMessages.find(m => m.id === id);
+    if (msg) {
+        state.selectedMessage = msg;
+        els.detailId.textContent = msg.id;
+
+        els.detailTypeBadge.textContent = msg.type;
+        els.detailTypeBadge.className = 'badge badge-outline-info';
+        els.detailTypeBadge.classList.remove('hidden');
+
+        if (msg._originalMsg) {
+            const dest = msg._originalMsg.getDestination();
+            if (dest) {
+                const destName = dest.getName();
+                els.detailDest.textContent = destName;
+                const destType = dest.getType();
+                let typeLabel = destType.toString();
+                if (window.solace) {
+                    if (destType === window.solace.DestinationType.TOPIC) typeLabel = 'Topic';
+                    else if (destType === window.solace.DestinationType.QUEUE) typeLabel = 'Queue';
+                }
+                els.detailDestBadge.textContent = typeLabel;
+            } else {
+                els.detailDest.textContent = 'N/A';
+                els.detailDestBadge.textContent = 'Unknown';
+            }
+
+            if (msg._originalMsg && typeof msg._originalMsg.getReplicationGroupMessageId === 'function') {
+                try {
+                    const rmid = msg._originalMsg.getReplicationGroupMessageId();
+                    els.detailReplMsgId.textContent = rmid ? rmid.toString() : 'N/A';
+                } catch (e) { els.detailReplMsgId.textContent = 'N/A'; }
+            } else {
+                els.detailReplMsgId.textContent = 'N/A';
+            }
+
+        } else {
+            els.detailDest.textContent = els.hdrQueueName.textContent || 'N/A';
+            els.detailDestBadge.textContent = 'Queue';
+            els.detailReplMsgId.textContent = 'N/A';
+        }
+
+        els.detailDestBadge.className = 'badge badge-outline-success';
+        els.detailDestBadge.classList.remove('hidden');
+
+        ui.renderTags(els.propContainer, msg.msgProperties);
+        ui.renderTags(els.headerContainer, msg.appProperties);
+
+        els.detailContent.textContent = msg.content;
+
+        if (els.btnShowRaw) {
+            els.btnShowRaw.disabled = false;
+            els.btnShowRaw.onclick = () => ui.showRawContent(msg);
+        }
+        if (els.btnCopyContent) els.btnCopyContent.disabled = false;
+
+        if (els.btnCopyDest) {
+            els.btnCopyDest.disabled = false;
+            els.btnCopyDest.onclick = () => window.App.copyToClipboard(els.detailDest.textContent, els.btnCopyDest);
+        }
+        if (els.btnCopyReplMsgId) {
+            els.btnCopyReplMsgId.disabled = false;
+            els.btnCopyReplMsgId.onclick = () => window.App.copyToClipboard(els.detailReplMsgId.textContent, els.btnCopyReplMsgId);
         }
     }
-}
+};
+
+ui.showRawContent = function (msg) {
+    const els = ui.getElements();
+    if (els.modalRaw && els.rawContentText) {
+        els.rawContentText.textContent = msg._originalMsg ? msg._originalMsg.dump() : 'No raw dump available.';
+        els.modalRaw.classList.remove('hidden');
+        if (els.btnRawClose) els.btnRawClose.onclick = () => els.modalRaw.classList.add('hidden');
+    }
+};
+
+ui.clearDetails = function () {
+    const els = ui.getElements();
+    els.detailId.textContent = '';
+    els.detailDest.textContent = '';
+    if (els.detailReplMsgId) els.detailReplMsgId.textContent = '';
+    if (els.propContainer) els.propContainer.innerHTML = '';
+    if (els.headerContainer) els.headerContainer.innerHTML = '';
+    els.detailContent.textContent = '';
+    els.btnShowRaw.disabled = true;
+    if (els.btnCopyContent) els.btnCopyContent.disabled = true;
+    if (els.btnCopyDest) els.btnCopyDest.disabled = true;
+    if (els.btnCopyReplMsgId) els.btnCopyReplMsgId.disabled = true;
+    els.detailTypeBadge.classList.add('hidden');
+    els.detailDestBadge.classList.add('hidden');
+
+    if (els.msgList) {
+        els.msgList.querySelectorAll('tr.selected').forEach(tr => tr.classList.remove('selected'));
+    }
+};
+
+ui.createTag = function (container, key, val) {
+    const valStr = String(val);
+    const tag = document.createElement('span');
+    tag.className = 'header-tag';
+
+    const isLong = valStr.length > 20;
+
+    const render = (expanded) => {
+        let displayVal = valStr;
+        if (!expanded && isLong) {
+            displayVal = valStr.substring(0, 20) + '...';
+        }
+        tag.textContent = `${key} = ${displayVal}`;
+    };
+
+    render(false);
+
+    if (isLong) {
+        let expanded = false;
+        tag.onclick = () => {
+            expanded = !expanded;
+            render(expanded);
+        };
+        tag.title = 'Click to expand/collapse';
+    }
+
+    container.appendChild(tag);
+};
+
+ui.renderTags = function (container, properties) {
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!properties || Object.keys(properties).length === 0) {
+        const empty = document.createElement('span');
+        empty.textContent = 'None';
+        empty.style.color = 'var(--text-secondary)';
+        empty.style.fontStyle = 'italic';
+        empty.style.fontSize = '0.85rem';
+        container.appendChild(empty);
+        return;
+    }
+
+    for (const [key, val] of Object.entries(properties)) {
+        if (val !== null && val !== undefined && val !== '') {
+            ui.createTag(container, key, val);
+        }
+    }
+};
+
+ui.addPropertyFilterRow = function (key = '', value = '') {
+    const els = ui.getElements();
+    const container = els.filterPropsRows || document.getElementById('filter-properties-rows');
+    if (!container) return;
+
+    const row = document.createElement('div');
+    row.className = 'flex-row gap-2 mt-1 property-filter-row';
+    row.innerHTML = `
+        <input type="text" class="form-control prop-key" placeholder="Key" list="standard-properties-list" value="${key}">
+        <input type="text" class="form-control prop-value" placeholder="Value" value="${value}">
+        <button class="btn-icon btn-remove-prop" title="Remove" style="color: var(--status-disconnected);">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="15" y1="9" x2="9" y2="15"></line>
+                <line x1="9" y1="9" x2="15" y2="15"></line>
+            </svg>
+        </button>
+    `;
+
+    row.querySelector('.btn-remove-prop').onclick = () => row.remove();
+
+    const handleEnter = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (els.btnFilterApply) els.btnFilterApply.click();
+            else {
+                const btn = document.getElementById('btn-filter-apply');
+                if (btn) btn.click();
+            }
+        }
+    };
+    row.querySelector('.prop-key').addEventListener('keydown', handleEnter);
+    row.querySelector('.prop-value').addEventListener('keydown', handleEnter);
+
+    container.appendChild(row);
+};
+
+ui.getPropertyFilters = function () {
+    const els = ui.getElements();
+    const container = els.filterPropsRows || document.getElementById('filter-properties-rows');
+    if (!container) return [];
+
+    const rows = container.querySelectorAll('.property-filter-row');
+    const filters = [];
+    rows.forEach(row => {
+        const key = row.querySelector('.prop-key').value.trim();
+        const value = row.querySelector('.prop-value').value.trim();
+        if (key) {
+            filters.push({ key, value });
+        }
+    });
+    return filters;
+};
+
+ui.clearPropertyFilters = function () {
+    const els = ui.getElements();
+    const container = els.filterPropsRows || document.getElementById('filter-properties-rows');
+    if (container) container.innerHTML = '';
+};
+
+
+// ui-forward.js - Message Forwarding Modal
+
+ui.getStatusIcon = function (status) {
+    if (status === 'QUEUED') {
+        return '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="var(--text-muted, #9ca3af)"/></svg>';
+    }
+    if (status === 'SENDING') {
+        return '<svg class="icon-spin" width="16" height="16" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10" fill="none" stroke="var(--status-connected)" stroke-width="3" stroke-linecap="round"/></svg>';
+    }
+    if (status === 'SUCCESS') {
+        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--status-connected)" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+    }
+    if (status === 'FAILED') {
+        return '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="var(--status-disconnected)"/></svg>';
+    }
+    return '';
+};
+
+ui.showForwardModal = function (msgs) {
+    const els = ui.getElements();
+    if (!els.modalForward) return;
+
+    const msgArray = Array.isArray(msgs) ? msgs : [msgs];
+    state.forwardQueue = msgArray.map(m => ({
+        originalMsg: m,
+        id: m.id,
+        correlationValue: ui.generateUuid(),
+        status: 'QUEUED',
+        error: null
+    }));
+
+    els.inputForwardDestName.value = '';
+    els.inputForwardDestType.value = 'Topic';
+    els.elForwardError.style.display = 'none';
+    els.elForwardError.textContent = '';
+
+    els.btnForwardSend.disabled = false;
+    els.btnForwardSend.textContent = 'Send';
+    els.btnForwardSend.classList.remove('btn-secondary');
+    els.btnForwardSend.classList.add('btn-primary');
+    state.forwardingCancelled = false;
+
+    const countEl = document.getElementById('forward-queue-count');
+    if (countEl) {
+        countEl.textContent = state.forwardQueue.length;
+    }
+
+    ui.renderForwardList();
+
+    els.modalForward.classList.remove('hidden');
+    els.inputForwardDestName.focus();
+};
+
+ui.renderForwardList = function () {
+    const els = ui.getElements();
+    if (!els.listForwardMsgs) return;
+
+    els.listForwardMsgs.innerHTML = state.forwardQueue.map(item => {
+        const icon = ui.getStatusIcon(item.status);
+        const hasError = item.status === 'FAILED' && item.error;
+
+        let cleanContent = (item.originalMsg.content || '').replace(/(\r\n|\n|\r)/gm, " ");
+        let maxLen = 30;
+        if (cleanContent.length > maxLen) {
+            cleanContent = cleanContent.substring(0, maxLen) + '...';
+        }
+
+        return `
+            <div class="flex-row gap-2 items-start mb-2">
+                <div id="status-${item.correlationValue}" class="flex-shrink-0 mt-2" style="width: 16px;">
+                    ${icon}
+                </div>
+                <div class="flex-col flex-1 min-w-0 gap-0">
+                    <div class="flex-row justify-between items-center p-2 rounded border" style="background: var(--bg-input); border-color: var(--border-color);">
+                        <span class="text-sm text-secondary whitespace-nowrap mr-2">${item.id}</span>
+                        <span class="text-xs text-secondary whitespace-nowrap">${cleanContent}</span>
+                    </div>
+                    <div id="error-${item.correlationValue}" class="text-xs text-error text-left ${hasError ? '' : 'hidden'}" style="color: var(--status-disconnected); margin-top: 2px;">
+                        ${item.error || ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+};
+
+ui.closeForwardModal = function () {
+    const els = ui.getElements();
+    if (!els.modalForward) return;
+    els.modalForward.classList.add('hidden');
+    state.selectedForwardMsg = null;
+};
+
+ui.onForwardSuccess = function () {
+    ui.closeForwardModal();
+};
+
+ui.onForwardFailure = function (err) {
+    const els = ui.getElements();
+    if (els.elForwardError) {
+        els.elForwardError.textContent = `Error: ${err.message || err}`;
+        els.elForwardError.style.display = 'block';
+    }
+};
+
+ui.updateForwardItemStatus = function (correlationValue, status, errorMsg) {
+    const els = ui.getElements();
+    if (!correlationValue || !state.forwardQueue) return;
+
+    const item = state.forwardQueue.find(m => m.correlationValue === correlationValue);
+    if (item) {
+        item.status = status;
+        item.error = errorMsg;
+
+        const iconContainer = document.getElementById(`status-${correlationValue}`);
+        if (iconContainer) {
+            iconContainer.innerHTML = ui.getStatusIcon(status);
+        }
+
+        const errorContainer = document.getElementById(`error-${correlationValue}`);
+        if (errorContainer) {
+            if (status === 'FAILED' && errorMsg) {
+                errorContainer.textContent = errorMsg;
+                errorContainer.classList.remove('hidden');
+            } else {
+                errorContainer.classList.add('hidden');
+            }
+        }
+    }
+
+    ui.checkForwardCompletion();
+};
+
+ui.checkForwardCompletion = function () {
+    const els = ui.getElements();
+    const isComplete = state.forwardQueue.every(m => m.status === 'SUCCESS' || m.status === 'FAILED');
+    if (isComplete && els.btnForwardSend) {
+        els.btnForwardSend.textContent = 'Send Complete';
+        els.btnForwardSend.disabled = true;
+        els.btnForwardSend.classList.add('btn-secondary');
+        els.btnForwardSend.classList.remove('btn-primary');
+    }
+};
 
 
 // import state, { setBrowser, deleteBrowser } from './state.js';
@@ -3445,170 +4281,209 @@ service.deleteMessages = function (queueName, msgIds) {
     });
 }
 
-const state = {
-    browserInstances: new Map(), // queueName -> solace.QueueBrowser
-    messageStore: new Map(),     // queueName -> Array<Message>
-    currentQueue: '',
-    currentQueuePermissions: null,
-    allMessages: [],
-    displayedMessages: [],
-    forwardQueue: [], // Array of messages to forward
-    activeFilters: { content: '', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'OR' }
-};
 
-// No default export needed in closure scope
+// import state, { addMessage, getMessages } from './state.js';
+// import * as ui from './ui.js';
 
-function getBrowser(queueName) {
-    return state.browserInstances.get(queueName);
-}
+const serviceEvents = {};
 
-function setBrowser(queueName, browser) {
-    state.browserInstances.set(queueName, browser);
-}
+serviceEvents.onBrowserUp = function (queueName) {
+    console.log(`[${queueName}] Browser UP`);
 
-function deleteBrowser(queueName) {
-    state.browserInstances.delete(queueName);
-}
+    // Finalize Bind in UI
+    ui.addQueueToDropdown(queueName);
 
-function getMessages(queueName) {
-    return state.messageStore.get(queueName);
-}
+    // Clear Input on success if matching
+    const els = ui.getElements();
+    if (els.inputBind && els.inputBind.value.trim() === queueName) {
+        els.inputBind.value = '';
+    }
 
-function setMessages(queueName, messages) {
-    state.messageStore.set(queueName, messages);
-}
-
-function addMessage(queueName, message) {
-    const store = state.messageStore.get(queueName);
-    if (store) {
-        store.push(message);
+    if (state.currentQueue === queueName) {
+        ui.showBrowserError(null);
+        // Duplicate call removed - handled by dropdown change event
     }
 }
 
-function clearStore() {
-    state.messageStore.clear();
+serviceEvents.onConnectFailed = function (queueName, err) {
+    console.error(`[${queueName}] Connect Failed:`, err);
+
+    // Show Inline Error for binding
+    ui.showBindError(`Connection Failed: ${err.message || 'Unknown Error'}`);
+
+    // If active view
+    if (state.currentQueue === queueName) {
+        ui.showBrowserError(`Connection Failed: ${err.message || 'Unknown Error'}`);
+    }
+
+    // Cleanup browser instance so it can be retried
+    if (service.disconnectBrowser) {
+        service.disconnectBrowser(queueName);
+    }
 }
 
-// Helper for Wildcard Match
-function matchString(text, pattern) {
-    if (!pattern) return true;
-
-    // If pattern contains '*', use regex for wildcard
-    if (pattern.includes('*')) {
-        // Escape regex characters except *
-        const escapeRegex = (str) => str.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-        // Split by * to create regex parts AND join by .*
-        const regexStr = '^' + pattern.split('*').map(escapeRegex).join('.*') + '$';
-        const regex = new RegExp(regexStr, 'i'); // Case insensitive
-        return regex.test(text);
+serviceEvents.onBrowserDown = function (queueName, err) {
+    console.error(`[${queueName}] Browser Down:`, err);
+    if (state.currentQueue === queueName) {
+        ui.showBrowserError(`Browser connection error: ${err.message || err}`);
     }
-
-    // Otherwise, Exact Match (Case Insensitive)
-    return text.toLowerCase() === pattern.toLowerCase();
 }
 
-// Logic extracted from ui-events to be shared with service-events
-function shouldShowMessage(msg) {
-    // Current Active Filters - DO NOT lower() here, let matchString handle casing
-    const fContent = state.activeFilters.content;
-    const fId = state.activeFilters.msgId;
-    const fDest = state.activeFilters.dest;
-    const fDestType = state.activeFilters.type;
-    const fMsgType = state.activeFilters.msgType;
-    const criteria = state.activeFilters.criteria || 'OR';
-
-    // Define Conditions: { active: boolean, match: boolean }
-    const conditions = [];
-
-    // 1. Content
-    if (fContent) {
-        // Use 'Contains' matching for content/body as per user request
-        //if (!fContent.includes('*')) {
-        const content = msg.content || '';
-        conditions.push({ active: true, match: content.toLowerCase().includes(fContent.toLowerCase()) });
-        //} else {
-        // Fallback to matchString for wildcards
-        //    conditions.push({ active: true, match: matchString(msg.content, fContent) });
-        //}
+// Session Events (for Forwarding)
+serviceEvents.onSessionAck = function (sessionEvent) {
+    if (sessionEvent && sessionEvent["correlationKey"] && sessionEvent["correlationKey"]["Solace_Msg_Utility_Seq_Num"]) {
+        const seqNum = sessionEvent["correlationKey"]["Solace_Msg_Utility_Seq_Num"];
+        console.log(`ACK Received for ${seqNum}`);
+        ui.updateForwardItemStatus(seqNum, 'SUCCESS');
+        return;
     }
+}
 
-    // 2. ID
-    if (fId) {
-        conditions.push({ active: true, match: matchString(msg.id, fId) });
+serviceEvents.onSessionReject = function (sessionEvent) {
+    if (sessionEvent && sessionEvent["correlationKey"] && sessionEvent["correlationKey"]["Solace_Msg_Utility_Seq_Num"]) {
+        const seqNum = sessionEvent["correlationKey"]["Solace_Msg_Utility_Seq_Num"];
+        console.error(`REJECT Received for ${seqNum}`, sessionEvent.infoStr);
+        ui.updateForwardItemStatus(seqNum, 'FAILED', sessionEvent.infoStr);
+        return;
     }
+}
 
-    // 3. Message Type (Check State UI logic for values)
-    if (fMsgType !== 'ANY') {
-        const currentType = msg.type || '';
-        conditions.push({ active: true, match: currentType === fMsgType }); // Enum match
+serviceEvents.onGmDisabled = function (queueName) {
+    console.error(`[${queueName}] GM Disabled`);
+    if (state.currentQueue === queueName) {
+        ui.showBrowserError('Guaranteed Messaging is disabled on the broker.');
     }
+}
 
-    // 4. Destination (Composite)
-    if (fDest || fDestType !== 'ANY') {
-        let matchDest = true;
+serviceEvents.onMessage = function (queueName, msg) {
+    let typeStr = 'Message';
+    try {
+        if (msg.getType() === solace.MessageType.TEXT) typeStr = 'Text';
+        else if (msg.getType() === solace.MessageType.BINARY) typeStr = 'Binary';
+        else if (msg.getType() === solace.MessageType.MAP) typeStr = 'Map';
+        else if (msg.getType() === solace.MessageType.STREAM) typeStr = 'Stream';
+    } catch (e) { }
 
-        let msgDestName = '';
-        let msgDestType = '';
-
-        // Extract dest info
-        if (msg._originalMsg && msg._originalMsg.getDestination()) {
-            msgDestName = msg._originalMsg.getDestination().getName() || '';
-            const t = msg._originalMsg.getDestination().getType();
-            if (window.solace) {
-                if (t === window.solace.DestinationType.TOPIC) msgDestType = 'Topic';
-                else if (t === window.solace.DestinationType.QUEUE) msgDestType = 'Queue';
-            }
+    // Safely extract content
+    let contentStr = '';
+    const attachment = msg.getBinaryAttachment();
+    const sdtCnt = msg.getSdtContainer();
+    if (sdtCnt !== null) {
+        if (sdtCnt.getType() === solace.SDTFieldType.STRING) {
+            contentStr = sdtCnt.getValue();
+        } else if (sdtCnt.getType() === solace.SDTFieldType.MAP) {
+            contentStr = '[SDT Map Data - Not Supported Yet]';
+        } else if (sdtCnt.getType() === solace.SDTFieldType.STREAM) {
+            contentStr = '[SDT Stream Data - Not Supported Yet]';
+        } else {
+            contentStr = '[SDT Unknown Data - Not Supported Yet]';
         }
-
-        if (fDest && !matchString(msgDestName, fDest)) matchDest = false;
-        if (fDestType !== 'ANY' && msgDestType !== fDestType) matchDest = false;
-
-        conditions.push({ active: true, match: matchDest });
-    }
-
-    // 5. Properties (Multiple)
-    if (state.activeFilters.properties && state.activeFilters.properties.length > 0) {
-        state.activeFilters.properties.forEach(prop => {
-            const fKey = prop.key.trim();
-            // Key is case-insensitive exact match
-            const fKeyLower = fKey.toLowerCase();
-            const fVal = prop.value;
-
-            let matchProp = false;
-
-            // Check Standard Properties
-            if (msg.msgProperties) {
-                // Find matching key (case-insensitive)
-                const foundKey = Object.keys(msg.msgProperties).find(k => k.toLowerCase() === fKeyLower);
-                if (foundKey) {
-                    const val = String(msg.msgProperties[foundKey] || '');
-                    if (matchString(val, fVal)) matchProp = true;
-                }
-            }
-
-            // Check App Properties
-            if (!matchProp && msg.appProperties) {
-                const foundKey = Object.keys(msg.appProperties).find(k => k.toLowerCase() === fKeyLower);
-                if (foundKey) {
-                    const val = String(msg.appProperties[foundKey] || '');
-                    if (matchString(val, fVal)) matchProp = true;
-                }
-            }
-
-            conditions.push({ active: true, match: matchProp });
-        });
-    }
-
-    // Evaluate
-    if (conditions.length === 0) return true;
-    else if (criteria === 'AND') {
-        // All conditions must match. If NO filter is active, it's a pass.
-        // Array only contains active conditions logic above if written differently
-        // But here `conditions` only contains filters the user actually set.
-        return conditions.every(c => c.match);
+    } else if (attachment) {
+        if (typeof attachment === 'string') {
+            contentStr = attachment;
+        } else if (attachment instanceof Uint8Array || attachment instanceof ArrayBuffer) {
+            try {
+                contentStr = new TextDecoder().decode(attachment);
+            } catch (e) { contentStr = '[Binary Data Error]'; }
+        } else {
+            contentStr = '[Unknown Binary Data]';
+        }
     } else {
-        // OR: At least one active must match.
-        return conditions.some(c => c.match);
+        contentStr = msg.getXmlContent() || '';
+    }
+
+    // TIMESTAMP Handling - Sender Timestamp preference
+    let dateStr = 'N/A';
+    try {
+        const ts = msg.getSenderTimestamp();
+        if (ts) {
+            const timeVal = (typeof ts.toNumber === 'function') ? ts.toNumber() : ts;
+            const d = new Date(timeVal);
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const dd = String(d.getDate()).padStart(2, '0');
+            const mon = months[d.getMonth()];
+            const yy = String(d.getFullYear()).slice(-2);
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            const ss = String(d.getSeconds()).padStart(2, '0');
+            dateStr = `${dd}-${mon}-${yy} ${hh}:${mm}:${ss}`;
+        }
+        else
+            dateStr = '(No Timestamp)';
+    } catch (e) { }
+
+    const m = {
+        id: msg.getGuaranteedMessageId() ? msg.getGuaranteedMessageId().toString() : 'N/A',
+        date: dateStr,
+        size: msg.smfHeader ? msg.smfHeader.messageLength : 0,
+        type: typeStr,
+        // Standard Properties
+        msgProperties: (function () {
+            const props = {};
+            const m = msg;
+            try { if (m.getApplicationMessageId()) props['App Msg Id'] = m.getApplicationMessageId(); } catch (e) { }
+            try { if (m.getCacheRequestId()) props['Cache Id'] = m.getCacheRequestId(); } catch (e) { }
+            try { if (m.getCorrelationId()) props['Corr Id'] = m.getCorrelationId(); } catch (e) { }
+            try { if (m.getDeliveryCount()) props['Delivery Count'] = m.getDeliveryCount(); } catch (e) { }
+
+            try {
+                if (m.getDeliveryMode() !== null && m.getDeliveryMode() !== undefined) {
+                    let modeStr = 'UNKNOWN';
+                    const dm = m.getDeliveryMode();
+                    if (dm === 0) modeStr = 'DIRECT';
+                    else if (dm === 2) modeStr = 'NON_PERSISTENT';
+                    else if (dm === 1) modeStr = 'PERSISTENT';
+                    props['Delivery Mode'] = modeStr;
+                }
+            } catch (e) { }
+
+            try { if (m.getHttpContentEncoding()) props['HTTP Encoding'] = m.getHttpContentEncoding(); } catch (e) { }
+            try { if (m.getHttpContentType()) props['HTTP Type'] = m.getHttpContentType(); } catch (e) { }
+            try { if (m.getPriority() !== null) props['Priority'] = m.getPriority(); } catch (e) { }
+            try { if (m.getReplyTo()) props['Reply To'] = m.getReplyTo().toString(); } catch (e) { }
+            try { if (m.getSenderId()) props['Sender Id'] = m.getSenderId(); } catch (e) { }
+            try { if (m.getSequenceNumber()) props['SeqNumber'] = m.getSequenceNumber(); } catch (e) { }
+            try { if (m.getTimeToLive()) props['TTL'] = m.getTimeToLive(); } catch (e) { }
+            try { if (m.getTopicSequenceNumber()) props['TopicSeqNum'] = m.getTopicSequenceNumber(); } catch (e) { }
+            return props;
+        })(),
+        // User/Application Properties (formerly headers)
+        appProperties: (function () {
+            try {
+                const map = msg.getUserPropertyMap();
+                if (!map) return {};
+                const obj = {};
+                const keys = map.getKeys();
+                keys.forEach(key => {
+                    const field = map.getField(key);
+                    if (field && typeof field.getValue === 'function') {
+                        obj[key] = field.getValue();
+                    } else {
+                        obj[key] = field;
+                    }
+                });
+                return obj;
+            } catch (e) { return {}; }
+        })(),
+        content: contentStr,
+        _originalMsg: msg // Store original for details
+    };
+
+    // Store in State
+    addMessage(queueName, m); // Scope function
+
+    // Check if this queue is currently active in UI
+    if (state.currentQueue === queueName) {
+        state.allMessages = getMessages(queueName);
+
+        // Filter Check for Incoming Message
+        if (shouldShowMessage(m)) {
+            // If we are in a filtered view, manually add to displayed list
+            if (state.displayedMessages !== state.allMessages) {
+                state.displayedMessages.push(m);
+            }
+            ui.addMessageRow(m);
+        }
     }
 }
 
@@ -3909,963 +4784,18 @@ uiEvents.handleBulkDelete = async function () {
 }
 
 
-// import { icons } from './constants.js'; // Available in scope
-// import state, { getBrowser } from './state.js'; // Available in scope
-
-const els = {};
-// Expose UI functions via a local namespace or directly if valid.
-// Since other files import * as ui, let's create a ui object to match the usage `ui.renderList`.
-const ui = {};
-
-ui.initElements = function (container) {
-    els.container = container;
-
-    // Headers
-    els.hdrVpnName = container.querySelector('#browser-vpn-name');
-    els.hdrQueueName = container.querySelector('#browser-queue-name');
-    els.hdrPermissions = container.querySelector('#browser-permissions');
-
-    // Bind Controls
-    els.inputBind = container.querySelector('#browser-bind-input');
-    els.btnBind = container.querySelector('#btn-browser-bind');
-    els.selectBound = container.querySelector('#browser-bound-queues');
-    els.btnUnbind = container.querySelector('#btn-browser-unbind');
-    els.elBindError = container.querySelector('#browser-bind-error'); // Added error container
-
-    // Message List & Counts
-    els.msgList = container.querySelector('#browser-msg-list');
-    els.checkAll = container.querySelector('#browser-select-all');
-    els.countTotal = container.querySelector('#count-total');
-    els.countDisplayed = container.querySelector('#count-displayed');
-    els.countSelected = container.querySelector('#count-selected');
-    els.btnRefresh = container.querySelector('#btn-browser-refresh');
-
-    // Details Panel
-    els.detailId = container.querySelector('#detail-msg-id');
-    els.detailDest = container.querySelector('#detail-destination');
-    els.detailTypeBadge = container.querySelector('#detail-type-badge');
-    els.detailDestBadge = container.querySelector('#detail-dest-badge');
-    els.detailReplMsgId = container.querySelector('#detail-repl-msg-id');
-    els.btnCopyDest = container.querySelector('#btn-copy-dest'); // New
-    els.btnCopyReplMsgId = container.querySelector('#btn-copy-repl-msg-id'); // New
-    els.propContainer = container.querySelector('#detail-properties-container');
-    els.headerContainer = container.querySelector('#detail-headers-container');
-    els.headerContainer = container.querySelector('#detail-headers-container');
-    els.detailContent = container.querySelector('#detail-content');
-    els.btnCopyContent = container.querySelector('#btn-copy-content');
-
-    // Raw Content
-    els.btnShowRaw = container.querySelector('#btn-show-raw');
-    els.modalRaw = container.querySelector('#browser-raw-content-modal');
-    els.btnRawClose = container.querySelector('#btn-raw-close');
-    els.rawContentText = container.querySelector('#raw-content-text');
-
-    // Forward Modal Elements
-    els.modalForward = container.querySelector('#browser-forward-modal');
-    els.inputForwardDestName = container.querySelector('#forward-dest-name');
-    els.inputForwardDestType = container.querySelector('#forward-dest-type');
-    els.btnForwardCancel = container.querySelector('#btn-forward-cancel');
-    els.btnForwardSend = container.querySelector('#btn-forward-send');
-    els.btnForwardClose = container.querySelector('#btn-forward-close'); // New
-    els.elForwardError = container.querySelector('#forward-error');
-    els.listForwardMsgs = container.querySelector('#forward-msg-list');
-
-    // Filter Controls
-    els.btnFilter = container.querySelector('#btn-browser-filter');
-    els.modalFilter = container.querySelector('#browser-filter-modal');
-    els.btnFilterCancel = container.querySelector('#btn-filter-cancel');
-    els.btnFilterClear = container.querySelector('#btn-filter-clear');
-    els.btnFilterApply = container.querySelector('#btn-filter-apply');
-    els.inputFilterContent = container.querySelector('#filter-content');
-    els.inputFilterId = container.querySelector('#filter-msg-id');
-
-    // Bulk Actions
-    els.btnBrowserDownloadContent = container.querySelector('#btn-browser-download-content');
-    els.btnBrowserDownloadFull = container.querySelector('#btn-browser-download-full');
-    els.btnBrowserForward = container.querySelector('#btn-browser-forward');
-    els.btnBrowserDelete = container.querySelector('#btn-browser-delete');
-    els.inputFilterMsgType = container.querySelector('#filter-msg-type'); // New
-    els.inputFilterDest = container.querySelector('#filter-destination');
-    els.inputFilterType = container.querySelector('#filter-destination-type');
-    els.radFilterCriteria = container.querySelectorAll('input[name="filter-criteria"]'); // New
-    els.btnAddPropFilter = container.querySelector('#btn-add-prop-filter');
-    els.filterPropsRows = container.querySelector('#filter-properties-rows');
-
-    // Error
-    els.elBrowserError = container.querySelector('#browser-connect-error');
-
-    // Visibility
-    els.elPrompt = container.querySelector('#browser-connect-prompt');
-    els.elActiveView = container.querySelector('#browser-active-view');
-
-    // Bulk Actions
-    els.btnBulkDownload = container.querySelector('#btn-browser-download');
-    // els.btnBulkResend removed (redundant)
-    els.btnBulkDelete = container.querySelector('#btn-browser-delete');
-
-    return els;
-}
-
-ui.getElements = function () {
-    return els;
-}
-
-ui.getSelectedMessageIds = function () {
-    if (!els.msgList) return [];
-    const checkedBoxes = Array.from(els.msgList.querySelectorAll('.msg-check:checked'));
-    return checkedBoxes.map(cb => cb.closest('tr').dataset.id);
-}
-
-ui.showBrowserError = function (msg) {
-    if (els.elBrowserError) {
-        if (msg) {
-            els.elBrowserError.textContent = msg;
-            els.elBrowserError.style.display = 'block';
-        } else {
-            els.elBrowserError.style.display = 'none';
-        }
-    }
-}
-
-// New Function: Show Inline Bind Error
-// New Function: Show Inline Bind Error
-ui.showBindError = function (msg) {
-    if (els.elBindError && els.inputBind) {
-        if (msg) {
-            els.elBindError.textContent = msg;
-            els.elBindError.style.display = 'block'; // Force show as invalid-feedback
-            els.inputBind.classList.add('is-invalid');
-        } else {
-            els.elBindError.textContent = '';
-            els.elBindError.style.display = 'none';
-            els.inputBind.classList.remove('is-invalid');
-        }
-    }
-}
-
-// Download Helper
-ui.triggerDownload = function (filename, content, type = 'text/plain') {
-    const blob = new Blob([content], { type: type });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-}
-
-ui.triggerDownloadBlob = function (blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-}
-
-ui.downloadMessageContent = function (msg) {
-    if (!msg) return;
-    const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}`; // Sanitize ID
-    // Check if content is available
-    const content = msg.content || '';
-    ui.triggerDownload(filename, content);
-}
-
-ui.getFullMessageJson = function (msg) {
-    if (!msg) return null;
-    const fullObj = {
-        messageProperties: {
-            ...msg.msgProperties,
-            destination: {
-                name: 'Unknown',
-                type: 'Unknown'
-            },
-            messageType: msg.type
-        },
-        applicationProperties: msg.appProperties,
-        payload: msg.content
-    };
-
-    // Try to extract destination from original msg if available, or fallback to cached UI data
-    if (msg._originalMsg) {
-        try {
-            const dest = msg._originalMsg.getDestination();
-            if (dest) {
-                fullObj.messageProperties.destination.name = dest.getName();
-                const dType = dest.getType();
-                if (window.solace) {
-                    if (dType === window.solace.DestinationType.TOPIC) fullObj.messageProperties.destination.type = 'Topic';
-                    else if (dType === window.solace.DestinationType.QUEUE) fullObj.messageProperties.destination.type = 'Queue';
-                    else fullObj.messageProperties.destination.type = dType.toString();
-                } else {
-                    fullObj.messageProperties.destination.type = dType.toString();
-                }
-            }
-        } catch (e) {
-            console.warn('Failed to extract destination details', e);
-        }
-    }
-    return fullObj;
-}
-
-ui.downloadMessageFull = function (msg) {
-    const fullObj = ui.getFullMessageJson(msg);
-    if (!fullObj) return;
-
-    const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}-full.json`;
-    ui.triggerDownload(filename, JSON.stringify(fullObj, null, 2), 'application/json');
-}
-
-ui.downloadMessagesZip = async function (type) {
-    if (!window.JSZip) {
-        alert('JSZip library not loaded. Cannot create ZIP.');
-        return;
-    }
-
-    // Get Checked Messages
-    const checkedBoxes = Array.from(document.querySelectorAll('.msg-check:checked'));
-    if (checkedBoxes.length === 0) {
-        alert('No messages selected.');
-        return;
-    }
-
-    const ids = checkedBoxes.map(cb => cb.closest('tr').dataset.id);
-    const msgs = state.displayedMessages.filter(m => ids.includes(String(m.id)));
-
-    if (msgs.length === 0) return;
-
-    const zip = new JSZip();
-    const now = new Date();
-    const pad = n => n.toString().padStart(2, '0');
-    const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-
-    let zipFilename = '';
-
-    if (type === 'content') {
-        zipFilename = `solace-messages-content-${timestamp}.zip`;
-        msgs.forEach(msg => {
-            const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}`;
-            const content = msg.content || '';
-            zip.file(filename, content);
-        });
-    } else if (type === 'full') {
-        zipFilename = `solace-messages-full-${timestamp}.zip`;
-        msgs.forEach(msg => {
-            const fullObj = ui.getFullMessageJson(msg);
-            const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}-full.json`;
-            zip.file(filename, JSON.stringify(fullObj, null, 2));
-        });
-    }
-
-    try {
-        const content = await zip.generateAsync({ type: 'blob' });
-        ui.triggerDownloadBlob(content, zipFilename);
-    } catch (err) {
-        console.error('Failed to generate ZIP:', err);
-        alert('Failed to generate ZIP file.');
-    }
-}
-
-// New Function: Format Bytes
-ui.formatBytes = function (bytes, decimals = 2) {
-    bytes = Number(bytes);
-    if (bytes === 0 || isNaN(bytes)) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    // Switch unit if >= 1000 to avoid displaying "1000 B" (user request)
-    let i = 0;
-    while (bytes >= 1000 && i < sizes.length - 1) {
-        bytes /= k;
-        i++;
-    }
-    return parseFloat(bytes.toFixed(decimals)) + ' ' + sizes[i];
-}
-
-// New Function: Add Queue to Dropdown (called on success)
-ui.addQueueToDropdown = function (queueName) {
-    if (!els.selectBound) return;
-
-    let exists = false;
-    for (let i = 0; i < els.selectBound.options.length; i++) {
-        if (els.selectBound.options[i].value === queueName) exists = true;
-    }
-
-    if (!exists) {
-        const opt = document.createElement('option');
-        opt.value = queueName;
-        opt.textContent = queueName;
-        els.selectBound.appendChild(opt);
-    }
-
-    // Auto-select
-    els.selectBound.value = queueName;
-    els.selectBound.dispatchEvent(new Event('change'));
-}
-
-ui.updateCounts = function () {
-    if (els.countTotal) els.countTotal.textContent = state.allMessages.length;
-    if (els.countDisplayed) els.countDisplayed.textContent = state.displayedMessages.length;
-
-    const checked = els.msgList ? els.msgList.querySelectorAll('.msg-check:checked').length : 0;
-    if (els.countSelected) els.countSelected.textContent = checked;
-
-    // Update Bulk Buttons State
-    const hasSelection = checked > 0;
-    const isReadOnly = state.currentQueuePermissions && state.currentQueuePermissions.READ_ONLY;
-
-    if (els.btnBrowserDownloadContent) els.btnBrowserDownloadContent.disabled = !hasSelection;
-    if (els.btnBrowserDownloadFull) els.btnBrowserDownloadFull.disabled = !hasSelection;
-    if (els.btnBrowserDownloadFull) els.btnBrowserDownloadFull.disabled = !hasSelection;
-    // Forward (Single or Bulk)
-    if (els.btnBrowserForward) els.btnBrowserForward.disabled = (checked === 0);
-
-    if (els.btnBrowserDelete) {
-        if (isReadOnly) {
-            els.btnBrowserDelete.classList.add('hidden');
-        } else {
-            els.btnBrowserDelete.classList.remove('hidden');
-            els.btnBrowserDelete.disabled = !hasSelection;
-        }
-    }
-}
-
-ui.updatePermissionUI = function (queueName) {
-    const browser = getBrowser(queueName);
-    const consumer = browser ? browser._messageConsumer : null;
-    const perms = consumer ? consumer._permissions : null;
-
-    // VERBOSE DEBUGGING (Removed redundant large objects to avoid spam, kept summary)
-    // User reported duplication, likely from multiple calls. 
-    // We will keep a cleaner log here.
-    console.log(`[Permissions] Computed for ${queueName}:`, perms);
-
-    let isReadOnly = false;
-    if (perms) {
-        // Handle Enum String or Object
-        // Solace sometimes returns just the string "READ_ONLY" or an object { READ_ONLY: true }
-        if (typeof perms === 'string' && perms === 'READ_ONLY') isReadOnly = true;
-        // Check for Object { READ_ONLY: true/value }
-        // else if (typeof perms === 'object' && perms.READ_ONLY) isReadOnly = true;
-        // Also check if window.solace is available and compare with enum
-        //else if (window.solace && perms === window.solace.QueuePermissions.READ_ONLY) isReadOnly = true;
-    }
-
-    // Normalize state for render logic
-    state.currentQueuePermissions = isReadOnly ? { READ_ONLY: true } : { READ_ONLY: false };
-
-    if (perms) {
-        els.hdrPermissions.classList.remove('hidden');
-        if (isReadOnly) {
-            els.hdrPermissions.textContent = 'Read-Only';
-            els.hdrPermissions.className = 'badge badge-outline-warning';
-        } else {
-            els.hdrPermissions.textContent = 'Read-Write';
-            els.hdrPermissions.className = 'badge badge-outline-success';
-        }
-    } else {
-        els.hdrPermissions.classList.add('hidden');
-        state.currentQueuePermissions = null;
-    }
-
-    // Refresh table to update delete icons based on perms
-    ui.renderList();
-    ui.updateCounts();
-}
-
-ui.selectMessage = function (id) {
-    // Highlight row
-    if (els.msgList) {
-        els.msgList.querySelectorAll('tr').forEach(tr => {
-            if (tr.dataset.id === id) {
-                tr.classList.add('selected');
-            } else {
-                tr.classList.remove('selected');
-            }
-        });
-    }
-
-    const msg = state.displayedMessages.find(m => m.id === id);
-    if (msg) {
-        state.selectedMessage = msg;
-        els.detailId.textContent = msg.id;
-
-        els.detailTypeBadge.textContent = msg.type;
-        els.detailTypeBadge.className = 'badge badge-outline-info';
-        els.detailTypeBadge.classList.remove('hidden');
-
-        if (msg._originalMsg) {
-            const dest = msg._originalMsg.getDestination();
-            if (dest) {
-                const destName = dest.getName();
-                els.detailDest.textContent = destName;
-                const destType = dest.getType();
-                let typeLabel = destType.toString();
-                if (window.solace) {
-                    if (destType === window.solace.DestinationType.TOPIC) typeLabel = 'Topic';
-                    else if (destType === window.solace.DestinationType.QUEUE) typeLabel = 'Queue';
-                }
-                els.detailDestBadge.textContent = typeLabel;
-            } else {
-                els.detailDest.textContent = 'N/A';
-                els.detailDestBadge.textContent = 'Unknown';
-            }
-
-            // Repl Grp Msg Id
-            if (msg._originalMsg && typeof msg._originalMsg.getReplicationGroupMessageId === 'function') {
-                try {
-                    const rmid = msg._originalMsg.getReplicationGroupMessageId();
-                    els.detailReplMsgId.textContent = rmid ? rmid.toString() : 'N/A';
-                } catch (e) { els.detailReplMsgId.textContent = 'N/A'; }
-            } else {
-                els.detailReplMsgId.textContent = 'N/A';
-            }
-
-        } else {
-            els.detailDest.textContent = els.hdrQueueName.textContent || 'N/A';
-            els.detailDestBadge.textContent = 'Queue'; // Fallback
-            els.detailReplMsgId.textContent = 'N/A';
-        }
-
-        els.detailDestBadge.className = 'badge badge-outline-success';
-        els.detailDestBadge.classList.remove('hidden');
-
-        els.detailDestBadge.classList.remove('hidden');
-
-        // Render Message Properties
-        ui.renderTags(els.propContainer, msg.msgProperties);
-
-        // Render Application Properties
-        ui.renderTags(els.headerContainer, msg.appProperties);
-
-        els.detailContent.textContent = msg.content;
-
-        if (els.btnShowRaw) {
-            els.btnShowRaw.disabled = false;
-            els.btnShowRaw.onclick = () => ui.showRawContent(msg);
-        }
-        if (els.btnCopyContent) {
-            els.btnCopyContent.disabled = false;
-        }
-
-        // Enable Copy Buttons
-        if (els.btnCopyDest) {
-            els.btnCopyDest.disabled = false;
-            els.btnCopyDest.onclick = () => window.App.copyToClipboard(els.detailDest.textContent, els.btnCopyDest);
-        }
-        if (els.btnCopyReplMsgId) {
-            els.btnCopyReplMsgId.disabled = false;
-            els.btnCopyReplMsgId.onclick = () => window.App.copyToClipboard(els.detailReplMsgId.textContent, els.btnCopyReplMsgId);
-        }
-    }
-}
-
-ui.showRawContent = function (msg) {
-    if (els.modalRaw && els.rawContentText) {
-        els.rawContentText.textContent = msg._originalMsg ? msg._originalMsg.dump() : 'No raw dump available.';
-        els.modalRaw.classList.remove('hidden');
-
-        if (els.btnRawClose) {
-            els.btnRawClose.onclick = () => els.modalRaw.classList.add('hidden');
-        }
-    }
-}
-
-ui.clearDetails = function () {
-    els.detailId.textContent = '';
-    els.detailDest.textContent = '';
-    if (els.detailReplMsgId) els.detailReplMsgId.textContent = '';
-    if (els.propContainer) els.propContainer.innerHTML = '';
-    if (els.headerContainer) els.headerContainer.innerHTML = '';
-    els.detailContent.textContent = '';
-    els.btnShowRaw.disabled = true;
-    if (els.btnCopyContent) els.btnCopyContent.disabled = true;
-    if (els.btnCopyDest) els.btnCopyDest.disabled = true;
-    if (els.btnCopyReplMsgId) els.btnCopyReplMsgId.disabled = true;
-    els.detailTypeBadge.classList.add('hidden');
-    els.detailDestBadge.classList.add('hidden');
-
-    if (els.msgList) {
-        els.msgList.querySelectorAll('tr.selected').forEach(tr => tr.classList.remove('selected'));
-    }
-}
-
-// Helper to create row HTML
-ui.createRowHtml = function (msg) {
-    const isReadOnly = state.currentQueuePermissions && state.currentQueuePermissions.READ_ONLY;
-    // Note: icons object is unavailable here if not imported. 
-    // Assuming icons are available via closure or global if this file was built?
-    // In strict module mode, we need access to 'icons'.
-    // Review shows 'icons' is used in renderList (line 263).
-    // So it must be available.
-
-    return `
-        <tr data-id="${msg.id}" class="clickable-row">
-            <td class="row-checkbox"><input type="checkbox" class="msg-check"></td>
-            <td>${msg.id}</td>
-            <td>${msg.date}</td>
-            <td>${ui.formatBytes(msg.size)}</td>
-            <td>
-                <div class="browser-actions">
-                    <button class="btn-icon btn-download-content" title="Download Content (Payload)">${icons.downloadContent}</button>
-                    <button class="btn-icon btn-download-full" title="Download Full Message (JSON)">${icons.downloadFull}</button>
-                    <button class="btn-icon btn-forward-row" title="Forward Message">${icons.forward}</button>
-                    ${!isReadOnly ? `<button class="btn-icon btn-delete-row" title="Delete" style="color: var(--status-disconnected);">${icons.delete}</button>` : ''}
-                </div>
-            </td>
-        </tr>
-    `;
-};
-
-// Helper to attach listeners to a row
-ui.attachRowListeners = function (tr) {
-    // Row Click (Select)
-    tr.addEventListener('click', (e) => {
-        if (e.target.closest('input') || e.target.closest('button')) return;
-        ui.selectMessage(tr.dataset.id);
-    });
-
-    // Download Content Trigger
-    const btnDownContent = tr.querySelector('.btn-download-content');
-    if (btnDownContent) {
-        btnDownContent.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const msg = state.displayedMessages.find(m => m.id === tr.dataset.id);
-            if (msg) ui.downloadMessageContent(msg);
-        });
-    }
-
-    // Download Full Trigger
-    const btnDownFull = tr.querySelector('.btn-download-full');
-    if (btnDownFull) {
-        btnDownFull.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const msg = state.displayedMessages.find(m => m.id === tr.dataset.id);
-            if (msg) ui.downloadMessageFull(msg);
-        });
-    }
-
-    // Forward Trigger
-    const btnForward = tr.querySelector('.btn-forward-row');
-    if (btnForward) {
-        btnForward.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const msg = state.displayedMessages.find(m => m.id === tr.dataset.id);
-            if (msg) ui.showForwardModal(msg);
-        });
-    }
-
-    // Checkbox Trigger
-    const chk = tr.querySelector('.msg-check');
-    if (chk) {
-        chk.addEventListener('change', ui.updateCounts);
-    }
-
-    // Delete Button Trigger
-    const btnDel = tr.querySelector('.btn-delete-row');
-    if (btnDel) {
-        btnDel.addEventListener('click', (e) => {
-            e.stopPropagation(); // Prevent selection
-            window.dispatchEvent(new CustomEvent('app:message-delete', { detail: { id: tr.dataset.id } }));
-        });
-    }
-};
-
-ui.renderList = function () {
-    if (!els.msgList) return;
-
-    // Reset Check All
-    if (els.checkAll) els.checkAll.checked = false;
-
-    // Use Helper
-    els.msgList.innerHTML = state.displayedMessages.map(msg => ui.createRowHtml(msg)).join('');
-
-    ui.updateCounts();
-
-    // Attach Listeners
-    els.msgList.querySelectorAll('tr').forEach(tr => ui.attachRowListeners(tr));
-}
-
-ui.addMessageRow = function (msg) {
-    if (!els.msgList) return;
-
-    // Create temp container to parse HTML
-    const temp = document.createElement('tbody');
-    temp.innerHTML = ui.createRowHtml(msg);
-    const tr = temp.firstElementChild;
-
-    if (tr) {
-        ui.attachRowListeners(tr);
-        els.msgList.appendChild(tr); // Append to bottom
-
-        // Highlight New? Maybe flash?
-        tr.style.animation = 'highlight-fade 2s'; // Assume CSS handles keyframes or ignored
-
-        ui.updateCounts();
-    }
-}
-
-ui.removeMessageRow = function (msgId) {
-    if (!els.msgList) return;
-
-    const tr = els.msgList.querySelector(`tr[data-id="${msgId}"]`);
-    if (tr) {
-        tr.remove();
-        ui.updateCounts();
-
-        // If selected, clear details
-        if (els.detailId && els.detailId.textContent === msgId.toString()) {
-            ui.clearDetails();
-        }
-    }
-}
-
-// New Function: Reset selection only (don't hide panel)
-// New Function: Reset selection only (don't hide panel)
-ui.resetQueueSelection = function () {
-    if (els.hdrQueueName) els.hdrQueueName.textContent = '';
-    if (els.hdrPermissions) els.hdrPermissions.classList.add('hidden');
-    state.currentQueue = '';
-    state.allMessages = [];
-    state.displayedMessages = [];
-    state.currentQueuePermissions = null;
-
-    // Reset Filters
-    state.activeFilters = { content: '', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'OR' };
-    if (els.inputFilterContent) els.inputFilterContent.value = '';
-    if (els.inputFilterId) els.inputFilterId.value = '';
-    if (els.inputFilterDest) els.inputFilterDest.value = '';
-    if (els.inputFilterType) els.inputFilterType.value = 'ANY';
-    if (els.inputFilterMsgType) els.inputFilterMsgType.value = 'ANY';
-    if (els.radFilterCriteria) {
-        els.radFilterCriteria.forEach(r => r.checked = (r.value === 'OR'));
-    }
-
-    if (els.btnFilter) {
-        els.btnFilter.classList.remove('filter-active');
-        els.btnFilter.disabled = true;
-    }
-
-    ui.renderList();
-    ui.clearDetails();
-}
-
-ui.updateVisibility = function (isConnected) {
-    if (!isConnected) {
-        if (els.elPrompt) els.elPrompt.classList.remove('hidden');
-        if (els.elActiveView) els.elActiveView.classList.add('hidden');
-    } else {
-        if (els.elPrompt) els.elPrompt.classList.add('hidden');
-        if (els.elActiveView) els.elActiveView.classList.remove('hidden');
-
-        if (els.selectBound && els.selectBound.value) {
-            els.hdrQueueName.textContent = els.selectBound.value;
-            // updatePermissionUI is called by logic
-        } else {
-            els.hdrQueueName.textContent = '';
-            els.hdrPermissions.classList.add('hidden');
-        }
-    }
-}
-
-ui.resetUI = function () {
-    if (els.selectBound) {
-        while (els.selectBound.options.length > 1) {
-            els.selectBound.remove(1);
-        }
-        els.selectBound.selectedIndex = 0;
-        els.selectBound.dispatchEvent(new Event('change'));
-    }
-    ui.updateVisibility(false);
-}
-
-// Forward Modal Functions
-ui.showForwardModal = function (msgs) {
-    if (!els.modalForward) return;
-
-    // Handle Single or Array & Prepare State Objects
-    const msgArray = Array.isArray(msgs) ? msgs : [msgs];
-    state.forwardQueue = msgArray.map(m => ({
-        originalMsg: m,
-        id: m.id, // Display ID
-        correlationValue: ui.generateUuid(), // New Random ID
-        status: 'QUEUED', // QUEUED, SENDING, SUCCESS, FAILED
-        error: null
-    }));
-
-    // Reset Inputs
-    els.inputForwardDestName.value = '';
-    els.inputForwardDestType.value = 'Topic'; // Default
-    els.elForwardError.style.display = 'none';
-    els.elForwardError.textContent = '';
-
-    // Enable Send Button initially (User flow: Review -> Send)
-    els.btnForwardSend.disabled = false;
-    els.btnForwardSend.textContent = 'Send';
-    els.btnForwardSend.classList.remove('btn-secondary');
-    els.btnForwardSend.classList.add('btn-primary');
-    state.forwardingCancelled = false; // Reset Cancel Flag
-
-    // Update Header Count (Label)
-    const countEl = document.getElementById('forward-queue-count');
-    if (countEl) {
-        countEl.textContent = state.forwardQueue.length;
-    }
-
-    ui.renderForwardList();
-
-    els.modalForward.classList.remove('hidden');
-    els.inputForwardDestName.focus();
-}
-
-ui.generateUuid = function () {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
-}
-
-ui.getStatusIcon = function (status) {
-    // QUEUED: Solid Gray Circle
-    if (status === 'QUEUED') {
-        // Use a safe fallback color if var is missing, but --text-muted is standard
-        return '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="var(--text-muted, #9ca3af)"/></svg>';
-    }
-    // SENT: Hollow Green Spinner (Donut)
-    if (status === 'SENDING') {
-        return '<svg class="icon-spin" width="16" height="16" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10" fill="none" stroke="var(--status-connected)" stroke-width="3" stroke-linecap="round"/></svg>';
-    }
-    // SUCCESS: Green Tick
-    if (status === 'SUCCESS') {
-        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--status-connected)" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
-    }
-    // FAILED: Solid Red Circle
-    if (status === 'FAILED') {
-        return '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="var(--status-disconnected)"/></svg>';
-    }
-    return '';
-}
-
-ui.renderForwardList = function () {
-    if (!els.listForwardMsgs) return;
-
-    els.listForwardMsgs.innerHTML = state.forwardQueue.map(item => {
-        const icon = ui.getStatusIcon(item.status);
-        const hasError = item.status === 'FAILED' && item.error;
-
-        // Content Cleaning & Truncation (Strict 10 chars)
-        let cleanContent = (item.originalMsg.content || '').replace(/(\r\n|\n|\r)/gm, " ");
-        let maxLen = 30;
-        if (cleanContent.length > maxLen) {
-            cleanContent = cleanContent.substring(0, maxLen) + '...';
-        }
-
-        // Structure: Icon (Left) | Wrapper (Right: ContentRow + ErrorRow)
-        return `
-            <div class="flex-row gap-2 items-start mb-2">
-                <div id="status-${item.correlationValue}" class="flex-shrink-0 mt-2" style="width: 16px;">
-                    ${icon}
-                </div>
-                <div class="flex-col flex-1 min-w-0 gap-0">
-                    <div class="flex-row justify-between items-center p-2 rounded border" style="background: var(--bg-input); border-color: var(--border-color);">
-                        <span class="text-sm text-secondary whitespace-nowrap mr-2">${item.id}</span>
-                        <span class="text-xs text-secondary whitespace-nowrap">${cleanContent}</span>
-                    </div>
-                    <div id="error-${item.correlationValue}" class="text-xs text-error text-left ${hasError ? '' : 'hidden'}" style="color: var(--status-disconnected); margin-top: 2px;">
-                        ${item.error || ''}
-                    </div>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-ui.closeForwardModal = function () {
-    if (!els.modalForward) return;
-    els.modalForward.classList.add('hidden');
-    state.selectedForwardMsg = null;
-}
-
-ui.onForwardSuccess = function () {
-    ui.closeForwardModal();
-    // Maybe show toast? User just said close.
-    // Ensure error is cleared if reopen? Done in show.
-}
-
-ui.onForwardFailure = function (err) {
-    if (els.elForwardError) {
-        els.elForwardError.textContent = `Error: ${err.message || err}`;
-        els.elForwardError.style.display = 'block';
-    }
-}
-
-// New Function: Render Headers with Truncation
-// Status Update Logic
-// Status Update Logic
-ui.updateForwardItemStatus = function (correlationValue, status, errorMsg) {
-    if (!correlationValue || !state.forwardQueue) return;
-
-    const item = state.forwardQueue.find(m => m.correlationValue === correlationValue);
-    if (item) {
-        item.status = status;
-        item.error = errorMsg;
-
-        // Update Icon
-        const iconContainer = document.getElementById(`status-${correlationValue}`);
-        if (iconContainer) {
-            iconContainer.innerHTML = ui.getStatusIcon(status);
-        }
-
-        // Handle Error Text
-        const errorContainer = document.getElementById(`error-${correlationValue}`);
-        if (errorContainer) {
-            if (status === 'FAILED' && errorMsg) {
-                errorContainer.textContent = errorMsg;
-                errorContainer.classList.remove('hidden');
-            } else {
-                errorContainer.classList.add('hidden');
-            }
-        }
-    }
-
-    // Check Completion
-    ui.checkForwardCompletion();
-}
-
-ui.checkForwardCompletion = function () {
-    // If all are final (SUCCESS or FAILED), update button
-    const isComplete = state.forwardQueue.every(m => m.status === 'SUCCESS' || m.status === 'FAILED');
-    if (isComplete && els.btnForwardSend) {
-        els.btnForwardSend.textContent = 'Send Complete';
-        els.btnForwardSend.disabled = true; // Stay disabled
-        els.btnForwardSend.classList.add('btn-secondary');
-        els.btnForwardSend.classList.remove('btn-primary');
-    }
-}
-
-// Consolidate Render Function
-ui.renderTags = function (container, properties) {
-    if (!container) return;
-    container.innerHTML = ''; // Clear
-
-    if (!properties || Object.keys(properties).length === 0) {
-        const empty = document.createElement('span');
-        empty.textContent = 'None';
-        empty.style.color = 'var(--text-secondary)';
-        empty.style.fontStyle = 'italic';
-        empty.style.fontSize = '0.85rem';
-        container.appendChild(empty);
-        return;
-    }
-
-    for (const [key, val] of Object.entries(properties)) {
-        if (val !== null && val !== undefined && val !== '') {
-            ui.createTag(container, key, val);
-        }
-    }
-}
-
-ui.createTag = function (container, key, val) {
-    const valStr = String(val);
-    const tag = document.createElement('span');
-    tag.className = 'header-tag';
-
-    const isLong = valStr.length > 20;
-
-    const render = (expanded) => {
-        let displayVal = valStr;
-        if (!expanded && isLong) {
-            displayVal = valStr.substring(0, 20) + '...';
-        }
-        tag.textContent = `${key} = ${displayVal}`;
-    };
-
-    render(false); // Initial render truncated
-
-    if (isLong) {
-        let expanded = false;
-        tag.onclick = () => {
-            expanded = !expanded;
-            render(expanded);
-        };
-        tag.title = 'Click to expand/collapse';
-    }
-
-    container.appendChild(tag);
-}
-
-// Dynamic Property Filter Rows
-ui.addPropertyFilterRow = function (key = '', value = '') {
-    const container = els.filterPropsRows || document.getElementById('filter-properties-rows');
-    if (!container) return;
-
-    const row = document.createElement('div');
-    row.className = 'flex-row gap-2 mt-1 property-filter-row';
-    row.innerHTML = `
-        <input type="text" class="form-control prop-key" placeholder="Key" list="standard-properties-list" value="${key}">
-        <input type="text" class="form-control prop-value" placeholder="Value" value="${value}">
-        <button class="btn-icon btn-remove-prop" title="Remove" style="color: var(--status-disconnected);">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="15" y1="9" x2="9" y2="15"></line>
-                <line x1="9" y1="9" x2="15" y2="15"></line>
-            </svg>
-        </button>
-    `;
-
-    // Attach Remove Listener
-    row.querySelector('.btn-remove-prop').onclick = () => row.remove();
-
-    // Attach Enter Key Listener to Apply Filter
-    const handleEnter = (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            if (els.btnFilterApply) els.btnFilterApply.click();
-            else {
-                const btn = document.getElementById('btn-filter-apply');
-                if (btn) btn.click();
-            }
-        }
-    };
-    row.querySelector('.prop-key').addEventListener('keydown', handleEnter);
-    row.querySelector('.prop-value').addEventListener('keydown', handleEnter);
-
-    container.appendChild(row);
-}
-
-ui.getPropertyFilters = function () {
-    const container = els.filterPropsRows || document.getElementById('filter-properties-rows');
-    if (!container) return [];
-
-    const rows = container.querySelectorAll('.property-filter-row');
-    const filters = [];
-    rows.forEach(row => {
-        const key = row.querySelector('.prop-key').value.trim();
-        const value = row.querySelector('.prop-value').value.trim();
-        if (key) { // Value acts as partial match, empty value might mean "exists"? Let's require value for now or allow empty.
-            // If value is empty, it matches anything with that key? Plan says Match ANY/ALL.
-            // Let's assume value is partial match string. Empty string matches all strings.
-            filters.push({ key, value });
-        }
-    });
-    return filters;
-}
-
-ui.clearPropertyFilters = function () {
-    const container = els.filterPropsRows || document.getElementById('filter-properties-rows');
-    if (container) container.innerHTML = '';
-}
-
-ui.getElements = function () {
-    return els;
-}
-
 // import * as ui from './ui.js';
 // import * as uiEvents from './ui-events.js';
 // import * as service from './service.js';
+// @include constants.js
+// @include state.js
+// @include ui-core.js
+// @include ui-table.js
+// @include ui-details.js
+// @include ui-forward.js
+// @include service.js
+// @include service-events.js
+// @include ui-events.js
 
 function setup(context) {
     const { container, appState, loadSelf } = context;
@@ -4886,8 +4816,6 @@ function setup(context) {
     } else {
         window.addEventListener('jszip:loaded', showZipButtons);
     }
-
-    // Bind Button
 
     // Bind Button
     if (els.btnBind) {
