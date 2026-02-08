@@ -12,9 +12,7 @@ The application is intended to be able to run **without a backend application (e
 
 Future versions and enhancements will include additional optional features that might require a web server to work.
 
-This version, as compared to other Solace Queue Browsers available, does not require SEMP credentials to work.
-
-Users are expected to know the connection parameters / details.
+This version, as compared to other Solace Queue Browsers available, does not require SEMP credentials to work at its core.
 
 ![Screenshot](images/browser.png)
 
@@ -25,8 +23,8 @@ Users are expected to know the connection parameters / details.
    - Chrome 137+
    - Chromium 137+
    - Thorium 130+
-2. Solace Javascript API (Browser) v10.18.3
-3. JSZip Library v3.10.1 (optional - only required for bulk download)
+2. Solace Javascript API (Browser) v10.18.3+
+3. JSZip Library v3.10.1+ (optional - only required for bulk download)
 
 ## Installation / Running the App
 
