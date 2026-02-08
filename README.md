@@ -16,7 +16,7 @@ This version, as compared to other Solace Queue Browsers available, does not req
 
 Users are expected to know the connection parameters / details.
 
-![Screenshot](images/screenshot.png)
+![Screenshot](images/browser.png)
 
 ## Pre-requisite
 
