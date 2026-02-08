@@ -40,12 +40,12 @@ This version, as compared to other Solace Queue Browsers available, does not req
 2. View message content
 3. Download message(s) content
 4. Delete message(s) from Queue
-5. Forwad message(s) from Queue
+5. Forward message(s) from Queue
 6. Supports Basic and OAuth2 login
 7. Supports saving/loading login credentials from local browser storage (excluding password)
 8. Search / Filter by Message Content
-9. Search / Filter by Message Headers
-10. Discover / List VPNs & Queues with a Management Connection
+9. Search / Filter by Message Headers / Properties
+10. Discover / List VPNs & Queues with a SEMP Management Connection
 
 > [!NOTE]
 > When connecting to secured (SSL/TLS) endpoints, please ensure the broker server certificate is valid (i.e. CN, SAN, Dates etc. all are correct). Due to limitations of how a browser work, you might not be able to connect to invalid/unvalidated secured endpoints.
