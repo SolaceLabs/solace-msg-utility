@@ -30,8 +30,8 @@ This version, as compared to other Solace Queue Browsers available, does not req
 
 1. You only need `dist/index.html` from the repository - you can choose to clone the entire repository or only download the `index.html` file.
 2. Download Solace Javascript (Browser) API from [Solace Downloads](https://solace.com/downloads/) or [Solace Products](https://products.solace.com/) (login required).
-   - Place `solclient.js` in the same folder as `index.html` or,
-   - Place `solclient.js` in `js` folder which is of the same directory as `index.html`.
+   - Place `solclient.js` and `jszip.min.js` (optional) in the same folder as `index.html` or,
+   - Place `solclient.js` and `jszip.min.js` (optional) in `js` folder which is of the same directory as `index.html`.
 3. Open `index.html` with a modern browser and you are ready to go.
 
 ## Features
