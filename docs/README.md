@@ -33,7 +33,7 @@ This page manages the connection sessions required by the different modules.
 | **SEMP**        | Queue Discovery   |
 | **Client**      | Queue Browsing    |
 
-![Connections](images/connections.png)
+![Connections](../images/connections.png)
 
 > To reduce configuration errors, both connections **must use the same hostname or IP address**.
 > Connection status indicators are displayed at the bottom-right of the page.
@@ -84,7 +84,7 @@ Ensure the following fields are entered correctly:
 
 Once a SEMP connection is established, available **Message VPNs** on the broker can be browsed. You can then select a queue directly instead of manually entering its name.
 
-![Queue Discovery](images/discovery.png)
+![Queue Discovery](../images/discovery.png)
 
 ---
 
@@ -92,7 +92,7 @@ Once a SEMP connection is established, available **Message VPNs** on the broker 
 
 After establishing a **Solace Client connection**, you can bind to one or more queues to browse their messages.
 
-![Queue Browsing](images/browser.png)
+![Queue Browsing](../images/browser.png)
 
 ### Features
 
@@ -147,7 +147,7 @@ The payload is shown in the **Content Preview** section.
 
 ## 🔎 Filter / Search Messages
 
-![Message Filtering](images/browser-filter.png)
+![Message Filtering](../images/browser-filter.png)
 
 Messages can be filtered using the following fields:
 
@@ -178,7 +178,7 @@ Two download options are available:
 1. **Download Content** (payload only)
 2. **Download Full Message (JSON)**
 
-> Bulk download requires **JSZip** (`jszip.min.js` or `jszip.js`) to be available locally.
+> Bulk download requires **JSZip** (`jszip.min.js` or `jszip.js`) to be available locally. Please put it in the same directory or in `js` folder
 
 ### Download Content
 
@@ -213,7 +213,7 @@ For bulk downloads:
 
 ## 📤 Forward Messages
 
-![Message Forwarding](images/browser-forward.png)
+![Message Forwarding](../images/browser-forward.png)
 
 Forwards messages to a specified destination. The message is copied and sent **as a new message**, preserving all properties.
 
