@@ -25,6 +25,6 @@ nppBackup
 
 # Solace Message Utility
 jszip*js
-solclient*js
+solclient*
 */jszip*js
 */solclient*js

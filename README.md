@@ -1,72 +1,75 @@
-# Solace Message Web Utility
+# Solace Message Utility
 
-## Overview
+A modular PWA for managing Solace PubSub+ Event Brokers. Browse queues, inspect messages, forward, delete, filter, and download — all from a single-page interface built on a micro-kernel architecture.
 
-> [!TIP]
-> Enterprise support is available through Solace Professional Services. Talk to your Solace consultant or sales contact to find out more!
+## Quick Start
 
-> [!IMPORTANT]
-> This is an open-source tool that is not officially supported under Solace Customer Support policy.
+```bash
+npm install
+npm run dev          # Start dev server at http://localhost:5173
+npm run build        # Production build → dist/index.html (single file)
+npm test             # Run all 658 tests
+npm run test:coverage # Run tests with coverage; fails the gate if below vitest.config.ts thresholds
+```
 
-The application is intended to be able to run **without a backend application (e.g. web server)**.
+**Prerequisites:** Node.js 20+. The Solace SDK (`solclient.js`) and JSZip (`jszip.min.js`) are loaded at runtime via `<script>` tags in `index.html`.
 
-Future versions and enhancements will include additional optional features that might require a web server to work.
+## Modules
 
-This version, as compared to other Solace Queue Browsers available, does not require SEMP credentials to work at its core.
+### Connections (Priority 100)
+Dual connection management for Solace Web Messaging (Client) and SEMP (Management API). Supports Basic and OAuth2 authentication, connection profiles via localStorage, and advanced settings (retries, timeouts, reconnect strategies).
 
-![Screenshot](images/browser.png)
+### Queue Discovery (Priority 50)
+SEMP-driven hierarchical browsing: select a VPN, then a queue. Real-time search/filter on both lists. "Open in Browser" triggers a cross-module flow that auto-connects and navigates to the Queue Browser.
 
-## Pre-requisite
+### Queue Browser (Priority 30)
+Bind up to 3 (configurable via global settings) queues simultaneously. Inspect message headers, properties, and payloads. Bulk operations: delete, forward (to queue or topic with ACK tracking), and download as ZIP (content-only or full JSON with headers). Advanced filtering by content, message ID, destination, type, and custom properties with AND/OR criteria.
 
-1. Modern Browser (only browsers tested with are listed below)
-   - Edge 137+
-   - Chrome 137+
-   - Chromium 137+
-   - Thorium 130+
-2. Solace Javascript API (Browser) v10.18.3+
-3. JSZip Library v3.10.1+ (optional - only required for bulk download)
+## Architecture
 
-## Installation / Running the App
+Micro-kernel with typed EventBus and dependency injection. See [architecture.md](docs/architecture.md) for diagrams and details.
 
-1. You only need `dist/index.html` from the repository - you can choose to clone the entire repository or only download the `index.html` file.
-2. Download Solace Javascript (Browser) API from [Solace Downloads](https://solace.com/downloads/) or [Solace Products](https://products.solace.com/) (login required).
-   - Place `solclient.js` and `jszip.min.js` (optional) in the same folder as `index.html` or,
-   - Place `solclient.js` and `jszip.min.js` (optional) in `js` folder which is of the same directory as `index.html`.
-3. Open `index.html` with a modern browser and you are ready to go.
+```
+src/
+  core/           Kernel, EventBus, type system, required() helper
+  css/            Split design system (variables, reset, layout, components, utilities)
+  modules/
+    connections/      Solace client + SEMP connection management
+    queue-discovery/  VPN and queue discovery via SEMP (async-generator pagination)
+    queue-browser/    Message browsing, filtering, forwarding, deletion
+  module-ids.ts   Canonical module-id list (build plugin + registry both key off it)
+  registry.ts     Module registry (ordered)
+  main.ts         Bootstrap
+```
 
-## Features
+Modules are isolated — zero cross-module imports. All coordination flows through the typed EventBus. Each module receives an `AppContext` with injected services (state management, SEMP auth, clipboard, navigation). Each module owns its own `index.html` template (injected at build time by a Vite plugin) and an optional `styles.css`.
 
-1. List messages in Queue(s)
-2. View message content
-3. Download message(s) content
-4. Delete message(s) from Queue
-5. Forward message(s) from Queue
-6. Supports Basic and OAuth2 login
-7. Supports saving/loading login credentials from local browser storage (excluding password)
-8. Search / Filter by Message Content
-9. Search / Filter by Message Headers / Properties
-10. Discover / List VPNs & Queues with a SEMP Management Connection
+## Documentation
 
-> [!NOTE]
-> When connecting to secured (SSL/TLS) endpoints, please ensure the broker server certificate is valid (i.e. CN, SAN, Dates etc. all are correct). Due to limitations of how a browser work, you might not be able to connect to invalid/unvalidated secured endpoints.
+| Document | Description |
+|----------|-------------|
+| [architecture.md](docs/architecture.md) | System diagrams, data flow, module structure |
+| [developer-guide.md](docs/developer-guide.md) | Setup, testing, adding modules, code conventions |
+| [user-guide.md](docs/user-guide.md) | UI workflows, feature reference |
+| [deployment.md](docs/deployment.md) | Build, hosting, external dependencies |
+| [contributing.md](docs/contributing.md) | PR workflow, coding standards, test requirements |
+| [test-report.md](docs/test-report.md) | Test methodology, coverage strategy, v8 ignore rationale |
+| [improvement-plan.md](docs/improvement-plan.md) | Prioritized backlog: security, bugs, accessibility, performance |
 
-## User Guide
+## Testing
 
-Refer to [User Guide](docs/)
+658 tests across 23 test files. `vitest.config.ts` sets **100% thresholds** on all four coverage metrics (statements, branches, functions, lines); the current run is slightly below (Statements 99.61%, Branches 98.06%, Functions 98.99%, Lines 99.72%) and the gate is failing. See [test-report.md](docs/test-report.md) for the per-file breakdown and methodology.
 
-## References
-- https://docs.solace.com/API/Messaging-APIs/JavaScript-API/js-home.htm
-- https://tutorials.solace.dev/javascript/
-- https://docs.solace.com/API-Developer-Online-Ref-Documentation/js/index.html
-- https://github.com/SolaceSamples/solace-samples-javascript
+## Tech Stack
 
-## Similar tools
+| Concern | Tool |
+|---------|------|
+| Language | TypeScript + JavaScript (ES modules) |
+| Bundler | Vite 6 + vite-plugin-singlefile |
+| Test runner | Vitest 4 + jsdom |
+| Coverage | @vitest/coverage-v8 |
+| Runtime deps | Solace SDK (solclient.js), JSZip |
 
-| Name | GUI | Backend | Authentication Supported | Features | Comments |
-| - | - | - | - | - | - |
-| Solace Queue Browser Utility | Browser | None | Basic, Oauth | View, Delete, Filter, Download, Text vs Binary Detection, JSON Pretty Print, Debug mode | - |
-| [JMSToolBox](https://docs.solace.com/API/JMSToolBox.htm) | Win Desktop App | None | Basic | View, Delete, Filter, Download, Republish | Requires SEMP Credential |
-| [Solace Queue Browser](https://github.com/solacecommunity/solace-queue-browser) | Browser | .Net (Container) | Basic, OAuth, Client Certiticate | View, Filter, Download | - |
-| [Chrome Extension](https://github.com/solacecommunity/solace-queue-browser-extension) | Browser | None | Basic | View | Requires SEMP Credentials |
-| [Solace Queue Browser GUI](https://github.com/SolaceServices/SolaceQueueBrowserGui) | Java Desktop App | None | Basic | View, Delete, Copy, Move (Drag & Drop) | Requires SEMP |
-| [Solace Message Viewer](https://github.com/richard-lawrence/Solace-Message-Viewer) | Browser | None | Basic | View | - |
+## License
+
+Private / Internal Use
