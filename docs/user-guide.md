@@ -14,7 +14,13 @@ The interface has a **sidebar** on the left for navigation and a **main content 
 
 ## Module 1: Connections
 
-This is the first screen you see. It manages two independent connections:
+This is the first screen you see. It manages two independent connections.
+
+![Connections](../images/connections.png)
+
+> **Both connections must use the same hostname or IP address.** The Broker Host field is shared between the Solace Client and SEMP connections to keep configuration consistent and reduce errors.
+>
+> Connection status indicators are shown at the bottom-left of the sidebar (see [Status Indicators](#status-indicators) below).
 
 ### Solace Client Connection (Web Messaging)
 
@@ -53,6 +59,12 @@ If connecting over `wss://` to a broker with a self-signed certificate, the brow
 
 This connection uses the SEMP v2 REST API for management operations (discovering VPNs and queues).
 
+> [!IMPORTANT]
+> SEMP connections are made over HTTP/HTTPS. Your Solace Event Broker must allow **CORS** for this to function. Future versions may include additional connection methods that do not require CORS.
+
+> [!NOTE]
+> SEMP interactions are REST calls rather than a persistent connection — each action triggers a new HTTP request using the configured credentials. The "connection" abstraction is preserved for UI consistency with the other modules. Future releases may add alternative SEMP connection methods (e.g. via the client session or OAuth2).
+
 **Fields:**
 | Field | Description | Example |
 |-------|-------------|---------|
@@ -81,6 +93,8 @@ The sidebar shows two colored dots:
 
 Requires an active **SEMP connection**. If SEMP is not connected, a "Connection Required" message is shown.
 
+![Queue Discovery](../images/discovery.png)
+
 ### Workflow
 
 1. **Select a VPN** — Click the VPN dropdown or type to search. The list is fetched from the broker via SEMP. Click "Refresh" to re-fetch.
@@ -106,6 +120,8 @@ Typing a queue or VPN name that doesn't exist in the fetched list and then click
 ## Module 3: Queue Browser
 
 Requires an active **Solace Client connection**. If disconnected, a "Connection Required" message is shown.
+
+![Queue Browser](../images/browser.png)
 
 ### Binding to a Queue
 
@@ -151,6 +167,8 @@ Copy buttons next to Destination, Repl Grp Msg Id, and Content allow one-click c
 
 Click the **filter icon** in the header bar to open the filter modal.
 
+![Message Filtering](../images/browser-filter.png)
+
 **Filter Criteria:**
 | Field | Description |
 |-------|-------------|
@@ -164,6 +182,11 @@ Click the **filter icon** in the header bar to open the filter modal.
 
 The property filter supports autocomplete for standard Solace properties (App Msg Id, Cache Id, Corr Id, Delivery Count, Delivery Mode, HTTP Encoding, HTTP Type, Priority, Reply To, Sender Id, SeqNumber, TTL, TopicSeqNum).
 
+**Wildcard semantics:**
+- `*` matches any sequence of characters (including spaces and symbols).
+- For **Body Content**, the wildcard is auto-applied — entering `match text` behaves as `*match text*` (substring contains-match).
+- For Message ID and Destination Name, wildcards are explicit — use `*` where you want a wildcard. Without one, the filter is an exact match.
+
 - **Apply Filter** — Filters the displayed messages (original data is preserved)
 - **Clear Filter** — Removes all filters and shows all messages
 - **Cancel** — Closes the modal without applying
@@ -172,7 +195,12 @@ Modals (filter, forward, raw content, settings, certificate trust helper) can al
 
 ### Forwarding Messages
 
-Forward one or more messages to a different destination:
+Forward one or more messages to a different destination.
+
+![Message Forwarding](../images/browser-forward.png)
+
+> **Forwarded messages are sent in PERSISTENT delivery mode** to ensure delivery confirmation, even if the original message was DIRECT. The forwarded message is constructed as a new message that copies all properties from the original (see the property-preservation note below).
+
 
 1. Select messages using checkboxes, then click **Forward** in the toolbar (bulk forward), OR click the forward button on an individual row
 2. The Forward modal opens showing the messages queued for forwarding
@@ -198,6 +226,9 @@ Forwarded messages preserve all original properties (application message ID, cor
 
 ### Deleting Messages
 
+> [!IMPORTANT]
+> Delete is available only when the queue binding has **read-write** permissions (Consume, Modify, Delete, Owner). On read-only queues the delete button is hidden from each row entirely.
+
 - **Single delete**: Click the delete button on a message row. A confirmation dialog appears.
 - **Bulk delete**: Select messages with checkboxes, then click **Delete** in the toolbar. A confirmation dialog shows the count.
 
@@ -207,8 +238,19 @@ Deleted messages are removed from the broker queue and the UI immediately.
 
 Two download formats are available:
 
-- **Download Content** — Exports only the message payload. Each message becomes a separate file in a ZIP archive named `solace-message-{id}`.
-- **Download Full** — Exports the complete message as JSON including all properties, headers, destination, timestamp, and content. Each message becomes `solace-message-{id}-full.json` in a ZIP archive.
+- **Download Content** — Exports only the message payload. Each message becomes a separate file in a ZIP archive named `solace-message-{id}`. If the payload is a known binary format (PDF, PNG, DOCX, etc.) the saved file has no extension — rename it before opening.
+- **Download Full** — Exports the complete message as JSON including all properties, headers, destination, timestamp, and content. Each message becomes `solace-message-{id}-full.json` in a ZIP archive. The JSON shape is:
+
+  ```json
+  {
+    "messageProperties":     { ... standard Solace properties + destination + messageType ... },
+    "applicationProperties": { ... user/custom properties ... },
+    "payload":               "..."
+  }
+  ```
+
+  > [!IMPORTANT]
+  > This JSON structure is proprietary to this tool and may change in future releases. If you build automation against it, version-pin the tool or migrate when the format changes.
 
 Both are available as per-row buttons and as bulk toolbar buttons (when messages are selected).
 
