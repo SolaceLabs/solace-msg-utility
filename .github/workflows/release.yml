@@ -86,6 +86,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # OCI image references must be all-lowercase. `${{ github.repository }}`
+      # preserves the org's original casing (e.g. SolaceLabs), which GHCR's push
+      # endpoint accepts but the strict OCI reference parser (used by Trivy and
+      # other tools) rejects. Lowercase IMAGE_NAME once, here, so every
+      # downstream step sees a valid reference.
+      - name: Lowercase image name
+        run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
