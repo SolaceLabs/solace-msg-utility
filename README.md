@@ -74,7 +74,6 @@ A browser-based tool for managing Solace PubSub+ Event Brokers. Browse queues, i
 | [developer-guide.md](docs/developer-guide.md) | Setup, testing, adding modules, code conventions |
 | [contributing.md](docs/contributing.md) | PR workflow, coding standards, test requirements |
 | [test-report.md](docs/test-report.md) | Test methodology, coverage strategy |
-| [improvement-plan.md](docs/improvement-plan.md) | Prioritized backlog |
 
 ## License
 
