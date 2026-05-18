@@ -1,0 +1,25 @@
+# Build artifacts — the image rebuilds these from source.
+dist/
+node_modules/
+coverage/
+
+# Test, doc, and tooling output not needed in the build context.
+graphify-out/
+tests/
+docs/
+.vscode/
+.idea/
+*.log
+
+# Git metadata.
+.git/
+.gitignore
+.gitattributes
+
+# Local environment.
+.env
+.env.*
+
+# Editor scratch.
+*.swp
+*.swo

@@ -1,0 +1,2334 @@
+{
+  "directed": false,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "label": "main.go",
+      "file_type": "code",
+      "source_file": "main.go",
+      "source_location": "L1",
+      "id": "main_go",
+      "community": 2,
+      "norm_label": "main.go"
+    },
+    {
+      "label": "config",
+      "file_type": "code",
+      "source_file": "main.go",
+      "source_location": "L16",
+      "id": "go_web_proxy_config",
+      "community": 2,
+      "norm_label": "config"
+    },
+    {
+      "label": "loadConfig()",
+      "file_type": "code",
+      "source_file": "main.go",
+      "source_location": "L26",
+      "id": "go_web_proxy_main_loadconfig",
+      "community": 2,
+      "norm_label": "loadconfig()"
+    },
+    {
+      "label": "envOr()",
+      "file_type": "code",
+      "source_file": "main.go",
+      "source_location": "L38",
+      "id": "go_web_proxy_main_envor",
+      "community": 2,
+      "norm_label": "envor()"
+    },
+    {
+      "label": "parseLogLevel()",
+      "file_type": "code",
+      "source_file": "main.go",
+      "source_location": "L45",
+      "id": "go_web_proxy_main_parseloglevel",
+      "community": 2,
+      "norm_label": "parseloglevel()"
+    },
+    {
+      "label": "main()",
+      "file_type": "code",
+      "source_file": "main.go",
+      "source_location": "L58",
+      "id": "go_web_proxy_main_main",
+      "community": 2,
+      "norm_label": "main()"
+    },
+    {
+      "label": "main_test.go",
+      "file_type": "code",
+      "source_file": "main_test.go",
+      "source_location": "L1",
+      "id": "main_test_go",
+      "community": 2,
+      "norm_label": "main_test.go"
+    },
+    {
+      "label": "TestEnvOr()",
+      "file_type": "code",
+      "source_file": "main_test.go",
+      "source_location": "L8",
+      "id": "go_web_proxy_main_test_testenvor",
+      "community": 2,
+      "norm_label": "testenvor()"
+    },
+    {
+      "label": "TestParseLogLevel()",
+      "file_type": "code",
+      "source_file": "main_test.go",
+      "source_location": "L19",
+      "id": "go_web_proxy_main_test_testparseloglevel",
+      "community": 2,
+      "norm_label": "testparseloglevel()"
+    },
+    {
+      "label": "TestLoadConfig_Defaults()",
+      "file_type": "code",
+      "source_file": "main_test.go",
+      "source_location": "L36",
+      "id": "go_web_proxy_main_test_testloadconfig_defaults",
+      "community": 2,
+      "norm_label": "testloadconfig_defaults()"
+    },
+    {
+      "label": "TestLoadConfig_FromEnv()",
+      "file_type": "code",
+      "source_file": "main_test.go",
+      "source_location": "L65",
+      "id": "go_web_proxy_main_test_testloadconfig_fromenv",
+      "community": 2,
+      "norm_label": "testloadconfig_fromenv()"
+    },
+    {
+      "label": "TestLoadConfig_HostedRequiresExactTrue()",
+      "file_type": "code",
+      "source_file": "main_test.go",
+      "source_location": "L89",
+      "id": "go_web_proxy_main_test_testloadconfig_hostedrequiresexacttrue",
+      "community": 2,
+      "norm_label": "testloadconfig_hostedrequiresexacttrue()"
+    },
+    {
+      "label": "proxy.go",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L1",
+      "id": "proxy_go",
+      "community": 1,
+      "norm_label": "proxy.go"
+    },
+    {
+      "label": "hostedHandler",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L24",
+      "id": "go_web_proxy_hostedhandler",
+      "community": 3,
+      "norm_label": "hostedhandler"
+    },
+    {
+      "label": "newHostedHandler()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L28",
+      "id": "go_web_proxy_proxy_newhostedhandler",
+      "community": 0,
+      "norm_label": "newhostedhandler()"
+    },
+    {
+      "label": ".ServeHTTP()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L32",
+      "id": "go_web_proxy_hostedhandler_servehttp",
+      "community": 3,
+      "norm_label": ".servehttp()"
+    },
+    {
+      "label": "pwaHandler",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L45",
+      "id": "go_web_proxy_pwahandler",
+      "community": 1,
+      "norm_label": "pwahandler"
+    },
+    {
+      "label": "newPWAHandler()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L52",
+      "id": "go_web_proxy_proxy_newpwahandler",
+      "community": 0,
+      "norm_label": "newpwahandler()"
+    },
+    {
+      "label": ".ServeHTTP()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L73",
+      "id": "go_web_proxy_pwahandler_servehttp",
+      "community": 1,
+      "norm_label": ".servehttp()"
+    },
+    {
+      "label": "serveIndex()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L96",
+      "id": "go_web_proxy_proxy_serveindex",
+      "community": 1,
+      "norm_label": "serveindex()"
+    },
+    {
+      "label": "fileResolvable()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L106",
+      "id": "go_web_proxy_proxy_fileresolvable",
+      "community": 1,
+      "norm_label": "fileresolvable()"
+    },
+    {
+      "label": "hasExt()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L119",
+      "id": "go_web_proxy_proxy_hasext",
+      "community": 1,
+      "norm_label": "hasext()"
+    },
+    {
+      "label": "reverseProxy",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L125",
+      "id": "go_web_proxy_reverseproxy",
+      "community": 1,
+      "norm_label": "reverseproxy"
+    },
+    {
+      "label": "newReverseProxy()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L130",
+      "id": "go_web_proxy_proxy_newreverseproxy",
+      "community": 3,
+      "norm_label": "newreverseproxy()"
+    },
+    {
+      "label": "targetURLKey",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L171",
+      "id": "go_web_proxy_targeturlkey",
+      "community": 1,
+      "norm_label": "targeturlkey"
+    },
+    {
+      "label": ".ServeHTTP()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L173",
+      "id": "go_web_proxy_reverseproxy_servehttp",
+      "community": 1,
+      "norm_label": ".servehttp()"
+    },
+    {
+      "label": "contextWithTarget()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L184",
+      "id": "go_web_proxy_proxy_contextwithtarget",
+      "community": 1,
+      "norm_label": "contextwithtarget()"
+    },
+    {
+      "label": "isProxyPath()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L190",
+      "id": "go_web_proxy_proxy_isproxypath",
+      "community": 1,
+      "norm_label": "isproxypath()"
+    },
+    {
+      "label": "firstSegment()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L198",
+      "id": "go_web_proxy_proxy_firstsegment",
+      "community": 1,
+      "norm_label": "firstsegment()"
+    },
+    {
+      "label": "parseProxyPath()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L216",
+      "id": "go_web_proxy_proxy_parseproxypath",
+      "community": 0,
+      "norm_label": "parseproxypath()"
+    },
+    {
+      "label": "joinHostPort()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L263",
+      "id": "go_web_proxy_proxy_joinhostport",
+      "community": 0,
+      "norm_label": "joinhostport()"
+    },
+    {
+      "label": "accessLog()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L277",
+      "id": "go_web_proxy_proxy_accesslog",
+      "community": 6,
+      "norm_label": "accesslog()"
+    },
+    {
+      "label": "recordingResponseWriter",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L298",
+      "id": "go_web_proxy_recordingresponsewriter",
+      "community": 3,
+      "norm_label": "recordingresponsewriter"
+    },
+    {
+      "label": ".WriteHeader()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L305",
+      "id": "go_web_proxy_recordingresponsewriter_writeheader",
+      "community": 3,
+      "norm_label": ".writeheader()"
+    },
+    {
+      "label": ".Write()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L314",
+      "id": "go_web_proxy_recordingresponsewriter_write",
+      "community": 3,
+      "norm_label": ".write()"
+    },
+    {
+      "label": ".Hijack()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L325",
+      "id": "go_web_proxy_recordingresponsewriter_hijack",
+      "community": 3,
+      "norm_label": ".hijack()"
+    },
+    {
+      "label": ".Flush()",
+      "file_type": "code",
+      "source_file": "proxy.go",
+      "source_location": "L333",
+      "id": "go_web_proxy_recordingresponsewriter_flush",
+      "community": 3,
+      "norm_label": ".flush()"
+    },
+    {
+      "label": "proxy_test.go",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L1",
+      "id": "proxy_test_go",
+      "community": 0,
+      "norm_label": "proxy_test.go"
+    },
+    {
+      "label": "TestIsProxyPath()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L18",
+      "id": "go_web_proxy_proxy_test_testisproxypath",
+      "community": 1,
+      "norm_label": "testisproxypath()"
+    },
+    {
+      "label": "TestFirstSegment()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L38",
+      "id": "go_web_proxy_proxy_test_testfirstsegment",
+      "community": 1,
+      "norm_label": "testfirstsegment()"
+    },
+    {
+      "label": "TestParseProxyPath_HTTPSchemes()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L52",
+      "id": "go_web_proxy_proxy_test_testparseproxypath_httpschemes",
+      "community": 0,
+      "norm_label": "testparseproxypath_httpschemes()"
+    },
+    {
+      "label": "TestParseProxyPath_IPv6()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L79",
+      "id": "go_web_proxy_proxy_test_testparseproxypath_ipv6",
+      "community": 0,
+      "norm_label": "testparseproxypath_ipv6()"
+    },
+    {
+      "label": "TestParseProxyPath_BadInput()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L100",
+      "id": "go_web_proxy_proxy_test_testparseproxypath_badinput",
+      "community": 0,
+      "norm_label": "testparseproxypath_badinput()"
+    },
+    {
+      "label": "TestJoinHostPort()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L120",
+      "id": "go_web_proxy_proxy_test_testjoinhostport",
+      "community": 0,
+      "norm_label": "testjoinhostport()"
+    },
+    {
+      "label": "TestHostedHandler_Enabled()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L142",
+      "id": "go_web_proxy_proxy_test_testhostedhandler_enabled",
+      "community": 0,
+      "norm_label": "testhostedhandler_enabled()"
+    },
+    {
+      "label": "TestHostedHandler_Disabled()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L161",
+      "id": "go_web_proxy_proxy_test_testhostedhandler_disabled",
+      "community": 0,
+      "norm_label": "testhostedhandler_disabled()"
+    },
+    {
+      "label": "TestPWAHandler_MissingDir()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L176",
+      "id": "go_web_proxy_proxy_test_testpwahandler_missingdir",
+      "community": 0,
+      "norm_label": "testpwahandler_missingdir()"
+    },
+    {
+      "label": "TestPWAHandler_EmptyDir()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L185",
+      "id": "go_web_proxy_proxy_test_testpwahandler_emptydir",
+      "community": 0,
+      "norm_label": "testpwahandler_emptydir()"
+    },
+    {
+      "label": "TestPWAHandler_ServesIndex()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L194",
+      "id": "go_web_proxy_proxy_test_testpwahandler_servesindex",
+      "community": 0,
+      "norm_label": "testpwahandler_servesindex()"
+    },
+    {
+      "label": "TestPWAHandler_SPAFallback_NoExtension()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L211",
+      "id": "go_web_proxy_proxy_test_testpwahandler_spafallback_noextension",
+      "community": 0,
+      "norm_label": "testpwahandler_spafallback_noextension()"
+    },
+    {
+      "label": "TestPWAHandler_MissingAsset_404()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L229",
+      "id": "go_web_proxy_proxy_test_testpwahandler_missingasset_404",
+      "community": 0,
+      "norm_label": "testpwahandler_missingasset_404()"
+    },
+    {
+      "label": "TestReverseProxy_HTTPRoundTrip()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L246",
+      "id": "go_web_proxy_proxy_test_testreverseproxy_httproundtrip",
+      "community": 3,
+      "norm_label": "testreverseproxy_httproundtrip()"
+    },
+    {
+      "label": "TestReverseProxy_BadPathReturns400()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L295",
+      "id": "go_web_proxy_proxy_test_testreverseproxy_badpathreturns400",
+      "community": 3,
+      "norm_label": "testreverseproxy_badpathreturns400()"
+    },
+    {
+      "label": "TestReverseProxy_UpstreamDown_502()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L310",
+      "id": "go_web_proxy_proxy_test_testreverseproxy_upstreamdown_502",
+      "community": 3,
+      "norm_label": "testreverseproxy_upstreamdown_502()"
+    },
+    {
+      "label": "TestAccessLog_RecordsStatusAndBytes()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L328",
+      "id": "go_web_proxy_proxy_test_testaccesslog_recordsstatusandbytes",
+      "community": 6,
+      "norm_label": "testaccesslog_recordsstatusandbytes()"
+    },
+    {
+      "label": "TestAccessLog_SkipsHosted()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L351",
+      "id": "go_web_proxy_proxy_test_testaccesslog_skipshosted",
+      "community": 6,
+      "norm_label": "testaccesslog_skipshosted()"
+    },
+    {
+      "label": "TestRecordingResponseWriter_DefaultStatus()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L366",
+      "id": "go_web_proxy_proxy_test_testrecordingresponsewriter_defaultstatus",
+      "community": 0,
+      "norm_label": "testrecordingresponsewriter_defaultstatus()"
+    },
+    {
+      "label": "newCapturingLogger()",
+      "file_type": "code",
+      "source_file": "proxy_test.go",
+      "source_location": "L381",
+      "id": "go_web_proxy_proxy_test_newcapturinglogger",
+      "community": 6,
+      "norm_label": "newcapturinglogger()"
+    },
+    {
+      "label": "tls.go",
+      "file_type": "code",
+      "source_file": "tls.go",
+      "source_location": "L1",
+      "id": "tls_go",
+      "community": 5,
+      "norm_label": "tls.go"
+    },
+    {
+      "label": "loadOrGenerateServerCert()",
+      "file_type": "code",
+      "source_file": "tls.go",
+      "source_location": "L30",
+      "id": "go_web_proxy_tls_loadorgenerateservercert",
+      "community": 7,
+      "norm_label": "loadorgenerateservercert()"
+    },
+    {
+      "label": "fileExists()",
+      "file_type": "code",
+      "source_file": "tls.go",
+      "source_location": "L63",
+      "id": "go_web_proxy_tls_fileexists",
+      "community": 8,
+      "norm_label": "fileexists()"
+    },
+    {
+      "label": "generateSelfSigned()",
+      "file_type": "code",
+      "source_file": "tls.go",
+      "source_location": "L68",
+      "id": "go_web_proxy_tls_generateselfsigned",
+      "community": 5,
+      "norm_label": "generateselfsigned()"
+    },
+    {
+      "label": "writePEM()",
+      "file_type": "code",
+      "source_file": "tls.go",
+      "source_location": "L123",
+      "id": "go_web_proxy_tls_writepem",
+      "community": 5,
+      "norm_label": "writepem()"
+    },
+    {
+      "label": "formatFingerprint()",
+      "file_type": "code",
+      "source_file": "tls.go",
+      "source_location": "L135",
+      "id": "go_web_proxy_tls_formatfingerprint",
+      "community": 7,
+      "norm_label": "formatfingerprint()"
+    },
+    {
+      "label": "buildTrustPool()",
+      "file_type": "code",
+      "source_file": "tls.go",
+      "source_location": "L150",
+      "id": "go_web_proxy_tls_buildtrustpool",
+      "community": 4,
+      "norm_label": "buildtrustpool()"
+    },
+    {
+      "label": "appendPEMCerts()",
+      "file_type": "code",
+      "source_file": "tls.go",
+      "source_location": "L210",
+      "id": "go_web_proxy_tls_appendpemcerts",
+      "community": 5,
+      "norm_label": "appendpemcerts()"
+    },
+    {
+      "label": "tls_test.go",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L1",
+      "id": "tls_test_go",
+      "community": 4,
+      "norm_label": "tls_test.go"
+    },
+    {
+      "label": "quietLogger()",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L15",
+      "id": "go_web_proxy_tls_test_quietlogger",
+      "community": 4,
+      "norm_label": "quietlogger()"
+    },
+    {
+      "label": "TestFileExists()",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L19",
+      "id": "go_web_proxy_tls_test_testfileexists",
+      "community": 8,
+      "norm_label": "testfileexists()"
+    },
+    {
+      "label": "TestFormatFingerprint()",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L33",
+      "id": "go_web_proxy_tls_test_testformatfingerprint",
+      "community": 7,
+      "norm_label": "testformatfingerprint()"
+    },
+    {
+      "label": "TestGenerateSelfSigned_CreatesValidKeypair()",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L41",
+      "id": "go_web_proxy_tls_test_testgenerateselfsigned_createsvalidkeypair",
+      "community": 8,
+      "norm_label": "testgenerateselfsigned_createsvalidkeypair()"
+    },
+    {
+      "label": "TestLoadOrGenerateServerCert_LoadsExisting()",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L88",
+      "id": "go_web_proxy_tls_test_testloadorgenerateservercert_loadsexisting",
+      "community": 7,
+      "norm_label": "testloadorgenerateservercert_loadsexisting()"
+    },
+    {
+      "label": "TestLoadOrGenerateServerCert_RefusesToOverwriteCorruptKeypair()",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L108",
+      "id": "go_web_proxy_tls_test_testloadorgenerateservercert_refusestooverwritecorruptkeypair",
+      "community": 4,
+      "norm_label": "testloadorgenerateservercert_refusestooverwritecorruptkeypair()"
+    },
+    {
+      "label": "TestLoadOrGenerateServerCert_GeneratesWhenOnlyOneFilePresent()",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L129",
+      "id": "go_web_proxy_tls_test_testloadorgenerateservercert_generateswhenonlyonefilepresent",
+      "community": 4,
+      "norm_label": "testloadorgenerateservercert_generateswhenonlyonefilepresent()"
+    },
+    {
+      "label": "TestBuildTrustPool_NoDir()",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L146",
+      "id": "go_web_proxy_tls_test_testbuildtrustpool_nodir",
+      "community": 4,
+      "norm_label": "testbuildtrustpool_nodir()"
+    },
+    {
+      "label": "TestBuildTrustPool_AddsCerts()",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L157",
+      "id": "go_web_proxy_tls_test_testbuildtrustpool_addscerts",
+      "community": 4,
+      "norm_label": "testbuildtrustpool_addscerts()"
+    },
+    {
+      "label": "TestBuildTrustPool_RejectsFile()",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L213",
+      "id": "go_web_proxy_tls_test_testbuildtrustpool_rejectsfile",
+      "community": 4,
+      "norm_label": "testbuildtrustpool_rejectsfile()"
+    },
+    {
+      "label": "TestAppendPEMCerts_CountsCertsSkipsNonCert()",
+      "file_type": "code",
+      "source_file": "tls_test.go",
+      "source_location": "L225",
+      "id": "go_web_proxy_tls_test_testappendpemcerts_countscertsskipsnoncert",
+      "community": 5,
+      "norm_label": "testappendpemcerts_countscertsskipsnoncert()"
+    }
+  ],
+  "links": [
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "main.go",
+      "source_location": "L16",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "main_go",
+      "target": "go_web_proxy_config"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "main.go",
+      "source_location": "L26",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "main_go",
+      "target": "go_web_proxy_main_loadconfig"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "main.go",
+      "source_location": "L38",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "main_go",
+      "target": "go_web_proxy_main_envor"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "main.go",
+      "source_location": "L45",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "main_go",
+      "target": "go_web_proxy_main_parseloglevel"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "main.go",
+      "source_location": "L58",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "main_go",
+      "target": "go_web_proxy_main_main"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "main.go",
+      "source_location": "L29",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_main_loadconfig",
+      "target": "go_web_proxy_main_envor"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "main.go",
+      "source_location": "L34",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_main_loadconfig",
+      "target": "go_web_proxy_main_parseloglevel"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "main.go",
+      "source_location": "L59",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_main_main",
+      "target": "go_web_proxy_main_loadconfig"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main_test.go",
+      "source_location": "L41",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_test_testloadconfig_defaults",
+      "target": "go_web_proxy_main_loadconfig"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main_test.go",
+      "source_location": "L74",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_test_testloadconfig_fromenv",
+      "target": "go_web_proxy_main_loadconfig"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main_test.go",
+      "source_location": "L93",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_test_testloadconfig_hostedrequiresexacttrue",
+      "target": "go_web_proxy_main_loadconfig"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main_test.go",
+      "source_location": "L10",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_test_testenvor",
+      "target": "go_web_proxy_main_envor"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main_test.go",
+      "source_location": "L30",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_test_testparseloglevel",
+      "target": "go_web_proxy_main_parseloglevel"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main.go",
+      "source_location": "L72",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_main",
+      "target": "go_web_proxy_tls_loadorgenerateservercert"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main.go",
+      "source_location": "L78",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_main",
+      "target": "go_web_proxy_tls_buildtrustpool"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main.go",
+      "source_location": "L87",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_main",
+      "target": "go_web_proxy_proxy_newhostedhandler"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main.go",
+      "source_location": "L88",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_main",
+      "target": "go_web_proxy_proxy_newpwahandler"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main.go",
+      "source_location": "L89",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_main",
+      "target": "go_web_proxy_proxy_newreverseproxy"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main.go",
+      "source_location": "L95",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_main",
+      "target": "go_web_proxy_proxy_isproxypath"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "main.go",
+      "source_location": "L102",
+      "weight": 1.0,
+      "source": "go_web_proxy_main_main",
+      "target": "go_web_proxy_proxy_accesslog"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "main_test.go",
+      "source_location": "L8",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "main_test_go",
+      "target": "go_web_proxy_main_test_testenvor"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "main_test.go",
+      "source_location": "L19",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "main_test_go",
+      "target": "go_web_proxy_main_test_testparseloglevel"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "main_test.go",
+      "source_location": "L36",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "main_test_go",
+      "target": "go_web_proxy_main_test_testloadconfig_defaults"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "main_test.go",
+      "source_location": "L65",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "main_test_go",
+      "target": "go_web_proxy_main_test_testloadconfig_fromenv"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "main_test.go",
+      "source_location": "L89",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "main_test_go",
+      "target": "go_web_proxy_main_test_testloadconfig_hostedrequiresexacttrue"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L24",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_hostedhandler"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L28",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_newhostedhandler"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L45",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_pwahandler"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L52",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_newpwahandler"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L96",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_serveindex"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L99",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_fileresolvable"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L112",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_hasext"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L118",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_reverseproxy"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L123",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_newreverseproxy"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L164",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_targeturlkey"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L177",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_contextwithtarget"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L183",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_isproxypath"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L191",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_firstsegment"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L209",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_parseproxypath"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L256",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_joinhostport"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L270",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_proxy_accesslog"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L291",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_go",
+      "target": "go_web_proxy_recordingresponsewriter"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L32",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_hostedhandler",
+      "target": "go_web_proxy_hostedhandler_servehttp"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L145",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testhostedhandler_enabled",
+      "target": "go_web_proxy_proxy_newhostedhandler"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L164",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testhostedhandler_disabled",
+      "target": "go_web_proxy_proxy_newhostedhandler"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L34",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_hostedhandler_servehttp",
+      "target": "go_web_proxy_recordingresponsewriter_writeheader"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L40",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_hostedhandler_servehttp",
+      "target": "go_web_proxy_recordingresponsewriter_write"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L73",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_pwahandler",
+      "target": "go_web_proxy_pwahandler_servehttp"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L177",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testpwahandler_missingdir",
+      "target": "go_web_proxy_proxy_newpwahandler"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L186",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testpwahandler_emptydir",
+      "target": "go_web_proxy_proxy_newpwahandler"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L199",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testpwahandler_servesindex",
+      "target": "go_web_proxy_proxy_newpwahandler"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L216",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testpwahandler_spafallback_noextension",
+      "target": "go_web_proxy_proxy_newpwahandler"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L234",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testpwahandler_missingasset_404",
+      "target": "go_web_proxy_proxy_newpwahandler"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L75",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_pwahandler_servehttp",
+      "target": "go_web_proxy_recordingresponsewriter_writeheader"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L85",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_pwahandler_servehttp",
+      "target": "go_web_proxy_proxy_fileresolvable"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L86",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_pwahandler_servehttp",
+      "target": "go_web_proxy_proxy_hasext"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L90",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_pwahandler_servehttp",
+      "target": "go_web_proxy_proxy_serveindex"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L93",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_pwahandler_servehttp",
+      "target": "go_web_proxy_reverseproxy_servehttp"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L103",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_proxy_serveindex",
+      "target": "go_web_proxy_recordingresponsewriter_write"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L166",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_reverseproxy",
+      "target": "go_web_proxy_reverseproxy_servehttp"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L157",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_proxy_newreverseproxy",
+      "target": "go_web_proxy_recordingresponsewriter_writeheader"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L158",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_proxy_newreverseproxy",
+      "target": "go_web_proxy_recordingresponsewriter_write"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L258",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testreverseproxy_httproundtrip",
+      "target": "go_web_proxy_proxy_newreverseproxy"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L296",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testreverseproxy_badpathreturns400",
+      "target": "go_web_proxy_proxy_newreverseproxy"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L311",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testreverseproxy_upstreamdown_502",
+      "target": "go_web_proxy_proxy_newreverseproxy"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L167",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_reverseproxy_servehttp",
+      "target": "go_web_proxy_proxy_parseproxypath"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L173",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_reverseproxy_servehttp",
+      "target": "go_web_proxy_proxy_contextwithtarget"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L274",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_proxy_accesslog",
+      "target": "go_web_proxy_reverseproxy_servehttp"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L184",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_proxy_isproxypath",
+      "target": "go_web_proxy_proxy_firstsegment"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L32",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testisproxypath",
+      "target": "go_web_proxy_proxy_isproxypath"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L39",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testfirstsegment",
+      "target": "go_web_proxy_proxy_firstsegment"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L242",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_proxy_parseproxypath",
+      "target": "go_web_proxy_proxy_joinhostport"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L67",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testparseproxypath_httpschemes",
+      "target": "go_web_proxy_proxy_parseproxypath"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L89",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testparseproxypath_ipv6",
+      "target": "go_web_proxy_proxy_parseproxypath"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L112",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testparseproxypath_badinput",
+      "target": "go_web_proxy_proxy_parseproxypath"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L134",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testjoinhostport",
+      "target": "go_web_proxy_proxy_joinhostport"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L337",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testaccesslog_recordsstatusandbytes",
+      "target": "go_web_proxy_proxy_accesslog"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L359",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testaccesslog_skipshosted",
+      "target": "go_web_proxy_proxy_accesslog"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L298",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_recordingresponsewriter",
+      "target": "go_web_proxy_recordingresponsewriter_writeheader"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L307",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_recordingresponsewriter",
+      "target": "go_web_proxy_recordingresponsewriter_write"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L318",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_recordingresponsewriter",
+      "target": "go_web_proxy_recordingresponsewriter_hijack"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy.go",
+      "source_location": "L326",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_recordingresponsewriter",
+      "target": "go_web_proxy_recordingresponsewriter_flush"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L18",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testisproxypath"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L38",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testfirstsegment"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L52",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testparseproxypath_httpschemes"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L79",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testparseproxypath_ipv6"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L100",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testparseproxypath_badinput"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L120",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testjoinhostport"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L142",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testhostedhandler_enabled"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L161",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testhostedhandler_disabled"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L176",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testpwahandler_missingdir"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L185",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testpwahandler_emptydir"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L194",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testpwahandler_servesindex"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L211",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testpwahandler_spafallback_noextension"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L229",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testpwahandler_missingasset_404"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L246",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testreverseproxy_httproundtrip"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L295",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testreverseproxy_badpathreturns400"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L310",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testreverseproxy_upstreamdown_502"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L328",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testaccesslog_recordsstatusandbytes"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L351",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testaccesslog_skipshosted"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L366",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_testrecordingresponsewriter_defaultstatus"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L381",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "proxy_test_go",
+      "target": "go_web_proxy_proxy_test_newcapturinglogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L177",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testpwahandler_missingdir",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L186",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testpwahandler_emptydir",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L199",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testpwahandler_servesindex",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L216",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testpwahandler_spafallback_noextension",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L234",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testpwahandler_missingasset_404",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L258",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testreverseproxy_httproundtrip",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L296",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testreverseproxy_badpathreturns400",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "proxy_test.go",
+      "source_location": "L311",
+      "weight": 1.0,
+      "source": "go_web_proxy_proxy_test_testreverseproxy_upstreamdown_502",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L330",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_proxy_test_testaccesslog_recordsstatusandbytes",
+      "target": "go_web_proxy_proxy_test_newcapturinglogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "proxy_test.go",
+      "source_location": "L353",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_proxy_test_testaccesslog_skipshosted",
+      "target": "go_web_proxy_proxy_test_newcapturinglogger"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L30",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_go",
+      "target": "go_web_proxy_tls_loadorgenerateservercert"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L63",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_go",
+      "target": "go_web_proxy_tls_fileexists"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L68",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_go",
+      "target": "go_web_proxy_tls_generateselfsigned"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L123",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_go",
+      "target": "go_web_proxy_tls_writepem"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L135",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_go",
+      "target": "go_web_proxy_tls_formatfingerprint"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L150",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_go",
+      "target": "go_web_proxy_tls_buildtrustpool"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L210",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_go",
+      "target": "go_web_proxy_tls_appendpemcerts"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L31",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_tls_loadorgenerateservercert",
+      "target": "go_web_proxy_tls_fileexists"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L48",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_tls_loadorgenerateservercert",
+      "target": "go_web_proxy_tls_generateselfsigned"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L57",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_tls_loadorgenerateservercert",
+      "target": "go_web_proxy_tls_formatfingerprint"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L94",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testloadorgenerateservercert_loadsexisting",
+      "target": "go_web_proxy_tls_loadorgenerateservercert"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L118",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testloadorgenerateservercert_refusestooverwritecorruptkeypair",
+      "target": "go_web_proxy_tls_loadorgenerateservercert"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L137",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testloadorgenerateservercert_generateswhenonlyonefilepresent",
+      "target": "go_web_proxy_tls_loadorgenerateservercert"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L22",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testfileexists",
+      "target": "go_web_proxy_tls_fileexists"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L52",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testgenerateselfsigned_createsvalidkeypair",
+      "target": "go_web_proxy_tls_fileexists"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L104",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_tls_generateselfsigned",
+      "target": "go_web_proxy_tls_writepem"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L46",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testgenerateselfsigned_createsvalidkeypair",
+      "target": "go_web_proxy_tls_generateselfsigned"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L163",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testbuildtrustpool_addscerts",
+      "target": "go_web_proxy_tls_generateselfsigned"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L229",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testappendpemcerts_countscertsskipsnoncert",
+      "target": "go_web_proxy_tls_generateselfsigned"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L34",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testformatfingerprint",
+      "target": "go_web_proxy_tls_formatfingerprint"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tls.go",
+      "source_location": "L191",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_tls_buildtrustpool",
+      "target": "go_web_proxy_tls_appendpemcerts"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L148",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testbuildtrustpool_nodir",
+      "target": "go_web_proxy_tls_buildtrustpool"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L193",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testbuildtrustpool_addscerts",
+      "target": "go_web_proxy_tls_buildtrustpool"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L219",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testbuildtrustpool_rejectsfile",
+      "target": "go_web_proxy_tls_buildtrustpool"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tls_test.go",
+      "source_location": "L238",
+      "weight": 1.0,
+      "source": "go_web_proxy_tls_test_testappendpemcerts_countscertsskipsnoncert",
+      "target": "go_web_proxy_tls_appendpemcerts"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L15",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_test_go",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L19",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_test_go",
+      "target": "go_web_proxy_tls_test_testfileexists"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L33",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_test_go",
+      "target": "go_web_proxy_tls_test_testformatfingerprint"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L41",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_test_go",
+      "target": "go_web_proxy_tls_test_testgenerateselfsigned_createsvalidkeypair"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L88",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_test_go",
+      "target": "go_web_proxy_tls_test_testloadorgenerateservercert_loadsexisting"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L108",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_test_go",
+      "target": "go_web_proxy_tls_test_testloadorgenerateservercert_refusestooverwritecorruptkeypair"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L129",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_test_go",
+      "target": "go_web_proxy_tls_test_testloadorgenerateservercert_generateswhenonlyonefilepresent"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L146",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_test_go",
+      "target": "go_web_proxy_tls_test_testbuildtrustpool_nodir"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L157",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_test_go",
+      "target": "go_web_proxy_tls_test_testbuildtrustpool_addscerts"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L213",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_test_go",
+      "target": "go_web_proxy_tls_test_testbuildtrustpool_rejectsfile"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L225",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "tls_test_go",
+      "target": "go_web_proxy_tls_test_testappendpemcerts_countscertsskipsnoncert"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L94",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_tls_test_testloadorgenerateservercert_loadsexisting",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L118",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_tls_test_testloadorgenerateservercert_refusestooverwritecorruptkeypair",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L137",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_tls_test_testloadorgenerateservercert_generateswhenonlyonefilepresent",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L148",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_tls_test_testbuildtrustpool_nodir",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L193",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_tls_test_testbuildtrustpool_addscerts",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tls_test.go",
+      "source_location": "L219",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "go_web_proxy_tls_test_testbuildtrustpool_rejectsfile",
+      "target": "go_web_proxy_tls_test_quietlogger"
+    }
+  ],
+  "hyperedges": []
+}

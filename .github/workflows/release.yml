@@ -1,0 +1,160 @@
+name: Release
+
+# Triggered when a GitHub Release is published.
+# Flow:
+#   1. scan-app      — npm audit (HIGH+) + govulncheck on go-web-proxy
+#   2. build-pwa     — npm run build, stage vendor JS files, upload Pages artifact
+#   3. build-image   — buildx + Trivy (HIGH/CRITICAL) + push to GHCR
+#   4. deploy-pages  — publish PWA to GitHub Pages (only if everything else passed)
+#
+# Any HIGH/CRITICAL finding in scan-app or build-image blocks the release —
+# image is not pushed, Pages is not updated.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+  NODE_VERSION: '22'
+  GO_VERSION: '1.26'
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  scan-app:
+    name: Scan source (npm audit + govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: npm audit (fail on HIGH/CRITICAL)
+        run: npm run scan:npm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go-web-proxy/go.sum
+
+      - name: govulncheck (fail on any finding)
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-input: ${{ env.GO_VERSION }}
+          work-dir: go-web-proxy
+
+  build-pwa:
+    name: Build PWA bundle
+    needs: scan-app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      # Produces dist/index.html (prod), dist/mock.html (demo), dist/min.html (minimal).
+      - run: npm run build
+
+      # The PWA shell expects solclient.js and jszip.min.js to sit next to the HTML
+      # (or in a sibling js/ folder) — see docs/deployment.md. They are not bundled
+      # by Vite, so we stage them into dist/ before publishing to Pages.
+      - name: Stage vendor JS files
+        run: |
+          npm install --no-save solclientjs jszip
+          cp node_modules/solclientjs/lib/solclient.js dist/
+          cp node_modules/jszip/dist/jszip.min.js dist/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  build-image:
+    name: Build, scan, and push image
+    needs: scan-app
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          # Release tag format vX.Y.Z (e.g. v3.3.0) → produces tags 3.3.0, 3.3, 3, latest
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      # Load the image into the local daemon so Trivy can scan it before we push.
+      - name: Build image (load into local daemon)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy scan (HIGH/CRITICAL, fail on findings)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+
+      - name: Push image (all computed tags)
+        run: |
+          echo "${{ steps.meta.outputs.tags }}" | while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            docker push "$tag"
+          done
+
+  deploy-pages:
+    name: Deploy PWA to GitHub Pages
+    needs: [build-pwa, build-image]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

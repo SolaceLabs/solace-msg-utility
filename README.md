@@ -2,11 +2,11 @@
 
 A browser-based tool for managing Solace PubSub+ Event Brokers. Browse queues, inspect messages, forward, delete, copy across brokers, and search subscriptions — all from a single self-contained HTML page. No installer, no backend.
 
-![Queue Browser](images/browser.png)
+![Queue Browser](../images/browser.png)
 
 ## Quick Start
 
-1. **Get the app.** Drop `index.html`, `solclient.js`, and `jszip.min.js` into any folder served over HTTP. (See [deployment.md](docs/deployment.md) for hosting options. Opening the file directly works for the UI, but SEMP calls will fail due to CORS — use a tiny local server instead.)
+1. **Get the app.** Drop `index.html`, `solclient.js`, and `jszip.min.js` into any folder served over HTTP. The build produces only `index.html` — the two vendor scripts (`solclient.js` and `jszip.min.js`) are **not bundled** and must be downloaded separately and placed alongside `index.html` (or in a sibling `js/` folder). See [deployment.md](docs/deployment.md#external-runtime-dependencies) for download sources. Opening the file directly works for the UI, but SEMP calls will fail due to CORS — use a tiny local server instead.
 2. **Open it in a browser.** The Connections screen loads first.
 3. **Fill in two connections** (both share the same Broker Host):
    - **Solace Client** (WebSocket, for message operations) — VPN, username, password, port `8008` (ws) or `1443` (wss).
@@ -60,8 +60,9 @@ A browser-based tool for managing Solace PubSub+ Event Brokers. Browse queues, i
 ### Cross-cutting
 - **SEMP queue picker** — used by Browser, Copy, and Subscriptions to select queues without leaving the current module.
 - **Toasts** for every success / failure.
-- **Single-file build** — `dist/index.html` is fully self-contained; only `solclient.js` and `jszip.min.js` sit alongside.
+- **Single-file build** — `dist/index.html` is fully self-contained for the app code; the two vendor scripts `solclient.js` and `jszip.min.js` must be downloaded separately (see [deployment.md](docs/deployment.md#external-runtime-dependencies)) and placed alongside it.
 - **Demo bundle** (`dist/mock.html`) — every module exercised against mock data, no broker required.
+- **Containerised gateway** ([`go-web-proxy/`](go-web-proxy/)) — optional single-binary Go HTTPS gateway serves the PWA, exposes a `/hosted` probe, and reverse-proxies SEMP/SMF traffic so browsers only need to trust one cert. Distroless image; see [deployment.md](docs/deployment.md#option-d-containerised-gateway-go-web-proxy).
 
 ## Documentation
 

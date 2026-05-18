@@ -1,0 +1,243 @@
+/* Queue Copy — module-scoped styles. Reuses design-system primitives
+   (.btn, .form-control, .card, .form-group, .invalid-feedback, etc.);
+   only copy-specific layout + the verify+run modal live here. */
+
+/* Two-column layout: source on the left, destination on the right. Cards
+   are direct children laid out row-by-row so each Source / Destination
+   pair sits in the same grid row. Default `align-items: stretch` makes
+   both cells in a row the height of the taller cell — the source and
+   destination cards align visually pair-by-pair. Collapses to a single
+   column on narrow viewports so the form remains usable. */
+.copy-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+@media (max-width: 880px) {
+    .copy-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Source-card "Edit in Connections" buttons are inline at the top-right of
+   each source card header. Slightly smaller than the default .btn so they
+   fit alongside the h2 without crowding it. */
+.copy-source-edit-btn {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+}
+
+/* Notes card spans the full width of the grid (both columns). Sits at the
+   top of the form. */
+.copy-notes-card {
+    grid-column: 1 / -1;
+}
+
+/* Advisory list inside the notes card. Uses CSS multi-column so bullets stay
+   attached to each <li> without the bullet-clipping that grid layout causes
+   on lists. Drops to a single column at the same breakpoint as .copy-grid. */
+.copy-notes-list {
+    margin: 0;
+    padding-left: 1.25rem;
+    columns: 2;
+    column-gap: 1.5rem;
+}
+.copy-notes-list li {
+    break-inside: avoid;
+    margin-bottom: 0.25rem;
+}
+@media (max-width: 880px) {
+    .copy-notes-list {
+        columns: 1;
+    }
+}
+
+/* Destination Queue / Topic slide toggle. Sits in the Destination card's
+   top-right header. Two static labels on either side; the slider in between
+   reflects checkbox state. */
+.copy-dest-type-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    user-select: none;
+}
+.copy-dest-type-switch .copy-switch {
+    position: relative;
+    display: inline-block;
+    width: 38px;
+    height: 22px;
+}
+.copy-dest-type-switch .copy-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.copy-dest-type-switch .copy-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--border-color);
+    border-radius: 22px;
+    transition: background-color 0.2s;
+}
+.copy-dest-type-switch .copy-slider::before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: #ffffff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.copy-dest-type-switch input:checked + .copy-slider {
+    background-color: var(--accent-primary);
+}
+.copy-dest-type-switch input:checked + .copy-slider::before {
+    transform: translateX(16px);
+}
+.copy-dest-type-switch .copy-dest-type-label.active {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* Destination connect buttons — mirror the connections module's per-card
+   "Connect" pattern, with a status line + optional error pane below. */
+.copy-dest-connect-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+.copy-dest-connect-status {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+.copy-dest-connect-error {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--status-error);
+}
+
+/* Search-icon-in-input combobox style. The input fills its container; the
+   search button is absolutely positioned on the right edge inside the input,
+   visually attached but with its own click target. Hidden via .hidden when
+   the relevant SEMP context is unavailable. */
+.copy-input-with-search {
+    position: relative;
+    display: block;
+    width: 100%;
+}
+.copy-input-with-search > .form-control {
+    width: 100%;
+    padding-right: 2.5rem;
+}
+.copy-search-btn {
+    position: absolute;
+    top: 50%;
+    right: 0.5rem;
+    transform: translateY(-50%);
+    background: transparent;
+    border: 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.copy-search-btn:hover {
+    background-color: var(--bg-hover, rgba(0, 0, 0, 0.04));
+    color: var(--text-primary);
+}
+.copy-search-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+}
+
+/* Modal layout */
+#copy-modal {
+    width: min(560px, 92vw);
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background-color: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-md);
+}
+#copy-modal::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+}
+.copy-modal-body {
+    padding: 1.25rem;
+}
+.copy-modal-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+.copy-modal-block {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem 1rem;
+}
+.copy-modal-dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0;
+    font-size: 0.9rem;
+}
+.copy-modal-dl dt {
+    color: var(--text-secondary);
+}
+.copy-modal-dl dd {
+    margin: 0;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+/* Pause-at-newest prompt block — inline replacement for window.confirm.
+   Sits below the progress bar inside the run section; the action row's
+   Continue button is the "yes" path and Cancel becomes "stop here". */
+.copy-modal-pause-block {
+    margin-top: 0.75rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-input);
+    font-size: 0.9rem;
+}
+
+/* Progress bar */
+.copy-progress-bar {
+    width: 100%;
+    height: 14px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+.copy-progress-fill {
+    height: 100%;
+    width: 0%;
+    background-color: var(--status-success, #2ecc71);
+    transition: width 120ms linear;
+}
+.copy-progress-fill.indeterminate {
+    width: 30%;
+    animation: copy-progress-sweep 1.4s ease-in-out infinite;
+}
+@keyframes copy-progress-sweep {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(330%); }
+}

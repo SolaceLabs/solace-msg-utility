@@ -1,0 +1,182 @@
+/* Queue Browser —
+ * message list table, info bar, detail panel, filter modal, raw content modal,
+ * and module-specific overrides. */
+
+.browser-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Bind input + inline "pick from list" search button. Mirrors the queue-copy
+   .copy-input-with-search pattern: the input fills its flex cell, and the
+   search button overlays its right edge, giving the input padding-right room
+   for the icon. The button is hidden via .hidden when the primary SEMP
+   connection is not live (no list to pick from). */
+.browser-input-with-search {
+    position: relative;
+    display: block;
+    flex: 1;
+}
+.browser-input-with-search > .form-control {
+    width: 100%;
+    padding-right: 2.5rem;
+}
+.browser-search-btn {
+    position: absolute;
+    top: 50%;
+    right: 0.5rem;
+    transform: translateY(-50%);
+    background: transparent;
+    border: 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.browser-search-btn:hover {
+    background-color: var(--bg-hover, rgba(0, 0, 0, 0.04));
+    color: var(--text-primary);
+}
+.browser-search-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+}
+
+.clickable-row {
+    cursor: pointer;
+}
+
+.data-table tr.selected td {
+    background-color: var(--solace-mint) !important;
+    color: var(--text-primary);
+}
+
+.data-table tr.selected:hover td {
+    background-color: var(--solace-mint) !important;
+}
+
+/* ---------- Detail panel ---------- */
+.detail-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+    font-weight: 600;
+}
+
+.detail-box {
+    font-family: monospace;
+    font-size: 0.85rem;
+    background-color: var(--solace-white);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.5rem;
+    color: var(--text-primary);
+    width: 100%;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+}
+
+.detail-header-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
+    height: 26px;
+    margin-bottom: 0.25rem;
+    white-space: nowrap;
+}
+
+.detail-header-row .detail-label {
+    margin-bottom: 0;
+}
+
+.detail-textarea {
+    font-family: monospace;
+    font-size: 0.85rem;
+    background-color: var(--solace-white);
+    border-color: var(--border-color);
+}
+
+/* ---------- Info bar ---------- */
+.browser-info-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 1rem;
+}
+
+.browser-info-bar .info-group {
+    display: flex;
+    gap: 1.5rem;
+}
+
+.browser-info-bar .action-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.info-count strong {
+    color: var(--text-primary);
+}
+
+/* ---------- Filter modal — dynamic header rows ---------- */
+.filter-header-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.btn-remove-header {
+    background: transparent;
+    border: none;
+    color: var(--status-disconnected);
+    cursor: pointer;
+    font-weight: bold;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 1.2rem;
+    line-height: 1;
+}
+
+.btn-remove-header:hover {
+    background-color: rgba(239, 68, 68, 0.1);
+}
+
+.filter-active {
+    color: var(--accent-primary) !important;
+}
+
+/* ---------- Raw content modal (larger, flex-column) ---------- */
+.modal-content-raw {
+    background-color: var(--bg-card);
+    padding: 1.5rem;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    width: 70%;
+    height: 70%;
+    min-width: 500px;
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-content-raw textarea {
+    flex: 1;
+    font-family: monospace;
+    font-size: 0.85rem;
+    background-color: var(--solace-white);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.5rem;
+    margin-top: 1rem;
+    resize: none;
+}

@@ -1,0 +1,10 @@
+.claude/*
+.graphifyignore
+solclient*js
+jszip*js
+dist/*
+obsidian/*
+coverage/*
+CLAUDE.md
+node_modules/*
+graphify-out/*

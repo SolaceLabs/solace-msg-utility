@@ -1,0 +1,193 @@
+<div class="card">
+    <div class="flex-row justify-between items-center mb-4">
+        <h2 class="m-0">Broker Configuration</h2>
+    </div>
+    <div class="form-group">
+        <label>Broker Host (IP or Hostname)</label>
+        <input type="text" id="conn-host" class="form-control"
+            placeholder="e.g. localhost or my-broker.solace.cloud or 192.168.0.10" value="localhost">
+        <div class="invalid-feedback">Invalid hostname or IP address.</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="flex-row justify-between items-center mb-4">
+        <h2 class="m-0">Solace SEMP (Management)</h2>
+    </div>
+    <div class="form-group flex-row">
+        <div style="width: 150px;">
+            <label>Protocol</label>
+            <select id="semp-protocol" class="form-control">
+                <option value="http">http://</option>
+                <option value="https" selected>https://</option>
+            </select>
+        </div>
+        <div style="width: 100px;">
+            <label>Port</label>
+            <input type="text" id="semp-port" class="form-control">
+            <div class="invalid-feedback">Invalid port.</div>
+        </div>
+        <div style="width: 150px;">
+            <label>URL Path</label>
+            <input type="text" id="semp-url-path" class="form-control">
+        </div>
+        <div class="w-full"></div> <!-- Spacer -->
+    </div>
+    <div class="form-group flex-row">
+        <div class="w-full">
+            <label>Username</label>
+            <input type="text" id="semp-username" class="form-control">
+            <div class="invalid-feedback">Username is required.</div>
+        </div>
+        <div class="w-full">
+            <label>Password</label>
+            <input type="password" id="semp-password" class="form-control">
+            <div class="invalid-feedback">Password is required.</div>
+        </div>
+    </div>
+    <button id="btn-semp-connect" class="btn btn-primary">Connect</button>
+    <div id="semp-connect-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+</div>
+
+<div class="card">
+    <div class="flex-row justify-between items-center mb-4">
+        <div class="flex-row items-center gap-4">
+            <h2 class="m-0">Solace Messaging (Client)</h2>
+            <button id="btn-solace-settings" class="btn-icon items-center flex" title="Connection Settings">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path
+                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                    </path>
+                </svg>
+            </button>
+        </div>
+        <!-- Auth Mode Toggle -->
+        <div class="auth-toggle flex-row gap-4" style="font-size: 0.9rem;">
+            <label class="flex-row items-center font-normal cursor-pointer gap-1">
+                <input type="radio" name="solace-auth-mode" value="basic" checked> Basic
+            </label>
+            <label class="flex-row items-center font-normal cursor-pointer gap-1">
+                <input type="radio" name="solace-auth-mode" value="oauth"> OAuth2
+            </label>
+        </div>
+    </div>
+
+    <div class="form-group flex-row">
+        <div style="width: 150px;">
+            <label>Protocol</label>
+            <select id="solace-protocol" class="form-control">
+                <option value="ws">ws://</option>
+                <option value="wss" selected>wss://</option>
+                <option value="http" disabled>http://</option>
+                <option value="https" disabled>https://</option>
+            </select>
+        </div>
+        <div style="width: 100px;">
+            <label>Port</label>
+            <input type="text" id="solace-port" class="form-control">
+            <div class="invalid-feedback">Invalid port.</div>
+        </div>
+        <div style="width: 150px;">
+            <label>URL Path</label>
+            <input type="text" id="solace-url-path" class="form-control">
+        </div>
+        <div class="w-full">
+            <label>Message VPN</label>
+            <input type="text" id="solace-vpn" class="form-control" placeholder="default">
+            <div class="invalid-feedback">Message VPN is required.</div>
+        </div>
+    </div>
+    <div class="form-group flex-row">
+        <div class="w-full">
+            <label id="lbl-solace-username">Username</label>
+            <input type="text" id="solace-username" class="form-control">
+            <div class="invalid-feedback">Field is required.</div>
+        </div>
+        <div class="w-full">
+            <label id="lbl-solace-password">Password</label>
+            <input type="password" id="solace-password" class="form-control">
+        </div>
+    </div>
+    <button id="btn-solace-connect" class="btn btn-primary">Connect</button>
+    <div id="solace-connect-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+</div>
+
+<div class="actions-footer mt-6 flex-row justify-end p-6 gap-4">
+    <button id="btn-reset-form" class="btn btn-secondary">Reset Form</button>
+    <button id="btn-load-config" class="btn btn-secondary">Load All Config</button>
+    <button id="btn-save-config" class="btn btn-primary"
+        style="background-color: var(--status-warning); border-color: var(--status-warning); color: #000;">Save All
+        Config</button>
+</div>
+
+<!-- Solace Advanced Settings Modal (native <dialog>) -->
+<dialog id="solace-settings-modal" aria-labelledby="solace-settings-modal-title">
+    <h3 id="solace-settings-modal-title">Advanced Connection Settings</h3>
+    <div class="form-group">
+        <label>Connect Retries</label>
+        <input type="number" id="sol-connect-retries" class="form-control" value="0" min="0">
+    </div>
+    <div class="form-group">
+        <label>Connect Timeout (ms)</label>
+        <input type="number" id="sol-connect-timeout" class="form-control" value="3000" min="100">
+    </div>
+    <div class="form-group">
+        <label>Reconnect Retries</label>
+        <input type="number" id="sol-reconnect-retries" class="form-control" value="1" min="-1">
+        <small class="text-secondary" style="font-size: 0.75rem;">-1 for infinite</small>
+    </div>
+    <div class="form-group">
+        <label>Reconnect Wait (ms)</label>
+        <input type="number" id="sol-reconnect-wait" class="form-control" value="3000" min="100">
+    </div>
+    <div class="form-group">
+        <label for="sol-max-messages">Max Messages per Queue</label>
+        <input type="number" id="sol-max-messages" class="form-control" value="100" min="1" max="10000" step="1">
+        <div class="invalid-feedback" id="sol-max-messages-error"></div>
+    </div>
+    <div class="form-group">
+        <label for="solace-client-name-id">Client Name Identifier</label>
+        <input type="text" id="solace-client-name-id" class="form-control" maxlength="100"
+            placeholder="Auto-generated identifier (editable)">
+        <div class="invalid-feedback" id="solace-client-name-id-error"></div>
+    </div>
+    <div class="flex-row justify-between mt-4">
+        <button id="btn-cancel-settings" class="btn btn-secondary">Close</button>
+    </div>
+</dialog>
+
+<!-- SSL Trust Modal (native <dialog>) -->
+<dialog id="ssl-trust-modal" aria-labelledby="ssl-trust-modal-title" style="max-width: 500px;">
+    <div class="flex-col gap-4">
+        <div class="flex-row justify-between items-center">
+            <h3 id="ssl-trust-modal-title" class="m-0">Certificate Trust Helper</h3>
+            <button id="btn-close-ssl-modal" class="btn-icon" title="Close" aria-label="Close"
+                style="font-size: 1.5rem;">&times;</button>
+        </div>
+
+        <div class="text-secondary" style="line-height: 1.5;">
+            <p class="mt-0">The browser may have blocked the connection because the broker's certificate is
+                not trusted.</p>
+
+            <div class="p-4"
+                style="background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color); margin: 0.5rem 0;">
+                <strong>Step 1:</strong> Click the link below to open the broker in a new tab.<br>
+                <strong>Step 2:</strong> If you see a privacy warning, click <strong>Advanced</strong> and then
+                <strong>Proceed</strong> (or Accept).<br>
+                <strong>Step 3:</strong> Once the page loads, close that tab and return here to connect.
+            </div>
+        </div>
+
+        <div class="text-center mt-2">
+            <a id="ssl-trust-link" href="#" target="_blank" class="btn btn-primary"
+                style="display: inline-block; text-decoration: none; padding: 0.5rem 1.5rem;">
+                Open Broker URL ↗
+            </a>
+            <div id="ssl-trust-url-text" class="text-secondary mt-2"
+                style="font-family: monospace; font-size: 0.8rem; word-break: break-all;">
+            </div>
+        </div>
+    </div>
+</dialog>

@@ -1,0 +1,377 @@
+<!-- Connection Prompt (Visible when Disconnected) -->
+<div id="browser-connect-prompt" class="card text-center p-6">
+    <h2 class="mb-4 text-secondary">Connection Required</h2>
+    <p class="text-secondary">Please establish a Solace Client connection to browse queues.</p>
+</div>
+
+<!-- Active View (Visible when Connected) -->
+<div id="browser-active-view" class="hidden">
+    <!-- QB Session Panel -->
+    <div class="card mb-4" id="browser-panel-manager">
+        <h2 class="mb-4">QB Session</h2>
+        <div class="flex-row items-start gap-4">
+            <div class="flex-1">
+                <label>Queue Name</label>
+                <div class="flex-col w-full gap-1">
+                    <div class="flex-row gap-2">
+                        <div class="browser-input-with-search">
+                            <input type="text" id="browser-bind-input" class="form-control"
+                                placeholder="Enter Queue Name to Bind">
+                            <button id="btn-browser-bind-pick" type="button" class="browser-search-btn hidden"
+                                title="Pick from list of queues" aria-label="Pick queue">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="11" cy="11" r="7"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                </svg>
+                            </button>
+                        </div>
+                        <button id="btn-browser-bind" class="btn btn-primary">Bind</button>
+                    </div>
+                    <!-- Error Feedback -->
+                    <div id="browser-bind-error" class="invalid-feedback"></div>
+                </div>
+            </div>
+            <div class="flex-1">
+                <label>Bound Queues</label>
+                <div class="flex-row gap-2">
+                    <select id="browser-bound-queues" class="form-control">
+                        <option value="" disabled selected>Select a Queue</option>
+                    </select>
+                    <button id="btn-browser-unbind" class="btn btn-secondary text-error"
+                        title="Unbind Selected Queue">Unbind</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="browser-connect-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+
+    <!-- Message List & Details Panel -->
+    <div class="card">
+        <!-- Snapshot-view notice: messages shown are a point-in-time list and may
+             have already been consumed by active subscribers since binding. -->
+        <div id="browser-snapshot-notice" class="flex-row items-center gap-2" style="padding: 0.4rem 0.6rem; margin-bottom: 0.6rem; font-size: 0.8rem;
+                   background: rgba(252, 171, 41, 0.12);
+                   color: var(--status-warning); border-radius: var(--radius-md);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0;">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z">
+                </path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <span>Messages may have been consumed since binding. Only latest <span id="browser-max-messages-count">100</span> messages are displayed to manage memory usage.</span>
+        </div>
+
+        <div class="flex-row justify-between items-center mb-2">
+            <div class="flex-row items-center gap-2" style="min-width: 0; flex: 1;">
+                <h2 class="m-0" style="min-width: 0; flex: 1;">
+                    <!-- Whole "vpn :: queue" title is scrollable as one unit so arbitrarily long
+                         VPN or queue names don't push the badge/filter button off-screen. -->
+                    <div style="overflow-x: auto; display: flex; align-items: center; white-space: nowrap;">
+                        <span id="browser-vpn-name" class="text-accent"></span>
+                        <span class="mx-2"> :: </span>
+                        <span id="browser-queue-name"></span>
+                    </div>
+                </h2>
+                <span id="browser-permissions" class="badge flex-shrink-0"></span>
+            </div>
+            <div class="flex-row items-center gap-2 flex-shrink-0 pl-2">
+                <button id="btn-browser-filter" class="btn-icon" title="Filter Messages" disabled>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Info Bar -->
+        <div class="browser-info-bar">
+            <div class="info-group">
+                <span class="info-count">Total: <strong id="count-total">-</strong></span>
+                <span class="info-count">Displayed: <strong id="count-displayed">-</strong></span>
+                <span class="info-count">Selected: <strong id="count-selected">0</strong></span>
+            </div>
+            <div class="flex-row items-center gap-2">
+                <button id="btn-browser-download-content" class="btn btn-secondary btn-sm hidden hover-success" disabled
+                    title="Download Content Only">Download Content</button>
+                <button id="btn-browser-download-full" class="btn btn-secondary btn-sm hidden hover-success" disabled
+                    title="Download Full Message (JSON)">Download Full</button>
+                <button id="btn-browser-forward" class="btn btn-secondary btn-sm hover-success" disabled
+                    title="Forward Selected">Forward</button>
+                <button id="btn-browser-delete" class="btn btn-secondary btn-sm hover-danger" disabled
+                    title="Delete Selected">Delete</button>
+            </div>
+        </div>
+
+        <div id="browser-content">
+            <!-- Message List -->
+            <div class="mb-6 overflow-auto"
+                style="max-height: 300px; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 40px;"><input type="checkbox" id="browser-select-all"></th>
+                            <th>Message ID</th>
+                            <th>Date</th>
+                            <th>Size</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="browser-msg-list">
+                        <!-- Mock Rows Injected by JS -->
+                    </tbody>
+                </table>
+            </div>
+
+            <hr class="divider mb-6">
+
+            <!-- Message Details (Always Visible) -->
+            <div class="card-light" id="browser-details-panel">
+                <div class="flex-row justify-between items-center mb-4">
+                    <div class="flex-row items-center gap-2">
+                        <h3 class="text-secondary m-0" style="font-size: 1rem;">Message Details</h3>
+                        <span id="detail-type-badge" class="badge badge-outline-info hidden"></span>
+                    </div>
+                    <button id="btn-show-raw" class="btn btn-secondary btn-sm" disabled>Show Raw Content</button>
+                </div>
+
+                <div class="flex-row mb-6 gap-4">
+                    <div class="flex-1">
+                        <div class="detail-header-row">
+                            <div class="detail-label">Message ID</div>
+                        </div>
+                        <div class="flex-row items-center gap-2">
+                            <div id="detail-msg-id" class="display-output single-line flex-1"></div>
+                        </div>
+                    </div>
+                    <div class="flex-3">
+                        <div class="detail-header-row">
+                            <div class="detail-label">Destination</div>
+                            <button id="btn-copy-dest" class="btn btn-secondary btn-sm" title="Copy Destination"
+                                disabled>
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="flex-row items-center gap-2">
+                            <div id="detail-destination" class="display-output single-line flex-1"></div>
+                            <span id="detail-dest-badge" class="badge badge-outline-success hidden"></span>
+                        </div>
+                    </div>
+                    <div class="flex-2">
+                        <div class="detail-header-row">
+                            <div class="detail-label">Repl Grp Msg Id</div>
+                            <button id="btn-copy-repl-msg-id" class="btn btn-secondary btn-sm"
+                                title="Copy Repl Grp Msg Id" disabled>
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="flex-row items-center gap-2">
+                            <div id="detail-repl-msg-id" class="display-output single-line flex-1"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div class="detail-label">Message Properties</div>
+                    <div id="detail-properties-container" class="display-output flex-wrap"></div>
+                </div>
+
+                <div class="form-group">
+                    <div class="detail-label">Application / User Properties</div>
+                    <div id="detail-app-properties-container" class="display-output flex-wrap"></div>
+                </div>
+
+                <div class="form-group">
+                    <div class="detail-header-row">
+                        <div class="detail-label">Content Preview</div>
+                        <button id="btn-copy-content" class="btn btn-secondary btn-sm" disabled
+                            title="Copy content to clipboard">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="detail-content" class="display-output multi-line"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filter Modal (native <dialog>) -->
+<dialog id="browser-filter-modal" class="modal-lg" aria-labelledby="browser-filter-modal-title">
+    <h3 id="browser-filter-modal-title" class="mb-4">Filter Messages</h3>
+
+        <!-- Criteria Selection -->
+        <div class="form-group flex-row items-center gap-4">
+            <label class="font-bold m-0">Search Criteria:</label>
+            <label class="flex-row items-center gap-2 font-normal cursor-pointer m-0">
+                <input type="radio" name="filter-criteria" value="OR" checked> Match ANY (OR)
+            </label>
+            <label class="flex-row items-center gap-2 font-normal cursor-pointer m-0">
+                <input type="radio" name="filter-criteria" value="AND"> Match ALL (AND)
+            </label>
+        </div>
+
+        <!-- Message ID & Type -->
+        <div class="form-group flex-row">
+            <div class="w-full">
+                <label>Message ID</label>
+                <input type="text" id="filter-msg-id" class="form-control" placeholder="e.g. 1023">
+            </div>
+            <div style="width: 200px;">
+                <label>Message Type</label>
+                <select id="filter-msg-type" class="form-control">
+                    <option value="ANY" selected>Any</option>
+                    <option value="Text">Text</option>
+                    <option value="Binary">Binary</option>
+                    <option value="Map">Map</option>
+                    <option value="Stream">Stream</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Destination -->
+        <div class="form-group flex-row">
+            <div class="w-full">
+                <label>Destination Name</label>
+                <input type="text" id="filter-destination" class="form-control" placeholder="e.g. queue/topic/name">
+            </div>
+            <div style="width: 150px;">
+                <label>Type</label>
+                <select id="filter-destination-type" class="form-control">
+                    <option value="ANY" selected>Any</option>
+                    <option value="Topic">Topic</option>
+                    <option value="Queue">Queue</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Properties Filter -->
+        <div class="form-group">
+            <div class="flex-row justify-between items-center mb-2">
+                <label class="m-0">Properties Filter (Key / Value)</label>
+                <button id="btn-add-prop-filter" class="btn btn-secondary btn-sm">+ Add</button>
+            </div>
+            <div id="filter-properties-rows" class="flex-col gap-2">
+                <!-- Dynamic Rows Go Here -->
+            </div>
+            <datalist id="standard-properties-list">
+                <option value="App Msg Id"></option>
+                <option value="Cache Id"></option>
+                <option value="Corr Id"></option>
+                <option value="Delivery Count"></option>
+                <option value="Delivery Mode"></option>
+                <option value="HTTP Encoding"></option>
+                <option value="HTTP Type"></option>
+                <option value="Priority"></option>
+                <option value="Reply To"></option>
+                <option value="Sender Id"></option>
+                <option value="SeqNumber"></option>
+                <option value="TTL"></option>
+                <option value="TopicSeqNum"></option>
+            </datalist>
+        </div>
+
+        <!-- Body -->
+        <div class="form-group">
+            <label>Body Content (Contains)</label>
+            <input type="text" id="filter-content" class="form-control" placeholder="e.g. orderId">
+        </div>
+
+        <hr class="divider">
+
+        <!-- Sender Timestamp Range (inclusive bounds; messages without a timestamp are excluded when either is set) -->
+        <div class="form-group">
+            <label class="font-bold mb-2">Search Time Range:</label>
+            <div class="flex-row gap-4">
+                <div class="w-full">
+                    <label class="text-xs">Newer than (inclusive) &mdash; hh:mm:ss</label>
+                    <input type="datetime-local" step="1" id="filter-newer-than" class="form-control">
+                </div>
+                <div class="w-full">
+                    <label class="text-xs">Older than (inclusive) &mdash; hh:mm:ss</label>
+                    <input type="datetime-local" step="1" id="filter-older-than" class="form-control">
+                </div>
+            </div>
+        </div>
+
+        <div class="flex-row justify-between gap-2 mt-4">
+            <button id="btn-filter-clear" class="btn btn-secondary text-error">Clear Filter</button>
+            <div class="flex-row gap-2">
+                <button id="btn-filter-cancel" class="btn btn-secondary">Cancel</button>
+                <button id="btn-filter-apply" class="btn btn-primary">Apply Filter</button>
+            </div>
+        </div>
+</dialog>
+
+<!-- Raw Content Modal (native <dialog>) -->
+<dialog id="browser-raw-content-modal" class="modal-lg" aria-labelledby="browser-raw-content-modal-title">
+    <div class="flex-row justify-between items-center mb-4">
+        <h3 id="browser-raw-content-modal-title" class="m-0">Raw Content</h3>
+        <button id="btn-raw-close" class="btn-icon" title="Close" aria-label="Close">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </button>
+    </div>
+    <pre id="raw-content-text"
+        style="max-height: calc(90vh - 120px); overflow: auto; background: var(--bg-tertiary); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);"></pre>
+</dialog>
+
+<!-- Forward Message Modal (native <dialog>) -->
+<dialog id="browser-forward-modal" class="modal-lg" aria-labelledby="browser-forward-modal-title">
+    <div class="flex-row justify-between items-center mb-4">
+        <h3 id="browser-forward-modal-title" class="m-0">Forward Message</h3>
+        <button id="btn-forward-close" class="btn-icon" title="Close" aria-label="Close">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </button>
+    </div>
+    <div class="flex-row gap-2">
+        <div class="form-group" style="flex: 0 0 160px;">
+            <label>Destination Type</label>
+            <select id="forward-dest-type" class="form-control">
+                <option value="Topic">Topic</option>
+                <option value="Queue">Queue</option>
+                <option value="Original">Original Destination</option>
+            </select>
+        </div>
+        <div class="form-group" style="flex: 1 1 auto;">
+            <label>Destination Name</label>
+            <input type="text" id="forward-dest-name" class="form-control" placeholder="Queue Or Topic Name">
+        </div>
+    </div>
+    <div id="forward-error" class="invalid-feedback mb-2" style="display: none;"></div>
+
+    <!-- Queue List -->
+    <div class="form-group">
+        <label><span id="forward-queue-count" class="badge mr-2">0</span>Messages to Forward</label>
+        <div id="forward-msg-list" class="display-output flex-col gap-1"
+            style="max-height: calc(90vh - 300px); overflow-y: auto;">
+            <!-- Dynamic Items -->
+        </div>
+    </div>
+
+    <div class="flex-row justify-end gap-2 mt-4">
+        <button id="btn-forward-cancel" class="btn btn-secondary">Close</button>
+        <button id="btn-forward-send" class="btn btn-primary" disabled>Send</button>
+    </div>
+</dialog>
+
+</div>
+</div>

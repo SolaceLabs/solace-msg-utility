@@ -1,0 +1,22 @@
+# Visual Studio Code
+.vscode
+
+# Eclipse
+.classpath
+
+# Intellij
+.idea
+*.iml
+
+# Maven Build settings
+.project
+.factorypath
+.settings
+
+# Maven Artifacts 
+target
+.flattened-pom.xml
+
+# Mac
+.DS_Store
+

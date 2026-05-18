@@ -1,0 +1,34 @@
+<div class="card">
+    <div class="form-group">
+        <h3>Topic Subscriptions</h3>
+        <div class="flex-row">
+            <input type="text" class="form-control" placeholder="Enter topic subscription...">
+            <button class="btn btn-secondary">Add</button>
+        </div>
+        <div class="card-light mt-4 p-2 text-center">
+            <small class="text-secondary">No subscriptions added.</small>
+        </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="form-group">
+        <h3>Endpoint Binding</h3>
+        <div class="mb-4">
+            <label class="mr-4 inline-flex items-center cursor-pointer">
+                <input type="radio" name="endpoint-type" checked> &nbsp; Queue
+            </label>
+            <label class="inline-flex items-center cursor-pointer">
+                <input type="radio" name="endpoint-type"> &nbsp; Topic Endpoint
+            </label>
+        </div>
+        <div class="w-full">
+            <label>Endpoint Name</label>
+            <input type="text" class="form-control" placeholder="e.g. Q/ORDER/NEW">
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <button id="btn-consume" class="btn btn-primary">Start Consumption</button>
+    </div>
+</div>

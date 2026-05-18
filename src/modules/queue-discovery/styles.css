@@ -1,0 +1,55 @@
+/* Queue Discovery — searchable dropdown controls for VPN and queue lookup. */
+
+.searchable-select-container {
+    position: relative;
+    width: 100%;
+}
+
+.searchable-select-container input.form-control {
+    padding-right: 2.5rem;
+    /* Space for icon */
+    cursor: text;
+}
+
+.searchable-select-icon {
+    position: absolute;
+    right: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dropdown-options {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    max-height: 250px;
+    overflow-y: auto;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    z-index: var(--z-dropdown);
+    margin-top: 4px;
+    display: none;
+}
+
+.dropdown-options.show {
+    display: block;
+}
+
+.dropdown-option {
+    padding: 0.5rem 0.875rem;
+    cursor: pointer;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.dropdown-option:hover {
+    background-color: var(--bg-input);
+}

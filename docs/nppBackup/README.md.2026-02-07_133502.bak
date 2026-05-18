@@ -1,0 +1,53 @@
+# Overview
+
+This version of the Solace Message Utility takes on a completely different architecture to allow for modularization of the utility.
+
+It now supports both queue browsing and discovery with.
+
+Please read the below user guide to understand more on the finer details of each feature.
+
+# 🔌 Connections
+
+![Queue Discovery](../images/connections.png)
+
+This page handles the different connection sessions required for the rest of the modules to work:
+
+| Connection Type | Modules supported |
+| - | - |
+| SEMP | - Queue Discovery |
+| Client | - Queue Browsing |
+
+In order to reduce discrepancies and user input error, both connections must share the same hostname / IP.
+
+## Solace Client Connection
+
+Supports both Basic and OAuth2 authentication mechanism.
+
+Please ensure you have entered the correct details:
+- Protocol
+- Port
+- Message VPN
+
+For Basic Auth:
+- Username
+- Password
+
+For OAuth2 Auth:
+- Access Token
+- ID Token
+
+## SEMP Connection
+
+Please ensure you have entered the correct details:
+- Protocol
+- Port
+- Username
+- Password
+
+> Other SEMP connection (e.g. via client or OAuth2) will be available in the future.
+
+# 🔍 Queue Discovery
+
+After establishing a SEMP connection, a list of Message VPNs on the broker will be available for browsing. You can then select the queue to browse instead of having to enter the queue name manually.
+
+![Queue Discovery](images/discovery.png)

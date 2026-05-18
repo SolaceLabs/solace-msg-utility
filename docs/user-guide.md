@@ -4,11 +4,12 @@
 
 Solace Message Utility is a browser-based tool for managing Solace PubSub+ Event Brokers. It runs as a single HTML page — no installation required beyond a web browser and network access to your broker.
 
-The interface has a **sidebar** on the left for navigation and a **main content area** on the right. Three modules are available:
+The interface has a **sidebar** on the left for navigation and a **main content area** on the right. The available modules are:
 
 1. **Connections** — Configure and manage broker connections
-2. **Queue Discovery** — Browse VPNs and queues via the SEMP management API
-3. **Queue Browser** — Inspect, filter, forward, delete, and download messages
+2. **Queue Browser** — Inspect, filter, forward, delete, and download messages
+3. **Queue Copy** — Copy messages from a source queue to a destination queue (same broker or cross-broker)
+4. **Queue Subscriptions** — Search every queue subscription on the broker by VPN, queue, or topic
 
 ---
 
@@ -32,6 +33,7 @@ This connection uses the Solace Web Messaging protocol (WebSocket) to communicat
 | Broker Host | IP address or hostname of your broker | `my-broker.solace.cloud`, `192.168.0.10` |
 | Protocol | `ws://` (unencrypted) or `wss://` (TLS) | `wss://` (recommended) |
 | Port | WebSocket port | `8008` (ws) or `1443` (wss) |
+| URL Path | Optional path appended after the port (e.g. when the broker sits behind a reverse proxy). Leave blank for a direct broker URL. | `/solace`, `/ws` |
 | Message VPN | The Solace VPN to connect to | `default` |
 | Username | Client username | `default` |
 | Password | Client password or OAuth2 token | |
@@ -48,6 +50,7 @@ This connection uses the Solace Web Messaging protocol (WebSocket) to communicat
 | Reconnect Retries | 1 | Retries after disconnect (-1 = infinite) |
 | Reconnect Wait | 3000ms | Delay between reconnect attempts |
 | Max Messages per Queue | 100 | Per-queue message cap (1–10 000). When a queue exceeds this, the oldest message is silently dropped from the in-memory store and the UI as new messages arrive. Increasing this lets you keep more history at the cost of browser memory; decreasing it limits memory use during long browse sessions. The cap takes effect when you click **Connect** (the live input is read at connect time — no Save required). |
+| Client Name Identifier | (auto-generated UUID) | Identifier embedded into the broker session's `clientName` property. Editable to any alphanumerics or `!@#$%^&*-=_+/.,` symbols (max 100 chars). Surrounding whitespace is trimmed on blur; if the field is left blank, a fresh UUID is filled in automatically. The full `clientName` sent to the broker is composed at Connect time as `SolMsgUtil/YYYYMMDDHHMMSS/{identifier}`, so each session is distinguishable in broker tooling. |
 
 **SSL/TLS Certificate Trust:**
 If connecting over `wss://` to a broker with a self-signed certificate, the browser will block the connection. A helper dialog appears with instructions to trust the certificate:
@@ -70,6 +73,7 @@ This connection uses the SEMP v2 REST API for management operations (discovering
 |-------|-------------|---------|
 | Protocol | `http://` or `https://` | `https://` |
 | Port | SEMP port | `8080` (http) or `1943` (https) |
+| URL Path | Optional path appended after the port and before `/SEMP/v2/...` (e.g. when SEMP is exposed behind a reverse proxy). Leave blank for a direct SEMP URL. | `/api`, `/management` |
 | Username | SEMP admin username | `admin` |
 | Password | SEMP admin password | |
 
@@ -89,35 +93,7 @@ The sidebar shows two colored dots:
 
 ---
 
-## Module 2: Queue Discovery
-
-Requires an active **SEMP connection**. If SEMP is not connected, a "Connection Required" message is shown.
-
-![Queue Discovery](../images/discovery.png)
-
-### Workflow
-
-1. **Select a VPN** — Click the VPN dropdown or type to search. The list is fetched from the broker via SEMP. Click "Refresh" to re-fetch.
-
-2. **Select a Queue** — After selecting a VPN, the queue dropdown populates with all queues in that VPN. Type to search. Click "Refresh" to re-fetch.
-
-3. **Open in Browser** — Click this button to navigate directly to the Queue Browser and start browsing the selected queue. This triggers a cross-module flow:
-   - If the Solace client is already connected to the same VPN, it navigates immediately
-   - If connected to a different VPN, a confirmation dialog asks whether to switch
-   - If not connected, it initiates the connection first
-
-### Keyboard Shortcuts
-
-- **Enter** in the VPN input — triggers VPN refresh
-- **Enter** in the Queue input — triggers Queue refresh
-
-### Validation
-
-Typing a queue or VPN name that doesn't exist in the fetched list and then clicking away (blur) will clear the input and show a warning in the console.
-
----
-
-## Module 3: Queue Browser
+## Module 2: Queue Browser
 
 Requires an active **Solace Client connection**. If disconnected, a "Connection Required" message is shown.
 
@@ -263,9 +239,102 @@ Requires JSZip to be loaded (included in the standard deployment).
 
 ---
 
+## Module 3: Queue Copy
+
+Requires an active **primary Solace connection**. If the primary client is disconnected, a "Connection Required" message is shown.
+
+Queue Copy moves or copies messages from a source queue to a destination queue (or topic). The destination can be on the **same broker** as the primary connection or on a **different broker** entirely — cross-broker copy is fully supported.
+
+### Two-column layout
+
+The form is split into Source (left, read-only mirror of the primary connection) and Destination (right, editable):
+
+- **Source** cards mirror the primary Broker / SEMP / Client values. Only the Source Queue field is editable. Each card has an **Edit in Connections** button that jumps to the Connections module for credential changes.
+- **Destination** cards accept broker host, SEMP creds, Solace client creds, and the destination target. Two shortcuts live at the top of the Destination Broker card:
+  - **Same Solace Broker as source** — destination reuses the primary host + SEMP creds.
+  - **Same Message VPN as source** — destination reuses the primary VPN + Solace creds (implies Same Broker).
+
+When Same-VPN is enabled, the destination uses the primary Solace session directly — no second connection is needed.
+
+### Destination target
+
+Choose one of two targets:
+
+- **Queue** — point-to-point delivery; pick an existing destination queue (or type the name). A **Pick** button opens a queue selector populated via SEMP.
+- **Topic** — fan-out to subscribers of the named topic.
+
+Each run is either a **Copy** (messages stay on the source) or a **Move** (messages are removed from the source after successful publish).
+
+### Important considerations
+
+The modal's top card lists operational constraints:
+
+- Don't run this on a live queue with active publishers/consumers.
+- The run stops on the first error (e.g. quota exhausted, permission denied, destination rejects).
+- The module snapshots the source queue before starting so the run is bounded.
+- Destination must have sufficient spool quota, equal-or-larger max-message-size, and ingress enabled.
+- Source queue must have egress enabled.
+
+### Confirm Queue Copy modal
+
+Clicking **Start Copy** opens a two-phase modal:
+
+1. **Verify** — SEMP v1 is probed for the source queue's count, size, quota, max-msg-size, oldest-msg-id, newest-msg-id, and access-type. If SEMP is unavailable, the module falls back to a temporary QueueBrowser bind that accumulates count + oldest/newest IDs from the browsed messages and reads the access-type from the SDK.
+2. **Run** — after you confirm, messages stream from source to destination. Progress counters update live; a per-message ACK is awaited before the next publish. In Move mode, each source message is removed immediately after its publish ACK lands (not batched at the end). The run stops when the recorded newest-msg-id is reached, then completes.
+
+The snapshot taken in step 1 is treated as immutable — the engine copies oldest → newest in one pass, then stops. Messages that arrive on the source *after* verify are out of scope for the current run.
+
+**Empty queue:** if verify reports zero messages, a red "Queue is empty" banner appears and the Copy/Move button stays disabled.
+
+**Move on read-only:** if you select Move and the source queue's access type is read-only, a red "Move requires consume permission" banner appears and the button is disabled. Switch to Copy mode to proceed (Copy doesn't need consume permission).
+
+**No access:** if the source queue's `<others-permission>` is `No-Access` AND your client session username doesn't match the queue's `<owner>`, a red "You don't have access to this queue" banner appears and Both Copy and Move are blocked. Re-connect as the queue owner or as a user with at least Read-Only permission, then click Refresh.
+
+**Owner override.** When SEMP is connected and the queue's `<owner>` matches your client session username, you have full access regardless of the queue's `<others-permission>` value. The modal lifts the effective access type to read-write automatically — both Copy and Move are enabled. (The QueueBrowser-fallback path doesn't need an explicit owner check; the SDK already factors owner status into the permission it reports.)
+
+**Stop conditions and statuses.** The run reports one of three final statuses:
+- **Completed** — every message from oldest to newest was copied/moved successfully.
+- **Cancelled** — you clicked Cancel; the modal shows the partial count.
+- **Failed** — surfaces with a specific error message. The most common causes:
+    - *Source drift:* the first browsed message ID doesn't match the recorded oldest. The queue contents changed between verify and run.
+    - *Recorded newest consumed:* a message ID greater than the recorded newest arrived before the engine reached the recorded newest itself, implying someone else consumed the recorded newest message before our run.
+    - *Count mismatch:* the run drained without reaching the recorded count. Messages were drained from the source mid-run by another consumer.
+    - *Publish error:* the destination broker rejected a publish (full quota, missing permission, max-message-size exceeded, etc.).
+
+### Refreshing source stats inside the modal
+
+The Confirm Queue Copy modal has a **Refresh** button next to the Source heading. After the initial verify probe completes (whether successful or not), click Refresh to re-fetch the source queue's count, size, oldest/newest message IDs, etc., before clicking Copy. The button is disabled while a probe is in flight and hidden once the copy run starts — drift recovery during the run is still cancel-and-re-click-Next.
+
+---
+
+## Module 4: Queue Subscriptions
+
+Requires an active **SEMP connection**. If SEMP is not connected, a "Connection Required" message is shown.
+
+This view lists every `(VPN, queue, topic-subscription)` triple visible to your SEMP user — useful for answering "which queues subscribe to topic X?" without having to walk every queue manually. Queues that have zero topic subscriptions are omitted.
+
+### Workflow
+
+1. **Click Load** to fetch the full subscription list from the broker. The button label flips to **Refresh** once the load completes; click it again at any time to re-fetch.
+2. **Filter the table** by typing into one or more of the column-filter inputs below the column headers. Filters are AND-combined — a row must match every non-empty filter to render.
+3. With all three filters empty, the table prompts *"Type in any column above to start searching."* — the filtered table is only rendered once you start typing, so the page never dumps thousands of rows by accident.
+
+### Filter syntax
+
+| Column | Match rule |
+|---|---|
+| **VPN** / **Queue** | Case-insensitive substring by default — `def` matches `default`. Type `*` anywhere in the input to switch to anchored wildcard matching — `def*` matches names starting with `def`, `*ult` matches names ending with `ult`, `def*ult` matches names that start with `def` and end with `ult`. |
+| **Subscription** | Solace topic-set intersection. Both your input and the stored subscription may use Solace wildcards: `*` matches one level, `>` matches one or more trailing levels. The row is included when the two patterns describe overlapping topics. So typing `orders/new` matches a stored subscription `orders/*`; typing `orders/>` matches `orders/new/details`; typing `topic` matches a stored subscription `*`. |
+
+### Caching
+
+The loaded subscription list is held in memory for the session. Subsequent filter changes never re-hit the broker. Click **Refresh** to re-fetch (e.g. after a queue or subscription was added/removed). The cache is dropped automatically if your SEMP connection drops.
+
+---
+
 ## Tips
 
-- **Cross-module flow**: The fastest way to start browsing is: connect both Client and SEMP in Connections, switch to Queue Discovery, select a VPN and queue, click "Open in Browser". The app handles navigation and binding automatically.
+- **Cross-module flow**: Once the primary connection is up, the **Pick** buttons in Queue Browser and Queue Copy let you select a queue from a SEMP-driven dropdown without leaving the current module.
 
 - **Connection profiles**: Save your connection settings before closing the browser. They persist in localStorage and can be restored with one click.
 
@@ -274,3 +343,93 @@ Requires JSZip to be loaded (included in the standard deployment).
 - **Filtering is non-destructive**: Filters only change what is displayed. All messages remain in memory. Clear the filter to see everything again.
 
 - **Wildcard search**: Use `*` in content and destination filters for glob-style matching (e.g., `order*` matches "orderCreated", "orderUpdated").
+
+- **Verbose troubleshooting logs**: append `?logLevel=DEBUG` to the URL (e.g. `dist/index.html?logLevel=DEBUG`) to surface fine-grained flow logs in DevTools. Accepted values are `DEBUG`, `INFO` (default), `WARN`, `ERROR`, and `SILENT` (mutes everything). Invalid values fall back to the default.
+
+- **Hosted (gateway) deployment**: when the bundle is served by the optional Go reverse-proxy in `go-web-proxy/`, the broker is internal to the gateway and unreachable from the browser. All broker URLs are automatically tunnelled through the gateway — you still enter the broker's protocol/host/port/path as if connecting directly, and the page displays those same values; the rewrite to the gateway URL is transparent. The PWA detects the mode at startup by probing the gateway-only `/hosted` endpoint, so a standalone deployment (no gateway) keeps working unchanged.
+
+---
+
+## Shipped Builds
+
+`npm run build` produces three artifacts in `dist/`:
+
+| File | Variant | Use |
+|------|---------|-----|
+| `index.html` | **Full** (default) | Production deployment — every module: Connections, Queue Browser, Queue Copy, Queue Subscriptions |
+| `min.html`   | **Minimal**        | Stripped-down build — only Connections + Queue Browser. Smaller bundle for environments that don't need the copy/move or subscription-browser modules |
+| `mock.html`  | Full + mocks       | Interactive demo (see [Demo Mode](#demo-mode-mockhtml)) |
+
+Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately**:
+
+- **`solclient.js`** — Solace Web Messaging SDK, required for any broker connection. Get it from the [Solace Developer Portal](https://solace.com/downloads/), npm (`solclientjs`), or your broker's web UI (`http://<broker>:8080/`).
+- **`jszip.min.js`** — JSZip library, required for the Queue Browser's ZIP download feature. Get it from a CDN (`https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js`), npm (`jszip`), or [https://stuk.github.io/jszip/](https://stuk.github.io/jszip/).
+
+Place both files in the **same folder as the HTML**, or in a sibling **`js/`** subfolder — the shell tries both locations automatically. The same files serve all three HTML builds; you don't need a separate copy per variant.
+
+> **What happens if a vendor file is missing:**
+> - Without `solclient.js`, the app boots in a limited mode and shows a vendor-missing banner. Connection features will not work.
+> - Without `jszip.min.js`, every other feature works normally; only ZIP download is disabled.
+
+See [deployment.md](deployment.md#external-runtime-dependencies) for download sources and version requirements.
+
+---
+
+## Demo Mode (`mock.html`)
+
+The project ships a self-contained demo build (`dist/mock.html`) that exercises every module without a real broker. It substitutes deterministic mock services for the Solace and SEMP clients and the queue-browser SDK calls, so you can walk the UI end-to-end on any machine with just a browser.
+
+### Building and opening
+
+```
+npm run build:mock     # produces dist/mock.html only
+npm run build          # produces dist/index.html (prod) AND dist/mock.html
+```
+
+Open `dist/mock.html` directly in a browser. No server required — it's a single self-contained file.
+
+### Connection values
+
+The mock factories accept **only one host**: `broker.solace.com`. Any other hostname will surface a "Connection Failed" error so you can also see the failure paths.
+
+**Solace Client connection:**
+
+| Field | Value |
+|-------|-------|
+| Broker Host | `broker.solace.com` |
+| Protocol | `wss://` (any value works) |
+| Port | `8008` (any valid 1–65535 port) |
+| URL Path | *(leave blank)* |
+| Message VPN | `default` (any non-empty value) |
+| Username | `default` (any non-empty value) |
+| Password | `anything` (any non-empty value) |
+
+Advanced settings can be left at their defaults.
+
+**SEMP connection** (use the **same** Broker Host as above):
+
+| Field | Value |
+|-------|-------|
+| Protocol | `https://` |
+| Port | `1943` (any valid 1–65535 port) |
+| URL Path | *(leave blank)* |
+| Username | `admin` (any non-empty value) |
+| Password | `admin` (any non-empty value) |
+
+Click **Connect** on each section. Both status indicators in the sidebar should turn green.
+
+### What's available after connecting
+
+- **SEMP queue picker** (used by Queue Browser, Queue Copy, and Queue Subscriptions) returns six VPNs: `default`, `vpn-dev`, `vpn-prod`, `vpn-test-1`, `vpn-test-2`, `vpn-finance`. Each VPN reports the same five queues: `test-queue-1`, `test-queue-2`, `Q/ORDER/NEW`, `Q/ORDER/PROCESS`, `Q/LOGS/AUDIT`.
+- **Queue Browser** can bind to **`test-queue-1`** or **`test-queue-2`** only. Other queue names (including `Q/ORDER/...`) will fail to bind. Each successful bind seeds 10–20 deterministic mock messages with mixed text/binary payloads, application properties, and varied destinations — enough to exercise filtering, forwarding, and downloading.
+- **Queue Copy** mock returns canned verify results (15 messages, oldest=1000, newest=1014) and simulates a successful copy/move with deterministic ACK delays.
+- **Queue Subscriptions** loads ~10 canned `(VPN, queue, topic)` rows across two pages (so the per-page render path is exercised). Mix of literal topics, `*`-wildcards, and `>`-wildcards — enough to exercise every column-filter rule.
+
+### Failure-path hosts
+
+To exercise error UI without leaving the demo:
+
+| Host | What you see |
+|------|--------------|
+| Any host containing `untrust.com` (e.g. `foo.untrust.com`) | Synthetic "Certificate Not Trusted (Mock)" error with the SSL trust-helper link. Works on both Solace Client and SEMP. |
+| Any host other than `broker.solace.com` (and not containing `untrust.com`) | "Connection Failed: Unable to connect to ..." for the Solace client; "Unable to connect to ..." for SEMP. |
