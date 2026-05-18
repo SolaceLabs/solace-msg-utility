@@ -72,15 +72,6 @@ jobs:
       # Produces dist/index.html (prod), dist/mock.html (demo), dist/min.html (minimal).
       - run: npm run build
 
-      # The PWA shell expects solclient.js and jszip.min.js to sit next to the HTML
-      # (or in a sibling js/ folder) — see docs/deployment.md. They are not bundled
-      # by Vite, so we stage them into dist/ before publishing to Pages.
-      - name: Stage vendor JS files
-        run: |
-          npm install --no-save solclientjs jszip
-          cp node_modules/solclientjs/lib/solclient.js dist/
-          cp node_modules/jszip/dist/jszip.min.js dist/
-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
@@ -143,19 +134,3 @@ jobs:
             [ -z "$tag" ] && continue
             docker push "$tag"
           done
-
-  deploy-pages:
-    name: Deploy PWA to GitHub Pages
-    needs: [build-pwa, build-image]
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - uses: actions/configure-pages@v5
-
-      - id: deploy
-        uses: actions/deploy-pages@v4
