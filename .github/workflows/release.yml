@@ -3,12 +3,18 @@ name: Release
 # Triggered when a GitHub Release is published.
 # Flow:
 #   1. scan-app      — npm audit (HIGH+) + govulncheck on go-web-proxy
-#   2. build-pwa     — npm run build, stage vendor JS files, upload Pages artifact
+#   2. build-pwa     — npm run build, upload dist/ as a workflow artifact
 #   3. build-image   — buildx + Trivy (HIGH/CRITICAL) + push to GHCR
-#   4. deploy-pages  — publish PWA to GitHub Pages (only if everything else passed)
+#   4. deploy-pages  — sync dist/ into the `dist` branch (preserving committed
+#                      vendor JS files); Pages auto-redeploys from that branch
 #
 # Any HIGH/CRITICAL finding in scan-app or build-image blocks the release —
 # image is not pushed, Pages is not updated.
+#
+# Pages source must be set to: Settings → Pages → Source: Deploy from a branch
+# → Branch: dist → Folder: / (root). The `dist` branch is expected to already
+# exist and contain the vendor files (solclient.js, jszip.min.js) plus an
+# empty .nojekyll file so Pages skips Jekyll processing.
 
 on:
   release:
@@ -72,9 +78,12 @@ jobs:
       # Produces dist/index.html (prod), dist/mock.html (demo), dist/min.html (minimal).
       - run: npm run build
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
+          name: pwa-bundle
           path: dist
+          retention-days: 7
+          if-no-files-found: error
 
   build-image:
     name: Build, scan, and push image
@@ -142,3 +151,46 @@ jobs:
             [ -z "$tag" ] && continue
             docker push "$tag"
           done
+
+  deploy-pages:
+    name: Deploy PWA to `dist` branch
+    needs: [build-pwa, build-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Check out the dist branch itself — vendor files (solclient.js, jszip.min.js)
+      # and Pages-control files (.nojekyll, CNAME) are expected to already be
+      # committed here. We overlay the freshly-built bundle on top.
+      - name: Check out dist branch
+        uses: actions/checkout@v4
+        with:
+          ref: dist
+          fetch-depth: 0
+
+      - name: Download PWA bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: pwa-bundle
+          path: _bundle
+
+      # Only index.html is published. mock.html and min.html stay as workflow
+      # artifacts (downloadable from the run page) but are not pushed to dist.
+      # Anything else already present on the dist branch (vendor files,
+      # .nojekyll, CNAME, etc.) is left untouched.
+      - name: Copy index.html into dist branch
+        run: |
+          cp _bundle/index.html ./index.html
+          rm -rf _bundle
+
+      - name: Commit and push to dist branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No changes to deploy."
+            exit 0
+          fi
+          git commit -m "Deploy ${{ github.event.release.tag_name }}"
+          git push origin dist
