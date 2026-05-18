@@ -21,6 +21,9 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
   NODE_VERSION: '22'
   GO_VERSION: '1.26'
+  # Opt into Node.js 24 for all JavaScript actions ahead of the June 2026
+  # default flip. Drops the "Node.js 20 actions are deprecated" warnings.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 concurrency:
   group: release-${{ github.event.release.tag_name }}
@@ -43,11 +46,9 @@ jobs:
       - name: npm audit (fail on HIGH/CRITICAL)
         run: npm run scan:npm
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: go-web-proxy/go.sum
-
+      # govulncheck-action installs Go itself via go-version-input — no separate
+      # setup-go step. go-web-proxy has stdlib-only deps, so there is no go.sum
+      # to cache and no benefit from setup-go's caching layer.
       - name: govulncheck (fail on any finding)
         uses: golang/govulncheck-action@v1
         with:
