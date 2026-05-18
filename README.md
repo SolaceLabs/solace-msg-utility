@@ -2,7 +2,7 @@
 
 A browser-based tool for managing Solace PubSub+ Event Brokers. Browse queues, inspect messages, forward, delete, copy across brokers, and search subscriptions — all from a single self-contained HTML page. No installer, no backend.
 
-![Queue Browser](../images/browser.png)
+![Queue Browser](images/browser.png)
 
 ## Quick Start
 
