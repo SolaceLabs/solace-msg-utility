@@ -12,7 +12,7 @@
 #   docker compose down -v          # also remove the tls volume (forces a new self-signed cert)
 #
 # After it's up: open https://localhost:9443/
-
+name: sol-msg-util-svc
 services:
   gateway:
     build:
@@ -21,7 +21,7 @@ services:
       # solclient.js, etc. Docker disallows COPY paths that escape the context.
       context: ..
       dockerfile: docker/Dockerfile
-    image: solace-message-utility:latest
+    image: solace-msg-utility:latest
     container_name: solace-message-utility
     restart: unless-stopped
     ports:
