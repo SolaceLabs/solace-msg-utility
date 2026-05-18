@@ -68,7 +68,7 @@ export class Kernel {
         const fromUrl = readLogLevelFromUrl();
         if (fromUrl !== null) setLogLevel(fromUrl);
 
-        logger.info(`[Kernel] Starting Solace Message Utility v3.0.0 (logLevel=${LogLevel[getLogLevel()]})`);
+        logger.info(`[Kernel] Starting Solace Message Utility v${__APP_VERSION__} (logLevel=${LogLevel[getLogLevel()]})`);
         logger.info(`[Kernel] ${this.modules.length} module(s) registered, sorted by priority:`);
         this.modules.forEach(m => logger.info(`  → ${m.name} (priority: ${this.priorities.get(m.id)})`));
 

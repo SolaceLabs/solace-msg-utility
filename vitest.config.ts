@@ -1,6 +1,15 @@
 import { defineConfig } from 'vitest/config';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const pkgVersion: string = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')
+).version;
 
 export default defineConfig({
+    define: {
+        __APP_VERSION__: JSON.stringify(pkgVersion)
+    },
     test: {
         globals: true,
         environment: 'jsdom',

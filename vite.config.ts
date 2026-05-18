@@ -3,6 +3,10 @@ import { viteSingleFile } from 'vite-plugin-singlefile';
 import fs from 'node:fs';
 import path from 'node:path';
 
+const pkgVersion: string = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')
+).version;
+
 /**
  * Inject every module template found on disk as a
  * `<template data-module-id="<id>">...</template>` block at the
@@ -185,6 +189,9 @@ export default defineConfig(({ mode }) => {
             viteSingleFile(),
             outputName && renameHtmlAsset('index.html', outputName)
         ].filter(Boolean) as PluginOption[],
+        define: {
+            __APP_VERSION__: JSON.stringify(pkgVersion)
+        },
         build: {
             target: 'esnext',
             outDir: '../dist',

@@ -28,6 +28,7 @@ jszip*js
 solclient*
 */jszip*js
 */solclient*js
+node_modules
 
 # SMU Reference
 Solace-JS-API
