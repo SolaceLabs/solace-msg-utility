@@ -96,9 +96,9 @@ gh run watch
 | Job              | Depends on                | What it does                                                                                                        | Fails the release if…                          |
 |------------------|---------------------------|----------------------------------------------------------------------------------------------------------------------|------------------------------------------------|
 | `scan-app`       | —                         | `npm audit --audit-level=high` and `govulncheck ./...` in `go-web-proxy/`.                                          | Any HIGH/CRITICAL npm advisory, or any Go vuln. |
-| `build-pwa`      | `scan-app`                | `npm run build`, then stages `solclient.js` and `jszip.min.js` from npm into `dist/`. Uploads `dist/` as the Pages artifact. | Build error.                                   |
+| `build-pwa`      | `scan-app`                | `npm run build`, then uploads `dist/` as a workflow artifact named `pwa-bundle`.                                    | Build error.                                   |
 | `build-image`    | `scan-app`                | `docker buildx build` with [docker/Dockerfile](../docker/Dockerfile), then Trivy scan on the locally-loaded image. If clean, pushes all computed tags to GHCR. | Any HIGH/CRITICAL OS or library vuln in the image. |
-| `deploy-pages`   | `build-pwa`, `build-image` | Publishes the Pages artifact via `actions/deploy-pages`.                                                            | Only runs if both upstream jobs succeeded.     |
+| `deploy-pages`   | `build-pwa`, `build-image` | Checks out the `dist` branch, downloads `pwa-bundle`, copies *only* `index.html` into the branch root (vendor files and everything else on `dist` are left untouched), commits, and pushes. Pages auto-redeploys from the branch. | Only runs if both upstream jobs succeeded.     |
 
 ### Image tags
 
@@ -117,15 +117,28 @@ Both `scan-app` and the Trivy step in `build-image` use the same severity thresh
 
 ### Pages deploy
 
-Pages serves the `dist/` directory verbatim. Users can hit:
+Pages is fed from the **`dist` branch**, not from a workflow-uploaded Pages artifact. The release workflow copies the freshly-built `index.html` into the branch root, commits, and pushes. Pages auto-redeploys from the new branch tip.
+
+The published URL is:
 
 - `https://solacelabs.github.io/solace-msg-utility/` → `index.html` (production bundle)
-- `https://solacelabs.github.io/solace-msg-utility/mock.html` → mock-services demo
-- `https://solacelabs.github.io/solace-msg-utility/min.html` → minimal variant
 
-The vendor JS files (`solclient.js`, `jszip.min.js`) are staged into the artifact during `build-pwa` so the served page boots in full mode — see [docs/deployment.md](deployment.md) for the lookup rules the shell uses.
+`mock.html` and `min.html` are built but **not** deployed to Pages. They remain available as files inside the `pwa-bundle` workflow artifact (downloadable from the run page for 7 days) for anyone who wants to test the mock-services demo or the minimal variant locally.
 
-> **One-time setup:** before the first release, enable Pages in the repo settings (*Settings → Pages → Source: GitHub Actions*). Without this, `deploy-pages` will fail with a `pages_build_version` error.
+#### Why a separate branch
+
+The PWA needs two vendor JS files at runtime — `solclient.js` (Solace SDK) and `jszip.min.js` (used by the queue browser's "Download" feature). They're not bundled by Vite, and the project has chosen not to commit them into `main`. Instead they live in the `dist` branch, where the PWA can find them as siblings of `index.html`.
+
+#### What the workflow touches on `dist`
+
+The `deploy-pages` job only overwrites `index.html`. **Every other file on the `dist` branch is left untouched** — including vendor files, `.nojekyll`, `CNAME`, or anything else you commit there manually. Stale files are never auto-removed; if you want to drop something from the branch, do it by hand.
+
+> **One-time setup:** before the first release:
+> 1. Create the `dist` branch with the vendor files committed at the root: `solclient.js`, `jszip.min.js`, plus an empty `.nojekyll` file. (See [docs/deployment.md](deployment.md) for where to obtain the SDK.)
+> 2. Push it: `git push -u origin dist`.
+> 3. In *Settings → Pages*, set **Source: Deploy from a branch → Branch: `dist` → Folder: `/` (root)**. Save.
+>
+> Until both are done, the first release's `deploy-pages` job will fail (no branch to push to) or succeed silently (Pages still serves nothing).
 
 ---
 
@@ -166,9 +179,11 @@ Do **not** retag an existing version. Image consumers cache by digest, so retagg
 | `scan-app` fails on `govulncheck`                                   | A new Go stdlib or module vuln affects `go-web-proxy/`.                                                     | Update `go-web-proxy/go.mod` (often just `go get -u` on the affected module) and re-tag.         |
 | `build-image` Trivy fails on the base image                         | Alpine or distroless base has a new CVE.                                                                    | Update the `FROM` lines in [docker/Dockerfile](../docker/Dockerfile) to the latest patch tag.    |
 | `build-image` push fails with `denied: permission_denied`           | The release was published from a fork, or `packages: write` is missing from repo settings.                  | Publish releases from the `SolaceLabs/solace-msg-utility` repo. Verify *Settings → Actions → Workflow permissions* allows `GITHUB_TOKEN` to write packages. |
-| `deploy-pages` fails with `Get Pages site failed`                   | Pages is not enabled, or *Source* is not set to *GitHub Actions*.                                           | *Settings → Pages → Source: GitHub Actions*.                                                     |
+| `deploy-pages` fails on `Check out dist branch` with `Remote branch dist not found` | The `dist` branch hasn't been created yet.                                                          | Create it once locally with the vendor files + `.nojekyll` committed and push: `git push -u origin dist`. See the one-time setup note above. |
+| `deploy-pages` fails on `git push` with `Permission to ... denied`  | `contents: write` is missing, or repo settings restrict `GITHUB_TOKEN` to read-only.                        | *Settings → Actions → General → Workflow permissions: Read and write permissions*. The job already declares `contents: write`. |
+| Pages serves the new HTML but the SDK fails to load (404 on `solclient.js`) | The vendor file is missing from the `dist` branch (someone wiped it, or the initial commit didn't include it). | Switch to the `dist` branch locally, commit `solclient.js` (and `jszip.min.js`), push. Re-run the release if needed. |
 | Workflow does not fire at all                                       | The release is still in *Draft*. Only `released`/`published` events trigger the workflow.                   | Click *Publish release* (or `gh release edit <tag> --draft=false`).                              |
-| Image is pushed but Pages didn't update                             | `build-image` succeeded but Trivy ran *after* a transient push happened? Not possible — push is the last step. Check the `deploy-pages` job log for a Pages-side error. | Re-run `deploy-pages` only: `gh run rerun <run-id> --job <job-id>`.                              |
+| Image is pushed but Pages didn't update                             | `deploy-pages` failed after the image push, OR Pages source isn't set to the `dist` branch.                 | Check the `deploy-pages` job log. Verify *Settings → Pages → Source: Deploy from a branch → `dist` → `/`*. Re-run with `gh run rerun <run-id> --job <job-id>`. |
 
 ---
 
