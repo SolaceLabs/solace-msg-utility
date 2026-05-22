@@ -1341,7 +1341,7 @@ describe('ConnectionsModule', () => {
             });
         });
 
-        it('onError isNetworkError ("Failed to fetch") → error text + helpUrl link', async () => {
+        it('onError isNetworkError ("Failed to fetch") → error text + helpUrl link + CORS hint', async () => {
             (globalThis.fetch as any).mockRejectedValue(new Error('Failed to fetch'));
             await setupSempInstall();
 
@@ -1351,6 +1351,8 @@ describe('ConnectionsModule', () => {
                 const errorEl = container.querySelector('#semp-connect-error') as HTMLElement;
                 expect(errorEl.textContent).toMatch(/^SEMP Network Error: Failed to fetch/);
                 expect(errorEl.querySelector('a')).toBeTruthy();
+                // Same trigger surfaces both cert-trust and CORS as possible causes.
+                expect(errorEl.textContent).toContain('(or CORS)');
             });
         });
 
@@ -1748,6 +1750,8 @@ describe('ConnectionsModule', () => {
             expect(errorEl.textContent).toMatch(/Connection error: refused/);
             // No anchor — the help link was suppressed because broker is internal.
             expect(errorEl.querySelector('a')).toBeNull();
+            // CORS hint sits in the same branch as the help link, so it's suppressed too.
+            expect(errorEl.textContent).not.toContain('(or CORS)');
         });
     });
 

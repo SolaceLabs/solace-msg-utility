@@ -97,6 +97,16 @@ describe('connections/ui', () => {
             ui.showConnectError(els.elSolError, 'Certificate error', 'https://broker:8080');
             expect(els.elSolError.querySelector('a')).toBeTruthy();
             expect(els.elSolError.querySelector('.error-help-link')).toBeTruthy();
+            // Inline CORS hint sits after the Trust Certificate? link so users see
+            // both possible causes of a "Failed to fetch" before clicking through.
+            expect(els.elSolError.textContent).toContain('(or CORS)');
+        });
+
+        it('omits CORS hint when no helpUrl is provided', () => {
+            const els = ui.getElements();
+            ui.showConnectError(els.elSolError, 'Auth failed');
+            expect(els.elSolError.querySelector('a')).toBeNull();
+            expect(els.elSolError.textContent).not.toContain('(or CORS)');
         });
 
         it('help link click opens SSL modal', () => {
@@ -105,6 +115,8 @@ describe('connections/ui', () => {
             const link = els.elSolError.querySelector('a');
             link!.click();
             expect(els.elSslModal.open).toBe(true);
+            // Modal populates the page origin so the broker admin gets a copy-pasteable value.
+            expect(els.elCorsOriginText.textContent).toBe(globalThis.location.origin);
         });
 
         it('clears error when msg is null', () => {

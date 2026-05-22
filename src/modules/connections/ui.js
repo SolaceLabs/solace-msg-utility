@@ -61,6 +61,7 @@ export const ui = {};
         elements.elSslModal = required(container, '#ssl-trust-modal');
         elements.elSslLink = required(container, '#ssl-trust-link');
         elements.elSslUrlText = required(container, '#ssl-trust-url-text');
+        elements.elCorsOriginText = required(container, '#cors-origin-text');
         elements.btnCloseSsl = required(container, '#btn-close-ssl-modal');
     };
 
@@ -93,15 +94,18 @@ export const ui = {};
                 link.style.color = 'var(--status-error)';
                 link.style.fontWeight = 'bold';
                 link.style.textDecoration = 'underline';
-                link.title = 'Open broker URL to manually accept certificate';
+                link.title = 'Open broker URL to manually accept certificate (or CORS)';
 
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
                     ui.openSslModal(helpUrl);
                 });
 
+                const corsHint = document.createTextNode(' (or CORS)');
+
                 el.appendChild(span);
                 el.appendChild(link);
+                el.appendChild(corsHint);
             }
         } else {
             el.textContent = '';
@@ -122,6 +126,7 @@ export const ui = {};
         const els = elements;
         els.elSslLink.href = url;
         els.elSslUrlText.textContent = url;
+        els.elCorsOriginText.textContent = globalThis.location.origin;
         els.elSslModal.showModal();
     };
 

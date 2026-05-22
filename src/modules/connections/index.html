@@ -178,6 +178,17 @@
                 <strong>Proceed</strong> (or Accept).<br>
                 <strong>Step 3:</strong> Once the page loads, close that tab and return here to connect.
             </div>
+
+            <p class="mt-4 mb-0"><strong>Or it could be CORS</strong></p>
+            <div class="p-4"
+                style="background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color); margin: 0.5rem 0;">
+                "Failed to fetch" can also mean the broker did not send an
+                <code>Access-Control-Allow-Origin</code> header that permits this page's origin.
+                If trusting the certificate doesn't fix it, ask your broker admin to enable CORS
+                for this page's origin:<br>
+                <span id="cors-origin-text"
+                    style="font-family: monospace; font-size: 0.85rem; word-break: break-all;"></span>
+            </div>
         </div>
 
         <div class="text-center mt-2">

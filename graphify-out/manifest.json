@@ -764,11 +764,6 @@
     "ast_hash": "a584525755939a644c24ee2330b8e0b5",
     "semantic_hash": ""
   },
-  "C:\\Users\\hamly\\git\\solabs-msg-utility\\.graphify_detect.json": {
-    "mtime": 1779112448.2223773,
-    "ast_hash": "98fedf66bf146fd49f57941e87fd3ab2",
-    "semantic_hash": "98fedf66bf146fd49f57941e87fd3ab2"
-  },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\package.json": {
     "mtime": 1779109561.730873,
     "ast_hash": "6a2a2a28fb6af56b1f28f089ea8e0c59",
@@ -965,9 +960,9 @@
     "semantic_hash": "3ea82a8e551338159e255c8c680373f1"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\connections\\ui.js": {
-    "mtime": 1779091773.3713126,
-    "ast_hash": "0bbe7e61458c7bc1778fc720813954ad",
-    "semantic_hash": "0bbe7e61458c7bc1778fc720813954ad"
+    "mtime": 1779387542.1243188,
+    "ast_hash": "dd112ad781a292b73918fe28b7653962",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\constants.js": {
     "mtime": 1779091773.37384,
@@ -1255,14 +1250,14 @@
     "semantic_hash": "7e643db06a1c44ea42adb35d8ffb73b9"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\tests\\modules\\connections\\module.test.ts": {
-    "mtime": 1779091773.5734222,
-    "ast_hash": "7d9e0551fb9b946f176d6efb2a116f73",
-    "semantic_hash": "7d9e0551fb9b946f176d6efb2a116f73"
+    "mtime": 1779387614.650638,
+    "ast_hash": "59904cbaaa198f1f33e7379c004c2d0f",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\tests\\modules\\connections\\ui.test.ts": {
-    "mtime": 1779091773.5775356,
-    "ast_hash": "efdb0ad8d4c212e2e4e9581e4e778891",
-    "semantic_hash": "efdb0ad8d4c212e2e4e9581e4e778891"
+    "mtime": 1779387565.4583313,
+    "ast_hash": "060e35d871bcf57ac980d268b3adaf72",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\tests\\modules\\queue-browser\\module.test.ts": {
     "mtime": 1779091773.5812473,
@@ -1455,9 +1450,9 @@
     "semantic_hash": "2d2937ed14bb936bf66ac82a551b2fe7"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\connections\\index.html": {
-    "mtime": 1779091773.3620167,
-    "ast_hash": "c6d4183b269c995c8507c80abd6fbdfe",
-    "semantic_hash": "c6d4183b269c995c8507c80abd6fbdfe"
+    "mtime": 1779387499.2894404,
+    "ast_hash": "25e4cebbd194f678b474b69eac455179",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\index.html": {
     "mtime": 1779091773.375877,
