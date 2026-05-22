@@ -151,11 +151,9 @@ export const ui = {};
         if (mode === 'oauth') {
             els.lblSolUser.textContent = 'Access Token';
             els.lblSolPass.textContent = 'ID Token';
-            els.elSolUser.placeholder = 'Access Token';
         } else {
             els.lblSolUser.textContent = 'Username';
             els.lblSolPass.textContent = 'Password';
-            els.elSolUser.placeholder = 'default';
         }
     };
 

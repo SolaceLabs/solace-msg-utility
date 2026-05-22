@@ -179,7 +179,6 @@ describe('connections/ui', () => {
             expect(ui.getAuthMode()).toBe('basic');
             const els = ui.getElements();
             expect(els.lblSolUser.textContent).toBe('Username');
-            expect(els.elSolUser.placeholder).toBe('default');
         });
     });
 
@@ -258,7 +257,6 @@ describe('connections/ui', () => {
             ui.setAuthMode('oauth');
             expect(els.lblSolUser.textContent).toBe('Access Token');
             expect(els.lblSolPass.textContent).toBe('ID Token');
-            expect(els.elSolUser.placeholder).toBe('Access Token');
         });
 
         it('updates labels for basic mode', () => {
@@ -266,7 +264,6 @@ describe('connections/ui', () => {
             ui.setAuthMode('basic');
             expect(els.lblSolUser.textContent).toBe('Username');
             expect(els.lblSolPass.textContent).toBe('Password');
-            expect(els.elSolUser.placeholder).toBe('default');
         });
     });
 

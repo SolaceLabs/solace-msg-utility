@@ -241,6 +241,8 @@ Requires JSZip to be loaded (included in the standard deployment).
 
 ## Module 3: Queue Copy
 
+![Copy](../images/copy.png)
+
 Requires an active **primary Solace connection**. If the primary client is disconnected, a "Connection Required" message is shown.
 
 Queue Copy moves or copies messages from a source queue to a destination queue (or topic). The destination can be on the **same broker** as the primary connection or on a **different broker** entirely — cross-broker copy is fully supported.
@@ -308,6 +310,8 @@ The Confirm Queue Copy modal has a **Refresh** button next to the Source heading
 ---
 
 ## Module 4: Queue Subscriptions
+
+![Subscriptions](../images/subscription.png)
 
 Requires an active **SEMP connection**. If SEMP is not connected, a "Connection Required" message is shown.
 
