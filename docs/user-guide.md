@@ -311,7 +311,7 @@ The Confirm Queue Copy modal has a **Refresh** button next to the Source heading
 
 ## Module 4: Queue Subscriptions
 
-![Subscriptions](../images/subscription.png)
+![Subscriptions](../images/subscriptions.png)
 
 Requires an active **SEMP connection**. If SEMP is not connected, a "Connection Required" message is shown.
 
