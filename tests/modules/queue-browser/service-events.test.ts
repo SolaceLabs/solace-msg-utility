@@ -572,6 +572,59 @@ describe('queue-browser/service-events', () => {
             expect(stored.msgProperties['TopicSeqNum']).toBe(7);
         });
 
+        it('stores boolean flag properties only when the SDK getter returns true', () => {
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            state.currentQueue = 'q1';
+            state.allMessages = [];
+            state.displayedMessages = [];
+
+            const msg = createSolaceMessage({ gmid: 200 });
+            msg.isAcknowledgeImmediately = () => true;
+            msg.isDeliverToOne = () => true;
+            msg.isDiscardIndication = () => true;
+            msg.isDMQEligible = () => true;
+            msg.isElidingEligible = () => true;
+            msg.isRedelivered = () => true;
+            msg.isReplyMessage = () => true;
+
+            se.onMessage('q1', msg);
+            const stored = state.messageStore.get('q1')![0];
+            expect(stored.msgProperties['AcknowledgeImmediately']).toBe(true);
+            expect(stored.msgProperties['DeliverToOne']).toBe(true);
+            expect(stored.msgProperties['DiscardIndication']).toBe(true);
+            expect(stored.msgProperties['DMQEligible']).toBe(true);
+            expect(stored.msgProperties['ElidingEligible']).toBe(true);
+            expect(stored.msgProperties['Redelivered']).toBe(true);
+            expect(stored.msgProperties['ReplyMessage']).toBe(true);
+        });
+
+        it('omits boolean flag properties when the SDK getter returns false', () => {
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            state.currentQueue = 'q1';
+            state.allMessages = [];
+            state.displayedMessages = [];
+
+            const msg = createSolaceMessage({ gmid: 201 });
+            msg.isAcknowledgeImmediately = () => false;
+            msg.isDeliverToOne = () => false;
+            msg.isDiscardIndication = () => false;
+            msg.isDMQEligible = () => false;
+            msg.isElidingEligible = () => false;
+            msg.isRedelivered = () => false;
+            msg.isReplyMessage = () => false;
+
+            se.onMessage('q1', msg);
+            const stored = state.messageStore.get('q1')![0];
+            for (const key of [
+                'AcknowledgeImmediately', 'DeliverToOne', 'DiscardIndication',
+                'DMQEligible', 'ElidingEligible', 'Redelivered', 'ReplyMessage'
+            ]) {
+                expect(stored.msgProperties[key]).toBeUndefined();
+            }
+        });
+
         it('handles MAP and STREAM message types', () => {
             const se = createServiceEvents();
             state.messageStore.set('q1', []);

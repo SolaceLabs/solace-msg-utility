@@ -499,6 +499,16 @@ describe('queue-browser/ui-details', () => {
             const tag = container.querySelector('.header-tag') as HTMLElement;
             expect(tag.title).toBe('');
         });
+
+        it('renders boolean true as a bare label (no "= value")', () => {
+            const container = document.createElement('div');
+            ui.createTag(container, 'DeliverToOne', true);
+            const tag = container.querySelector('.header-tag') as HTMLElement;
+            expect(tag.textContent).toBe('DeliverToOne');
+            expect(tag.title).toBe('');
+            // Bare-label tags have no expand/collapse handler.
+            expect(tag.onclick).toBeNull();
+        });
     });
 
     describe('renderTags()', () => {
@@ -533,6 +543,13 @@ describe('queue-browser/ui-details', () => {
             container.innerHTML = '<span>old</span>';
             ui.renderTags(container, { key: 'val' });
             expect(container.innerHTML).not.toContain('old');
+        });
+
+        it('renders scalar and boolean-true properties side by side', () => {
+            const container = document.createElement('div');
+            ui.renderTags(container, { Priority: 5, DeliverToOne: true });
+            const tags = Array.from(container.querySelectorAll('.header-tag')).map(t => t.textContent);
+            expect(tags).toEqual(['Priority = 5', 'DeliverToOne']);
         });
     });
 

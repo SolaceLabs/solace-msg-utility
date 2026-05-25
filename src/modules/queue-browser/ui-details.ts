@@ -162,10 +162,17 @@ export function initDetails(ctx: AppContext) {
     };
 
     ui.createTag = function (container: HTMLElement, key: string, val: any) {
-        const valStr = String(val);
         const tag = document.createElement('span');
         tag.className = 'header-tag';
 
+        // Boolean flags render as a bare label — the presence of the tag is the value.
+        if (val === true) {
+            tag.textContent = key;
+            container.appendChild(tag);
+            return;
+        }
+
+        const valStr = String(val);
         const isLong = valStr.length > 20;
 
         const render = (expanded: boolean) => {

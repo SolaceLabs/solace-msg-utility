@@ -37,6 +37,16 @@ const STANDARD_PROPERTY_GETTERS: Array<[string, (m: any) => unknown]> = [
     ['SeqNumber', m => m.getSequenceNumber() || undefined],
     ['TTL', m => m.getTimeToLive() || undefined],
     ['TopicSeqNum', m => m.getTopicSequenceNumber() || undefined],
+    // Boolean flags — getter returns `true` when set, `undefined` otherwise so the
+    // ingest filter drops false flags before they reach msgProperties. createTag
+    // then renders these as bare labels (no `= value`).
+    ['AcknowledgeImmediately', m => m.isAcknowledgeImmediately() || undefined],
+    ['DeliverToOne', m => m.isDeliverToOne() || undefined],
+    ['DiscardIndication', m => m.isDiscardIndication() || undefined],
+    ['DMQEligible', m => m.isDMQEligible() || undefined],
+    ['ElidingEligible', m => m.isElidingEligible() || undefined],
+    ['Redelivered', m => m.isRedelivered() || undefined],
+    ['ReplyMessage', m => m.isReplyMessage() || undefined],
 ];
 
 /**

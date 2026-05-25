@@ -765,8 +765,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\package.json": {
-    "mtime": 1779417446.802074,
-    "ast_hash": "f326dfc62781bc8b68031e6d7b0bd0eb",
+    "mtime": 1779678238.4332733,
+    "ast_hash": "be8fd1d613cacc96ea171d9f47564b5d",
     "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\setup.sh": {
@@ -975,9 +975,9 @@
     "semantic_hash": "2e52087f721ba653b1232d0a5bd91187"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\service-events.ts": {
-    "mtime": 1779091773.3810368,
-    "ast_hash": "bbe880b4c336601e648d65c83a7af770",
-    "semantic_hash": "bbe880b4c336601e648d65c83a7af770"
+    "mtime": 1779676985.2718658,
+    "ast_hash": "438d2360f74c0dd7a75392663371a075",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\service.ts": {
     "mtime": 1779091773.3843226,
@@ -995,9 +995,9 @@
     "semantic_hash": "f639c578f4ca0eefd3d6329946a32590"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\ui-details.ts": {
-    "mtime": 1779091773.3954985,
-    "ast_hash": "e55a7602f1109f57bb480f885b07336a",
-    "semantic_hash": "e55a7602f1109f57bb480f885b07336a"
+    "mtime": 1779676997.858608,
+    "ast_hash": "89ad3f2fea803a7691a0da45a744c5b1",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\ui-events.ts": {
     "mtime": 1779091773.3980327,
@@ -1265,9 +1265,9 @@
     "semantic_hash": "d1c8db01c6e3a16e1b7eb85dd1bded4b"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\tests\\modules\\queue-browser\\service-events.test.ts": {
-    "mtime": 1779091773.584313,
-    "ast_hash": "7d3fa474d3b9735e5efd601af1f144c7",
-    "semantic_hash": "7d3fa474d3b9735e5efd601af1f144c7"
+    "mtime": 1779677042.1871572,
+    "ast_hash": "25cb3658811222c5f5c9e95536dd39f7",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\tests\\modules\\queue-browser\\service.test.ts": {
     "mtime": 1779091773.5883183,
@@ -1285,9 +1285,9 @@
     "semantic_hash": "e8406bf186f63fb96367658fbf375fb4"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\tests\\modules\\queue-browser\\ui-details.test.ts": {
-    "mtime": 1779091773.5970917,
-    "ast_hash": "315a7fd2f849b0562ccbf6d219e72947",
-    "semantic_hash": "315a7fd2f849b0562ccbf6d219e72947"
+    "mtime": 1779677070.2846544,
+    "ast_hash": "d7efb409da5ebdc0e175bf0ef6d40c44",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\tests\\modules\\queue-browser\\ui-events.test.ts": {
     "mtime": 1779091773.6012223,
@@ -1440,8 +1440,8 @@
     "semantic_hash": "8b1d27ef7967198fb88dcd41d0f623cc"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\docs\\user-guide.md": {
-    "mtime": 1779418239.2197864,
-    "ast_hash": "ebaf52ba3cff29db826759545704f523",
+    "mtime": 1779601358.791404,
+    "ast_hash": "9a1a309eff774003382660f1e174bf15",
     "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\index.html": {
