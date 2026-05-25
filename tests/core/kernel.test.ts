@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Kernel } from '../../src/core/kernel';
 import { getLogLevel, setLogLevel } from '../../src/core/logger';
+import { setHosted } from '../../src/core/hosted';
 import { LogLevel, DEFAULT_LOG_LEVEL } from '../../src/core/constants';
 import type { PwaModule, RegisteredModule, AppContext } from '../../src/core/types';
 
@@ -392,7 +393,11 @@ describe('Kernel', () => {
             expect(document.getElementById('module-view-a')?.classList.contains('hidden')).toBe(false);
         });
 
-        it('provides sempFetch with auth injection', async () => {
+        it('provides sempFetch that assembles the broker URL from credentials and injects auth', async () => {
+            // Path-only contract: caller passes the SEMP endpoint suffix, the
+            // kernel assembles {protocol}://{host}:{port}{urlPath}{path} from
+            // appState.sempCredentials so broker-direct URLs never leak in
+            // from callers (the whole point of the hosted-mode safety design).
             let capturedCtx: AppContext | null = null;
             const mod = createMockModule({
                 id: 'test-module',
@@ -410,9 +415,9 @@ describe('Kernel', () => {
                 protocol: 'http', host: 'test', port: '8080', urlPath: '',
             });
 
-            const result = await capturedCtx!.sempFetch('http://test:8080/SEMP');
+            const result = await capturedCtx!.sempFetch('/SEMP/v2/monitor/msgVpns?count=1');
             expect(globalThis.fetch).toHaveBeenCalledWith(
-                'http://test:8080/SEMP',
+                'http://test:8080/SEMP/v2/monitor/msgVpns?count=1',
                 expect.objectContaining({
                     headers: expect.objectContaining({
                         Authorization: `Basic ${btoa('admin:admin')}`
@@ -420,6 +425,72 @@ describe('Kernel', () => {
                 })
             );
             expect(result).toBe(mockResponse);
+        });
+
+        it('sempFetch prepends the credential urlPath before the caller-supplied path', async () => {
+            // When the user typed a reverse-proxy prefix into the Connection
+            // form (e.g. urlPath='/api'), every SEMP request must carry that
+            // prefix. The kernel reads it from sempCredentials and prepends
+            // it to the caller's path, so callers stay oblivious.
+            let capturedCtx: AppContext | null = null;
+            const mod = createMockModule({
+                id: 'test-module',
+                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
+            });
+            setupDOM(['test-module']);
+            const kernel = new Kernel([reg(mod)]);
+            await kernel.start();
+
+            (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
+
+            capturedCtx!.setState('sempCredentials', {
+                user: 'admin', pass: 'admin', baseUrl: 'https://broker:1943/api',
+                protocol: 'https', host: 'broker', port: '1943', urlPath: '/api',
+            });
+
+            await capturedCtx!.sempFetch('/SEMP');
+            expect(globalThis.fetch).toHaveBeenCalledWith(
+                'https://broker:1943/api/SEMP',
+                expect.anything(),
+            );
+        });
+
+        it('sempFetch routes through the gateway proxy path scheme in hosted mode', async () => {
+            // The bug this design fixes: when the PWA is served by the Go
+            // gateway, every broker-bound request must go to
+            // {pageOrigin}/{scheme}/{port}/{host}{path} or it will not route.
+            // The kernel applies this transformation uniformly for every
+            // SEMP call, regardless of which path the caller asked for —
+            // including paths extracted from a broker-emitted nextPageUri.
+            setHosted(true);
+            try {
+                let capturedCtx: AppContext | null = null;
+                const mod = createMockModule({
+                    id: 'test-module',
+                    install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
+                });
+                setupDOM(['test-module']);
+                const kernel = new Kernel([reg(mod)]);
+                await kernel.start();
+
+                (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
+
+                capturedCtx!.setState('sempCredentials', {
+                    user: 'admin', pass: 'admin', baseUrl: '(diagnostic)',
+                    protocol: 'https', host: 'broker-internal', port: '943', urlPath: '',
+                });
+
+                await capturedCtx!.sempFetch('/SEMP/v2/monitor/msgVpns?cursor=xyz');
+
+                // window.location in jsdom is http://localhost:3000 by default;
+                // hosted wire scheme follows the page scheme (https→wss for ws,
+                // http→ws or http for fetch). Match the shape rather than the
+                // exact host so the assertion is robust to test-runner config.
+                const calledWith = (globalThis.fetch as any).mock.calls[0][0] as string;
+                expect(calledWith).toMatch(/^https?:\/\/[^/]+\/https\/943\/broker-internal\/SEMP\/v2\/monitor\/msgVpns\?cursor=xyz$/);
+            } finally {
+                setHosted(false);
+            }
         });
 
         it('sempFetch handles 401 by disconnecting SEMP', async () => {
@@ -442,14 +513,20 @@ describe('Kernel', () => {
             capturedCtx!.eventBus.on('semp:disconnected', disconnectHandler);
 
             (globalThis.fetch as any).mockResolvedValue({ status: 401, ok: false });
-            await capturedCtx!.sempFetch('http://test/SEMP');
+            await capturedCtx!.sempFetch('/SEMP');
 
             expect(capturedCtx!.appState.isSempConnected).toBe(false);
             expect(capturedCtx!.appState.sempCredentials).toBe(null);
             expect(disconnectHandler).toHaveBeenCalled();
         });
 
-        it('sempFetch without credentials does not add auth header', async () => {
+        it('sempFetch without credentials does not assemble or add auth header', async () => {
+            // Defensive path: a caller invoking sempFetch before connecting
+            // shouldn't crash. With no creds we have nothing to assemble from,
+            // so the path is passed to fetch unchanged and no Authorization
+            // header is added. The downstream fetch will fail naturally with
+            // whatever error a bare path produces — that's the caller's
+            // responsibility to handle.
             let capturedCtx: AppContext | null = null;
             const mod = createMockModule({
                 id: 'test-module',
@@ -460,9 +537,10 @@ describe('Kernel', () => {
             await kernel.start();
 
             (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
-            await capturedCtx!.sempFetch('http://test/SEMP');
+            await capturedCtx!.sempFetch('/SEMP');
 
             const callArgs = (globalThis.fetch as any).mock.calls[0];
+            expect(callArgs[0]).toBe('/SEMP');
             expect(callArgs[1].headers.Authorization).toBeUndefined();
         });
 
@@ -477,7 +555,7 @@ describe('Kernel', () => {
             await kernel.start();
 
             (globalThis.fetch as any).mockRejectedValue(new Error('Network error'));
-            await expect(capturedCtx!.sempFetch('http://test/SEMP')).rejects.toThrow('Network error');
+            await expect(capturedCtx!.sempFetch('/SEMP')).rejects.toThrow('Network error');
         });
 
         it('sempFetch propagates synchronous URL construction TypeError', async () => {
@@ -496,7 +574,7 @@ describe('Kernel', () => {
             (globalThis.fetch as any).mockImplementation(() => {
                 throw new TypeError("Failed to construct 'URL': Invalid URL");
             });
-            await expect(capturedCtx!.sempFetch('http://test/\0bad')).rejects.toThrow(TypeError);
+            await expect(capturedCtx!.sempFetch('/\0bad')).rejects.toThrow(TypeError);
         });
 
         it('provides copyToClipboard that writes to clipboard', async () => {

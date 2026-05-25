@@ -1,6 +1,7 @@
 import type { PwaModule, RegisteredModule, AppContext, AppState, EventBus } from './types';
 import { createEventBus } from './event-bus';
-import { escapeHtml } from './utils';
+import { escapeHtml, normalizeUrlPath } from './utils';
+import { buildBrokerUrl } from './hosted';
 import { logger, setLogLevel, getLogLevel, readLogLevelFromUrl } from './logger';
 import { LogLevel } from './constants';
 
@@ -239,15 +240,25 @@ export class Kernel {
     }
 
     /**
-     * SEMP API fetch helper with auto-injected Basic Auth.
+     * SEMP API fetch helper. Takes a `path` (the SEMP endpoint + query string,
+     * e.g. '/SEMP/v2/monitor/msgVpns?count=100' or '/SEMP' for v1 RPC) and
+     * assembles the full URL from `appState.sempCredentials` on every call:
+     * the connection-form values (protocol/host/port/urlPath) are the single
+     * source of truth, run through `buildBrokerUrl()` so hosted-mode gateway
+     * routing is applied uniformly. Broker-emitted URLs (e.g. nextPageUri)
+     * never reach the wire — callers extract pathname+search from them
+     * before calling here. Basic auth is auto-injected.
      */
-    private async sempFetch(url: string, options: RequestInit = {}): Promise<Response> {
+    private async sempFetch(path: string, options: RequestInit = {}): Promise<Response> {
         const defaults: RequestInit = { headers: {} };
 
+        let url = path;
         if (this.state.sempCredentials) {
-            const { user, pass } = this.state.sempCredentials;
+            const { user, pass, protocol, host, port, urlPath } = this.state.sempCredentials;
             const token = btoa(`${user}:${pass}`);
             (defaults.headers as Record<string, string>)['Authorization'] = `Basic ${token}`;
+            const fullPath = normalizeUrlPath(urlPath) + path;
+            url = buildBrokerUrl(protocol, host, port, fullPath, false);
         }
 
         const finalOptions: RequestInit = {

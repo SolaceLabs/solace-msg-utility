@@ -88,9 +88,11 @@ describe('queue-subscription-explorer/service', () => {
             { ok: true, data: [{ vpn: 'v', queue: 'only', topic: 'x' }] },
         ]);
         expect(ctx.sempFetch).toHaveBeenCalledTimes(1);
-        const [url, opts] = (ctx.sempFetch as any).mock.calls[0];
-        // SEMP v1 endpoint is derived from the v2 baseUrl.
-        expect(url).toBe('https://broker:1943/SEMP');
+        const [path, opts] = (ctx.sempFetch as any).mock.calls[0];
+        // Path-only contract: the service passes the SEMP v1 RPC endpoint path
+        // directly; the kernel's sempFetch assembles the broker URL from the
+        // connection-form values and routes through the gateway when hosted.
+        expect(path).toBe('/SEMP');
         expect(opts.method).toBe('POST');
         expect(opts.headers['Content-Type']).toBe('application/xml');
         expect(opts.body).toContain('<subscriptions/>');

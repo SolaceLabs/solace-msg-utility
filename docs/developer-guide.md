@@ -21,6 +21,17 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 
 Custom variants are built via the `scripts/vite-build.mjs` wrapper, which surfaces `--variant=<name>` and `--out-filename=<name>` because Vite's CLI parser (CAC) rejects unknown flags. The wrapper forwards them to `vite.config.ts` via private env vars. Example: `node scripts/vite-build.mjs --variant=min --out-filename=min.html`.
 
+### Build internals
+
+`vite.config.ts` uses [vite-plugin-singlefile](https://github.com/nicolo-ribaudo/vite-plugin-singlefile) to inline all JS and CSS into a single HTML per variant. Settings of note:
+
+- **Target**: ESNext
+- **CSS**: inlined (no code splitting)
+- **Dynamic imports**: forced inline (`inlineDynamicImports: true`)
+- **emptyOutDir**: `false` — preserves pre-placed files in `dist/` (vendor scripts, prior variants) across builds.
+
+The two vendor scripts (`solclient.js`, `jszip.min.js`) are intentionally **not** bundled — they're loaded at runtime from sibling locations. See [deployment.md → External Runtime Dependencies](deployment.md#external-runtime-dependencies) for the placement rules the shell expects.
+
 ---
 
 ## Project Structure

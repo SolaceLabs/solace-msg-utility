@@ -6,16 +6,37 @@ A browser-based tool for managing Solace PubSub+ Event Brokers. Browse queues, i
 
 ## Quick Start
 
-1. **Get the app.** Drop `index.html`, `solclient.js`, and `jszip.min.js` into any folder served over HTTP. The build produces only `index.html` — the two vendor scripts (`solclient.js` and `jszip.min.js`) are **not bundled** and must be downloaded separately and placed alongside `index.html` (or in a sibling `js/` folder). See [deployment.md](docs/deployment.md#external-runtime-dependencies) for download sources. Opening the file directly works for the UI, but SEMP calls will fail due to CORS — use a tiny local server instead.
-2. **Open it in a browser.** The Connections screen loads first.
-3. **Fill in two connections** (both share the same Broker Host):
-   - **Solace Client** (WebSocket, for message operations) — VPN, username, password, port `8008` (ws) or `1443` (wss).
-   - **SEMP** (REST, for management operations) — admin username, password, port `8080` (http) or `1943` (https).
-4. **Click Connect** on each. The two dots in the sidebar turn green when ready.
-5. **Save All Config** — your settings persist in the browser for next time.
-6. **Use the sidebar** to switch between Queue Browser, Queue Copy, and Queue Subscriptions.
+Pick whichever path fits — none of them require a build toolchain.
+
+### Option 1 — Use the hosted version (zero install)
+
+Open <https://solacelabs.github.io/solace-msg-utility/> in a browser. Done. (You'll still need network reachability to your broker, and the broker must allow CORS for SEMP.)
+
+### Option 2 — Run as a container (one command)
+
+```bash
+docker run --rm -p 9443:9443 -e HOSTED=true -v solace-tls:/tls \
+  ghcr.io/solacelabs/solace-msg-utility:latest
+```
+
+Then open <https://localhost:9443/>. The container ships a built-in HTTPS gateway that also reverse-proxies SEMP/SMF to your broker, so the browser only needs to trust one cert. See [deployment.md → Containerised Gateway](docs/deployment.md#containerised-gateway) for the full env-var list.
+
+### Option 3 — Self-host the static files
+
+Download three files from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) (or from the `dist` branch): `index.html`, `solclient.js`, `jszip.min.js`. Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, …). See [deployment.md → Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
 
 > **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials — every module works against deterministic mock data. See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details.
+
+## Connecting to a broker
+
+Once the app is loaded:
+
+1. **Fill in two connections** (both share the same Broker Host):
+   - **Solace Client** (WebSocket, for message operations) — VPN, username, password, port `8008` (ws) or `1443` (wss).
+   - **SEMP** (REST, for management operations) — admin username, password, port `8080` (http) or `1943` (https).
+2. **Click Connect** on each. The two dots in the sidebar turn green when ready.
+3. **Save All Config** — your settings persist in the browser for next time.
+4. **Use the sidebar** to switch between Queue Browser, Queue Copy, and Queue Subscriptions.
 
 > **Self-signed TLS certificates:** if `wss://` connection is blocked, the app shows a helper dialog with one-click instructions to trust the broker certificate.
 
@@ -60,20 +81,21 @@ A browser-based tool for managing Solace PubSub+ Event Brokers. Browse queues, i
 ### Cross-cutting
 - **SEMP queue picker** — used by Browser, Copy, and Subscriptions to select queues without leaving the current module.
 - **Toasts** for every success / failure.
-- **Single-file build** — `dist/index.html` is fully self-contained for the app code; the two vendor scripts `solclient.js` and `jszip.min.js` must be downloaded separately (see [deployment.md](docs/deployment.md#external-runtime-dependencies)) and placed alongside it.
-- **Demo bundle** (`dist/mock.html`) — every module exercised against mock data, no broker required.
-- **Containerised gateway** ([`go-web-proxy/`](go-web-proxy/)) — optional single-binary Go HTTPS gateway serves the PWA, exposes a `/hosted` probe, and reverse-proxies SEMP/SMF traffic so browsers only need to trust one cert. Distroless image; see [deployment.md](docs/deployment.md#option-d-containerised-gateway-go-web-proxy).
+- **Self-contained HTML** — `index.html` includes all app code; the two vendor scripts `solclient.js` and `jszip.min.js` sit alongside it (see [deployment.md](docs/deployment.md#external-runtime-dependencies)).
+- **Demo bundle** (`mock.html`) — every module exercised against mock data, no broker required.
+- **Containerised gateway** — optional single-binary Go HTTPS gateway serves the PWA, exposes a `/hosted` probe, and reverse-proxies SEMP/SMF traffic so browsers only need to trust one cert. Distroless image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#containerised-gateway).
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [user-guide.md](docs/user-guide.md) | Full UI walkthrough, every field, every screen |
-| [deployment.md](docs/deployment.md) | Build, hosting options, network requirements, TLS |
+| [deployment.md](docs/deployment.md) | Hosting options, network requirements, TLS |
+| [developer-guide.md](docs/developer-guide.md) | Setup, build, testing, adding modules, code conventions |
 | [architecture.md](docs/architecture.md) | System diagrams, module structure (developers) |
-| [developer-guide.md](docs/developer-guide.md) | Setup, testing, adding modules, code conventions |
 | [contributing.md](docs/contributing.md) | PR workflow, coding standards, test requirements |
 | [test-report.md](docs/test-report.md) | Test methodology, coverage strategy |
+| [git.md](docs/git.md) | Release process, CI workflow, image tags (maintainers) |
 
 ## License
 

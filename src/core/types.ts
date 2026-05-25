@@ -140,8 +140,13 @@ export interface AppContext {
     setState<K extends keyof AppState>(key: K, value: AppState[K]): void;
     /** Helper to navigate to this module's view */
     loadSelf: () => void;
-    /** Helper for SEMP API requests with auto-injected auth */
-    sempFetch: (url: string, options?: RequestInit) => Promise<Response>;
+    /**
+     * Helper for SEMP API requests. `path` is the endpoint + query string only
+     * (e.g. '/SEMP/v2/monitor/msgVpns?count=100' or '/SEMP' for v1 RPC); the
+     * kernel assembles the full URL from `appState.sempCredentials` on every
+     * call, applies hosted-mode gateway routing, and injects Basic auth.
+     */
+    sempFetch: (path: string, options?: RequestInit) => Promise<Response>;
     /** Helper for clipboard copy with visual feedback */
     copyToClipboard: (text: string, btnElement?: HTMLElement) => Promise<void>;
     /** Global app config */

@@ -53,12 +53,15 @@ describe('core/services/semp-client', () => {
             expect(hooks.onError).not.toHaveBeenCalled();
         });
 
-        it('returned SempContext.fetch injects Authorization header bound to the validated creds', async () => {
-            // Capture the fetch the factory passes to onConnected and exercise it
-            // — the factory's job is to bind creds into a reusable fetch wrapper.
+        it('returned SempContext.fetch assembles the URL from connection-form values and injects auth', async () => {
+            // The closure captures protocol/host/port/urlPath at connect time
+            // and reassembles the full URL from the caller-supplied path on
+            // every call. This is the central guarantee that broker-direct
+            // URLs from response bodies (nextPageUri) cannot reach the wire
+            // — the closure literally cannot accept one.
             (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
 
-            let capturedFetch: ((url: string, opts?: RequestInit) => Promise<Response>) | null = null;
+            let capturedFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
             const hooks = makeHooks({
                 onConnected: vi.fn((sempCtx) => { capturedFetch = sempCtx.fetch; }),
             });
@@ -66,15 +69,36 @@ describe('core/services/semp-client', () => {
             await service.connect(baseCfg(), 'broker.test', 'secret');
 
             expect(capturedFetch).not.toBeNull();
-            await capturedFetch!('https://broker.test:8080/some/endpoint');
+            await capturedFetch!('/some/endpoint');
 
             // Assert the second fetch call (the first was the validation probe)
-            // carried the auth header derived from { user: 'admin', pass: 'secret' }.
+            // hit the assembled URL and carried the auth header derived from
+            // { user: 'admin', pass: 'secret' }.
             const expectedAuth = 'Basic ' + btoa('admin:secret');
             const fetchCalls = (globalThis.fetch as any).mock.calls;
             const lastCall = fetchCalls[fetchCalls.length - 1];
             expect(lastCall[0]).toBe('https://broker.test:8080/some/endpoint');
             expect(lastCall[1].headers.Authorization).toBe(expectedAuth);
+        });
+
+        it('returned SempContext.fetch prepends the configured urlPath to the caller-supplied path', async () => {
+            // The form's urlPath sits between the host:port and the SEMP
+            // endpoint suffix on every call — same shape as the validation
+            // probe URL, just driven by a per-call path now.
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+
+            let capturedFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
+            const hooks = makeHooks({
+                onConnected: vi.fn((sempCtx) => { capturedFetch = sempCtx.fetch; }),
+            });
+            const service = createServiceSemp(hooks);
+            await service.connect(baseCfg({ urlPath: '/api' }), 'broker.test', 'pw');
+
+            await capturedFetch!('/SEMP/v2/monitor/msgVpns?cursor=xyz');
+
+            const fetchCalls = (globalThis.fetch as any).mock.calls;
+            const lastCall = fetchCalls[fetchCalls.length - 1];
+            expect(lastCall[0]).toBe('https://broker.test:8080/api/SEMP/v2/monitor/msgVpns?cursor=xyz');
         });
 
         it('fires onAuthFailed on 401', async () => {
@@ -288,6 +312,30 @@ describe('core/services/semp-client', () => {
                 expect.objectContaining({ baseUrl: 'http://localhost:3000/https/8080/broker.example.com/api' }),
                 { user: 'admin', pass: 'pw' }
             );
+        });
+
+        it('returned SempContext.fetch routes per-call requests through the gateway proxy path', async () => {
+            // The whole reason for the path-only API: every per-call request
+            // (including paginated follow-ups whose path comes from a
+            // broker-emitted nextPageUri) goes through the same closure that
+            // reassembles the gateway-prefixed URL. Broker-direct URLs never
+            // reach fetch().
+            setHosted(true);
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+
+            let capturedFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
+            const hooks = makeHooks({
+                onConnected: vi.fn((sempCtx) => { capturedFetch = sempCtx.fetch; }),
+            });
+            const service = createServiceSemp(hooks);
+            await service.connect(baseCfg(), 'broker-internal', 'pw');
+
+            // Simulate a pagination follow-up: caller extracted pathname+search
+            // from the broker's nextPageUri.
+            await capturedFetch!('/SEMP/v2/monitor/msgVpns?cursor=abc');
+
+            const calledUrl = (globalThis.fetch as any).mock.calls.at(-1)[0];
+            expect(calledUrl).toBe('http://localhost:3000/https/8080/broker-internal/SEMP/v2/monitor/msgVpns?cursor=abc');
         });
     });
 });

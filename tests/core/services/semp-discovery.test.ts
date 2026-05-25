@@ -3,8 +3,13 @@ import { createSempDiscovery, PAGE_DELAY_MS } from '../../../src/core/services/s
 import type { SempContext } from '../../../src/core/connections/types';
 
 /**
- * Pure-factory tests. The factory takes a SempContext (a fetch + baseUrl pair);
- * tests stub `fetch` with vi.fn() and assert on its calls + the yielded pages.
+ * Pure-factory tests. The factory takes a SempContext (a fetch closure + a
+ * diagnostic baseUrl); the `fetch` API is path-only — callers pass the SEMP
+ * endpoint suffix and the underlying closure assembles the full URL. These
+ * tests stub `sempCtx.fetch` with vi.fn() so assertions match against the
+ * paths the factory feeds in, not against the assembled wire URLs (which are
+ * the SEMP client closure's responsibility, covered in semp-client tests).
+ *
  * No AppContext — connection-state gating lives in queue-discovery's wrapper.
  */
 
@@ -104,27 +109,34 @@ describe('core/services/semp-discovery', () => {
             if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching VPNs');
         });
 
-        it('uses custom maxCount in the URL', async () => {
+        it('uses custom maxCount in the path', async () => {
             const sempCtx = makeSempCtx();
             (sempCtx.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
             await allPages(createSempDiscovery(sempCtx).fetchVpns(50));
             expect(sempCtx.fetch).toHaveBeenCalledWith(expect.stringContaining('count=50'));
         });
 
-        it('builds the URL using sempCtx.baseUrl', async () => {
-            // Confirms the parameterization — different SempContexts hit different brokers.
-            const sempCtx = makeSempCtx({ baseUrl: 'https://other-broker:1943/api' });
+        it('passes a path-only string to sempCtx.fetch (the closure assembles the URL)', async () => {
+            // The factory must never construct a full URL — that's the SEMP
+            // client closure's job. Anything that looks like a full URL here
+            // would mean the factory is bypassing the closure's hosted-mode
+            // routing and trusting broker-emitted hostnames.
+            const sempCtx = makeSempCtx();
             (sempCtx.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
             await allPages(createSempDiscovery(sempCtx).fetchVpns());
-            expect(sempCtx.fetch).toHaveBeenCalledWith(
-                expect.stringMatching(/^https:\/\/other-broker:1943\/api\/SEMP\/v2\/monitor\/msgVpns/)
-            );
+            const calledWith = (sempCtx.fetch as any).mock.calls[0][0];
+            expect(calledWith).toBe('/SEMP/v2/monitor/msgVpns?count=100');
         });
 
-        it('follows meta.paging.nextPageUri and yields each page', async () => {
+        it('follows meta.paging.nextPageUri by extracting only its pathname+search (host/port/scheme discarded)', async () => {
+            // Defense: the broker's nextPageUri points back at the broker's
+            // own self-view (e.g. http://broker-internal:943/SEMP/v2/...),
+            // which routes wrong in hosted mode. The factory strips that down
+            // to pathname+search and feeds it back as a path; the closure
+            // reassembles the URL through the correct (gateway-aware) channel.
             vi.useFakeTimers();
             const sempCtx = makeSempCtx();
-            const nextUri = 'http://broker:8080/SEMP/v2/monitor/msgVpns?cursor=abc';
+            const nextUri = 'http://broker-internal:943/SEMP/v2/monitor/msgVpns?cursor=abc';
             (sempCtx.fetch as any)
                 .mockResolvedValueOnce({
                     ok: true,
@@ -141,16 +153,33 @@ describe('core/services/semp-discovery', () => {
                 });
 
             const pagesPromise = allPages(createSempDiscovery(sempCtx).fetchVpns());
-            // Advance the inter-page throttle
             await vi.advanceTimersByTimeAsync(PAGE_DELAY_MS);
             const pages = await pagesPromise;
 
             expect(pages).toHaveLength(2);
             expect(pages[0]).toEqual({ ok: true, data: ['vpn-a', 'vpn-b'] });
             expect(pages[1]).toEqual({ ok: true, data: ['vpn-c'] });
-            // Second fetch uses the nextPageUri verbatim
-            expect((sempCtx.fetch as any).mock.calls[1][0]).toBe(nextUri);
+            // Second fetch hits the EXTRACTED path, not the original URI.
+            expect((sempCtx.fetch as any).mock.calls[1][0]).toBe('/SEMP/v2/monitor/msgVpns?cursor=abc');
             vi.useRealTimers();
+        });
+
+        it('ends the stream when meta.paging.nextPageUri is malformed', async () => {
+            // Defensive: a broken broker response shouldn't crash the
+            // generator. Treat unparseable nextPageUri as end-of-stream.
+            const sempCtx = makeSempCtx();
+            (sempCtx.fetch as any).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    data: [{ msgVpnName: 'vpn-a' }],
+                    meta: { paging: { nextPageUri: 'not-a-url' } }
+                })
+            });
+            const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
+            expect(pages).toHaveLength(1);
+            expect(pages[0]).toEqual({ ok: true, data: ['vpn-a'] });
+            // Only one fetch — the malformed URI ended the loop without a retry.
+            expect((sempCtx.fetch as any).mock.calls).toHaveLength(1);
         });
 
         it('stops paginating on error mid-stream', async () => {
@@ -234,14 +263,22 @@ describe('core/services/semp-discovery', () => {
             if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching Queues');
         });
 
-        it('includes VPN name in URL', async () => {
+        it('includes VPN name in the path', async () => {
             const sempCtx = makeSempCtx();
             (sempCtx.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
             await allPages(createSempDiscovery(sempCtx).fetchQueues('my-vpn'));
             expect(sempCtx.fetch).toHaveBeenCalledWith(expect.stringContaining('/msgVpns/my-vpn/queues'));
         });
 
-        it('follows meta.paging.nextPageUri across multiple pages', async () => {
+        it('passes a path-only string for the initial fetch', async () => {
+            const sempCtx = makeSempCtx();
+            (sempCtx.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
+            await allPages(createSempDiscovery(sempCtx).fetchQueues('default'));
+            const calledWith = (sempCtx.fetch as any).mock.calls[0][0];
+            expect(calledWith).toBe('/SEMP/v2/monitor/msgVpns/default/queues?count=100');
+        });
+
+        it('follows meta.paging.nextPageUri across multiple pages, passing only the extracted path', async () => {
             vi.useFakeTimers();
             const sempCtx = makeSempCtx();
             (sempCtx.fetch as any)
@@ -249,7 +286,7 @@ describe('core/services/semp-discovery', () => {
                     ok: true,
                     json: async () => ({
                         data: [{ queueName: 'Q-1' }, { queueName: 'Q-2' }],
-                        meta: { paging: { nextPageUri: 'http://broker:8080/next' } }
+                        meta: { paging: { nextPageUri: 'http://broker-internal:943/SEMP/v2/monitor/msgVpns/default/queues?cursor=p2' } }
                     })
                 })
                 .mockResolvedValueOnce({
@@ -264,6 +301,7 @@ describe('core/services/semp-discovery', () => {
             expect(pages).toHaveLength(2);
             expect(pages[0]).toEqual({ ok: true, data: ['Q-1', 'Q-2'] });
             expect(pages[1]).toEqual({ ok: true, data: ['Q-3'] });
+            expect((sempCtx.fetch as any).mock.calls[1][0]).toBe('/SEMP/v2/monitor/msgVpns/default/queues?cursor=p2');
             vi.useRealTimers();
         });
     });

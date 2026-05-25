@@ -30,8 +30,10 @@ export function createServiceSemp(hooks: SempConnectionHooks): SempClient {
             logger.info('[Mock] SEMP Connection Established');
 
             // Mock fetch — caller can ignore or stub further. Tests typically
-            // don't actually exercise this fetch in mock build.
-            const sempFetch = (url: string, opts: RequestInit = {}) => fetch(url, opts);
+            // don't actually exercise this fetch in mock build. Signature
+            // matches the real client: path-only, closure assembles the URL.
+            const sempFetch = (path: string, opts: RequestInit = {}) =>
+                fetch(`${baseUrl}${path}`, opts);
 
             hooks.onConnected({ fetch: sempFetch, baseUrl }, { user: cfg.user, pass });
 

@@ -354,14 +354,14 @@ The loaded subscription list is held in memory for the session. Subsequent filte
 
 ---
 
-## Shipped Builds
+## Shipped Variants
 
-`npm run build` produces three artifacts in `dist/`:
+The project ships three HTML variants, all available from each [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases):
 
 | File | Variant | Use |
 |------|---------|-----|
 | `index.html` | **Full** (default) | Production deployment — every module: Connections, Queue Browser, Queue Copy, Queue Subscriptions |
-| `min.html`   | **Minimal**        | Stripped-down build — only Connections + Queue Browser. Smaller bundle for environments that don't need the copy/move or subscription-browser modules |
+| `min.html`   | **Minimal**        | Stripped-down variant — only Connections + Queue Browser. Smaller bundle for environments that don't need the copy/move or subscription-browser modules |
 | `mock.html`  | Full + mocks       | Interactive demo (see [Demo Mode](#demo-mode-mockhtml)) |
 
 Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately**:
@@ -383,14 +383,11 @@ See [deployment.md](deployment.md#external-runtime-dependencies) for download so
 
 The project ships a self-contained demo build (`dist/mock.html`) that exercises every module without a real broker. It substitutes deterministic mock services for the Solace and SEMP clients and the queue-browser SDK calls, so you can walk the UI end-to-end on any machine with just a browser.
 
-### Building and opening
+### Opening the demo
 
-```
-npm run build:mock     # produces dist/mock.html only
-npm run build          # produces dist/index.html (prod) AND dist/mock.html
-```
+`mock.html` ships in every [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) alongside `index.html`. Download it and open it directly in a browser — no server required, it's a single self-contained file.
 
-Open `dist/mock.html` directly in a browser. No server required — it's a single self-contained file.
+(For developers building from source, `npm run build:mock` produces `dist/mock.html`; `npm run build` produces all three variants. See [developer-guide.md](developer-guide.md) for the full build workflow.)
 
 ### Connection values
 

@@ -21,7 +21,7 @@ services:
       # solclient.js, etc. Docker disallows COPY paths that escape the context.
       context: ..
       dockerfile: docker/Dockerfile
-    image: solace-msg-utility:latest
+    image: ghcr.io/solacelabs/solace-msg-utility:latest
     container_name: solace-message-utility
     restart: unless-stopped
     ports:
@@ -44,8 +44,8 @@ services:
       # Optional: bind-mount your own PWA bundle. Comment out to use the bundle
       # baked into the image at /SolaceMsgUtility.
       # - ./dist:/SolaceMsgUtility:ro
-      - ../solclient.js:/SolaceMsgUtility/solclient.js:ro
-      - ../jszip.min.js:/SolaceMsgUtility/jszip.min.js:ro
+      - ../dist/solclient.js:/SolaceMsgUtility/solclient.js:ro
+      - ../dist/jszip.min.js:/SolaceMsgUtility/jszip.min.js:ro
     # No HEALTHCHECK: the scratch image has no shell or curl. Use an external
     # check (k8s liveness probe, docker swarm, monitoring agent) hitting
     # https://<host>:9443/hosted with TLS verification disabled or pinned.

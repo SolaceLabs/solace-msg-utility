@@ -1,5 +1,6 @@
 import { logger } from '../logger';
 import { buildBrokerUrl } from '../hosted';
+import { normalizeUrlPath } from '../utils';
 import type { SempConfig, SempContext } from '../connections/types';
 
 /**
@@ -78,10 +79,22 @@ export function createServiceSemp(hooks: SempConnectionHooks): SempClient {
                 // and reuses this for all subsequent SEMP requests against
                 // this broker (primary uses it via ctx.sempFetch bridging;
                 // secondary uses it directly).
-                const sempFetch = (url: string, opts: RequestInit = {}) => fetch(url, {
-                    ...opts,
-                    headers: { ...(opts.headers || {}), Authorization: authHeader }
-                });
+                //
+                // Path-only API: callers pass the SEMP endpoint + query (e.g.
+                // '/SEMP/v2/monitor/msgVpns?count=100'). The closure captures
+                // the connection-form values here and rebuilds the full URL via
+                // buildBrokerUrl() on every call, so hosted-mode gateway routing
+                // is applied uniformly and broker-emitted URLs (nextPageUri,
+                // etc.) are never used as request targets — callers extract
+                // pathname+search from them before calling fetch().
+                const sempFetch = (path: string, opts: RequestInit = {}) => {
+                    const fullPath = normalizeUrlPath(cfg.urlPath) + path;
+                    const url = buildBrokerUrl(cfg.protocol, host, cfg.port, fullPath, false);
+                    return fetch(url, {
+                        ...opts,
+                        headers: { ...(opts.headers || {}), Authorization: authHeader }
+                    });
+                };
 
                 hooks.onConnected({ fetch: sempFetch, baseUrl }, { user: cfg.user, pass });
 

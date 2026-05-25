@@ -159,7 +159,12 @@ describe('queue-copy/service-verify', () => {
     });
 
     describe('SEMP v1 verify path', () => {
-        it('POSTs the SEMP v1 RPC to {host}/SEMP and parses fields on success', async () => {
+        it('POSTs the SEMP v1 RPC with path "/SEMP" and parses fields on success', async () => {
+            // Path-only contract: the service passes `/SEMP` directly; the
+            // underlying client closure (real semp-client.ts) assembles the
+            // wire URL from the connection-form values and applies hosted-mode
+            // routing. The test's SempContext.fetch stub stands in for that
+            // closure, so the assertion checks the path the service hands in.
             const fetchImpl = vi.fn(async () => textRes(SAMPLE_RESPONSE));
             const ctx = makeSempCtx(fetchImpl);
 
@@ -171,7 +176,7 @@ describe('queue-copy/service-verify', () => {
             expect(result.sourceOk).toBe(true);
             expect(result.messageCount).toBe(18);
             expect(fetchImpl).toHaveBeenCalledWith(
-                'https://broker.example:1943/SEMP',
+                '/SEMP',
                 expect.objectContaining({
                     method: 'POST',
                     body: expect.stringContaining('<name>test-all</name>'),

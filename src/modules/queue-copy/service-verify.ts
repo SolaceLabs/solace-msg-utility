@@ -1,5 +1,4 @@
 import type { SempContext } from '../../core/types';
-import { deriveSempV1Url } from '../../core/services/sempContext';
 import { escapeXml } from '../../core/utils';
 import { logger } from '../../core/logger';
 import { BIND_PROBE_TIMEOUT_MS, ACCUMULATE_IDLE_MS } from './constants';
@@ -149,7 +148,6 @@ async function verifyViaSempV1(
     signal: AbortSignal,
     result: VerifyResult,
 ): Promise<VerifyResult> {
-    const url = deriveSempV1Url(sempCtx.baseUrl);
     // Use vpn-name="*" when the caller didn't pass one; the broker filters by
     // the requesting user's VPN scope. The detailed `<detail/>` flag pulls in
     // the `info/*` block we need for count/quota/max-size.
@@ -159,9 +157,9 @@ async function verifyViaSempV1(
         `<vpn-name>${escapeXml(vpnFilter)}</vpn-name>` +
         `<detail/></queue></show></rpc>`;
 
-    logger.debug(`[Verify] SEMP detail RPC → ${url} queue="${queue}" vpn="${vpnFilter}"`);
+    logger.debug(`[Verify] SEMP detail RPC → /SEMP queue="${queue}" vpn="${vpnFilter}"`);
     try {
-        const res = await sempCtx.fetch(url, {
+        const res = await sempCtx.fetch('/SEMP', {
             method: 'POST',
             headers: { 'Content-Type': 'application/xml' },
             body,
@@ -237,14 +235,13 @@ async function fetchNewestMsgIdViaSempV1(
     queue: string,
     signal: AbortSignal,
 ): Promise<string | null> {
-    const url = deriveSempV1Url(sempCtx.baseUrl);
     const body =
         `<rpc><show><queue><name>${escapeXml(queue)}</name>` +
         `<vpn-name>${escapeXml(vpnFilter)}</vpn-name>` +
         `<messages/><newest/><count/><num-elements>1</num-elements>` +
         `</queue></show></rpc>`;
 
-    const res = await sempCtx.fetch(url, {
+    const res = await sempCtx.fetch('/SEMP', {
         method: 'POST',
         headers: { 'Content-Type': 'application/xml' },
         body,

@@ -1,4 +1,4 @@
-import { primarySempContextFrom, deriveSempV1Url } from '../../core/services/sempContext';
+import { primarySempContextFrom } from '../../core/services/sempContext';
 import { PAGE_DELAY_MS } from '../../core/services/semp-discovery';
 import type { AppContext } from '../../core/types';
 import { parseSubscriptionsResponse, type SubscriptionRow } from './parse';
@@ -39,7 +39,6 @@ export function createService(ctx: AppContext) {
             yield { ok: false, error: 'SEMP Not Connected' };
             return;
         }
-        const url = deriveSempV1Url(sempCtx.baseUrl);
 
         let body: string | null = INITIAL_BODY;
         let pageNum = 0;
@@ -48,7 +47,7 @@ export function createService(ctx: AppContext) {
                 await new Promise(r => setTimeout(r, PAGE_DELAY_MS));
             }
             try {
-                const res = await sempCtx.fetch(url, {
+                const res = await sempCtx.fetch('/SEMP', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/xml' },
                     body,

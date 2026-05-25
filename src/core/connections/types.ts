@@ -59,10 +59,16 @@ export interface ConnectionCredentials {
  * after credentials are validated, and consumed by the discovery service and
  * any other module that needs to make SEMP requests against a specific broker.
  *
- * `fetch` is bound to those creds — caller doesn't need to inject auth headers.
- * `baseUrl` is the validated SEMP base (e.g. `https://broker.example.com:943/SEMP/v2`).
+ * `fetch` accepts an endpoint *path* only (e.g. `/SEMP/v2/monitor/msgVpns?count=100`
+ * or `/SEMP` for v1 RPC). The closure captures the connection-form values
+ * (protocol, host, port, urlPath) at connect time and assembles the full URL
+ * internally on every call — applying hosted-mode gateway routing automatically.
+ * Callers never construct or pass broker-direct URLs.
+ *
+ * `baseUrl` is diagnostic only (used for "trust this URL" links and logging).
+ * Do NOT use it to build request URLs — call `fetch(path, …)` instead.
  */
 export interface SempContext {
-    fetch: (url: string, opts?: RequestInit) => Promise<Response>;
+    fetch: (path: string, opts?: RequestInit) => Promise<Response>;
     baseUrl: string;
 }

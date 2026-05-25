@@ -1,6 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { primarySempContextFrom, deriveSempV1Url } from '../../../src/core/services/sempContext';
-import { setHosted } from '../../../src/core/hosted';
+import { describe, it, expect, vi } from 'vitest';
+import { primarySempContextFrom } from '../../../src/core/services/sempContext';
 import type { AppContext, AppState } from '../../../src/core/types';
 
 function makeCtx(overrides: Partial<AppState> = {}): AppContext {
@@ -54,41 +53,3 @@ describe('core/services/sempContext — primarySempContextFrom', () => {
     });
 });
 
-describe('core/services/sempContext — deriveSempV1Url', () => {
-    afterEach(() => setHosted(false));
-
-    describe('direct mode (default)', () => {
-        it('strips the SEMP v2 path and appends /SEMP', () => {
-            expect(deriveSempV1Url('https://broker.example:1943/SEMP/v2')).toBe('https://broker.example:1943/SEMP');
-        });
-        it('strips any path/query from the base and appends /SEMP', () => {
-            expect(deriveSempV1Url('http://host:8080/anything')).toBe('http://host:8080/SEMP');
-            expect(deriveSempV1Url('http://host:8080/SEMP/v2/monitor?x=1')).toBe('http://host:8080/SEMP');
-        });
-        it('works when the baseUrl has no path at all', () => {
-            expect(deriveSempV1Url('https://broker.example')).toBe('https://broker.example/SEMP');
-        });
-    });
-
-    describe('hosted mode', () => {
-        // In hosted mode the baseUrl is gateway-prefixed
-        // (`{wireScheme}://{gateway}/{scheme}/{port}/{host}{userPath}`).
-        // The proxy prefix MUST be preserved or the SEMP v1 POST won't
-        // route through the gateway.
-        it('preserves the gateway proxy prefix and appends /SEMP', () => {
-            setHosted(true);
-            expect(deriveSempV1Url('https://gateway:9443/https/943/broker.example.com'))
-                .toBe('https://gateway:9443/https/943/broker.example.com/SEMP');
-        });
-        it('preserves a user-supplied urlPath inside the gateway prefix', () => {
-            setHosted(true);
-            expect(deriveSempV1Url('https://gateway:9443/https/943/broker.example.com/api'))
-                .toBe('https://gateway:9443/https/943/broker.example.com/api/SEMP');
-        });
-        it('trims a trailing slash on the pathname before appending /SEMP', () => {
-            setHosted(true);
-            expect(deriveSempV1Url('https://gateway:9443/https/943/broker.example.com/'))
-                .toBe('https://gateway:9443/https/943/broker.example.com/SEMP');
-        });
-    });
-});
