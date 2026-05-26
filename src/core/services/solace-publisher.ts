@@ -223,14 +223,15 @@ export function createSolacePublisher(session: any, opts?: PublisherOptions): So
 
         return new Promise<SendResult>((resolve) => {
             const timer = setTimeout(() => {
-                const entry = pending.get(correlationValue);
-                /* v8 ignore start -- defensive guard against a race where the entry is
-                 * removed from `pending` without cancelling this timer. Every removal
-                 * path (ack/reject listeners, rejectAllPending, dispose, sync-send
-                 * catch) calls clearTimeout(entry.timer) before pending.delete(), so
-                 * the timer cannot fire against a missing entry in normal flow. */
-                if (!entry) return;
-                /* v8 ignore stop */
+                // Defensive guard kept commented in case future code changes
+                // allow the timer to fire after the entry has been removed.
+                // Currently unreachable: every removal path (ack/reject
+                // listeners, rejectAllPending, dispose, sync-send catch)
+                // calls clearTimeout(entry.timer) before pending.delete(),
+                // so the timer cannot fire against a missing entry. The `!`
+                // assertion below reflects that invariant.
+                const entry = pending.get(correlationValue)!;
+                // if (!entry) return;
                 pending.delete(correlationValue);
                 const result: SendResult = { ok: false, error: 'Timed out waiting for broker acknowledgement.' };
                 entry.resolve(result);

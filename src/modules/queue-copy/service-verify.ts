@@ -467,12 +467,15 @@ function verifyViaQueueBrowserAccumulate(
         signal.addEventListener('abort', onAbort);
 
         const bindTimer = setTimeout(() => {
-            /* v8 ignore start -- the bound=true branch (skip the timeout
-             * settle) is defensively unreachable: any UP_NOTICE arms the
-             * idle timer (2s), which always fires before the 10s bind
-             * timer; settle() then runs cleanup() and clears bindTimer.
-             * The bind timer can only ever fire when bound is still false. */
-            if (!bound) settle(false, `Verification timed out after ${BIND_PROBE_TIMEOUT_MS / 1000}s.`);
+            /* v8 ignore start -- the entire body is defensively unreachable in
+             * tests: any QueueBrowserEventName.UP arms the idle timer (2s),
+             * which always fires before the 10s bind timer; settle() then
+             * runs cleanup() and clears bindTimer. The bind timer can only
+             * ever fire when bound is still false, so the `if (!bound)`
+             * guard below is itself dead — kept commented in case future
+             * timer-management changes break that invariant. */
+            // if (!bound)
+            settle(false, `Verification timed out after ${BIND_PROBE_TIMEOUT_MS / 1000}s.`);
             /* v8 ignore stop */
         }, BIND_PROBE_TIMEOUT_MS);
 

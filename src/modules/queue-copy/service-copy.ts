@@ -115,8 +115,12 @@ export function runCopyJob(
     return new Promise<void>((resolve) => {
         // Phase-1 state — drive the stop sequence.
         let stopReason: StopReason | null = null;
-        let drainStarted = false;
-        let finished = false;
+        // `drainStarted` declaration commented for parity with the re-entry
+        // guard inside triggerStop (search for "Re-entry guard kept commented").
+        // let drainStarted = false;
+        // `finished` declaration commented for parity with the idempotency
+        // guard inside evaluateAndFinish (search for "Idempotency guard kept commented").
+        // let finished = false;
         let firstMessageSeen = false;
         // True once the MESSAGE event for `maxMsgId` has been observed
         // (synchronously, before its publish.send await). Used by the
@@ -157,13 +161,13 @@ export function runCopyJob(
          * resolves the outer Promise. Exactly one firing.
          */
         const evaluateAndFinish = (): void => {
-            /* v8 ignore start -- idempotency guard: every triggerStop path
-             * funnels through `drainAndFinish` which only fires once because
-             * `drainStarted` gates it; the early-return is a defense against
-             * future call-sites adding direct invocations. */
-            if (finished) return;
-            /* v8 ignore stop */
-            finished = true;
+            // Idempotency guard kept commented in case a future call-site adds
+            // a direct invocation. Currently unreachable: every triggerStop
+            // path funnels through `drainAndFinish` which only fires once
+            // because `drainStarted` gates it. See the `let finished`
+            // declaration above (also commented for parity).
+            // if (finished) return;
+            // finished = true;
 
             // Cancel always upgrades the final classification — if the user
             // cancelled at any point, the run is reported as cancelled even
@@ -274,19 +278,20 @@ export function runCopyJob(
                 logger.debug('[Copy] rejectAllPending — cancel');
                 publisher.rejectAllPending('Cancelled');
             }
-            /* v8 ignore start -- the `stopReason !== null` early-return at
-             * the top of triggerStop short-circuits any re-entry, so
-             * `drainStarted` is always false when this check runs. Kept as a
-             * defense against future code reordering. */
-            if (!drainStarted) {
-                /* v8 ignore stop */
-                drainStarted = true;
-                // Defer to a microtask so a synchronous cancelRequested-set
-                // immediately after the triggering event (e.g. test code
-                // setting it on the next line after fireDown) is visible to
-                // evaluateAndFinish when the drain reaches it.
-                queueMicrotask(() => void drainAndFinish());
-            }
+            // Re-entry guard kept commented in case future code reordering
+            // allows triggerStop re-entry. Currently unreachable: the
+            // `stopReason !== null` early-return at the top of triggerStop
+            // short-circuits any re-entry, so `drainStarted` would always be
+            // false at this point. See the `let drainStarted` declaration
+            // above (also commented for parity).
+            // if (!drainStarted) {
+            //     drainStarted = true;
+            // Defer to a microtask so a synchronous cancelRequested-set
+            // immediately after the triggering event (e.g. test code
+            // setting it on the next line after fireDown) is visible to
+            // evaluateAndFinish when the drain reaches it.
+            queueMicrotask(() => void drainAndFinish());
+            // }
         };
 
         /**
@@ -313,15 +318,15 @@ export function runCopyJob(
         const resetIdleTimer = (): void => {
             if (idleTimer !== null) clearTimeout(idleTimer);
             idleTimer = setTimeout(() => {
-                /* v8 ignore start -- race guards: the pause-suspension fix
-                 * clears the timer when entering pause, and triggerStop
-                 * clears it on any stop reason, so by the time this callback
-                 * fires `stopReason === null` and `inFlight === 0` is the
-                 * only reachable state. Both guards are retained as a
-                 * defense against future timer-management changes. */
-                if (stopReason !== null) return;
-                if (inFlight > 0) { resetIdleTimer(); return; }
-                /* v8 ignore stop */
+                // Race guards kept commented in case future timer-management
+                // changes allow the timer to fire after a stop or with
+                // in-flight publishes. Currently unreachable: the
+                // pause-suspension fix clears the timer when entering pause,
+                // and triggerStop clears it on any stop reason, so by the
+                // time this callback fires `stopReason === null` and
+                // `inFlight === 0` is the only reachable state.
+                // if (stopReason !== null) return;
+                // if (inFlight > 0) { resetIdleTimer(); return; }
                 triggerStop('idle');
             }, IDLE_TIMEOUT_MS);
         };
@@ -340,12 +345,11 @@ export function runCopyJob(
             logger.error(`[Copy] Source QueueBrowser DOWN_ERROR: ${state.job!.lastError}`);
             triggerStop('browser-error');
         });
-        /* v8 ignore start -- GM_DISABLED registered for SDK-event-code-validation
-         * parity (createBrowserMock in tests/setup.ts throws on unknown event
-         * codes). No-op — any actual failure surfaces via DOWN_ERROR or the
-         * next publish failure. */
+        // GM_DISABLED registered for SDK-event-code-validation parity
+        // (createBrowserMock in tests/setup.ts throws on unknown event codes).
+        // No-op — any actual failure surfaces via DOWN_ERROR or the next
+        // publish failure. Covered by the `GM_DISABLED is a no-op` test.
         browser.on(solace.QueueBrowserEventName.GM_DISABLED, () => { /* no-op */ });
-        /* v8 ignore stop */
 
         browser.on(solace.QueueBrowserEventName.MESSAGE, async (msg: any) => {
             if (stopReason !== null) {
