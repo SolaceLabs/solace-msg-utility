@@ -356,12 +356,13 @@ The loaded subscription list is held in memory for the session. Subsequent filte
 
 ## Shipped Variants
 
-The project ships three HTML variants, all available from each [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases):
+The project ships four HTML variants, all available from each [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases):
 
 | File | Variant | Use |
 |------|---------|-----|
 | `index.html` | **Full** (default) | Production deployment — every module: Connections, Queue Browser, Queue Copy, Queue Subscriptions |
 | `min.html`   | **Minimal**        | Stripped-down variant — only Connections + Queue Browser. Smaller bundle for environments that don't need the copy/move or subscription-browser modules |
+| `no-payload.html` | **No-payload** | Same as Full, except the Queue Browser never shows or exports the message **body**. The Content Preview, Show Raw Content, Copy Content, Download Content, Download Full, and Body-Content filter are all removed; Forward, Delete, all metadata, and the other filters remain. Use where message bodies must not be visible to the operator. |
 | `mock.html`  | Full + mocks       | Interactive demo (see [Demo Mode](#demo-mode-mockhtml)) |
 
 Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately**:

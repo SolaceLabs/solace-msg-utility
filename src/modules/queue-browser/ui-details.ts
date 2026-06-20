@@ -2,6 +2,7 @@ import { ui } from './ui-core.js';
 import { state } from './state.js';
 import { escapeHtml } from '../../core/utils';
 import { logger } from '../../core/logger';
+import { showPayload } from './features.js';
 import { BLOB_URL_REVOKE_DELAY_MS } from './constants.js';
 import type { AppContext } from '../../core/types';
 
@@ -124,11 +125,15 @@ export function initDetails(ctx: AppContext) {
             ui.renderTags(els.propContainer, msg.msgProperties);
             ui.renderTags(els.appPropertiesContainer, msg.appProperties);
 
-            els.detailContent.textContent = msg.content;
+            // Payload preview + raw/copy-content actions exist only in the show-payload
+            // flavor; their elements were removed in the no-payload flavor.
+            if (showPayload()) {
+                els.detailContent.textContent = msg.content;
+                els.btnShowRaw.disabled = false;
+                els.btnShowRaw.onclick = () => ui.showRawContent(msg);
+                els.btnCopyContent.disabled = false;
+            }
 
-            els.btnShowRaw.disabled = false;
-            els.btnShowRaw.onclick = () => ui.showRawContent(msg);
-            els.btnCopyContent.disabled = false;
             els.btnCopyDest.disabled = false;
             els.btnCopyDest.onclick = () => ctx.copyToClipboard(els.detailDest.textContent, els.btnCopyDest);
             els.btnCopyReplMsgId.disabled = false;
@@ -150,9 +155,12 @@ export function initDetails(ctx: AppContext) {
         els.detailReplMsgId.textContent = '';
         els.propContainer.innerHTML = '';
         els.appPropertiesContainer.innerHTML = '';
-        els.detailContent.textContent = '';
-        els.btnShowRaw.disabled = true;
-        els.btnCopyContent.disabled = true;
+        // Payload preview + raw/copy-content controls are absent in the no-payload flavor.
+        if (showPayload()) {
+            els.detailContent.textContent = '';
+            els.btnShowRaw.disabled = true;
+            els.btnCopyContent.disabled = true;
+        }
         els.btnCopyDest.disabled = true;
         els.btnCopyReplMsgId.disabled = true;
         els.detailTypeBadge.classList.add('hidden');

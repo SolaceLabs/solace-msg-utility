@@ -29,7 +29,8 @@ const viteBin = path.join(path.dirname(vitePkgPath), vitePkg.bin.vite);
 
 const CUSTOM_FLAGS = {
     'variant': '__VITE_VARIANT',
-    'out-filename': '__VITE_OUT_FILENAME'
+    'out-filename': '__VITE_OUT_FILENAME',
+    'show-payload': '__VITE_SHOW_PAYLOAD'
 };
 
 const argv = process.argv.slice(2);

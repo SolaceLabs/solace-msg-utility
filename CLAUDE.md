@@ -35,7 +35,8 @@ btnCopy.disabled = false;
 
 ## Coverage Policy
 
-- **Target is 100%** on statements, branches, functions, and lines. `vitest.config.ts` sets the thresholds to 100 so `npm run test:coverage` emits an `ERROR: Coverage for … does not meet global threshold (100%)` whenever a metric slips. The current run is below the target — see `docs/test-report.md` for the per-file gap. Don't regress it further; prefer raising it.
+- **Target is 100%** on statements, branches, functions, and lines. `vitest.config.ts` sets the thresholds to 100 so `npm run test:coverage` emits an `ERROR: Coverage for … does not meet global threshold (100%)` whenever a metric slips. The current run is below the target — see `docs/test-report.md` for the per-file gap. Don't regress it further; prefer raising it. **The 100% target applies to the lines you add or change**: code you touch must be fully covered by tests in the same change, even though the global total is still below target.
+- **Don't run the test or coverage commands yourself — ask the user to.** After modifying code, ask the user to run `npm run test:coverage` (and `npm test` when relevant) and report the results back, rather than running them yourself — mirrors the graphify-update rule above. Use the reported output to decide follow-up fixes.
 - **v8 ignores are a last resort.** Valid categories only: jsdom environment limitations (e.g., `document.readyState === 'loading'`), SDK callbacks the test harness can't fire, defensive `catch` around contracts that never throw. DOM null-guards on required elements are NOT a valid category — convert them to `required()`.
 - Every `/* v8 ignore */` must have an inline comment explaining why the code is architecturally untestable.
 - Tests should be solid and reflective of real-world scenario. It should not be ceremonial. Don't add tests that don't add value. Reviewers are expected to point out where tests can be removed or improved.

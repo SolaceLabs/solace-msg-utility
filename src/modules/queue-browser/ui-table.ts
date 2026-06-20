@@ -3,6 +3,7 @@ import { state, getBrowser } from './state.js';
 import { icons } from './constants.js';
 import { escapeHtml } from '../../core/utils';
 import { required } from '../../core/dom';
+import { showPayload } from './features.js';
 import { logger } from '../../core/logger';
 import type { EventBus } from '../../core/types';
 
@@ -23,6 +24,12 @@ export function initTable(eventBus: EventBus) {
         const isReadOnly = state.currentQueuePermissions && state.currentQueuePermissions.READ_ONLY;
         const safeId = escapeHtml(msg.id);
         const safeDate = escapeHtml(msg.date);
+        // Payload download buttons (content + full JSON) are omitted in the no-payload
+        // flavor — the body is never decoded. Forward/Delete are unaffected.
+        const downloadBtns = showPayload()
+            ? `<button class="btn-icon btn-download-content" title="Download Content (Payload)">${icons.downloadContent}</button>
+                        <button class="btn-icon btn-download-full" title="Download Full Message (JSON)">${icons.downloadFull}</button>`
+            : '';
         return `
             <tr data-id="${safeId}" class="clickable-row">
                 <td class="row-checkbox"><input type="checkbox" class="msg-check"></td>
@@ -31,8 +38,7 @@ export function initTable(eventBus: EventBus) {
                 <td>${ui.formatBytes(msg.size)}</td>
                 <td>
                     <div class="browser-actions">
-                        <button class="btn-icon btn-download-content" title="Download Content (Payload)">${icons.downloadContent}</button>
-                        <button class="btn-icon btn-download-full" title="Download Full Message (JSON)">${icons.downloadFull}</button>
+                        ${downloadBtns}
                         <button class="btn-icon btn-forward-row" title="Forward Message">${icons.forward}</button>
                         ${!isReadOnly ? `<button class="btn-icon btn-delete-row" title="Delete" style="color: var(--status-disconnected);">${icons.delete}</button>` : ''}
                     </div>
@@ -52,16 +58,20 @@ export function initTable(eventBus: EventBus) {
         // after state.displayedMessages was filtered/cleared but before the row was
         // removed from the DOM. The handler holds the row's dataset.id but find()
         // returns undefined.
-        required(tr, '.btn-download-content').addEventListener('click', (e) => {
-            e.stopPropagation();
-            const msg = state.displayedMessages.find((m: any) => m.id === (tr as any).dataset.id);
-            if (msg) ui.downloadMessageContent(msg);
-        });
-        required(tr, '.btn-download-full').addEventListener('click', (e) => {
-            e.stopPropagation();
-            const msg = state.displayedMessages.find((m: any) => m.id === (tr as any).dataset.id);
-            if (msg) ui.downloadMessageFull(msg);
-        });
+        // Download buttons exist only in the show-payload flavor; in the no-payload
+        // flavor createRowHtml omitted them, so don't assert/wire them (required() throws).
+        if (showPayload()) {
+            required(tr, '.btn-download-content').addEventListener('click', (e) => {
+                e.stopPropagation();
+                const msg = state.displayedMessages.find((m: any) => m.id === (tr as any).dataset.id);
+                if (msg) ui.downloadMessageContent(msg);
+            });
+            required(tr, '.btn-download-full').addEventListener('click', (e) => {
+                e.stopPropagation();
+                const msg = state.displayedMessages.find((m: any) => m.id === (tr as any).dataset.id);
+                if (msg) ui.downloadMessageFull(msg);
+            });
+        }
         required(tr, '.btn-forward-row').addEventListener('click', (e) => {
             e.stopPropagation();
             const msg = state.displayedMessages.find((m: any) => m.id === (tr as any).dataset.id);
@@ -144,8 +154,11 @@ export function initTable(eventBus: EventBus) {
         const hasSelection = checked > 0;
         const isReadOnly = state.currentQueuePermissions && state.currentQueuePermissions.READ_ONLY;
 
-        els.btnBrowserDownloadContent.disabled = !hasSelection;
-        els.btnBrowserDownloadFull.disabled = !hasSelection;
+        // Download buttons are removed in the no-payload flavor.
+        if (showPayload()) {
+            els.btnBrowserDownloadContent.disabled = !hasSelection;
+            els.btnBrowserDownloadFull.disabled = !hasSelection;
+        }
         els.btnBrowserForward.disabled = (checked === 0);
 
         if (isReadOnly) {

@@ -115,7 +115,7 @@ You can open `index.html` directly in a browser via `file:///…`, but **SEMP AP
 
 ## External Runtime Dependencies
 
-The PWA loads two external scripts via `<script>` tags. They are not bundled into the HTML and must be mounted alongside it at the deployment location. The same requirement applies to `min.html` and `mock.html`; every variant of the PWA expects the two vendor files next to it.
+The PWA loads two external scripts via `<script>` tags. They are not bundled into the HTML and must be mounted alongside it at the deployment location. The same requirement applies to `min.html`, `mock.html`, `no-payload.html`, and `no-queue-copy.html`; every variant of the PWA expects the two vendor files next to it.
 
 The shell tries each file in two locations, in order:
 

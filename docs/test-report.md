@@ -48,12 +48,12 @@ The SolaceMessageUtility PWA is a modular web application for managing Solace Pu
 
 The test suite consists of **27 test files** covering 26 source files (one-to-one for source modules plus a dedicated test for the shared [`src/core/dom.ts`](../src/core/dom.ts) helpers added in the May 2026 sweep). Coverage thresholds in `vitest.config.ts` are set to **100%** across all four metrics (Statements, Branches, Functions, Lines); as of the May 2026 sweep the target is met across the board. Tests are split between dedicated unit tests per source file and three integration test files: `full-flow.test.ts` (Kernel mechanics with stub modules), `module-events.test.ts` (real cross-module event flows), and `message-pipeline.test.ts` (end-to-end `onMessage → ingest → filter → DOM`).
 
-**Coverage summary (last measured run, post May 2026 sweep):**
+**Coverage summary (last measured run, post June 2026 no-payload-flavor work):**
 ```
-Statements : 100% (2229/2229)
-Branches   : 100%  (862/862)
-Functions  : 100%  (347/347)
-Lines      : 100% (2006/2006)
+Statements : 100% (4024/4024)
+Branches   : 100% (1783/1783)
+Functions  : 100%  (627/627)
+Lines      : 100% (3645/3645)
 ```
 
 Every source file in the coverage scope reports 100% across all four metrics — the per-file gap table that earlier revisions of this report carried is no longer needed. The remaining `/* v8 ignore */` blocks are limited to CLAUDE.md's sanctioned categories (jsdom-readyState branch, SDK-callback paths the harness can't fire, defensive catches around contracts that never throw); each is documented inline at its source site.
@@ -414,6 +414,15 @@ This is the most complex service test file because `onMessage()` handles many va
 - **Non-active queue**: message stored in `messageStore` but UI not updated
 
 Each of these represents a real production scenario that affects what the user sees in the UI.
+
+#### Queue Browser No-Payload Flavor Tests
+
+The no-payload build flavor (`VITE_SHOW_PAYLOAD=false`, see [developer-guide.md → Build-time feature flags](developer-guide.md#build-time-feature-flags)) gates payload behavior on `showPayload()`. Two files cover it:
+
+- `tests/modules/queue-browser/features.test.ts` mirrors `features.ts` — the flag defaults to `true`, returns `false` only for the exact string `'false'`, and `true` otherwise (driven via `vi.stubEnv`).
+- `tests/modules/queue-browser/no-payload.test.ts` is a cohesive flag-off spec rather than a per-source mirror, because the flavor is cross-cutting: it stubs the env, installs the real module against `loadModuleDOM('queue-browser')`, and asserts the flag-off branch of each gated function — DOM removal of `[data-payload]` nodes, `service-events` never putting `content` on the stored message, `createRowHtml` omitting the download buttons, and the filter/reset/detail/forward handlers running without touching the removed elements. The payload-on (default) branches stay covered by the per-source-file suites.
+
+Gates were added only to code that runs in **both** flavors, so both branches are reachable; leaf functions reachable only via removed buttons (e.g. `downloadMessagesZip`, `getFullMessageJson`) are left unguarded and stay covered by the default suites — adding an off-branch guard there would create an uncovered branch.
 
 ### Queue Browser State Tests
 

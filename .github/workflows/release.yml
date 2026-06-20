@@ -75,7 +75,8 @@ jobs:
 
       - run: npm ci --no-audit --no-fund
 
-      # Produces dist/index.html (prod), dist/mock.html (demo), dist/min.html (minimal).
+      # Produces dist/index.html (prod), dist/mock.html (demo), dist/min.html (minimal),
+      # dist/no-payload.html (body hidden), dist/no-queue-copy.html (no Queue Copy module).
       - run: npm run build
 
       - uses: actions/upload-artifact@v4
@@ -174,10 +175,11 @@ jobs:
           name: pwa-bundle
           path: _bundle
 
-      # Only index.html is published. mock.html and min.html stay as workflow
-      # artifacts (downloadable from the run page) but are not pushed to dist.
-      # Anything else already present on the dist branch (vendor files,
-      # .nojekyll, CNAME, etc.) is left untouched.
+      # Only index.html is published. The other variants (mock.html, min.html,
+      # no-payload.html, no-queue-copy.html) stay as workflow artifacts
+      # (downloadable from the run page) but are not pushed to dist. Anything
+      # else already present on the dist branch (vendor files, .nojekyll, CNAME,
+      # etc.) is left untouched.
       - name: Copy index.html into dist branch
         run: |
           cp _bundle/index.html ./index.html

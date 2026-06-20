@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ACTIVE_MODULES as FULL_VARIANT } from '../src/variants/full';
 import { ACTIVE_MODULES as MIN_VARIANT } from '../src/variants/min';
+import { ACTIVE_MODULES as NO_QUEUE_COPY_VARIANT } from '../src/variants/no-queue-copy';
 import { ACTIVE_MODULES as ACTIVE_VARIANT } from '../src/variants/_active';
 
 /**
@@ -29,6 +30,18 @@ describe('variants', () => {
         // intent would surface in this assertion before reaching prod.
         expect(Object.keys(MIN_VARIANT).sort()).toEqual(['connections', 'queue-browser']);
         expect(MIN_VARIANT['connections']).toBeGreaterThan(MIN_VARIANT['queue-browser']);
+    });
+
+    it('no-queue-copy variant ships everything except queue-copy', () => {
+        // Locks the "full minus Queue Copy" build's contents — the whole point
+        // of this variant is that queue-copy never appears, so assert that
+        // directly. The other three modules should match the full variant.
+        expect(Object.keys(NO_QUEUE_COPY_VARIANT).sort()).toEqual([
+            'connections',
+            'queue-browser',
+            'queue-subscription-explorer',
+        ]);
+        expect(NO_QUEUE_COPY_VARIANT).not.toHaveProperty('queue-copy');
     });
 
     it('_active re-exports a populated manifest', () => {

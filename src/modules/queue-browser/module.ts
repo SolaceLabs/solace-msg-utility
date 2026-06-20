@@ -16,6 +16,7 @@ import { createServiceEvents } from './service-events.js';
 import { logger } from '../../core/logger';
 import { createUiEvents } from './ui-events.js';
 import { initDetails } from './ui-details.js';
+import { showPayload } from './features.js';
 import { required, attachBackdropClose } from '../../core/dom';
 import type { AppContext } from '../../core/types';
 
@@ -27,6 +28,14 @@ export const QueueBrowserModule = {
 
     async install(app: AppContext) {
         const { container, appState, eventBus, loadSelf } = app;
+
+        // No-payload flavor: strip every payload-bearing element from the DOM up-front,
+        // before initElements caches them, so the message body can never be displayed.
+        // Pairs with the body never being decoded onto state (service-events.ts) and the
+        // payload actions never being wired (below). See features.ts.
+        if (!showPayload()) {
+            container.querySelectorAll('[data-payload]').forEach(el => el.remove());
+        }
 
         // Instantiate services with AppContext
         const serviceEvents = createServiceEvents();
@@ -53,7 +62,7 @@ export const QueueBrowserModule = {
 
         // 1. Initialize UI elements + assert module-owned required elements up-front.
         const els = ui.initElements(container);
-        [
+        const requiredSelectors = [
             '#browser-connect-prompt', '#browser-active-view',
             '#browser-vpn-name', '#browser-queue-name', '#browser-permissions',
             '#browser-connect-error', '#browser-bind-error',
@@ -61,23 +70,32 @@ export const QueueBrowserModule = {
             '#browser-bound-queues',
             '#btn-browser-filter', '#browser-filter-modal',
             '#btn-filter-clear', '#btn-filter-cancel', '#btn-add-prop-filter',
-            '#filter-content', '#filter-msg-id', '#filter-msg-type',
+            '#filter-msg-id', '#filter-msg-type',
             '#filter-destination', '#filter-destination-type',
             '#filter-properties-rows',
             '#browser-select-all', '#browser-msg-list',
             '#count-total', '#count-displayed', '#count-selected',
             '#btn-browser-forward', '#btn-browser-delete',
-            '#btn-browser-download-content', '#btn-browser-download-full',
-            '#btn-copy-content',
-            '#detail-msg-id', '#detail-destination', '#detail-content',
+            '#detail-msg-id', '#detail-destination',
             '#detail-type-badge', '#detail-dest-badge', '#detail-repl-msg-id',
             '#detail-properties-container', '#detail-app-properties-container',
-            '#btn-show-raw', '#btn-copy-dest', '#btn-copy-repl-msg-id',
-            '#btn-raw-close', '#browser-raw-content-modal', '#raw-content-text',
+            '#btn-copy-dest', '#btn-copy-repl-msg-id',
             '#btn-forward-send', '#btn-forward-cancel', '#btn-forward-close',
             '#forward-dest-name', '#forward-dest-type',
             '#forward-error', '#forward-msg-list', '#forward-queue-count'
-        ].forEach(selector => required(container, selector));
+        ];
+        // Payload-bearing elements (Content Preview, Show Raw + modal, Download
+        // Content/Full, Body filter) exist only in the show-payload flavor — they were
+        // removed from the DOM above in the no-payload flavor, so assert them only when present.
+        if (showPayload()) {
+            requiredSelectors.push(
+                '#filter-content',
+                '#btn-browser-download-content', '#btn-browser-download-full',
+                '#btn-copy-content', '#detail-content',
+                '#btn-show-raw', '#btn-raw-close', '#browser-raw-content-modal', '#raw-content-text'
+            );
+        }
+        requiredSelectors.forEach(selector => required(container, selector));
 
         // 2. Initial Visibility
         ui.updateVisibility(appState.isConnected, appState.selectedVpn);
@@ -130,7 +148,8 @@ export const QueueBrowserModule = {
         els.inputFilterOlderThan.addEventListener('focus', prefillOlder);
         attachBackdropClose(els.modalFilter as HTMLDialogElement);
         attachBackdropClose(els.modalForward as HTMLDialogElement);
-        attachBackdropClose(els.modalRaw as HTMLDialogElement);
+        // Raw modal exists only in the show-payload flavor.
+        if (showPayload()) attachBackdropClose(els.modalRaw as HTMLDialogElement);
 
         // Add Property Filter Row
         els.btnAddPropFilter.addEventListener('click', () => ui.addPropertyFilterRow());
@@ -145,11 +164,13 @@ export const QueueBrowserModule = {
         // Bulk Actions — thin wrappers over ui-events handlers
         els.btnBrowserForward.addEventListener('click', () => uiEvents.handleBulkForward());
         els.btnBrowserDelete.addEventListener('click', () => uiEvents.handleBulkDelete());
-        els.btnBrowserDownloadContent.addEventListener('click', () => uiEvents.handleBulkDownloadContent());
-        els.btnBrowserDownloadFull.addEventListener('click', () => uiEvents.handleBulkDownloadFull());
 
-        // Copy Content Button
-        els.btnCopyContent.addEventListener('click', () => uiEvents.handleCopyContent());
+        // Payload-only bulk/copy actions — buttons removed in the no-payload flavor.
+        if (showPayload()) {
+            els.btnBrowserDownloadContent.addEventListener('click', () => uiEvents.handleBulkDownloadContent());
+            els.btnBrowserDownloadFull.addEventListener('click', () => uiEvents.handleBulkDownloadFull());
+            els.btnCopyContent.addEventListener('click', () => uiEvents.handleCopyContent());
+        }
 
         // Forward Modal
         els.btnForwardSend.addEventListener('click', () => uiEvents.handleForwardSend());
@@ -217,16 +238,18 @@ export const QueueBrowserModule = {
             }, 200);
         });
 
-        // 7. Show download buttons when JSZip is available
-        function showDownloadButtons() {
-            els.btnBrowserDownloadContent.classList.remove('hidden');
-            els.btnBrowserDownloadFull.classList.remove('hidden');
+        // 7. Show download buttons when JSZip is available. Payload flavor only —
+        // the no-payload flavor removed these buttons and never exports the body.
+        if (showPayload()) {
+            const showDownloadButtons = () => {
+                els.btnBrowserDownloadContent.classList.remove('hidden');
+                els.btnBrowserDownloadFull.classList.remove('hidden');
+            };
+            if ((window as any).jszipLoaded) {
+                showDownloadButtons();
+            }
+            eventBus.on('jszip:loaded', showDownloadButtons);
         }
-
-        if ((window as any).jszipLoaded) {
-            showDownloadButtons();
-        }
-        eventBus.on('jszip:loaded', showDownloadButtons);
 
         // 8. Initial Counts
         ui.updateCounts();

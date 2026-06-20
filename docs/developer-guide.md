@@ -17,9 +17,28 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 |---|---|
 | `npm run build:prod` | `index.html` (production, full variant) |
 | `npm run build:mock` | `mock.html` (interactive demo with canned mocks) |
-| `npm run build` | `mock.html`, `index.html`, AND `min.html` (full variant + minimal variant in one pass) |
+| `npm run build:no-payload` | `no-payload.html` (queue-browser with the message body hidden — see Build-time feature flags) |
+| `npm run build:no-queue-copy` | `no-queue-copy.html` (full variant minus the Queue Copy module) |
+| `npm run build` | `mock.html`, `index.html`, `min.html`, `no-payload.html`, AND `no-queue-copy.html` in one pass |
 
-Custom variants are built via the `scripts/vite-build.mjs` wrapper, which surfaces `--variant=<name>` and `--out-filename=<name>` because Vite's CLI parser (CAC) rejects unknown flags. The wrapper forwards them to `vite.config.ts` via private env vars. Example: `node scripts/vite-build.mjs --variant=min --out-filename=min.html`.
+Custom variants are built via the `scripts/vite-build.mjs` wrapper, which surfaces `--variant=<name>`, `--out-filename=<name>`, and `--show-payload=<bool>` because Vite's CLI parser (CAC) rejects unknown flags. The wrapper forwards them to `vite.config.ts` via private env vars. Example: `node scripts/vite-build.mjs --variant=min --out-filename=min.html`.
+
+### Build-time feature flags
+
+A **flavor** is a build-time toggle of *how a module behaves*, orthogonal to which modules a *variant* ships. The pattern:
+
+1. **Declare the flag where it's used.** Add a tiny module-local helper (don't put one-off, single-module flags in `src/core/` — see [architecture.md → Build flavors vs variants](architecture.md#build-flavors-vs-variants)). Example — [src/modules/queue-browser/features.ts](../src/modules/queue-browser/features.ts):
+
+   ```ts
+   export function showPayload(): boolean {
+       return import.meta.env.VITE_SHOW_PAYLOAD !== 'false';
+   }
+   ```
+
+   Read it as a **function call at each use site**, not a module-level `const`, so `vi.stubEnv('VITE_SHOW_PAYLOAD', ...)` controls it per-test.
+2. **Plumb the flag through the build.** Add the CLI alias to `CUSTOM_FLAGS` in [scripts/vite-build.mjs](../scripts/vite-build.mjs), and a `define` in [vite.config.ts](../vite.config.ts): `'import.meta.env.VITE_SHOW_PAYLOAD': JSON.stringify(input ?? 'true')`. The `define` makes the flag a compile-time constant, so Rollup dead-code-eliminates the disabled branches from that bundle.
+3. **Add an npm script** that calls the wrapper with the flag + `--out-filename`, and append it to the aggregate `build`.
+4. **Test both states.** Stub the env in a flag-off suite (`vi.stubEnv` / `vi.unstubAllEnvs`); the default suites cover flag-on. Every `if (flag())` branch must be hit in both states to keep coverage at 100%. Gate only code that *runs in both flavors* — adding a guard to a function that's unreachable when the flag is off creates an uncovered off-branch (let unreachable leaf code stay covered by the flag-on suites instead).
 
 ### Build internals
 
@@ -103,6 +122,7 @@ src/
   variants/
     full.ts            # Default variant — every module the app ships with
     min.ts             # Minimal variant — connections + queue-browser only
+    no-queue-copy.ts   # Full variant minus the Queue Copy module
     _active.ts         # One-line re-export from one variant (default ./full)
   main.ts              # Bootstrap (imports ./css/main.css and ./registry)
   registry.ts          # Resolves variant manifest → PwaModule via import.meta.glob

@@ -1,5 +1,6 @@
 import { state, shouldShowMessage, defaultActiveFilters } from './state.js';
 import { ui } from './ui-core.js';
+import { showPayload } from './features.js';
 import { pickQueue } from '../../core/components/queue-picker';
 import { primarySempContextFrom } from '../../core/services/sempContext';
 import type { AppContext } from '../../core/types';
@@ -204,7 +205,7 @@ export function createUiEvents(ctx: AppContext, service: any) {
 
         // Reset filters
         state.activeFilters = defaultActiveFilters();
-        els.inputFilterContent.value = '';
+        if (showPayload()) els.inputFilterContent.value = '';
         els.inputFilterId.value = '';
         els.inputFilterDest.value = '';
         els.inputFilterType.value = 'ANY';
@@ -228,7 +229,7 @@ export function createUiEvents(ctx: AppContext, service: any) {
     function clearFilters() {
         const els = ui.getElements();
         // Reset inputs
-        els.inputFilterContent.value = '';
+        if (showPayload()) els.inputFilterContent.value = '';
         els.inputFilterId.value = '';
         els.inputFilterDest.value = '';
         els.inputFilterType.value = 'ANY';
@@ -252,8 +253,9 @@ export function createUiEvents(ctx: AppContext, service: any) {
 
     function applyFilters() {
         const els = ui.getElements();
-        // Update active filters from Inputs
-        state.activeFilters.content = els.inputFilterContent.value;
+        // Update active filters from Inputs. The body-content input is absent in the
+        // no-payload flavor, so leave activeFilters.content at its '' default.
+        if (showPayload()) state.activeFilters.content = els.inputFilterContent.value;
         state.activeFilters.msgId = els.inputFilterId.value;
         state.activeFilters.dest = els.inputFilterDest.value;
         state.activeFilters.type = els.inputFilterType.value;

@@ -1,5 +1,6 @@
 import { state, ingestMessage, getMessages, shouldShowMessage } from './state.js';
 import { ui } from './ui-core.js';
+import { showPayload } from './features.js';
 import { showToast } from '../../core/toast';
 import { logger } from '../../core/logger';
 
@@ -126,32 +127,36 @@ export function createServiceEvents() {
             logger.warn('Failed to determine message type', e);
         }
 
-        // Safely extract content
+        // Safely extract content — payload flavor only. In the no-payload flavor the body
+        // is never decoded, so it can never reach the message object stored in state; it
+        // stays completely inaccessible. Forward/Delete operate on _originalMsg, not this string.
         let contentStr = '';
-        const attachment = msg.getBinaryAttachment();
-        const sdtCnt = msg.getSdtContainer();
-        if (sdtCnt !== null) {
-            if (sdtCnt.getType() === solace.SDTFieldType.STRING) {
-                contentStr = sdtCnt.getValue();
-            } else if (sdtCnt.getType() === solace.SDTFieldType.MAP) {
-                contentStr = '[SDT Map Data - Not Supported Yet]';
-            } else if (sdtCnt.getType() === solace.SDTFieldType.STREAM) {
-                contentStr = '[SDT Stream Data - Not Supported Yet]';
+        if (showPayload()) {
+            const attachment = msg.getBinaryAttachment();
+            const sdtCnt = msg.getSdtContainer();
+            if (sdtCnt !== null) {
+                if (sdtCnt.getType() === solace.SDTFieldType.STRING) {
+                    contentStr = sdtCnt.getValue();
+                } else if (sdtCnt.getType() === solace.SDTFieldType.MAP) {
+                    contentStr = '[SDT Map Data - Not Supported Yet]';
+                } else if (sdtCnt.getType() === solace.SDTFieldType.STREAM) {
+                    contentStr = '[SDT Stream Data - Not Supported Yet]';
+                } else {
+                    contentStr = '[SDT Unknown Data - Not Supported Yet]';
+                }
+            } else if (attachment) {
+                if (typeof attachment === 'string') {
+                    contentStr = attachment;
+                } else if (attachment instanceof Uint8Array || attachment instanceof ArrayBuffer) {
+                    try {
+                        contentStr = new TextDecoder().decode(attachment);
+                    } catch (e) { contentStr = '[Binary Data Error]'; }
+                } else {
+                    contentStr = '[Unknown Binary Data]';
+                }
             } else {
-                contentStr = '[SDT Unknown Data - Not Supported Yet]';
+                contentStr = msg.getXmlContent() || '';
             }
-        } else if (attachment) {
-            if (typeof attachment === 'string') {
-                contentStr = attachment;
-            } else if (attachment instanceof Uint8Array || attachment instanceof ArrayBuffer) {
-                try {
-                    contentStr = new TextDecoder().decode(attachment);
-                } catch (e) { contentStr = '[Binary Data Error]'; }
-            } else {
-                contentStr = '[Unknown Binary Data]';
-            }
-        } else {
-            contentStr = msg.getXmlContent() || '';
         }
 
         // TIMESTAMP Handling - Sender Timestamp preference
@@ -215,9 +220,15 @@ export function createServiceEvents() {
                     return obj;
                 } catch (e) { return {}; }
             })(),
-            content: contentStr,
             _originalMsg: msg // Store original for details
         };
+
+        // Payload flavor only: attach the decoded body. The no-payload flavor leaves
+        // `content` off the stored object entirely, so the body is never accessible
+        // through app state.
+        if (showPayload()) {
+            m.content = contentStr;
+        }
 
         // Store in State — atomic ingest enforces the moving-window cap and keeps
         // displayedMessages + DOM in sync with the store in one synchronous pass.

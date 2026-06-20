@@ -577,6 +577,16 @@ The `inject-module-templates` Vite plugin scans `src/modules/` for every directo
 
 **To ship a build variant**: drop a new `src/variants/<name>.ts` listing the desired subset, then `VITE_VARIANT=<name> npm run build`.
 
+### Build flavors vs variants
+
+A **variant** decides *which modules* ship (the `ACTIVE_MODULES` manifest). A **flavor** decides *how a module behaves* at build time, via a build-time feature flag — orthogonal to the variant. The two compose: any variant can be built in any flavor.
+
+The first flavor is the queue-browser **no-payload** build. [src/modules/queue-browser/features.ts](../src/modules/queue-browser/features.ts) exports `showPayload()`, which reads `import.meta.env.VITE_SHOW_PAYLOAD` (default `'true'`). The flag is module-local — only queue-browser consumes it, and "payload" is a queue-browser concept (the cross-module capability seam is the separate [RBAC plan](rbac-variant-plan.md)'s `CapabilityProvider`). When `VITE_SHOW_PAYLOAD='false'`:
+
+- **The body is never decoded onto state.** `service-events.onMessage` skips the SDT/binary/XML decode and never sets `content` on the stored message object, so the payload is completely inaccessible through app state. The raw SDK message (`_originalMsg`) is retained only because Forward/Delete need it.
+- **Payload DOM is removed at install.** Every payload-bearing element in [index.html](../src/modules/queue-browser/index.html) carries a `data-payload` attribute (the single source of truth for "what is payload"); `module.ts` removes `[data-payload]` nodes up-front, and the `required()` assertion list is conditional so the removed elements aren't asserted. Removed: Content Preview, Copy Content, Show Raw + Raw modal, Download Content, Download Full, and the Body-Content filter. **Kept**: Forward, Delete, all metadata, and every other filter.
+- **The build plumbs the flag** through `scripts/vite-build.mjs` (`--show-payload=false` → `__VITE_SHOW_PAYLOAD`) into a `vite.config.ts` `define` of `import.meta.env.VITE_SHOW_PAYLOAD`. Because `showPayload()` then folds to a constant, Rollup dead-code-eliminates the payload branches from `dist/no-payload.html` (the inert `data-payload` markup stays in the injected `<template>`, but the live nodes are removed at install and the decode/wiring JS is gone). Emitted by `npm run build:no-payload`.
+
 ---
 
 ## CSS Organization

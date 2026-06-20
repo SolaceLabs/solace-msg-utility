@@ -765,9 +765,9 @@
     "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\package.json": {
-    "mtime": 1779678238.4332733,
-    "ast_hash": "be8fd1d613cacc96ea171d9f47564b5d",
-    "semantic_hash": "be8fd1d613cacc96ea171d9f47564b5d"
+    "mtime": 1781858561.7121162,
+    "ast_hash": "42ffccf5f01a139da6ddc8e92228b2ad",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\setup.sh": {
     "mtime": 1779091773.2639747,
@@ -780,9 +780,9 @@
     "semantic_hash": "ee630bceaaf044c28391d0e0fafdc338"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\vite.config.ts": {
-    "mtime": 1779109561.7379038,
-    "ast_hash": "63599a60a7cb094e369a8ec9a97927fa",
-    "semantic_hash": "63599a60a7cb094e369a8ec9a97927fa"
+    "mtime": 1781858549.676865,
+    "ast_hash": "4deb48024f2d45b5086e1ae7de43c992",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\vitest.config.ts": {
     "mtime": 1779109561.7404113,
@@ -820,9 +820,9 @@
     "semantic_hash": "2d562ed205372c49c7baad394e49c104"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\scripts\\vite-build.mjs": {
-    "mtime": 1779091773.261424,
-    "ast_hash": "49d723b3596c2fa35713b4984416bad6",
-    "semantic_hash": "49d723b3596c2fa35713b4984416bad6"
+    "mtime": 1781858536.1490066,
+    "ast_hash": "0999fb439a215a64aaea22180249f6f6",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\main.ts": {
     "mtime": 1779091773.354743,
@@ -945,9 +945,9 @@
     "semantic_hash": "a8f19c7400347f082f91ca7774be1afe"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\core\\services\\solace-publisher.ts": {
-    "mtime": 1779091773.3246577,
-    "ast_hash": "f87dfced7359c9e3fafbd8aeed41ef45",
-    "semantic_hash": "f87dfced7359c9e3fafbd8aeed41ef45"
+    "mtime": 1779754430.7583432,
+    "ast_hash": "227151d27da0261aaeddb54708521b2d",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\connections\\config.js": {
     "mtime": 1779091773.3589888,
@@ -970,14 +970,14 @@
     "semantic_hash": "c243ff69ff5a08a4fb38976fd2723c31"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\module.ts": {
-    "mtime": 1779091773.3795044,
-    "ast_hash": "2e52087f721ba653b1232d0a5bd91187",
-    "semantic_hash": "2e52087f721ba653b1232d0a5bd91187"
+    "mtime": 1781858741.5430198,
+    "ast_hash": "682d235ca2c6446e44c7d82703d5093c",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\service-events.ts": {
-    "mtime": 1779676985.2718658,
-    "ast_hash": "438d2360f74c0dd7a75392663371a075",
-    "semantic_hash": "438d2360f74c0dd7a75392663371a075"
+    "mtime": 1781858806.6728508,
+    "ast_hash": "e430041fb0b1157f29bef5c1c2cb8290",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\service.ts": {
     "mtime": 1779091773.3843226,
@@ -990,29 +990,29 @@
     "semantic_hash": "dea39fd5028986da0a9d08101eb0d652"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\ui-core.js": {
-    "mtime": 1779091773.392405,
-    "ast_hash": "f639c578f4ca0eefd3d6329946a32590",
-    "semantic_hash": "f639c578f4ca0eefd3d6329946a32590"
+    "mtime": 1781859067.2886007,
+    "ast_hash": "358953a941ddd38065bab170486ce691",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\ui-details.ts": {
-    "mtime": 1779676997.858608,
-    "ast_hash": "89ad3f2fea803a7691a0da45a744c5b1",
-    "semantic_hash": "89ad3f2fea803a7691a0da45a744c5b1"
+    "mtime": 1781858988.2125533,
+    "ast_hash": "a68b25a8da422eb499f7002b71bdefd0",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\ui-events.ts": {
-    "mtime": 1779091773.3980327,
-    "ast_hash": "ce814aad4ab53fa2f68a1c2be7b93088",
-    "semantic_hash": "ce814aad4ab53fa2f68a1c2be7b93088"
+    "mtime": 1781859030.059699,
+    "ast_hash": "87e4363cb8d5a97c43d71aec26a5c010",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\ui-forward.js": {
-    "mtime": 1779091773.4011085,
-    "ast_hash": "f2f8b1adf85c963e1dcb45d834e5f912",
-    "semantic_hash": "f2f8b1adf85c963e1dcb45d834e5f912"
+    "mtime": 1781859054.555081,
+    "ast_hash": "9b81fd1c3a9c1568afca08c7691bc836",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\ui-table.ts": {
-    "mtime": 1779091773.403641,
-    "ast_hash": "352625ef949569926b6d530b2f0406f3",
-    "semantic_hash": "352625ef949569926b6d530b2f0406f3"
+    "mtime": 1781858946.2653544,
+    "ast_hash": "46f8819f174897c5b20384adc83c9091",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-copy\\constants.ts": {
     "mtime": 1779091773.406165,
@@ -1030,9 +1030,9 @@
     "semantic_hash": "8fd73734db9e7f84cd82dc01ae30d765"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-copy\\service-copy.ts": {
-    "mtime": 1779091773.416615,
-    "ast_hash": "c2b8c6154ac66816deb4ee24af1cf33c",
-    "semantic_hash": "c2b8c6154ac66816deb4ee24af1cf33c"
+    "mtime": 1779754398.8080962,
+    "ast_hash": "5e34286e298da91048fbd9a6c6f70d6b",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-copy\\service-verify-mock.ts": {
     "mtime": 1779091773.4192793,
@@ -1040,9 +1040,9 @@
     "semantic_hash": "0d84c54dd8eca0604cfbba190ba1d2d7"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-copy\\service-verify.ts": {
-    "mtime": 1779722218.7824073,
-    "ast_hash": "fd1ae6ce11e6bd87c8256bee5f06a233",
-    "semantic_hash": "fd1ae6ce11e6bd87c8256bee5f06a233"
+    "mtime": 1779754412.9954581,
+    "ast_hash": "2507893f54ac9424ece9ac3453dd7d41",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-copy\\service.ts": {
     "mtime": 1779091773.4247203,
@@ -1410,9 +1410,9 @@
     "semantic_hash": "3aafc6263d093d48ca8c770433371bfc"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\docs\\architecture.md": {
-    "mtime": 1779091769.9672296,
-    "ast_hash": "2287bb3fdbccfe40491ff520043265ff",
-    "semantic_hash": "2287bb3fdbccfe40491ff520043265ff"
+    "mtime": 1781861410.852511,
+    "ast_hash": "a612c864fd79af8f26af9b8a27162073",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\docs\\contributing.md": {
     "mtime": 1779091769.971174,
@@ -1420,14 +1420,14 @@
     "semantic_hash": "2bbb82e29e27d5ec063083de0eb6b292"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\docs\\deployment.md": {
-    "mtime": 1779723797.4860291,
-    "ast_hash": "dec94e9c4d66b4863b0c2613871e288c",
-    "semantic_hash": "dec94e9c4d66b4863b0c2613871e288c"
+    "mtime": 1781861526.3568425,
+    "ast_hash": "a7ed73a771f6246d3d8f4b2e7c00fb03",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\docs\\developer-guide.md": {
-    "mtime": 1779723810.0500584,
-    "ast_hash": "4ed43a4b05dcb4db44c83458af9af74f",
-    "semantic_hash": "4ed43a4b05dcb4db44c83458af9af74f"
+    "mtime": 1781861459.1912627,
+    "ast_hash": "2c3722726580cc2ff5116a0f6694a5cf",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\docs\\git.md": {
     "mtime": 1779091454.7390022,
@@ -1435,14 +1435,14 @@
     "semantic_hash": "aba28598b27c51ffa778beebda23d703"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\docs\\test-report.md": {
-    "mtime": 1779091770.017905,
-    "ast_hash": "8b1d27ef7967198fb88dcd41d0f623cc",
-    "semantic_hash": "8b1d27ef7967198fb88dcd41d0f623cc"
+    "mtime": 1781861592.419979,
+    "ast_hash": "19b8e6e95949965002e3542f17a2d6a8",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\docs\\user-guide.md": {
-    "mtime": 1779723915.9474125,
-    "ast_hash": "7e277fde1934e0fb942eb7b3caa841b1",
-    "semantic_hash": "7e277fde1934e0fb942eb7b3caa841b1"
+    "mtime": 1781861491.8481386,
+    "ast_hash": "b005217f404ea3435fdfad12c2c7327f",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\index.html": {
     "mtime": 1779091773.351215,
@@ -1455,9 +1455,9 @@
     "semantic_hash": "ba397872939f5be760047bfaf6a949f6"
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\index.html": {
-    "mtime": 1779091773.375877,
-    "ast_hash": "8ab230249b15e2a2b888f981dda6e765",
-    "semantic_hash": "8ab230249b15e2a2b888f981dda6e765"
+    "mtime": 1781858637.4029582,
+    "ast_hash": "52f6a4a1fb161800bb91b79499733bf1",
+    "semantic_hash": ""
   },
   "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-copy\\index.html": {
     "mtime": 1779091773.4082084,
@@ -1508,5 +1508,30 @@
     "mtime": 1779418117.8041084,
     "ast_hash": "a70613aaf29b208e10d6ecbebea96ea9",
     "semantic_hash": "a70613aaf29b208e10d6ecbebea96ea9"
+  },
+  "C:\\Users\\hamly\\git\\solabs-msg-utility\\src\\modules\\queue-browser\\features.ts": {
+    "mtime": 1781858513.4522102,
+    "ast_hash": "d3a888aed456fcef720cf602e1f442f3",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\hamly\\git\\solabs-msg-utility\\tests\\modules\\queue-browser\\features.test.ts": {
+    "mtime": 1781859657.5442753,
+    "ast_hash": "cba7830c6952f8f40adf74808ea94313",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\hamly\\git\\solabs-msg-utility\\tests\\modules\\queue-browser\\no-payload.test.ts": {
+    "mtime": 1781859694.2236502,
+    "ast_hash": "8654ccf9505fc87e760f7dc2a66dbc19",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\hamly\\git\\solabs-msg-utility\\docs\\improvement-plan.md": {
+    "mtime": 1779754540.5479784,
+    "ast_hash": "f30a2c46354fd22194541a12623725ed",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\hamly\\git\\solabs-msg-utility\\docs\\rbac-variant-plan.md": {
+    "mtime": 1780379341.0940468,
+    "ast_hash": "21e5c27448d1ea0d4a483975f1943661",
+    "semantic_hash": ""
   }
 }

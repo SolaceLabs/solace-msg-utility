@@ -93,9 +93,9 @@
                 <span class="info-count">Selected: <strong id="count-selected">0</strong></span>
             </div>
             <div class="flex-row items-center gap-2">
-                <button id="btn-browser-download-content" class="btn btn-secondary btn-sm hidden hover-success" disabled
+                <button id="btn-browser-download-content" data-payload class="btn btn-secondary btn-sm hidden hover-success" disabled
                     title="Download Content Only">Download Content</button>
-                <button id="btn-browser-download-full" class="btn btn-secondary btn-sm hidden hover-success" disabled
+                <button id="btn-browser-download-full" data-payload class="btn btn-secondary btn-sm hidden hover-success" disabled
                     title="Download Full Message (JSON)">Download Full</button>
                 <button id="btn-browser-forward" class="btn btn-secondary btn-sm hover-success" disabled
                     title="Forward Selected">Forward</button>
@@ -133,7 +133,7 @@
                         <h3 class="text-secondary m-0" style="font-size: 1rem;">Message Details</h3>
                         <span id="detail-type-badge" class="badge badge-outline-info hidden"></span>
                     </div>
-                    <button id="btn-show-raw" class="btn btn-secondary btn-sm" disabled>Show Raw Content</button>
+                    <button id="btn-show-raw" data-payload class="btn btn-secondary btn-sm" disabled>Show Raw Content</button>
                 </div>
 
                 <div class="flex-row mb-6 gap-4">
@@ -190,7 +190,7 @@
                     <div id="detail-app-properties-container" class="display-output flex-wrap"></div>
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" data-payload>
                     <div class="detail-header-row">
                         <div class="detail-label">Content Preview</div>
                         <button id="btn-copy-content" class="btn btn-secondary btn-sm" disabled
@@ -285,7 +285,7 @@
         </div>
 
         <!-- Body -->
-        <div class="form-group">
+        <div class="form-group" data-payload>
             <label>Body Content (Contains)</label>
             <input type="text" id="filter-content" class="form-control" placeholder="e.g. orderId">
         </div>
@@ -317,7 +317,7 @@
 </dialog>
 
 <!-- Raw Content Modal (native <dialog>) -->
-<dialog id="browser-raw-content-modal" class="modal-lg" aria-labelledby="browser-raw-content-modal-title">
+<dialog id="browser-raw-content-modal" data-payload class="modal-lg" aria-labelledby="browser-raw-content-modal-title">
     <div class="flex-row justify-between items-center mb-4">
         <h3 id="browser-raw-content-modal-title" class="m-0">Raw Content</h3>
         <button id="btn-raw-close" class="btn-icon" title="Close" aria-label="Close">

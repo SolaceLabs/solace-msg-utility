@@ -180,6 +180,11 @@ export default defineConfig(({ mode }) => {
     // registry resolves at build time. Unset → the default re-export in
     // `_active.ts` wins (currently `./full`).
     const variant = readBuildInput('__VITE_VARIANT');
+    // `--show-payload=false` ships the "no-payload" flavor of queue-browser (body
+    // never decoded into state, payload DOM removed at install). Default 'true' is
+    // the current behavior. Baked into `import.meta.env.VITE_SHOW_PAYLOAD` so the
+    // module's `showPayload()` reads it at runtime. (Tests stub it via vi.stubEnv.)
+    const showPayloadInput = readBuildInput('__VITE_SHOW_PAYLOAD');
     return {
         root: 'src',
         plugins: [
@@ -190,7 +195,8 @@ export default defineConfig(({ mode }) => {
             outputName && renameHtmlAsset('index.html', outputName)
         ].filter(Boolean) as PluginOption[],
         define: {
-            __APP_VERSION__: JSON.stringify(pkgVersion)
+            __APP_VERSION__: JSON.stringify(pkgVersion),
+            'import.meta.env.VITE_SHOW_PAYLOAD': JSON.stringify(showPayloadInput ?? 'true')
         },
         build: {
             target: 'esnext',

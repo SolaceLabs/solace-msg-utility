@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/vite-build.mjs --mode mock && node scripts/vite-build.mjs && node scripts/vite-build.mjs --variant=min --out-filename=min.html",
+    "build": "node scripts/vite-build.mjs --mode mock && node scripts/vite-build.mjs && node scripts/vite-build.mjs --variant=min --out-filename=min.html && node scripts/vite-build.mjs --show-payload=false --out-filename=no-payload.html && node scripts/vite-build.mjs --variant=no-queue-copy --out-filename=no-queue-copy.html",
     "build:prod": "node scripts/vite-build.mjs",
     "build:mock": "node scripts/vite-build.mjs --mode mock",
+    "build:no-payload": "node scripts/vite-build.mjs --show-payload=false --out-filename=no-payload.html",
+    "build:no-queue-copy": "node scripts/vite-build.mjs --variant=no-queue-copy --out-filename=no-queue-copy.html",
     "preview": "vite preview",
     "test": "vitest run --pool=threads --maxWorkers=12",
     "test:watch": "vitest --pool=threads --maxWorkers=12",
@@ -29,4 +31,4 @@
     "vite-plugin-singlefile": "^2.0.3",
     "vitest": "^4.1.1"
   }
-}
+}/

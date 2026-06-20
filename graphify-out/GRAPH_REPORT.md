@@ -1,55 +1,60 @@
-# Graph Report - .  (2026-05-26)
+# Graph Report - solabs-msg-utility  (2026-06-19)
 
 ## Corpus Check
-- 33 files · ~255,543 words
+- 138 files · ~260,446 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1810 nodes · 2850 edges · 136 communities (103 shown, 33 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 171 edges (avg confidence: 0.84)
-- Token cost: 186,846 input · 186,846 output
+- 1970 nodes · 3331 edges · 141 communities (111 shown, 30 thin omitted)
+- Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 171 edges (avg confidence: 0.84)
+- Token cost: 0 input · 0 output
+
+## Graph Freshness
+- Built from commit: `b0d177b6`
+- Run `git rev-parse HEAD` and compare to check if the graph is stale.
+- Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- [[_COMMUNITY_Go Web Proxy & Hosted Gateway|Go Web Proxy & Hosted Gateway]]
-- [[_COMMUNITY_Legacy Connections UI|Legacy Connections UI]]
-- [[_COMMUNITY_Kernel & Config Persistence Tests|Kernel & Config Persistence Tests]]
-- [[_COMMUNITY_Connection Type System|Connection Type System]]
-- [[_COMMUNITY_Connections Module Architecture|Connections Module Architecture]]
-- [[_COMMUNITY_Architecture Documentation|Architecture Documentation]]
-- [[_COMMUNITY_Connections UI Buttons|Connections UI Buttons]]
-- [[_COMMUNITY_Core Components & Test Helpers|Core Components & Test Helpers]]
-- [[_COMMUNITY_Queue Copy UI Rendering|Queue Copy UI Rendering]]
-- [[_COMMUNITY_Queue Picker Dialog Tests|Queue Picker Dialog Tests]]
-- [[_COMMUNITY_SEMP v1 Message ID Lookups|SEMP v1 Message ID Lookups]]
-- [[_COMMUNITY_Broker Connection Form|Broker Connection Form]]
-- [[_COMMUNITY_Contributing Docs Code Samples|Contributing Docs Code Samples]]
-- [[_COMMUNITY_Connections Module Events|Connections Module Events]]
-- [[_COMMUNITY_Queue Browser UI Panels|Queue Browser UI Panels]]
-- [[_COMMUNITY_Queue Copy Modal UI|Queue Copy Modal UI]]
-- [[_COMMUNITY_Dependencies (package.json)|Dependencies (package.json)]]
-- [[_COMMUNITY_Queue Copy Job Engine|Queue Copy Job Engine]]
-- [[_COMMUNITY_Queue Browser State Module|Queue Browser State Module]]
-- [[_COMMUNITY_Queue Copy Verification Flow|Queue Copy Verification Flow]]
-- [[_COMMUNITY_Release Process Docs|Release Process Docs]]
-- [[_COMMUNITY_Queue Copy Module Tests|Queue Copy Module Tests]]
-- [[_COMMUNITY_Queue Browser Module Files|Queue Browser Module Files]]
-- [[_COMMUNITY_Connections Shared Mocks|Connections Shared Mocks]]
-- [[_COMMUNITY_Queue Browser DOM Helpers|Queue Browser DOM Helpers]]
-- [[_COMMUNITY_Go Gateway Routing|Go Gateway Routing]]
-- [[_COMMUNITY_Queue Browser Error Paths|Queue Browser Error Paths]]
-- [[_COMMUNITY_App Bootstrap & Registry|App Bootstrap & Registry]]
-- [[_COMMUNITY_Queue Browser Ack Tests|Queue Browser Ack Tests]]
-- [[_COMMUNITY_Queue Browser DownloadDelete UI|Queue Browser Download/Delete UI]]
-- [[_COMMUNITY_Queue Copy Publish Hooks|Queue Copy Publish Hooks]]
-- [[_COMMUNITY_Build System & solclient Bootstrap|Build System & solclient Bootstrap]]
-- [[_COMMUNITY_Queue Browser Download Tests|Queue Browser Download Tests]]
-- [[_COMMUNITY_Queue Browser Core Tests|Queue Browser Core Tests]]
-- [[_COMMUNITY_Subscription Explorer UI|Subscription Explorer UI]]
-- [[_COMMUNITY_Message Filter Dialog UI|Message Filter Dialog UI]]
-- [[_COMMUNITY_Container Mocks (test setup)|Container Mocks (test setup)]]
-- [[_COMMUNITY_Button Click Test Spies|Button Click Test Spies]]
-- [[_COMMUNITY_QueueVPN Picker Cache|Queue/VPN Picker Cache]]
-- [[_COMMUNITY_TypeScript Configuration|TypeScript Configuration]]
+- [[_COMMUNITY_Community 0|Community 0]]
+- [[_COMMUNITY_Community 1|Community 1]]
+- [[_COMMUNITY_Community 2|Community 2]]
+- [[_COMMUNITY_Community 3|Community 3]]
+- [[_COMMUNITY_Community 4|Community 4]]
+- [[_COMMUNITY_Community 5|Community 5]]
+- [[_COMMUNITY_Community 6|Community 6]]
+- [[_COMMUNITY_Community 7|Community 7]]
+- [[_COMMUNITY_Community 8|Community 8]]
+- [[_COMMUNITY_Community 9|Community 9]]
+- [[_COMMUNITY_Community 10|Community 10]]
+- [[_COMMUNITY_Community 11|Community 11]]
+- [[_COMMUNITY_Community 12|Community 12]]
+- [[_COMMUNITY_Community 13|Community 13]]
+- [[_COMMUNITY_Community 14|Community 14]]
+- [[_COMMUNITY_Community 15|Community 15]]
+- [[_COMMUNITY_Community 16|Community 16]]
+- [[_COMMUNITY_Community 17|Community 17]]
+- [[_COMMUNITY_Community 18|Community 18]]
+- [[_COMMUNITY_Community 19|Community 19]]
+- [[_COMMUNITY_Community 20|Community 20]]
+- [[_COMMUNITY_Community 21|Community 21]]
+- [[_COMMUNITY_Community 22|Community 22]]
+- [[_COMMUNITY_Community 23|Community 23]]
+- [[_COMMUNITY_Community 24|Community 24]]
+- [[_COMMUNITY_Community 25|Community 25]]
+- [[_COMMUNITY_Community 26|Community 26]]
+- [[_COMMUNITY_Community 27|Community 27]]
+- [[_COMMUNITY_Community 28|Community 28]]
+- [[_COMMUNITY_Community 29|Community 29]]
+- [[_COMMUNITY_Community 30|Community 30]]
+- [[_COMMUNITY_Community 31|Community 31]]
+- [[_COMMUNITY_Community 32|Community 32]]
+- [[_COMMUNITY_Community 33|Community 33]]
+- [[_COMMUNITY_Community 34|Community 34]]
+- [[_COMMUNITY_Community 35|Community 35]]
+- [[_COMMUNITY_Community 36|Community 36]]
+- [[_COMMUNITY_Community 37|Community 37]]
+- [[_COMMUNITY_Community 38|Community 38]]
+- [[_COMMUNITY_Community 39|Community 39]]
 - [[_COMMUNITY_Community 40|Community 40]]
 - [[_COMMUNITY_Community 41|Community 41]]
 - [[_COMMUNITY_Community 42|Community 42]]
@@ -115,6 +120,7 @@
 - [[_COMMUNITY_Community 102|Community 102]]
 - [[_COMMUNITY_Community 103|Community 103]]
 - [[_COMMUNITY_Community 104|Community 104]]
+- [[_COMMUNITY_Community 105|Community 105]]
 - [[_COMMUNITY_Community 106|Community 106]]
 - [[_COMMUNITY_Community 107|Community 107]]
 - [[_COMMUNITY_Community 108|Community 108]]
@@ -141,18 +147,23 @@
 - [[_COMMUNITY_Community 133|Community 133]]
 - [[_COMMUNITY_Community 134|Community 134]]
 - [[_COMMUNITY_Community 135|Community 135]]
+- [[_COMMUNITY_Community 136|Community 136]]
+- [[_COMMUNITY_Community 137|Community 137]]
+- [[_COMMUNITY_Community 138|Community 138]]
+- [[_COMMUNITY_Community 139|Community 139]]
+- [[_COMMUNITY_Community 140|Community 140]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `loadModuleDOM()` - 29 edges
-2. `state` - 28 edges
-3. `logger` - 24 edges
-4. `ui` - 22 edges
-5. `Architecture` - 22 edges
-6. `createEventBus()` - 21 edges
-7. `required()` - 17 edges
-8. `QueueBrowserModule (priority 30)` - 17 edges
-9. `scripts` - 16 edges
-10. `quietLogger()` - 15 edges
+1. `loadModuleDOM()` - 38 edges
+2. `AppContext` - 35 edges
+3. `state` - 33 edges
+4. `createEventBus()` - 30 edges
+5. `logger` - 30 edges
+6. `ui` - 27 edges
+7. `Architecture` - 22 edges
+8. `required()` - 18 edges
+9. `scripts` - 17 edges
+10. `QueueBrowserModule (priority 30)` - 17 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Queue Discovery Screenshot` --references--> `queue-discovery index.html`  [INFERRED]
@@ -174,171 +185,171 @@
 - **Two independent broker connections (Solace client + SEMP REST) sharing one host** — readme_dualConnection, connhtml_brokerHost, connmoduletest_bridgingHooks [INFERRED 0.85]
 - **Containerised gateway: distroless image + named volume + proxy paths** — readme_containerGateway, dockercompose_doc, deploymentdoc_scratchDistroless, deploymentdoc_proxyPathScheme, deploymentdoc_selfSignedCert [EXTRACTED 1.00]
 
-## Communities (136 total, 33 thin omitted)
+## Communities (141 total, 30 thin omitted)
 
-### Community 0 - "Go Web Proxy & Hosted Gateway"
+### Community 0 - "Community 0"
 Cohesion: 0.05
 Nodes (63): config, hostedHandler, envOr(), loadConfig(), main(), parseLogLevel(), TestEnvOr(), TestLoadConfig_Defaults() (+55 more)
 
-### Community 1 - "Legacy Connections UI"
-Cohesion: 0.05
-Nodes (42): DEFAULT_CONFIG, cfg, errors, validateConfig(), showToast(), c, rafCallbacks, ToastType (+34 more)
+### Community 1 - "Community 1"
+Cohesion: 0.11
+Nodes (22): extractMoreCookieBody(), ParsedSubPage, ParseResult, parseSubscriptionsResponse(), SubscriptionRow, r, createService(), SubFetchPage (+14 more)
 
-### Community 2 - "Kernel & Config Persistence Tests"
-Cohesion: 0.07
-Nodes (32): plain, raw, cfg, consoleSpy, err, result, ConnectionsModule, cfg (+24 more)
+### Community 2 - "Community 2"
+Cohesion: 0.13
+Nodes (17): SolaceConfig, buildBrokerUrl(), isHosted(), probeHosted(), setHosted(), normalizeUrlPath(), createServiceSolace(), SolaceClient (+9 more)
 
-### Community 3 - "Connection Type System"
+### Community 3 - "Community 3"
 Cohesion: 0.05
 Nodes (44): ConnectionConfig, SempConfig, SempContext interface, SolaceConfig, Connections UI module, ui.cacheElements, ui.updateInputState, Kernel class (+36 more)
 
-### Community 4 - "Connections Module Architecture"
+### Community 4 - "Community 4"
 Cohesion: 0.05
 Nodes (43): Shared Broker Host field, Connections module HTML template, Bridging: factory hooks to AppState+bus, connection:check-connection cross-module dispatch, createTestContext (test helper), Input validation debounce timer cancel, max-messages cap validation/persistence, ConnectionsModule Test Suite (+35 more)
 
-### Community 5 - "Architecture Documentation"
+### Community 5 - "Community 5"
 Cohesion: 0.07
 Nodes (43): AppContext (Dependency Injection), AppState (Global State), Architecture Anchors, Circular Dependency Resolution (wire pattern), Coverage Policy (100% target), CSS Organization (split by responsibility), Defensive-Guard Tests Pattern, DOM Template Injection (per-module HTML) (+35 more)
 
-### Community 6 - "Connections UI Buttons"
+### Community 6 - "Community 6"
 Cohesion: 0.05
-Nodes (39): browseHandler, btnLoad, btnReset, btnSave, btnSemp, btnSolace, c, connectedHandler (+31 more)
+Nodes (40): browseHandler, btnLoad, btnReset, btnSave, btnSemp, btnSolace, c, connectedHandler (+32 more)
 
-### Community 7 - "Core Components & Test Helpers"
+### Community 7 - "Community 7"
 Cohesion: 0.07
 Nodes (41): core event-bus, core queue-picker component, core solace-publisher service, loadModuleDOM helper, resetQueueBrowserState helper, queue-copy module tests, queue-discovery module tests, queue-subscription-explorer module tests (+33 more)
 
-### Community 8 - "Queue Copy UI Rendering"
+### Community 8 - "Community 8"
 Cohesion: 0.11
-Nodes (35): formatBytes(), applyDestPrefill(), applyDestType(), applySourceReadonly(), DestConnStatus, PrimarySnapshot, renderDestSummary(), renderModalInitial() (+27 more)
+Nodes (37): formatBytes(), applyDestPrefill(), applyDestType(), applySourceReadonly(), cacheElements(), DestConnStatus, PrimarySnapshot, renderDestSummary() (+29 more)
 
-### Community 9 - "Queue Picker Dialog Tests"
+### Community 9 - "Community 9"
 Cohesion: 0.05
-Nodes (27): all, allQOpts, d, dialog, empty, first, firstDialog, input (+19 more)
+Nodes (29): $(), all, allQOpts, d, dialog, empty, first, firstDialog (+21 more)
 
-### Community 10 - "SEMP v1 Message ID Lookups"
-Cohesion: 0.08
-Nodes (25): compareMsgIds(), emptyResult(), fetchNewestMsgIdViaSempV1(), msgIdToString(), normalizeAccessType(), parseSempV1Response(), readNumber(), body (+17 more)
+### Community 10 - "Community 10"
+Cohesion: 0.09
+Nodes (14): body, body2, browser, ctrl, ctx, detailRes, fetchImpl, FlakyParser (+6 more)
 
-### Community 11 - "Broker Connection Form"
+### Community 11 - "Community 11"
 Cohesion: 0.08
 Nodes (33): Basic Auth Radio, OAuth2 Auth Radio, Broker Configuration Section, Broker Host (IP or Hostname) Input, Client Connection Status, Load All Config Button, Message VPN Input (default), Messaging Connect Button (+25 more)
 
-### Community 12 - "Contributing Docs Code Samples"
+### Community 12 - "Community 12"
 Cohesion: 0.06
 Nodes (30): Architecture Notes, Code Standards, code:bash (npm install && npm test), code:ts (import { required } from '../../core/dom';), code:block3 (src/core/services/solace-client.ts), code:ts (import { describe, it, expect, vi, beforeEach } from 'vitest), code:ts (// Weak — only proves "no crash"), code:ts (// Avoid — manual restoration is skipped on failure, leaks i) (+22 more)
 
-### Community 13 - "Connections Module Events"
+### Community 13 - "Community 13"
 Cohesion: 0.14
 Nodes (31): connections/config (load/save obfuscated localStorage), ConnectionsModule (priority 100, primary specialist), BusEvent app:message-delete, BusEvent app:state-change, BusEvent browser:available, BusEvent browser:browse-queue, BusEvent client:connected, BusEvent client:disconnected (+23 more)
 
-### Community 14 - "Queue Browser UI Panels"
+### Community 14 - "Community 14"
 Cohesion: 0.09
 Nodes (30): App Header (solace Msg Utility / Queue Browser title), Content Preview (JSON payload viewer with copy button), Details Header Fields (Message ID, Destination + TOPIC badge, Repl Grp Msg Id), Message Details Panel (BINARY badge, Show Raw Content), Message Properties chips (Delivery Mode, Sender Id), Message Table (Message ID, Date, Size, Actions, row selection, highlighted row), QB Session Panel (Queue Name input, Bind, Bound Queues picker, Unbind), Queue Header (vpn::queue, READ-ONLY badge, filter, Total/Displayed/Selected counts, Download Content / Download Full / Forward) (+22 more)
 
-### Community 15 - "Queue Copy Modal UI"
+### Community 15 - "Community 15"
 Cohesion: 0.08
 Nodes (29): Confirm Queue Copy Modal, Destination Topic (test topic), Destination Panel, Queue/Topic Toggle, Modal Cancel Button, Modal Copy Confirm Button, Modal Destination Section, Modal Refresh Button (+21 more)
 
-### Community 16 - "Dependencies (package.json)"
+### Community 16 - "Community 16"
 Cohesion: 0.07
-Nodes (28): devDependencies, jsdom, @types/node, typescript, vite, vite-plugin-singlefile, vitest, @vitest/coverage-v8 (+20 more)
+Nodes (29): devDependencies, jsdom, @types/node, typescript, vite, vite-plugin-singlefile, vitest, @vitest/coverage-v8 (+21 more)
 
-### Community 17 - "Queue Copy Job Engine"
-Cohesion: 0.10
-Nodes (20): CopyHooks, CopyHooks, runCopyJob(), job, onComplete, onProgress, state, StopReason (+12 more)
+### Community 17 - "Community 17"
+Cohesion: 0.13
+Nodes (14): CopyHooks, CopyHooks, runCopyJob(), job, onComplete, onProgress, state, StopReason (+6 more)
 
-### Community 18 - "Queue Browser State Module"
-Cohesion: 0.20
-Nodes (23): matchString(), addMessage(), clearStore(), deleteBrowser(), getBrowser(), getMessages(), ingestMessage(), setBrowser() (+15 more)
+### Community 18 - "Community 18"
+Cohesion: 0.19
+Nodes (21): addMessage(), clearStore(), deleteBrowser(), getBrowser(), getMessages(), ingestMessage(), setBrowser(), setMessages() (+13 more)
 
-### Community 19 - "Queue Copy Verification Flow"
+### Community 19 - "Community 19"
 Cohesion: 0.07
 Nodes (24): browser, customPublisher, destSession, job, m1, m2, pendingResolvers, removedAfter (+16 more)
 
-### Community 20 - "Release Process Docs"
+### Community 20 - "Community 20"
 Cohesion: 0.08
 Nodes (24): 1. Bump `package.json`, 2. Tag the release commit, 3. Publish the GitHub Release, code:bash (npm ci), code:bash (git checkout -b release/3.4.0), code:bash (git checkout main), code:bash (gh release create v3.4.0 \), code:bash (gh run watch) (+16 more)
 
-### Community 21 - "Queue Copy Module Tests"
-Cohesion: 0.16
-Nodes (22): btnCopy, btnRefresh, btnRefreshQueues, btnRefreshVpns, clickSpy, container, { ctx }, { ctx, appState } (+14 more)
+### Community 21 - "Community 21"
+Cohesion: 0.14
+Nodes (25): QueueDiscoveryModule, btnCopy, btnRefresh, btnRefreshQueues, btnRefreshVpns, clickSpy, container, createDiscoveryDOM() (+17 more)
 
-### Community 22 - "Queue Browser Module Files"
-Cohesion: 0.30
-Nodes (10): attachBackdropClose(), required(), logger, icons, createService(), state, opt, ui (+2 more)
+### Community 22 - "Community 22"
+Cohesion: 0.39
+Nodes (7): logger, matchString(), createService(), STANDARD_PROPERTY_GETTERS, shouldShowMessage(), state, ui
 
-### Community 23 - "Connections Shared Mocks"
+### Community 23 - "Community 23"
 Cohesion: 0.08
 Nodes (20): activeItems, btn, calledWith, consoleSpy, disconnectHandler, errSpy, handler, kernel (+12 more)
 
-### Community 24 - "Queue Browser DOM Helpers"
-Cohesion: 0.08
+### Community 24 - "Community 24"
+Cohesion: 0.09
 Nodes (22): applyClickSpy, blob, clickSpy, consoleSpy, container, event, eventBus, filters (+14 more)
 
-### Community 25 - "Go Gateway Routing"
+### Community 25 - "Community 25"
 Cohesion: 0.15
 Nodes (20): gateway config struct + loadConfig, go-web-proxy main (gateway entrypoint), loadConfig(), root mux (hosted/proxy/pwa routing), accessLog middleware, hostedHandler (/hosted endpoint), isProxyPath router predicate, joinHostPort (IPv6 bracketing) (+12 more)
 
-### Community 26 - "Queue Browser Error Paths"
-Cohesion: 0.09
+### Community 26 - "Community 26"
+Cohesion: 0.10
 Nodes (19): bindErr, browserErr, c, consoleSpy, ctx, disconnectSpy, errorEl, errorSpy (+11 more)
 
-### Community 27 - "App Bootstrap & Registry"
-Cohesion: 0.13
-Nodes (12): boot(), kernel, moduleFiles, modules, expected, ids, shuffled, { spied, order } (+4 more)
+### Community 27 - "Community 27"
+Cohesion: 0.17
+Nodes (10): PwaModule, RegisteredModule, boot(), kernel, moduleFiles, modules, expected, ids (+2 more)
 
-### Community 28 - "Queue Browser Ack Tests"
+### Community 28 - "Community 28"
 Cohesion: 0.09
-Nodes (20): b1, b2, binary, browser, createTestContext(), first, msg, order (+12 more)
+Nodes (21): b1, b2, binary, browser, createTestContext(), first, msg, order (+13 more)
 
-### Community 29 - "Queue Browser Download/Delete UI"
+### Community 29 - "Community 29"
 Cohesion: 0.10
 Nodes (20): btn, checkbox, consoleSpy, container, ctx, deleteBtn, downloadContentSpy, downloadFullSpy (+12 more)
 
-### Community 30 - "Queue Copy Publish Hooks"
+### Community 30 - "Community 30"
 Cohesion: 0.10
 Nodes (17): beforeSend, cloned, codes, onAck, onReject, onRejectA, onRejectB, onTimeout (+9 more)
 
-### Community 31 - "Build System & solclient Bootstrap"
+### Community 31 - "Community 31"
 Cohesion: 0.11
 Nodes (20): dist/js/solclient.js (Solace JS SDK), boot() solclient async loader, src/main.ts application bootstrap, Module registry (variant manifest resolver), setup.sh solclient.js downloader, TS path aliases (@core, @modules), ACTIVE_MODULES variant manifest pattern, MOCK_REDIRECTS table (+12 more)
 
-### Community 32 - "Queue Browser Download Tests"
+### Community 32 - "Community 32"
 Cohesion: 0.11
 Nodes (18): btnContent, btnFull, cached, checked, clickSpy, confirmSpy, consoleSpy, downloadSpy (+10 more)
 
-### Community 33 - "Queue Browser Core Tests"
-Cohesion: 0.17
-Nodes (14): resetQueueBrowserState(), ctx, makeCtx(), rows, rowsAfterClear, QueueBrowserModule, defaultActiveFilters(), els (+6 more)
+### Community 33 - "Community 33"
+Cohesion: 0.10
+Nodes (23): resetQueueBrowserState(), ctx, makeCtx(), rows, rowsAfterClear, QueueBrowserModule, forwardSpy, html (+15 more)
 
-### Community 34 - "Subscription Explorer UI"
+### Community 34 - "Community 34"
 Cohesion: 0.13
 Nodes (19): queue-subscription-explorer module, About Panel (description of subscription explorer), Active Nav Item: Queue Subscriptions, Filter Input: Queue, Filter Input: Subscription (wildcard-capable, e.g. test/*), Filter Input: VPN, Load Action (initial data fetch), Rows: VPN with Long Names and Spaces (+11 more)
 
-### Community 35 - "Message Filter Dialog UI"
+### Community 35 - "Community 35"
 Cohesion: 0.15
 Nodes (18): Add Property Filter Button, Apply Filter Button, Body Content Contains Filter, Cancel Button, Clear Filter Button, Destination Name Filter, Destination Type Filter, Filter Messages Dialog (+10 more)
 
-### Community 36 - "Container Mocks (test setup)"
+### Community 36 - "Community 36"
 Cohesion: 0.11
-Nodes (17): browserContainer, connContainer, ctx, discoveryContainer, mockCreateBrowser, mockDeleteMessages, mockDisconnectAll, mockDisconnectBrowser (+9 more)
+Nodes (18): ConnectionsModule, browserContainer, connContainer, ctx, discoveryContainer, mockCreateBrowser, mockDeleteMessages, mockDisconnectAll (+10 more)
 
-### Community 37 - "Button Click Test Spies"
+### Community 37 - "Community 37"
 Cohesion: 0.11
 Nodes (17): btn, cb, clearSpy, clickSpy, container, el, err, errorEl (+9 more)
 
-### Community 38 - "Queue/VPN Picker Cache"
-Cohesion: 0.20
-Nodes (15): applyQueueFilter(), applyVpnFilter(), ensureCache(), fetchQueues(), fetchVpns(), PickerCache, PickQueueOptions, PickQueueResult (+7 more)
+### Community 38 - "Community 38"
+Cohesion: 0.18
+Nodes (17): applyQueueFilter(), applyVpnFilter(), ensureCache(), fetchQueues(), fetchVpns(), PickerCache, PickQueueOptions, PickQueueResult (+9 more)
 
-### Community 39 - "TypeScript Configuration"
+### Community 39 - "Community 39"
 Cohesion: 0.11
 Nodes (17): compilerOptions, allowJs, baseUrl, esModuleInterop, module, moduleResolution, outDir, paths (+9 more)
 
 ### Community 40 - "Community 40"
-Cohesion: 0.21
-Nodes (12): ConnectionConfig, ConnectionCredentials, SempContext, SolaceConfig, AppContext, AppState, BusEvents, EventBus (+4 more)
+Cohesion: 0.22
+Nodes (10): AppContext, AppState, BusEvents, createService(), ctx, gen, service, primarySempContextFrom() (+2 more)
 
 ### Community 41 - "Community 41"
 Cohesion: 0.22
@@ -346,15 +357,15 @@ Nodes (15): badHandler, bus, calls, consoleSpy, first(), goodHandler, h1, h2 (+7
 
 ### Community 42 - "Community 42"
 Cohesion: 0.18
-Nodes (14): runCopyJob(), CopyMode, DestType, CopyUiElements, DestSummary, CopyUiServices, buildDestSummary(), buildSourceSummary() (+6 more)
+Nodes (15): runCopyJob(), CopyMode, DestType, CopyUiElements, DestSummary, CopyUiServices, destSempContext(), buildDestSummary() (+7 more)
 
 ### Community 43 - "Community 43"
-Cohesion: 0.12
-Nodes (13): QueueCopyModule, actual, consoleSpy, ctx, ctx2, { destSempConnect, destSolConnect, capturedSempHooks, capturedSolHooks }, editBtns, fakeSession (+5 more)
+Cohesion: 0.11
+Nodes (14): EventBus, QueueCopyModule, actual, consoleSpy, ctx, ctx2, { destSempConnect, destSolConnect, capturedSempHooks, capturedSolHooks }, editBtns (+6 more)
 
 ### Community 44 - "Community 44"
-Cohesion: 0.16
-Nodes (14): createInitialState(), syncDestFormFromSnapshot(), cacheElements(), e, { els }, { els, ctx, state }, { els, services }, { els, state } (+6 more)
+Cohesion: 0.12
+Nodes (20): createInitialState(), DestForm, DestPrefillSnapshot, DestTarget, resetTransientState(), syncDestFormFromSnapshot(), fakeSempCtx, fakeSession (+12 more)
 
 ### Community 45 - "Community 45"
 Cohesion: 0.12
@@ -365,20 +376,20 @@ Cohesion: 0.23
 Nodes (14): apple, banana, btn, btnCopy, content, input, list, onSelect (+6 more)
 
 ### Community 47 - "Community 47"
-Cohesion: 0.19
-Nodes (9): SempConfig, createServiceSemp(), SempClient, SempConnectionHooks, call, connectPromise, decoded, hooks (+1 more)
+Cohesion: 0.11
+Nodes (14): ConnectionCredentials, SempConfig, SempContext, createServiceSemp(), SempClient, SempConnectionHooks, call, connectPromise (+6 more)
 
 ### Community 48 - "Community 48"
-Cohesion: 0.14
-Nodes (11): QueueSubscriptionExplorerModule, btn, container, counter, { ctx }, { ctx, eventBus }, fQueue, fSub (+3 more)
+Cohesion: 0.13
+Nodes (12): QueueSubscriptionExplorerModule, btn, container, counter, createDOM(), { ctx }, { ctx, eventBus }, fQueue (+4 more)
 
 ### Community 49 - "Community 49"
-Cohesion: 0.23
-Nodes (8): generateUuid(), createSolacePublisher(), DestTarget, Pending, PublisherOptions, SendOptions, SendResult, SolacePublisher
+Cohesion: 0.29
+Nodes (7): createSolacePublisher(), DestTarget, Pending, PublisherOptions, SendOptions, SendResult, SolacePublisher
 
 ### Community 50 - "Community 50"
-Cohesion: 0.15
-Nodes (11): corsHint, elements, link, mode, span, bare, els, els1 (+3 more)
+Cohesion: 0.07
+Nodes (31): DEFAULT_CONFIG, cfg, errors, validateConfig(), ConnectionConfig, corsHint, elements, link (+23 more)
 
 ### Community 51 - "Community 51"
 Cohesion: 0.24
@@ -390,11 +401,11 @@ Nodes (13): Categories of Ignored Code, Category 1 (obsolete): DOM Element Null 
 
 ### Community 53 - "Community 53"
 Cohesion: 0.15
-Nodes (12): Approach: Isolation-First with Shared Infrastructure, code:block1 (Statements : 100% (2229/2229)), Core Philosophy: Mock the Platform, Test the Logic, Executive Summary, SolaceMessageUtility — Test Suite Technical Report, Summary of v8 Ignore Philosophy, Table of Contents, Testing Methodology (+4 more)
+Nodes (12): Approach: Isolation-First with Shared Infrastructure, code:block1 (Statements : 100% (4024/4024)), Core Philosophy: Mock the Platform, Test the Logic, Executive Summary, SolaceMessageUtility — Test Suite Technical Report, Summary of v8 Ignore Philosophy, Table of Contents, Testing Methodology (+4 more)
 
 ### Community 54 - "Community 54"
-Cohesion: 0.28
-Nodes (11): escapeHtml(), cleanContent, cv, els, errorContainer, _hasInFlightForward(), icon, iconContainer (+3 more)
+Cohesion: 0.30
+Nodes (10): cleanContent, cv, els, errorContainer, _hasInFlightForward(), icon, iconContainer, item (+2 more)
 
 ### Community 55 - "Community 55"
 Cohesion: 0.15
@@ -405,12 +416,12 @@ Cohesion: 0.21
 Nodes (13): LogLevel enum, createEventBus factory, buildBrokerUrl(), isHosted singleton, logger module-singleton, setLogLevel, SolaceConnectionHooks, createServiceSolace (real) (+5 more)
 
 ### Community 57 - "Community 57"
-Cohesion: 0.27
+Cohesion: 0.25
 Nodes (11): makeOriginal(), msg(), setup(), createBrowserMock(), createMessageMock(), createSessionMock(), createSolaceMock(), localStorageDefaults (+3 more)
 
 ### Community 58 - "Community 58"
-Cohesion: 0.29
-Nodes (6): QueueDiscoveryModule, createService(), div, empty, runFilter(), ui
+Cohesion: 0.39
+Nodes (4): div, empty, runFilter(), ui
 
 ### Community 59 - "Community 59"
 Cohesion: 0.17
@@ -425,32 +436,32 @@ Cohesion: 0.18
 Nodes (11): Cancel Button, Close (X) Button, Destination Name Input Field, Destination Type Selector (Topic/Queue), Forward Message Modal Dialog, Per-Message Preview Row (id + payload snippet), Messages to Forward List (11 selected), Forward Message Dialog Screenshot (+3 more)
 
 ### Community 62 - "Community 62"
-Cohesion: 0.18
-Nodes (10): HERE, htmlCache, loadModuleDOM(), MODULES_DIR, createBrowserDOM(), setupBrowserDOM(), createBrowserDOM(), createBrowserDOM() (+2 more)
+Cohesion: 0.05
+Nodes (39): Adding a New Module, AppContext (Dependency Injection), Build commands, Build internals, Build-time feature flags, Circular Dependency Resolution, Code Conventions, code:bash (git clone <repository-url>) (+31 more)
 
 ### Community 63 - "Community 63"
-Cohesion: 0.22
-Nodes (8): createEventBus(), makeCtx(), createTestContext(), createTestContext(), ctx, gen, service, createTestContext()
+Cohesion: 0.06
+Nodes (34): Binding to a Queue, Caching, code:json ({), Confirm Queue Copy modal, Connection Profiles, Connection values, Deleting Messages, Demo Mode (`mock.html`) (+26 more)
 
 ### Community 64 - "Community 64"
-Cohesion: 0.18
-Nodes (10): container, createBrowserDOM(), cvs, els, errorEl, msg, msgs, seq (+2 more)
+Cohesion: 0.08
+Nodes (25): bare, createConnectionsDOM(), els, els1, els2, link, HERE, htmlCache (+17 more)
 
 ### Community 65 - "Community 65"
-Cohesion: 0.22
-Nodes (6): createService(), SubFetchPage, ctx, gen, p2Promise, primarySempContextFrom()
+Cohesion: 0.20
+Nodes (8): createEventBus(), makeCtx(), createTestContext(), createTestContext(), createTestContext(), ctx, gen, p2Promise
 
 ### Community 66 - "Community 66"
 Cohesion: 0.20
 Nodes (9): argv, child, CUSTOM_FLAGS, env, passthrough, require, viteBin, vitePkg (+1 more)
 
 ### Community 68 - "Community 68"
-Cohesion: 0.24
-Nodes (5): createSempDiscovery(), extractNextPath(), FetchPage, pagesPromise, sempCtx
+Cohesion: 0.10
+Nodes (20): 1. Solace JavaScript SDK (`solclient.js`), 2. JSZip (`jszip.min.js`), code:bash (docker run --rm -p 9443:9443 \), code:text (your-server/), code:bash (# Node.js), code:bash (docker pull ghcr.io/solacelabs/solace-msg-utility:latest), Configuration, Containerised Gateway (+12 more)
 
 ### Community 69 - "Community 69"
-Cohesion: 0.20
-Nodes (4): MOCK_REDIRECTS, MockRedirect, rawOutputName, variant
+Cohesion: 0.18
+Nodes (5): MOCK_REDIRECTS, MockRedirect, rawOutputName, showPayloadInput, variant
 
 ### Community 70 - "Community 70"
 Cohesion: 0.22
@@ -473,8 +484,8 @@ Cohesion: 0.29
 Nodes (7): code:ts (// src/core/services/semp-discovery.ts), code:block12 (while (url) {), code:ts (for await (const page of createSempDiscovery(sempCtx).fetchV), Consumers, Mock service, SEMP v2 Paged Discovery (core library), Service contract
 
 ### Community 75 - "Community 75"
-Cohesion: 0.29
-Nodes (7): code:ts (beforeEach(() => {), code:ts (it('fires onConnected with session and vpn on UP_NOTICE', ()), Core Module Tests, `tests/core/event-bus.test.ts`, `tests/core/kernel.test.ts`, `tests/core/services/solace-client.test.ts`, `tests/modules/queue-browser/service-events.test.ts`
+Cohesion: 0.25
+Nodes (8): code:ts (beforeEach(() => {), code:ts (it('fires onConnected with session and vpn on UP_NOTICE', ()), Core Module Tests, Queue Browser No-Payload Flavor Tests, `tests/core/event-bus.test.ts`, `tests/core/kernel.test.ts`, `tests/core/services/solace-client.test.ts`, `tests/modules/queue-browser/service-events.test.ts`
 
 ### Community 76 - "Community 76"
 Cohesion: 0.29
@@ -485,16 +496,16 @@ Cohesion: 0.29
 Nodes (7): Integration Testing — How Cross-Module Flows Are Tested, `tests/integration/full-flow.test.ts` — Kernel mechanics, `tests/integration/message-pipeline.test.ts` — End-to-end message ingestion, `tests/integration/module-events.test.ts` — Real cross-module flows, What Integration Testing Does NOT Cover, What Is NOT Covered, Why These Count As Integration Tests
 
 ### Community 78 - "Community 78"
-Cohesion: 0.29
-Nodes (5): btn, dialog, ev, inner, root
+Cohesion: 0.10
+Nodes (20): Architecture, Backend API contract (stack-agnostic), Changes to THIS repo (explicit — new impls live in the external repo), code:text (┌─────────────── EXTERNAL REPO ───────────────┐        ┌────), code:ts (export type Operation = 'browse'|'publish'|'delete'|'move'|s), code:ts (export interface BrowseMessage { id: string; destination: st), code:jsonc ({ "version":1,), Context (+12 more)
 
 ### Community 79 - "Community 79"
-Cohesion: 0.33
+Cohesion: 0.29
 Nodes (5): ctrl, promise, VerifyProgress, verifySource(), VerifyResult
 
 ### Community 80 - "Community 80"
-Cohesion: 0.33
-Nodes (6): code:block15 (src/modules/<id>/index.html   ← canonical per-module HTML), code:html (<!-- index.html (repo root) — shell only -->), code:block17 (build flow:), code:ts (// src/variants/full.ts — every module the default build shi), DOM Template System, Module registration — variant manifests
+Cohesion: 0.29
+Nodes (7): Build flavors vs variants, code:block15 (src/modules/<id>/index.html   ← canonical per-module HTML), code:html (<!-- index.html (repo root) — shell only -->), code:block17 (build flow:), code:ts (// src/variants/full.ts — every module the default build shi), DOM Template System, Module registration — variant manifests
 
 ### Community 81 - "Community 81"
 Cohesion: 0.40
@@ -560,6 +571,10 @@ Nodes (3): Defensive null guard on inconsistent state, makeCtx (test helper), se
 Cohesion: 0.67
 Nodes (3): createTestContext(), setupConnectedFlow(), setupSempInstall()
 
+### Community 98 - "Community 98"
+Cohesion: 0.12
+Nodes (15): code:bash (docker run --rm -p 9443:9443 -e HOSTED=true -v solace-tls:/t), Connecting to a broker, Connections, Cross-cutting, Documentation, Features, License, Option 1 — Use the hosted version (zero install) (+7 more)
+
 ### Community 99 - "Community 99"
 Cohesion: 0.67
 Nodes (3): tests main, tests registry, tests setup
@@ -568,6 +583,38 @@ Nodes (3): tests main, tests registry, tests setup
 Cohesion: 0.67
 Nodes (3): validateConfig(), isValidHost, isValidPort
 
+### Community 104 - "Community 104"
+Cohesion: 0.45
+Nodes (6): LogLevel, getLogLevel(), parseLogLevel(), readLogLevelFromUrl(), setLogLevel(), err
+
+### Community 105 - "Community 105"
+Cohesion: 0.35
+Nodes (10): escapeXml(), emptyResult(), fetchNewestMsgIdViaSempV1(), normalizeAccessType(), parseSempV1Response(), readNumber(), VerifyProgress, verifySource() (+2 more)
+
+### Community 108 - "Community 108"
+Cohesion: 0.37
+Nodes (7): required(), escapeHtml(), icons, showPayload(), opt, initDetails(), initTable()
+
+### Community 136 - "Community 136"
+Cohesion: 0.20
+Nodes (9): code:block1 (Statements   : 100% ( 4002/4002 )), Fresh Audit — 2026-05-26 (CLOSED), Historical Ledger, SolaceMessageUtility — Improvement Plan, Tier 1 — Bugs / Incorrect Code, Tier 2 — Dead-code removal, Tier 3 — v8 Ignore reductions, Tier 4 — Coverage gaps (+1 more)
+
+### Community 137 - "Community 137"
+Cohesion: 0.22
+Nodes (5): plain, raw, cfg, legacy, loaded
+
+### Community 138 - "Community 138"
+Cohesion: 0.36
+Nodes (4): ids, priorities, ACTIVE_MODULES, ACTIVE_MODULES
+
+### Community 139 - "Community 139"
+Cohesion: 0.40
+Nodes (4): showToast(), c, rafCallbacks, ToastType
+
+### Community 140 - "Community 140"
+Cohesion: 0.40
+Nodes (4): cfg, consoleSpy, err, result
+
 ## Ambiguous Edges - Review These
 - `queue-copy ui-modal` → `tests core/dom`  [AMBIGUOUS]
   tests/core/dom.test.ts · relation: conceptually_related_to
@@ -575,9 +622,9 @@ Nodes (3): validateConfig(), isValidHost, isValidPort
   src/variants/min.ts · relation: references
 
 ## Knowledge Gaps
-- **779 isolated node(s):** `target`, `module`, `moduleResolution`, `strict`, `allowJs` (+774 more)
+- **882 isolated node(s):** `name`, `version`, `private`, `type`, `dev` (+877 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **33 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **30 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -586,13 +633,13 @@ _Questions this graph is uniquely positioned to answer:_
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **What is the exact relationship between `queue-discovery module` and `variants min`?**
   _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
-- **Why does `logger` connect `Queue Browser Module Files` to `Legacy Connections UI`, `Kernel & Config Persistence Tests`, `Queue Copy UI Rendering`, `Community 42`, `Community 49`, `Queue Copy Job Engine`, `Community 58`, `App Bootstrap & Registry`, `Community 63`?**
-  _High betweenness centrality (0.016) - this node is a cross-community bridge._
-- **Why does `loadModuleDOM()` connect `Community 62` to `Queue Browser Download Tests`, `Queue Browser Core Tests`, `Community 64`, `Kernel & Config Persistence Tests`, `Container Mocks (test setup)`, `Button Click Test Spies`, `Legacy Connections UI`, `Queue Copy UI Rendering`, `Community 43`, `Community 44`, `Community 45`, `Community 48`, `Queue Copy Module Tests`, `Queue Browser Ack Tests`, `Queue Browser Download/Delete UI`?**
-  _High betweenness centrality (0.015) - this node is a cross-community bridge._
-- **Why does `createEventBus()` connect `Community 63` to `Queue Browser Download Tests`, `Queue Browser Core Tests`, `Kernel & Config Persistence Tests`, `Container Mocks (test setup)`, `Button Click Test Spies`, `Community 41`, `Community 43`, `Community 48`, `Queue Copy Module Tests`, `Queue Browser Ack Tests`, `Queue Browser Download/Delete UI`?**
-  _High betweenness centrality (0.010) - this node is a cross-community bridge._
-- **What connects `target`, `module`, `moduleResolution` to the rest of the system?**
-  _818 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Go Web Proxy & Hosted Gateway` be split into smaller, more focused modules?**
+- **Why does `loadModuleDOM()` connect `Community 64` to `Community 32`, `Community 33`, `Community 36`, `Community 37`, `Community 6`, `Community 8`, `Community 43`, `Community 44`, `Community 45`, `Community 48`, `Community 50`, `Community 21`, `Community 24`, `Community 57`, `Community 26`, `Community 28`, `Community 29`?**
+  _High betweenness centrality (0.019) - this node is a cross-community bridge._
+- **Why does `AppContext` connect `Community 40` to `Community 1`, `Community 2`, `Community 6`, `Community 8`, `Community 21`, `Community 23`, `Community 24`, `Community 28`, `Community 29`, `Community 32`, `Community 33`, `Community 36`, `Community 37`, `Community 42`, `Community 43`, `Community 44`, `Community 45`, `Community 48`, `Community 49`, `Community 65`, `Community 71`, `Community 104`, `Community 108`?**
+  _High betweenness centrality (0.017) - this node is a cross-community bridge._
+- **Why does `createEventBus()` connect `Community 65` to `Community 32`, `Community 33`, `Community 97`, `Community 67`, `Community 36`, `Community 37`, `Community 6`, `Community 104`, `Community 41`, `Community 40`, `Community 43`, `Community 48`, `Community 21`, `Community 24`, `Community 57`, `Community 26`, `Community 28`, `Community 29`?**
+  _High betweenness centrality (0.011) - this node is a cross-community bridge._
+- **What connects `name`, `version`, `private` to the rest of the system?**
+  _921 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.05094905094905095 - nodes in this community are weakly interconnected._

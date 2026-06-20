@@ -1,5 +1,6 @@
 import { ui } from './ui-core.js';
 import { state } from './state.js';
+import { showPayload } from './features.js';
 import { escapeHtml } from '../../core/utils';
 
 // ui-forward.js - Message Forwarding Modal
@@ -101,10 +102,15 @@ ui.renderForwardList = function () {
         const icon = ui.getStatusIcon(item.status);
         const hasError = item.status === 'FAILED' && item.error;
 
-        let cleanContent = (item.originalMsg.content || '').replace(/(\r\n|\n|\r)/gm, " ");
-        let maxLen = 30;
-        if (cleanContent.length > maxLen) {
-            cleanContent = cleanContent.substring(0, maxLen) + '...';
+        // Body preview snippet — payload flavor only. In the no-payload flavor the body
+        // is never decoded, so the preview is left empty.
+        let cleanContent = '';
+        if (showPayload()) {
+            cleanContent = (item.originalMsg.content || '').replace(/(\r\n|\n|\r)/gm, " ");
+            const maxLen = 30;
+            if (cleanContent.length > maxLen) {
+                cleanContent = cleanContent.substring(0, maxLen) + '...';
+            }
         }
 
         return `

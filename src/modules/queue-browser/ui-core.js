@@ -1,6 +1,7 @@
 import { state, defaultActiveFilters } from './state.js';
 import { formatBytes, generateUuid } from '../../core/utils';
 import { required } from '../../core/dom';
+import { showPayload } from './features.js';
 
 /** @type {any} */
 export const ui = {};
@@ -161,9 +162,9 @@ ui.resetQueueSelection = function () {
     state.displayedMessages = [];
     state.currentQueuePermissions = null;
 
-    // Reset Filters
+    // Reset Filters. Body-content input is absent in the no-payload flavor.
     state.activeFilters = defaultActiveFilters();
-    els.inputFilterContent.value = '';
+    if (showPayload()) els.inputFilterContent.value = '';
     els.inputFilterId.value = '';
     els.inputFilterDest.value = '';
     els.inputFilterType.value = 'ANY';
