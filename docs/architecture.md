@@ -5,32 +5,23 @@
 ```mermaid
 flowchart TB
     subgraph browser["Browser — Single Page"]
-        direction TB
         kernel["<b>Kernel</b><br/>module lifecycle · install / navigate<br/>global state — AppState<br/>sidebar navigation<br/>SEMP auth injection · clipboard helper"]
         bus["<b>Typed EventBus</b><br/>on(event, handler) · emit(event, payload) · off(event, handler)"]
 
-        subgraph modules["Modules — navigable, priority-ordered"]
-            direction LR
-            conn["Connections<br/><b>P=100</b>"]
-            qb["Queue Browser<br/><b>P=80</b>"]
-            qc["Queue Copy<br/><b>P=70</b>"]
-            qse["Queue Subscription Explorer<br/><b>P=45</b>"]
-        end
+        conn["<b>Connections</b><br/>P=100"]
+        qb["<b>Queue Browser</b><br/>P=80"]
+        qc["<b>Queue Copy</b><br/>P=70"]
+        qse["<b>Queue Subscription<br/>Explorer</b><br/>P=45"]
 
-        subgraph core["src/core/ — libraries (imported, not navigated)"]
-            direction LR
-            services["<b>services/</b><br/>solace-client<br/>solace-publisher<br/>semp-client<br/>semp-discovery<br/>sempContext"]
-            conndir["<b>connections/</b><br/>types<br/>defaults"]
-            components["<b>components/</b><br/>queue-picker"]
-        end
+        core["<b>src/core/</b> — libraries · imported, not navigated<br/><br/><b>services/</b><br/>solace-client · solace-publisher · semp-client · semp-discovery · sempContext<br/><br/><b>connections/</b> — types · defaults<br/><b>components/</b> — queue-picker"]
 
         kernel --> bus
         bus --> conn & qb & qc & qse
         conn & qb & qc & qse --> core
     end
 
-    core --> broker["Solace Broker<br/>WS / WSS"]
-    core --> semp["SEMP API — REST<br/>HTTP / S"]
+    core --> broker["<b>Solace Broker</b><br/>WS / WSS"]
+    core --> semp["<b>SEMP API — REST</b><br/>HTTP / S"]
 ```
 
 The broker-side service factories live in `src/core/services/` as **pure libraries** — they take lifecycle hooks (no AppContext, no UI, no global bus). The connections module (priority 100) is the *primary specialist*: its `module.ts` defines `solaceHooks` / `sempHooks` that bridge factory lifecycle events to global AppState + bus events that other modules consume. This pattern lets a future module (queue-copy) own a *secondary* connection by passing different hooks to the same factories — module symmetry, no cross-module imports.
