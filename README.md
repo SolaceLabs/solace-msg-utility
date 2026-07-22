@@ -26,7 +26,7 @@ Then open <https://localhost:9443/>. The container ships a built-in HTTPS gatewa
 
 ### Option 3 — Self-host the static files
 
-Download `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) and [solclient.js](https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md#1-solace-javascript-sdk-solclientjs). Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, …). See [deployment.md → Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
+Download [index.html](https://raw.githubusercontent.com/SolaceLabs/solace-msg-utility/refs/heads/main/dist/index.html) and [solclient.js](https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md#1-solace-javascript-sdk-solclientjs). Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, …). See [deployment.md → Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
 
 > **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials — every module works against deterministic mock data. See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details.
 
