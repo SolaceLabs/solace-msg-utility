@@ -130,6 +130,7 @@ For `solclient.js`, the shell additionally tries `solclient-full.js` and `solcli
 
 **Where to get it:**
 - Download from the [Solace Developer Portal](https://solace.com/downloads/)
+- [Solace Customer Portal](https://products.solace.com/) > Products > APIs > Javascript
 - Or from the Solace PubSub+ broker's built-in web interface (typically at `http://<broker>:8080/`)
 - NPM: `npm install solclientjs` (then copy `node_modules/solclientjs/lib/solclient.js`)
 
