@@ -2,49 +2,26 @@
 
 ## System Overview
 
-```text
-+------------------------------------------------------------------+
-|                        Browser (Single Page)                      |
-|                                                                   |
-|  +-------------------------------------------------------------+ |
-|  |                         Kernel                               | |
-|  |  - Module lifecycle (install, navigate)                      | |
-|  |  - Global state (AppState)                                   | |
-|  |  - Sidebar navigation                                        | |
-|  |  - SEMP auth injection                                       | |
-|  |  - Clipboard helper                                          | |
-|  +---------------------------+----------------------------------+ |
-|                              |                                    |
-|  +---------------------------v----------------------------------+ |
-|  |                    Typed EventBus                             | |
-|  |  on(event, handler)  emit(event, payload)  off(event, handler)| |
-|  +---+------------------+-------------------+-------------------+ |
-|      |                  |                   |                     |
-|  +---+-------+   +----------+-----+   +--------+---+   +------+-----------+ |
-|  |Connections|   | Queue Browser |   | Queue Copy |   | Queue Subscription| |
-|  |  P=100    |   |    P=80       |   |   P=70     |   |  Explorer  P=45   | |
-|  +-----+-----+   +-------+-------+   +------+-----+   +------+------------+ |
-|        |                 |                  |                |               |
-|        v                 v                  v                v               |
-|  +---------------------------------------------------------------+|
-|  |               src/core/ (libraries — imported, not navigated) ||
-|  |                                                                ||
-|  |  services/        connections/      components/                ||
-|  |  - solace-client  - types          - queue-picker              ||
-|  |  - solace-publisher  - defaults                                ||
-|  |  - semp-client                                                 ||
-|  |  - semp-discovery                                              ||
-|  |  - sempContext                                                 ||
-|  +---------------------------------------------------------------+|
-|                                                                   |
-+------------------------------------------------------------------+
-        |                    |
-        v                    v
-  +-----------+      +-------------+
-  |  Solace   |      |  SEMP API   |
-  |  Broker   |      |  (REST)     |
-  |  (WS/WSS) |      |  (HTTP/S)   |
-  +-----------+      +-------------+
+```mermaid
+flowchart TB
+    subgraph browser["Browser — Single Page"]
+        kernel["<b>Kernel</b><br/>module lifecycle · install / navigate<br/>global state — AppState<br/>sidebar navigation<br/>SEMP auth injection · clipboard helper"]
+        bus["<b>Typed EventBus</b><br/>on(event, handler) · emit(event, payload) · off(event, handler)"]
+
+        conn["<b>Connections</b><br/>P=100"]
+        qb["<b>Queue Browser</b><br/>P=80"]
+        qc["<b>Queue Copy</b><br/>P=70"]
+        qse["<b>Queue Subscription<br/>Explorer</b><br/>P=45"]
+
+        core["<b>src/core/</b> — libraries · imported, not navigated<br/><br/><b>services/</b><br/>solace-client · solace-publisher · semp-client · semp-discovery · sempContext<br/><br/><b>connections/</b> — types · defaults<br/><b>components/</b> — queue-picker"]
+
+        kernel --> bus
+        bus --> conn & qb & qc & qse
+        conn & qb & qc & qse --> core
+    end
+
+    core --> broker["<b>Solace Broker</b><br/>WS / WSS"]
+    core --> semp["<b>SEMP API — REST</b><br/>HTTP / S"]
 ```
 
 The broker-side service factories live in `src/core/services/` as **pure libraries** — they take lifecycle hooks (no AppContext, no UI, no global bus). The connections module (priority 100) is the *primary specialist*: its `module.ts` defines `solaceHooks` / `sempHooks` that bridge factory lifecycle events to global AppState + bus events that other modules consume. This pattern lets a future module (queue-copy) own a *secondary* connection by passing different hooks to the same factories — module symmetry, no cross-module imports.
@@ -104,15 +81,7 @@ Install order + sidebar order are set in [src/registry.ts](../src/registry.ts) �
 
 Each module directory additionally contains a `service-*-mock.ts` sibling for the mock build (`vite build --mode mock`) — see the **Build Modes** section in [CLAUDE.md](../CLAUDE.md).
 
-All module coordination goes through the EventBus:
-
-```text
-              EventBus
-                 |
-     +-----------+-----------+
-     |           |           |
-  Module A    Module B    Module C
-```
+All module coordination goes through the EventBus — every module publishes and subscribes through the single shared bus instance, with no direct module-to-module references.
 
 ### Install-phase buffering (`hold` / `release`)
 
@@ -143,54 +112,41 @@ The `returnTo` field only selects which finish event fires (`browser:browse-queu
 
 **Why the picker does not own the confirm.** The reusable `pickQueue()` core component resolves a `{vpn, queue}` tuple and nothing more. Whether that VPN matches the consumer's "current" VPN (different concept across consumers — primary for queue-browser, destination form for queue-copy's dest picker) and whether to disrupt the primary session are app-layer decisions. Keeping them in the consumer + connections module lets the picker stay generic across all current and future callers.
 
-```text
-Queue Copy                         Connections                       Queue Copy
-     |                                  |                                |
-     | emit('connection:check-         |                                |
-     |       connection',              |                                |
-     |       {vpn, queue,              |                                |
-     |        returnTo:'queue-copy'})  |                                |
-     |------------------------------->  |                                |
-     |                                  |                                |
-     |                          [Is VPN the same?]                      |
-     |                           /            \                         |
-     |                         YES             NO                       |
-     |                          |         [confirm() dialog]            |
-     |                          |          /          \                 |
-     |                          |        YES          NO                |
-     |                          |         |        (abort)              |
-     |                          |    [reconnect]                        |
-     |                          |         |                             |
-     |                          |   emit('client:connected')           |
-     |                          |         |                             |
-     |                          +---------+                             |
-     |                                |                                 |
-     |                          emit('copy:vpn-switched',               |
-     |                                {queue})                          |
-     |                                |------------------------------->  |
-     |                                |                                 |
-     |                                |                          [loadSelf()]
-     |                                |                          [apply queue]
+```mermaid
+sequenceDiagram
+    participant QC as Queue Copy
+    participant CN as Connections
+
+    QC->>CN: emit('connection:check-connection',<br/>{vpn, queue, returnTo:'queue-copy'})
+
+    alt VPN already matches
+        CN-->>QC: emit('copy:vpn-switched', {queue})
+    else VPN differs
+        CN->>CN: confirm() dialog
+        alt user confirms
+            CN->>CN: reconnect
+            CN->>CN: emit('client:connected')
+            CN-->>QC: emit('copy:vpn-switched', {queue})
+        else user cancels
+            CN--xQC: abort — caller stays put
+        end
+    end
+
+    QC->>QC: loadSelf() + apply queue
 ```
 
 ### State Change Propagation
 
-```text
-Any Module                     Kernel                         All Modules
-     |                            |                                |
-     | ctx.setState(              |                                |
-     |   'isConnected', true)     |                                |
-     |------------------------->  |                                |
-     |                            | state.isConnected = true       |
-     |                            |                                |
-     |                            | eventBus.emit(                 |
-     |                            |   'app:state-change',          |
-     |                            |   {key:'isConnected',          |
-     |                            |    value: true})               |
-     |                            |------------------------------> |
-     |                            |                                |
-     |                            | updateGlobalUI()               |
-     |                            | (status indicators)            |
+```mermaid
+sequenceDiagram
+    participant M as Any Module
+    participant K as Kernel
+    participant All as All Modules
+
+    M->>K: ctx.setState('isConnected', true)
+    K->>K: state.isConnected = true
+    K->>All: emit('app:state-change',<br/>{key:'isConnected', value:true})
+    K->>K: updateGlobalUI() — status indicators
 ```
 
 ---
@@ -315,42 +271,20 @@ module.ts (install):
 
 ## Data Flow: Message Lifecycle
 
-```text
-Solace Broker
-     |
-     | (WebSocket message)
-     v
-service.ts: browser.on(MESSAGE, ...)
-     |
-     v
-service-events.ts: onMessage(queueName, msg)
-     |
-     | 1. Extract type (Text/Binary/Map/Stream)
-     | 2. Extract content (SDT > Binary > XML)
-     | 3. Parse timestamp
-     | 4. Extract properties + user properties
-     | 5. Build message object
-     |
-     v
-state.js: messageStore.get(queueName).push(msg)
-     |
-     | [Is this the active queue?]
-     |   YES --> state.allMessages.push(msg)
-     |           shouldShowMessage(msg, filters)?
-     |             YES --> state.displayedMessages.push(msg)
-     |                     ui-table.ts: addMessageRow(msg)
-     |             NO  --> (stored but not displayed)
-     |   NO  --> (stored in messageStore only)
-     |
-     v
-ui-table.ts: row appears in table
-     |
-     | (user clicks row)
-     v
-ui-details.ts: showDetails(msg)
-     |
-     v
-Detail panel renders message properties, content, destination
+```mermaid
+flowchart TD
+    broker["<b>Solace Broker</b>"] -->|WebSocket message| svc["service.ts<br/>browser.on(MESSAGE, …)"]
+    svc --> onmsg["service-events.ts — onMessage(queueName, msg)<br/>1. extract type — Text / Binary / Map / Stream<br/>2. extract content — SDT, then Binary, then XML<br/>3. parse timestamp<br/>4. extract properties + user properties<br/>5. build message object"]
+    onmsg --> store["state.js<br/>messageStore.get(queueName).push(msg)"]
+    store --> active{"Is this the<br/>active queue?"}
+    active -->|no| storedOnly["stored in messageStore only"]
+    active -->|yes| allMsgs["state.allMessages.push(msg)"]
+    allMsgs --> filter{"shouldShowMessage(msg, filters)?"}
+    filter -->|no| notShown["stored but not displayed"]
+    filter -->|yes| display["state.displayedMessages.push(msg)<br/>ui-table.ts — addMessageRow(msg)"]
+    display --> row["ui-table.ts — row appears in table"]
+    row -->|user clicks row| details["ui-details.ts — showDetails(msg)"]
+    details --> panel["Detail panel renders<br/>properties · content · destination"]
 ```
 
 ---
@@ -553,13 +487,13 @@ The repo-root `index.html` is a generic PWA shell — sidebar, header, `#module-
 
 The `inject-module-templates` Vite plugin in `vite.config.ts` reads each `src/modules/<id>/index.html` at build time, wraps each in `<template data-module-id="<id>">...</template>`, and replaces the `@module-templates` marker with the concatenated blocks. The output single-file bundle has all module templates inline, ready for the Kernel to find at startup.
 
-```text
-build flow:
-  vite.config.ts plugin (transformIndexHtml)
-       reads src/modules/<id>/index.html for every module dir
-       wraps each in <template data-module-id="<id>">
-       splices into src/index.html at <!-- @module-templates -->
-       → single dist/index.html with all templates embedded
+```mermaid
+flowchart TD
+    plugin["vite.config.ts plugin<br/>(transformIndexHtml)"]
+    plugin --> read["reads src/modules/&lt;id&gt;/index.html<br/>for every module dir"]
+    read --> wrap["wraps each in<br/>&lt;template data-module-id='&lt;id&gt;'&gt;"]
+    wrap --> splice["splices into src/index.html<br/>at &lt;!-- @module-templates --&gt;"]
+    splice --> out["single dist/index.html<br/>with all templates embedded"]
 ```
 
 At startup, the Kernel:

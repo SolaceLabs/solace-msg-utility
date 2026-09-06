@@ -1,6 +1,6 @@
 # Solace Message Utility
 
-A browser-based tool for managing Solace PubSub+ Event Brokers. Browse queues, inspect messages, forward, delete, copy across brokers, and search subscriptions — all from a single self-contained HTML page. No installer, no backend.
+A browser-based tool for managing Solace PubSub+ Event Brokers events/messages. Browse queues, inspect messages, forward, delete, copy across brokers, and search subscriptions — all from a single self-contained HTML page. No installer, no backend.
 
 ![Queue Browser](images/browser.png)
 
@@ -14,8 +14,11 @@ Open <https://solacelabs.github.io/solace-msg-utility/> in a browser. Done. (You
 
 ### Option 2 — Run as a container (one command)
 
+Download [solclient.js](https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md#1-solace-javascript-sdk-solclientjs) and start the container with `solclient.js` mounted:
+
 ```bash
 docker run --rm -p 9443:9443 -e HOSTED=true -v solace-tls:/tls \
+  -v ./solclient.js:/SolaceMsgUtility/solclient.js:ro \
   ghcr.io/solacelabs/solace-msg-utility:latest
 ```
 

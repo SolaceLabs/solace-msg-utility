@@ -1,0 +1,21 @@
+version: 3
+project:
+  locator: SolaceLabs_solace-msg-utility
+  id: SolaceLabs_solace-msg-utility
+  name: solace-msg-utility
+  teams: []
+  labels:
+    - javascript
+vendoredDependencies:
+  forceRescans: false
+  scanMethod: CLILicenseScan
+  licenseScanPathFilters:
+    exclude:
+      - "./.git"
+      - "./.github"
+paths:
+  exclude:
+    - ./.git
+    - ./.github
+telemetry:
+  scope: full

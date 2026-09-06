@@ -202,6 +202,7 @@ The first file that loads wins; if both 404 the shell shows a "vendor file not f
 **Where to get it:**
 
 - Download from the [Solace Developer Portal](https://solace.com/downloads/)
+- [Solace Customer Portal](https://products.solace.com/) > Products > APIs > Javascript
 - Or from the Solace PubSub+ broker's built-in web interface (typically at `http://<broker>:8080/`)
 - NPM: `npm install solclientjs` (then copy `node_modules/solclientjs/lib/solclient.js`)
 
