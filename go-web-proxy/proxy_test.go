@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/x509"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -142,32 +143,114 @@ func TestJoinHostPort(t *testing.T) {
 func TestHostedHandler_Enabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(true).ServeHTTP(rec, r)
+	newHostedHandler(true, connBoth, connManaged).ServeHTTP(rec, r)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: want 200, got %d", rec.Code)
 	}
-	if got := rec.Body.String(); got != "true" {
-		t.Errorf("body: want 'true' (no newline), got %q", got)
+	// The SPA reads its connection-mode config from this body — it is the only
+	// channel a statically-served page has for the gateway's container env.
+	var got hostedInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body is not JSON: %v (%q)", err, rec.Body.String())
 	}
-	if ct := rec.Header().Get("Content-Type"); ct != "text/html" {
-		t.Errorf("Content-Type: want text/html, got %q", ct)
+	want := hostedInfo{Hosted: true, ConnModes: connBoth, DefaultConn: connManaged}
+	if got != want {
+		t.Errorf("body: want %+v, got %+v", want, got)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: want application/json, got %q", ct)
 	}
 	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Errorf("Cache-Control: want no-store, got %q", cc)
 	}
 }
 
+func TestHostedHandler_EnabledDirectOnlyDefault(t *testing.T) {
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
+	newHostedHandler(true, connDirect, connDirect).ServeHTTP(rec, r)
+
+	var got hostedInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body is not JSON: %v", err)
+	}
+	if got.ConnModes != connDirect || got.DefaultConn != connDirect {
+		t.Errorf("want direct-only, got %+v", got)
+	}
+}
+
 func TestHostedHandler_Disabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(false).ServeHTTP(rec, r)
+	newHostedHandler(false, connDirect, connDirect).ServeHTTP(rec, r)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: want 404, got %d", rec.Code)
 	}
 	if rec.Body.Len() != 0 {
 		t.Errorf("body: want empty, got %q", rec.Body.String())
+	}
+}
+
+// ----- validateConnModes ------------------------------------------------------
+
+// Startup guard: advertising Managed sign-in without the pieces that serve it
+// must refuse to start rather than ship a tab that only fails at login.
+func TestValidateConnModes(t *testing.T) {
+	base := func(modes, def string, hosted, managed bool) config {
+		return config{connModes: modes, defaultConn: def, hosted: hosted, managed: managed}
+	}
+	cases := []struct {
+		name           string
+		cfg            config
+		managedRouting bool
+		wantErr        bool
+	}{
+		{"direct only needs nothing", base(connDirect, connDirect, false, false), false, false},
+		{"direct ignores an odd defaultConn", base(connDirect, connManaged, false, false), false, false},
+		{"managed fully configured", base(connManaged, connManaged, true, true), true, false},
+		{"both fully configured", base(connBoth, connDirect, true, true), true, false},
+		{"invalid CONN_MODES", base("bogus", connDirect, true, true), true, true},
+		{"invalid DEFAULT_CONN", base(connBoth, "bogus", true, true), true, true},
+		{"managed without HOSTED", base(connManaged, connManaged, false, true), true, true},
+		{"managed without MANAGED", base(connBoth, connDirect, true, false), true, true},
+		{"managed on an untagged binary", base(connManaged, connManaged, true, true), false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateConnModes(tc.cfg, tc.managedRouting)
+			if tc.wantErr && err == nil {
+				t.Fatalf("want an error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("want no error, got %v", err)
+			}
+		})
+	}
+}
+
+// The defaults keep an unconfigured deployment Direct-only (and therefore valid
+// on the stdlib-only binary, which has no managed routing at all).
+func TestLoadConfig_ConnModeDefaults(t *testing.T) {
+	t.Setenv("CONN_MODES", "")
+	t.Setenv("DEFAULT_CONN", "")
+	cfg := loadConfig()
+	if cfg.connModes != connDirect || cfg.defaultConn != connDirect {
+		t.Fatalf("want direct/direct, got %q/%q", cfg.connModes, cfg.defaultConn)
+	}
+	if err := validateConnModes(cfg, false); err != nil {
+		t.Errorf("defaults should validate without managed routing, got %v", err)
+	}
+}
+
+// Env values are case-insensitive so "Managed"/"BOTH" don't fail the enum check.
+func TestLoadConfig_ConnModesLowercased(t *testing.T) {
+	t.Setenv("CONN_MODES", "BOTH")
+	t.Setenv("DEFAULT_CONN", "Managed")
+	cfg := loadConfig()
+	if cfg.connModes != connBoth || cfg.defaultConn != connManaged {
+		t.Fatalf("want both/managed, got %q/%q", cfg.connModes, cfg.defaultConn)
 	}
 }
 
@@ -380,4 +463,75 @@ func TestRecordingResponseWriter_DefaultStatus(t *testing.T) {
 
 func newCapturingLogger(w io.Writer) *slog.Logger {
 	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
+
+// ----- adminHandler (/solAdmin) ------------------------------------------------
+
+func TestAdminHandler_DisabledIs404(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, adminIndexFile), []byte("<html>admin</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Bundle present but the deployment isn't hosted+managed: the surface must
+	// not exist, and must be indistinguishable from a wrong URL.
+	h := newAdminHandler(dir, false, quietLogger())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath, nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("disabled: want 404, got %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "admin") {
+		t.Errorf("disabled: body leaked the bundle: %q", rec.Body.String())
+	}
+}
+
+func TestAdminHandler_ServesBundle(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, adminIndexFile), []byte("<html>admin</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := newAdminHandler(dir, true, quietLogger())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enabled: want 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "admin") {
+		t.Errorf("enabled: want the admin bundle, got %q", rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+		t.Errorf("content-type: want text/html, got %q", got)
+	}
+	// The admin surface must never be cached by an intermediary.
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("cache-control: want no-store, got %q", got)
+	}
+}
+
+func TestAdminHandler_EnabledButNotDeployed(t *testing.T) {
+	// Route on, bundle missing — a packaging error, still a 404 to the caller.
+	h := newAdminHandler(t.TempDir(), true, quietLogger())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath, nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("missing bundle: want 404, got %d", rec.Code)
+	}
+}
+
+func TestAdminHandler_DoesNotFallBackToTheSPA(t *testing.T) {
+	// The whole point of a dedicated route: the SPA's history-mode fallback
+	// would otherwise answer /solAdmin with the ordinary app.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>SPA</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := newAdminHandler(dir, true, quietLogger())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath, nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "SPA") {
+		t.Errorf("served the SPA at %s: %q", adminPath, rec.Body.String())
+	}
 }

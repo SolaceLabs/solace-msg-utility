@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,12 +22,24 @@ import (
 
 // ----- /hosted ----------------------------------------------------------------
 
-type hostedHandler struct {
-	hosted bool
+// hostedInfo is the /hosted response body. Beyond the hosted flag it carries the
+// deployment's connection-mode config (from CONN_MODES / DEFAULT_CONN), which is
+// the only channel the statically-served SPA has for reading container env — it
+// decides which connection tabs (Direct / Managed) the app offers.
+type hostedInfo struct {
+	Hosted      bool   `json:"hosted"`
+	ConnModes   string `json:"connModes"`
+	DefaultConn string `json:"defaultConn"`
 }
 
-func newHostedHandler(hosted bool) *hostedHandler {
-	return &hostedHandler{hosted: hosted}
+type hostedHandler struct {
+	hosted      bool
+	connModes   string
+	defaultConn string
+}
+
+func newHostedHandler(hosted bool, connModes, defaultConn string) *hostedHandler {
+	return &hostedHandler{hosted: hosted, connModes: connModes, defaultConn: defaultConn}
 }
 
 func (h *hostedHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
@@ -34,10 +47,54 @@ func (h *hostedHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("true"))
+	_ = json.NewEncoder(w).Encode(hostedInfo{
+		Hosted:      true,
+		ConnModes:   h.connModes,
+		DefaultConn: h.defaultConn,
+	})
+}
+
+// ----- /solAdmin ---------------------------------------------------------------
+
+// adminHandler serves the standalone administration app (the `admin` variant's
+// solAdmin.html). It is a dedicated route rather than a file the SPA tree serves
+// on its own for two reasons: the entitlement editors must not be reachable from
+// a deployment that has no managed user list to edit, and the SPA's history-mode
+// fallback would otherwise answer /solAdmin with the ordinary index.html.
+//
+// When the deployment is not hosted+managed the route 404s, which is also what a
+// wrong URL returns — a probe cannot tell an admin-capable deployment from any
+// other. Authentication is still the app's job; this only decides whether the
+// surface exists at all.
+type adminHandler struct {
+	root    string
+	enabled bool
+	logger  *slog.Logger
+}
+
+func newAdminHandler(root string, enabled bool, logger *slog.Logger) *adminHandler {
+	return &adminHandler{root: root, enabled: enabled, logger: logger}
+}
+
+func (h *adminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !h.enabled {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := os.ReadFile(h.root + "/" + adminIndexFile)
+	if err != nil {
+		// The route is enabled but the bundle isn't deployed — a packaging
+		// error, so say so in the log rather than leaving an operator to guess.
+		h.logger.Warn("admin app requested but not deployed", "file", adminIndexFile, "err", err)
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
 }
 
 // ----- PWA --------------------------------------------------------------------

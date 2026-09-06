@@ -9,8 +9,9 @@
  */
 
 import { createService, type SubscriptionRow } from './service';
-import { renderRows, renderCounter, updateVisibility, uniqueQueues, EMPTY_MESSAGES } from './ui';
+import { renderRows, renderCounter, uniqueQueues, EMPTY_MESSAGES } from './ui';
 import { required } from '../../core/dom';
+import { createGate } from '../../core/components/module-gate';
 import { matchString, topicFilterMatches } from '../../core/utils';
 import { INPUT_DEBOUNCE_MS } from '../../core/timing';
 import { showToast } from '../../core/toast';
@@ -27,10 +28,31 @@ export const QueueSubscriptionExplorerModule = {
         const { container, appState, eventBus } = app;
         const service = createService(app);
 
+        // The SEMP-connection gate is created by the shared component (markup
+        // owned there); the about + table cards stay template-owned.
+        const gate = createGate(container, {
+            id: 'subexp-warning',
+            title: 'SEMP Connection Required',
+            message: 'Please establish a SEMP connection to explore queue subscriptions.',
+        });
+
         // Required elements — fail loudly at install time if any are missing.
-        const elWarning = required<HTMLElement>(container, '#subexp-warning');
         const elAbout = required<HTMLElement>(container, '#subexp-about');
         const elTable = required<HTMLElement>(container, '#subexp-table-card');
+
+        // Gate (SEMP disconnected) vs the content cards — the module owns the
+        // mutual exclusion; the component is view-unaware.
+        function applyVisibility(isSempConnected: boolean): void {
+            if (isSempConnected) {
+                gate.hide();
+                elAbout.classList.remove('hidden');
+                elTable.classList.remove('hidden');
+            } else {
+                gate.show();
+                elAbout.classList.add('hidden');
+                elTable.classList.add('hidden');
+            }
+        }
         const btnLoad = required<HTMLButtonElement>(container, '#btn-subexp-load');
         const fVpn = required<HTMLInputElement>(container, '#subexp-filter-vpn');
         const fQueue = required<HTMLInputElement>(container, '#subexp-filter-queue');
@@ -179,13 +201,13 @@ export const QueueSubscriptionExplorerModule = {
         btnLoad.addEventListener('click', load);
 
         // Initial visibility based on current SEMP state.
-        updateVisibility(elWarning, elAbout, elTable, appState.isSempConnected);
+        applyVisibility(appState.isSempConnected);
 
         // SEMP connect/disconnect — drop the cache + reset the table on disconnect.
         eventBus.on('app:state-change', ({ key, value }) => {
             if (key !== 'isSempConnected') return;
             const isConnected = value as boolean;
-            updateVisibility(elWarning, elAbout, elTable, isConnected);
+            applyVisibility(isConnected);
             if (!isConnected) {
                 // Bump loadGen so any in-flight load is superseded — without
                 // this, a slow load that yields a page after the disconnect

@@ -6,9 +6,15 @@
  */
 
 import './css/main.css';
+import { boot as preBoot } from './core/boot';
 import { Kernel } from './core/kernel';
 import { modules } from './registry';
 import { logger } from './core/logger';
+
+// Pre-kernel seam. A no-op in shipped builds; the mock build redirects it to
+// the in-browser broker so the SDK global and HTTP interceptor are in place
+// before any module installs.
+preBoot();
 
 const kernel = new Kernel(modules);
 

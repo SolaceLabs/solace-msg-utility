@@ -257,11 +257,50 @@ describe('core/services/solace-client', () => {
             }));
         });
 
+        it('refuses to connect when the loaded SDK is below the required version', () => {
+            // `window.solace` is present (the SDK loaded) but the shell's version
+            // gate never set the flag — the SDK is too old. Refusing is the whole
+            // point of the gate, so assert the session is never created, not just
+            // that an error was reported.
+            (window as any).solaceLibLoaded = false;
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({
+                message: expect.stringContaining('10.18.3'),
+            }));
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+        });
+
         it('calls init if not initialized when connecting', () => {
             const service = createServiceSolace(makeHooks());
             // No service.init() call
             service.connect(baseCfg(), 'broker.test', 'admin');
             expect(solaceMock.SolclientFactory.init).toHaveBeenCalled();
+        });
+
+        it('normalises a non-Error throw so the UI cannot render "undefined"', () => {
+            // `onError` is typed `(err: Error) => void` and every consumer renders
+            // `err.message`. Every throw site traced in dist/solclient.js throws an
+            // OperationError, but nothing guarantees it — and a plain object would
+            // otherwise reach the connect banner as "Connection Failed: undefined",
+            // with the real reason only in the console.
+            solaceMock.SolclientFactory.createSession.mockImplementation(() => {
+                throw { code: 503, description: 'transport unavailable' };
+            });
+            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
+
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.init();
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            const reported = (hooks.onError as any).mock.calls[0][0];
+            expect(reported).toBeInstanceOf(Error);
+            expect(reported.message).toBe('Session creation failed.');
+            expect(consoleSpy).toHaveBeenCalled();
         });
 
         it('fires onError when session creation throws', () => {

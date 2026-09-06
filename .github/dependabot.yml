@@ -1,0 +1,24 @@
+version: 2
+
+# SHA-pinned actions never update on their own -- that is the point, and also
+# the risk. Dependabot reads the `# <tag>` comment the pin script writes and
+# bumps both the SHA and the comment together, so pins stay current without
+# reintroducing a mutable tag.
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    # With the narrow pull_request trigger in ci.yml, these PRs run the full
+    # gate. Enabling repo auto-merge on the minor/patch group is then safe:
+    # updates land automatically but still leave a revertable commit.
+    groups:
+      # One PR for routine bumps; majors arrive separately so a breaking
+      # change is never buried in a batch.
+      actions-minor:
+        update-types:
+          - minor
+          - patch

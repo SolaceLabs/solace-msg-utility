@@ -2,6 +2,8 @@ import type { PwaModule, RegisteredModule, AppContext, AppState, EventBus } from
 import { createEventBus } from './event-bus';
 import { escapeHtml, normalizeUrlPath } from './utils';
 import { buildBrokerUrl } from './hosted';
+import { isModuleVisible } from './rbac';
+import { createManagedSessionStore, type ManagedStore } from './services/managed-session-store';
 import { logger, setLogLevel, getLogLevel, readLogLevelFromUrl } from './logger';
 import { LogLevel } from './constants';
 
@@ -23,6 +25,12 @@ export class Kernel {
     private loadedModules: Map<string, { mod: PwaModule; container: HTMLElement }> = new Map();
     private eventBus: EventBus;
     private state: AppState;
+    /**
+     * Managed session store handed to every module via AppContext. Created once
+     * per kernel and inert until a managed login populates it, so non-managed
+     * deployments are unaffected.
+     */
+    private managedStore: ManagedStore = createManagedSessionStore();
     private config: Record<string, any> = (window as any).APP_CONFIG || { useMocks: false };
     private moduleContainer: HTMLElement | null = null;
     private sidebarNav: HTMLElement | null = null;
@@ -111,11 +119,18 @@ export class Kernel {
         // Render sidebar navigation
         this.renderSidebar();
 
-        // Activate the first module that actually installed. If `modules[0]`
-        // failed (template missing, install() threw), it isn't in `loadedModules`
-        // and `navigateTo` would silently return early — leaving an empty view.
-        // Fall through to the next-priority module so the user still sees something.
-        const firstInstalled = this.modules.find(m => this.loadedModules.has(m.id));
+        // Re-render the sidebar (and navigate away from a now-hidden view) when
+        // the managed RBAC session changes. No-op in non-managed variants, which
+        // never emit this event. Registered once per kernel.
+        this.eventBus.on('rbac:changed', () => this.handleRbacChanged());
+
+        // Activate the first module that actually installed AND is visible under
+        // the current session. If `modules[0]` failed (template missing, install()
+        // threw) it isn't in `loadedModules`; if it's hidden by RBAC it's skipped.
+        // Fall through to the next module so the user still sees something.
+        const firstInstalled = this.modules.find(
+            m => this.loadedModules.has(m.id) && isModuleVisible(this.state.managed, m.id)
+        );
         if (firstInstalled) {
             this.navigateTo(firstInstalled.id);
         } else if (this.modules.length > 0) {
@@ -156,6 +171,9 @@ export class Kernel {
             setState: this.appSetState.bind(this),
             loadSelf: () => this.navigateTo(mod.id),
             sempFetch: this.sempFetch.bind(this),
+            // One store shared by every module: the module owning the managed
+            // login writes it, others read provisioned identities from it.
+            managedStore: this.managedStore,
             copyToClipboard: this.copyToClipboard.bind(this),
             config: this.config
         };
@@ -205,12 +223,16 @@ export class Kernel {
 
         // Sort by priority descending for consistent ordering. `priorities`
         // is populated from the registry in the constructor for every loaded
-        // module — the `!` assertion makes the contract executable.
-        const sorted = [...this.loadedModules.values()].sort((a, b) => {
-            const pa = this.priorities.get(a.mod.id)!;
-            const pb = this.priorities.get(b.mod.id)!;
-            return pb - pa;
-        });
+        // module — the `!` assertion makes the contract executable. Then filter
+        // by RBAC visibility (allow-all when there's no managed session, so
+        // non-managed variants render every module exactly as before).
+        const sorted = [...this.loadedModules.values()]
+            .sort((a, b) => {
+                const pa = this.priorities.get(a.mod.id)!;
+                const pb = this.priorities.get(b.mod.id)!;
+                return pb - pa;
+            })
+            .filter(({ mod }) => isModuleVisible(this.state.managed, mod.id));
 
         sorted.forEach(({ mod }) => {
             const item = document.createElement('div');
@@ -228,6 +250,34 @@ export class Kernel {
             item.onclick = () => this.navigateTo(mod.id);
             this.sidebarNav!.appendChild(item);
         });
+
+        // Re-apply the active highlight after rebuilding — navigateTo is the only
+        // other place that sets it, so a re-render (e.g. on rbac:changed) would
+        // otherwise drop the highlight on the currently-viewed module.
+        if (this.state.activeModuleId) {
+            this.sidebarNav!.querySelectorAll('.nav-item').forEach(el => {
+                (el as HTMLElement).classList.toggle(
+                    'active',
+                    (el as HTMLElement).dataset.moduleId === this.state.activeModuleId
+                );
+            });
+        }
+    }
+
+    /**
+     * React to a managed RBAC session change: re-render the sidebar (module
+     * visibility), then — if the active module is now hidden — navigate to the
+     * highest-priority module that is still installed AND visible. No-op in
+     * non-managed variants, where this event never fires.
+     */
+    private handleRbacChanged(): void {
+        this.renderSidebar();
+        if (this.state.activeModuleId && !isModuleVisible(this.state.managed, this.state.activeModuleId)) {
+            const firstVisible = this.modules.find(
+                m => this.loadedModules.has(m.id) && isModuleVisible(this.state.managed, m.id)
+            );
+            if (firstVisible) this.navigateTo(firstVisible.id);
+        }
     }
 
     /**

@@ -17,11 +17,17 @@ function createBrowserDOM() {
 
 describe('queue-browser/ui-core', () => {
     let container: HTMLElement;
+    // The gate is the module-gate component, injected at install. These ui-core
+    // tests drive ui.updateVisibility directly (no Module.install), so inject a
+    // stub gate and assert against its show()/hide().
+    let gateStub: { show: ReturnType<typeof vi.fn>; hide: ReturnType<typeof vi.fn> };
 
     beforeEach(() => {
         container = createBrowserDOM();
         document.body.appendChild(container);
         ui.initElements(container);
+        gateStub = { show: vi.fn(), hide: vi.fn() };
+        ui.setGate(gateStub);
 
         resetQueueBrowserState();
     });
@@ -103,15 +109,15 @@ describe('queue-browser/ui-core', () => {
     });
 
     describe('updateVisibility()', () => {
-        it('shows prompt and hides view when disconnected', () => {
+        it('shows gate and hides view when disconnected', () => {
             ui.updateVisibility(false);
-            expect(els.elPrompt.classList.contains('hidden')).toBe(false);
+            expect(gateStub.show).toHaveBeenCalled();
             expect(els.elActiveView.classList.contains('hidden')).toBe(true);
         });
 
-        it('hides prompt and shows view when connected', () => {
+        it('hides gate and shows view when connected', () => {
             ui.updateVisibility(true);
-            expect(els.elPrompt.classList.contains('hidden')).toBe(true);
+            expect(gateStub.hide).toHaveBeenCalled();
             expect(els.elActiveView.classList.contains('hidden')).toBe(false);
         });
 

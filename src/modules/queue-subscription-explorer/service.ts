@@ -1,4 +1,4 @@
-import { primarySempContextFrom } from '../../core/services/sempContext';
+import { unfilteredPrimarySempContext } from '../../core/services/sempContext';
 import { PAGE_DELAY_MS } from '../../core/services/semp-discovery';
 import type { AppContext } from '../../core/types';
 import { parseSubscriptionsResponse, type SubscriptionRow } from './parse';
@@ -34,7 +34,7 @@ const INITIAL_BODY =
  */
 export function createService(ctx: AppContext) {
     async function* fetchAllSubscriptions(): AsyncGenerator<SubFetchPage> {
-        const sempCtx = primarySempContextFrom(ctx);
+        const sempCtx = unfilteredPrimarySempContext(ctx);
         if (!sempCtx) {
             yield { ok: false, error: 'SEMP Not Connected' };
             return;

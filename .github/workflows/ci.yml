@@ -1,0 +1,88 @@
+name: CI
+
+# No automatic triggers by design: nothing runs on push or PR. The full stack
+# runs once, on a tag, via tag.yml. `workflow_dispatch` is here so you can
+# still fire a manual run from the Actions tab without pushing a commit.
+#
+# Everything that compiles, tests, lints or scans goes through scripts/dev.sh
+# and dev.ps1 -- this file only calls task names, which is what keeps local ==
+# CI structurally rather than by discipline. Runner-only machinery (checkout,
+# artifact upload) is the exception no script can cover.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  # Deliberately narrow. Nothing runs on a normal push or PR, but a PR that
+  # touches CI config gets the full gate -- which is what validates Dependabot's
+  # action bumps. Without this they would merge with zero verification, since
+  # everything else only runs on a tag.
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".github/dependabot.yml"
+      - "scripts/dev.sh"
+      - "scripts/dev.ps1"
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: gates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # see both platforms fail in one run, not one at a time
+      matrix:
+        # Pinned, not `-latest`: those labels migrate to a new OS over 1-2
+        # months and would swap the OS out mid-release.
+        #
+        # This pins the OS VERSION only. The label still tracks the newest
+        # build of that image, so preinstalled tool versions DO move --
+        # windows-2025 was switched from Visual Studio 2022 to 2026 in June
+        # 2026 without the label changing. Pin the toolchain in-repo if it
+        # matters: go.mod `toolchain` / rust-toolchain.toml (self-honouring,
+        # no workflow edits) or .tool-versions where no such pin exists.
+        #
+        # Labels also expire, unlike action SHAs: GitHub keeps two GA images
+        # per OS, and brownouts precede removal. ubuntu-22.04 deprecates from
+        # 2026-09-17. Check actions/runner-images releases when bumping.
+        os: [ubuntu-24.04, windows-2025]
+    env:
+      NO_COLOR: "1" # keeps captured logs free of ANSI mojibake
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # `build` may stamp a version from tag history
+
+      # The one addition to the standard template. Node has no self-honouring
+      # in-repo pin the way go.mod's `toolchain` directive does, so something
+      # has to read .tool-versions. setup-node does, on both runners -- unlike
+      # mise, whose Windows leg is rough. Go needs no equivalent step: the
+      # runner's preinstalled toolchain reads go-web-proxy/go.mod and fetches
+      # the pinned one itself.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+
+      # A task that does not fit the stack warns and skips, so this line is
+      # the same whether the project is compiled, interpreted, or mixed.
+      - name: Gates (POSIX)
+        if: runner.os != 'Windows'
+        run: ./scripts/dev.sh all scan
+
+      - name: Gates (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/dev.ps1 all scan
+
+      # Same log files the dev scripts write locally -- your evidence when a
+      # tag fails and no release appears.
+      - name: Upload task logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: logs-${{ matrix.os }}
+          path: scripts/logs/
+          if-no-files-found: warn
+          retention-days: 30

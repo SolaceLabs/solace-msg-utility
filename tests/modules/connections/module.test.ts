@@ -3,6 +3,7 @@ import { ConnectionsModule } from '../../../src/modules/connections/module';
 import { ui } from '../../../src/modules/connections/ui.js';
 import { config } from '../../../src/modules/connections/config.js';
 import { createEventBus } from '../../../src/core/event-bus';
+import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
 import { INPUT_DEBOUNCE_MS } from '../../../src/core/timing';
 import { isHosted, setHosted } from '../../../src/core/hosted';
 import { createSolaceMock } from '../../setup';
@@ -27,6 +28,7 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; eventBus:
         setState: vi.fn((key: keyof AppState, value: any) => { (appState as any)[key] = value; }),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
+        managedStore: createManagedSessionStore(),
         copyToClipboard: vi.fn(),
         config: { useMocks: false }
     };
@@ -1709,6 +1711,62 @@ describe('ConnectionsModule', () => {
             const { ctx } = createTestContext(container);
             await ConnectionsModule.install(ctx);
             expect(isHosted()).toBe(false);
+        });
+    });
+
+    // Phase 2a: the module renders Direct/Managed tabs from resolveConnTabs().
+    // Direct-only deployments (every install test above, where /hosted doesn't
+    // advertise managed) hide the tab bar and show the Direct panel — so those
+    // paths are already covered. These exercise the multi-tab + Managed paths.
+    describe('connection-mode tabs', () => {
+        afterEach(() => setHosted(false));
+
+        function stubHosted(json: any) {
+            (globalThis.fetch as any).mockImplementation((url: string) => {
+                if (url === '/hosted') return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(json)) });
+                return Promise.resolve({ ok: true, status: 200 });
+            });
+        }
+        const hiddenCls = (sel: string) => (container.querySelector(sel) as HTMLElement).classList.contains('hidden');
+
+        it("shows both tabs + the tab bar for connModes 'both'; Managed click switches panels", async () => {
+            stubHosted({ hosted: true, connModes: 'both', defaultConn: 'direct' });
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+
+            expect(hiddenCls('#conn-tabs')).toBe(false);         // a choice exists → bar shown
+            expect(hiddenCls('#conn-tab-direct')).toBe(false);
+            expect(hiddenCls('#conn-tab-managed')).toBe(false);
+            expect(hiddenCls('#conn-panel-direct')).toBe(false); // Direct active first
+            expect(hiddenCls('#conn-panel-managed')).toBe(true);
+
+            (container.querySelector('#conn-tab-managed') as HTMLButtonElement).click();
+            expect(hiddenCls('#conn-panel-managed')).toBe(false); // Managed now active
+            expect(hiddenCls('#conn-panel-direct')).toBe(true);
+            expect((container.querySelector('#conn-tab-managed') as HTMLElement).getAttribute('aria-selected')).toBe('true');
+
+            (container.querySelector('#conn-tab-direct') as HTMLButtonElement).click();
+            expect(hiddenCls('#conn-panel-direct')).toBe(false); // back to Direct
+        });
+
+        it("managed-only (connModes 'managed') hides the tab bar and shows the Managed panel", async () => {
+            stubHosted({ hosted: true, connModes: 'managed', defaultConn: 'direct' });
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+
+            expect(hiddenCls('#conn-tabs')).toBe(true);          // single tab → bar hidden
+            expect(hiddenCls('#conn-tab-managed')).toBe(false);
+            expect(hiddenCls('#conn-tab-direct')).toBe(true);
+            expect(hiddenCls('#conn-panel-managed')).toBe(false);
+            expect(hiddenCls('#conn-panel-direct')).toBe(true);
+        });
+
+        it("defaultConn 'managed' with 'both' activates the Managed tab first", async () => {
+            stubHosted({ hosted: true, connModes: 'both', defaultConn: 'managed' });
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            expect(hiddenCls('#conn-panel-managed')).toBe(false); // Managed active first
+            expect(hiddenCls('#conn-panel-direct')).toBe(true);
         });
     });
 

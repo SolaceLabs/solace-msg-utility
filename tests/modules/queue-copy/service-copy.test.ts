@@ -517,6 +517,33 @@ describe('queue-copy/service-copy', () => {
                 expect(final.lastError).toBe('Browser connect failed');
             });
 
+            it('surfaces the reason from a real OperationError, which carries .message', async () => {
+                // The SDK emits an OperationError for this event (verified against
+                // dist/solclient.js): an Error subclass with `.message` and NO
+                // `infoStr`. This engine used to read only `infoStr`, so against a
+                // live broker it discarded the reason and showed the generic
+                // fallback while queue-browser showed the real text for the same
+                // failure. The other fixtures here pass `{ infoStr }`, which is the
+                // shape the SDK never sends — hence the bug went unnoticed.
+                const { state, session, onComplete } = setup();
+                state.verify = {
+                    inProgress: false, abort: null,
+                    result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
+                };
+
+                const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+                await flush();
+                const operationError = Object.assign(
+                    new Error('Permission Denied - not authorized to bind'), { subcode: 20 });
+                ((session.createQueueBrowser as any).mock.results.at(-1)!.value as any)
+                    ._handlers.CONNECT_FAILED_ERROR(operationError);
+                await flush();
+                await job;
+
+                expect(onComplete.mock.calls[0][0].lastError)
+                    .toBe('Permission Denied - not authorized to bind');
+            });
+
             it('synchronous browser.connect throw → browser-error', async () => {
                 const { state, session, onComplete } = setup();
                 ((session.createQueueBrowser as any).mock.results); // prime

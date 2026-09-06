@@ -20,7 +20,9 @@ import { showToast } from '../../core/toast';
 import { INPUT_DEBOUNCE_MS } from '../../core/timing';
 import { logger } from '../../core/logger';
 import { normalizeUrlPath, generateUuid } from '../../core/utils';
-import { isHosted, probeHosted, setHosted } from '../../core/hosted';
+import { isHosted, probeDeployment, setHosted } from '../../core/hosted';
+import { resolveConnTabs } from '../../core/connections/conn-modes';
+import { createManagedPanel } from './managed-panel';
 import type { AppContext, ConnectionConfig, SolaceConfig, SempConfig } from '../../core/types';
 
 export const ConnectionsModule = {
@@ -37,14 +39,27 @@ export const ConnectionsModule = {
         //    (Solace WebSocket + SEMP HTTP) must route via the gateway proxy
         //    path `/{scheme}/{port}/{host}{urlPath}`. Awaited so the flag is
         //    set before any Connect click can race the probe.
-        const hosted = await probeHosted();
+        const { hosted, conn } = await probeDeployment();
         setHosted(hosted);
+        // Publish the deployment's connection config so other modules can derive
+        // what they may offer for their own secondary connections without
+        // re-probing the gateway.
+        app.setState('connConfig', conn);
         logger.info(`[Connections] mode = ${hosted ? 'hosted' : 'browser'}`);
 
         // 1. Initialize UI (Cache Elements)
         ui.cacheElements(container);
         ui.initEvents();
         const els = ui.getElements();
+
+        // 1a. Connection-mode tabs (Direct / Managed). resolveConnTabs yields
+        //     Direct-only unless a hosted gateway advertised Managed via /hosted;
+        //     the tab bar hides itself for a single-mode deployment. The Managed
+        //     panel itself is instantiated further down (after the Direct
+        //     services) and only when that tab is actually offered, so a
+        //     Direct-only deployment behaves exactly as it did pre-merge.
+        const tabs = resolveConnTabs(conn);
+        ui.renderTabs(tabs);
 
         // 2. Build broker-side service clients with bridging hooks.
         //    These hooks ARE the primary-specific behavior: writes to global
@@ -173,6 +188,31 @@ export const ConnectionsModule = {
 
         // 3. Initialize Solace Factory
         serviceSolace.init();
+
+        // 3a. Managed panel (the "Managed" tab). Built after the Direct services
+        //     so this module's own factory instances are created first; it owns
+        //     its own factory pair + hooks and bridges them to the same global
+        //     AppState/bus contract the Direct hooks use.
+        const managedPanel = tabs.includes('managed')
+            ? createManagedPanel(app, {
+                // Only one mode may be live: drop the Direct connection when the
+                // Managed panel connects.
+                tearDownOther: () => {
+                    if (appState.isConnected) serviceSolace.disconnect();
+                    if (appState.isSempConnected) void serviceSemp.disconnect();
+                },
+            })
+            : null;
+        /** Mirror image: drop a managed session before a Direct connect, so RBAC
+         *  (which keys off appState.managed) can't leak onto a direct session. */
+        function tearDownManaged(): void {
+            if (appState.managed) managedPanel?.logout();
+        }
+        els.connTabDirect.addEventListener('click', () => ui.showTab('direct'));
+        els.connTabManaged.addEventListener('click', () => {
+            ui.showTab('managed');
+            managedPanel?.refreshView();
+        });
 
         // Helper: Apply Config to UI. Each field is guarded individually so a partial
         // saved config (e.g. a user only ever set host + vpn) doesn't blank the rest.
@@ -428,6 +468,7 @@ export const ConnectionsModule = {
                 serviceSolace.disconnect();
             } else {
                 if (!validateSolace()) return;
+                tearDownManaged();
                 // Match the other Advanced Settings fields: read live from input at
                 // connect time. A separate Save click persists to localStorage, but
                 // the *current session* uses whatever the modal shows right now.
@@ -490,6 +531,7 @@ export const ConnectionsModule = {
                 await serviceSemp.disconnect();
             } else {
                 if (!validateSemp()) return;
+                tearDownManaged();
 
                 const cfg: SempConfig = {
                     protocol: els.elSempProtocol.value,
@@ -555,10 +597,23 @@ export const ConnectionsModule = {
         // `copy:vpn-switched` so queue-copy can navigate back and rewrite
         // the source queue field.
         eventBus.on('connection:edit-requested', () => {
+            // A live managed session owns the view — let its panel decide which
+            // managed view to show; otherwise just navigate to this module.
+            if (appState.managed && managedPanel) {
+                managedPanel.handleEditRequested();
+                return;
+            }
             if (loadSelf) loadSelf();
         });
 
-        eventBus.on('connection:check-connection', ({ vpn: targetVpn, queue: targetQueue, returnTo }) => {
+        eventBus.on('connection:check-connection', (payload) => {
+            // Route by the ACTIVE connection mode: a managed session drives the
+            // provisioned-broker switch, otherwise the Direct form dance below.
+            if (appState.managed && managedPanel) {
+                managedPanel.handleCheckConnection(payload);
+                return;
+            }
+            const { vpn: targetVpn, queue: targetQueue, returnTo } = payload;
             logger.info('[Connections] Received Open Request:', targetVpn, targetQueue, returnTo ?? 'queue-browser');
 
             if (opInProgress) {

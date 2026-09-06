@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderRows, renderCounter, uniqueQueues, updateVisibility, EMPTY_MESSAGES } from '../../../src/modules/queue-subscription-explorer/ui';
+import { renderRows, renderCounter, uniqueQueues, EMPTY_MESSAGES } from '../../../src/modules/queue-subscription-explorer/ui';
 import type { SubscriptionRow } from '../../../src/modules/queue-subscription-explorer/service';
 
 function makeTbody(): HTMLElement {
@@ -114,34 +114,9 @@ describe('queue-subscription-explorer/ui', () => {
         });
     });
 
-    describe('updateVisibility', () => {
-        function makeTriple() {
-            const warning = document.createElement('div');
-            const about = document.createElement('div');
-            const table = document.createElement('div');
-            return { warning, about, table };
-        }
-
-        it('shows the warning and hides about+table when SEMP is disconnected', () => {
-            const { warning, about, table } = makeTriple();
-            warning.classList.add('hidden');
-            about.classList.remove('hidden');
-            table.classList.remove('hidden');
-            updateVisibility(warning, about, table, false);
-            expect(warning.classList.contains('hidden')).toBe(false);
-            expect(about.classList.contains('hidden')).toBe(true);
-            expect(table.classList.contains('hidden')).toBe(true);
-        });
-
-        it('hides the warning and reveals about+table when SEMP connects', () => {
-            const { warning, about, table } = makeTriple();
-            warning.classList.remove('hidden');
-            about.classList.add('hidden');
-            table.classList.add('hidden');
-            updateVisibility(warning, about, table, true);
-            expect(warning.classList.contains('hidden')).toBe(true);
-            expect(about.classList.contains('hidden')).toBe(false);
-            expect(table.classList.contains('hidden')).toBe(false);
-        });
-    });
+    // The gate (#subexp-warning) is now created + toggled via the shared
+    // module-gate component; the gate-visibility behaviour is covered through
+    // full install in module.test.ts ("installs and shows the SEMP warning…" /
+    // "reveals the content cards when SEMP is connected…"). The component's own
+    // show()/hide() is covered in tests/core/components/module-gate.
 });

@@ -1,8 +1,4 @@
-<!-- Connection Prompt (Visible when primary Solace not connected) -->
-<div id="copy-warning" class="card text-center p-6">
-    <h2 class="mb-4 text-secondary">Connection Required</h2>
-    <p class="text-secondary">Please establish a primary Solace connection before copying messages.</p>
-</div>
+<!-- The connection-required gate is created at install by createGate() (see module.ts). -->
 
 <!-- Active View (Visible when primary Solace is connected) -->
 <div id="copy-content" class="hidden">
@@ -65,6 +61,35 @@
                 <label class="flex-row items-center gap-2 font-normal cursor-pointer">
                     <input type="checkbox" id="copy-toggle-same-vpn" checked> Same Message VPN as source
                 </label>
+            </div>
+
+            <!-- Credential source for the secondary connection. Shown only when a
+                 secondary connection is needed AND the deployment offers a choice;
+                 a managed-only deployment pins this to Provisioned. -->
+            <div class="form-group flex-row gap-4 items-center hidden" id="copy-dest-cred-mode-row" role="radiogroup"
+                aria-label="Destination credentials">
+                <span class="text-secondary">Destination credentials:</span>
+                <label class="flex-row items-center gap-2 font-normal cursor-pointer">
+                    <input type="radio" name="copy-dest-cred-mode" value="provisioned"
+                        id="copy-dest-cred-provisioned"> Provisioned
+                </label>
+                <label class="flex-row items-center gap-2 font-normal cursor-pointer">
+                    <input type="radio" name="copy-dest-cred-mode" value="manual" id="copy-dest-cred-manual" checked>
+                    Manual
+                </label>
+            </div>
+
+            <!-- Provisioned selection. Replaces every typed credential field: the
+                 core managed store dials the connection, so no password is entered. -->
+            <div class="form-group flex-row hidden" id="copy-dest-provisioned-block">
+                <div class="w-full">
+                    <label for="copy-dest-prov-broker">Broker</label>
+                    <select id="copy-dest-prov-broker" class="form-control"></select>
+                </div>
+                <div class="w-full">
+                    <label for="copy-dest-prov-vpn">Message VPN</label>
+                    <select id="copy-dest-prov-vpn" class="form-control" disabled></select>
+                </div>
             </div>
         </div>
 
@@ -264,6 +289,9 @@
                         <span class="copy-slider"></span>
                     </label>
                     <span class="copy-dest-type-label" id="copy-dest-type-label-topic">Topic</span>
+                </div>
+                <div class="text-secondary hidden" id="copy-dest-topic-blocked" style="font-size: 0.85rem;">
+                    Topic destinations are unavailable with managed credentials — entitlements are defined per queue.
                 </div>
             </div>
             <div class="form-group">

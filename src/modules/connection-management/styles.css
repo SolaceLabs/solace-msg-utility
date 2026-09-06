@@ -1,0 +1,22 @@
+/* Connection Management module styles. Module-prefixed (.conn-mgmt-*) so they
+ * never collide in the shared (inlined) cascade. Shipped only in the managed
+ * build (main-admin.css). */
+
+.conn-mgmt-card {
+    max-width: 720px;
+    margin: 2rem auto;
+}
+
+.conn-mgmt-table th {
+    text-align: left;
+}
+
+.conn-mgmt-actions-col {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.conn-mgmt-section {
+    margin: 1.25rem 0 0.5rem;
+    font-size: 0.95rem;
+}

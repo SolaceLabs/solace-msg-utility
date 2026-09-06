@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatBytes, generateUuid, matchString, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches } from '../../src/core/utils';
+import { formatBytes, generateUuid, matchString, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText} from '../../src/core/utils';
 
 describe('core/utils', () => {
 
@@ -366,5 +366,50 @@ describe('core/utils', () => {
             expect(topicFilterMatches('B*', 'bulkq')).toBe(false);
             expect(topicFilterMatches('b*', 'BULKQ')).toBe(false);
         });
+    });
+});
+
+describe('core/utils solaceErrorText', () => {
+    // The Solace SDK is not consistent about which field carries the reason, and
+    // the two shapes reach different call sites:
+    //   QueueBrowser CONNECT_FAILED_ERROR -> OperationError (Error, `.message`)
+    //   Session CONNECT_FAILED_ERROR      -> SessionEvent   (`.infoStr`)
+    // Reading only one loses the broker's explanation.
+
+    it('prefers message, the field a QueueBrowser OperationError carries', () => {
+        const operationError = Object.assign(new Error('Permission Denied'), { subcode: 20 });
+        expect(solaceErrorText(operationError, 'fallback')).toBe('Permission Denied');
+    });
+
+    it('falls back to infoStr, the field a SessionEvent carries', () => {
+        expect(solaceErrorText({ infoStr: 'Host unreachable' }, 'fallback')).toBe('Host unreachable');
+    });
+
+    it('prefers message when a value carries both', () => {
+        expect(solaceErrorText({ message: 'from message', infoStr: 'from infoStr' }, 'fallback'))
+            .toBe('from message');
+    });
+
+    it('uses the fallback when neither field is usable', () => {
+        expect(solaceErrorText({}, 'fallback')).toBe('fallback');
+        expect(solaceErrorText({ message: '   ', infoStr: '' }, 'fallback')).toBe('fallback');
+        expect(solaceErrorText(null, 'fallback')).toBe('fallback');
+        expect(solaceErrorText(undefined, 'fallback')).toBe('fallback');
+    });
+
+    it('never stringifies the object, so [object Object] cannot reach a user', () => {
+        // The old `err.message || err` idiom did exactly that.
+        expect(solaceErrorText({ nope: 1 }, 'fallback')).not.toContain('object');
+        expect(solaceErrorText(42, 'fallback')).toBe('fallback');
+    });
+
+    it('accepts a bare string, which some callers pass through', () => {
+        expect(solaceErrorText('Not connected to Solace.', 'fallback')).toBe('Not connected to Solace.');
+        expect(solaceErrorText('   ', 'fallback')).toBe('fallback');
+    });
+
+    it('ignores a non-string message or infoStr rather than rendering it', () => {
+        expect(solaceErrorText({ message: 500 }, 'fallback')).toBe('fallback');
+        expect(solaceErrorText({ message: 500, infoStr: 'real reason' }, 'fallback')).toBe('real reason');
     });
 });

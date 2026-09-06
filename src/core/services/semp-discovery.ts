@@ -24,7 +24,7 @@ export const PAGE_DELAY_MS = 370;
  * self-view points outside the gateway).
  *
  * Scoped to a specific broker via the supplied SempContext. Drives the
- * primary connection by passing `primarySempContextFrom(ctx)`; queue-copy
+ * primary connection by passing `unfilteredPrimarySempContext(ctx)`; queue-copy
  * will pass its destination SempContext for secondary discovery.
  *
  * Presumes the SempContext is valid — does NOT check connection state.

@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
     cacheElements,
-    setPrimaryConnected,
     applyDestPrefill,
     applyDestType,
     applySourceReadonly,
@@ -108,19 +107,11 @@ describe('queue-copy/ui', () => {
         });
     });
 
-    describe('setPrimaryConnected', () => {
-        it('shows content + hides warning when connected', () => {
-            setPrimaryConnected(elsHolder.els, true);
-            expect(elsHolder.els.warning.classList.contains('hidden')).toBe(true);
-            expect(elsHolder.els.content.classList.contains('hidden')).toBe(false);
-        });
-
-        it('shows warning + hides content when disconnected', () => {
-            setPrimaryConnected(elsHolder.els, false);
-            expect(elsHolder.els.warning.classList.contains('hidden')).toBe(false);
-            expect(elsHolder.els.content.classList.contains('hidden')).toBe(true);
-        });
-    });
+    // The connection gate (#copy-warning) is now created + toggled via the
+    // shared module-gate component inside install; its show/hide-vs-content
+    // behaviour is covered by module.test.ts ("installs without primary
+    // connection…" / "installs with primary connected…"), and the component's
+    // own show()/hide() in tests/core/components/module-gate.
 
     describe('applyDestPrefill', () => {
         it('sameBroker=true & sameVpn=true: disables every dest field, prefills with primary values', () => {

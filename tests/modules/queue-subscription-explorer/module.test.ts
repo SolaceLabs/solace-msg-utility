@@ -406,8 +406,10 @@ describe('QueueSubscriptionExplorerModule', () => {
     });
 
     it('throws at install when a required element is missing', async () => {
+        // The gate (#subexp-warning) is now created by createGate, not required
+        // from the template — so an empty container makes install fail on the
+        // first genuine required() capture (#subexp-about).
         const container = document.createElement('div');
-        container.innerHTML = '<div id="subexp-warning"></div>';
         document.body.appendChild(container);
         const { ctx } = createTestContext(container);
         await expect(QueueSubscriptionExplorerModule.install(ctx)).rejects.toThrow(/Required element missing/);

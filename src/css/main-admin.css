@@ -1,0 +1,17 @@
+/* Admin-app CSS entry.
+ *
+ * Used ONLY by the `admin` build (dist/solAdmin.html): the
+ * `css-variant-redirect` plugin (vite.config.ts) rewrites src/main.ts's
+ * `import './css/main.css'` to this file when --variant=admin. Every other
+ * build keeps importing main.css directly, so the admin stylesheets below
+ * never ship in a bundle that has no admin modules.
+ *
+ * Imports the full design system + shared module styles, then layers the
+ * admin-only module stylesheets.
+ */
+
+@import './main.css';
+
+@import '../modules/admin-login/styles.css';
+@import '../modules/user-management/styles.css';
+@import '../modules/connection-management/styles.css';

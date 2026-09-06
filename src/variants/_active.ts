@@ -10,4 +10,4 @@
  *      same `import { ACTIVE_MODULES } from './variants/_active'` line in
  *      the registry picks up the chosen variant. Per-build, no source edit.
  */
-export * from './full';
+export * from './standard';

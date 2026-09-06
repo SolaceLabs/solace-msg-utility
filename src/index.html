@@ -60,18 +60,27 @@
                 script.onload = () => {
                     console.log(`Loaded ${src}`);
 
-                    // Version Check (>= 10.18.3)
+                    // Version Check (>= 10.18.3). solaceLibLoaded gates connecting
+                    // (see core/services/solace-client.ts), so "cannot verify" must
+                    // not mean "refuse": some custom/minified SDK builds strip
+                    // Version.version, and blocking those would break a working
+                    // deployment over a missing string. Only a version we can read
+                    // AND that falls below the floor blocks.
                     const MIN_VERSION = '10.18.3';
-                    const currentVersion = (window.solace && window.solace.Version && window.solace.Version.version) || '0.0.0';
-                    console.log(`Solace API Version: ${currentVersion}`);
+                    const reportedVersion = window.solace && window.solace.Version && window.solace.Version.version;
+                    console.log(`Solace API Version: ${reportedVersion || '(not reported)'}`);
 
-                    if (window.compareVersions(currentVersion, MIN_VERSION) >= 0) {
+                    if (!reportedVersion) {
+                        console.warn(`Solclient reported no version; cannot verify the ${MIN_VERSION}+ requirement. Proceeding.`);
+                        window.solaceLibLoaded = true;
+                        window.dispatchEvent(new CustomEvent('Solclient:loaded'));
+                    } else if (window.compareVersions(reportedVersion, MIN_VERSION) >= 0) {
                         window.solaceLibLoaded = true;
                         window.dispatchEvent(new CustomEvent('Solclient:loaded'));
                     } else {
-                        const err = `Solace API Version ${currentVersion} is too old. Required: ${MIN_VERSION}+`;
+                        const err = `Solace API Version ${reportedVersion} is too old. Required: ${MIN_VERSION}+`;
                         console.error(err);
-                        showBanner(`⚠️ <strong>Outdated Library</strong>: Found Solclient ${currentVersion}, required ${MIN_VERSION}+.`);
+                        showBanner(`⚠️ <strong>Outdated Library</strong>: Found Solclient ${reportedVersion}, required ${MIN_VERSION}+. Connecting is disabled.`);
                     }
                 };
                 script.onerror = () => {
@@ -91,8 +100,11 @@
                 document.head.appendChild(script);
             }
 
-            // Start Solclient Load
-            loadSolclient('solclient.js', 'js/solclient.js', 'solclient-full.js', 'js/solclient-full.js', 'solclient-debug.js', 'js/solclient-debug.js');
+            // Start Solclient Load. Two candidates only — the file next to the
+            // HTML, then a sibling js/ folder. loadSolclient takes (src, fallback);
+            // extra arguments would be silently ignored, so a debug build must be
+            // renamed to solclient.js rather than dropped in under its own name.
+            loadSolclient('solclient.js', 'js/solclient.js');
 
             // JSZip Loader
             const zipPaths = ['jszip.min.js', 'js/jszip.min.js', 'jszip.js', 'js/jszip.js'];

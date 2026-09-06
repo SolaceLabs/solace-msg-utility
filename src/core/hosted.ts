@@ -19,6 +19,7 @@
  * currentLevel` + setter/getter pair).
  */
 import { normalizeUrlPath } from './utils';
+import { coerceConnConfig, DEFAULT_CONN_CONFIG, type ConnDeploymentConfig } from './connections/conn-modes';
 
 let hostedMode = false;
 
@@ -30,21 +31,54 @@ export function setHosted(v: boolean): void {
     hostedMode = v;
 }
 
+/** Result of probing the gateway `/hosted` endpoint. */
+export interface DeploymentInfo {
+    hosted: boolean;
+    /** Which connection tabs to offer + default. Direct-only when not hosted. */
+    conn: ConnDeploymentConfig;
+}
+
 /**
- * Probe the gateway's `/hosted` endpoint. Resolves to `true` only when the
- * response is HTTP 200 and the body (trimmed, lowercased) is `'true'`. Any
- * other outcome — non-200, mismatched body, network error, throw — resolves
- * to `false` so callers can blindly `setHosted(await probeHosted())`.
+ * Probe the gateway's `/hosted` endpoint for hosted-mode + connection-tab config.
+ *
+ * The current gateway returns JSON `{ hosted:true, connModes, defaultConn }`; a
+ * legacy gateway may return plaintext `'true'`/`'false'`. Any non-200,
+ * non-hosted, malformed, or network-error outcome resolves to
+ * `{ hosted:false, conn: DEFAULT_CONN_CONFIG }` (Direct only) — so a
+ * static/non-hosted deployment never surfaces Managed. A legacy plaintext
+ * `'true'` is treated as hosted with the Direct-only default (Managed requires
+ * the JSON contract).
  */
-export async function probeHosted(): Promise<boolean> {
+export async function probeDeployment(): Promise<DeploymentInfo> {
+    const notHosted: DeploymentInfo = { hosted: false, conn: DEFAULT_CONN_CONFIG };
     try {
         const res = await fetch('/hosted', { method: 'GET', cache: 'no-store' });
-        if (!res.ok) return false;
-        const body = (await res.text()).trim().toLowerCase();
-        return body === 'true';
+        if (!res.ok) return notHosted;
+        const text = (await res.text()).trim();
+        const lower = text.toLowerCase();
+        if (lower === 'true') return { hosted: true, conn: DEFAULT_CONN_CONFIG }; // legacy plaintext
+        if (lower === 'false' || lower === '') return notHosted;
+        let json: unknown;
+        try {
+            json = JSON.parse(text);
+        } catch {
+            return notHosted; // not the legacy contract and not JSON
+        }
+        const hosted = !!(json && typeof json === 'object' && (json as Record<string, unknown>).hosted === true);
+        if (!hosted) return notHosted;
+        return { hosted: true, conn: coerceConnConfig(json) };
     } catch {
-        return false;
+        return notHosted;
     }
+}
+
+/**
+ * Back-compat boolean probe (hosted-mode only). Callers that also need the
+ * connection-tab config should use `probeDeployment`. Any non-hosted outcome
+ * resolves `false` so callers can blindly `setHosted(await probeHosted())`.
+ */
+export async function probeHosted(): Promise<boolean> {
+    return (await probeDeployment()).hosted;
 }
 
 /**

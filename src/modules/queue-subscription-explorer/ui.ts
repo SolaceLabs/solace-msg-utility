@@ -39,24 +39,6 @@ export function renderRows(tbody: HTMLElement, rows: SubscriptionRow[], emptyHtm
     tbody.innerHTML = html;
 }
 
-/** Toggle the SEMP-warning + content cards based on the connection flag. */
-export function updateVisibility(
-    elWarning: HTMLElement,
-    elAbout: HTMLElement,
-    elTable: HTMLElement,
-    isSempConnected: boolean,
-): void {
-    if (!isSempConnected) {
-        elWarning.classList.remove('hidden');
-        elAbout.classList.add('hidden');
-        elTable.classList.add('hidden');
-    } else {
-        elWarning.classList.add('hidden');
-        elAbout.classList.remove('hidden');
-        elTable.classList.remove('hidden');
-    }
-}
-
 /**
  * Counter payload shown next to the "Subscriptions" title. `null` clears it
  * (used while loading or before the first Load click). `showMatched` controls

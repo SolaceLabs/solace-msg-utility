@@ -1,0 +1,34 @@
+<div class="module-header">
+    <h1>Administration</h1>
+    <p class="text-secondary">Sign in with an administrator account to manage users and broker connections.</p>
+</div>
+
+<!-- Login view -->
+<div id="admin-login-view" class="card admin-login-card">
+    <div class="flex-row justify-between items-center mb-4">
+        <h2 class="m-0">Sign in</h2>
+    </div>
+    <div class="form-group">
+        <label for="admin-login-username">Username</label>
+        <input type="text" id="admin-login-username" class="form-control" autocomplete="username">
+    </div>
+    <div class="form-group">
+        <label for="admin-login-password">Password</label>
+        <input type="password" id="admin-login-password" class="form-control" autocomplete="current-password">
+    </div>
+    <button id="btn-admin-login" class="btn btn-primary">Sign in</button>
+    <div id="admin-login-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+</div>
+
+<!-- Signed-in view. No broker controls: this app never opens a broker connection. -->
+<div id="admin-session-view" class="card admin-login-card hidden">
+    <div class="flex-row justify-between items-center mb-4">
+        <h2 class="m-0">Signed in</h2>
+        <button id="btn-admin-logout" class="btn btn-secondary">Sign out</button>
+    </div>
+    <div id="admin-session-summary" class="text-secondary"></div>
+    <p class="text-secondary mt-4" style="line-height: 1.5;">
+        Use <strong>User Mgmt.</strong> and <strong>Connection Mgmt.</strong> in the sidebar. Changes take
+        effect for users on their next sign-in or Refresh.
+    </p>
+</div>

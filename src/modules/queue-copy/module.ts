@@ -21,7 +21,6 @@ import {
     applyDestPrefill,
     applyDestType,
     applySourceReadonly,
-    setPrimaryConnected,
     setSourcePickVisible,
     setDestPickVisible as ui_setDestPickVisible,
     setStartEnabled,
@@ -45,7 +44,10 @@ import {
     type SempConnectionHooks,
 } from '../../core/services/semp-client';
 import { createSolacePublisher } from '../../core/services/solace-publisher';
+import { createGate } from '../../core/components/module-gate';
 import { logger } from '../../core/logger';
+import { isQueueVisible, canOperate } from '../../core/rbac';
+import { errMessage } from '../../core/utils';
 import type { AppContext, SempConfig, SolaceConfig } from '../../core/types';
 
 export const QueueCopyModule = {
@@ -59,6 +61,23 @@ export const QueueCopyModule = {
 
         const state = createInitialState();
         const els = cacheElements(container);
+
+        // Connection-required gate (created by the shared component) vs the
+        // content panel — the module owns the mutual exclusion.
+        const gate = createGate(container, {
+            id: 'copy-warning',
+            title: 'Connection Required',
+            message: 'Please establish a primary Solace connection before copying messages.',
+        });
+        function setPrimaryConnected(isConnected: boolean): void {
+            if (isConnected) {
+                gate.hide();
+                els.content.classList.remove('hidden');
+            } else {
+                gate.show();
+                els.content.classList.add('hidden');
+            }
+        }
 
         // Track the primary session so toggle-prefill and modal Start can
         // read broker/VPN/user details live.
@@ -188,19 +207,49 @@ export const QueueCopyModule = {
 
         function connectDestSemp(): void {
             const f = state.destForm;
+            setDestSempStatus(els, 'connecting');
+            setDestSempError(els, null);
+            if (f.credMode === 'provisioned') {
+                // The core store owns the credential: it unpacks just-in-time and
+                // dials with a password this module never sees. Effects still land
+                // only in module-local state via destSempHooks (Anchor 4).
+                void app.managedStore
+                    .connect({ broker: f.provisioned.broker, kind: 'semp' }, {
+                        connect: async (c) => { await destSempClient.connect(c.cfg, c.host, c.pass); },
+                    })
+                    .catch((e) => {
+                        setDestSempStatus(els, 'disconnected');
+                        setDestSempError(els, errMessage(e));
+                    });
+                return;
+            }
             const cfg: SempConfig = {
                 protocol: f.semp.protocol,
                 port: f.semp.port,
                 urlPath: f.semp.urlPath,
                 user: f.semp.user,
             };
-            setDestSempStatus(els, 'connecting');
-            setDestSempError(els, null);
             void destSempClient.connect(cfg, f.host, state.destSempPass);
         }
 
         function connectDestSol(): void {
             const f = state.destForm;
+            if (f.credMode === 'provisioned') {
+                destSolClient.init();
+                setDestSolStatus(els, 'connecting');
+                setDestSolError(els, null);
+                // The store also owns connection identity here, so the clientName
+                // it composes always matches the clientNameId inside its cfg.
+                void app.managedStore
+                    .connect({ broker: f.provisioned.broker, vpn: f.provisioned.vpn, kind: 'solace' }, {
+                        connect: (c) => { destSolClient.connect(c.cfg, c.host, c.pass, c.clientName); },
+                    })
+                    .catch((e) => {
+                        setDestSolStatus(els, 'disconnected');
+                        setDestSolError(els, errMessage(e));
+                    });
+                return;
+            }
             const cfg: SolaceConfig = {
                 protocol: f.solace.protocol,
                 port: f.solace.port,
@@ -213,6 +262,10 @@ export const QueueCopyModule = {
                 reconnectRetries: 1,
                 reconnectWait: 3000,
                 maxMessagesPerQueue: 100,
+                // Dest connect() takes its clientName as a separate 4th arg and
+                // never reads cfg.clientNameId, so this satisfies the required
+                // SolaceConfig field without affecting the dest connection.
+                clientNameId: '',
             };
             destSolClient.init();
             setDestSolStatus(els, 'connecting');
@@ -258,7 +311,7 @@ export const QueueCopyModule = {
 
         // -------- Initial UI state --------
         applyDestType(els, state.dest.type);
-        setPrimaryConnected(els, appState.isConnected);
+        setPrimaryConnected(appState.isConnected);
         setSourcePickVisible(els, appState.isSempConnected);
         // refreshFromPrimary computes both Next-button + dest-picker gates from
         // current state, so no explicit initial-disabled call is needed.
@@ -293,7 +346,7 @@ export const QueueCopyModule = {
             // its own pending map.
             state.primaryPublisher?.dispose();
             state.primaryPublisher = createSolacePublisher(session);
-            setPrimaryConnected(els, true);
+            setPrimaryConnected(true);
             refreshFromPrimary();
         });
 
@@ -301,7 +354,7 @@ export const QueueCopyModule = {
             primarySession = null;
             state.primaryPublisher?.dispose('Primary disconnected');
             state.primaryPublisher = null;
-            setPrimaryConnected(els, false);
+            setPrimaryConnected(false);
             refreshFromPrimary();
         });
 
@@ -322,6 +375,55 @@ export const QueueCopyModule = {
         // into the input. The source picker emitted connection:check-connection
         // with returnTo='queue-copy', and connections fired this event once
         // the new VPN was UP.
+        /**
+         * Entitlements changed underneath us (login / Refresh / logout / the
+         * Direct-connect interlock).
+         *
+         * An active run halts through the engine's ordinary halt path — the same
+         * one the Cancel button uses. The treatment is identical (stop consuming,
+         * drain in-flight publishes, settle once), so it deliberately reports as
+         * `cancelled`: `rbac:changed` only ever fires as a result of something the
+         * user just did, so there is nothing to disambiguate for them. The reason
+         * is logged here, which is where diagnosis belongs.
+         */
+        eventBus.on('rbac:changed', () => {
+            const session = appState.managed ?? null;
+            const vpn = appState.selectedVpn ?? '';
+            const broker = session?.broker ?? '';
+
+            const destProvisioned = state.destForm.credMode === 'provisioned';
+            const destStillProvisioned = !destProvisioned || app.managedStore
+                .vpnsFor(state.destForm.provisioned.broker)
+                .includes(state.destForm.provisioned.vpn);
+
+            if (state.job && !state.job.cancelRequested) {
+                // Move is the forcing case: without this a run keeps DELETING from
+                // a queue the user was just denied operate on.
+                const sourceGone = !isQueueVisible(session, broker, vpn, state.sourceQueue);
+                const moveDenied = state.mode === 'move'
+                    && !canOperate(session, broker, vpn, state.sourceQueue);
+                if (sourceGone || moveDenied || !destStillProvisioned) {
+                    logger.warn('[QueueCopy] halting run — the entitlement backing an endpoint was revoked');
+                    state.job.cancelRequested = true;
+                }
+            }
+
+            // Teardown applies to the DESTINATION only: it is this module's own
+            // secondary connection. The source rides the app-wide primary, which
+            // the connections module owns — revoking one queue must never
+            // disconnect that session.
+            //
+            // Deferred while a run is settling: killing the dest session mid-drain
+            // would fail in-flight publishes and misreport the outcome. A stale
+            // connection is hygiene, not a control — the run-start gate re-checks
+            // entitlement before anything is published — so it is dropped on the
+            // next refresh instead.
+            if (!destStillProvisioned && !state.job) {
+                disconnectDestSemp();
+                disconnectDestSol();
+            }
+        });
+
         eventBus.on('copy:vpn-switched', ({ queue }) => {
             if (loadSelf) loadSelf();
             state.sourceQueue = queue;

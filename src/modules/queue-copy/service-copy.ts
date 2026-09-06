@@ -1,6 +1,7 @@
 import { getOriginalIdHint } from './service';
 import { msgIdToString, compareMsgIds } from './service-verify';
 import { logger } from '../../core/logger';
+import { solaceErrorText } from '../../core/utils';
 import {
     IDLE_TIMEOUT_MS,
     PUBLISH_CONCURRENCY_HIGH,
@@ -336,12 +337,13 @@ export function runCopyJob(
             resetIdleTimer();
         });
         browser.on(solace.QueueBrowserEventName.CONNECT_FAILED_ERROR, (e: any) => {
-            state.job!.lastError = e?.infoStr ?? 'Browser connect failed';
+            // OperationError carries the reason on `.message`, not `infoStr`.
+            state.job!.lastError = solaceErrorText(e, 'Browser connect failed');
             logger.error(`[Copy] Source QueueBrowser CONNECT_FAILED_ERROR: ${state.job!.lastError}`);
             triggerStop('browser-error');
         });
         browser.on(solace.QueueBrowserEventName.DOWN_ERROR, (e: any) => {
-            state.job!.lastError = e?.infoStr ?? 'Browser disconnected';
+            state.job!.lastError = solaceErrorText(e, 'Browser disconnected');
             logger.error(`[Copy] Source QueueBrowser DOWN_ERROR: ${state.job!.lastError}`);
             triggerStop('browser-error');
         });

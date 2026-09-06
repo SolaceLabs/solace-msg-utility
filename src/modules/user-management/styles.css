@@ -1,0 +1,17 @@
+/* User Management module styles. Module-prefixed (.user-mgmt-*) so they never
+ * collide in the shared (inlined) cascade. Shipped only in the managed build
+ * (main-admin.css). */
+
+.user-mgmt-card {
+    max-width: 720px;
+    margin: 2rem auto;
+}
+
+.user-mgmt-table th {
+    text-align: left;
+}
+
+.user-mgmt-actions-col {
+    width: 1%;
+    white-space: nowrap;
+}

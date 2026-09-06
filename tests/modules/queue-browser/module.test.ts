@@ -74,7 +74,7 @@ describe('queue-browser/module', () => {
             await QueueBrowserModule.install(ctx);
 
             const cached = ui.getElements();
-            expect(cached.elPrompt.classList.contains('hidden')).toBe(false);
+            expect(container.querySelector('#browser-connect-prompt')!.classList.contains('hidden')).toBe(false);
             expect(cached.elActiveView.classList.contains('hidden')).toBe(true);
             consoleSpy.mockRestore();
         });
@@ -193,14 +193,14 @@ describe('queue-browser/module', () => {
             consoleSpy.mockRestore();
         });
 
-        it('btnBindPick click wires to handleBindPickClick (invokes pickQueue with primary sempCtx)', async () => {
+        it('btnBindPick click wires to handleBindPickClick (invokes pickQueue with the primary queue source)', async () => {
             // Closes COV-10: the click listener at module.ts:89 was
             // previously unexercised. Spy on `pickQueue` — the distinguishing
             // downstream effect of handleBindPickClick — so a regression that
             // re-wires this button to a different handler would fail.
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-            // Set up enough state for primarySempContextFrom to return a
-            // non-null SempContext so handleBindPickClick reaches pickQueue.
+            // Set up enough state for queueSourceFrom to return a non-null
+            // QueueSource so handleBindPickClick reaches pickQueue.
             ctx.appState.isSempConnected = true;
             ctx.appState.sempCredentials = {
                 user: 'u', pass: 'p', baseUrl: 'https://b:1943/SEMP/v2',
@@ -217,7 +217,7 @@ describe('queue-browser/module', () => {
 
             expect(pickSpy).toHaveBeenCalledTimes(1);
             expect(pickSpy).toHaveBeenCalledWith(
-                expect.objectContaining({ fetch: expect.any(Function), baseUrl: expect.stringContaining('1943') }),
+                expect.objectContaining({ key: expect.stringContaining('1943'), listVpns: expect.any(Function), listQueues: expect.any(Function) }),
                 expect.objectContaining({ defaultVpn: 'vpn1' }),
             );
 
@@ -595,7 +595,7 @@ describe('queue-browser/module', () => {
             els.hdrVpnName.textContent = 'stale-vpn';
             eventBus.emit('app:state-change', { key: 'isConnected', value: false });
 
-            expect(els.elPrompt.classList.contains('hidden')).toBe(false);
+            expect(container.querySelector('#browser-connect-prompt')!.classList.contains('hidden')).toBe(false);
             expect(els.hdrVpnName.textContent).toBe('');
             consoleSpy.mockRestore();
         });
@@ -642,7 +642,7 @@ describe('queue-browser/module', () => {
 
             eventBus.emit('client:disconnected');
 
-            expect(els.elPrompt.classList.contains('hidden')).toBe(false);
+            expect(container.querySelector('#browser-connect-prompt')!.classList.contains('hidden')).toBe(false);
             expect(els.elActiveView.classList.contains('hidden')).toBe(true);
             consoleSpy.mockRestore();
         });
@@ -703,7 +703,6 @@ describe('queue-browser/module', () => {
                 <span id="detail-dest-badge" class="hidden"></span>
                 <div id="detail-content"></div>
                 <button id="btn-show-raw" disabled></button>
-                <div id="browser-connect-prompt"></div>
                 <div id="browser-active-view" class="hidden"></div>
                 <span id="browser-queue-name"></span>
                 <span id="browser-permissions" class="hidden"></span>

@@ -63,6 +63,42 @@ export const ui = {};
         elements.elSslUrlText = required(container, '#ssl-trust-url-text');
         elements.elCorsOriginText = required(container, '#cors-origin-text');
         elements.btnCloseSsl = required(container, '#btn-close-ssl-modal');
+
+        // Connection-mode tabs (Direct / Managed) — required.
+        elements.connTabs = required(container, '#conn-tabs');
+        elements.connTabDirect = required(container, '#conn-tab-direct');
+        elements.connTabManaged = required(container, '#conn-tab-managed');
+        elements.connPanelDirect = required(container, '#conn-panel-direct');
+        elements.connPanelManaged = required(container, '#conn-panel-managed');
+    };
+
+    function setTabActive(btn, active) {
+        btn.classList.toggle('btn-primary', active);
+        btn.classList.toggle('btn-secondary', !active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    }
+
+    /**
+     * Render the connection-mode tabs from `resolveConnTabs()` output
+     * (`['direct']`, `['managed']`, or both, ordered). The tab bar itself is
+     * shown only when there's a choice (>1 tab) — a single-mode deployment
+     * looks exactly like the pre-tabs UI. Activates the first tab.
+     */
+    ui.renderTabs = function (tabs) {
+        const els = elements;
+        els.connTabDirect.classList.toggle('hidden', !tabs.includes('direct'));
+        els.connTabManaged.classList.toggle('hidden', !tabs.includes('managed'));
+        els.connTabs.classList.toggle('hidden', tabs.length < 2);
+        ui.showTab(tabs[0]);
+    };
+
+    /** Show one connection panel (and mark its tab active), hide the other. */
+    ui.showTab = function (mode) {
+        const els = elements;
+        els.connPanelDirect.classList.toggle('hidden', mode !== 'direct');
+        els.connPanelManaged.classList.toggle('hidden', mode !== 'managed');
+        setTabActive(els.connTabDirect, mode === 'direct');
+        setTabActive(els.connTabManaged, mode === 'managed');
     };
 
     ui.initEvents = function () {

@@ -11,6 +11,8 @@ The interface has a **sidebar** on the left for navigation and a **main content 
 3. **Queue Copy** — Copy messages from a source queue to a destination queue (same broker or cross-broker)
 4. **Queue Subscriptions** — Search every queue subscription on the broker by VPN, queue, or topic
 
+Which modules appear depends on the build [variant](#shipped-variants). Deployments behind the gateway can also enable **Managed** connections, a second tab in **Connections** for users who do not have broker credentials — you sign in and pick from the brokers you are entitled to. See [Managed Connections](#managed-connections) below.
+
 ---
 
 ## Module 1: Connections
@@ -28,8 +30,9 @@ This is the first screen you see. It manages two independent connections.
 This connection uses the Solace Web Messaging protocol (WebSocket) to communicate with the broker for message operations (browsing, forwarding, deleting).
 
 **Fields:**
+
 | Field | Description | Example |
-|-------|-------------|---------|
+| --- | --- | --- |
 | Broker Host | IP address or hostname of your broker | `my-broker.solace.cloud`, `192.168.0.10` |
 | Protocol | `ws://` (unencrypted) or `wss://` (TLS) | `wss://` (recommended) |
 | Port | WebSocket port | `8008` (ws) or `1443` (wss) |
@@ -39,12 +42,14 @@ This connection uses the Solace Web Messaging protocol (WebSocket) to communicat
 | Password | Client password or OAuth2 token | |
 
 **Auth Modes:**
+
 - **Basic** — Standard username/password authentication
 - **OAuth2** — Token-based authentication (the Username field becomes "Client ID" and Password becomes "Access Token")
 
 **Advanced Settings** (gear icon):
+
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | Connect Retries | 0 | Number of times to retry initial connection |
 | Connect Timeout | 3000ms | How long to wait for connection |
 | Reconnect Retries | 1 | Retries after disconnect (-1 = infinite) |
@@ -54,6 +59,7 @@ This connection uses the Solace Web Messaging protocol (WebSocket) to communicat
 
 **SSL/TLS Certificate Trust:**
 If connecting over `wss://` to a broker with a self-signed certificate, the browser will block the connection. A helper dialog appears with instructions to trust the certificate:
+
 1. Click "Open Broker URL" to open the broker in a new tab
 2. Accept the certificate warning in that tab
 3. Close the tab and reconnect
@@ -69,8 +75,9 @@ This connection uses the SEMP v2 REST API for management operations (discovering
 > SEMP interactions are REST calls rather than a persistent connection — each action triggers a new HTTP request using the configured credentials. The "connection" abstraction is preserved for UI consistency with the other modules. Future releases may add alternative SEMP connection methods (e.g. via the client session or OAuth2).
 
 **Fields:**
+
 | Field | Description | Example |
-|-------|-------------|---------|
+| --- | --- | --- |
 | Protocol | `http://` or `https://` | `https://` |
 | Port | SEMP port | `8080` (http) or `1943` (https) |
 | URL Path | Optional path appended after the port and before `/SEMP/v2/...` (e.g. when SEMP is exposed behind a reverse proxy). Leave blank for a direct SEMP URL. | `/api`, `/management` |
@@ -85,9 +92,12 @@ The SEMP connection shares the same Broker Host as the Solace client connection.
 - **Load All Config** — Restores previously saved fields
 - **Reset Form** — Clears all fields back to defaults
 
+> **Out-of-date `solclient.js`:** if the SDK next to the app is older than the required version, a banner appears at the top of the page and **Connect** refuses with an explicit message naming the required version, rather than failing somewhere inside the SDK. Replace the file to clear it.
+
 ### Status Indicators
 
 The sidebar shows two colored dots:
+
 - **Client** indicator — green when Solace client is connected
 - **SEMP** indicator — green when SEMP management API is connected
 
@@ -114,7 +124,7 @@ To stop receiving messages, select a queue and click **Unbind**.
 Messages are displayed in a scrollable table:
 
 | Column | Description |
-|--------|-------------|
+| --- | --- |
 | Checkbox | Select individual messages for bulk operations |
 | Message ID | The Guaranteed Message ID assigned by the broker |
 | Date | Sender timestamp (or "No Timestamp" if not set) |
@@ -146,8 +156,9 @@ Click the **filter icon** in the header bar to open the filter modal.
 ![Message Filtering](../images/browser-filter.png)
 
 **Filter Criteria:**
+
 | Field | Description |
-|-------|-------------|
+| --- | --- |
 | Search Criteria | **Match ANY (OR)** or **Match ALL (AND)** |
 | Message ID | Filter by message ID (contains) |
 | Message Type | Any, Text, Binary, Map, or Stream |
@@ -159,6 +170,7 @@ Click the **filter icon** in the header bar to open the filter modal.
 The property filter supports autocomplete for standard Solace properties (App Msg Id, Cache Id, Corr Id, Delivery Count, Delivery Mode, HTTP Encoding, HTTP Type, Priority, Reply To, Sender Id, SeqNumber, TTL, TopicSeqNum).
 
 **Wildcard semantics:**
+
 - `*` matches any sequence of characters (including spaces and symbols).
 - For **Body Content**, the wildcard is auto-applied — entering `match text` behaves as `*match text*` (substring contains-match).
 - For Message ID and Destination Name, wildcards are explicit — use `*` where you want a wildcard. Without one, the filter is an exact match.
@@ -177,7 +189,6 @@ Forward one or more messages to a different destination.
 
 > **Forwarded messages are sent in PERSISTENT delivery mode** to ensure delivery confirmation, even if the original message was DIRECT. The forwarded message is constructed as a new message that copies all properties from the original (see the property-preservation note below).
 
-
 1. Select messages using checkboxes, then click **Forward** in the toolbar (bulk forward), OR click the forward button on an individual row
 2. The Forward modal opens showing the messages queued for forwarding
 3. Choose a **Destination Type** and (where applicable) enter a **Destination Name**:
@@ -189,6 +200,7 @@ Forward one or more messages to a different destination.
 While the send is running, both the type and name inputs are locked and the button shows **Sending...**. They re-enable when the batch reaches a terminal state.
 
 Each message shows a status indicator:
+
 - **QUEUED** — Waiting to be sent
 - **SENDING** — In transit
 - **SUCCESS** — Broker acknowledged receipt
@@ -230,7 +242,7 @@ Two download formats are available:
 
 Both are available as per-row buttons and as bulk toolbar buttons (when messages are selected).
 
-Requires JSZip to be loaded (included in the standard deployment).
+Requires `jszip.min.js` to be present next to the app (see [Shipped Variants](#shipped-variants) for where to get it). Without it the app still runs — only the ZIP download is disabled.
 
 ### Keyboard Shortcuts
 
@@ -258,11 +270,22 @@ The form is split into Source (left, read-only mirror of the primary connection)
 
 When Same-VPN is enabled, the destination uses the primary Solace session directly — no second connection is needed.
 
+### Destination credentials (managed sessions)
+
+When the destination is *not* just the primary connection, a **Credentials** choice appears on the Destination Broker card:
+
+- **Provisioned** — pick a **Broker** and **Message VPN** from the ones you are entitled to. There are no password fields: the app uses the credentials your administrator provisioned, exactly as it does for the primary connection.
+- **Manual** — type the host and credentials yourself, as before.
+
+Which options you get follows the deployment: a managed-only deployment offers **Provisioned** alone, a direct one offers **Manual** alone, and a deployment offering both connection modes lets you choose. Switching between them clears the destination target, since it was picked against a different broker.
+
+On a provisioned destination you can only copy **into queues you hold Operate on**, and **Topic destinations are unavailable** — entitlements are defined per queue, and a topic delivers to every queue subscribed to it, so there is no way to check it. Switch to manual credentials (where the deployment allows it) if you need to publish to a topic.
+
 ### Destination target
 
 Choose one of two targets:
 
-- **Queue** — point-to-point delivery; pick an existing destination queue (or type the name). A **Pick** button opens a queue selector populated via SEMP.
+- **Queue** — point-to-point delivery; pick an existing destination queue (or type the name). A **Pick** button opens a queue selector populated via SEMP. In a managed session it lists only queues you may **write** to on the destination broker.
 - **Topic** — fan-out to subscribers of the named topic.
 
 Each run is either a **Copy** (messages stay on the source) or a **Move** (messages are removed from the source after successful publish).
@@ -295,13 +318,14 @@ The snapshot taken in step 1 is treated as immutable — the engine copies oldes
 **Owner override.** When SEMP is connected and the queue's `<owner>` matches your client session username, you have full access regardless of the queue's `<others-permission>` value. The modal lifts the effective access type to read-write automatically — both Copy and Move are enabled. (The QueueBrowser-fallback path doesn't need an explicit owner check; the SDK already factors owner status into the permission it reports.)
 
 **Stop conditions and statuses.** The run reports one of three final statuses:
+
 - **Completed** — every message from oldest to newest was copied/moved successfully.
 - **Cancelled** — you clicked Cancel; the modal shows the partial count.
 - **Failed** — surfaces with a specific error message. The most common causes:
-    - *Source drift:* the first browsed message ID doesn't match the recorded oldest. The queue contents changed between verify and run.
-    - *Recorded newest consumed:* a message ID greater than the recorded newest arrived before the engine reached the recorded newest itself, implying someone else consumed the recorded newest message before our run.
-    - *Count mismatch:* the run drained without reaching the recorded count. Messages were drained from the source mid-run by another consumer.
-    - *Publish error:* the destination broker rejected a publish (full quota, missing permission, max-message-size exceeded, etc.).
+  - *Source drift:* the first browsed message ID doesn't match the recorded oldest. The queue contents changed between verify and run.
+  - *Recorded newest consumed:* a message ID greater than the recorded newest arrived before the engine reached the recorded newest itself, implying someone else consumed the recorded newest message before our run.
+  - *Count mismatch:* the run drained without reaching the recorded count. Messages were drained from the source mid-run by another consumer.
+  - *Publish error:* the destination broker rejected a publish (full quota, missing permission, max-message-size exceeded, etc.).
 
 ### Refreshing source stats inside the modal
 
@@ -326,7 +350,7 @@ This view lists every `(VPN, queue, topic-subscription)` triple visible to your 
 ### Filter syntax
 
 | Column | Match rule |
-|---|---|
+| --- | --- |
 | **VPN** / **Queue** | Case-insensitive substring by default — `def` matches `default`. Type `*` anywhere in the input to switch to anchored wildcard matching — `def*` matches names starting with `def`, `*ult` matches names ending with `ult`, `def*ult` matches names that start with `def` and end with `ult`. |
 | **Subscription** | Solace topic-set intersection. Both your input and the stored subscription may use Solace wildcards: `*` matches one level, `>` matches one or more trailing levels. The row is included when the two patterns describe overlapping topics. So typing `orders/new` matches a stored subscription `orders/*`; typing `orders/>` matches `orders/new/details`; typing `topic` matches a stored subscription `*`. |
 
@@ -356,23 +380,26 @@ The loaded subscription list is held in memory for the session. Subsequent filte
 
 ## Shipped Variants
 
-The project ships four HTML variants, all available from each [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases):
+The project builds several HTML variants. Only `index.html` is published (to GitHub Pages and as the container image); the others are attached to the release run as the `pwa-bundle` **workflow artifact**, downloadable from that run's Actions page for 7 days.
 
 | File | Variant | Use |
-|------|---------|-----|
+| --- | --- | --- |
 | `index.html` | **Full** (default) | Production deployment — every module: Connections, Queue Browser, Queue Copy, Queue Subscriptions |
-| `min.html`   | **Minimal**        | Stripped-down variant — only Connections + Queue Browser. Smaller bundle for environments that don't need the copy/move or subscription-browser modules |
+| `min.html` | **Minimal** | Stripped-down variant — only Connections + Queue Browser. Smaller bundle for environments that don't need the copy/move or subscription-browser modules |
 | `no-payload.html` | **No-payload** | Same as Full, except the Queue Browser never shows or exports the message **body**. The Content Preview, Show Raw Content, Copy Content, Download Content, Download Full, and Body-Content filter are all removed; Forward, Delete, all metadata, and the other filters remain. Use where message bodies must not be visible to the operator. |
-| `mock.html`  | Full + mocks       | Interactive demo (see [Demo Mode](#demo-mode-mockhtml)) |
+| `no-queue-copy.html` | **No Queue Copy** | Same as Full, minus the Queue Copy module. For deployments where operators should browse and forward but never bulk-copy between queues. |
+| `solAdmin.html` | **Administration** | The standalone admin app: sign in as an administrator to manage users and broker connections. Served by the gateway at `/solAdmin` in managed deployments, never as the main app. See [Administration](#administration-soladmin). |
+| `mock.html` | Full + mocks | Interactive demo (see [Demo Mode](#demo-mode-mockhtml)) |
 
 Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately**:
 
 - **`solclient.js`** — Solace Web Messaging SDK, required for any broker connection. Get it from the [Solace Developer Portal](https://solace.com/downloads/), npm (`solclientjs`), or your broker's web UI (`http://<broker>:8080/`).
 - **`jszip.min.js`** — JSZip library, required for the Queue Browser's ZIP download feature. Get it from a CDN (`https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js`), npm (`jszip`), or [https://stuk.github.io/jszip/](https://stuk.github.io/jszip/).
 
-Place both files in the **same folder as the HTML**, or in a sibling **`js/`** subfolder — the shell tries both locations automatically. The same files serve all three HTML builds; you don't need a separate copy per variant.
+Place both files in the **same folder as the HTML**, or in a sibling **`js/`** subfolder — the shell tries both locations automatically. The same files serve every HTML variant; you don't need a separate copy per variant.
 
 > **What happens if a vendor file is missing:**
+>
 > - Without `solclient.js`, the app boots in a limited mode and shows a vendor-missing banner. Connection features will not work.
 > - Without `jszip.min.js`, every other feature works normally; only ZIP download is disabled.
 
@@ -382,56 +409,114 @@ See [deployment.md](deployment.md#external-runtime-dependencies) for download so
 
 ## Demo Mode (`mock.html`)
 
-The project ships a self-contained demo build (`dist/mock.html`) that exercises every module without a real broker. It substitutes deterministic mock services for the Solace and SEMP clients and the queue-browser SDK calls, so you can walk the UI end-to-end on any machine with just a browser.
+`dist/mock.html` runs the **whole** application against an in-browser mock broker. It is not a set of canned
+screens: the broker holds real queues and messages, so actions compose. Delete a message and the depth drops. Copy
+a queue and the destination genuinely receives it — browse it afterwards and the same messages are there.
+
+It needs nothing alongside it. The demo installs its own Solace SDK, so unlike the other variants you do **not**
+need `solclient.js` next to the HTML. (`jszip.min.js` is still required for the Queue Browser's ZIP download; every
+other export works without it.)
 
 ### Opening the demo
 
-`mock.html` ships in every [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) alongside `index.html`. Download it and open it directly in a browser — no server required, it's a single self-contained file.
+`mock.html` is built by the release run and included in its `pwa-bundle` workflow artifact (Actions page, 7-day
+retention). Download it and open it directly in a browser — no server required.
 
-(For developers building from source, `npm run build:mock` produces `dist/mock.html`; `npm run build` produces all three variants. See [developer-guide.md](developer-guide.md) for the full build workflow.)
+(For developers building from source, `npm run build:mock` produces `dist/mock.html`; `npm run build` produces
+every variant in one pass. See [developer-guide.md](developer-guide.md) for the full build workflow.)
 
-### Connection values
+### Connecting
 
-The mock factories accept **only one host**: `broker.solace.com`. Any other hostname will surface a "Connection Failed" error so you can also see the failure paths.
+Use host **`broker.solace.com`** with any non-empty credentials. Any other hostname surfaces a connection failure,
+and a hostname containing `untrust.com` simulates an untrusted certificate, so the error paths are demoable too.
 
-**Solace Client connection:**
+Both connection tabs are available even though a demo opened from disk has no gateway: the broker answers the
+`/hosted` probe itself, so the app resolves the same Direct + Managed tabs it would behind the real proxy.
+**Direct** works as above. **Managed** signs you in against the mock RBAC
+backend — any username and password are accepted; which entitlements you get is chosen in the demo controls
+(below), not by what you type.
 
-| Field | Value |
-|-------|-------|
-| Broker Host | `broker.solace.com` |
-| Protocol | `wss://` (any value works) |
-| Port | `8008` (any valid 1–65535 port) |
-| URL Path | *(leave blank)* |
-| Message VPN | `default` (any non-empty value) |
-| Username | `default` (any non-empty value) |
-| Password | `anything` (any non-empty value) |
+### The demo topology
 
-Advanced settings can be left at their defaults.
+| VPN | Queues |
+| --- | --- |
+| `default` | `test-queue-1`, `test-queue-2`, `Q/EMPTY` |
+| `vpn-prod` | `Q/ORDER/NEW`, `Q/ORDER/PROCESS`, `Q/ORDER/ARCHIVE`, `Q/LOGS/AUDIT`, `Q/DENIED` |
+| `vpn-dev` | `dev-scratch`, `Q/BULK` |
+| `vpn-finance` | `payments-Q`, `reports-daily` |
 
-**SEMP connection** (use the **same** Broker Host as above):
+Four of those are shaped to exercise a specific path rather than to look realistic:
 
-| Field | Value |
-|-------|-------|
-| Protocol | `https://` |
-| Port | `1943` (any valid 1–65535 port) |
-| URL Path | *(leave blank)* |
-| Username | `admin` (any non-empty value) |
-| Password | `admin` (any non-empty value) |
+- **`Q/LOGS/AUDIT`** is read-only — Delete is hidden and the read-only badge shows.
+- **`Q/DENIED`** refuses to bind, so the bind-error path is visible.
+- **`Q/EMPTY`** binds and delivers nothing.
+- **`Q/BULK`** holds several hundred messages, enough for paging and for the copy engine's backpressure to engage.
+- **`Q/ORDER/ARCHIVE`** starts empty and is the natural destination for a Queue Copy demo.
 
-Click **Connect** on each section. Both status indicators in the sidebar should turn green.
+Queues carry topic subscriptions, so a forward to a topic really fans out: publishing to `orders/new/uk` lands in
+`Q/ORDER/NEW`, because that queue subscribes to `orders/new/>`.
 
-### What's available after connecting
+### Demo controls
 
-- **SEMP queue picker** (used by Queue Browser, Queue Copy, and Queue Subscriptions) returns six VPNs: `default`, `vpn-dev`, `vpn-prod`, `vpn-test-1`, `vpn-test-2`, `vpn-finance`. Each VPN reports the same five queues: `test-queue-1`, `test-queue-2`, `Q/ORDER/NEW`, `Q/ORDER/PROCESS`, `Q/LOGS/AUDIT`.
-- **Queue Browser** can bind to **`test-queue-1`** or **`test-queue-2`** only. Other queue names (including `Q/ORDER/...`) will fail to bind. Each successful bind seeds 10–20 deterministic mock messages with mixed text/binary payloads, application properties, and varied destinations — enough to exercise filtering, forwarding, and downloading.
-- **Queue Copy** mock returns canned verify results (15 messages, oldest=1000, newest=1014) and simulates a successful copy/move with deterministic ACK delays.
-- **Queue Subscriptions** loads ~10 canned `(VPN, queue, topic)` rows across two pages (so the per-page render path is exercised). Mix of literal topics, `*`-wildcards, and `>`-wildcards — enough to exercise every column-filter rule.
+A **Demo controls** panel sits at the bottom-right, collapsed by default. It both tells you what the demo accepts and drives the broker live:
 
-### Failure-path hosts
+- **Connection values** — the accepted host, every Message VPN, and the host that simulates a certificate error. Click any value to copy it. Usernames, passwords, ports and URL paths are accepted as typed — only the host is checked — and the list is generated from the broker's own topology, so it can never disagree with what the pickers show.
+- **Queue state** — switch any queue between normal, read-only, bind-denied and empty. Applies on the next bind.
+- **Connection faults** — fail the next connect, simulate SEMP `401` or `500`, or drop a live session to show the
+  disconnect path. The connect failure is one-shot; the SEMP faults stay armed until you clear them.
+- **Managed identity** — switch between `admin` (everything), `operator` (operate on `Q/ORDER/*` in `vpn-prod`,
+  read-only elsewhere), `readonly` and signed out. Switching while signed in clicks Refresh for you, so the
+  sidebar, queue pickers and Queue Copy destination all re-derive exactly as they would in production when an
+  administrator changes your access.
+- **Latency and volume** — tune the artificial response delay and the seeded message count, then **Reset demo
+  data** to rebuild everything from scratch.
 
-To exercise error UI without leaving the demo:
+Nothing is persisted: reloading the page reseeds the broker, so a reload is always a clean reset.
 
-| Host | What you see |
-|------|--------------|
-| Any host containing `untrust.com` (e.g. `foo.untrust.com`) | Synthetic "Certificate Not Trusted (Mock)" error with the SSL trust-helper link. Works on both Solace Client and SEMP. |
-| Any host other than `broker.solace.com` (and not containing `untrust.com`) | "Connection Failed: Unable to connect to ..." for the Solace client; "Unable to connect to ..." for SEMP. |
+### What is not in the demo
+
+The `/solAdmin` administration app is not part of the demo build — managing users and connections needs the real
+gateway. Everything else is exercisable offline.
+
+---
+
+## Managed Connections
+
+**Managed** mode is for users who should not handle broker credentials. Instead of typing connection details, you **log in** and pick from the brokers and Message VPNs an administrator has granted you.
+
+It appears as a second tab in the **Connections** module — **Direct** (type your own credentials) and **Managed** (sign in). Which tabs you see is decided by the deployment: you may get both, or only one. Managed runs **only behind the deployment gateway**, so if you are using a plain copy of the app with no gateway, the Managed tab simply isn't there. See [deployment.md](deployment.md#managed-mode-rbac) to stand one up.
+
+### Signing in and connecting
+
+1. Open **Connections** and choose the **Managed** tab (it may already be selected).
+2. **Sign in** with the username and password your administrator gave you. (A brand-new deployment bootstraps a single administrator, `admin` / `msgutility` — the administrator should change this immediately, see below.)
+3. Pick a **Broker** and **Message VPN** from the dropdowns — these list only what you're entitled to. The host is shown read-only for confirmation.
+4. Click **Connect**. From here the **Queue Browser** and **Queue Copy** work exactly as usual, but scoped to your entitlements.
+5. **Refresh** asks the server to re-read its connection + user files from disk into memory, then re-fetches your entitlements without signing out (useful right after an admin grants you access, or after the YAML files are edited directly on the server). **Sign out** clears your session. Note that a **browser page refresh (F5) ends your session** and returns you to the login screen — the session is held in memory only.
+
+**One mode at a time.** Connecting on the Managed tab drops a Direct connection, and connecting on the Direct tab ends your managed session — otherwise your entitlements would be applied to a connection they were never issued for. Just *switching* tabs changes nothing; only Connect does.
+
+### What you can see and do
+
+Your entitlements come in two levels, **Operate** (browse + delete) and **Read-only** (browse only); Operate includes everything Read-only does. They are evaluated per broker + VPN + queue:
+
+- The **VPN picker** lists exactly the VPNs you can connect to — the same provisioned set shown in the **Connections** dropdown (the VPNs your administrator added for you), not every VPN that happens to exist on the broker. The **queue picker** lists only the queues you're entitled to on the chosen VPN — non-entitled queues are filtered out of discovery.
+- Typing or selecting a queue you aren't entitled to **fails to bind**, with an error.
+- On a **read-only** queue, the **Delete** action is hidden and the queue shows a "Read-Only" badge; **Forward** is still available. On an **Operate** queue, Delete is available.
+- In **Queue Copy**, the destination queue must be one you hold **Operate** on — copying into a queue is a write. See [Destination credentials](#destination-credentials-managed-sessions).
+- **Queue Subscriptions** and Queue Discovery are **not shown** in a managed session, for anyone, including administrators. They read the broker over a management path that cannot be filtered by your entitlements, so rather than show you everything, they are hidden.
+
+If your entitlements change while you are working (you or an admin hit Refresh, or you sign out), anything that depended on what was withdrawn stops: a copy/move run in progress halts the same way pressing Cancel would, and if a provisioned Queue Copy destination is no longer yours, the chosen destination queue is cleared so you cannot start a run against it.
+
+> These client-side limits are guardrails for a smooth experience. The deployment's real protection is the gateway only handing you credentials for what you're entitled to, plus using least-privilege broker accounts. If your deployment offers **both** tabs, note that the Direct tab is outside this model entirely — see [deployment.md](deployment.md#managed-mode-rbac).
+
+### Administration (`/solAdmin`)
+
+Administration is a **separate app**, not a pair of extra sidebar entries in the main one. Open `https://<your-gateway>/solAdmin` and sign in with an administrator account — an ordinary account is refused at the login screen. The admin app never connects to a broker; it only edits the deployment's user and connection data. It exists only on deployments running in managed mode; anywhere else the URL simply 404s.
+
+Signed in there, you get two modules:
+
+- **User Management** — list, add, edit, and delete users. For each user you set the username, password, the **Administrator** flag, and the **Operate** / **Read-only** entitlement rows (each row is a *brokers / msgVpns / queues* glob, e.g. `* / vpn-prod / orders.*`). Leave the password blank when editing to keep the current one. The last remaining administrator cannot be deleted (to avoid locking everyone out).
+- **Connection Management** — list, add, edit, and delete broker connections. For each connection you set the broker name, hostname, the **SEMP** account (port / username / password), the **client** port, and one or more **Message VPNs** (name / username / password). Use a **read-only or least-privilege SEMP account**. Leave a password field blank when editing to keep the stored one.
+
+Changes take effect for users on their next sign-in or **Refresh**. Glob matching is **case-sensitive** and supports `*` anywhere (leading, middle, trailing, multiple).

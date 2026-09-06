@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isHosted, setHosted, probeHosted, buildBrokerUrl } from '../../src/core/hosted';
+import { isHosted, setHosted, probeHosted, probeDeployment, buildBrokerUrl } from '../../src/core/hosted';
+import { DEFAULT_CONN_CONFIG } from '../../src/core/connections/conn-modes';
 
 // Reset the singleton between tests so a leftover flag from one test can't
 // silently affect another. Mirrors the pattern used for the logger
@@ -63,6 +64,54 @@ describe('core/hosted — probeHosted', () => {
     it('returns false when fetch throws (network error, blocked, etc.)', async () => {
         (globalThis.fetch as any).mockRejectedValue(new Error('Failed to fetch'));
         await expect(probeHosted()).resolves.toBe(false);
+    });
+});
+
+describe('core/hosted — probeDeployment', () => {
+    beforeEach(() => {
+        vi.stubGlobal('fetch', vi.fn());
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    const ok = (body: string) => ({ ok: true, text: () => Promise.resolve(body) });
+
+    it('parses the JSON contract into hosted + connection config', async () => {
+        (globalThis.fetch as any).mockResolvedValue(ok(JSON.stringify({ hosted: true, connModes: 'both', defaultConn: 'managed' })));
+        await expect(probeDeployment()).resolves.toEqual({ hosted: true, conn: { connModes: 'both', defaultConn: 'managed' } });
+    });
+
+    it('coerces invalid config fields to the Direct-only default', async () => {
+        (globalThis.fetch as any).mockResolvedValue(ok(JSON.stringify({ hosted: true, connModes: 'bogus', defaultConn: 42 })));
+        await expect(probeDeployment()).resolves.toEqual({ hosted: true, conn: DEFAULT_CONN_CONFIG });
+    });
+
+    it('treats legacy plaintext "true" as hosted with the Direct-only default (Managed needs the JSON contract)', async () => {
+        (globalThis.fetch as any).mockResolvedValue(ok('true'));
+        await expect(probeDeployment()).resolves.toEqual({ hosted: true, conn: DEFAULT_CONN_CONFIG });
+    });
+
+    it('returns not-hosted (Direct only) for "false", empty body, non-OK, non-JSON, JSON without hosted:true, and throws', async () => {
+        const notHosted = { hosted: false, conn: DEFAULT_CONN_CONFIG };
+
+        (globalThis.fetch as any).mockResolvedValueOnce(ok('false'));
+        await expect(probeDeployment()).resolves.toEqual(notHosted);
+
+        (globalThis.fetch as any).mockResolvedValueOnce(ok(''));
+        await expect(probeDeployment()).resolves.toEqual(notHosted);
+
+        (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, text: () => Promise.resolve('{"hosted":true}') });
+        await expect(probeDeployment()).resolves.toEqual(notHosted);
+
+        (globalThis.fetch as any).mockResolvedValueOnce(ok('<html>not-the-gateway</html>'));
+        await expect(probeDeployment()).resolves.toEqual(notHosted);
+
+        (globalThis.fetch as any).mockResolvedValueOnce(ok(JSON.stringify({ hosted: false, connModes: 'both' })));
+        await expect(probeDeployment()).resolves.toEqual(notHosted);
+
+        (globalThis.fetch as any).mockRejectedValueOnce(new Error('Failed to fetch'));
+        await expect(probeDeployment()).resolves.toEqual(notHosted);
     });
 });
 

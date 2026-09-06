@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"log/slog"
 	"testing"
 )
@@ -93,5 +94,46 @@ func TestLoadConfig_HostedRequiresExactTrue(t *testing.T) {
 		if cfg := loadConfig(); cfg.hosted {
 			t.Errorf("HOSTED=%q: want hosted=false", v)
 		}
+	}
+}
+
+func TestPrintVersionIfRequested(t *testing.T) {
+	// The build stamps `version` via -ldflags; tests run without it, so pin a
+	// known value rather than asserting on the "dev" default.
+	orig := version
+	version = "v9.9.9"
+	t.Cleanup(func() { version = orig })
+
+	handled := map[string]bool{
+		"--version": true,
+		"-version":  true,
+		"version":   true,
+		"--help":    false,
+		"serve":     false,
+		"":          false,
+	}
+	for arg, want := range handled {
+		var buf bytes.Buffer
+		if got := printVersionIfRequested([]string{arg}, &buf); got != want {
+			t.Errorf("arg %q: want handled=%v, got %v", arg, want, got)
+		}
+		if want && buf.String() != "v9.9.9\n" {
+			t.Errorf("arg %q: want the version on stdout, got %q", arg, buf.String())
+		}
+		if !want && buf.Len() != 0 {
+			t.Errorf("arg %q: want no output, got %q", arg, buf.String())
+		}
+	}
+
+	// No arguments at all: the gateway starts normally.
+	var buf bytes.Buffer
+	if printVersionIfRequested(nil, &buf) {
+		t.Error("no args: want handled=false")
+	}
+
+	// Only the first argument is inspected — `--version` behind another flag is
+	// not a version query.
+	if printVersionIfRequested([]string{"serve", "--version"}, &buf) {
+		t.Error("trailing --version: want handled=false")
 	}
 }

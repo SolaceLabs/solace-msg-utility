@@ -29,6 +29,9 @@ solclient*
 */jszip*js
 */solclient*js
 node_modules
+*.exe
+all-test.html
+cert
 
 # SMU Reference
 Solace-JS-API
@@ -37,3 +40,6 @@ semp-samples
 # Test results
 coverage
 improvement-plan.md
+
+# Dev-script task logs (scripts/dev.sh, dev.ps1)
+scripts/logs

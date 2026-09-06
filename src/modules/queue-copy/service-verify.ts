@@ -1,5 +1,5 @@
 import type { SempContext } from '../../core/types';
-import { escapeXml } from '../../core/utils';
+import { escapeXml, solaceErrorText } from '../../core/utils';
 import { logger } from '../../core/logger';
 import { BIND_PROBE_TIMEOUT_MS, ACCUMULATE_IDLE_MS } from './constants';
 import type { VerifyResult } from './state';
@@ -430,8 +430,10 @@ function verifyViaQueueBrowserAccumulate(
         });
 
         browser.on(solace.QueueBrowserEventName.CONNECT_FAILED_ERROR, (e: any) => {
-            logger.error(`[Verify] QB-fallback CONNECT_FAILED for "${queue}": ${e?.infoStr ?? '(no info)'}`);
-            settle(false, e?.infoStr ?? `Source queue "${queue}" not found or no read permission.`);
+            // OperationError carries the reason on `.message`, not `infoStr`.
+            const reason = solaceErrorText(e, `Source queue "${queue}" not found or no read permission.`);
+            logger.error(`[Verify] QB-fallback CONNECT_FAILED for "${queue}": ${reason}`);
+            settle(false, reason);
         });
 
         browser.on(solace.QueueBrowserEventName.DOWN_ERROR, (e: any) => {
@@ -439,8 +441,9 @@ function verifyViaQueueBrowserAccumulate(
                 logger.info(`[Verify] QB-fallback DOWN after UP — settling with accumulated count=${count}`);
                 settle(true);
             } else {
-                logger.error(`[Verify] QB-fallback DOWN before UP: ${e?.infoStr ?? '(no info)'}`);
-                settle(false, e?.infoStr ?? 'Browser bind failed.');
+                const reason = solaceErrorText(e, 'Browser bind failed.');
+                logger.error(`[Verify] QB-fallback DOWN before UP: ${reason}`);
+                settle(false, reason);
             }
         });
 

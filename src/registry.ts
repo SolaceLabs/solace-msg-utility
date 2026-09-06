@@ -4,8 +4,10 @@
  * The active variant's `ACTIVE_MODULES` manifest (see `src/variants/`) is the
  * single source of truth for which modules are loaded and at what priority.
  * This file resolves each id in the manifest to its `PwaModule` object using
- * Vite's `import.meta.glob` over `src/modules/*​/module.ts` so the registry
- * has no hand-maintained import section that has to stay in sync.
+ * `moduleFiles` from the `virtual:module-registry` module, which the
+ * `moduleRegistryPlugin` (scripts/module-registry-plugin.mjs) generates from the
+ * SAME active variant — so only the variant's modules are bundled, and there's
+ * no hand-maintained import section to keep in sync.
  *
  * To add or remove a module from a variant: edit `src/variants/<name>.ts`.
  * To create a new module: drop `src/modules/<id>/` (with `module.ts` and
@@ -15,14 +17,11 @@
 
 import type { PwaModule, RegisteredModule } from './core/types';
 import { ACTIVE_MODULES } from './variants/_active';
-
-// `eager: true` makes Vite resolve every match at build time so the registry
-// stays synchronous (kernel construction never has to await). Files NOT in
-// `ACTIVE_MODULES` still get bundled because the glob matches them — to fully
-// tree-shake a module out of a shipped variant, delete its directory or split
-// the glob into variant-specific patterns. Same trade-off as the previous
-// hardcoded-imports design.
-const moduleFiles = import.meta.glob('./modules/*/module.ts', { eager: true });
+// Generated per active variant by moduleRegistryPlugin: a map of
+// './modules/<id>/module.ts' → that module's namespace, for exactly the
+// variant's modules. Non-active modules are never imported, so they never
+// enter the bundle (stronger than tree-shaking).
+import { moduleFiles } from 'virtual:module-registry';
 
 export const modules: RegisteredModule[] = Object.entries(ACTIVE_MODULES).map(([id, priority]) => {
     const file = moduleFiles[`./modules/${id}/module.ts`] as Record<string, unknown> | undefined;

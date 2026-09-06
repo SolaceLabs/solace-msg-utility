@@ -1,0 +1,411 @@
+name: Tag
+
+# The only automatic pipeline. Push a tag, the full stack runs, and a release
+# is created ONLY if everything passed:
+#
+#   git tag v1.2.3 && git push origin v1.2.3
+#     -> plan     resolve the project shape once
+#     -> gates    build vet test cov scan, ubuntu + windows
+#     -> image    multi-arch build of BOTH variants, push to GHCR, trivy gate
+#     -> binaries cross-compile the gateway per BUILD_TARGETS, plus the PWA
+#     -> pages    sync dist/index.html into the `dist` branch
+#     -> release  created last, with artifacts, checksums, digests
+#
+# A failure anywhere leaves no release. Read the logs artifact, push a fix,
+# tag again.
+#
+# Do NOT also add `on: release`. The release this workflow creates would
+# re-trigger the whole pipeline.
+#
+# DEVIATIONS from the standard template (assets/tag.yml), all forced by this
+# project's shape -- keep this list current if you touch the file:
+#   1. DOCKERFILE is docker/Dockerfile, not the repo root, in `plan` and
+#      `image`. Without it the shape auto-detect finds no Dockerfile and no
+#      image ships.
+#   2. `image` is a 2-leg matrix (standard, managed). The managed leg bakes
+#      MANAGED/HOSTED/CONN_MODES, ships the /solAdmin app, and builds the
+#      gateway with -tags managed. The stock single-image job would silently
+#      drop the managed image family.
+#   3. Both legs pass APP_VERSION so the tag reaches the Go binary's ldflags
+#      and the PWA bundle's __APP_VERSION__. Git is not available inside the
+#      build, so it has to arrive as a build-arg.
+#   4. A `pages` job, carried over from the old release.yml, redeploys
+#      solacelabs.github.io/solace-msg-utility from the `dist` branch. Gated
+#      on everything else passing, so a red scan no longer redeploys the site.
+#   5. Image digests travel to `release` as artifacts, not as a job output.
+#      Matrix legs overwrite each other's outputs nondeterministically, so a
+#      2-leg matrix cannot use `outputs:` for a per-leg value.
+#   6. A setup-node step in `binaries`, reading .tool-versions -- Node has no
+#      self-honouring in-repo pin the way go.mod's `toolchain` directive does.
+#      ci.yml carries the same step for the same reason.
+#
+# Repo variables (Settings > Secrets and variables > Actions > Variables):
+#   BUILD_TARGETS  JSON array, e.g. [{"os":"linux","arch":"amd64"}]
+#   SHIP_IMAGE     optional override, "true" or "false". Unset means "is
+#                  there a Dockerfile".
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tag-${{ github.ref_name }}
+  cancel-in-progress: false # never abort a half-published pipeline
+
+jobs:
+  # Resolve the shape once, loudly, before anything expensive runs. Both
+  # toggles are validated here so a typo fails with a readable message
+  # instead of an opaque matrix-expansion error later.
+  plan:
+    runs-on: ubuntu-24.04 # pinned; see ci.yml
+    outputs:
+      ship_image: ${{ steps.shape.outputs.ship_image }}
+      ship_binaries: ${{ steps.shape.outputs.ship_binaries }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: shape
+        env:
+          SHIP_IMAGE: ${{ vars.SHIP_IMAGE }}
+          BUILD_TARGETS: ${{ vars.BUILD_TARGETS }}
+          DOCKERFILE: docker/Dockerfile # deviation 1
+        run: |
+          set -euo pipefail
+
+          case "$(printf '%s' "${SHIP_IMAGE:-}" | tr '[:upper:]' '[:lower:]')" in
+            true|yes|1) img=true ;;
+            false|no|0) img=false ;;
+            "") if [ -f "$DOCKERFILE" ]; then img=true; else img=false; fi ;;
+            *) echo "::error::SHIP_IMAGE must be true or false, got '$SHIP_IMAGE'"
+               exit 1 ;;
+          esac
+
+          if [ -n "${BUILD_TARGETS:-}" ]; then
+            printf '%s' "$BUILD_TARGETS" \
+              | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
+              || { echo "::error::BUILD_TARGETS must be a non-empty JSON array of {os,arch}"; exit 1; }
+            bins=true
+          else
+            bins=false
+          fi
+
+          if [ "$img" = false ] && [ "$bins" = false ]; then
+            echo "::error::nothing to ship: no Dockerfile (or SHIP_IMAGE=false) and BUILD_TARGETS unset"
+            exit 1
+          fi
+
+          echo "ship_image=$img" >> "$GITHUB_OUTPUT"
+          echo "ship_binaries=$bins" >> "$GITHUB_OUTPUT"
+          echo "::notice::shape -- image=$img binaries=$bins"
+
+  gates:
+    needs: plan
+    # `scan` reduces to the applicable subset inside the dev scripts, so this
+    # is valid for all three shapes: with no image it is the dependency scan
+    # alone. It is fatal on fixable CVEs, so a red gate stops the release.
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    needs: [plan, gates]
+    if: needs.plan.outputs.ship_image == 'true'
+    name: image (${{ matrix.name }})
+    runs-on: ubuntu-24.04 # pinned; see ci.yml
+    permissions:
+      contents: read
+      packages: write # push to GHCR
+    strategy:
+      # Build both variants even if one fails, so a managed-only break never
+      # blocks the standard image (and vice versa).
+      fail-fast: false
+      matrix:
+        # Both legs ship the SAME PWA bundle -- connection posture is a runtime
+        # decision (CONN_MODES via /hosted), not a per-image build. The managed
+        # leg additionally ships solAdmin.html and a gateway built with the
+        # `managed` tag (RBAC store + /managed/* handler + the yaml dep).
+        include:
+          - name: standard
+            managed: ""
+            hosted: ""
+            conn_modes: ""
+            with_admin: ""
+            go_tags: ""
+            flavor: ""
+            tags: |
+              type=semver,pattern={{version}}
+              type=semver,pattern={{major}}.{{minor}}
+              type=semver,pattern={{major}}
+              type=raw,value=latest
+          - name: managed
+            managed: "true"
+            hosted: "true"
+            conn_modes: "managed"
+            with_admin: "true"
+            go_tags: "managed"
+            # prefix=managed-,onlatest=true + latest=true turns the semver
+            # patterns into managed-X.Y.Z / managed-X.Y / managed-X and the
+            # latest tag into managed-latest. No bare `latest`, so no collision
+            # with the standard image.
+            flavor: |
+              latest=true
+              prefix=managed-,onlatest=true
+            tags: |
+              type=semver,pattern={{version}}
+              type=semver,pattern={{major}}.{{minor}}
+              type=semver,pattern={{major}}
+    env:
+      DOCKERFILE: docker/Dockerfile # deviation 1
+      PLATFORMS: linux/amd64,linux/arm64
+      NO_COLOR: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # GHCR rejects uppercase; github.repository preserves owner casing.
+      - id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} # no PAT for same-repo pushes
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.name.outputs.image }}
+          flavor: ${{ matrix.flavor }}
+          tags: ${{ matrix.tags }}
+
+      # The one deliberate divergence from dev.sh: multi-arch buildx and a
+      # registry push cannot run identically on a laptop. `dev.sh image` is
+      # the local single-arch equivalent; note `all scan` above did not run
+      # it, though `scan` builds an image when the project ships one.
+      - id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}
+            MANAGED=${{ matrix.managed }}
+            HOSTED=${{ matrix.hosted }}
+            CONN_MODES=${{ matrix.conn_modes }}
+            WITH_ADMIN=${{ matrix.with_admin }}
+            GO_TAGS=${{ matrix.go_tags }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Per-variant cache scope so the two parallel legs don't race writing
+          # the gha cache.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          provenance: true
+          sbom: true
+
+      # A second pass: `scan` in the gates job already failed the run on any
+      # fixable CVE, but only this one sees the pushed multi-arch digest.
+      # The image is live at this point, though no release will reference it,
+      # so a failure here leaves it unreferenced rather than published.
+      # The action, not `docker run aquasec/trivy:latest` -- a floating image
+      # tag is an unpinned dependency pulled at runtime. Pinned by SHA here,
+      # so Dependabot tracks it like every other action.
+      - name: Trivy gate on the pushed image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          NO_COLOR: "1"
+        with:
+          version: latest # match the dev scripts; the action itself stays SHA-pinned
+          scan-type: image
+          image-ref: ${{ steps.name.outputs.image }}@${{ steps.build.outputs.digest }}
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      # Deviation 5: a per-leg value cannot travel through `outputs:` on a
+      # matrix job -- the legs overwrite each other in completion order.
+      - name: Record the pushed digest
+        run: |
+          printf '%s: `%s@%s`\n' \
+            "${{ matrix.name }}" \
+            "${{ steps.name.outputs.image }}" \
+            "${{ steps.build.outputs.digest }}" > "imgref-${{ matrix.name }}.md"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: imgref-${{ matrix.name }}
+          path: imgref-${{ matrix.name }}.md
+          if-no-files-found: error
+          retention-days: 7
+
+  binaries:
+    needs: [plan, gates]
+    if: needs.plan.outputs.ship_binaries == 'true'
+    runs-on: ubuntu-24.04 # pinned; see ci.yml
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(vars.BUILD_TARGETS) }}
+    env:
+      NO_COLOR: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Deviation 6: `build` emits the PWA too, so this job needs the same Node
+      # pin the gates job takes from ci.yml.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+
+      # The workflow names the target; the script decides how to honour it
+      # (GOOS/GOARCH, --target, -r RID, ...). Unset means host build, so the
+      # same `build` task serves local use and cross-compilation.
+      #
+      # `build` also emits the PWA bundles, which are target-independent, so
+      # every leg produces an identical copy of them. merge-multiple in the
+      # release job collapses those; the gateway binaries carry their target in
+      # the filename and so survive the merge intact.
+      - name: Cross-compile
+        env:
+          TARGET_OS: ${{ matrix.target.os }}
+          TARGET_ARCH: ${{ matrix.target.arch }}
+          VERSION: ${{ github.ref_name }}
+        run: ./scripts/dev.sh build
+
+      # Handed to the release job, since the release does not exist yet.
+      # The release job merges these with merge-multiple, so `build` MUST name
+      # outputs <name>-<os>-<arch> -- identical names overwrite silently.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bin-${{ matrix.target.os }}-${{ matrix.target.arch }}
+          path: dist/
+          if-no-files-found: error # BUILD_TARGETS asked for this; empty is a bug
+          retention-days: 7
+
+  # Deviation 4. Pages serves the PWA from the `dist` branch, which already
+  # holds the vendor files (solclient.js, jszip.min.js), .nojekyll and CNAME.
+  # We overlay only index.html; everything else on that branch is left alone.
+  # Pages is gateway-less, so it is Direct-connection-only by design.
+  pages:
+    needs: [plan, gates, image, binaries]
+    if: >-
+      always()
+      && needs.gates.result == 'success'
+      && needs.image.result != 'failure' && needs.image.result != 'cancelled'
+      && needs.binaries.result == 'success'
+    runs-on: ubuntu-24.04 # pinned; see ci.yml
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the dist branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dist
+          fetch-depth: 0
+
+      # Any leg's bundle would do -- they are identical -- but naming one keeps
+      # the step deterministic.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bin-linux-amd64
+          path: _bundle
+
+      - name: Publish index.html
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cp _bundle/index.html ./index.html
+          rm -rf _bundle
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "::notice::no bundle change; nothing to deploy"
+            exit 0
+          fi
+          git commit -m "Deploy $TAG"
+          git push origin dist
+
+  release:
+    needs: [plan, gates, image, binaries]
+    # Either producer may be skipped; neither may fail; and at least one must
+    # have actually succeeded, so a run that shipped nothing never publishes.
+    if: >-
+      always()
+      && needs.plan.result == 'success'
+      && needs.gates.result == 'success'
+      && needs.image.result != 'failure' && needs.image.result != 'cancelled'
+      && needs.binaries.result != 'failure' && needs.binaries.result != 'cancelled'
+      && (needs.image.result == 'success' || needs.binaries.result == 'success')
+    runs-on: ubuntu-24.04 # pinned; see ci.yml
+    permissions:
+      contents: write # the only job that can write to the repo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.binaries.result == 'success'
+        with:
+          pattern: bin-*
+          merge-multiple: true
+          path: dist/
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.image.result == 'success'
+        with:
+          pattern: imgref-*
+          merge-multiple: true
+          path: imgrefs/
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # Idempotent: re-running the workflow must not hard-fail.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::release $TAG already exists, leaving it alone"
+            exit 0
+          fi
+
+          # Checksums over whatever the matrix produced, before it is listed
+          # as an asset so SHA256SUMS.txt never hashes itself.
+          if [ -d dist ] && [ -n "$(ls -A dist 2>/dev/null)" ]; then
+            ( cd dist && sha256sum -- * > ../SHA256SUMS.txt )
+            mv SHA256SUMS.txt dist/
+          fi
+
+          # Compose notes up front so the release is correct at creation.
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$TAG" -q .body > notes.md
+          if [ -d imgrefs ] && [ -n "$(ls -A imgrefs 2>/dev/null)" ]; then
+            printf '\n\n---\n\nImages:\n\n' >> notes.md
+            cat imgrefs/*.md >> notes.md
+            printf '\nPinned by digest -- dependents must redeploy to pick this up.\n' >> notes.md
+          fi
+
+          # Word-splitting is intentional: no binaries means no file args.
+          # shellcheck disable=SC2046
+          gh release create "$TAG" \
+            --verify-tag \
+            --title "$TAG" \
+            --notes-file notes.md \
+            $(ls -1 dist/* 2>/dev/null || true)
