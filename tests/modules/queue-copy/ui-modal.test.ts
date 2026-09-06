@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { openCopyModal, cancelCopyModal, evaluateStartGate } from '../../../src/modules/queue-copy/ui-modal';
+import { openCopyModal, cancelCopyModal, evaluateStartGate, destinationRefusal } from '../../../src/modules/queue-copy/ui-modal';
 import { cacheElements } from '../../../src/modules/queue-copy/ui';
 import { createInitialState } from '../../../src/modules/queue-copy/state';
 import { ACCUMULATE_IDLE_MS } from '../../../src/modules/queue-copy/service-verify';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { createSessionMock, createBrowserMock } from '../../setup';
-import type { AppContext, AppState } from '../../../src/core/types';
+import type { SourceAccess } from '../../../src/modules/queue-copy/ui-modal';
+import type { AppContext, AppState, ManagedSession } from '../../../src/core/types';
+import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
 import type { CopyJob, VerifyResult } from '../../../src/modules/queue-copy/state';
 
 // Derive the structured sempCredentials fields from a baseUrl shorthand so
@@ -37,10 +39,27 @@ function makeCtx(overrides: Partial<AppContext['appState']> = {}): AppContext {
         setState: vi.fn(),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
+        managedStore: createManagedSessionStore(),
         copyToClipboard: vi.fn(),
         config: {},
     };
 }
+
+/** Direct mode: no managed session, so every gate degrades to allow-all. */
+const DIRECT: SourceAccess = { session: null, broker: '', vpn: '' };
+
+/** A managed session with explicit operate/read-only globs. */
+function managed(over: Partial<ManagedSession> = {}): ManagedSession {
+    return {
+        admin: false, username: 'u', token: 't', broker: 'b1', vpns: [],
+        operate: [{ brokers: 'b1', msgVpns: 'vpn1', queues: 'ops.*' }],
+        readOnly: [{ brokers: 'b1', msgVpns: 'vpn1', queues: 'ro.*' }],
+        ...over,
+    };
+}
+/** Managed access for a given source queue on b1/vpn1. */
+const mAccess = (over: Partial<ManagedSession> = {}): SourceAccess =>
+    ({ session: managed(over), broker: 'b1', vpn: 'vpn1' });
 
 function verifyResult(opts: Partial<VerifyResult> = {}): VerifyResult {
     return {
@@ -259,7 +278,7 @@ describe('queue-copy/ui-modal', () => {
                 result: verifyResult({ sourceOk: false, errors: ['no perms'] }),
             };
             els.btnModalStart.disabled = false;
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(true);
             expect(els.modalSourceEmpty.classList.contains('hidden')).toBe(true);
             expect(els.modalSourceReadonly.classList.contains('hidden')).toBe(true);
@@ -271,7 +290,7 @@ describe('queue-copy/ui-modal', () => {
                 inProgress: false, abort: null,
                 result: verifyResult({ messageCount: 0 }),
             };
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(true);
             expect(els.modalSourceEmpty.classList.contains('hidden')).toBe(false);
             expect(els.modalSourceReadonly.classList.contains('hidden')).toBe(true);
@@ -284,7 +303,7 @@ describe('queue-copy/ui-modal', () => {
                 inProgress: false, abort: null,
                 result: verifyResult({ messageCount: 5, accessType: 'read-only' }),
             };
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(true);
             expect(els.modalSourceReadonly.classList.contains('hidden')).toBe(false);
             expect(els.modalSourceEmpty.classList.contains('hidden')).toBe(true);
@@ -297,7 +316,7 @@ describe('queue-copy/ui-modal', () => {
                 inProgress: false, abort: null,
                 result: verifyResult({ messageCount: 5, accessType: 'read-only' }),
             };
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(false);
             expect(els.modalSourceReadonly.classList.contains('hidden')).toBe(true);
             expect(els.modalSourceEmpty.classList.contains('hidden')).toBe(true);
@@ -310,16 +329,16 @@ describe('queue-copy/ui-modal', () => {
                 inProgress: false, abort: null,
                 result: verifyResult({ messageCount: 5, accessType: 'read-only' }),
             };
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(false);
 
             state.mode = 'move';
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(true);
             expect(els.modalSourceReadonly.classList.contains('hidden')).toBe(false);
 
             state.mode = 'copy';
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(false);
             expect(els.modalSourceReadonly.classList.contains('hidden')).toBe(true);
         });
@@ -331,17 +350,17 @@ describe('queue-copy/ui-modal', () => {
                 result: verifyResult({ messageCount: 5, accessType: null }),
             };
             state.mode = 'copy';
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(false);
             state.mode = 'move';
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(false);
         });
 
         it('no verify result yet → Start disabled, banners hidden', () => {
             const state = createInitialState();
             state.verify = null;
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(true);
             expect(els.modalSourceEmpty.classList.contains('hidden')).toBe(true);
             expect(els.modalSourceReadonly.classList.contains('hidden')).toBe(true);
@@ -355,14 +374,14 @@ describe('queue-copy/ui-modal', () => {
                 result: verifyResult({ messageCount: 5, accessType: 'no-access' }),
             };
             state.mode = 'copy';
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(true);
             expect(els.modalSourceNoAccess.classList.contains('hidden')).toBe(false);
             expect(els.modalSourceReadonly.classList.contains('hidden')).toBe(true);
             expect(els.modalSourceEmpty.classList.contains('hidden')).toBe(true);
 
             state.mode = 'move';
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(true);
             expect(els.modalSourceNoAccess.classList.contains('hidden')).toBe(false);
         });
@@ -373,11 +392,11 @@ describe('queue-copy/ui-modal', () => {
                 inProgress: false, abort: null,
                 result: verifyResult({ messageCount: 5, accessType: 'no-access' }),
             };
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.modalSourceNoAccess.classList.contains('hidden')).toBe(false);
 
             state.verify.result!.accessType = 'read-write';
-            evaluateStartGate(els, state);
+            evaluateStartGate(els, state, DIRECT);
             expect(els.btnModalStart.disabled).toBe(false);
             expect(els.modalSourceNoAccess.classList.contains('hidden')).toBe(true);
         });
@@ -1085,6 +1104,180 @@ describe('queue-copy/ui-modal', () => {
             els.modal.showModal();
             cancelCopyModal(els, state);
             expect(els.modal.hasAttribute('open')).toBe(false);
+        });
+    });
+});
+
+/**
+ * Entitlement gates. Direct mode (no managed session) must be byte-for-byte
+ * unchanged — every existing assertion above already runs through `DIRECT` to
+ * prove that. These cover the managed intersection, the source gate that keeps
+ * verify from probing an unentitled queue, and the destination gate that is the
+ * last check before anything is published.
+ */
+describe('queue-copy/ui-modal — entitlement gates', () => {
+    let els: ReturnType<typeof cacheElements>;
+
+    beforeEach(() => {
+        const container = loadModuleDOM('queue-copy');
+        document.body.appendChild(container);
+        els = cacheElements(container);
+    });
+
+    /** State with a verify result already in place for the given source queue. */
+    function stateFor(sourceQueue: string, accessType: VerifyResult['accessType'], mode: 'copy' | 'move' = 'move') {
+        const state = createInitialState();
+        state.sourceQueue = sourceQueue;
+        state.mode = mode;
+        state.verify = { inProgress: false, abort: null, result: verifyResult({ accessType }) };
+        return state;
+    }
+    const startEnabled = () => !els.btnModalStart.disabled;
+    const readOnlyBanner = () => !els.modalSourceReadonly.classList.contains('hidden');
+    const noAccessBanner = () => !els.modalSourceNoAccess.classList.contains('hidden');
+
+    describe('effectiveAccess — RBAC may only ever downgrade', () => {
+        it('broker read-write + RBAC read-only => move refused, copy allowed', () => {
+            // 'ro.x' matches the read-only glob but not the operate glob.
+            evaluateStartGate(els, stateFor('ro.x', 'read-write', 'move'), mAccess());
+            expect(startEnabled()).toBe(false);
+            expect(readOnlyBanner()).toBe(true);
+
+            evaluateStartGate(els, stateFor('ro.x', 'read-write', 'copy'), mAccess());
+            expect(startEnabled()).toBe(true);
+        });
+
+        it('broker reports null (permissive) + RBAC read-only => move still refused', () => {
+            // The residual hole: an unknown broker verdict must not defeat RBAC.
+            evaluateStartGate(els, stateFor('ro.x', null, 'move'), mAccess());
+            expect(startEnabled()).toBe(false);
+            expect(readOnlyBanner()).toBe(true);
+        });
+
+        it('broker read-only + RBAC operate => move still refused (broker wins; RBAC never upgrades)', () => {
+            evaluateStartGate(els, stateFor('ops.x', 'read-only', 'move'), mAccess());
+            expect(startEnabled()).toBe(false);
+            expect(readOnlyBanner()).toBe(true);
+        });
+
+        it('RBAC operate + broker read-write => move allowed', () => {
+            evaluateStartGate(els, stateFor('ops.x', 'read-write', 'move'), mAccess());
+            expect(startEnabled()).toBe(true);
+        });
+
+        it('no-access is preserved, never softened to read-only by an RBAC downgrade', () => {
+            evaluateStartGate(els, stateFor('ro.x', 'no-access', 'copy'), mAccess());
+            expect(startEnabled()).toBe(false);
+            expect(noAccessBanner()).toBe(true);
+            expect(readOnlyBanner()).toBe(false);
+        });
+
+        it('source visibility revoked while the modal was open => no-access, both operations blocked', () => {
+            // 'gone' matches neither glob, so it is not visible at all.
+            evaluateStartGate(els, stateFor('gone', 'read-write', 'copy'), mAccess());
+            expect(startEnabled()).toBe(false);
+            expect(noAccessBanner()).toBe(true);
+        });
+
+        it('empty queue still wins over any access verdict', () => {
+            const state = stateFor('ro.x', 'read-write', 'move');
+            state.verify!.result!.messageCount = 0;
+            evaluateStartGate(els, state, mAccess());
+            expect(startEnabled()).toBe(false);
+            expect(els.modalSourceEmpty.classList.contains('hidden')).toBe(false);
+            expect(readOnlyBanner()).toBe(false);
+        });
+    });
+
+    describe('source gate — verify never probes an unentitled queue', () => {
+        function openFor(sourceQueue: string, managedSession: ManagedSession | null) {
+            const state = createInitialState();
+            state.sourceQueue = sourceQueue;
+            state.dest = { type: 'queue', name: 'ops.dest' };
+            const ctx = makeCtx({
+                selectedVpn: 'vpn1',
+                sempCredentials: sempCreds('https://broker:1943/SEMP/v2'),
+                isSempConnected: true,
+                managed: managedSession ?? undefined,
+            });
+            const session = createSessionMock();
+            openCopyModal(ctx, els, state, () => session);
+            return { state, ctx, session };
+        }
+
+        it('refuses an unentitled source and never spawns the probe', () => {
+            const { state, ctx } = openFor('gone', managed());
+            expect(state.verify!.result!.sourceOk).toBe(false);
+            expect(state.verify!.result!.errors[0]).toMatch(/not entitled to queue "gone"/);
+            expect(els.btnModalStart.disabled).toBe(true);
+            // The SEMP probe reaches the broker through sempFetch — never fired.
+            expect(ctx.sempFetch).not.toHaveBeenCalled();
+        });
+
+        it('lets an entitled source through to the probe', () => {
+            // Inverse of the refusal case: the probe reaches the broker, and no
+            // refusal result was synthesized (verify is still in flight).
+            const { state, ctx } = openFor('ops.x', managed());
+            expect(ctx.sempFetch).toHaveBeenCalled();
+            expect(state.verify!.result).toBeNull();
+        });
+
+        it('direct mode never refuses', () => {
+            const { state, ctx } = openFor('anything-at-all', null);
+            expect(ctx.sempFetch).toHaveBeenCalled();
+            expect(state.verify!.result).toBeNull();
+        });
+    });
+
+    describe('destination gate — last check before publishing', () => {
+        /** A managed session publishing through the primary connection. */
+        function provisionedState(destType: 'queue' | 'topic', destName: string) {
+            const state = createInitialState();
+            state.sourceQueue = 'ops.src';
+            state.mode = 'copy';
+            state.dest = { type: destType, name: destName };
+            state.destForm.sameBroker = true;
+            state.destForm.sameVpn = true;
+            return state;
+        }
+
+        // The gate is pure, so the matrix is asserted directly — that keeps the
+        // real copy engine out of these cases entirely.
+        it('refuses a queue destination the user cannot write to', () => {
+            expect(destinationRefusal(provisionedState('queue', 'ro.dest'), mAccess()))
+                .toMatch(/not entitled to write to queue "ro.dest"/);
+        });
+
+        it('refuses a topic destination outright — entitlements are per queue', () => {
+            expect(destinationRefusal(provisionedState('topic', 'some/topic'), mAccess()))
+                .toMatch(/Topic destinations are unavailable with managed credentials/);
+        });
+
+        it('allows a queue destination the user may write to', () => {
+            expect(destinationRefusal(provisionedState('queue', 'ops.dest'), mAccess())).toBeNull();
+        });
+
+        it('does not apply to a manual-credential destination (the documented bypass)', () => {
+            const state = provisionedState('topic', 'some/topic');
+            state.destForm.sameBroker = false;   // manual credentials
+            state.destForm.sameVpn = false;
+            expect(destinationRefusal(state, mAccess())).toBeNull();
+        });
+
+        it('does not apply in direct mode', () => {
+            expect(destinationRefusal(provisionedState('topic', 'some/topic'), DIRECT)).toBeNull();
+        });
+
+        // Wiring: the Start handler must consult the gate and surface its reason
+        // instead of starting a run. A refused gate returns before the run path
+        // touches the verify result, so this is safe to drive through a click.
+        it('is wired into Start — a refused run renders the reason and never starts', () => {
+            const state = provisionedState('topic', 'some/topic');
+            const ctx = makeCtx({ selectedVpn: 'vpn1', managed: managed() });
+            openCopyModal(ctx, els, state, () => createSessionMock());
+            els.btnModalStart.disabled = false;
+            els.btnModalStart.click();
+            expect(els.modalRunError.textContent).toMatch(/Topic destinations/);
         });
     });
 });

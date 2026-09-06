@@ -1,0 +1,71 @@
+<!-- The admin gate is created at install by createGate() (see module.ts). -->
+
+<!-- List view -->
+<div id="conn-mgmt-list-view" class="card conn-mgmt-card hidden">
+    <div class="flex-row justify-between items-center mb-4">
+        <h2 class="m-0">Connections</h2>
+        <div class="flex-row items-center gap-4">
+            <button id="btn-conn-mgmt-refresh" class="btn btn-secondary" title="Reload the connection list">Refresh</button>
+            <button id="btn-conn-mgmt-add" class="btn btn-primary">Add connection</button>
+        </div>
+    </div>
+    <table class="conn-mgmt-table w-full">
+        <thead>
+            <tr><th>Broker</th><th>Host</th><th class="conn-mgmt-actions-col">Actions</th></tr>
+        </thead>
+        <tbody id="conn-mgmt-rows"></tbody>
+    </table>
+    <div id="conn-mgmt-list-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+</div>
+
+<!-- Create / edit form view -->
+<div id="conn-mgmt-form-view" class="card conn-mgmt-card hidden">
+    <div class="flex-row justify-between items-center mb-4">
+        <h2 id="conn-mgmt-form-title" class="m-0">Add connection</h2>
+    </div>
+    <div class="form-group flex-row">
+        <div class="w-full">
+            <label for="conn-mgmt-broker">Broker name</label>
+            <input type="text" id="conn-mgmt-broker" class="form-control" autocomplete="off">
+        </div>
+        <div class="w-full">
+            <label for="conn-mgmt-hostname">Hostname</label>
+            <input type="text" id="conn-mgmt-hostname" class="form-control" autocomplete="off">
+        </div>
+    </div>
+
+    <h3 class="conn-mgmt-section">SEMP (management)</h3>
+    <div class="form-group flex-row">
+        <div class="w-full">
+            <label for="conn-mgmt-semp-port">Port</label>
+            <input type="text" id="conn-mgmt-semp-port" class="form-control" autocomplete="off">
+        </div>
+        <div class="w-full">
+            <label for="conn-mgmt-semp-user">Username</label>
+            <input type="text" id="conn-mgmt-semp-user" class="form-control" autocomplete="off">
+        </div>
+        <div class="w-full">
+            <label for="conn-mgmt-semp-pass">Password <span id="conn-mgmt-semp-pass-hint" class="text-secondary"></span></label>
+            <input type="password" id="conn-mgmt-semp-pass" class="form-control" autocomplete="new-password">
+        </div>
+    </div>
+
+    <h3 class="conn-mgmt-section">Client (messaging)</h3>
+    <div class="form-group">
+        <label for="conn-mgmt-client-port">Port</label>
+        <input type="text" id="conn-mgmt-client-port" class="form-control" autocomplete="off">
+    </div>
+    <div class="form-group">
+        <div class="flex-row justify-between items-center mb-2">
+            <label class="m-0">Message VPNs (name / user / password)</label>
+            <button id="btn-conn-mgmt-add-vpn" class="btn btn-secondary btn-sm">+ Add</button>
+        </div>
+        <div id="conn-mgmt-vpn-rows" class="flex-col"></div>
+    </div>
+
+    <div class="flex-row gap-4 mt-2">
+        <button id="btn-conn-mgmt-save" class="btn btn-primary">Save</button>
+        <button id="btn-conn-mgmt-cancel" class="btn btn-secondary">Cancel</button>
+    </div>
+    <div id="conn-mgmt-form-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+</div>

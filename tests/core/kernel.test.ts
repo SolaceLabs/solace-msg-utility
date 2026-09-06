@@ -3,7 +3,15 @@ import { Kernel } from '../../src/core/kernel';
 import { getLogLevel, setLogLevel } from '../../src/core/logger';
 import { setHosted } from '../../src/core/hosted';
 import { LogLevel, DEFAULT_LOG_LEVEL } from '../../src/core/constants';
-import type { PwaModule, RegisteredModule, AppContext } from '../../src/core/types';
+import type { PwaModule, RegisteredModule, AppContext, ManagedSession } from '../../src/core/types';
+
+function managedSession(over: Partial<ManagedSession> = {}): ManagedSession {
+    return {
+        admin: false, username: 'u', token: 't', broker: 'b',
+        vpns: [], operate: [], readOnly: [],
+        ...over,
+    };
+}
 
 function createMockModule(overrides: Partial<PwaModule> = {}): PwaModule {
     return {
@@ -848,6 +856,101 @@ describe('Kernel', () => {
 
             expect(capturedCtx!.config.useMocks).toBe(false);
             (window as any).APP_CONFIG = saved;
+        });
+    });
+
+    describe('managed RBAC visibility', () => {
+        const nav = () => document.getElementById('sidebar-nav')!;
+
+        it('hides admin-only modules from the sidebar for a non-admin session', async () => {
+            let ctx: AppContext | null = null;
+            const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
+            const mgr = createMockModule({ id: 'user-management', name: 'Users' });
+            setupDOM(['queue-browser', 'user-management']);
+            const kernel = new Kernel([reg(qb, 80), reg(mgr, 20)]);
+            await kernel.start();
+
+            // No managed session yet → both visible.
+            expect(nav().innerHTML).toContain('Users');
+
+            ctx!.setState('managed', managedSession({ admin: false }));
+            ctx!.eventBus.emit('rbac:changed');
+
+            expect(nav().innerHTML).toContain('Browser');
+            expect(nav().innerHTML).not.toContain('Users');
+        });
+
+        it('shows admin-only modules for an admin session', async () => {
+            let ctx: AppContext | null = null;
+            const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
+            const mgr = createMockModule({ id: 'user-management', name: 'Users' });
+            setupDOM(['queue-browser', 'user-management']);
+            const kernel = new Kernel([reg(qb, 80), reg(mgr, 20)]);
+            await kernel.start();
+
+            ctx!.setState('managed', managedSession({ admin: true }));
+            ctx!.eventBus.emit('rbac:changed');
+
+            expect(nav().innerHTML).toContain('Users');
+            // Active module (queue-browser) keeps its highlight across the re-render.
+            const active = Array.from(document.querySelectorAll('.nav-item')).filter(el => el.classList.contains('active'));
+            expect(active.length).toBe(1);
+            expect((active[0] as HTMLElement).dataset.moduleId).toBe('queue-browser');
+            // Active module still visible → no navigation away.
+            expect(document.getElementById('page-title')?.textContent).toBe('Browser');
+        });
+
+        it('navigates away from a now-hidden active module on rbac:changed', async () => {
+            let ctx: AppContext | null = null;
+            const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
+            const mgr = createMockModule({ id: 'user-management', name: 'Users' });
+            setupDOM(['queue-browser', 'user-management']);
+            const kernel = new Kernel([reg(qb, 80), reg(mgr, 20)]);
+            await kernel.start();
+
+            kernel.navigateTo('user-management');
+            expect(document.getElementById('page-title')?.textContent).toBe('Users');
+
+            ctx!.setState('managed', managedSession({ admin: false }));
+            ctx!.eventBus.emit('rbac:changed');
+
+            // user-management hidden → kernel falls back to the highest-priority visible module.
+            expect(document.getElementById('page-title')?.textContent).toBe('Browser');
+            expect(document.getElementById('module-view-user-management')?.classList.contains('hidden')).toBe(true);
+            expect(document.getElementById('module-view-queue-browser')?.classList.contains('hidden')).toBe(false);
+        });
+
+        it('skips a hidden module when choosing the first module to activate at start', async () => {
+            // user-management installs first (priority 100) and sets a non-admin
+            // session during install; first-activation must skip it and land on
+            // queue-browser.
+            const mgr = createMockModule({
+                id: 'user-management', name: 'Users',
+                install: vi.fn(async (c: AppContext) => { c.setState('managed', managedSession({ admin: false })); })
+            });
+            const qb = createMockModule({ id: 'queue-browser', name: 'Browser' });
+            setupDOM(['user-management', 'queue-browser']);
+            const kernel = new Kernel([reg(mgr, 100), reg(qb, 80)]);
+            await kernel.start();
+
+            expect(document.getElementById('page-title')?.textContent).toBe('Browser');
+            expect(nav().innerHTML).not.toContain('Users');
+        });
+
+        it('does not navigate when no module is visible after the session changes', async () => {
+            let ctx: AppContext | null = null;
+            const mgr = createMockModule({ id: 'user-management', name: 'Users', install: vi.fn(async c => { ctx = c; }) });
+            setupDOM(['user-management']);
+            const kernel = new Kernel([reg(mgr, 100)]);
+            await kernel.start();
+            expect(document.getElementById('page-title')?.textContent).toBe('Users');
+
+            ctx!.setState('managed', managedSession({ admin: false }));
+            ctx!.eventBus.emit('rbac:changed');
+
+            // The only module is now hidden; sidebar empties and there's nowhere
+            // to navigate — the kernel leaves the (now-hidden) view as-is without throwing.
+            expect(nav().innerHTML).toBe('');
         });
     });
 });

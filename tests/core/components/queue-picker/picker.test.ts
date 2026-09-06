@@ -1,14 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { pickQueue, __resetForTest } from '../../../../src/core/components/queue-picker';
 import type { SempContext } from '../../../../src/core/connections/types';
+import { sempQueueSource } from '../../../../src/core/services/queue-source';
 import { INPUT_DEBOUNCE_MS } from '../../../../src/core/timing';
 
 /**
  * Picker tests. The picker is module-scoped (lazily-created dialog DOM, single
  * inflight invocation). `__resetForTest` clears the module state between tests
- * so each test exercises the lazy-create path. Tests drive the picker by
- * stubbing SempContext.fetch to return canned SEMP page payloads, then
- * dispatching DOM events on the dialog.
+ * so each test exercises the lazy-create path. The picker consumes a
+ * `QueueSource`; here we drive it with the real SEMP-backed `sempQueueSource`
+ * over a stubbed `SempContext.fetch` (so `.fetch` mock inspection still works
+ * and the source's cache key is the broker `baseUrl`), then dispatch DOM events.
  */
 
 function makeSempCtx(overrides: Partial<SempContext> = {}): SempContext {
@@ -17,6 +19,14 @@ function makeSempCtx(overrides: Partial<SempContext> = {}): SempContext {
         baseUrl: 'http://broker:8080',
         ...overrides,
     };
+}
+
+/** Wrap a (stubbed) SempContext in the real SEMP-backed QueueSource so the
+ *  picker — which now takes a QueueSource — drives `sempCtx.fetch` exactly as
+ *  before. Its `key` is `sempCtx.baseUrl`, preserving the cache semantics the
+ *  tests below assert. */
+function src(sempCtx: SempContext) {
+    return sempQueueSource(sempCtx, 'unmanaged');
 }
 
 /** Wire the SempContext.fetch mock to return canned VPN + queue page data.
@@ -84,7 +94,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, [], {});
 
-            const promise = pickQueue(sempCtx);
+            const promise = pickQueue(src(sempCtx));
             await flushAsync();
 
             const d = getDialog();
@@ -101,14 +111,14 @@ describe('core/components/queue-picker', () => {
             stubVpnsAndQueues(sempCtx, ['v1'], { v1: ['q1'] });
 
             // First invocation
-            let p = pickQueue(sempCtx);
+            let p = pickQueue(src(sempCtx));
             await flushAsync();
             const firstDialog = getDialog();
             $<HTMLButtonElement>('.picker-cancel').click();
             await p;
 
             // Second invocation
-            p = pickQueue(sempCtx);
+            p = pickQueue(src(sempCtx));
             await flushAsync();
             expect(getDialog()).toBe(firstDialog);
             $<HTMLButtonElement>('.picker-cancel').click();
@@ -119,10 +129,10 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, [], {});
 
-            const first = pickQueue(sempCtx);
+            const first = pickQueue(src(sempCtx));
             await flushAsync();
 
-            await expect(pickQueue(sempCtx)).rejects.toThrow(/already open/);
+            await expect(pickQueue(src(sempCtx))).rejects.toThrow(/already open/);
 
             $<HTMLButtonElement>('.picker-cancel').click();
             await first;
@@ -134,7 +144,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-c', 'vpn-a', 'vpn-b'], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             // Trigger focus to ensure list is shown
@@ -151,7 +161,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['only-vpn'], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             expect($<HTMLDivElement>('.picker-status').textContent).toBe('1 VPN loaded.');
@@ -164,7 +174,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, [], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
@@ -180,7 +190,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             (sempCtx.fetch as any).mockResolvedValue({ ok: false, statusText: 'Forbidden' });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             expect($<HTMLDivElement>('.picker-status').textContent).toContain('Failed to load VPNs');
@@ -198,7 +208,7 @@ describe('core/components/queue-picker', () => {
                 throw new Error('boom');
             });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             expect($<HTMLDivElement>('.picker-status').textContent).toContain('Failed to load VPNs');
@@ -211,7 +221,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-a'], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             const callsBefore = (sempCtx.fetch as any).mock.calls.length;
 
@@ -231,7 +241,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-a'], { 'vpn-a': ['q1', 'q2'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
@@ -256,7 +266,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['only-q'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -279,7 +289,7 @@ describe('core/components/queue-picker', () => {
                 'singleton': ['only'],
             });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             const focusVpn = () => $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
@@ -309,7 +319,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['empty-vpn'], { 'empty-vpn': [] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -330,7 +340,7 @@ describe('core/components/queue-picker', () => {
                 'vpn-b': ['qb-1'],
             });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             const vpnOpts = document.querySelectorAll<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option');
@@ -361,7 +371,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-a'], { 'vpn-a': ['q1'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -387,7 +397,7 @@ describe('core/components/queue-picker', () => {
                 return { ok: true, json: async () => ({ data: [{ msgVpnName: 'v' }] }) };
             });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -408,7 +418,7 @@ describe('core/components/queue-picker', () => {
                 return Promise.resolve({ ok: true, json: async () => ({ data: [{ msgVpnName: 'v' }] }) });
             });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -426,7 +436,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['my-queue'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             expect($<HTMLButtonElement>('.picker-confirm').disabled).toBe(true);
@@ -449,7 +459,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['q1'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             // Bypass the disabled attribute via dispatchEvent — `.click()` on a
             // disabled button is a jsdom no-op and would not exercise the
@@ -469,7 +479,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, [], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLButtonElement>('.picker-cancel').click();
             expect(await p).toBeNull();
@@ -479,7 +489,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, [], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLButtonElement>('.picker-close').click();
             expect(await p).toBeNull();
@@ -489,7 +499,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, [], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             // Simulate click landing on the backdrop — target === dialog AND
             // the coordinates are outside the dialog's box (the hit-test in
@@ -508,7 +518,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, [], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             getDialog().close();
             expect(await p).toBeNull();
@@ -520,7 +530,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, [], {});
 
-            const p = pickQueue(sempCtx, { title: 'Choose source queue' });
+            const p = pickQueue(src(sempCtx), { title: 'Choose source queue' });
             await flushAsync();
             expect($<HTMLElement>('.picker-title').textContent).toBe('Choose source queue');
 
@@ -532,7 +542,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-a', 'vpn-b'], { 'vpn-b': ['qb1'] });
 
-            const p = pickQueue(sempCtx, { defaultVpn: 'vpn-b' });
+            const p = pickQueue(src(sempCtx), { defaultVpn: 'vpn-b' });
             await flushAsync();
 
             expect($<HTMLInputElement>('.picker-vpn-input').value).toBe('vpn-b');
@@ -551,7 +561,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-a'], {});
 
-            const p = pickQueue(sempCtx, { defaultVpn: 'vpn-missing' });
+            const p = pickQueue(src(sempCtx), { defaultVpn: 'vpn-missing' });
             await flushAsync();
 
             expect($<HTMLInputElement>('.picker-queue-input').disabled).toBe(true);
@@ -568,7 +578,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-alpha', 'vpn-beta', 'vpn-gamma'], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             const input = $<HTMLInputElement>('.picker-vpn-input');
@@ -598,7 +608,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-alpha', 'vpn-beta', 'vpn-gamma'], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             const input = $<HTMLInputElement>('.picker-vpn-input');
@@ -622,7 +632,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-a', 'vpn-b'], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             const input = $<HTMLInputElement>('.picker-vpn-input');
@@ -643,7 +653,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['queue-1', 'queue-2'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
@@ -681,7 +691,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-1', 'vpn-2'], { 'vpn-1': [], 'vpn-2': [] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             await flushAsync();
@@ -715,7 +725,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['queue-1', 'queue-2'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -748,7 +758,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['q-alpha', 'q-beta'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -774,7 +784,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-a', 'vpn-b'], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             // Type to filter, then clear input value, then focus → should show all.
@@ -800,14 +810,14 @@ describe('core/components/queue-picker', () => {
             stubVpnsAndQueues(sempCtx, ['vpn-a', 'vpn-b'], {});
 
             // First open populates the cache.
-            let p = pickQueue(sempCtx);
+            let p = pickQueue(src(sempCtx));
             await flushAsync();
             const fetchCallsAfterFirst = (sempCtx.fetch as any).mock.calls.length;
             $<HTMLButtonElement>('.picker-cancel').click();
             await p;
 
             // Second open against the same broker — cache hit, no fetch.
-            p = pickQueue(sempCtx);
+            p = pickQueue(src(sempCtx));
             await flushAsync();
             const fetchCallsAfterSecond = (sempCtx.fetch as any).mock.calls.length;
             expect(fetchCallsAfterSecond).toBe(fetchCallsAfterFirst);
@@ -825,7 +835,7 @@ describe('core/components/queue-picker', () => {
         it('second open against a DIFFERENT baseUrl invalidates the cache and fetches fresh', async () => {
             const sempA = makeSempCtx({ baseUrl: 'http://broker-a:8080' });
             stubVpnsAndQueues(sempA, ['vpn-a-only'], {});
-            let p = pickQueue(sempA);
+            let p = pickQueue(src(sempA));
             await flushAsync();
             $<HTMLButtonElement>('.picker-cancel').click();
             await p;
@@ -833,7 +843,7 @@ describe('core/components/queue-picker', () => {
             const sempB = makeSempCtx({ baseUrl: 'http://broker-b:8080' });
             stubVpnsAndQueues(sempB, ['vpn-b-only'], {});
             const fetchCallsBefore = (sempB.fetch as any).mock.calls.length;
-            p = pickQueue(sempB);
+            p = pickQueue(src(sempB));
             await flushAsync();
 
             // Different broker → cache replaced → must fetch.
@@ -858,7 +868,7 @@ describe('core/components/queue-picker', () => {
                 return Promise.resolve({ ok: true, json: async () => ({ data }) });
             });
 
-            let p = pickQueue(sempCtx);
+            let p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLButtonElement>('.picker-vpn-refresh').click();
             await flushAsync();
@@ -868,7 +878,7 @@ describe('core/components/queue-picker', () => {
             // Re-open against the same broker → cache hit with the
             // refresh-updated data. 'vpn-a' is gone; 'vpn-b' is present.
             const callsBefore = fetchCount;
-            p = pickQueue(sempCtx);
+            p = pickQueue(src(sempCtx));
             await flushAsync();
             expect(fetchCount).toBe(callsBefore); // no new fetch — cache hit
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
@@ -882,7 +892,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-a'], { 'vpn-a': ['q1', 'q2'] });
 
-            let p = pickQueue(sempCtx);
+            let p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -893,7 +903,7 @@ describe('core/components/queue-picker', () => {
 
             // Re-open with defaultVpn='vpn-a' — both VPN list AND queue list
             // are cached; no new fetch should happen.
-            p = pickQueue(sempCtx, { defaultVpn: 'vpn-a' });
+            p = pickQueue(src(sempCtx), { defaultVpn: 'vpn-a' });
             await flushAsync();
             expect((sempCtx.fetch as any).mock.calls.length).toBe(callsAfterFirst);
             $<HTMLInputElement>('.picker-queue-input').dispatchEvent(new Event('focus'));
@@ -910,7 +920,7 @@ describe('core/components/queue-picker', () => {
                 'vpn-b': ['qb1'],
             });
 
-            let p = pickQueue(sempCtx);
+            let p = pickQueue(src(sempCtx));
             await flushAsync();
             // Prime both VPN caches.
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
@@ -928,12 +938,47 @@ describe('core/components/queue-picker', () => {
             // Reopen → vpn-a still cached (no fetch on selectVpn). vpn-b is
             // also re-cached because the refresh's fetch finished above.
             const callsBefore = (sempCtx.fetch as any).mock.calls.length;
-            p = pickQueue(sempCtx, { defaultVpn: 'vpn-a' });
+            p = pickQueue(src(sempCtx), { defaultVpn: 'vpn-a' });
             await flushAsync();
             expect((sempCtx.fetch as any).mock.calls.length).toBe(callsBefore);
             $<HTMLInputElement>('.picker-queue-input').dispatchEvent(new Event('focus'));
             expect(visibleOptions('.picker-queue-list')).toEqual(['qa1']);
 
+            $<HTMLButtonElement>('.picker-cancel').click();
+            await p;
+        });
+
+        it('re-fetches when the source key changes (RBAC/provisioning edit) and reuses it when unchanged', async () => {
+            // Symptom-1 regression (tests/.../picker.test.ts): the picker caches
+            // by `source.key`, so a managed permission/provisioning change — which
+            // flips `queueSourceFrom`'s key while the broker baseUrl is unchanged —
+            // invalidates the cache and forces a re-read. Same key → cache hit.
+            const listVpns = vi.fn(async function* () { yield { ok: true, data: ['v-only'] }; });
+            const keyedSource = (key: string) => ({
+                key,
+                listVpns,
+                listQueues: async function* () { yield { ok: true, data: [] as string[] }; },
+            });
+
+            // First open at key 'rbac-1' → fetches.
+            let p = pickQueue(keyedSource('rbac-1'));
+            await flushAsync();
+            expect(listVpns).toHaveBeenCalledTimes(1);
+            $<HTMLButtonElement>('.picker-cancel').click();
+            await p;
+
+            // Re-open with the SAME key → cache hit, no new fetch.
+            p = pickQueue(keyedSource('rbac-1'));
+            await flushAsync();
+            expect(listVpns).toHaveBeenCalledTimes(1);
+            $<HTMLButtonElement>('.picker-cancel').click();
+            await p;
+
+            // Re-open with a CHANGED key (entitlements/provisioning edited) →
+            // cache miss → re-fetch, even though nothing else changed.
+            p = pickQueue(keyedSource('rbac-2'));
+            await flushAsync();
+            expect(listVpns).toHaveBeenCalledTimes(2);
             $<HTMLButtonElement>('.picker-cancel').click();
             await p;
         });
@@ -944,7 +989,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, [], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             const vpnIcon = document.querySelector('.picker-input-wrap .picker-select-icon svg');
@@ -962,7 +1007,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-alpha', 'vpn-beta'], { 'vpn-alpha': [], 'vpn-beta': [] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             // Select vpn-alpha — input value is now "vpn-alpha".
@@ -983,7 +1028,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['q-1', 'q-2'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -1004,7 +1049,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-a', 'vpn-b'], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             // Type a partial term (no selection).
@@ -1052,7 +1097,7 @@ describe('core/components/queue-picker', () => {
                 });
             });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             // Drain the VPN fetch (single page).
             for (let i = 0; i < 20; i++) await Promise.resolve();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
@@ -1096,7 +1141,7 @@ describe('core/components/queue-picker', () => {
                 });
             });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             for (let i = 0; i < 20; i++) await Promise.resolve();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -1126,7 +1171,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v1', 'v2'], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             const vpnList = $<HTMLDivElement>('.picker-vpn-list');
@@ -1144,7 +1189,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['q1'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -1174,7 +1219,7 @@ describe('core/components/queue-picker', () => {
                     json: async () => ({ data: [{ msgVpnName: 'fresh' }] })
                 }));
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await Promise.resolve();
 
             // Refresh before first fetch resolves — increments vpnFetchGen,
@@ -1202,7 +1247,7 @@ describe('core/components/queue-picker', () => {
             let resolveFetch: (v: any) => void = () => {};
             (sempCtx.fetch as any).mockImplementation(() => new Promise<any>(r => { resolveFetch = r; }));
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await Promise.resolve();
 
             $<HTMLButtonElement>('.picker-cancel').click();
@@ -1236,7 +1281,7 @@ describe('core/components/queue-picker', () => {
                 });
             });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
@@ -1278,7 +1323,7 @@ describe('core/components/queue-picker', () => {
                 });
             });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -1298,7 +1343,7 @@ describe('core/components/queue-picker', () => {
             let rejectFetch: (e: any) => void = () => {};
             (sempCtx.fetch as any).mockImplementation(() => new Promise<any>((_resolve, reject) => { rejectFetch = reject; }));
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await Promise.resolve();
             $<HTMLButtonElement>('.picker-cancel').click();
             await p;
@@ -1316,7 +1361,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             (sempCtx.fetch as any).mockImplementation(() => new Promise(() => {})); // hangs
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await Promise.resolve();
 
             const input = $<HTMLInputElement>('.picker-vpn-input');
@@ -1334,7 +1379,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['q'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             // Programmatically dispatch input on the queue input despite it being disabled
@@ -1355,7 +1400,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: [] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             const beforeCalls = (sempCtx.fetch as any).mock.calls.length;
@@ -1380,7 +1425,7 @@ describe('core/components/queue-picker', () => {
                 });
             });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -1404,7 +1449,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-a', 'vpn-b'], {});
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             const input = $<HTMLInputElement>('.picker-vpn-input');
@@ -1426,7 +1471,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['q1', 'q2'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -1453,7 +1498,7 @@ describe('core/components/queue-picker', () => {
         it('handlers gracefully no-op when dispatched after the picker closes', async () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['q'] });
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             // Capture references before closing — querySelector after close still
@@ -1496,7 +1541,7 @@ describe('core/components/queue-picker', () => {
             // fetch never resolves
             (sempCtx.fetch as any).mockImplementation(() => new Promise(() => {}));
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await Promise.resolve();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             const vpnList = $<HTMLDivElement>('.picker-vpn-list');
@@ -1511,7 +1556,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['q'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             $<HTMLInputElement>('.picker-queue-input').dispatchEvent(new Event('focus'));
@@ -1531,7 +1576,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['q-a', 'q-b', 'q-c'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             // Pick the VPN first.
@@ -1573,7 +1618,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['q-a', 'q-b'] });
 
-            const p = pickQueue(sempCtx);
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
 
             const vpnOpt = document.querySelector<HTMLElement>(

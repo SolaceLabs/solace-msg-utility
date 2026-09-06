@@ -5,6 +5,7 @@
 See [developer-guide.md](developer-guide.md) for full setup instructions (`npm install`, dev server, project structure).
 
 Quick verification after cloning:
+
 ```bash
 npm install && npm test
 ```
@@ -16,10 +17,31 @@ npm install && npm test
 1. Create a branch for your change
 2. Make your changes in `src/`
 3. Write or update tests in `tests/`
-4. Run `npm test` — all 707+ tests must pass
-5. Run `npm run test:coverage` — don't regress; target is 100% on all four metrics
-6. Run `npm run build` — verify production build succeeds
+4. Run `./scripts/dev.sh all` (or `./scripts/dev.ps1 all` on Windows) — `build vet test`, the fast inner loop and exactly what CI runs
+5. Run `./scripts/dev.sh cov` — coverage must not regress; target is 100% on all four metrics, and `vitest.config.ts` fails the run below that
+6. Run `./scripts/dev.sh scan` before opening the PR if you touched a dependency, the Dockerfile, or `go-web-proxy/`
 7. Open a pull request with a clear description
+
+`scripts/dev.sh` and `scripts/dev.ps1` are the only place that knows how to build, test, lint or scan this repo — CI calls the same task names, which is what keeps local and CI identical structurally rather than by discipline. Don't add a build command to a workflow; add it to both scripts.
+
+| Task | What it runs |
+| --- | --- |
+| `build` | `npm run build` (every variant) plus both gateway binaries, version-stamped, into `dist/` |
+| `vet` | `npm run typecheck`, `npm run check:docs`, `go vet ./...` **and** `go vet -tags managed ./...` |
+| `test` | `npm test`, `go test ./...` **and** `go test -tags managed ./...` |
+| `cov` | `npm run test:coverage` plus a Go coverage profile; prints both totals |
+| `scan` | `npm audit`, `go tool govulncheck -tags=managed ./...`, then a Trivy scan of both freshly-built images |
+| `image` | Builds both container images via `docker/docker-compose.yaml` |
+| `up` / `down` | Brings the compose stack up or down |
+| `graphify` | Refreshes the knowledge graph (local only — skipped when `CI` is set) |
+| `all` | `build vet test` |
+| `full` | `all` + `cov image scan graphify` — the pre-tag sweep |
+
+The Go gates run **both** ways because the RBAC backend is behind the `managed` build tag; an untagged run does not compile it at all.
+
+Each task writes `scripts/logs/<task>.log` with a timestamped footer. `logs/cov.log` holds the previous coverage totals, which are the local floor — CI is a fresh checkout with no prior log, so it cannot catch a coverage regression.
+
+The image half of `image` and `scan` warn-skips when Docker is absent or running Windows containers, since a Linux image cannot be built there. The `ubuntu-24.04` CI leg still enforces it.
 
 ---
 
@@ -38,11 +60,13 @@ npm install && npm test
 - Always scope queries to the module's `container` — never `document.getElementById()`.
 - Cache element references at install time.
 - **Required elements** (anything the module owns in its own `<template>`) are captured with `required()` from `src/core/dom.ts`:
+
   ```ts
   import { required } from '../../core/dom';
   const btnCopy = required<HTMLButtonElement>(container, '#btn-copy-config');
   btnCopy.disabled = false;  // no null-guard, no `!`
   ```
+
   Missing required elements throw `Required element missing: <selector>` at install time — no silent partial wiring.
 - **Optional elements** (conditionally rendered, e.g. `.btn-delete-row` that only appears for non-read-only queues) stay as nullable `container.querySelector()` with an `if (el)` guard.
 - Do **not** wrap null-guards on required elements with `/* v8 ignore */` — convert them to `required()` instead.
@@ -93,7 +117,7 @@ A PR should not regress coverage. A PR that restores a previously-covered file o
 
 Every source file must have a corresponding test file in `tests/` mirroring the source directory structure:
 
-```
+```text
 src/core/services/solace-client.ts
   -> tests/core/services/solace-client.test.ts
 
@@ -225,13 +249,14 @@ vi.spyOn(document, 'getElementById').mockReturnValue(null);
 Use `/* v8 ignore start */` / `/* v8 ignore stop */` **only** for code that is architecturally untestable in jsdom. Valid categories:
 
 | Category | Example |
-|----------|---------|
+| --- | --- |
 | jsdom limitations | `document.readyState === 'loading'` — always `'complete'` in jsdom |
 | SDK callback branches | Error paths inside Solace SDK callbacks the test harness can't deterministically fire |
 | Defensive `catch` on trusted contracts | Services return `{ok, error}` and never throw, but a `catch` guards against SDK misbehavior |
 | Redundant safety checks | Both branches produce identical results |
 
 **Not valid categories** (convert instead of ignoring):
+
 - **DOM null-guards on required elements** — use `required()` from `src/core/dom.ts`. The helper throws with a clear message and removes the nullable type, so no guard is needed.
 - **`|| 'fallback'` on values the service always sets** — drop the fallback or push the default into the service.
 - **Registering SDK callbacks that are covered by dedicated tests** — wire the mock to invoke the handler directly; `.on.mock.calls` gives you the registered function.
@@ -241,25 +266,28 @@ Use `/* v8 ignore start */` / `/* v8 ignore stop */` **only** for code that is a
 ### Running Tests
 
 ```bash
-npm test              # Full run (23 files, ~16s)
-npm run test:watch    # Watch mode
-npm run test:coverage # With coverage report (text + HTML in coverage/)
+./scripts/dev.sh test  # Web + Go, both build-tag variants
+./scripts/dev.sh cov   # With coverage report (text + HTML in coverage/)
+npm run test:watch     # Watch mode — the one case where the npm script is the right entry point
 ```
 
-The `--pool=threads --maxWorkers=8` flags are included in the npm scripts.
+The `--pool=threads --maxWorkers=12` flags are included in the npm scripts the tasks call.
 
 ---
 
 ## Pull Request Checklist
 
-- [ ] All existing tests pass (`npm test`)
+- [ ] `./scripts/dev.sh all` is green (build, vet, test — both the web and Go halves)
 - [ ] New code has corresponding tests
-- [ ] Coverage does not regress (`npm run test:coverage`); targets 100% per `vitest.config.ts` thresholds
-- [ ] Build succeeds (`npm run build`)
+- [ ] Coverage does not regress (`./scripts/dev.sh cov`); targets 100% per `vitest.config.ts` thresholds
+- [ ] Type-check passes — `vet` runs it, because the build uses esbuild and does **not** type-check, so `tsc --noEmit` is a separate gate
+- [ ] If you changed a build command, it went into **both** `scripts/dev.sh` and `scripts/dev.ps1` — never into workflow YAML
 - [ ] No new `any` types (except Solace SDK interface)
 - [ ] DOM access is container-scoped
+- [ ] SDK/exception text goes through `solaceErrorText(e, fallback)` (core/utils.ts) — the SDK splits the reason across `.message` (QueueBrowser `OperationError`) and `.infoStr` (Session events); reading one loses it
 - [ ] Cross-module communication uses EventBus (no direct imports)
 - [ ] v8 ignores have explanatory comments
+- [ ] Managed/RBAC (if touched): module gating goes through `MODULE_REQUIREMENTS` (rbac.ts); credential-bearing state stays in `managedStore`, never `AppState`; the credential-transform algorithm stays out of the docs (`npm run check:docs`)
 - [ ] Commit message describes the change clearly
 
 ---
@@ -267,11 +295,13 @@ The `--pool=threads --maxWorkers=8` flags are included in the npm scripts.
 ## Architecture Notes
 
 Before making changes, read:
+
 - [architecture.md](architecture.md) — System diagrams and data flow
 - [developer-guide.md](developer-guide.md) — Setup, conventions, module creation guide
 - [test-report.md](test-report.md) — Testing methodology and v8 ignore rationale
 
 Key rules:
+
 1. **No cross-module imports** — use EventBus
 2. **No global state** — use AppContext or module-scoped closures
 3. **No `document.getElementById()`** — use `container.querySelector()` or `required()`

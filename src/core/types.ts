@@ -18,6 +18,58 @@ export type {
     SempContext,
 } from './connections/types';
 
+// Type-only (erased at build time, so no runtime import cycle) — AppContext
+// carries the managed session store defined alongside the managed API client.
+import type { ManagedStore } from './services/managed-session-store';
+import type { ConnDeploymentConfig } from './connections/conn-modes';
+
+/* ------------------------------------------------------------------ */
+/*  Managed (RBAC) session                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A single permission row from the managed RBAC profile. Each field is a glob
+ * (`*` = match-all; leading/middle/trailing supported, case-sensitive). A row
+ * grants only when broker AND msgVpns AND queues all match the candidate.
+ */
+export interface QGlob {
+    brokers: string;
+    msgVpns: string;
+    queues: string;
+}
+
+/**
+ * The current user's managed session, populated by the connections module's
+ * Managed panel after login. `null`/absent whenever no managed login is active
+ * (including every Direct-mode session), where RBAC helpers degrade to allow-all.
+ *
+ * This carries only **matcher inputs**. The packed broker credentials and the
+ * deployment seed live in `AppContext.managedStore` — see
+ * `src/core/services/managed-session-store.ts` for the ownership split.
+ */
+export interface ManagedSession {
+    /** Whether the user may see the admin-only management modules. */
+    admin: boolean;
+    /** Username, resent (with `token`) to authenticate admin CRUD calls. */
+    username: string;
+    /** Login bearer (the one-way `stamp` of the password); in-memory only. */
+    token: string;
+    /** Connected broker NAME — the source of the `broker` argument to matchers. */
+    broker: string;
+    /**
+     * Provisioned VPN names for the connected `broker`, published by the
+     * connections module from `getConnections` (`connections.yaml` ∩ entitled).
+     * `[]` until connected. This is what bounds the queue-picker's VPN list in
+     * managed mode (via `queueSourceFrom`) so it matches the Connections dropdown
+     * — provisioning, not the broader entitlement globs.
+     */
+    vpns: string[];
+    /** Queues the user may forward/delete on (operate ⊇ read-only). */
+    operate: QGlob[];
+    /** Queues the user may only view. */
+    readOnly: QGlob[];
+}
+
 /* ------------------------------------------------------------------ */
 /*  Application State                                                  */
 /* ------------------------------------------------------------------ */
@@ -63,6 +115,20 @@ export interface AppState {
         urlPath: string;
     } | null;
     isSempConnected: boolean;
+    /**
+     * Current managed (RBAC) session — present only in the `managed` variant,
+     * set by managed-connections after login and cleared on logout. Optional so
+     * non-managed variants (and their AppContext test literals) need not set it;
+     * absent/null ⇒ RBAC helpers in `./rbac` degrade to allow-all.
+     */
+    managed?: ManagedSession | null;
+    /**
+     * The deployment's connection-mode config, published once by the connections
+     * module from its `/hosted` probe. Other modules read it to derive what they
+     * may offer for a SECONDARY connection (see `resolveDestCredModes`) rather
+     * than probing the gateway again.
+     */
+    connConfig?: ConnDeploymentConfig;
 }
 
 /* ------------------------------------------------------------------ */
@@ -86,6 +152,12 @@ export interface BusEvents {
     'connection:check-connection': { vpn: string; queue: string; returnTo?: 'queue-browser' | 'queue-copy' };
     /** Navigate to the connections form. Emitted by "Edit in Connections" buttons. */
     'connection:edit-requested':   void;
+    /**
+     * The managed RBAC session changed (login / logout / re-fetch entitlements).
+     * The kernel re-renders the sidebar (module visibility) on this. Emitted only
+     * by managed-connections; never fires in non-managed variants.
+     */
+    'rbac:changed':                void;
     'browser:available':           void;
     'browser:browse-queue':        { queue: string };
     /** Connections module finished switching VPN on a queue-copy origin request. */
@@ -147,6 +219,13 @@ export interface AppContext {
      * call, applies hosted-mode gateway routing, and injects Basic auth.
      */
     sempFetch: (path: string, options?: RequestInit) => Promise<Response>;
+    /**
+     * The managed session's provisioned profile + deployment seed, owned by core
+     * so any module can open a provisioned connection (or seal a credential)
+     * without reaching into the module that owns the login. Inert — and
+     * `isActive() === false` — outside a managed session.
+     */
+    managedStore: ManagedStore;
     /** Helper for clipboard copy with visual feedback */
     copyToClipboard: (text: string, btnElement?: HTMLElement) => Promise<void>;
     /** Global app config */

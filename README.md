@@ -26,9 +26,9 @@ Then open <https://localhost:9443/>. The container ships a built-in HTTPS gatewa
 
 ### Option 3 — Self-host the static files
 
-Download [index.html](https://raw.githubusercontent.com/SolaceLabs/solace-msg-utility/refs/heads/main/dist/index.html) and [solclient.js](https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md#1-solace-javascript-sdk-solclientjs). Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, …). See [deployment.md → Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
+Take `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) and the two vendor libraries `solclient.js`, `jszip.min.js` from the `dist` branch. Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, …). See [deployment.md → Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
 
-> **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials — every module works against deterministic mock data. See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details.
+> **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials — Connections, Queue Copy and Queue Subscriptions run against deterministic mock data (message browsing needs a real broker). See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details.
 
 ## Connecting to a broker
 
@@ -41,12 +41,16 @@ Once the app is loaded:
 3. **Save All Config** — your settings persist in the browser for next time.
 4. **Use the sidebar** to switch between Queue Browser, Queue Copy, and Queue Subscriptions.
 
+> **Managed deployments:** where the gateway enables it, Connections offers a second **Managed** tab — sign in with an account an administrator provisioned and pick from the brokers and VPNs you are entitled to, instead of typing credentials at all. See [Managed Connections](docs/user-guide.md#managed-connections).
+
 > **Self-signed TLS certificates:** if `wss://` connection is blocked, the app shows a helper dialog with one-click instructions to trust the broker certificate.
 
 ## Features
 
 ### Connections
+
 - Two independent connections (Solace Web Messaging + SEMP REST), shared broker host.
+- **Direct** or **Managed** tab, where the deployment offers both — Managed signs you in and hands you only the brokers/VPNs you are entitled to, with no credentials to type.
 - **Basic** or **OAuth2** authentication for the Solace client.
 - **Save / Load / Reset** connection profiles (localStorage).
 - **Advanced settings** — connect/reconnect retries, timeouts, per-queue message cap (1–10 000).
@@ -54,6 +58,7 @@ Once the app is loaded:
 - SSL trust helper for self-signed broker certificates.
 
 ### Queue Browser
+
 - Bind up to **3 queues simultaneously** and switch between them; each keeps its own message history.
 - Real-time message arrival into a sortable, scrollable table.
 - Per-message **details panel** — properties, application properties, destination, payload preview, raw dump.
@@ -66,15 +71,18 @@ Once the app is loaded:
 - Modals dismiss on **Escape** or backdrop click.
 
 ### Queue Copy
+
 - Copy or **move** messages between queues, on the same broker or **across brokers**.
 - Two-column form — read-only Source mirror + editable Destination with **Same Broker** / **Same VPN** shortcuts.
 - Destination can be a **queue** (with SEMP-driven picker) or a **topic**.
+- Destination credentials are typed by hand, or — in a managed session — chosen from a provisioned broker/VPN you are entitled to, with no password to enter.
 - Bounded runs — snapshots the source before starting so the run has a defined end.
 - Pre-flight verification (count, size, quota, oldest/newest message ID) via SEMP, with QueueBrowser fallback if SEMP is unavailable.
-- Live progress with per-message ACK and a **Continue beyond** prompt for messages that arrive during the run.
+- Live progress with per-message ACK. The run is bounded to the snapshot taken at verify time, so messages arriving mid-run are left for the next run.
 - Stops on the first error (quota, permission, rejection) so partial state is visible.
 
 ### Queue Subscriptions
+
 - Lists every `(VPN, queue, topic-subscription)` triple visible to your SEMP user — answer "which queues subscribe to topic X?" without walking each queue manually.
 - Three column filters, AND-combined.
 - VPN / Queue filters: case-insensitive substring by default; `*` switches to anchored wildcard (`def*`, `*ult`, `def*ult`).
@@ -82,6 +90,7 @@ Once the app is loaded:
 - Loaded list is cached in memory; **Refresh** re-fetches.
 
 ### Cross-cutting
+
 - **SEMP queue picker** — used by Browser, Copy, and Subscriptions to select queues without leaving the current module.
 - **Toasts** for every success / failure.
 - **Self-contained HTML** — `index.html` includes all app code; the two vendor scripts `solclient.js` and `jszip.min.js` sit alongside it (see [deployment.md](docs/deployment.md#external-runtime-dependencies)).
@@ -91,7 +100,7 @@ Once the app is loaded:
 ## Documentation
 
 | Document | Description |
-|----------|-------------|
+| --- | --- |
 | [user-guide.md](docs/user-guide.md) | Full UI walkthrough, every field, every screen |
 | [deployment.md](docs/deployment.md) | Hosting options, network requirements, TLS |
 | [developer-guide.md](docs/developer-guide.md) | Setup, build, testing, adding modules, code conventions |

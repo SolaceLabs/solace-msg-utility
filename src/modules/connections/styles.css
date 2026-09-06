@@ -1,3 +1,12 @@
-/* Connections module — currently relies entirely on shell + generic components.
+/* Connections module — mostly relies on shell + generic components.
  * Add module-specific selectors (e.g. `.auth-toggle`, `.ssl-trust-*`) here if/when
  * they need styling beyond what the design system provides. */
+
+/* Managed-tab cards (login / broker selection / connected). Module-prefixed
+ * (.managed-conn-*) so they never collide in the shared (inlined) cascade.
+ * Moved here from the former standalone managed-connections module when the
+ * two connection modes merged into this module's tabs. */
+.managed-conn-card {
+    max-width: 520px;
+    margin: 2rem auto;
+}

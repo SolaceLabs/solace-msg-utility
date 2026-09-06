@@ -9,6 +9,13 @@ export const ui = {};
 /** @type {any} */
 export const els = {};
 
+// The connection gate is the shared module-gate component, injected by module.ts
+// at install via ui.setGate(). updateVisibility() drives it (the module owns the
+// gate-vs-active-view mutual exclusion).
+/** @type {{ show(): void; hide(): void } | null} */
+let gate = null;
+ui.setGate = function (g) { gate = g; };
+
 // Delegate to core/utils — keeps ui.formatBytes() / ui.generateUuid() call sites working
 ui.formatBytes = formatBytes;
 ui.generateUuid = generateUuid;
@@ -92,8 +99,7 @@ ui.initElements = function (container) {
     // Error
     els.elBrowserError = container.querySelector('#browser-connect-error');
 
-    // Visibility
-    els.elPrompt = container.querySelector('#browser-connect-prompt');
+    // Visibility (the gate is the module-gate component; see ui.setGate)
     els.elActiveView = container.querySelector('#browser-active-view');
 
     return els;
@@ -127,11 +133,11 @@ ui.showBindError = function (msg) {
 
 ui.updateVisibility = function (isConnected, vpnName) {
     if (!isConnected) {
-        els.elPrompt.classList.remove('hidden');
+        gate.show();
         els.elActiveView.classList.add('hidden');
         els.hdrVpnName.textContent = '';
     } else {
-        els.elPrompt.classList.add('hidden');
+        gate.hide();
         els.elActiveView.classList.remove('hidden');
         els.hdrVpnName.textContent = vpnName;
 

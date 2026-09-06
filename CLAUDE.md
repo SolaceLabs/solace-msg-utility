@@ -2,12 +2,13 @@
 
 ## graphify
 
-This project has a graphify knowledge graph at graphify-out/.
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
 
 Rules:
-- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
-- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, ask user to run `python -m graphify update .` to keep the graph current (AST-only, no API cost)
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
 
 ## API to Backend LLM server
 
@@ -35,11 +36,15 @@ btnCopy.disabled = false;
 
 ## Coverage Policy
 
-- **Target is 100%** on statements, branches, functions, and lines. `vitest.config.ts` sets the thresholds to 100 so `npm run test:coverage` emits an `ERROR: Coverage for … does not meet global threshold (100%)` whenever a metric slips. The current run is below the target — see `docs/test-report.md` for the per-file gap. Don't regress it further; prefer raising it. **The 100% target applies to the lines you add or change**: code you touch must be fully covered by tests in the same change, even though the global total is still below target.
-- **Don't run the test or coverage commands yourself — ask the user to.** After modifying code, ask the user to run `npm run test:coverage` (and `npm test` when relevant) and report the results back, rather than running them yourself — mirrors the graphify-update rule above. Use the reported output to decide follow-up fixes.
+- **Target is 100%** on statements, branches, functions, and lines. `vitest.config.ts` sets the thresholds to 100 so `./scripts/dev.sh cov` emits an `ERROR: Coverage for … does not meet global threshold (100%)` whenever a metric slips. **The suite currently meets it on all four metrics** — keep it there. The target applies to the lines you add or change: code you touch must be fully covered by tests in the same change.
+- **The previous total in `scripts/logs/cov.log` is the local floor.** `cov` prints and logs the web and Go totals. CI is a fresh checkout with no prior log, so it cannot catch a coverage regression — that check only exists locally.
 - **v8 ignores are a last resort.** Valid categories only: jsdom environment limitations (e.g., `document.readyState === 'loading'`), SDK callbacks the test harness can't fire, defensive `catch` around contracts that never throw. DOM null-guards on required elements are NOT a valid category — convert them to `required()`.
 - Every `/* v8 ignore */` must have an inline comment explaining why the code is architecturally untestable.
 - Tests should be solid and reflective of real-world scenario. It should not be ceremonial. Don't add tests that don't add value. Reviewers are expected to point out where tests can be removed or improved.
+
+## The Credential Transform Is Undocumented By Policy
+
+The construction behind [src/core/encode.ts](src/core/encode.ts) must never be described in `docs/`, `README.md`, or `CLAUDE.md`. Say what a value **is** ("packed with the deployment site seed") and what the posture guarantees (just-in-time unpack, non-extractable key, plaintext never stored) — never how it is built. `npm run check:docs` ([scripts/check-docs-secrecy.mjs](scripts/check-docs-secrecy.mjs)) enforces this and runs in CI. It is a guard against accidental documentation, not a security boundary.
 
 ## Tests and Documentation Stay In Sync With Code
 
@@ -61,14 +66,14 @@ When you change behavior, **update the relevant tests and documentation in the s
 ## Architecture Anchors
 
 1. **No cross-module imports** — communicate via the typed `EventBus` (`src/core/types.ts` → `BusEvents`). Modules MAY import freely from `src/core/` (services, components, types, utilities) — that's the library layer, the second axis added by the May 2026 connection-libraries-to-core refactor.
-2. **No global state** — everything flows through `AppContext`.
+2. **No global state** — everything flows through `AppContext`. Credential-bearing state is not an exception: the managed profile + site seed live in `ctx.managedStore` ([src/core/services/managed-session-store.ts](src/core/services/managed-session-store.ts)), never in `AppState` and never in a module-level variable. `AppState.managed` carries matcher inputs only (names, globs, the login token).
 3. **No `document.getElementById()`** — always scope to the module's `container`.
-4. **Factory functions, not classes** — state lives in closures. Two factory shapes coexist: module-level factories take `AppContext` (e.g. queue-browser's `createService(ctx)`); core service factories in `src/core/services/` are **pure** — they take lifecycle hooks (`onConnected`/`onDisconnected`/etc.) so the same factory can power the connections module's primary connection AND a future module's secondary connection. The connections module's `module.ts` is the one place that bridges factory hooks to global AppState + bus events.
+4. **Factory functions, not classes** — state lives in closures. Two factory shapes coexist: module-level factories take `AppContext` (e.g. queue-browser's `createService(ctx)`); core service factories in `src/core/services/` are **pure** — they take lifecycle hooks (`onConnected`/`onDisconnected`/etc.) so the same factory can power the connections module's primary connection AND another module's secondary connection (queue-copy's destination). The connections module's `module.ts` is the one place that bridges factory hooks to global AppState + bus events; a secondary connection's hooks must write only module-local state. To open a *provisioned* secondary, ask `ctx.managedStore.connect(target, { connect })` and build the client inside the callback — never move a credential across a module boundary.
 5. **Required elements use `required()`, optional ones use nullable checks** — see DOM Access policy above.
-6. **Modules register in `src/variants/<name>.ts`** — each variant is a small `ACTIVE_MODULES: Record<id, priority>` manifest. The active variant is selected via `src/variants/_active.ts` (default re-exports `./full`) or the `VITE_VARIANT=<name>` env var at build time. `src/registry.ts` resolves each id to its `module.ts` via `import.meta.glob` — no separate import section. Adding a module = create `src/modules/<id>/{module.ts, index.html}` + add one line to the variant. Disabling = comment one line. Shipping a different module mix = drop a new variant file.
+6. **Modules register in `src/variants/<name>.ts`** — each variant is a small `ACTIVE_MODULES: Record<id, priority>` manifest. The active variant is selected via `src/variants/_active.ts` (default re-exports `./standard`) or the `VITE_VARIANT=<name>` env var at build time. `src/registry.ts` resolves each id to its `module.ts` via `import.meta.glob` — no separate import section. Adding a module = create `src/modules/<id>/{module.ts, index.html}` + add one line to the variant. Disabling = comment one line. Shipping a different module mix = drop a new variant file.
 7. **Module HTML lives in `src/modules/<id>/index.html`** — never in the shell. The shell `src/index.html` has a `<!-- @module-templates -->` marker and the `inject-module-templates` Vite plugin splices each module's HTML in at build time.
 8. **CSS is split by responsibility** — `src/css/{variables,reset,layout,components,utilities}.css` for the design system, `src/modules/<id>/styles.css` for module-scoped rules, `src/core/components/<name>/styles.css` for reusable components, and `src/css/main.css` aggregates them via `@import`. Module-prefixed selectors (`.browser-*`, `.detail-*`, etc.) belong in the module's own `styles.css`; component-prefixed selectors (`.picker-*`, `.toast-*`) belong in the component's. Shared primitives stay in `components.css` / `utilities.css`. Don't reach for `!important` to beat cross-file specificity — the rule is in the wrong file.
-9. **Reusable UI components live in `src/core/components/<name>/`** with a function API (e.g. `pickQueue(sempCtx, opts?)`). The component owns its DOM creation, event wiring, and lifecycle internally. Qualifies for core only if reusable across ≥2 features. One-off UI stays inside the consuming module.
+9. **Reusable UI components live in `src/core/components/<name>/`** with a function API (e.g. `pickQueue(source, opts?)` — components take a `QueueSource`, never a `SempContext`, and never run their own discovery). The component owns its DOM creation, event wiring, and lifecycle internally. Qualifies for core only if reusable across ≥2 features. One-off UI stays inside the consuming module.
 
 ## Test DOM
 
@@ -83,5 +88,14 @@ When a test references another test — in a comment, a `describe`/`it` title, o
 ## Build Modes
 
 - `npm run build:prod` — production bundle (`dist/index.html`, real services, no mock code).
-- `npm run build:mock` — interactive demo bundle (`dist/mock.html`) with mock services. Vite's `serviceMockRedirect` plugin rewrites broker-side service imports to their `*-mock` siblings at resolve time. The `MOCK_REDIRECTS` map in `vite.config.ts` covers `../../core/services/{solace-client, semp-client, semp-discovery}` (the lifted core factories) and `./service` (queue-browser's local service-mock).
-- `npm run build` — emits both, in that order (mock first, production second). `emptyOutDir: false` is set in `vite.config.ts`, so neither pass wipes the other's output nor pre-placed files in `dist/` (like `solclient.js` / `jszip.min.js`).
+- `npm run build:mock` — interactive demo bundle (`dist/mock.html`) backed by an in-browser broker. `MOCK_REDIRECTS` in `vite.config.ts` now holds a **single** entry: `./core/boot` → `./mock-broker/boot`. That seam installs `window.solace`, a `fetch` interceptor (SEMP v2/v1, `/hosted`, `/managed/*`) and the demo control panel, so every real service runs unmodified against it. **Do not add `*-mock` service siblings** — extend `src/mock-broker/` instead, and cover new behaviour in `tests/mock-broker/`. The tree is mock-only: the redirect plugin is registered only when `mode === 'mock'`, so production never imports it.
+- `npm run build:no-payload` / `build:no-queue-copy` / `build:admin` / `build:all` — the remaining variants (`no-payload.html`, `no-queue-copy.html`, `solAdmin.html`, `all-test.html`).
+- `npm run build` — emits every shipped variant in one pass: `mock.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, `solAdmin.html`. `emptyOutDir: false` is set in `vite.config.ts`, so no pass wipes another's output nor pre-placed files in `dist/` (like `solclient.js` / `jszip.min.js`).
+- `./scripts/dev.sh build` is the **gate**, and what CI calls: `npm run build` plus both version-stamped gateway binaries (`go-web-proxy[-managed]-<os>-<arch>`), honouring `TARGET_OS`/`TARGET_ARCH` for cross-compilation. The npm scripts above are the pieces it calls; reach for them directly only when iterating on one variant. A build command belongs in **both** `scripts/dev.sh` and `scripts/dev.ps1`, never in workflow YAML.
+- **Version comes from the git tag, not `package.json`.** `dev.sh` derives it (`git describe`, or `VERSION` from the tag ref in CI) and exports `APP_VERSION`, which `vite.config.ts` reads into `__APP_VERSION__` and the `-ldflags` stamp into the gateway's `version`. `docker/Dockerfile` takes the same value as a build-arg because git is unavailable inside the image build. `package.json`'s `0.0.0-dev` is a deliberately implausible placeholder — see [docs/git.md](docs/git.md).
+
+## Type Checking
+
+- `./scripts/dev.sh vet` is the **static-analysis gate**: `tsc --noEmit`, the doc-secrecy check, and `go vet` both with and without the `managed` tag. The build does **not** type-check — Vite/esbuild transpiles by *stripping* types without checking them, so a type error never fails `dev.sh build` or the dev server. `tsc` is the only thing that catches it.
+- **Code you touch must pass `vet` clean** — same expectation as the 100% coverage rule. Don't leave type errors behind a green build.
+- CI enforces it by calling the same task: `.github/workflows/ci.yml` runs `./scripts/dev.sh all scan` on Linux and `./scripts/dev.ps1 all scan` on Windows.

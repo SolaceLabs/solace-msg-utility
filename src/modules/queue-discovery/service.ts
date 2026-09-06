@@ -1,5 +1,5 @@
 import { createSempDiscovery, type FetchPage } from '../../core/services/semp-discovery';
-import { primarySempContextFrom } from '../../core/services/sempContext';
+import { unfilteredPrimarySempContext } from '../../core/services/sempContext';
 import type { AppContext } from '../../core/types';
 
 // Re-export so existing consumers (the queue-discovery module + its tests)
@@ -18,7 +18,7 @@ export type { FetchPage };
 export function createService(ctx: AppContext) {
 
     async function* fetchVpns(maxCount = 100): AsyncGenerator<FetchPage> {
-        const sempCtx = primarySempContextFrom(ctx);
+        const sempCtx = unfilteredPrimarySempContext(ctx);
         if (!sempCtx) {
             yield { ok: false, error: 'SEMP Not Connected' };
             return;
@@ -27,7 +27,7 @@ export function createService(ctx: AppContext) {
     }
 
     async function* fetchQueues(vpnName: string, maxCount = 100): AsyncGenerator<FetchPage> {
-        const sempCtx = primarySempContextFrom(ctx);
+        const sempCtx = unfilteredPrimarySempContext(ctx);
         if (!sempCtx) {
             yield { ok: false, error: 'SEMP Not Connected' };
             return;

@@ -260,3 +260,46 @@ export function normalizeUrlPath(val: string | null | undefined): string {
     const withLeading = trimmed.startsWith('/') ? trimmed : '/' + trimmed;
     return withLeading.replace(/\/+$/, '');
 }
+
+/**
+ * Message from a thrown value, for display in a UI error slot. Non-Error
+ * throws are stringified rather than dropped, so a rejected promise from a
+ * non-Error source still tells the user something.
+ */
+export function errMessage(e: unknown): string {
+    return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Reason text for anything the Solace SDK hands a listener, or for a thrown
+ * exception — the two arrive in different shapes and the SDK is not consistent
+ * about which field carries the detail:
+ *
+ * - **QueueBrowser / MessageConsumer** `CONNECT_FAILED_ERROR` and `DOWN_ERROR`
+ *   deliver an `OperationError` (an `Error` subclass), so the reason is on
+ *   **`.message`**. It has no `infoStr` at all.
+ * - **Session** events (`CONNECT_FAILED_ERROR`, `REJECTED_MESSAGE_ERROR`, …)
+ *   deliver a `SessionEvent`, whose reason is on **`.infoStr`**.
+ * - A `try`/`catch` around an SDK call yields a plain `Error` → `.message`.
+ *
+ * Reading only one of those silently loses the broker's explanation: the queue
+ * browser showed it while queue-copy reported a generic fallback for the very
+ * same failure, because each read a different field. Prefer `.message`, fall
+ * back to `.infoStr`, and only then to the caller's text — never stringify the
+ * object itself, which is how `[object Object]` reaches a user.
+ *
+ * @param e        the SDK event or thrown value
+ * @param fallback shown when the value carries no usable text
+ */
+export function solaceErrorText(e: unknown, fallback: string): string {
+    if (typeof e === 'string') return e.trim() || fallback;
+
+    const candidate = e as { message?: unknown; infoStr?: unknown } | null | undefined;
+    const message = candidate?.message;
+    if (typeof message === 'string' && message.trim()) return message;
+
+    const infoStr = candidate?.infoStr;
+    if (typeof infoStr === 'string' && infoStr.trim()) return infoStr;
+
+    return fallback;
+}

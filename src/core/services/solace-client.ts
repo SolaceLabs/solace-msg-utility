@@ -1,5 +1,6 @@
 import { logger } from '../logger';
 import { buildBrokerUrl, isHosted } from '../hosted';
+import { solaceErrorText } from '../utils';
 import type { SolaceConfig } from '../connections/types';
 
 declare const solace: any;
@@ -120,6 +121,21 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
             return;
         }
 
+        // The shell's vendor loader (src/index.html) sets `solaceLibLoaded` only
+        // once the SDK it loaded satisfies the minimum version — or reports no
+        // version at all, which it cannot verify and therefore permits. Reaching
+        // here with the flag false means the SDK IS present but is too old, so
+        // this is the one place that turns that finding into a refusal: every
+        // Solace session in the app is created below, and the primary (Direct and
+        // Managed) and secondary (queue-copy destination) callers all render
+        // `onError` already.
+        if (!(window as any).solaceLibLoaded) {
+            hooks.onError?.(new Error(
+                'Solace Web Messaging SDK is below the required version (10.18.3) — see the banner at the top of the page.',
+            ));
+            return;
+        }
+
         if (!isInitialized) init();
 
         // For secure WebSocket, fire a hidden-iframe TLS handshake alongside
@@ -197,9 +213,16 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
 
             session.connect();
 
-        } catch (e: any) {
+        } catch (e) {
             logger.error('Session Creation Error', e);
-            hooks.onError?.(e);
+            // `onError` is typed `(err: Error) => void` and every consumer renders
+            // `err.message`, so honour that here rather than trusting whatever the
+            // SDK threw. Every throw site traced in the bundle throws an
+            // OperationError, but a non-Error would otherwise surface to the user
+            // as "Connection Failed: undefined" with the reason only in the console.
+            hooks.onError?.(e instanceof Error
+                ? e
+                : new Error(solaceErrorText(e, 'Session creation failed.')));
             cleanup();
         }
     }

@@ -1,24 +1,29 @@
 import { required, attachBackdropClose } from '../../dom';
 import { INPUT_DEBOUNCE_MS } from '../../timing';
-import { createSempDiscovery } from '../../services/semp-discovery';
-import type { SempContext } from '../../connections/types';
+import type { QueueSource } from '../../services/queue-source';
 
 /**
  * Reusable queue picker — a `<dialog>` that lets the user pick a `{VPN, queue}`
- * pair against a given SempContext. Self-contained: owns its DOM, its CSS, and
- * its lifecycle. Callers invoke `pickQueue(sempCtx)` and await the chosen
+ * pair against a given `QueueSource`. Self-contained: owns its DOM, its CSS, and
+ * its lifecycle. Callers invoke `pickQueue(source)` and await the chosen
  * queue name (or `null` on cancel).
  *
- * Streams queues incrementally as SEMP pages arrive (mirrors queue-discovery's
+ * The picker is RBAC- and transport-agnostic: it consumes a `QueueSource`
+ * (`listVpns` / `listQueues`) and never runs its own SEMP discovery, so it
+ * behaves identically in every variant — the connection that owns the source
+ * decides where VPN/queue names come from (provisioned set vs live broker).
+ *
+ * Streams queues incrementally as source pages arrive (mirrors queue-discovery's
  * `for await` re-render-on-each-page pattern), so users get usable results
  * even on VPNs with thousands of queues. Filter is a CSS `display:none` toggle
  * applied on top of a static option list, also matching queue-discovery —
  * that lets the filter persist across page-arrival re-renders.
  *
- * A module-level cache keyed by `sempCtx.baseUrl` survives across pickQueue
+ * A module-level cache keyed by `source.key` survives across pickQueue
  * invocations (and across module installs of the consuming feature). VPN
  * lists and per-VPN queue lists are cached on first fetch and reused on
- * subsequent opens; the user invalidates with the refresh icons.
+ * subsequent opens; the user invalidates with the refresh icons, and a changed
+ * `key` (e.g. an RBAC/provisioning edit) invalidates it automatically.
  *
  * Concurrency: only one picker instance at a time. Subsequent calls while
  * open reject with an error. The dialog DOM is lazily created on first use
@@ -54,7 +59,7 @@ interface Refs {
 }
 
 interface State {
-    sempCtx: SempContext;
+    source: QueueSource;
     selectedVpn: string | null;
     selectedQueue: string | null;
     vpns: string[] | null;
@@ -66,21 +71,22 @@ interface State {
 }
 
 /**
- * Module-level cache keyed by SEMP baseUrl. Survives across pickQueue calls
- * so reopening the picker is instant when the broker is unchanged. The user
- * invalidates with the refresh icons; opening against a different broker
- * (different baseUrl) replaces the cache.
+ * Module-level cache keyed by the source's `key`. Survives across pickQueue
+ * calls so reopening the picker is instant when the source is unchanged. The
+ * user invalidates with the refresh icons; opening against a different source
+ * `key` (different broker, or a managed RBAC/provisioning change) replaces the
+ * cache automatically.
  */
 interface PickerCache {
-    baseUrl: string;
+    key: string;
     vpns: string[] | null;
     queues: Map<string, string[]>;
 }
 let cache: PickerCache | null = null;
 
-function ensureCache(sempCtx: SempContext): PickerCache {
-    if (!cache || cache.baseUrl !== sempCtx.baseUrl) {
-        cache = { baseUrl: sempCtx.baseUrl, vpns: null, queues: new Map() };
+function ensureCache(source: QueueSource): PickerCache {
+    if (cache?.key !== source.key) {
+        cache = { key: source.key, vpns: null, queues: new Map() };
     }
     return cache;
 }
@@ -89,7 +95,7 @@ let refs: Refs | null = null;
 let state: State | null = null;
 let pendingResolve: ((v: PickQueueResult | null) => void) | null = null;
 
-export function pickQueue(sempCtx: SempContext, opts: PickQueueOptions = {}): Promise<PickQueueResult | null> {
+export function pickQueue(source: QueueSource, opts: PickQueueOptions = {}): Promise<PickQueueResult | null> {
     if (pendingResolve) {
         return Promise.reject(new Error('Queue picker is already open'));
     }
@@ -101,9 +107,9 @@ export function pickQueue(sempCtx: SempContext, opts: PickQueueOptions = {}): Pr
 
     return new Promise<PickQueueResult | null>((resolve) => {
         pendingResolve = resolve;
-        const c = ensureCache(sempCtx);
+        const c = ensureCache(source);
         state = {
-            sempCtx,
+            source,
             selectedVpn: opts.defaultVpn ?? null,
             selectedQueue: null,
             vpns: c.vpns ? [...c.vpns] : null,
@@ -161,12 +167,12 @@ function resolveAndClose(value: PickQueueResult | null): void {
 }
 
 async function fetchVpns(): Promise<void> {
-    const sempCtx = state!.sempCtx;
+    const source = state!.source;
     const gen = ++state!.vpnFetchGen;
     setStatus('Loading VPNs…');
     const accumulated: string[] = [];
     try {
-        for await (const page of createSempDiscovery(sempCtx).fetchVpns()) {
+        for await (const page of source.listVpns()) {
             if (!state || state.vpnFetchGen !== gen) return;
             if (!page.ok) {
                 setStatus(`Failed to load VPNs: ${page.error}`);
@@ -186,16 +192,17 @@ async function fetchVpns(): Promise<void> {
         if (!state || state.vpnFetchGen !== gen) return;
         /* v8 ignore stop */
         // Persist the just-fetched list to the module cache so the next
-        // pickQueue() invocation against the same broker gets instant render.
-        ensureCache(sempCtx).vpns = [...accumulated];
+        // pickQueue() invocation against the same source gets instant render.
+        ensureCache(source).vpns = [...accumulated];
         setStatus(`${accumulated.length} VPN${accumulated.length === 1 ? '' : 's'} loaded.`);
 
         if (state.selectedVpn && accumulated.includes(state.selectedVpn)) {
             selectVpn(state.selectedVpn);
         }
-    /* v8 ignore start -- defensive catch. The underlying createSempDiscovery
-     * generator catches every fetch / json / mapper error internally and yields
-     * `{ok:false}` pages, so errors never escape the for-await loop. */
+    /* v8 ignore start -- defensive catch. The source generators catch every
+     * fetch / json / mapper error internally and yield `{ok:false}` pages (the
+     * provisioned-VPN source yields a static list that can't throw), so errors
+     * never escape the for-await loop. */
     } catch (err: any) {
         if (state && state.vpnFetchGen === gen) {
             setStatus(`Failed to load VPNs: ${err?.message ?? 'unknown error'}`);
@@ -205,14 +212,14 @@ async function fetchVpns(): Promise<void> {
 }
 
 async function fetchQueues(): Promise<void> {
-    const sempCtx = state!.sempCtx;
+    const source = state!.source;
     const vpn = state!.selectedVpn!;
     const gen = ++state!.queueFetchGen;
     setStatus(`Loading queues for ${vpn}…`);
     const accumulated: string[] = [];
     state!.queueCache.delete(vpn);
     try {
-        for await (const page of createSempDiscovery(sempCtx).fetchQueues(vpn)) {
+        for await (const page of source.listQueues(vpn)) {
             if (!state || state.queueFetchGen !== gen) return;
             if (!page.ok) {
                 setStatus(`Failed to load queues: ${page.error}`);
@@ -229,7 +236,7 @@ async function fetchQueues(): Promise<void> {
         if (!state || state.queueFetchGen !== gen) return;
         /* v8 ignore stop */
         // Persist this VPN's queue list to the module cache.
-        ensureCache(sempCtx).queues.set(vpn, [...accumulated]);
+        ensureCache(source).queues.set(vpn, [...accumulated]);
         setStatus(
             accumulated.length === 0
                 ? `No queues found in ${vpn}.`
@@ -448,7 +455,7 @@ function attachHandlers(r: Refs): void {
         if (!state) return;
         // Drop the module cache for this broker's VPN list; the next fetch
         // will repopulate it.
-        ensureCache(state.sempCtx).vpns = null;
+        ensureCache(state.source).vpns = null;
         state.vpns = null;
         r.vpnInput.value = '';
         r.vpnList.innerHTML = '';
@@ -477,7 +484,7 @@ function attachHandlers(r: Refs): void {
     });
     r.btnQueueRefresh.addEventListener('click', () => {
         if (!state || !state.selectedVpn) return;
-        ensureCache(state.sempCtx).queues.delete(state.selectedVpn);
+        ensureCache(state.source).queues.delete(state.selectedVpn);
         state.queueCache.delete(state.selectedVpn);
         r.queueInput.value = '';
         r.queueList.innerHTML = '';

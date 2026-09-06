@@ -1,12 +1,16 @@
 import { defineConfig } from 'vitest/config';
 import fs from 'node:fs';
 import path from 'node:path';
+import { moduleRegistryPlugin } from './scripts/module-registry-plugin.mjs';
 
 const pkgVersion: string = JSON.parse(
     fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')
 ).version;
 
 export default defineConfig({
+    // Resolve `virtual:module-registry` (imported by src/registry.ts) under tests
+    // too. With no __VITE_VARIANT, the plugin defaults to the `full` variant.
+    plugins: [moduleRegistryPlugin({ root: __dirname })],
     define: {
         __APP_VERSION__: JSON.stringify(pkgVersion)
     },
@@ -36,6 +40,7 @@ export default defineConfig({
                 // mock was deleted in Stage C in favor of the core mock below.
                 // queue-copy keeps split mocks for the verify + copy engines so
                 // the build:mock demo runs without an SDK-level QueueBrowser mock.
+                'src/mock-broker/**',
                 'src/modules/**/service-mock.ts',
                 'src/modules/**/service-verify-mock.ts',
                 'src/modules/**/service-copy-mock.ts',

@@ -18,6 +18,7 @@ import { createUiEvents } from './ui-events.js';
 import { initDetails } from './ui-details.js';
 import { showPayload } from './features.js';
 import { required, attachBackdropClose } from '../../core/dom';
+import { createGate } from '../../core/components/module-gate';
 import type { AppContext } from '../../core/types';
 
 export const QueueBrowserModule = {
@@ -63,7 +64,7 @@ export const QueueBrowserModule = {
         // 1. Initialize UI elements + assert module-owned required elements up-front.
         const els = ui.initElements(container);
         const requiredSelectors = [
-            '#browser-connect-prompt', '#browser-active-view',
+            '#browser-active-view',
             '#browser-vpn-name', '#browser-queue-name', '#browser-permissions',
             '#browser-connect-error', '#browser-bind-error',
             '#browser-bind-input', '#btn-browser-bind-pick', '#btn-browser-bind', '#btn-browser-unbind',
@@ -96,6 +97,15 @@ export const QueueBrowserModule = {
             );
         }
         requiredSelectors.forEach(selector => required(container, selector));
+
+        // The connection-required gate is owned by the shared module-gate
+        // component; hand it to the ui layer so updateVisibility can toggle it
+        // (the module still owns gate-vs-active-view mutual exclusion).
+        ui.setGate(createGate(container, {
+            id: 'browser-connect-prompt',
+            title: 'Connection Required',
+            message: 'Please establish a Solace Client connection to browse queues.',
+        }));
 
         // 2. Initial Visibility
         ui.updateVisibility(appState.isConnected, appState.selectedVpn);

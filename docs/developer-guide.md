@@ -4,9 +4,10 @@
 
 ```bash
 git clone <repository-url>
-cd SolaceMessageUtility
+cd solabs-msg-utility
 npm install
 npm run dev          # Dev server at http://localhost:5173
+npm run preview      # Serve an already-built dist/ bundle
 ```
 
 The dev server hot-reloads on file changes. TypeScript compilation errors appear in the terminal and browser console.
@@ -14,12 +15,18 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 ### Build commands
 
 | Command | Outputs in `dist/` |
-|---|---|
+| --- | --- |
 | `npm run build:prod` | `index.html` (production, full variant) |
-| `npm run build:mock` | `mock.html` (interactive demo with canned mocks) |
+| `npm run build:mock` | `mock.html` (interactive demo backed by the in-browser mock broker) |
 | `npm run build:no-payload` | `no-payload.html` (queue-browser with the message body hidden — see Build-time feature flags) |
 | `npm run build:no-queue-copy` | `no-queue-copy.html` (full variant minus the Queue Copy module) |
-| `npm run build` | `mock.html`, `index.html`, `min.html`, `no-payload.html`, AND `no-queue-copy.html` in one pass |
+| `npm run build:all` | `all-test.html` (kitchen-sink QA build — every module, including the admin ones) |
+| `npm run build:admin` | `solAdmin.html` (the standalone administration app — see [architecture.md -> The admin app](architecture.md#the-admin-app-soladmin)) |
+| `npm run build` | `mock.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, AND `solAdmin.html` in one pass |
+
+**The gates are `scripts/dev.sh` / `scripts/dev.ps1`, not the npm scripts.** The table above is the variant reference — reach for an individual `build:*` script when iterating on one variant. For anything you would call a gate, use the task: `./scripts/dev.sh all` (`build vet test`, what CI runs), `cov`, `scan`, `image`, or `full` for the pre-tag sweep. The tasks call the npm scripts above plus the Go halves, and they are the only place a build command lives — see [contributing.md](contributing.md#development-workflow) for the task table and [git.md](git.md) for how a tag turns into a release.
+
+The npm scripts the tasks wrap: `typecheck` (`tsc --noEmit`), `check:docs` (the credential-transform secrecy check), `test` / `test:coverage`, `build`, `image:build` (both container images), and `scan:go` / `scan:npm` / `scan:image`. `scan:go` runs `go tool govulncheck`, which resolves through the `tool` directive pinned in [go-web-proxy/go.mod](../go-web-proxy/go.mod) — never `go run pkg@version`, which runs module-less and ignores the toolchain pin.
 
 Custom variants are built via the `scripts/vite-build.mjs` wrapper, which surfaces `--variant=<name>`, `--out-filename=<name>`, and `--show-payload=<bool>` because Vite's CLI parser (CAC) rejects unknown flags. The wrapper forwards them to `vite.config.ts` via private env vars. Example: `node scripts/vite-build.mjs --variant=min --out-filename=min.html`.
 
@@ -49,13 +56,13 @@ A **flavor** is a build-time toggle of *how a module behaves*, orthogonal to whi
 - **Dynamic imports**: forced inline (`inlineDynamicImports: true`)
 - **emptyOutDir**: `false` — preserves pre-placed files in `dist/` (vendor scripts, prior variants) across builds.
 
-The two vendor scripts (`solclient.js`, `jszip.min.js`) are intentionally **not** bundled — they're loaded at runtime from sibling locations. See [deployment.md → External Runtime Dependencies](deployment.md#external-runtime-dependencies) for the placement rules the shell expects.
+The two vendor scripts (`solclient.js`, `jszip.min.js`) are intentionally **not** bundled — they're loaded at runtime from sibling locations. The demo build is the exception: it installs its own SDK, so `mock.html` needs no `solclient.js` (only `jszip.min.js`, for ZIP export). See [deployment.md → External Runtime Dependencies](deployment.md#external-runtime-dependencies) for the placement rules the shell expects.
 
 ---
 
 ## Project Structure
 
-```
+```text
 src/
   core/
     types.ts           # Shared interfaces (AppContext, AppState, BusEvents, PwaModule).
@@ -63,24 +70,41 @@ src/
     event-bus.ts       # Typed pub/sub implementation
     kernel.ts          # Module orchestrator, state, navigation, SEMP auth
     dom.ts             # required() helper — fail-fast required-element assertion
-    utils.ts           # Pure utilities (escapeHtml, formatBytes, generateUuid, matchString, isValidHost, isValidPort)
+    utils.ts           # Pure utilities (escapeHtml, escapeXml, formatBytes, generateUuid, matchString,
+                       # topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
+                       # isValidHost, isValidPort)
     timing.ts          # Shared INPUT_DEBOUNCE_MS for input-driven feedback
     toast.ts           # Toast notification system
+    logger.ts          # Leveled logger every module writes through (?logLevel= URL override)
+    hosted.ts          # /hosted probe + buildBrokerUrl — the single gateway-rewrite point
+    constants.ts       # App-wide constants
+    rbac.ts            # Stateless RBAC matchers — matchGlob, isModuleVisible, isVpnVisible, isQueueVisible, canOperate
+    encode.ts          # Credential transform (login token + site-seed pack/unpack). Algorithm is code-only —
+                       # never describe it in docs (scripts/check-docs-secrecy.mjs enforces this)
+    managed-semp-filter.ts # filterSempFetch — scopes SEMP discovery to entitled VPNs/queues (managed)
     services/                  # Pure broker-side factories — no AppContext, no UI.
       solace-client.ts         # createServiceSolace(hooks) → Solace session lifecycle
-      solace-client-mock.ts    # Mock for `vite build --mode mock`
+      solace-publisher.ts      # createSolacePublisher(session) → publish/ACK tracking
       semp-client.ts           # createServiceSemp(hooks) → SEMP cred validation; returns SempContext
-      semp-client-mock.ts      # Mock for mock build
       semp-discovery.ts        # createSempDiscovery(sempCtx) → paginated VPN + queue fetchers
-      semp-discovery-mock.ts   # Mock for mock build (canned VPN/queue lists)
-      sempContext.ts           # primarySempContextFrom(ctx) → builds a SempContext from primary AppState
+      sempContext.ts           # unfilteredPrimarySempContext(ctx) → SempContext from primary AppState.
+                               # Named for what it does NOT do: only two SEMP v2 list shapes are filtered
+      queue-source.ts          # QueueSource + typed Access/scope — the discovery seam components consume
+      managed-session-store.ts # Owns the provisioned profile + site seed; dials targets on request
+      managed-service.ts       # createManagedService() → the POST /managed/* client
     connections/               # Connection-domain library (types only — no orchestration here).
       types.ts                 # SolaceConfig, SempConfig, ConnectionConfig, ConnectionCredentials, SempContext
       defaults.ts              # DEFAULT_CONFIG + validateConfig (data-shape validator)
+      conn-modes.ts            # ConnDeploymentConfig + DEFAULT_CONN_CONFIG + coerceConnConfig +
+                               # resolveConnTabs / resolveDestCredModes (fed by CONN_MODES/DEFAULT_CONN)
     components/                # Reusable UI components with function APIs.
       queue-picker/
-        index.ts               # pickQueue(sempCtx, opts?): Promise<string | null>
+        index.ts               # pickQueue(source, opts?) — takes a QueueSource, never SEMP directly
         styles.css             # Component-scoped .picker-* styles
+      row-list/
+        index.ts               # createRowList(container, fields) — dynamic add/remove row editor (managed admin forms)
+      module-gate/
+        index.ts               # createGate(container, {id,title,message}) — full-view "… Required" gate card
   css/                 # Split by responsibility; aggregated by main.css
     variables.css      # :root design tokens
     reset.css          # * resets
@@ -88,20 +112,22 @@ src/
     components.css     # Generic UI — buttons, cards, forms, modals, tables, badges
     utilities.css      # Atomic helpers — flex, gap, spacing, sizing
     main.css           # @import entry — imported by main.ts (also imports core/components/queue-picker/styles.css)
+    main-admin.css     # Admin-build entry — main.css + the admin modules' styles; the
+                       # css-variant-redirect plugin swaps it in for --variant=admin
   modules/
     connections/       # Priority 100. Owns the PRIMARY connection lifecycle.
       module.ts        # Orchestrator — defines solaceHooks/sempHooks that bridge factory
                        # lifecycle events (onConnected/onDisconnected/etc.) to ctx.setState +
                        # eventBus.emit + the connections form's UI updates.
-      config.js        # localStorage persistence (XOR+base64 obfuscation)
+      managed-panel.ts # The Managed tab — login, provisioned dropdowns, browser guardrails
+      config.js        # localStorage persistence (values obfuscated at rest)
       ui.js            # Element caching, auth mode, visual feedback
       styles.css       # Module-scoped styles
       index.html       # Module HTML template (injected by build plugin)
     queue-browser/     # Priority 80
       module.ts        # Event listener wiring
       service.ts       # Browser create, forward, delete
-      service-mock.ts  # Mock for mock build (queue-browser keeps a local mock — its
-                       # canned data is browser-specific, not a SEMP/Solace plumbing concern)
+      features.ts      # Build-time flavor flag — showPayload() reads VITE_SHOW_PAYLOAD
       service-events.ts # onMessage, onBrowserUp/Down, ACK/REJECT
       state.js         # Message store, filter logic
       ui-core.js       # Element cache, visibility, counts
@@ -119,19 +145,37 @@ src/
     queue-subscription-explorer/  # Priority 45 — SEMP v1 (vpn, queue, topic) browser
     queue-discovery/   # Present on disk but NOT in any active variant — sits inert at runtime.
                        # Kept for code archaeology; the kernel never installs it.
+    admin-login/           # /solAdmin entry point — managed auth only, opens no broker connection
+    user-management/       # Admin-only (/solAdmin) — user + entitlement CRUD
+    connection-management/ # Admin-only (/solAdmin) — broker connection CRUD
   variants/
-    full.ts            # Default variant — every module the app ships with
+    standard.ts        # Default variant — every module the app ships with
     min.ts             # Minimal variant — connections + queue-browser only
     no-queue-copy.ts   # Full variant minus the Queue Copy module
-    _active.ts         # One-line re-export from one variant (default ./full)
+    admin.ts           # The /solAdmin app — admin-login + the two entitlement editors
+    all-for-testing-only.ts  # Kitchen-sink QA build — every module, incl. the admin ones
+    _active.ts         # One-line re-export from one variant (default ./standard)
+  mock-broker/         # DEMO ONLY — entered solely via the mock-mode import redirect,
+                       # so no production bundle contains it.
+    boot.ts            # Installs window.solace, the fetch interceptor and the panel
+    fixtures.ts        # THE demo dataset + scenario enums — single source of truth
+    emitter.ts         # Synchronous FIFO emitter (RBAC patch ordering depends on it)
+    sdk/               # enums, session, browser, message — the solace global
+    broker/store.ts    # Queues, messages, seeding, publish routing, deletes
+    server/            # fetch router: SEMP v2 + v1, /hosted, /managed/*
+    controls/          # The demo scenario switcher (.mockctl-* only)
   main.ts              # Bootstrap (imports ./css/main.css and ./registry)
-  registry.ts          # Resolves variant manifest → PwaModule via import.meta.glob
+  registry.ts          # Resolves variant manifest → PwaModule via virtual:module-registry (moduleRegistryPlugin)
   index.html           # App shell with <!-- @module-templates --> marker
 tests/
   setup.ts             # Global mocks (Solace SDK, browser APIs)
   helpers/             # loadModuleDOM, resetQueueBrowserState
   core/                # Kernel, EventBus, toast, utils tests (dom.ts is exercised transitively by module tests)
   modules/             # Per-module test files
+  build/               # module-registry-plugin.test.ts — manifest → virtual:module-registry
+  variants.test.ts     # Every variant manifest resolves and keeps its shape invariants
+  registry.test.ts     # Registry resolution + kernel integration
+  main.test.ts         # Bootstrap
   integration/         # Cross-module + end-to-end tests
     full-flow.test.ts        # Kernel mechanics with stub modules
     module-events.test.ts    # Real modules + shared EventBus + mocked services
@@ -171,6 +215,7 @@ interface AppContext {
     setState(key, value): void;  // Update global state + emit event
     loadSelf(): void;            // Navigate to this module's view
     sempFetch(url, opts): Promise<Response>;  // SEMP with auto-injected auth
+    managedStore: ManagedStore;  // Provisioned profile + site seed; dials targets on request
     copyToClipboard(text, btn?): Promise<void>;  // Clipboard + feedback
     config: Record<string, any>;
 }
@@ -181,7 +226,7 @@ interface AppContext {
 All inter-module coordination goes through typed events:
 
 | Event | Payload | Flow |
-|-------|---------|------|
+| --- | --- | --- |
 | `app:state-change` | `{ key, value }` | Kernel -> All modules |
 | `client:connected` | `{ session }` | Connections -> Queue Browser / Queue Copy |
 | `client:disconnected` | void | Connections -> All |
@@ -194,6 +239,7 @@ All inter-module coordination goes through typed events:
 | `copy:vpn-switched` | `{ vpn, queue }` | Connections -> Queue Copy (completion of VPN-switch handoff when `returnTo: 'queue-copy'`) |
 | `config:max-messages-changed` | `{ value }` | Connections -> Queue Browser |
 | `app:message-delete` | `{ id }` | Queue Browser row -> Queue Browser handler |
+| `rbac:changed` | void | Connections (Managed panel) / User Mgmt / Admin Login -> Kernel (sidebar re-render) + any module holding entitlement-derived state |
 | `jszip:loaded` | void | Window -> Queue Browser |
 
 ### Factory Pattern
@@ -215,7 +261,7 @@ export function createService(ctx: AppContext, serviceEvents: ServiceEvents) {
 }
 ```
 
-**Core service factories** in `src/core/services/` are **pure** — no AppContext, no UI access, no global bus. Lifecycle is communicated through caller-supplied hooks. This decouples the broker plumbing from any particular module so the same factory can power the connections module's primary connection AND a future module's secondary connection (e.g. queue-copy):
+**Core service factories** in `src/core/services/` are **pure** — no AppContext, no UI access, no global bus. Lifecycle is communicated through caller-supplied hooks. This decouples the broker plumbing from any particular module so the same factory can power the connections module's primary connection AND another module's secondary connection — queue-copy's destination, which drives its own pair of these factories and keeps every effect in module-local state. Note the connections module itself bridges TWO parallel hook sets: `module.ts` for the Direct form and `managed-panel.ts` for the Managed tab, both writing the same AppState keys and emitting the same bus events:
 
 ```ts
 // e.g. src/core/services/solace-client.ts
@@ -228,9 +274,9 @@ export interface SolaceConnectionHooks {
 export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient;
 ```
 
-The connections module owns the **primary** connection: its `module.ts` defines `solaceHooks`/`sempHooks` that bridge factory events to `ctx.setState` + `eventBus.emit('client:connected'…)` + the connections form's UI updates. Other modules subscribe to those bus events as they always have. A future secondary-connection caller (queue-copy) will define different hooks that target module-scoped state instead of global state — same factory, different bridging.
+The connections module owns the **primary** connection: its `module.ts` defines `solaceHooks`/`sempHooks` that bridge factory events to `ctx.setState` + `eventBus.emit('client:connected'…)` + the connections form's UI updates. Other modules subscribe to those bus events as they always have. queue-copy is the secondary-connection caller: it defines different hooks that target module-scoped state instead of global state — same factory, different bridging. When its destination uses provisioned credentials it asks `ctx.managedStore` to dial the target and creates the client inside that callback, so the credential never leaves core.
 
-The same shape applies to SEMP: `createServiceSemp(hooks)` and the discovery generator `createSempDiscovery(sempCtx)` (from `src/core/services/semp-discovery.ts`) which is parameterized by a `SempContext` — a `{ fetch, baseUrl }` pair scoped to a specific broker. Build a primary SempContext via `primarySempContextFrom(ctx)` from `src/core/services/sempContext.ts`.
+The same shape applies to SEMP: `createServiceSemp(hooks)` and the discovery generator `createSempDiscovery(sempCtx)` (from `src/core/services/semp-discovery.ts`) which is parameterized by a `SempContext` — a `{ fetch, baseUrl }` pair scoped to a specific broker. Build a primary SempContext via `unfilteredPrimarySempContext(ctx)` from `src/core/services/sempContext.ts` — read its docstring before adding a consumer, because only two SEMP v2 list shapes are entitlement-filtered. For discovery, prefer `queueSourceFrom(ctx, scope)` from `src/core/services/queue-source.ts`; components take a `QueueSource` and never run their own SEMP calls.
 
 ### Circular Dependency Resolution
 
@@ -260,7 +306,8 @@ serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser });
 ## Adding a New Module
 
 1. **Create the module directory:**
-   ```
+
+   ```text
    src/modules/your-module/
      module.ts      # PwaModule implementation
      index.html     # Module HTML template (lives next to the code)
@@ -268,6 +315,7 @@ serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser });
    ```
 
 2. **Implement the module:**
+
    ```ts
    import type { AppContext } from '../../core/types';
    import { required } from '../../core/dom';
@@ -294,7 +342,8 @@ serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser });
 
 3. **Author the HTML template** at `src/modules/your-module/index.html`. The build plugin reads this file and injects it into the shell HTML as `<template data-module-id="your-module">…</template>` at the `<!-- @module-templates -->` marker. Do **not** edit module markup directly in the shell `src/index.html` — those edits don't survive a rebuild.
 
-4. **Activate in a variant manifest** under [src/variants/](../src/variants/). Add one line to whichever variant(s) should ship the module — for the default build, edit `src/variants/full.ts`:
+4. **Activate in a variant manifest** under [src/variants/](../src/variants/). Add one line to whichever variant(s) should ship the module — for the default build, edit `src/variants/standard.ts`:
+
    ```ts
    export const ACTIVE_MODULES: Record<string, number> = {
        'connections':                 100,
@@ -304,9 +353,13 @@ serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser });
        'your-module':                  20,   // ← new line
    };
    ```
-   Pick a priority that slots into the existing list (higher installs first, renders higher in the sidebar). [src/registry.ts](../src/registry.ts) resolves each id in the manifest to the `PwaModule` exported by `src/modules/<id>/module.ts` via `import.meta.glob`, so no import section needs touching. To **disable** a module in a variant, comment its line. To **ship a different variant**, drop a new `src/variants/<name>.ts` and build with `VITE_VARIANT=<name> npm run build`.
+
+   Pick a priority that slots into the existing list (higher installs first, renders higher in the sidebar). [src/registry.ts](../src/registry.ts) resolves each id in the manifest to the `PwaModule` exported by `src/modules/<id>/module.ts` via the `virtual:module-registry` module (generated per variant by `scripts/module-registry-plugin.mjs`), so no import section needs touching and only the active variant's modules enter the bundle. To **disable** a module in a variant, comment its line. To **ship a different variant**, drop a new `src/variants/<name>.ts` and build with `VITE_VARIANT=<name> npm run build`.
+
+   > **Gating a module in managed deployments:** add its id to `MODULE_REQUIREMENTS` in [src/core/rbac.ts](../src/core/rbac.ts) — `'admin'` for admin-only CRUD (like `user-management` / `connection-management`, which ship only in `src/variants/admin.ts`), or `'unfiltered-semp'` for a module that reaches the broker over a path RBAC cannot filter, which hides it in **every** managed session. The kernel hides the sidebar entry and re-evaluates on `rbac:changed`. See [architecture.md → Managed Connections](architecture.md#managed-connections-rbac).
 
 5. **Import the module's CSS** (if you added `styles.css`) from `src/css/main.css`:
+
    ```css
    @import '../modules/your-module/styles.css';
    ```
@@ -320,12 +373,12 @@ serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser });
 ### Running Tests
 
 ```bash
-npm test                # Single run (all 707 tests, ~16s)
+npm test                # Single run (the full suite)
 npm run test:watch      # Watch mode (re-runs on file changes)
 npm run test:coverage   # With 100% coverage enforcement
 ```
 
-All commands use `--pool=threads --maxWorkers=8` (configured in `package.json`).
+All commands use `--pool=threads --maxWorkers=12` (configured in `package.json`).
 
 ### Test Architecture
 
@@ -342,6 +395,7 @@ The **real EventBus** is used in tests (not mocked) — tests verify events by r
 ### Test Setup (`tests/setup.ts`)
 
 Provides global mocks installed before every test:
+
 - `localStorage` — in-memory Map
 - `navigator.clipboard` — mock writeText
 - `fetch` — global mock for SEMP HTTP calls
@@ -400,26 +454,32 @@ Use `/* v8 ignore start */` / `/* v8 ignore stop */` only for architecturally un
 ## Code Conventions
 
 ### File Organization
+
 - One concern per file (service logic, UI state, event handlers, DOM management)
 - Factory functions over classes
 - Module-scoped state via closures, not global singletons
 
 ### DOM Access
+
 - Always scope queries to the module's `container` element
 - Cache elements at install time, reference via the cache object
 - Never use `document.getElementById()` — use `container.querySelector()`
 
 ### Event Handling
+
 - Use the typed EventBus for cross-module communication
 - Direct DOM events for intra-module interaction
 - Clean up listeners when disconnecting/unbinding
 
 ### Error Handling
+
 - Return `{ ok: boolean; error?: string }` result objects from services
 - Wrap Solace SDK calls in try/catch
 - Log errors to console, show user-facing messages in the UI
 
 ### TypeScript
+
 - Strict mode enabled (`strict: true` in tsconfig)
 - `allowJs: true` — mixed TS/JS codebase (legacy JS files coexist with new TS)
 - `declare const solace: any` in files that access the global Solace SDK
+- Run `npm run typecheck` (`tsc --noEmit`) to check types — the build (Vite/esbuild) strips types **without** checking them, so `tsc` is the only thing that catches type errors. It's a separate gate from `npm run build`, enforced in CI.

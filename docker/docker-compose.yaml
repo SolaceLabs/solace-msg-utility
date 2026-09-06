@@ -21,6 +21,10 @@ services:
       # solclient.js, etc. Docker disallows COPY paths that escape the context.
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        # scripts/dev.sh derives this from the git tag and exports it; a bare
+        # `docker compose build` falls back to the placeholder.
+        APP_VERSION: ${APP_VERSION:-0.0.0-dev}
     image: ghcr.io/solacelabs/solace-msg-utility:latest
     container_name: solace-message-utility
     restart: unless-stopped
@@ -49,3 +53,46 @@ services:
     # No HEALTHCHECK: the scratch image has no shell or curl. Use an external
     # check (k8s liveness probe, docker swarm, monitoring agent) hitting
     # https://<host>:9443/hosted with TLS verification disabled or pinned.
+
+  # Managed (RBAC) deployment: the SAME bundle as the standard gateway, with
+  # MANAGED/HOSTED/CONN_MODES baked into the image (via the build args below) so
+  # it offers the Managed sign-in instead of the Direct form. Exposed on a
+  # different host port so it can run alongside the standard gateway. Open
+  # https://localhost:29443/ — bootstrap admin is admin / msgutility (change it).
+  # Administration lives at https://localhost:29443/solAdmin.
+  gateway-managed:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        # Bake the runtime flags so the image is a self-contained managed
+        # deployment. GO_TAGS=managed compiles the RBAC store + /managed/*
+        # handler into the gateway binary (the standard gateway omits it and
+        # stays stdlib-only). WITH_ADMIN ships solAdmin.html, which only a
+        # managed image has any use for.
+        MANAGED: "true"
+        HOSTED: "true"
+        CONN_MODES: managed
+        GO_TAGS: managed
+        WITH_ADMIN: "true"
+        APP_VERSION: ${APP_VERSION:-0.0.0-dev}
+    image: ghcr.io/solacelabs/solace-msg-utility:managed-latest
+    container_name: solace-message-utility-managed
+    restart: unless-stopped
+    ports:
+      - "29443:9443"
+    environment:
+      # MANAGED and HOSTED are baked into the image; only the operational knobs
+      # are set here.
+      LOG_LEVEL: warn
+      SSL_INSECURE_SKIP_VERIFY: "true"
+    volumes:
+      # Writable RBAC store. The named volume inherits the baked /managed dir's
+      # UID-65532 ownership, so the gateway can write users.yaml + site.seed on
+      # first run. `docker compose down -v` wipes it (forces a fresh bootstrap).
+      - managed:/managed
+      - ../dist/solclient.js:/SolaceMsgUtility/solclient.js:ro
+      - ../dist/jszip.min.js:/SolaceMsgUtility/jszip.min.js:ro
+
+volumes:
+  managed:

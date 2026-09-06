@@ -3,6 +3,7 @@
 > **Recent hardening (April 2026):** defensive-guard tests across ~12 files were strengthened so that `.not.toThrow()` is paired with a state-snapshot or DOM-snapshot assertion proving the guarded body did not run. The 4 `document.getElementById` stub sites in `ui-details.test.ts` were migrated to `vi.spyOn(...).mockReturnValue(...)` so they are auto-restored by `vi.restoreAllMocks()` in the global `afterEach` and can no longer leak across tests. See Priority 6.1 and 6.4 in [improvement-plan.md](improvement-plan.md) for details. The philosophy below remains unchanged; the implementation simply now matches it.
 >
 > **Post-April 2026 tightening:**
+>
 > - **Cross-module integration tests:** [`tests/integration/module-events.test.ts`](../tests/integration/module-events.test.ts) installs real `ConnectionsModule` / `QueueBrowserModule` against `loadModuleDOM` containers with a shared `EventBus`, then drives cross-module event flows: `config:max-messages-changed` cap propagation, `client:disconnected` triggering `service.disconnectAll` + forward-queue FAILED marking. Service factories are mocked at the module level via `vi.mock`.
 > - **End-to-end message pipeline test:** new file [`tests/integration/message-pipeline.test.ts`](../tests/integration/message-pipeline.test.ts) fires real broker-shaped messages through `service-events.onMessage`, letting `ingestMessage`, `shouldShowMessage`, and `ui.addMessageRow` run through the full pipeline. Four scenarios: content filter gates DOM rows, filter cleared mid-stream does not retroactively re-render, messages for a non-current queue still ingest but don't hit the DOM, destination-type filter works via `window.solace` enum.
 > - **Toast lifecycle tests:** new file [`tests/core/toast.test.ts`](../tests/core/toast.test.ts) exercises the auto-dismiss timer chain (`durationMs` → `toast--leaving` → `FADE_OUT_MS` → remove) with `vi.useFakeTimers()`. Previously the `setTimeout` callbacks fired zero times under test.
@@ -13,10 +14,11 @@
 > - **v8 ignore policy:** long-tail defensive sites on SDK-never-throws catches and unreachable-in-jsdom branches now carry `/* v8 ignore */` blocks with multi-option justification — each one lists at least two ways the branch could be tested and explains why each was rejected. CLAUDE.md still forbids using ignores to skip real business logic; the contracts inside these ignores are all SDK-boundary or reachability issues.
 > - **Fresh Audit phase closed:** the last four remaining items (T6, T11, T12, T13) landed in one pass. T6 was stale (`tests/core/event-bus.test.ts` *"catches and logs errors in handlers without breaking other handlers"* already covered it). T11 extracted `checkModuleIdInvariant()` as a testable export from `src/registry.ts` and added four `tests/registry.test.ts` cases (baseline, missing, extra, both-sides-wrong composite). T12 unified the bind input's deprecated `'keypress'` to `'keydown'` and strengthened three module-level tests with `event.defaultPrevented === true` assertions proving the whole handler body ran. T13 strengthened two `tests/modules/queue-discovery/service.test.ts` disconnect tests with `expect(ctx.sempFetch).not.toHaveBeenCalled()` + generator exhaustion — catches regressions that move the SEMP guard below the first network call. See [improvement-plan.md](improvement-plan.md) Fresh Audit "Closed during this audit" for per-test detail.
 > - **Required-element DOM policy:** module-owned elements (every element declared in a module's own `<template>`) are captured via `required<T>(container, selector)` from [`src/core/dom.ts`](../src/core/dom.ts). The helper throws at install time if a selector yields null, which removes the nullable type and eliminates every "DOM null-guard on an element that's always present" v8 ignore from the codebase. See CLAUDE.md for the policy.
-> - **Real-template test DOM:** tests no longer hand-roll a `container.innerHTML = '<long HTML string>'` setup. The [`loadModuleDOM`](../tests/helpers/loadModuleDOM.ts) helper reads each module's `src/modules/<id>/index.html` at test time, so the test DOM can never drift from the HTML that actually ships. The `moduleId` parameter is typed against `MODULE_IDS` so typos fail at compile time.
-> - **MODULE_IDS registry:** [`src/module-ids.ts`](../src/module-ids.ts) is now the single source of truth for which modules exist. The Vite build plugin, the registry invariant block, and the `loadModuleDOM` helper all consume it; any drift between them fails fast (at build time or import time).
+> - **Real-template test DOM:** tests no longer hand-roll a `container.innerHTML = '<long HTML string>'` setup. The [`loadModuleDOM`](../tests/helpers/loadModuleDOM.ts) helper reads each module's `src/modules/<id>/index.html` at test time, so the test DOM can never drift from the HTML that actually ships. The `moduleId` parameter is a plain `string` (the directory name under `src/modules/`); a typo surfaces as an ENOENT at read time, which is loud enough for a test.
+> - **Module activation is manifest-driven:** `src/module-ids.ts` and its `MODULE_IDS` constant were removed by the May 2026 variant-manifest refactor (below). The active variant under [`src/variants/`](../src/variants/) is the single source of truth; `src/registry.ts` resolves each id through `virtual:module-registry` and throws at module-eval time if a manifest entry has no matching `module.ts` on disk.
 > - **CSS split:** `src/css/styles.css` (1,232 lines) was split into five design-system files (`variables`, `reset`, `layout`, `components`, `utilities`) plus three per-module `styles.css` under `src/modules/<id>/`. `src/css/main.css` is the aggregator imported by `main.ts`. This closed Priority 7.1.
 > - **Connection-libraries-to-core refactor (May 2026):** four-stage lift to enable a future `queue-copy` module without violating module isolation. Stage A added [`src/core/connections/types.ts`](../src/core/connections/types.ts) (`ConnectionConfig`, `SolaceConfig`, `SempConfig`, `SempContext`) and [`defaults.ts`](../src/core/connections/defaults.ts) (`DEFAULT_CONFIG`, `validateConfig`); plus [`tests/core/connections/defaults.test.ts`](../tests/core/connections/defaults.test.ts) and [`persistence-compat.test.ts`](../tests/core/connections/persistence-compat.test.ts) (legacy-shape round-trip). Stage B lifted the broker factories to [`src/core/services/`](../src/core/services/) and refactored their APIs from `(ctx)` to **pure factories taking lifecycle hooks** (`onConnected/onDisconnected/onConnectFailed/onError` for Solace; `onConnected/onDisconnected/onAuthFailed/onError` for SEMP); the connections module's `module.ts` now defines bridging hooks that route factory events to `ctx.setState` + `eventBus.emit` + form UI updates. Tests migrated to [`tests/core/services/solace-client.test.ts`](../tests/core/services/solace-client.test.ts) and [`semp-client.test.ts`](../tests/core/services/semp-client.test.ts); a new `Solace bridging hooks` / `SEMP bridging hooks` describe block in [`tests/modules/connections/module.test.ts`](../tests/modules/connections/module.test.ts) covers the bridging side (helpUrl construction, button transitions, error text, AppState writes, bus emits). Stage C lifted SEMP discovery to [`src/core/services/semp-discovery.ts`](../src/core/services/semp-discovery.ts) parameterized by `SempContext`; queue-discovery's `service.ts` is now a thin wrapper that builds primary `SempContext` via the new [`primarySempContextFrom`](../src/core/services/sempContext.ts) helper. Stage D added a reusable [`pickQueue(sempCtx, opts?)`](../src/core/components/queue-picker/index.ts) component with full coverage in [`tests/core/components/queue-picker/picker.test.ts`](../tests/core/components/queue-picker/picker.test.ts). All four stages held at 100% coverage; no module other than connections needed any changes (the bus contract `client:connected` / `semp:connected` was preserved end-to-end).
+> - **Gates moved behind the dev scripts (September 2026):** the suite is no longer invoked as bare npm scripts. [`scripts/dev.sh`](../scripts/dev.sh) and [`scripts/dev.ps1`](../scripts/dev.ps1) own every build/test/lint/scan command and [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) calls task names only, so `local == CI` is structural rather than a matter of discipline. `test` now runs the web suite **and** `go test` both with and without the `managed` build tag; `cov` runs the vitest 100%-threshold run plus a Go coverage profile and prints both totals into `scripts/logs/cov.log`, whose previous numbers are the local floor (CI is a fresh checkout with no prior log, so it cannot catch a coverage regression). One Go test was added alongside this: `go-web-proxy/main_test.go > TestPrintVersionIfRequested` covers the new `--version` / `-version` / `version` handling, including that only the first argument is inspected. The web suite is unchanged at 71 files / 1730 tests, 100% on all four metrics.
 > - **May 2026 audit sweep — 100% coverage achieved.** A fresh 4-axis audit (bugs / dead-code / v8 ignores / ceremonial tests) produced two rounds of source cleanup followed by a coverage closure pass. Round 1 (DEAD-1, DEAD-2, IGNORE-1, IGNORE-2, B1, B2): collapsed `keypress` → `keydown` in connections, removed the dead `properties &&` guard from `applyFilters`, deleted the misplaced `if (els.selectBound)` and filter-input null-guards on module-owned elements, removed two over-broad `/* v8 ignore */` blocks, and dropped a dead `msg.content || ''` fallback. Round 2 (DEAD-1, DEAD-1b, IGNORE-1, COV-6, CER-3): bulk-removed `if (els.X)` guards on 23 module-owned selectors across `queue-browser/{ui-core, ui-table, ui-details, ui-forward}` plus `connections/ui.openSslModal`, dropped sibling-module `if (els.btnSemp)` / `if (els.btnSolace)` / NodeList-never-null `if (!els.radiosAuth)` guards (4 sites), expanded the queue-browser required-list to 67 selectors, deleted ~21 dead-guard null-stub tests across 5+ files, and added a new race-test for the stale-session `removeListener` catch in `queue-browser/module.ts`. Coverage closure (COV-1..16 + late-discovered ui-forward.js + queue-browser/module.ts gaps): 11 new tests in 5 files plus 10 `firstPage()` → `allPages()` swaps in `queue-discovery/service.test.ts` to lock in the single-page-then-stop generator contract; new file [`tests/core/dom.test.ts`](../tests/core/dom.test.ts) covers `required()` and `attachBackdropClose` (the modal backdrop helper used by every dialog). Ceremonial-test sweep (CER-1, CER-2, CER-4, CER-5): replaced bare `// Should not throw` and `vi.spyOn(button, 'click')` patterns with real `dispatchEvent` calls plus state/log assertions; deleted two duplicate `describe('... additional')` blocks in `service-events.test.ts`. COV-16 was an investigation-first item — diagnosed as a v8 basic-block instrumentation false-negative on chained `else if (method() === X)` patterns (DA shows line 167 reached 3x with line 168 reached 2x, meaning the falsy branch IS exercised; v8 just didn't propagate the BRDA count) and resolved by adding an explicit "unknown type fallthrough" test that gives v8 its cleanest signal. **Result:** Statements / Branches / Functions / Lines all now report 100% with all four `vitest.config.ts` thresholds met. See [improvement-plan.md](improvement-plan.md) Historical Ledger for the per-item shipped narrative.
 > - **`queue-subscription-explorer` module added (May 2026):** new SEMP-only module that lists every `(VPN, queue, topic-subscription)` triple visible to the SEMP user with three column-filter inputs (substring + `*` for VPN/Queue, bidirectional Solace topic intersection for the Subscription column). Built around four new test files — `parse.test.ts` (XML edge cases including `<more-cookie>` extraction), `service.test.ts` (SEMP v1 paged async-generator + `<more-cookie>` continuation + error paths), `ui.test.ts` (renderRows / updateVisibility), `module.test.ts` (install, debounced filter, Load gating via `disabled`, SEMP disconnect cache invalidation). Two utilities lifted to core for cross-module reuse: `escapeXml` from queue-copy/service-verify into [`src/core/utils.ts`](../src/core/utils.ts), `deriveSempV1Url` into [`src/core/services/sempContext.ts`](../src/core/services/sempContext.ts) — their tests moved alongside; `tests/core/utils.test.ts` and `tests/core/services/sempContext.test.ts` cover the new homes. `topicsIntersect(a, b)` is also new in `src/core/utils.ts` (pure helper, fully unit-tested). The SEMP v1 + `<more-cookie>` pagination contract is described in [architecture.md](architecture.md) — separate section from the existing v2 generator contract.
 > - **Module priority centralized in registry (May 2026):** dropped `priority` from the `PwaModule` interface and from each module's exported object; introduced `RegisteredModule` (`{ module, priority }`) in [`src/core/types.ts`](../src/core/types.ts) and changed [`src/registry.ts`](../src/registry.ts) to a list of these tuples. Kernel constructor now takes `RegisteredModule[]`, builds a `priorities: Map<string, number>` keyed by module id, and sorts the install + sidebar lists from it. Per-module test files no longer assert `MODULE.priority`. The registry test was rewritten to be **behavioral, not ceremonial**: it spies the install of every real registered module and feeds the lot to the kernel, then asserts (1) every registered module installs and (2) install order matches the priority-descending order — including a case where the registry array is shuffled, to prove the kernel's sort is what enforces ordering rather than the array layout. The test never names a specific module or priority, so adding/removing a module or changing a number doesn't touch this test. The structural-shape test asserts every entry has `{ module: PwaModule, priority: number }` + unique ids, again module-agnostic. Kernel + integration tests gained a small `reg(module, priority)` helper to wrap mocks for the new constructor shape; ~40 `new Kernel([...])` call sites were rewritten with `replace_all`. Architecture, developer-guide, and test-report docs updated to describe the new shape.
@@ -25,6 +27,15 @@
 > - **Queue-copy run-engine simplification + SEMP/QB parity (2026-05-15):** replaced the pause-at-newest / continue-beyond control flow with a clean two-phase engine. Phase 1 detects one of seven first-wins `StopReason`s (`cancel | source-drift | max-consumed | reached-max | idle | publish-error | browser-error`) and halts the source `QueueBrowser`; Phase 2 drains in-flight publishes and produces `status: 'completed' | 'cancelled' | 'error'` exactly once. The `IDLE_DRAIN_MS=2s` + `NO_PROGRESS_MS=60s` dual-timer scheme was replaced with a single configurable `IDLE_TIMEOUT_MS=60_000`. `CopyHooks` slimmed from seven callbacks to two (`onProgress`, `onComplete`); the run's final classification flows entirely through `onComplete(job)` where `job.status` and `job.lastError` are populated by Phase 2. Move-mode `removeMessageFromQueue` is still called per-message-after-ACK (not batched). Access type for the source queue is now captured at verify time via the existing SEMP `<info>/<others-permission>` field (prefix match `Read-Only…` / `No-Access…` → `'read-only'`) on the SEMP path, or `_messageConsumer._permissions` on the QueueBrowser-fallback path — no extra RPCs, no extra binds. The modal gates Start with `evaluateStartGate` for empty-queue and move-on-read-only; the engine itself contains no permission logic. Tests: `tests/modules/queue-copy/service-copy.test.ts` rewritten from scratch around the seven-`StopReason` × Phase-2 outcome matrix (one describe per stop reason + first-wins, cancel-during-drain upgrade, per-message-after-ACK move ordering, `IDLE_TIMEOUT_MS` configurability, total-0 + null-publisher fast-paths); `tests/modules/queue-copy/ui-modal.test.ts` lost the three continue-beyond pause-prompt tests, gained an `evaluateStartGate` describe (verify-fail, empty-queue, move-on-read-only, copy-on-read-only, mode-toggle, null-permissive); `tests/modules/queue-copy/ui.test.ts` lost the pause/stale helper tests + `renderProgress` continuation-suffix tests, gained `setEmptyQueueIndicator` / `setReadOnlyIndicator` show/hide tests + an explicit "renderVerifyResult does NOT toggle btnModalStart on success" anchor; `tests/modules/queue-copy/service-verify.test.ts` gained `normalizeAccessType` unit tests + SEMP `<others-permission>` parse tests + QB-fallback `_messageConsumer._permissions` capture tests; `tests/modules/queue-copy/state.test.ts` updated for the slimmed `CopyJob` (`{ total, copied, cancelRequested, lastError, status }`); `tests/modules/queue-copy/service-copy-mock.test.ts` aligned with the new hook shape. `docs/queue-copy-plan.md` flagged as SUPERSEDED with a pointer to `architecture.md` § "Run engine: two-phase model" (the live algorithm doc).
 > - **2026-05-17 audit ship #1 + #2 (CER-1 + six XS coverage gaps):** seven test-only changes across five files, no source touched. **CER-1** rewrote the two click-wiring tests in [`tests/modules/queue-browser/module.test.ts`](../tests/modules/queue-browser/module.test.ts) to spy the distinguishing downstream effect — `ui.showForwardModal` for the forward button, `window.confirm` for delete — instead of the shared `ui.getSelectedMessageIds` anchor; each test also asserts the OTHER button's downstream was NOT invoked, so a forward/delete wire-swap regression now fails BOTH tests instead of passing silently. The pattern (assert on the distinguishing downstream, not the shared anchor, and cross-assert the sibling) is the recommended shape for click-wiring tests on modules that share a selection helper. **COV-5** added a "client name identifier validation" describe in [`tests/modules/connections/module.test.ts`](../tests/modules/connections/module.test.ts) covering the >100-char early-return path. **COV-6** added two [`tests/core/kernel.test.ts`](../tests/core/kernel.test.ts) tests covering the `?logLevel=` URL override (truthy + falsy-anchor branches) by stubbing `window.location.search` via `Object.defineProperty`. **COV-10** added a `btnBindPick` click-wiring test against a `pickQueue` spy. **COV-11** added a `<execute-result/>` with neither reason nor code test to [`tests/modules/queue-subscription-explorer/parse.test.ts`](../tests/modules/queue-subscription-explorer/parse.test.ts) confirming the `?? 'error'` fallback. **COV-12** added an empty-`textContent` filtering test in [`tests/core/components/queue-picker/picker.test.ts`](../tests/core/components/queue-picker/picker.test.ts) covering the `|| ''` fallback at `applyVpnFilter`/`applyQueueFilter`. **COV-13** added a `topicsIntersect('**', '**')` memoization test in [`tests/core/utils.test.ts`](../tests/core/utils.test.ts) exercising the memo cache-check branch. See [improvement-plan.md](improvement-plan.md) Historical Ledger 2026-05-17 entry for the per-test detail.
 > - **Variant-aware single-line activation (May 2026):** collapsed the registry/`MODULE_IDS`/disk three-source-of-truth design into a **variant manifest** living at [`src/variants/<name>.ts`](../src/variants/full.ts) (one record per shippable variation, mapping module id → priority). [`src/variants/_active.ts`](../src/variants/_active.ts) is a one-line re-export from one specific variant; [`src/registry.ts`](../src/registry.ts) imports `ACTIVE_MODULES` from it and resolves each id to a `PwaModule` via `import.meta.glob('./modules/*/module.ts', { eager: true })` — no hand-maintained import section. Disabling a module = comment one line in the variant. `src/module-ids.ts` deleted; `checkModuleIdInvariant` removed (the registry now throws at module-eval time with a clearer message if a manifest entry has no matching `module.ts` on disk). [`vite.config.ts`](../vite.config.ts)'s `injectModuleTemplates` plugin now scans `src/modules/` for available templates (alphabetized for stable diffs) — orphan check removed; a directory not listed in the active variant just sits inert in the DOM (`<template>`-wrapped, no installer). A new `variant-redirect` Vite plugin honors `VITE_VARIANT=<name>` to rewrite `_active`'s import target at build time, enabling future per-variant builds without touching source. [`tests/helpers/loadModuleDOM.ts`](../tests/helpers/loadModuleDOM.ts) widened from `ModuleId` to `string` (typos surface as ENOENT at read time). [`tests/registry.test.ts`](../tests/registry.test.ts) dropped the `checkModuleIdInvariant` `describe` block — the shape + kernel-integration blocks remain. Kernel's missing-template console error sharpened to point at the variant manifest. CLAUDE.md anchor #6, architecture/developer-guide/contributing/test-report docs updated.
+> - **Managed (RBAC) variant shipped (June 2026):** a new `managed` build (`npm run build:managed` → `dist/managed.html`) for users without broker credentials — login-gated broker/VPN selection plus admin-only user/connection management, served behind [go-web-proxy](../go-web-proxy) in `MANAGED` mode. **Registry made manifest-authoritative:** [`src/registry.ts`](../src/registry.ts) now imports `moduleFiles` from `virtual:module-registry` (generated per variant by [`scripts/module-registry-plugin.mjs`](../scripts/module-registry-plugin.mjs)), so only the active variant's modules enter the bundle — an isolation grep over the built variants confirms no managed identifiers leak into `full`/`min`/etc.; registered in vitest via the same plugin and asserted by [`tests/build/module-registry-plugin.test.ts`](../tests/build/module-registry-plugin.test.ts). **RBAC:** stateless matchers in [`src/core/rbac.ts`](../src/core/rbac.ts) (`matchGlob`/`isModuleVisible`/`isVpnVisible`/`isQueueVisible`/`canOperate`), mirrored by the proxy's `rbac.go` via a shared conformance vector; `AppState.managed` + the `rbac:changed` event drive kernel sidebar gating + navigate-away. **Guardrails with zero changes to queue-browser/queue-picker:** [`managed-semp-filter.ts`](../src/core/managed-semp-filter.ts) (wired through `primarySempContextFrom`) scopes SEMP discovery, and `managed-connections` wraps the SDK `createQueueBrowser` (bind-visibility throw + `_permissions` overwrite on UP). **Credential transform** ([`src/core/encode.ts`](../src/core/encode.ts), imported only by managed modules) — algorithm intentionally undocumented; posture in [rbac-variant-plan.md](rbac-variant-plan.md). **Admin modules** `user-management` + `connection-management` share a new core [`row-list`](../src/core/components/row-list/) component and CRUD the proxy's YAML store (resend-token auth, opaque-400, list responses strip secrets, last-admin-delete guard → 409, blank-password-create rejection). New frontend test files: `core/{mode,rbac,encode,managed-semp-filter}.test.ts`, `core/components/row-list/row-list.test.ts`, `modules/{managed-connections,user-management,connection-management}/{module,service}.test.ts`, `build/module-registry-plugin.test.ts` — all at 100% on touched lines, with **no new v8 ignores** (every WebCrypto branch is real-tested). The Go proxy carries its own `go test -tags managed ./...` suite (see § Go proxy tests). An adversarial multi-agent review pass fixed 8 findings before merge — self-edit re-gate, blank-password-create rejection, last-admin guard, deep-copy isolation, two `?? []` branch-coverage gaps, a dead variable, and `msgVpns:[]` (not `null`) serialization.
+> - **Two gateway binaries via Go build tags (June 2026):** the managed RBAC backend (`store.go`, `managed.go`, `rbac.go` + their `*_test.go`) now carries `//go:build managed`, reached from `main.go` through `newManagedRouting` (a `//go:build !managed` stub returns no handler and warns if `MANAGED=true` on the hosted binary). The hosted image's gateway is built untagged and stays **stdlib-only** (no `gopkg.in/yaml.v3`); the managed image builds with `GO_TAGS=managed` (Docker build arg, wired through the release matrix + the `gateway-managed` compose service). Test/scan consequence: `go test` and `govulncheck` need `-tags managed` to cover the RBAC code — `scan:go` and the CI govulncheck step were updated to `-tags=managed` (a superset scan that still covers the hosted binary's deps).
+> - **Connection-owned discovery via `QueueSource` (June 2026):** the reusable queue-picker stopped calling SEMP directly — it now consumes a [`QueueSource`](../src/core/services/queue-source.ts) (`{ key, listVpns, listQueues }`), the discovery analog of `SempContext`. A core `queueSourceFrom(ctx)` (mirroring `primarySempContextFrom`) is the single managed-vs-standard branch point: in a managed session the **VPN list is the provisioned set** (`appState.managed.vpns`, published by managed-connections at connect/refresh) with no SEMP call, while queues stay live-SEMP + glob-filtered; standard uses live SEMP for both. This fixed two managed-variant bugs — the picker over-showing VPNs that a broad `msgVpns:'*'` glob admitted (it now matches the Connections dropdown's provisioned set), and a stale picker after a live-permission Refresh (the source's `key` folds in `vpns`+entitlement rows, so a change flips it and the picker's `key`-keyed cache misses → re-reads). New `ManagedSession.vpns` field; `filterSempFetch` kept as the fetch-layer guardrail with its VPN branch bounded to the provisioned set (glob fallback before a set is published). **Tests:** new [`tests/core/services/queue-source.test.ts`](../tests/core/services/queue-source.test.ts) (sempQueueSource delegation; queueSourceFrom managed/standard/null + key-folding); [`picker.test.ts`](../tests/core/components/queue-picker/picker.test.ts) migrated to drive the picker through `sempQueueSource` over the same stubbed `SempContext.fetch` (so `.fetch` inspection + cache semantics carry over) plus a new "re-fetches when the source key changes" regression; [`managed-semp-filter.test.ts`](../tests/core/managed-semp-filter.test.ts) gained provisioned-bounding + intersection + glob-fallback cases; [`managed-connections/module.test.ts`](../tests/modules/managed-connections/module.test.ts) gained a "provisioned VPN publishing" block (login `[]`, connect publishes, refresh recomputes/empties). `vpns: []` added to the `ManagedSession` fixtures in kernel/rbac/sempContext/user-management/connection-management tests. Client/Solace connections unchanged (already centralized via `client:connected`; RBAC via `wrapManagedBrowser`).
+>
+> - **Managed connections merged into `connections`; posture became runtime (August 2026):** the separate `managed-connections` module was **deleted** and its flow moved verbatim into [`src/modules/connections/managed-panel.ts`](../src/modules/connections/managed-panel.ts) as a second tab, with the `/managed/*` client lifted to [`core/services/managed-service.ts`](../src/core/services/managed-service.ts). Which tabs the app offers now comes from the gateway (`/hosted` returns `{hosted, connModes, defaultConn}`, driven by the `CONN_MODES` / `DEFAULT_CONN` container env; [`conn-modes.ts`](../src/core/connections/conn-modes.ts) + `resolveConnTabs`), so **every bundle ships both paths** — the `__MANAGED__` define, `src/core/mode.ts`, and the bundle-isolation grep are gone, and `encode.ts` now ships everywhere (breadth of exposure changed, not kind — see [rbac-variant-plan.md](rbac-variant-plan.md) § Threat model). A **mode interlock** guarantees only one mode is live: connecting on Managed tears down Direct, connecting on Direct clears `appState.managed`, so RBAC can never filter a session it did not issue. New/renamed tests: `core/connections/conn-modes.test.ts`, `core/hosted.test.ts`, `modules/connections/managed-panel.test.ts` (replacing `managed-connections/*`), `variants.test.ts`; Go-side `validateConnModes` refuses to start a container that advertises managed without `HOSTED`/`MANAGED`/the build tag.
+> - **Credentials moved into core; typed entitlement on discovery (August 2026):** [`managed-session-store.ts`](../src/core/services/managed-session-store.ts) is now the sole owner of the provisioned profile + site seed and the only importer of the pack/unpack helpers; it is created by the kernel and injected as `AppContext.managedStore`, so `ManagedSession` lost its `siteSeed` field and `AppState` carries **matcher inputs only**. Callers name a *target* and pass a dial callback (`connect` overloaded on `'solace'` / `'semp'` kind, so a VPN is required exactly where it applies) — they never receive a credential and cannot enumerate one. [`queue-source.ts`](../src/core/services/queue-source.ts) gained a typed `Access = { session, broker, scope } | 'unmanaged'` with `Scope = 'browse' | 'operate'`: `'unmanaged'` is an explicit, greppable declaration that a list is deliberately unfiltered, and `operate` scope means a *destination* picker cannot offer a queue the user may only read. `primarySempContextFrom` → **`unfilteredPrimarySempContext`** (8 files, zero runtime change) with a docstring stating precisely what is and is not filtered. Tests: `core/services/managed-session-store.test.ts`, `managed-service.test.ts`, and a scope/access matrix in `queue-source.test.ts`.
+> - **Three RBAC holes closed (August 2026):** (1) **queue-copy verify** ran over SEMP v1 RPC, which `filterSempFetch` never rewrites — a managed user could type any queue name and read back its depth, size and message IDs. A **source gate** in `runVerify` now refuses a non-entitled queue before the probe is spawned, and `evaluateStartGate` intersects the broker's verdict with RBAC (`effectiveSourceAccess` downgrades read-write → read-only → no-access), so *move* on a browse-only queue is blocked. (2) **`queue-subscription-explorer` / `queue-discovery`** read exclusively over v1 RPC and were therefore wholly unfiltered; `ADMIN_ONLY_MODULES` was generalised to `MODULE_REQUIREMENTS: Record<string, 'admin' | 'unfiltered-semp'>` and both are now hidden in **every** managed session, admin included. (3) **Publishing was ungated**: `destinationRefusal` is the last check before any message is published, refusing a destination queue the user cannot `operate` on and refusing **topics** outright on a provisioned publish path (entitlements are per queue; a topic fans out to every subscribed queue, so it cannot be checked). Tests: `rbac.test.ts` requirement × session matrix; `ui-modal.test.ts` gate describes.
+> - **Provisioned destination for Queue Copy (August 2026):** the destination may now reuse the credentials the deployment provisioned instead of typed ones. `DestCredMode = 'manual' | 'provisioned'` in [`state.ts`](../src/modules/queue-copy/state.ts); which sources are offered comes from `resolveDestCredModes(connConfig)` — the same enum that drives the primary's tabs, so the two cannot drift — and a managed-only deployment never falls back to a manual bypass even when signed out. `module.ts` dials the secondary through `managedStore.connect(...)`, so a second module opens a provisioned connection **without importing the connections module and without credential-bearing globals**. On `rbac:changed` an active run halts through the engine's ordinary halt path (deliberately reported as `cancelled` — the treatment is mechanically identical and the event only ever fires downstream of a user action), and teardown applies to the **destination only** because the source rides the primary connection this module does not own. New file [`tests/modules/queue-copy/dest-provisioned.test.ts`](../tests/modules/queue-copy/dest-provisioned.test.ts) (33 tests) mocks the copy engine so `state.job.cancelRequested` is directly observable, and packs its fixture passwords **with the real transform against a real seed** — a hand-written literal is rejected by `unpack` and would only prove the error path. `errMessage` was lifted from two module-local copies into [`core/utils.ts`](../src/core/utils.ts) rather than adding a third.
+> - **Documentation secrecy check (August 2026):** [`scripts/check-docs-secrecy.mjs`](../scripts/check-docs-secrecy.mjs) (`npm run check:docs`, run by the `vet` task in `scripts/dev.sh` / `dev.ps1`, which CI calls as part of `all scan`) scans `docs/**`, `README.md` and `CLAUDE.md` for cryptographic-construction vocabulary and fails with **file:line and a rule id only**, never the prose, so a CI log cannot become the leak it exists to prevent. It is a guard against *accidental documentation*, not a secret scanner — the denylist, the source and the bundle are all in the repo either way. Certificate fingerprints and image digests are allow-listed (naming the algorithm there is operationally necessary). Its first run found three real violations, since scrubbed.
 >
 > The v8 ignore categories table further down has been trimmed to reflect which of the old justifications still apply.
 
@@ -44,16 +55,17 @@
 
 ## Executive Summary
 
-The SolaceMessageUtility PWA is a modular web application for managing Solace PubSub+ Event Broker message queues. It is built on a custom micro-kernel architecture with four feature modules (connections, queue-browser, queue-copy, queue-subscription-explorer), a typed event bus, and dependency injection via an `AppContext` object.
+The SolaceMessageUtility PWA is a modular web application for managing Solace PubSub+ Event Broker message queues. It is built on a custom micro-kernel architecture with eight modules — four shipped in the everyday bundles (connections, queue-browser, queue-copy, queue-subscription-explorer), two admin-only ones in the standalone `/solAdmin` app (user-management, connection-management) plus its `admin-login` entry point, and the vestigial queue-discovery — a typed event bus, and dependency injection via an `AppContext` object.
 
-The test suite consists of **27 test files** covering 26 source files (one-to-one for source modules plus a dedicated test for the shared [`src/core/dom.ts`](../src/core/dom.ts) helpers added in the May 2026 sweep). Coverage thresholds in `vitest.config.ts` are set to **100%** across all four metrics (Statements, Branches, Functions, Lines); as of the May 2026 sweep the target is met across the board. Tests are split between dedicated unit tests per source file and three integration test files: `full-flow.test.ts` (Kernel mechanics with stub modules), `module-events.test.ts` (real cross-module event flows), and `message-pipeline.test.ts` (end-to-end `onMessage → ingest → filter → DOM`).
+The test suite consists of **69 test files / 1668 tests** covering every source file in scope (broadly one-to-one with source modules, plus dedicated tests for shared core helpers and for each variant manifest). Coverage thresholds in `vitest.config.ts` are set to **100%** across all four metrics (Statements, Branches, Functions, Lines); as of the May 2026 sweep the target is met across the board. Tests are split between dedicated unit tests per source file and three integration test files: `full-flow.test.ts` (Kernel mechanics with stub modules), `module-events.test.ts` (real cross-module event flows), and `message-pipeline.test.ts` (end-to-end `onMessage → ingest → filter → DOM`).
 
-**Coverage summary (last measured run, post June 2026 no-payload-flavor work):**
-```
-Statements : 100% (4024/4024)
-Branches   : 100% (1783/1783)
-Functions  : 100%  (627/627)
-Lines      : 100% (3645/3645)
+**Coverage summary (last measured run, post the August 2026 managed-connections merge):**
+
+```text
+Statements : 100%
+Branches   : 100% (2147/2147)
+Functions  : 100%  (841/841)
+Lines      : 100% (4564/4564)
 ```
 
 Every source file in the coverage scope reports 100% across all four metrics — the per-file gap table that earlier revisions of this report carried is no longer needed. The remaining `/* v8 ignore */` blocks are limited to CLAUDE.md's sanctioned categories (jsdom-readyState branch, SDK-callback paths the harness can't fire, defensive catches around contracts that never throw); each is documented inline at its source site.
@@ -68,7 +80,7 @@ Understanding the architecture is prerequisite to understanding the test strateg
 
 The application is structured as a kernel (`src/core/kernel.ts`) that owns all global infrastructure — the event bus, application state, DOM orchestration, and SEMP API authentication — and injects these capabilities into each module via an `AppContext` object:
 
-```
+```text
 src/
 ├── core/
 │   ├── kernel.ts          # Orchestrator — installs modules, manages state, navigation
@@ -84,6 +96,7 @@ src/
 ```
 
 Each module is a plain object implementing `PwaModule`:
+
 ```ts
 interface PwaModule {
     name: string;         // Display name for sidebar
@@ -93,15 +106,17 @@ interface PwaModule {
 }
 ```
 
-Priority (install order + sidebar position) is set in the active variant manifest under [`src/variants/`](../src/variants/) — an `id → priority` map. The kernel constructor takes `RegisteredModule[]` (assembled by `src/registry.ts` via `import.meta.glob` against the manifest) and sorts descending by priority before installing.
+Priority (install order + sidebar position) is set in the active variant manifest under [`src/variants/`](../src/variants/) — an `id → priority` map. The kernel constructor takes `RegisteredModule[]` (assembled by `src/registry.ts` from the manifest, resolving each id through the `virtual:module-registry` module emitted by `scripts/module-registry-plugin.mjs`) and sorts descending by priority before installing.
 
 The `AppContext` received by each module's `install()` includes:
+
 - `container` — The module's private DOM subtree (cloned from an HTML `<template>`)
 - `appState` — Read-only reference to global state
 - `eventBus` — The shared typed event bus
 - `setState(key, value)` — Triggers state change and emits `app:state-change`
 - `loadSelf()` — Navigates to this module's view
 - `sempFetch(url, opts)` — HTTP fetch with auto-injected SEMP Basic auth
+- `managedStore` — the managed session's provisioned profile + site seed; validates a named target, unpacks just-in-time and dials it, so no module ever holds a credential
 - `copyToClipboard(text, btn?)` — Writes to clipboard with optional button feedback
 - `config` — Application-level configuration flags
 
@@ -112,7 +127,7 @@ This architecture is the cornerstone of testability: every module is instantiate
 The largest module (queue-browser) is further decomposed into single-responsibility units:
 
 | File | Responsibility |
-|------|---------------|
+| --- | --- |
 | `module.ts` | DOM wiring — registers all click handlers and EventBus listeners |
 | `service.ts` | Broker operations — create browser, forward message, delete message |
 | `service-events.ts` | Broker event callbacks — onMessage, onBrowserUp, onConnectFailed |
@@ -134,6 +149,7 @@ This decomposition means each file has a narrow contract, making it straightforw
 The test strategy is **black-box unit testing at the module boundary**, with each source file tested through its exported API. Tests do not reach into internal implementation details; they exercise exported functions, observe DOM state mutations, and verify EventBus events.
 
 The key constraint is that this is a browser application relying on:
+
 1. The Solace SDK (`window.solace`) — a commercial third-party library that cannot run in Node.js
 2. A rich DOM (100+ elements per module) — managed via jsdom
 3. External APIs (SEMP over HTTPS) — mocked via `vi.fn()`
@@ -147,12 +163,12 @@ The tests mock the **platform layer** (Solace SDK, DOM APIs, HTTPS) but exercise
 ### Testing Stack
 
 | Concern | Tool |
-|---------|------|
+| --- | --- |
 | Test runner | Vitest 4.x |
 | DOM environment | jsdom (via `environment: 'jsdom'` in vitest config) |
 | Code coverage | `@vitest/coverage-v8` with v8 provider |
 | Mocking | Vitest's built-in `vi.fn()`, `vi.spyOn()` |
-| Multi-file stability | `--pool=threads --maxWorkers=8` (configured in `package.json` npm scripts) |
+| Multi-file stability | `--pool=threads --maxWorkers=12` (configured in `package.json` npm scripts) |
 
 ---
 
@@ -168,17 +184,20 @@ export default defineConfig({
         setupFiles: ['tests/setup.ts'],
         coverage: {
             provider: 'v8',
-            reporter: ['text', 'text-summary', 'html', 'lcov'],
-            reportsDirectory: './coverage',
-            all: true,
+            reporter: ['text', 'text-summary', ['text', { file: 'coverage.txt' }],
+                       ['text-summary', { file: 'summary.txt' }], 'html', 'lcovonly'],
+            reportsDirectory: 'coverage',
             thresholds: {
                 statements: 100,
                 branches: 100,
                 functions: 100,
                 lines: 100
             },
-            include: ['src/**/*.{ts,js}'],
-            exclude: ['src/css/**', 'src/index.html']
+            include: ['src/**/*.ts', 'src/**/*.js'],
+            // Seven entries: CSS, the shell HTML, queue-browser's icon constants,
+            // and the mock-only service files (they exist to serve the demo build,
+            // and their real siblings carry the behaviour under test).
+            exclude: ['src/css/**', 'src/index.html', /* ...see vitest.config.ts */ ]
         }
     }
 });
@@ -291,7 +310,7 @@ This ensures complete isolation between tests. DOM teardown is critical because 
 
 ### Pool Configuration
 
-The npm scripts run `vitest` with `--pool=threads --maxWorkers=8`. The thread pool is faster than the fork pool and is currently stable for this codebase (23 files, ~16 s end-to-end). If multi-file instability returns (`"Vitest failed to find the runner"` and similar), `--pool=forks` is the documented fallback — it spawns each file in its own OS process at the cost of higher startup overhead.
+The npm scripts run `vitest` with `--pool=threads --maxWorkers=12`. The thread pool is faster than the fork pool and is currently stable for this codebase (the full suite runs in seconds end-to-end). If multi-file instability returns (`"Vitest failed to find the runner"` and similar), `--pool=forks` is the documented fallback — it spawns each file in its own OS process at the cost of higher startup overhead.
 
 ---
 
@@ -371,6 +390,7 @@ beforeEach(() => {
 ```
 
 Key test categories:
+
 - **Priority ordering**: Two mock modules with priorities 50 and 100 — verified that the priority-100 module installs first
 - **State propagation**: `kernel.setState('isConnected', true)` triggers `app:state-change` on the EventBus with the correct payload
 - **Navigation**: `kernel.navigateTo('mod-b')` adds `.active` to `mod-b`'s nav item and removes `.hidden` from its view
@@ -666,12 +686,13 @@ v8 originally counted this inner arrow function as a separate function entity in
 ### Summary of v8 Ignore Philosophy
 
 | Scenario | Why Ignored | Alternative Considered | Why Rejected |
-|----------|-------------|----------------------|--------------|
+| --- | --- | --- | --- |
 | DOMContentLoaded branch | jsdom readyState always `'complete'` | Manipulate jsdom internals | Unsupported by jsdom API |
 | Defensive SDK catch (session already disposed) | SDK can legitimately throw on a stale reference; catch exists for this | Force the SDK to throw from the test | Already tested via mock where tractable; remainder is environmental |
 | Solace `DestinationType` enum branches in ui-details | `window.solace` is mocked but certain type-code paths require specific SDK internals | Stub more of the SDK type machinery | Mock fidelity gap tracked as Priority 6.6 |
 
 Categories **removed** from this table after the post-April 2026 tightening (and extended in the May 2026 sweep):
+
 - *"DOM element null guards"* — converted to `required()`.
 - *"Disabled button handlers"* — wiring tests added in `module.test.ts`.
 - *"Redundant inner checks with `useMocks: true`"* — `useMocks` config was removed when mocks moved to file-level service swaps.
@@ -684,7 +705,7 @@ Categories **removed** from this table after the post-April 2026 tightening (and
 
 ### Most Recent Run (post May 2026 sweep)
 
-```
+```text
 =============================== Coverage summary ===============================
 Statements   : 100% ( 2229/2229 )
 Branches     : 100%  ( 862/862 )
@@ -693,26 +714,40 @@ Lines        : 100% ( 2006/2006 )
 ================================================================================
 ```
 
-Every source file in the coverage scope (`src/**/*.{ts,js}` minus `src/css/**`, `src/index.html`) reports 100% / 100% / 100% / 100%. Re-running `npm run test:coverage` after any change is the canonical way to confirm — the snapshot above is from the May 2026 sweep close-out run.
+Every source file in the coverage scope (`src/**/*.{ts,js}` minus `src/css/**`, `src/index.html`) reports 100% / 100% / 100% / 100%. Re-running `./scripts/dev.sh cov` after any change is the canonical way to confirm — the snapshot above is from the May 2026 sweep close-out run. The managed variant (the RBAC matchers, the credential transform, the SEMP discovery filter, the `row-list` component, `managed-connections`, and the two admin modules) shipped *after* that snapshot and is held to the same 100%-on-touched-lines bar, so the absolute totals are higher now — re-run for current numbers.
 
 ### Test Counts by File
 
-| Test File | Tests |
-|-----------|-------|
 Current files in the test tree:
 
-- **core/** — `dom.test.ts`, `event-bus.test.ts`, `kernel.test.ts`, `toast.test.ts`, `utils.test.ts`
-- **core/connections/** — `defaults.test.ts`, `persistence-compat.test.ts`
-- **core/services/** — `solace-client.test.ts`, `solace-publisher.test.ts`, `semp-client.test.ts`, `semp-discovery.test.ts`, `sempContext.test.ts`
+- **core/** — `dom.test.ts`, `event-bus.test.ts`, `hosted.test.ts`, `kernel.test.ts`, `logger.test.ts`, `toast.test.ts`, `utils.test.ts`, `rbac.test.ts`, `encode.test.ts`, `managed-semp-filter.test.ts`
+- **core/connections/** — `conn-modes.test.ts`, `defaults.test.ts`, `persistence-compat.test.ts`
+- **core/services/** — `solace-client.test.ts`, `solace-publisher.test.ts`, `semp-client.test.ts`, `semp-discovery.test.ts`, `sempContext.test.ts`, `queue-source.test.ts`, `managed-service.test.ts`, `managed-session-store.test.ts`
 - **core/components/queue-picker/** — `picker.test.ts`
-- **connections/** — `config.test.ts`, `module.test.ts`, `ui.test.ts`
-- **queue-browser/** — `module.test.ts`, `service.test.ts`, `service-events.test.ts`, `state.test.ts`, `ui-core.test.ts`, `ui-details.test.ts`, `ui-events.test.ts`, `ui-forward.test.ts`, `ui-table.test.ts`
-- **queue-copy/** — `module.test.ts`, `service.test.ts`, `service-copy.test.ts`, `service-copy-mock.test.ts`, `service-verify.test.ts`, `service-verify-mock.test.ts`, `state.test.ts`, `ui-events.test.ts`, `ui-modal.test.ts`, `ui.test.ts`
+- **core/components/row-list/** — `row-list.test.ts`
+- **core/components/module-gate/** — `module-gate.test.ts`
+- **admin-login/** — `module.test.ts` (the /solAdmin entry point: admin-only login, no broker connection)
+- **connections/** — `config.test.ts`, `module.test.ts`, `ui.test.ts`, `managed-panel.test.ts` (the Managed tab)
+- **queue-browser/** — `module.test.ts`, `service.test.ts`, `service-events.test.ts`, `state.test.ts`, `ui-core.test.ts`, `ui-details.test.ts`, `ui-events.test.ts`, `ui-forward.test.ts`, `ui-table.test.ts`, `features.test.ts`, `no-payload.test.ts`
+- **queue-copy/** — `module.test.ts`, `service.test.ts`, `service-copy.test.ts`, `service-copy-mock.test.ts`, `service-verify.test.ts`, `service-verify-mock.test.ts`, `state.test.ts`, `ui-events.test.ts`, `ui-modal.test.ts`, `ui.test.ts`, `dest-provisioned.test.ts` (provisioned destination — mocks the engine so the `rbac:changed` halt is observable)
+- **queue-discovery/** — `module.test.ts`, `service.test.ts`, `ui.test.ts`
 - **queue-subscription-explorer/** — `module.test.ts`, `service.test.ts`, `parse.test.ts`, `ui.test.ts`
+- **user-management/** (admin-only) — `module.test.ts`, `service.test.ts`
+- **connection-management/** (admin-only) — `module.test.ts`, `service.test.ts`
+- **build/** — `module-registry-plugin.test.ts` (manifest → `virtual:module-registry` emission)
 - **integration/** — `full-flow.test.ts`, `module-events.test.ts`, `message-pipeline.test.ts`
-- **top-level** — `main.test.ts`, `registry.test.ts`
+- **(root)** — `main.test.ts`, `registry.test.ts`, `variants.test.ts` (every variant manifest resolves to a real module)
+- **top-level** — `main.test.ts`, `registry.test.ts`, `variants.test.ts`
 
-Per-file counts shift with every audit pass (tests added for coverage, tests deleted when their guard was removed, ceremonial tests replaced with substantive ones); re-run `npm test` for up-to-the-minute numbers rather than relying on a static table.
+Per-file counts shift with every audit pass (tests added for coverage, tests deleted when their guard was removed, ceremonial tests replaced with substantive ones); re-run `./scripts/dev.sh test` for up-to-the-minute numbers rather than relying on a static table.
+
+### Go proxy tests (separate suite)
+
+The managed backend lives in [go-web-proxy/](../go-web-proxy) and has its own Go test suite. The gateway ships as two binaries (stdlib-only hosted vs `-tags managed`; see [architecture.md](architecture.md) § Managed Connections), so the RBAC-only files carry `//go:build managed` — run `go test -tags managed ./...` from that directory to include them (use `CGO_ENABLED=1` for `-race`). A bare `go test ./...` runs only the untagged stdlib tests (`main_test.go`, `proxy_test.go`, `tls_test.go`) and skips the RBAC suite. Tagged files: `store_test.go` (YAML load/persist/bootstrap, the admin-CRUD mutators, keep-on-blank merge, last-admin guard, deep-copy isolation, a writer race test), `managed_test.go` (the `/managed/*` HTTP handlers — auth/opaque-400, CRUD status codes, no-secret-leak), `rbac_test.go` (glob + entitlement + the TS↔Go conformance vector). This suite is **not** part of the vitest coverage scope; the 100% gate applies to the frontend.
+
+### Type-check gate (separate from coverage)
+
+`npm run typecheck` (`tsc --noEmit`) is a verification gate distinct from the test suite, added in the June 2026 sweep. It exists because the build path (Vite/esbuild) transpiles by *stripping* TypeScript types **without checking them** — so a type error never fails `npm run build`, the dev server, or vitest, and several `tsc` errors had accumulated silently (an implicit-`any` `.then` callback in `queue-browser/ui-events.ts` from an untyped `service` param, and a `SolaceConfig` literal in `queue-copy/module.ts` missing the required `clientNameId` field). The gate is enforced in CI via the `gates` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), which calls `./scripts/dev.sh all scan` (`vet` runs `tsc --noEmit`), and is on the PR checklist in [contributing.md](contributing.md). Touched code must pass `vet` clean, the same expectation as the 100% coverage bar.
 
 ---
 
@@ -737,6 +772,7 @@ This allows testing the full event-driven connection lifecycle without a real br
 Several modules (`state.js`, `ui-core.js`) export singleton objects that accumulate state across calls. Without proper reset between tests, mutations from one test contaminate the next.
 
 The solution is twofold:
+
 1. `document.body.innerHTML = ''` in `beforeEach` clears the DOM, which forces `ui.initElements()` to rebuild the element cache on next call
 2. `state.messageStore.clear()`, `state.currentQueue = ''`, etc. are called explicitly in `beforeEach` blocks in each test file that uses the state module
 
@@ -757,7 +793,7 @@ it('checkAll handler with null msgList does not throw', async () => {
 
 Early in development, `npx vitest run --coverage` on the default thread pool occasionally produced `"Vitest failed to find the runner"` crashes. The team switched to `--pool=forks` for stability at the cost of startup overhead.
 
-Subsequent Vitest 4.x releases stabilized thread-pool behaviour for this workload, and the current configuration is `--pool=threads --maxWorkers=8`. `--pool=forks` remains available as a fallback if regressions appear.
+Subsequent Vitest 4.x releases stabilized thread-pool behaviour for this workload, and the current configuration is `--pool=threads --maxWorkers=12`. `--pool=forks` remains available as a fallback if regressions appear.
 
 ### Challenge 4: `/* v8 ignore next */` Not Suppressing Branch Coverage
 

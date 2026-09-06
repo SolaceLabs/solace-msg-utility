@@ -248,6 +248,11 @@ export { createSolaceMock, createSessionMock, createBrowserMock, createMessageMo
 
 // Install solace mock by default
 (window as any).solace = createSolaceMock();
+// The shell's vendor loader sets this in the browser; `connect()` refuses to
+// open a session without it (src/core/services/solace-client.ts). Default it
+// true so suites exercise the normal path — the refusal branch is driven by the
+// one test that sets it false explicitly.
+(window as any).solaceLibLoaded = true;
 (window as any).APP_CONFIG = { useMocks: false };
 
 // Reset mocks between tests
@@ -278,6 +283,9 @@ beforeEach(() => {
     // the next test. Test files that instantiate their own mock in their own
     // `beforeEach` simply overwrite this default, so this is backwards-compatible.
     (window as any).solace = createSolaceMock();
+    // Re-assert alongside it: `restoreAllMocks` doesn't touch plain property
+    // assignments, so a test that flips this false would otherwise leak.
+    (window as any).solaceLibLoaded = true;
 
     document.body.innerHTML = '';
 });

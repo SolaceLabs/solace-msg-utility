@@ -2,33 +2,40 @@ import { defineConfig, type PluginOption } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import fs from 'node:fs';
 import path from 'node:path';
-
-const pkgVersion: string = JSON.parse(
-    fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')
-).version;
+import { moduleRegistryPlugin, activeModuleIds } from './scripts/module-registry-plugin.mjs';
 
 /**
- * Inject every module template found on disk as a
- * `<template data-module-id="<id>">...</template>` block at the
+ * The git tag is the single source of version truth — `scripts/dev.sh` derives
+ * it (`git describe`, or `VERSION` exported from the tag ref in CI) and exports
+ * `APP_VERSION`; the Dockerfile takes it as a build-arg because git is not
+ * available inside the image build.
+ *
+ * The leading `v` is stripped because the kernel's startup line already prints
+ * one — the same convention the image tags use. `0.0.0-dev` is a deliberately
+ * implausible placeholder: a build that lost the injection should look wrong,
+ * not merely out of date.
+ */
+const appVersion: string = (process.env.APP_VERSION ?? '0.0.0-dev').replace(/^v/, '');
+
+/**
+ * Inject the ACTIVE VARIANT's module templates as
+ * `<template data-module-id="<id>">...</template>` blocks at the
  * `<!-- @module-templates -->` marker in the shell HTML.
  *
- * The disk scan is authoritative for "what's available to inject" — it never
- * fails on orphan directories. The active variant manifest in
- * `src/variants/_active.ts` (resolved at runtime by `src/registry.ts`) decides
- * which of these templates actually get installed by the kernel. A template
- * that's injected but not in the variant just sits inert in the DOM.
+ * Scoped to the active variant (not every dir on disk) so a non-active module's
+ * markup — e.g. the managed modules in a standard build — never leaks into the
+ * shipped HTML. Mirrors the manifest-driven module registry: the variant `.ts`
+ * is authoritative for both bundled code and injected templates.
  *
  * Output is alphabetized for stable build diffs; runtime kernel lookups are
  * by id (querySelector), so order is cosmetic.
  */
-function injectModuleTemplates(): PluginOption {
+function injectModuleTemplates(variant: string | undefined): PluginOption {
     return {
         name: 'inject-module-templates',
         transformIndexHtml(html) {
             const modulesDir = path.resolve(__dirname, 'src/modules');
-            const ids = fs.readdirSync(modulesDir, { withFileTypes: true })
-                .filter(d => d.isDirectory())
-                .map(d => d.name)
+            const ids = activeModuleIds(__dirname, variant)
                 .filter(id => fs.existsSync(path.join(modulesDir, id, 'index.html')))
                 .sort();
             const blocks = ids.map(id => {
@@ -36,6 +43,28 @@ function injectModuleTemplates(): PluginOption {
                 return `    <template data-module-id="${id}">\n${content}\n    </template>`;
             });
             return html.replace('<!-- @module-templates -->', blocks.join('\n\n'));
+        }
+    };
+}
+
+/**
+ * Admin variant CSS swap: the app statically imports `./css/main.css` from
+ * `src/main.ts`. For the `admin` build, redirect that import to
+ * `./css/main-admin.css` (which `@import`s main.css plus the admin module
+ * stylesheets) so admin CSS ships only in solAdmin.html. The CSS-level
+ * `@import './main.css'` inside main-admin.css is resolved by Vite's CSS
+ * pipeline (not this resolver), so there's no redirect loop.
+ */
+function cssVariantRedirect(variant: string | undefined): PluginOption {
+    return {
+        name: 'css-variant-redirect',
+        enforce: 'pre',
+        resolveId(source, importer) {
+            if (variant !== 'admin' || !importer) return null;
+            const cleaned = source.replace(/\.css$/, '');
+            if (!cleaned.endsWith('/css/main') && cleaned !== './css/main') return null;
+            const target = path.resolve(__dirname, 'src/css/main-admin.css');
+            return this.resolve(target, importer, { skipSelf: true });
         }
     };
 }
@@ -85,31 +114,17 @@ interface MockRedirect {
 }
 
 const MOCK_REDIRECTS: MockRedirect[] = [
-    // Broker-side factories live in src/core/services/ (lifted in Stage B of the
-    // connection-libraries-to-core refactor). Feature modules import them via the
-    // relative path `../../core/services/<name>` — same depth for every module
-    // under src/modules/<id>/, so one entry per factory covers all callers.
-    { from: '../../core/services/solace-client', to: '../../core/services/solace-client-mock' },
-    { from: '../../core/services/solace-publisher', to: '../../core/services/solace-publisher-mock' },
-    { from: '../../core/services/semp-client', to: '../../core/services/semp-client-mock' },
-    // SEMP discovery lifted to core/services/ in Stage C; queue-discovery's
-    // wrapper now delegates to the core factory, so the mock-redirect
-    // intercepts at the core level. The old queue-discovery-local
-    // service-mock.ts was deleted in the same stage.
-    { from: '../../core/services/semp-discovery', to: '../../core/services/semp-discovery-mock' },
-    // Queue-copy's source-side path uses session.createQueueBrowser, which the
-    // demo-bundle's mock Solace session does not expose. Two module-relative
-    // redirects swap the verify + copy engines for canned implementations
-    // that don't touch the SDK — the rest of the module (state, ui, modal
-    // orchestration) runs unchanged.
-    { from: './service-verify', to: './service-verify-mock' },
-    { from: './service-copy', to: './service-copy-mock' },
-    // Queue-subscription-explorer's service POSTs SEMP v1 RPC bodies which the
-    // demo bundle has no mock for. Redirect the local `./service` import to a
-    // sibling that yields canned rows. Scoped to this module so it doesn't
-    // catch other modules (queue-discovery, queue-browser) that also import
-    // a local `./service`.
-    { from: './service', to: './service-mock', importerContains: 'queue-subscription-explorer' }
+    // ONE entry. `src/core/boot.ts` is a no-op seam that `src/main.ts` calls
+    // before starting the kernel; in mock mode it resolves to the in-browser
+    // broker instead, which installs `window.solace`, intercepts `fetch` for
+    // SEMP / /hosted / /managed, and mounts the demo control panel.
+    //
+    // Everything downstream then runs the REAL code: solace-client, semp-client,
+    // solace-publisher, semp-discovery, queue-copy's verify + copy engines and
+    // the subscription parser all talk to the emulator exactly as they talk to a
+    // broker. That is deliberate — the seven canned `*-mock` files this replaced
+    // could each drift from the code they stood in for, and two of them had.
+    { from: './core/boot', to: './mock-broker/boot' },
 ];
 
 /**
@@ -189,13 +204,15 @@ export default defineConfig(({ mode }) => {
         root: 'src',
         plugins: [
             variantRedirect(variant),
+            moduleRegistryPlugin({ root: __dirname, variant }) as PluginOption,
+            cssVariantRedirect(variant),
             isMock && serviceMockRedirect(),
-            injectModuleTemplates(),
+            injectModuleTemplates(variant),
             viteSingleFile(),
             outputName && renameHtmlAsset('index.html', outputName)
         ].filter(Boolean) as PluginOption[],
         define: {
-            __APP_VERSION__: JSON.stringify(pkgVersion),
+            __APP_VERSION__: JSON.stringify(appVersion),
             'import.meta.env.VITE_SHOW_PAYLOAD': JSON.stringify(showPayloadInput ?? 'true')
         },
         build: {

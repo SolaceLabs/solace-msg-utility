@@ -1,3 +1,8 @@
+<div id="conn-tabs" class="conn-tabs flex-row gap-2 mb-4 hidden" role="tablist">
+    <button id="conn-tab-direct" class="btn btn-primary conn-tab" type="button" role="tab" data-conn-mode="direct" aria-selected="true">Direct</button>
+    <button id="conn-tab-managed" class="btn btn-secondary conn-tab hidden" type="button" role="tab" data-conn-mode="managed" aria-selected="false">Managed</button>
+</div>
+<div id="conn-panel-direct" role="tabpanel">
 <div class="card">
     <div class="flex-row justify-between items-center mb-4">
         <h2 class="m-0">Broker Configuration</h2>
@@ -202,3 +207,67 @@
         </div>
     </div>
 </dialog>
+</div>
+<!-- Managed connection panel: login + entitled broker/VPN selection. Only
+     rendered when the gateway advertises managed mode via /hosted. -->
+<div id="conn-panel-managed" role="tabpanel" class="hidden">
+    <!-- Login view -->
+    <div id="managed-login-view" class="card managed-conn-card">
+        <div class="flex-row justify-between items-center mb-4">
+            <h2 class="m-0">Sign in</h2>
+        </div>
+        <div class="form-group">
+            <label for="managed-username">Username</label>
+            <input type="text" id="managed-username" class="form-control" autocomplete="username">
+        </div>
+        <div class="form-group">
+            <label for="managed-password">Password</label>
+            <input type="password" id="managed-password" class="form-control" autocomplete="current-password">
+        </div>
+        <button id="btn-managed-login" class="btn btn-primary">Sign in</button>
+        <div id="managed-login-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+    </div>
+
+    <!-- Selection view -->
+    <div id="managed-select-view" class="card managed-conn-card hidden">
+        <div class="flex-row justify-between items-center mb-4">
+            <h2 class="m-0">Connect to a broker</h2>
+            <div class="flex-row items-center gap-4">
+                <button id="btn-managed-refresh" class="btn btn-secondary" title="Re-fetch your available connections">Refresh</button>
+                <button id="btn-managed-logout" class="btn btn-secondary">Sign out</button>
+            </div>
+        </div>
+
+        <div id="managed-empty-state" class="text-secondary hidden" style="line-height: 1.5;">
+            No connections are available for your account. Ask an administrator to grant access.
+        </div>
+
+        <div id="managed-connect-controls">
+            <div class="form-group flex-row">
+                <div class="w-full">
+                    <label for="managed-broker-select">Broker</label>
+                    <select id="managed-broker-select" class="form-control"></select>
+                </div>
+                <div class="w-full">
+                    <label for="managed-vpn-select">Message VPN</label>
+                    <select id="managed-vpn-select" class="form-control" disabled></select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Host</label>
+                <input type="text" id="managed-broker-host" class="form-control" readonly>
+            </div>
+            <button id="btn-managed-connect" class="btn btn-primary" disabled>Connect</button>
+            <div id="managed-connect-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+        </div>
+    </div>
+
+    <!-- Connected view -->
+    <div id="managed-connected-view" class="card managed-conn-card hidden">
+        <div class="flex-row justify-between items-center mb-4">
+            <h2 class="m-0">Connected</h2>
+            <button id="btn-managed-disconnect" class="btn btn-danger">Disconnect</button>
+        </div>
+        <div id="managed-connected-summary" class="text-secondary"></div>
+    </div>
+</div>

@@ -1,0 +1,147 @@
+/* Demo scenario switcher. Every selector is `.mockctl-*` so nothing here can
+ * collide with the app's cascade. Imported only by the mock-broker entry, which
+ * production never loads. */
+
+.mockctl-root {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 9999;
+    width: 18rem;
+    font-family: system-ui, sans-serif;
+    font-size: 0.8rem;
+    color: #e6edf3;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+    overflow: hidden;
+}
+
+.mockctl-header {
+    width: 100%;
+    padding: 0.6rem 0.8rem;
+    text-align: left;
+    font-weight: 600;
+    color: inherit;
+    background: #21262d;
+    border: 0;
+    cursor: pointer;
+}
+
+.mockctl-header::after {
+    content: ' ▸';
+}
+
+.mockctl-open .mockctl-header::after {
+    content: ' ▾';
+}
+
+/* Collapsed by default so the panel never obscures the app in a screenshot. */
+.mockctl-body {
+    display: none;
+    max-height: 60vh;
+    padding: 0.4rem 0.8rem 0.8rem;
+    overflow-y: auto;
+}
+
+.mockctl-open .mockctl-body {
+    display: block;
+}
+
+.mockctl-section {
+    padding: 0.6rem 0;
+    border-top: 1px solid #30363d;
+}
+
+.mockctl-section:first-child {
+    border-top: 0;
+}
+
+.mockctl-title {
+    margin: 0 0 0.4rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #8b949e;
+}
+
+.mockctl-select,
+.mockctl-range {
+    width: 100%;
+    margin-bottom: 0.35rem;
+}
+
+.mockctl-select {
+    padding: 0.25rem;
+    color: inherit;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+}
+
+.mockctl-btn {
+    width: 100%;
+    padding: 0.3rem;
+    margin-top: 0.2rem;
+    color: inherit;
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.mockctl-btn:hover {
+    background: #30363d;
+}
+
+.mockctl-value {
+    display: inline-block;
+    margin-bottom: 0.35rem;
+    color: #8b949e;
+}
+
+/* Connection reference: label on the left, click-to-copy values on the right. */
+.mockctl-kv {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+    margin-bottom: 0.3rem;
+}
+
+.mockctl-key {
+    flex: 0 0 5.5rem;
+    color: #8b949e;
+}
+
+.mockctl-vals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+}
+
+.mockctl-copy {
+    padding: 0.05rem 0.3rem;
+    font-family: ui-monospace, monospace;
+    font-size: 0.72rem;
+    color: #7ee787;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.mockctl-copy:hover {
+    border-color: #7ee787;
+}
+
+.mockctl-copied {
+    color: #d29922;
+}
+
+.mockctl-hint {
+    margin: 0.3rem 0 0;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    color: #8b949e;
+}

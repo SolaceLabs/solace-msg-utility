@@ -1,0 +1,58 @@
+<!-- The admin gate is created at install by createGate() (see module.ts). -->
+
+<!-- List view -->
+<div id="user-mgmt-list-view" class="card user-mgmt-card hidden">
+    <div class="flex-row justify-between items-center mb-4">
+        <h2 class="m-0">Users</h2>
+        <div class="flex-row items-center gap-4">
+            <button id="btn-user-mgmt-refresh" class="btn btn-secondary" title="Reload the user list">Refresh</button>
+            <button id="btn-user-mgmt-add" class="btn btn-primary">Add user</button>
+        </div>
+    </div>
+    <table class="user-mgmt-table w-full">
+        <thead>
+            <tr><th>Username</th><th>Role</th><th class="user-mgmt-actions-col">Actions</th></tr>
+        </thead>
+        <tbody id="user-mgmt-rows"></tbody>
+    </table>
+    <div id="user-mgmt-list-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+</div>
+
+<!-- Create / edit form view -->
+<div id="user-mgmt-form-view" class="card user-mgmt-card hidden">
+    <div class="flex-row justify-between items-center mb-4">
+        <h2 id="user-mgmt-form-title" class="m-0">Add user</h2>
+    </div>
+    <div class="form-group">
+        <label for="user-mgmt-username">Username</label>
+        <input type="text" id="user-mgmt-username" class="form-control" autocomplete="off">
+    </div>
+    <div class="form-group">
+        <label for="user-mgmt-password">Password <span id="user-mgmt-password-hint" class="text-secondary"></span></label>
+        <input type="password" id="user-mgmt-password" class="form-control" autocomplete="new-password">
+    </div>
+    <div class="form-group">
+        <label class="flex-row items-center gap-2 m-0">
+            <input type="checkbox" id="user-mgmt-admin"> Administrator
+        </label>
+    </div>
+    <div class="form-group">
+        <div class="flex-row justify-between items-center mb-2">
+            <label class="m-0">Operate entitlements (read + write)</label>
+            <button id="btn-user-mgmt-add-operate" class="btn btn-secondary btn-sm">+ Add</button>
+        </div>
+        <div id="user-mgmt-operate-rows" class="flex-col"></div>
+    </div>
+    <div class="form-group">
+        <div class="flex-row justify-between items-center mb-2">
+            <label class="m-0">Read-only entitlements</label>
+            <button id="btn-user-mgmt-add-readonly" class="btn btn-secondary btn-sm">+ Add</button>
+        </div>
+        <div id="user-mgmt-readonly-rows" class="flex-col"></div>
+    </div>
+    <div class="flex-row gap-4 mt-2">
+        <button id="btn-user-mgmt-save" class="btn btn-primary">Save</button>
+        <button id="btn-user-mgmt-cancel" class="btn btn-secondary">Cancel</button>
+    </div>
+    <div id="user-mgmt-form-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+</div>

@@ -5,8 +5,7 @@ import type { CopyJob, VerifyResult, DestType, CopyMode } from './state';
 export interface CopyUiElements {
     container: HTMLElement;
 
-    // Top-level visibility
-    warning: HTMLElement;
+    // Top-level visibility (the gate is owned by the module-gate component)
     content: HTMLElement;
 
     // Source read-only connection mirror (populated from AppState.solaceConnection
@@ -35,6 +34,13 @@ export interface CopyUiElements {
     toggleSameBroker: HTMLInputElement;
     toggleSameVpn: HTMLInputElement;
     destHost: HTMLInputElement;
+    // Destination credential source (managed deployments only)
+    destCredModeRow: HTMLElement;
+    destCredProvisioned: HTMLInputElement;
+    destCredManual: HTMLInputElement;
+    destProvisionedBlock: HTMLElement;
+    destProvBroker: HTMLSelectElement;
+    destProvVpn: HTMLSelectElement;
 
     // Destination SEMP (Management) card
     destSempProtocol: HTMLSelectElement;
@@ -68,6 +74,7 @@ export interface CopyUiElements {
     destTypeToggle: HTMLInputElement;
     destTypeLabelQueue: HTMLElement;
     destTypeLabelTopic: HTMLElement;
+    destTopicBlocked: HTMLElement;
     destNameLabel: HTMLElement;
     destInput: HTMLInputElement;
     btnDestPick: HTMLButtonElement;
@@ -129,7 +136,6 @@ export interface CopyUiElements {
 export function cacheElements(container: HTMLElement): CopyUiElements {
     return {
         container,
-        warning: required(container, '#copy-warning'),
         content: required(container, '#copy-content'),
 
         sourceHost: required<HTMLInputElement>(container, '#copy-source-host'),
@@ -153,6 +159,12 @@ export function cacheElements(container: HTMLElement): CopyUiElements {
         toggleSameBroker: required<HTMLInputElement>(container, '#copy-toggle-same-broker'),
         toggleSameVpn: required<HTMLInputElement>(container, '#copy-toggle-same-vpn'),
         destHost: required<HTMLInputElement>(container, '#copy-dest-host'),
+        destCredModeRow: required<HTMLElement>(container, '#copy-dest-cred-mode-row'),
+        destCredProvisioned: required<HTMLInputElement>(container, '#copy-dest-cred-provisioned'),
+        destCredManual: required<HTMLInputElement>(container, '#copy-dest-cred-manual'),
+        destProvisionedBlock: required<HTMLElement>(container, '#copy-dest-provisioned-block'),
+        destProvBroker: required<HTMLSelectElement>(container, '#copy-dest-prov-broker'),
+        destProvVpn: required<HTMLSelectElement>(container, '#copy-dest-prov-vpn'),
 
         destSempProtocol: required<HTMLSelectElement>(container, '#copy-dest-semp-protocol'),
         destSempPort: required<HTMLInputElement>(container, '#copy-dest-semp-port'),
@@ -179,6 +191,7 @@ export function cacheElements(container: HTMLElement): CopyUiElements {
         destTypeToggle: required<HTMLInputElement>(container, '#copy-dest-type-toggle'),
         destTypeLabelQueue: required(container, '#copy-dest-type-label-queue'),
         destTypeLabelTopic: required(container, '#copy-dest-type-label-topic'),
+        destTopicBlocked: required(container, '#copy-dest-topic-blocked'),
         destNameLabel: required(container, '#copy-dest-name-label'),
         destInput: required<HTMLInputElement>(container, '#copy-dest-input'),
         btnDestPick: required<HTMLButtonElement>(container, '#copy-btn-dest-pick'),
@@ -221,17 +234,6 @@ export function cacheElements(container: HTMLElement): CopyUiElements {
         btnModalCancel: required<HTMLButtonElement>(container, '#copy-modal-cancel'),
         btnModalStart: required<HTMLButtonElement>(container, '#copy-modal-start'),
     };
-}
-
-/** Show/hide the warning vs content panels based on primary connection. */
-export function setPrimaryConnected(els: CopyUiElements, isConnected: boolean): void {
-    if (isConnected) {
-        els.warning.classList.add('hidden');
-        els.content.classList.remove('hidden');
-    } else {
-        els.warning.classList.remove('hidden');
-        els.content.classList.add('hidden');
-    }
 }
 
 /**
@@ -345,6 +347,77 @@ export function applyDestPrefill(
  * Host stays under the broker-level lock — see `setDestBrokerLocked` — because
  * SEMP and Client share the same host field.
  */
+/**
+ * Render the destination credential-source control.
+ *
+ * The radio row only appears when a secondary connection is actually needed AND
+ * the deployment offers a choice — a managed-only deployment pins Provisioned
+ * and a direct deployment pins Manual, so neither shows a pointless control.
+ */
+export function applyDestCredMode(
+    els: CopyUiElements,
+    opts: { offered: readonly ('provisioned' | 'manual')[]; active: 'provisioned' | 'manual'; needsSecondary: boolean },
+): void {
+    const { offered, active, needsSecondary } = opts;
+    els.destCredModeRow.classList.toggle('hidden', !(needsSecondary && offered.length > 1));
+    els.destCredProvisioned.checked = active === 'provisioned';
+    els.destCredManual.checked = active === 'manual';
+    els.destCredProvisioned.disabled = !offered.includes('provisioned');
+    els.destCredManual.disabled = !offered.includes('manual');
+    els.destProvisionedBlock.classList.toggle('hidden', !(needsSecondary && active === 'provisioned'));
+}
+
+/** Fill the provisioned broker list (names only — the store never exposes creds). */
+export function renderDestProvisionedBrokers(els: CopyUiElements, brokers: readonly string[], selected: string): void {
+    els.destProvBroker.innerHTML = '';
+    brokers.forEach((b) => {
+        const opt = document.createElement('option');
+        opt.value = b;
+        opt.textContent = b;
+        els.destProvBroker.appendChild(opt);
+    });
+    if (selected && brokers.includes(selected)) els.destProvBroker.value = selected;
+    els.destProvBroker.disabled = brokers.length === 0;
+}
+
+/** Fill the provisioned VPN list for the selected broker. */
+export function renderDestProvisionedVpns(els: CopyUiElements, vpns: readonly string[], selected: string): void {
+    els.destProvVpn.innerHTML = '';
+    vpns.forEach((v) => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        els.destProvVpn.appendChild(opt);
+    });
+    if (selected && vpns.includes(selected)) els.destProvVpn.value = selected;
+    els.destProvVpn.disabled = vpns.length === 0;
+}
+
+/**
+ * Enable/disable every typed destination credential field. Provisioned mode
+ * disables them because the store supplies host, port, user and password — the
+ * user selects an identity, not a credential. Runs after `applyDestPrefill` so
+ * it has the final say.
+ */
+export function setDestManualFieldsEnabled(els: CopyUiElements, enabled: boolean): void {
+    // One-directional by design: this may only ever DISABLE. `applyDestPrefill`
+    // owns the enabled state in manual mode (it locks whatever the same-broker /
+    // same-VPN toggles imply), so re-enabling here would fight it and unlock
+    // fields the toggles had deliberately locked.
+    if (enabled) return;
+    const fields: HTMLInputElement[] = [
+        els.destHost,
+        els.destSempPort, els.destSempUrlPath, els.destSempUser, els.destSempPass,
+        els.destSolPort, els.destSolUrlPath, els.destSolVpn, els.destSolUser, els.destSolPass,
+    ];
+    fields.forEach((f) => { f.disabled = true; });
+    els.destSempProtocol.disabled = true;
+    els.destSolProtocol.disabled = true;
+    // Never leave a typed secret sitting in a field the user can no longer see.
+    els.destSempPass.value = '';
+    els.destSolPass.value = '';
+}
+
 export function setDestSempFormLocked(els: CopyUiElements, locked: boolean): void {
     els.destSempProtocol.disabled = locked;
     els.destSempPort.disabled = locked;
@@ -439,6 +512,19 @@ function setErrorPane(el: HTMLElement, message: string | null): void {
 
 /** Update the dest-name field label + the slide-toggle's active-side
  *  highlight based on dest type. */
+/**
+ * Disable the Topic option when the publish path uses provisioned managed
+ * credentials. `QGlob` has no topic vocabulary — a topic fans out to whichever
+ * queues subscribe to it — so entitlement cannot be expressed for one. The
+ * run-start gate refuses topics on that path regardless; this keeps the control
+ * from offering something that would only fail later.
+ */
+export function setDestTopicBlocked(els: CopyUiElements, blocked: boolean): void {
+    els.destTypeToggle.disabled = blocked;
+    els.destTypeLabelTopic.classList.toggle('copy-dest-type-disabled', blocked);
+    els.destTopicBlocked.classList.toggle('hidden', !blocked);
+}
+
 export function applyDestType(els: CopyUiElements, type: DestType): void {
     const isTopic = type === 'topic';
     els.destTypeToggle.checked = isTopic;

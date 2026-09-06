@@ -1,15 +1,16 @@
 import { state, shouldShowMessage, defaultActiveFilters } from './state.js';
 import { ui } from './ui-core.js';
 import { showPayload } from './features.js';
+import type { createService } from './service.js';
 import { pickQueue } from '../../core/components/queue-picker';
-import { primarySempContextFrom } from '../../core/services/sempContext';
+import { queueSourceFrom } from '../../core/services/queue-source';
 import type { AppContext } from '../../core/types';
 
 /**
  * Queue Browser UI event handlers.
  * Factory receives AppContext and service — no window.App references.
  */
-export function createUiEvents(ctx: AppContext, service: any) {
+export function createUiEvents(ctx: AppContext, service: ReturnType<typeof createService>) {
 
     async function handleCopyContent() {
         const els = ui.getElements();
@@ -109,9 +110,10 @@ export function createUiEvents(ctx: AppContext, service: any) {
 
     async function handleBindPickClick() {
         const els = ui.getElements();
-        const sempCtx = primarySempContextFrom(ctx);
-        if (!sempCtx) return;
-        const picked = await pickQueue(sempCtx, {
+        // Binding a queue is a READ — browse scope (operate ∪ read-only).
+        const source = queueSourceFrom(ctx, 'browse');
+        if (!source) return;
+        const picked = await pickQueue(source, {
             title: 'Pick a queue to bind',
             defaultVpn: ctx.appState.selectedVpn ?? undefined,
         });

@@ -11,11 +11,27 @@ import type { SolacePublisher } from '../../core/services/solace-publisher';
 export type CopyMode = 'copy' | 'move';
 export type DestType = 'queue' | 'topic';
 
+/**
+ * Where the destination's credentials come from when a secondary connection is
+ * needed. `'manual'` is the typed form (the only option outside a managed
+ * session); `'provisioned'` selects a broker/VPN the managed session is entitled
+ * to and lets the core store broker the credential, so nothing is typed.
+ */
+export type DestCredMode = 'manual' | 'provisioned';
+
 export interface DestForm {
     /** When true, dest reuses primary host + SEMP creds. */
     sameBroker: boolean;
     /** When true, dest reuses primary VPN + Solace creds. Forced false when sameBroker is false. */
     sameVpn: boolean;
+    /**
+     * Credential source for the secondary connection. Which options the user is
+     * offered is derived from the deployment's `CONN_MODES` — see
+     * `destCredModesFor` in ui-events.
+     */
+    credMode: DestCredMode;
+    /** Selection when `credMode === 'provisioned'` — names only, from the store. */
+    provisioned: { broker: string; vpn: string };
     /** Visible only when !sameBroker. */
     host: string;
     /** Visible when !sameBroker || !sameVpn (Solace client side). */
@@ -145,6 +161,10 @@ export function createInitialState(): QueueCopyState {
         destForm: {
             sameBroker: true,
             sameVpn: true,
+            // Manual is the only universally-available source; a managed
+            // deployment re-pins this when the destination panel initialises.
+            credMode: 'manual',
+            provisioned: { broker: '', vpn: '' },
             host: '',
             solace: { protocol: 'wss', port: '', urlPath: '', vpn: '', user: '' },
             semp: { protocol: 'https', port: '', urlPath: '', user: '' },
