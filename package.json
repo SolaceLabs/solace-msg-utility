@@ -1,24 +1,27 @@
 {
   "name": "solace-message-utility",
-  "version": "3.3.4",
+  "version": "0.0.0-dev",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/vite-build.mjs --mode mock && node scripts/vite-build.mjs && node scripts/vite-build.mjs --variant=min --out-filename=min.html && node scripts/vite-build.mjs --show-payload=false --out-filename=no-payload.html && node scripts/vite-build.mjs --variant=no-queue-copy --out-filename=no-queue-copy.html",
+    "build": "node scripts/vite-build.mjs --mode mock && node scripts/vite-build.mjs && node scripts/vite-build.mjs --variant=min --out-filename=min.html && node scripts/vite-build.mjs --show-payload=false --out-filename=no-payload.html && node scripts/vite-build.mjs --variant=no-queue-copy --out-filename=no-queue-copy.html && node scripts/vite-build.mjs --variant=admin --out-filename=solAdmin.html",
     "build:prod": "node scripts/vite-build.mjs",
     "build:mock": "node scripts/vite-build.mjs --mode mock",
     "build:no-payload": "node scripts/vite-build.mjs --show-payload=false --out-filename=no-payload.html",
     "build:no-queue-copy": "node scripts/vite-build.mjs --variant=no-queue-copy --out-filename=no-queue-copy.html",
+    "build:admin": "node scripts/vite-build.mjs --variant=admin --out-filename=solAdmin.html",
+    "build:all": "node scripts/vite-build.mjs --variant=all-for-testing-only --out-filename=all-test.html",
     "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "check:docs": "node scripts/check-docs-secrecy.mjs",
     "test": "vitest run --pool=threads --maxWorkers=12",
     "test:watch": "vitest --pool=threads --maxWorkers=12",
     "test:coverage": "vitest run --pool=threads --maxWorkers=12 --coverage",
     "scan": "npm run scan:go && npm run scan:npm && npm run scan:image",
-    "scan:go": "cd go-web-proxy && govulncheck ./...",
+    "scan:go": "go -C go-web-proxy tool govulncheck -tags=managed ./...",
     "scan:npm": "npm audit --audit-level=high",
-    "scan:image": "trivy image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed solace-message-utility:latest",
-    "scan:install-tools": "go install golang.org/x/vuln/cmd/govulncheck@latest",
+    "scan:image": "trivy image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed ghcr.io/solacelabs/solace-msg-utility:latest && trivy image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed ghcr.io/solacelabs/solace-msg-utility:managed-latest",
     "image:build": "docker compose -f docker/docker-compose.yaml build",
     "image:scan": "npm run image:build && npm run scan:image"
   },
@@ -30,5 +33,8 @@
     "vite": "^6.4.1",
     "vite-plugin-singlefile": "^2.0.3",
     "vitest": "^4.1.1"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
   }
-}/
+}
