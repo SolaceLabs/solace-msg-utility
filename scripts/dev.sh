@@ -115,7 +115,9 @@ has_linux_docker() {
 
 # trivy natively when it is on PATH, otherwise the container. --pull=always
 # matters more than the tag: without it docker reuses whatever :latest resolved
-# to months ago -- unpinned AND stale.
+# to months ago -- unpinned AND stale. The docker.sock mount is what lets the
+# containerised trivy see the image `image` just built locally; without it trivy
+# falls back to pulling the never-pushed tag from the registry and fails.
 trivy_image() {
   local task=$1 ref=$2
   if command -v trivy >/dev/null 2>&1; then
@@ -123,6 +125,7 @@ trivy_image() {
       --severity HIGH,CRITICAL --ignore-unfixed "$ref"
   else
     run "$task" docker run --rm --pull=always -e NO_COLOR=1 \
+      -v /var/run/docker.sock:/var/run/docker.sock \
       aquasec/trivy:latest image --quiet --exit-code 1 \
       --severity HIGH,CRITICAL --ignore-unfixed "$ref"
   fi
@@ -225,7 +228,7 @@ task_scan() {
   local code=0
   ensure_deps scan || return $?
 
-  run scan npm audit --audit-level=high || return $?
+  run scan npm run audit:gate || return $?
 
   # The managed superset: go-web-proxy's only third-party dependency
   # (gopkg.in/yaml.v3) is compiled in behind `-tags managed`, so an untagged

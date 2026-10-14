@@ -73,7 +73,7 @@ function cssVariantRedirect(variant: string | undefined): PluginOption {
  * Variant selection: when a non-empty `variant` is passed, redirect the
  * registry's `import { ACTIVE_MODULES } from './variants/_active'` to
  * `./variants/<variant>.ts`. The default re-export inside `_active.ts` (which
- * points at `./full`) handles the no-flag case so dev/prod builds Just Work.
+ * points at `./standard`) handles the no-flag case so dev/prod builds Just Work.
  *
  * Driven from `defineConfig` via the `--variant` CLI flag — see `readCliFlag`.
  * The named variant file must exist under `src/variants/`.
@@ -193,7 +193,7 @@ export default defineConfig(({ mode }) => {
         : (isMock ? 'mock.html' : null);
     // `--variant=<name>` selects which manifest under `src/variants/` the
     // registry resolves at build time. Unset → the default re-export in
-    // `_active.ts` wins (currently `./full`).
+    // `_active.ts` wins (currently `./standard`).
     const variant = readBuildInput('__VITE_VARIANT');
     // `--show-payload=false` ships the "no-payload" flavor of queue-browser (body
     // never decoded into state, payload DOM removed at install). Default 'true' is

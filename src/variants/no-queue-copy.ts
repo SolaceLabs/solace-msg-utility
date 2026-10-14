@@ -1,7 +1,7 @@
 /**
  * No-Queue-Copy variant — every module except Queue Copy.
  *
- * Same as `full`, with `queue-copy` omitted so the Copy/Move-between-queues
+ * Same as `standard`, with `queue-copy` omitted so the Copy/Move-between-queues
  * module is never installed. See architecture.md → "Module registration —
  * variant manifests".
  */

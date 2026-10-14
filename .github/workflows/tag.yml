@@ -1,6 +1,7 @@
 name: Tag
 
-# The only automatic pipeline. Push a tag, the full stack runs, and a release
+# The only release pipeline (ci.yml's narrow PR trigger and the SCA scan are
+# the other automatic runs). Push a tag, the full stack runs, and a release
 # is created ONLY if everything passed:
 #
 #   git tag v1.2.3 && git push origin v1.2.3

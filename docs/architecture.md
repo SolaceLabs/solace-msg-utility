@@ -79,7 +79,7 @@ src/modules/connection-management/        Module — admin-only broker-connectio
 Install order + sidebar order are set in [src/registry.ts](../src/registry.ts) — each registry entry is a `{ module, priority }` tuple, so the entire ordering decision lives in one file.
 ```
 
-Each module directory additionally contains a `service-*-mock.ts` sibling for the mock build (`vite build --mode mock`) — see the **Build Modes** section in [CLAUDE.md](../CLAUDE.md).
+There are no `*-mock` service siblings: the mock build (`vite build --mode mock`) runs these same modules against the in-browser broker -- see [The demo broker](#the-demo-broker-mockhtml) and the **Build Modes** section in [CLAUDE.md](../CLAUDE.md).
 
 All module coordination goes through the EventBus — every module publishes and subscribes through the single shared bus instance, with no direct module-to-module references.
 
@@ -252,7 +252,7 @@ queue-browser/
        +--- constants.js         Module-scoped SVG icon strings (downloadContent, forward, delete, copy …)
 ```
 
-Queue-browser has no `service-mock.ts` — its production `service.ts` runs in both real and mock builds, with the SDK calls flowing through the mocked Solace session created by `solace-client-mock.ts`. Publish-with-ACK is delegated to the core `solace-publisher` (also mock-redirected) so the demo bundle resolves forwards via the no-op publisher mock.
+Queue-browser's production `service.ts` runs unmodified in both real and mock builds. In the demo, its SDK calls reach the `window.solace` emulation installed by the demo broker, and publish-with-ACK (delegated to the core `solace-publisher`) round-trips through the broker's acknowledgement events -- see [The demo broker](#the-demo-broker-mockhtml).
 
 ### Circular Dependency Resolution
 
@@ -361,9 +361,9 @@ for await (const page of source.listVpns()) {
 
 The user sees results populate progressively rather than waiting for every page. queue-browser builds its source with `queueSourceFrom(ctx)`; queue-copy uses `queueSourceFrom(ctx)` for the source / same-broker destination and `sempQueueSource(state.destSempCtx)` for a different-broker destination. The picker behaves identically in every variant — the connection's source decides where the names come from, and the picker never calls SEMP itself.
 
-### Mock service
+### Mock mode
 
-`semp-discovery-mock.ts` matches the same generator signature but yields exactly one page — pagination logic isn't exercised in mock mode, but the consumer code path is identical.
+There is no discovery mock: the real `semp-discovery` runs in the demo against the demo broker's SEMP v2 interceptor, so the same generator and consumer code paths are exercised -- see [The demo broker](#the-demo-broker-mockhtml).
 
 ---
 
@@ -445,7 +445,7 @@ The copy engine separates **stop detection** (Phase 1) from **outcome evaluation
 
 Stop reasons: `cancel`, `source-drift` (first msg id ≠ recorded oldest), `max-consumed` (msg id > recorded newest AND we never saw the recorded newest — see below), `reached-max` (processed the recorded newest), `idle` ([`IDLE_TIMEOUT_MS`](../src/modules/queue-copy/constants.ts) = 30 s with no MESSAGE), `publish-error`, `browser-error`. `reached-max` and `idle` produce `completed` only when `copied === total` — otherwise `error` with a count-mismatch message. Cancel always upgrades the final classification.
 
-All five tunable knobs (`IDLE_TIMEOUT_MS`, `PUBLISH_CONCURRENCY_HIGH=20`, `PUBLISH_CONCURRENCY_LOW=10`, `BIND_PROBE_TIMEOUT_MS`, `ACCUMULATE_IDLE_MS`) live in [`queue-copy/constants.ts`](../src/modules/queue-copy/constants.ts) — single source of truth between production and mock builds, motivated by an earlier 30s/60s drift between `service-copy.ts` and `service-copy-mock.ts`. `service-copy.ts` / `service-verify.ts` re-export them via barrel lines for existing test imports.
+All five tunable knobs (`IDLE_TIMEOUT_MS`, `PUBLISH_CONCURRENCY_HIGH=20`, `PUBLISH_CONCURRENCY_LOW=10`, `BIND_PROBE_TIMEOUT_MS`, `ACCUMULATE_IDLE_MS`) live in [`queue-copy/constants.ts`](../src/modules/queue-copy/constants.ts) — single source of truth, motivated by an earlier 30s/60s drift between `service-copy.ts` and the since-deleted `service-copy-mock.ts`. `service-copy.ts` / `service-verify.ts` re-export them via barrel lines for existing test imports.
 
 **`msgId > maxMsgId` is disambiguated by a `seenMaxMsgId` flag, not blindly fatal.** Same-broker copy/move creates a feedback loop: our own published clones land back on the source queue and may be re-delivered as MESSAGE events while the originals' ACKs are still in flight. To distinguish "benign clone" from "the recorded max was consumed externally", the engine sets `seenMaxMsgId = true` synchronously (before the publish await) when a MESSAGE matches the recorded max. The pre-process gate then branches:
 
@@ -485,7 +485,7 @@ The repo-root `index.html` is a generic PWA shell — sidebar, header, `#module-
 <!-- @module-templates -->
 ```
 
-The `inject-module-templates` Vite plugin in `vite.config.ts` reads each `src/modules/<id>/index.html` at build time, wraps each in `<template data-module-id="<id>">...</template>`, and replaces the `@module-templates` marker with the concatenated blocks. The output single-file bundle has all module templates inline, ready for the Kernel to find at startup.
+The `inject-module-templates` Vite plugin in `vite.config.ts` reads each `src/modules/<id>/index.html` at build time, wraps each in `<template data-module-id="<id>">...</template>`, and replaces the `@module-templates` marker with the concatenated blocks. Only the active variant's modules are injected, so the output single-file bundle has exactly those templates inline, ready for the Kernel to find at startup.
 
 ```mermaid
 flowchart TD
@@ -535,17 +535,17 @@ export const ACTIVE_MODULES: Record<string, number> = {
 };
 ```
 
-[src/variants/_active.ts](../src/variants/_active.ts) is a one-line re-export from one variant (default `./standard`). The registry imports `ACTIVE_MODULES` from `_active`, so the registry never changes when variants do. To ship a different variant, either edit the re-export OR set `VITE_VARIANT=<name>` at build time — `vite.config.ts`'s variant-redirect resolver rewrites `_active` to the chosen variant file. The `scripts/vite-build.mjs` wrapper surfaces this as `--variant=<name>` and `--out-filename=<name>` flags, since Vite's CLI parser rejects unknown options directly.
+[src/variants/_active.ts](../src/variants/_active.ts) is a one-line re-export from one variant (default `./standard`). The registry imports `ACTIVE_MODULES` from `_active`, so the registry never changes when variants do. To ship a different variant, build with `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>` -- the wrapper exists because Vite's CLI parser rejects unknown options, and passes both flags to `vite.config.ts` as private env vars. The variant drives `vite.config.ts`'s variant-redirect resolver (which rewrites `_active` to the chosen variant file), the module registry and the template injection. Do not edit the re-export instead: with no `--variant`, the registry plugin falls back to `standard` regardless of what `_active` points at.
 
-A module directory may exist on disk but not appear in any variant (e.g. [`src/modules/queue-discovery/`](../src/modules/queue-discovery/)). The `inject-module-templates` plugin still scans it and injects its `<template>` block into the shell HTML, but the **module registry only bundles the active variant's modules** (see below), so its code never enters the bundle and the kernel never installs it. This is the intentional "carry the code, ship the bundle without it" shape — stronger than tree-shaking, because the unlisted module's `module.ts` is never imported.
+A module directory may exist on disk but not appear in any variant (e.g. [`src/modules/queue-discovery/`](../src/modules/queue-discovery/)). Neither its `<template>` block nor its code is emitted: the `inject-module-templates` plugin and the **module registry** both work from the active variant's manifest only (see below), so the kernel never installs it. This is the intentional "carry the code, ship the bundle without it" shape — stronger than tree-shaking, because the unlisted module's `module.ts` is never imported.
 
-**Manifest-driven registry (manifest is authoritative for bundling, not just activation).** [src/registry.ts](../src/registry.ts) reads `ACTIVE_MODULES` from `_active` for the id→priority map and resolves each id to its `PwaModule` via `moduleFiles` from the **`virtual:module-registry`** module. That virtual module is generated per build by the `moduleRegistryPlugin` ([scripts/module-registry-plugin.mjs](../scripts/module-registry-plugin.mjs)) — it transpiles the active `src/variants/<name>.ts`, then emits literal `import * as` statements for **exactly** the listed ids. So a module absent from the active variant is never imported and never reaches the bundle (verified by an isolation grep over the built variants). If a manifest lists an id with no matching `module.ts`, or a `module.ts` whose exported `.id` doesn't match its directory, the registry throws a clear error — boot fails fast. (vitest registers the same plugin so tests resolve `virtual:module-registry`, defaulting to the `full` variant.)
+**Manifest-driven registry (manifest is authoritative for bundling, not just activation).** [src/registry.ts](../src/registry.ts) reads `ACTIVE_MODULES` from `_active` for the id→priority map and resolves each id to its `PwaModule` via `moduleFiles` from the **`virtual:module-registry`** module. That virtual module is generated per build by the `moduleRegistryPlugin` ([scripts/module-registry-plugin.mjs](../scripts/module-registry-plugin.mjs)) — it transpiles the active `src/variants/<name>.ts`, then emits literal `import * as` statements for **exactly** the listed ids. So a module absent from the active variant is never imported and never reaches the bundle; the manifest-driven plugin is the only enforcement (there is no post-build isolation grep). If a manifest lists an id with no matching `module.ts`, or a `module.ts` whose exported `.id` doesn't match its directory, the registry throws a clear error — boot fails fast. (vitest registers the same plugin so tests resolve `virtual:module-registry`, defaulting to the `standard` variant.)
 
-The `inject-module-templates` Vite plugin scans `src/modules/` for every directory containing an `index.html` and injects each as a `<template data-module-id="<id>">…</template>` block. The disk scan is informational: a directory not in the active variant just sits inert in the DOM (no kernel installs it). A module in the active variant whose `index.html` is missing on disk surfaces a kernel console error at startup.
+The `inject-module-templates` Vite plugin takes the active variant's module ids (from the same manifest as the registry) and injects each one's `src/modules/<id>/index.html` as a `<template data-module-id="<id>">...</template>` block, so a non-active module's markup never reaches the shipped HTML. A module in the active variant whose `index.html` is missing on disk is skipped by the plugin and surfaces a kernel console error at startup.
 
 **To add a new module**: create `src/modules/<id>/` with `module.ts` and `index.html`, then add a line to whichever variant should ship it. The build plugin and the registry pick it up automatically.
 
-**To ship a build variant**: drop a new `src/variants/<name>.ts` listing the desired subset, then `VITE_VARIANT=<name> npm run build`.
+**To ship a build variant**: drop a new `src/variants/<name>.ts` listing the desired subset, then `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>.html` (and add it to the `build` npm script if every release should carry it).
 
 ### Build flavors vs variants
 

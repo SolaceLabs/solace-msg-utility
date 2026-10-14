@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "check:docs": "node scripts/check-docs-secrecy.mjs",
+    "audit:gate": "node scripts/npm-audit-gate.mjs",
     "test": "vitest run --pool=threads --maxWorkers=12",
     "test:watch": "vitest --pool=threads --maxWorkers=12",
     "test:coverage": "vitest run --pool=threads --maxWorkers=12 --coverage",
@@ -31,7 +32,7 @@
     "jsdom": "^29.0.1",
     "typescript": "^5.7.3",
     "vite": "^6.4.1",
-    "vite-plugin-singlefile": "^2.0.3",
+    "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^4.1.1"
   },
   "allowScripts": {

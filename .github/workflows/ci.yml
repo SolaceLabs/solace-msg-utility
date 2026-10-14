@@ -1,8 +1,9 @@
 name: CI
 
-# No automatic triggers by design: nothing runs on push or PR. The full stack
-# runs once, on a tag, via tag.yml. `workflow_dispatch` is here so you can
-# still fire a manual run from the Actions tab without pushing a commit.
+# No push trigger by design, and only the narrow pull_request trigger below.
+# The full stack runs once, on a tag, via tag.yml. `workflow_dispatch` is here
+# so you can still fire a manual run from the Actions tab without pushing a
+# commit. (sca-scan-and-guard.yml is separate and runs on every PR/push to main.)
 #
 # Everything that compiles, tests, lints or scans goes through scripts/dev.sh
 # and dev.ps1 -- this file only calls task names, which is what keeps local ==

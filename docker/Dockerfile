@@ -53,7 +53,7 @@
 #               lost it looks wrong rather than merely out of date.
 
 # ---- Stage 1: build the static Go gateway ------------------------------------
-FROM golang:1.27.0-alpine AS gateway-builder
+FROM golang:1.27.2-alpine AS gateway-builder
 WORKDIR /src
 # go.sum is needed for the managed build (it pulls gopkg.in/yaml.v3); it is
 # harmless for the default stdlib-only hosted build, which imports nothing
@@ -81,7 +81,7 @@ RUN mkdir -p /staging/tls/trust /staging/managed \
  && chmod 0755 /staging/tls /staging/tls/trust /staging/managed
 
 # ---- Stage 2: build the PWA bundle ------------------------------------------
-# Builds dist/{index,mock,min}.html from source so the runtime image doesn't
+# Builds every dist/*.html variant from source so the runtime image doesn't
 # depend on whatever happens to be in the host's dist/ at `docker build` time.
 FROM node:26.8.1-alpine AS pwa-builder
 WORKDIR /pwa
@@ -98,7 +98,7 @@ RUN APP_VERSION="$APP_VERSION" npm run build
 
 # Stage exactly what this image should serve, rather than copying all of dist/.
 # The build emits every variant, and an image has no business shipping bundles it
-# does not serve: mock.html is a demo build with canned services, and
+# does not serve: mock.html is the demo build with its in-browser broker, and
 # solAdmin.html would be reachable as a plain file at /solAdmin.html, side-
 # stepping the hosted+managed check the gateway applies to the /solAdmin route.
 # Declared after `npm run build` so the expensive build layer stays cached and

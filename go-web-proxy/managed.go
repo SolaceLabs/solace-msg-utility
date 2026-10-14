@@ -99,7 +99,7 @@ func (h *managedHandler) getConnections(w http.ResponseWriter, r *http.Request) 
 
 // reload re-reads users.yaml + connections.yaml from disk into the in-memory
 // store so out-of-band edits take effect without a restart. Available to any
-// logged-in user (the managed-connections Refresh button drives it). 400 for an
+// logged-in user (the connections Managed tab's Refresh button drives it). 400 for an
 // unknown user / bad token; 500 if a file can't be re-read.
 func (h *managedHandler) reload(w http.ResponseWriter, r *http.Request) {
 	if !h.methodPost(w, r) {

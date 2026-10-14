@@ -40,7 +40,8 @@ mode. There is no longer a separate `managed` variant: a managed deployment ship
      generates a per-deployment site-seed file if absent
    + POST /managed/getConnections → string-match auth → entitled brokers/VPNs + queue globs
    + POST /managed/reload → re-read both YAML files from disk (any logged-in user)
-   + /managed/{users,connections} CRUD (admin-only; resend-token auth)
+   + /managed/{listUsers,saveUser,deleteUser,listConnections,saveConnection,deleteConnection}
+     (admin-only CRUD; resend-token auth)
         ▼
  Solace broker (SEMP + SMF/WebSocket) — use a READ-ONLY / least-privilege SEMP account
 ```

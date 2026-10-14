@@ -1,5 +1,6 @@
 /**
- * User-management service — admin CRUD over /managed/users* on the go-web-proxy.
+ * User-management service — admin CRUD over /managed/{listUsers,saveUser,deleteUser}
+ * on the go-web-proxy.
  *
  * Same-origin plain `fetch` (NOT sempFetch — these endpoints are served by the
  * proxy that serves the SPA). Every call carries the caller's admin

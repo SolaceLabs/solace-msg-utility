@@ -9,7 +9,7 @@ const pkgVersion: string = JSON.parse(
 
 export default defineConfig({
     // Resolve `virtual:module-registry` (imported by src/registry.ts) under tests
-    // too. With no __VITE_VARIANT, the plugin defaults to the `full` variant.
+    // too. With no __VITE_VARIANT, the plugin defaults to the `standard` variant.
     plugins: [moduleRegistryPlugin({ root: __dirname })],
     define: {
         __APP_VERSION__: JSON.stringify(pkgVersion)
@@ -36,18 +36,11 @@ export default defineConfig({
                 'src/css/**',
                 'src/index.html',
                 'src/modules/queue-browser/constants.js',
-                // queue-browser ships its own canned-data mock; queue-discovery's
-                // mock was deleted in Stage C in favor of the core mock below.
-                // queue-copy keeps split mocks for the verify + copy engines so
-                // the build:mock demo runs without an SDK-level QueueBrowser mock.
-                'src/mock-broker/**',
-                'src/modules/**/service-mock.ts',
-                'src/modules/**/service-verify-mock.ts',
-                'src/modules/**/service-copy-mock.ts',
-                // Broker-side service factories + SEMP discovery lifted to
-                // core/services/ in Stages B + C. Mocks are only exercised by
-                // `build:mock` at runtime, not by unit tests.
-                'src/core/services/**/*-mock.ts'
+                // The in-browser demo broker. Mock-only: the redirect that reaches
+                // it is registered only when mode === 'mock', so it never enters a
+                // production bundle. Its fidelity contracts are covered by
+                // tests/mock-broker/ rather than held to the 100% gate.
+                'src/mock-broker/**'
             ],
             thresholds: {
                 statements: 100,

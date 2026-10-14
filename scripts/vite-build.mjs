@@ -12,7 +12,7 @@
  *
  * Examples:
  *   node scripts/vite-build.mjs --variant=min --out-filename=min.html
- *   node scripts/vite-build.mjs --mode mock --variant=full
+ *   node scripts/vite-build.mjs --variant=admin --out-filename=solAdmin.html
  */
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';

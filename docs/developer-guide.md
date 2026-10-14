@@ -16,17 +16,17 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 
 | Command | Outputs in `dist/` |
 | --- | --- |
-| `npm run build:prod` | `index.html` (production, full variant) |
+| `npm run build:prod` | `index.html` (production, standard variant) |
 | `npm run build:mock` | `mock.html` (interactive demo backed by the in-browser mock broker) |
 | `npm run build:no-payload` | `no-payload.html` (queue-browser with the message body hidden — see Build-time feature flags) |
-| `npm run build:no-queue-copy` | `no-queue-copy.html` (full variant minus the Queue Copy module) |
+| `npm run build:no-queue-copy` | `no-queue-copy.html` (standard variant minus the Queue Copy module) |
 | `npm run build:all` | `all-test.html` (kitchen-sink QA build — every module, including the admin ones) |
 | `npm run build:admin` | `solAdmin.html` (the standalone administration app — see [architecture.md -> The admin app](architecture.md#the-admin-app-soladmin)) |
 | `npm run build` | `mock.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, AND `solAdmin.html` in one pass |
 
-**The gates are `scripts/dev.sh` / `scripts/dev.ps1`, not the npm scripts.** The table above is the variant reference — reach for an individual `build:*` script when iterating on one variant. For anything you would call a gate, use the task: `./scripts/dev.sh all` (`build vet test`, what CI runs), `cov`, `scan`, `image`, or `full` for the pre-tag sweep. The tasks call the npm scripts above plus the Go halves, and they are the only place a build command lives — see [contributing.md](contributing.md#development-workflow) for the task table and [git.md](git.md) for how a tag turns into a release.
+**The gates are `scripts/dev.sh` / `scripts/dev.ps1`, not the npm scripts.** The table above is the variant reference — reach for an individual `build:*` script when iterating on one variant. For anything you would call a gate, use the task: `./scripts/dev.sh all` (`build vet test`; CI runs `all scan`), `cov`, `scan`, `image`, or `full` for the pre-tag sweep. The tasks call the npm scripts above plus the Go halves, and they are the only place a build command lives — see [contributing.md](contributing.md#development-workflow) for the task table and [git.md](git.md) for how a tag turns into a release.
 
-The npm scripts the tasks wrap: `typecheck` (`tsc --noEmit`), `check:docs` (the credential-transform secrecy check), `test` / `test:coverage`, `build`, `image:build` (both container images), and `scan:go` / `scan:npm` / `scan:image`. `scan:go` runs `go tool govulncheck`, which resolves through the `tool` directive pinned in [go-web-proxy/go.mod](../go-web-proxy/go.mod) — never `go run pkg@version`, which runs module-less and ignores the toolchain pin.
+The npm scripts the tasks wrap: `typecheck` (`tsc --noEmit`), `check:docs` (the credential-transform secrecy check), `audit:gate` (the npm half of `scan`: [scripts/npm-audit-gate.mjs](../scripts/npm-audit-gate.mjs) runs `npm audit` and fails only on fixable HIGH/CRITICAL advisories), `test` / `test:coverage`, and `build`. The `image` and `scan` tasks otherwise run their commands directly (`docker compose build`, `govulncheck`, trivy) rather than through the `image:*` / `scan:*` npm scripts. `scan` runs `go tool govulncheck`, which resolves through the `tool` directive pinned in [go-web-proxy/go.mod](../go-web-proxy/go.mod) — never `go run pkg@version`, which runs module-less and ignores the toolchain pin.
 
 Custom variants are built via the `scripts/vite-build.mjs` wrapper, which surfaces `--variant=<name>`, `--out-filename=<name>`, and `--show-payload=<bool>` because Vite's CLI parser (CAC) rejects unknown flags. The wrapper forwards them to `vite.config.ts` via private env vars. Example: `node scripts/vite-build.mjs --variant=min --out-filename=min.html`.
 
@@ -149,9 +149,9 @@ src/
     user-management/       # Admin-only (/solAdmin) — user + entitlement CRUD
     connection-management/ # Admin-only (/solAdmin) — broker connection CRUD
   variants/
-    standard.ts        # Default variant — every module the app ships with
+    standard.ts        # Default variant -- the everyday bundle (no admin modules)
     min.ts             # Minimal variant — connections + queue-browser only
-    no-queue-copy.ts   # Full variant minus the Queue Copy module
+    no-queue-copy.ts   # Standard variant minus the Queue Copy module
     admin.ts           # The /solAdmin app — admin-login + the two entitlement editors
     all-for-testing-only.ts  # Kitchen-sink QA build — every module, incl. the admin ones
     _active.ts         # One-line re-export from one variant (default ./standard)
@@ -354,7 +354,7 @@ serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser });
    };
    ```
 
-   Pick a priority that slots into the existing list (higher installs first, renders higher in the sidebar). [src/registry.ts](../src/registry.ts) resolves each id in the manifest to the `PwaModule` exported by `src/modules/<id>/module.ts` via the `virtual:module-registry` module (generated per variant by `scripts/module-registry-plugin.mjs`), so no import section needs touching and only the active variant's modules enter the bundle. To **disable** a module in a variant, comment its line. To **ship a different variant**, drop a new `src/variants/<name>.ts` and build with `VITE_VARIANT=<name> npm run build`.
+   Pick a priority that slots into the existing list (higher installs first, renders higher in the sidebar). [src/registry.ts](../src/registry.ts) resolves each id in the manifest to the `PwaModule` exported by `src/modules/<id>/module.ts` via the `virtual:module-registry` module (generated per variant by `scripts/module-registry-plugin.mjs`), so no import section needs touching and only the active variant's modules enter the bundle. To **disable** a module in a variant, comment its line. To **ship a different variant**, drop a new `src/variants/<name>.ts` and build it with `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>.html` (add a matching `build:<name>` npm script, and a pass in `build`, if it should ship).
 
    > **Gating a module in managed deployments:** add its id to `MODULE_REQUIREMENTS` in [src/core/rbac.ts](../src/core/rbac.ts) — `'admin'` for admin-only CRUD (like `user-management` / `connection-management`, which ship only in `src/variants/admin.ts`), or `'unfiltered-semp'` for a module that reaches the broker over a path RBAC cannot filter, which hides it in **every** managed session. The kernel hides the sidebar entry and re-evaluates on `rbac:changed`. See [architecture.md → Managed Connections](architecture.md#managed-connections-rbac).
 

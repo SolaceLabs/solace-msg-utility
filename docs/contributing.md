@@ -17,7 +17,7 @@ npm install && npm test
 1. Create a branch for your change
 2. Make your changes in `src/`
 3. Write or update tests in `tests/`
-4. Run `./scripts/dev.sh all` (or `./scripts/dev.ps1 all` on Windows) — `build vet test`, the fast inner loop and exactly what CI runs
+4. Run `./scripts/dev.sh all` (or `./scripts/dev.ps1 all` on Windows) — `build vet test`, the fast inner loop (CI runs `all scan`)
 5. Run `./scripts/dev.sh cov` — coverage must not regress; target is 100% on all four metrics, and `vitest.config.ts` fails the run below that
 6. Run `./scripts/dev.sh scan` before opening the PR if you touched a dependency, the Dockerfile, or `go-web-proxy/`
 7. Open a pull request with a clear description
@@ -30,7 +30,7 @@ npm install && npm test
 | `vet` | `npm run typecheck`, `npm run check:docs`, `go vet ./...` **and** `go vet -tags managed ./...` |
 | `test` | `npm test`, `go test ./...` **and** `go test -tags managed ./...` |
 | `cov` | `npm run test:coverage` plus a Go coverage profile; prints both totals |
-| `scan` | `npm audit`, `go tool govulncheck -tags=managed ./...`, then a Trivy scan of both freshly-built images |
+| `scan` | `npm run audit:gate` (`npm audit`, fatal on fixable HIGH/CRITICAL advisories, warns on unfixable ones), `go tool govulncheck -tags=managed ./...`, then a Trivy scan of both freshly-built images |
 | `image` | Builds both container images via `docker/docker-compose.yaml` |
 | `up` / `down` | Brings the compose stack up or down |
 | `graphify` | Refreshes the knowledge graph (local only — skipped when `CI` is set) |
@@ -95,7 +95,7 @@ The image half of `image` and `scan` warn-skips when Docker is absent or running
 ### File Organization
 
 - One concern per file (not one class per file — there are no classes).
-- Services: `service.ts`, `service-*.ts` (with a `service-*-mock.ts` sibling for the `vite build --mode mock` bundle when the service talks to an external system)
+- Services: `service.ts`, `service-*.ts`. Never add a `service-*-mock.ts` sibling: the mock build runs the real services against the in-browser broker, so new demo behaviour goes in `src/mock-broker/` and is covered in `tests/mock-broker/`.
 - UI: `ui.js`, `ui-*.ts`, `ui-*.js`
 - State: `state.js`
 - Orchestrator: `module.ts`

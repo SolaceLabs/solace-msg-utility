@@ -380,16 +380,16 @@ The loaded subscription list is held in memory for the session. Subsequent filte
 
 ## Shipped Variants
 
-The project builds several HTML variants. Only `index.html` is published (to GitHub Pages and as the container image); the others are attached to the release run as the `pwa-bundle` **workflow artifact**, downloadable from that run's Actions page for 7 days.
+The project builds several HTML variants, and every one is attached to each [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases). `index.html` is also what GitHub Pages and the container images serve; the managed image additionally serves `solAdmin.html` at `/solAdmin`.
 
 | File | Variant | Use |
 | --- | --- | --- |
-| `index.html` | **Full** (default) | Production deployment — every module: Connections, Queue Browser, Queue Copy, Queue Subscriptions |
+| `index.html` | **Standard** (default) | Production deployment — every module: Connections, Queue Browser, Queue Copy, Queue Subscriptions |
 | `min.html` | **Minimal** | Stripped-down variant — only Connections + Queue Browser. Smaller bundle for environments that don't need the copy/move or subscription-browser modules |
-| `no-payload.html` | **No-payload** | Same as Full, except the Queue Browser never shows or exports the message **body**. The Content Preview, Show Raw Content, Copy Content, Download Content, Download Full, and Body-Content filter are all removed; Forward, Delete, all metadata, and the other filters remain. Use where message bodies must not be visible to the operator. |
-| `no-queue-copy.html` | **No Queue Copy** | Same as Full, minus the Queue Copy module. For deployments where operators should browse and forward but never bulk-copy between queues. |
+| `no-payload.html` | **No-payload** | Same as Standard, except the Queue Browser never shows or exports the message **body**. The Content Preview, Show Raw Content, Copy Content, Download Content, Download Full, and Body-Content filter are all removed; Forward, Delete, all metadata, and the other filters remain. Use where message bodies must not be visible to the operator. |
+| `no-queue-copy.html` | **No Queue Copy** | Same as Standard, minus the Queue Copy module. For deployments where operators should browse and forward but never bulk-copy between queues. |
 | `solAdmin.html` | **Administration** | The standalone admin app: sign in as an administrator to manage users and broker connections. Served by the gateway at `/solAdmin` in managed deployments, never as the main app. See [Administration](#administration-soladmin). |
-| `mock.html` | Full + mocks | Interactive demo (see [Demo Mode](#demo-mode-mockhtml)) |
+| `mock.html` | Standard + demo broker | Interactive demo (see [Demo Mode](#demo-mode-mockhtml)) |
 
 Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately**:
 
@@ -419,8 +419,8 @@ other export works without it.)
 
 ### Opening the demo
 
-`mock.html` is built by the release run and included in its `pwa-bundle` workflow artifact (Actions page, 7-day
-retention). Download it and open it directly in a browser — no server required.
+`mock.html` is attached to every GitHub Release. Download it and open it directly in a browser -- no server
+required.
 
 (For developers building from source, `npm run build:mock` produces `dist/mock.html`; `npm run build` produces
 every variant in one pass. See [developer-guide.md](developer-guide.md) for the full build workflow.)

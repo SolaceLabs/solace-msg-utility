@@ -7,7 +7,7 @@ This project ships in four forms:
 3. The **PWA bundles** (`index.html` and its variants) attached to the GitHub Release.
 4. The **gateway binaries** (`go-web-proxy`), cross-compiled and attached to the same Release.
 
-All four are produced by [`.github/workflows/tag.yml`](../.github/workflows/tag.yml), which fires when you **push a `v*` tag**. Nothing is built or pushed on an ordinary branch push or pull request.
+All four are produced by [`.github/workflows/tag.yml`](../.github/workflows/tag.yml), which fires when you **push a `v*` tag**. Nothing is built or pushed on an ordinary branch push or pull request (the only automatic runs are listed under [Day-to-day branching](#day-to-day-branching): the narrow CI trigger and the SCA scan).
 
 The tag itself is the single source of version truth. There is no version field to bump: the binaries report the tag as-is (`v3.4.0`), the image tags and the PWA's `__APP_VERSION__` take it with the leading `v` stripped (`3.4.0`), and `package.json` carries the deliberately implausible placeholder `0.0.0-dev` so a build that lost the injection looks wrong rather than merely out of date.
 
@@ -22,7 +22,7 @@ The tag itself is the single source of version truth. There is no version field 
 
 There is **no** `develop`, `release/*`, or long-lived staging branch. The tag workflow runs only against the commit the tag points at, so whatever is on `main` at tag time is what ships.
 
-**Nothing runs on push or PR by design** — the one exception is a PR that touches `.github/workflows/**`, `.github/dependabot.yml`, or the dev scripts, which gets the full gate so Dependabot's action bumps are verified before merging. This means `main` can sit broken between releases, which is exactly why the pre-tag sweep below matters.
+**No gate runs on push or PR by design**, with two exceptions. A PR that touches `.github/workflows/**`, `.github/dependabot.yml`, or the dev scripts gets the full gate, so Dependabot's action bumps are verified before merging. And [`sca-scan-and-guard.yml`](../.github/workflows/sca-scan-and-guard.yml) (the organisation's FOSSA SCA scan, configured by `.fossa.yml`) runs on every PR to and push to `main`; a push also records the commit in the organisation's release manifest. This means `main` can sit broken between releases, which is exactly why the pre-tag sweep below matters.
 
 ---
 
@@ -133,6 +133,8 @@ The two vendor JS files (`solclient.js`, `jszip.min.js`) are **not** release ass
 
 `scan` inside the dev scripts is fatal on **fixable** CVEs and warns-and-passes on unfixable ones: there is nothing to act on for the latter, and blocking on it would freeze releases on someone else's patch schedule. There is no report-only mode — local and CI behave identically, so a contributor never meets a CI-only finding.
 
+For npm, [scripts/npm-audit-gate.mjs](../scripts/npm-audit-gate.mjs) (`npm run audit:gate`) draws the same line as Trivy's `--ignore-unfixed`: an advisory is unfixable while the vulnerable package's latest release is still inside the advisory's range, and turns fatal the day a patched release ships. A bare `npm audit` cannot draw it -- it fails on unfixable advisories, and `npm audit fix --force` "fixes" them by downgrading a parent until the package disappears.
+
 Note that a scanner or advisory-database update can turn a tag red with no code change. That is accepted deliberately: the vulnerability database already updates daily, so the gate was never deterministic, and `--ignore-unfixed` keeps it actionable.
 
 ### Pages deploy
@@ -170,7 +172,7 @@ Dependabot manages **actions only, on purpose**. Language dependencies move the 
 Two things Dependabot cannot track:
 
 - **Runner labels expire**, unlike action SHAs. GitHub keeps two GA images per OS and brownouts precede removal. Check [actions/runner-images](https://github.com/actions/runner-images/releases) before assuming `ubuntu-24.04` / `windows-2025` are still live.
-- **The toolchain pins**: `toolchain go1.27.0` in [go-web-proxy/go.mod](../go-web-proxy/go.mod) (self-honouring — the `go` binary fetches it on your laptop and both runners) and `nodejs` in [`.tool-versions`](../.tool-versions), which `actions/setup-node` reads via `node-version-file`. Runner labels pin the OS version, not the toolchain, so without these the project is green locally and red in CI by default.
+- **The toolchain pins**: `toolchain go1.27.2` in [go-web-proxy/go.mod](../go-web-proxy/go.mod) (self-honouring — the `go` binary fetches it on your laptop and both runners) and `nodejs` in [`.tool-versions`](../.tool-versions), which `actions/setup-node` reads via `node-version-file`. Runner labels pin the OS version, not the toolchain, so without these the project is green locally and red in CI by default.
 
 ---
 
@@ -209,7 +211,7 @@ Do **not** retag an existing version. Image consumers cache by digest, so retagg
 | --- | --- | --- |
 | Workflow does not fire at all | The tag doesn't match `v*`, or `tag.yml` isn't on the default branch yet. | Workflows must be merged to `main` before they can be relied on. Check the tag name. |
 | `plan` fails with `BUILD_TARGETS must be a non-empty JSON array` | The repo variable is malformed. | `gh variable set BUILD_TARGETS --body '[{"os":"linux","arch":"amd64"}]'` — mind the quoting. |
-| `gates` fails on `npm audit` | A transitive npm dep has a new fixable HIGH/CRITICAL advisory. | `npm update <pkg>` for an in-range fix, or bump the direct dependency. Re-run `./scripts/dev.sh scan`, commit, re-tag. |
+| `gates` fails on the npm audit gate (`FATAL:` lines in `scan.log`) | A transitive npm dep has a new fixable HIGH/CRITICAL advisory: a release outside its range exists. Unfixable ones only print `WARN unfixable`. | `npm update <pkg>` for an in-range fix, else bump the direct dependency or add an `overrides` entry -- never `npm audit fix --force`. Re-run `./scripts/dev.sh scan`, commit, re-tag. |
 | `gates` fails on `govulncheck` | A new Go stdlib or module vuln affects `go-web-proxy/`. | Update [go-web-proxy/go.mod](../go-web-proxy/go.mod) (often just `go get -u` on the affected module) and re-tag. |
 | `gates` fails only on `windows-2025` | Usually a path or shell difference between the two dev scripts. | Reproduce with `./scripts/dev.ps1 all scan`. The two scripts must stay behaviourally identical. |
 | `gates` passes locally but fails in CI on a Go build | The runner's preinstalled Go is older than yours and the toolchain pin is missing or unhonoured. | Check `toolchain` is present in [go-web-proxy/go.mod](../go-web-proxy/go.mod). Never invoke a Go tool as `go run pkg@version` — that runs module-less and ignores the pin. |

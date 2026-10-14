@@ -1,13 +1,13 @@
 /**
  * The active variant — re-exports `ACTIVE_MODULES` from one specific variant
- * file. Default is `./full`, which lists every shipping module.
+ * file. Default is `./standard`, the everyday bundle.
  *
- * Two ways to ship a different variant:
- *   1. Edit this file's re-export to point at a different variant manifest
- *      (e.g. `export * from './browser-only';`). Manual, durable.
- *   2. Set `VITE_VARIANT=<name>` at build time. Vite's resolver in
- *      `vite.config.ts` rewrites this file's path to `./<name>.ts` so the
- *      same `import { ACTIVE_MODULES } from './variants/_active'` line in
- *      the registry picks up the chosen variant. Per-build, no source edit.
+ * Ship a different variant with the build wrapper's flag, not by editing this
+ * file: `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>.html`.
+ * The flag drives both `vite.config.ts`'s variant-redirect resolver (which
+ * rewrites this file's path to `./<name>.ts`) and the `virtual:module-registry`
+ * plugin. With no flag, the plugin falls back to `standard`, so this re-export
+ * must stay pointed at `./standard`: a variant listing a module outside
+ * `standard` would find no bundled `module.ts` for it, and boot throws.
  */
 export * from './standard';

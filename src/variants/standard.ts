@@ -1,10 +1,11 @@
 /**
- * Full variant — every module the app ships with.
+ * Standard variant -- the everyday bundle (`dist/index.html`). The admin-only
+ * modules ship separately in the `admin` variant.
  *
  * One line per active module. To disable a module in this variant, comment
  * its line. To add a new module, drop a `src/modules/<id>/` directory and
  * add a line here. The registry resolves each id to the corresponding
- * `module.ts` via `import.meta.glob` at build time.
+ * `module.ts` via `virtual:module-registry` at build time.
  *
  * Higher priority installs first and renders higher in the sidebar. Pick a
  * priority that slots into the existing values; the kernel sorts descending

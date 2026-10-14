@@ -116,10 +116,11 @@ export interface AppState {
     } | null;
     isSempConnected: boolean;
     /**
-     * Current managed (RBAC) session — present only in the `managed` variant,
-     * set by managed-connections after login and cleared on logout. Optional so
-     * non-managed variants (and their AppContext test literals) need not set it;
-     * absent/null ⇒ RBAC helpers in `./rbac` degrade to allow-all.
+     * Current managed (RBAC) session -- a runtime posture, not a variant: set
+     * after login by the connections module's Managed tab (or by admin-login in
+     * the admin app) and cleared on logout. Optional so unmanaged sessions (and
+     * AppContext test literals) need not set it; absent/null => RBAC helpers in
+     * `./rbac` degrade to allow-all.
      */
     managed?: ManagedSession | null;
     /**
@@ -154,8 +155,9 @@ export interface BusEvents {
     'connection:edit-requested':   void;
     /**
      * The managed RBAC session changed (login / logout / re-fetch entitlements).
-     * The kernel re-renders the sidebar (module visibility) on this. Emitted only
-     * by managed-connections; never fires in non-managed variants.
+     * The kernel re-renders the sidebar (module visibility) on this. Emitted by
+     * the connections Managed tab, admin-login and user-management (self-
+     * demote); never fires in an unmanaged session.
      */
     'rbac:changed':                void;
     'browser:available':           void;

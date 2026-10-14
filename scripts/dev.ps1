@@ -47,21 +47,41 @@ function Ok   { param($m) Write-Host "ok: $m"    -ForegroundColor Green }
 function Warn { param($m) Write-Host "warn: $m"  -ForegroundColor Yellow }
 function Die  { param($m) Write-Host "error: $m" -ForegroundColor Red; exit 1 }
 
-function Get-Now { (Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz') }
+# dev.sh uses `date +%z`, which renders +0800. PowerShell's zzz renders +08:00,
+# so the two scripts' footers would not match. Strip the colon to match.
+function Get-Now {
+  $d = Get-Date
+  $d.ToString('yyyy-MM-ddTHH:mm:ss') + ($d.ToString('zzz') -replace ':', '')
+}
 function Get-Log { param($Task) Join-Path $LogDir "$Task.log" }
+
+# Windows PowerShell 5.1's `-Encoding utf8` ALWAYS writes a BOM, so every log
+# opened with a leading U+FEFF that dev.sh never emits -- `head -1` showed it as
+# mojibake and it defeats a plain `grep '^==='`. Write BOM-less UTF-8 explicitly.
+# Set-/Add-Content also append a line terminator, so these do the same.
+$Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+
+function Set-LogText {
+  param([string]$Path, [string]$Text)
+  [System.IO.File]::WriteAllText($Path, $Text + [Environment]::NewLine, $Utf8NoBom)
+}
+
+function Add-LogText {
+  param([string]$Path, [string]$Text)
+  [System.IO.File]::AppendAllText($Path, $Text + [Environment]::NewLine, $Utf8NoBom)
+}
 
 function Start-TaskLog {
   param($Task)
-  Set-Content -Path (Get-Log $Task) -Encoding utf8 `
-    -Value ("=== {0} | {1} | version {2} ===" -f (Get-Now), $Task, $Version)
+  Set-LogText (Get-Log $Task) ("=== {0} | {1} | version {2} ===" -f (Get-Now), $Task, $Version)
 }
 
 function Write-Finish {
   param([string]$Task, [int]$Code, [int]$Seconds)
   $status = if ($Code -eq 0) { 'OK' } else { "FAILED (exit $Code)" }
   $line = '{0} | {1} | {2}s | {3}' -f (Get-Now), $Task, $Seconds, $status
-  # Add-Content, never Tee-Object: Tee doubles lines and writes UTF-16.
-  Add-Content -Path (Get-Log $Task) -Value $line -Encoding utf8
+  # Never Tee-Object: Tee doubles lines and writes UTF-16.
+  Add-LogText (Get-Log $Task) $line
   Write-Host $line
 }
 
@@ -74,7 +94,7 @@ function Invoke-Logged {
   $out = (& $Exe @CmdArgs 2>&1 | ForEach-Object { "$_" } | Out-String -Width 4096)
   $code = $LASTEXITCODE
   $out = $out -replace "\x1b\[[0-9;?]*[a-zA-Z]", ""
-  Add-Content -Path (Get-Log $Task) -Value $out -Encoding utf8
+  Add-LogText (Get-Log $Task) $out
   Write-Host $out
   return $code
 }
@@ -82,7 +102,7 @@ function Invoke-Logged {
 # A line of our own onto the console and the log.
 function Write-Note {
   param([string]$Task, [string]$Text)
-  Add-Content -Path (Get-Log $Task) -Value $Text -Encoding utf8
+  Add-LogText (Get-Log $Task) $Text
   Write-Host $Text
 }
 
@@ -126,7 +146,10 @@ function Test-LinuxDocker {
 
 # trivy natively when it is on PATH, otherwise the container. --pull=always
 # matters more than the tag: without it docker reuses whatever :latest resolved
-# to months ago -- unpinned AND stale.
+# to months ago -- unpinned AND stale. The docker.sock mount is what lets the
+# containerised trivy see the image `image` just built locally; without it trivy
+# falls back to pulling the never-pushed tag from the registry and fails.
+# Docker Desktop on Windows accepts the same Linux socket path.
 function Invoke-TrivyImage {
   param([string]$Task, [string]$Ref)
   if (Get-Command trivy -ErrorAction SilentlyContinue) {
@@ -135,7 +158,8 @@ function Invoke-TrivyImage {
       '--severity','HIGH,CRITICAL','--ignore-unfixed',$Ref))
   }
   return (Invoke-Logged $Task 'docker' @(
-    'run','--rm','--pull=always','-e','NO_COLOR=1','aquasec/trivy:latest','image',
+    'run','--rm','--pull=always','-e','NO_COLOR=1',
+    '-v','/var/run/docker.sock:/var/run/docker.sock','aquasec/trivy:latest','image',
     '--quiet','--exit-code','1','--severity','HIGH,CRITICAL','--ignore-unfixed',$Ref))
 }
 
@@ -255,7 +279,7 @@ function Task-image {
 function Task-scan {
   $c = Install-Deps 'scan'; if ($c -ne 0) { return $c }
 
-  $c = Invoke-Logged 'scan' 'npm' @('audit','--audit-level=high'); if ($c -ne 0) { return $c }
+  $c = Invoke-Logged 'scan' 'npm' @('run','audit:gate'); if ($c -ne 0) { return $c }
 
   # The managed superset: go-web-proxy's only third-party dependency
   # (gopkg.in/yaml.v3) is compiled in behind `-tags managed`, so an untagged

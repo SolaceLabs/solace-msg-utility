@@ -28,7 +28,7 @@ Then open <https://localhost:9443/>. The container ships a built-in HTTPS gatewa
 
 Take `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) and the two vendor libraries `solclient.js`, `jszip.min.js` from the `dist` branch. Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, …). See [deployment.md → Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
 
-> **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials — Connections, Queue Copy and Queue Subscriptions run against deterministic mock data (message browsing needs a real broker). See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details.
+> **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials — every module, message browsing included, runs against an in-browser mock broker. See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details.
 
 ## Connecting to a broker
 
