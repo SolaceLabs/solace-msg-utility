@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * npm audit gate -- the npm half of the `scan` task.
  *
@@ -19,6 +18,10 @@
  * npm runs as `node <npm-cli.js>` with no shell, so the `<`/`>` in an advisory
  * range never reach cmd.exe. That path comes from npm_execpath, which only
  * `npm run` sets -- hence the npm script.
+ *
+ * No `#!` line, on purpose: tests import this file, and Vite's SSR transform
+ * only recognises an LF-terminated hashbang. On a CRLF (Windows) checkout it
+ * hoists the imports above the `#!`, and the file fails to parse.
  *
  * Usage: npm run audit:gate
  */
