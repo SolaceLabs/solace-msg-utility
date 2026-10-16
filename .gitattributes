@@ -1,0 +1,14 @@
+# Text files are LF in the index and in every checkout, Windows included
+# (eol= overrides a runner's core.autocrlf=true). CRLF breaks LF-only tooling:
+# bash rejects a CRLF dev.sh, and Vite's SSR transform mis-parses a CRLF hashbang.
+* text=auto eol=lf
+
+# Never convert or text-diff binaries.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.exe binary
+*.zip binary
+*.woff binary
+*.woff2 binary
