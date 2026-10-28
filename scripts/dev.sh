@@ -11,6 +11,12 @@ GO_DIR="$REPO_ROOT/go-web-proxy"
 COV_DIR="$REPO_ROOT/coverage"
 COMPOSE_FILE="$REPO_ROOT/docker/docker-compose.yaml"
 IMAGE_REPO="ghcr.io/solacelabs/solace-msg-utility"
+# The image scanner is pinned like any other dependency: a newer trivy can turn
+# the same image red on its own. The digest is the multi-arch index. Bump the
+# version and digest together with dev.ps1 and tag.yml's trivy-action
+# `version:` -- see docs/git.md, "Keeping the workflow pins current". A trivy on
+# PATH is deliberately not used: it cannot be pinned, and CI runners have none.
+TRIVY_IMAGE="aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c"
 mkdir -p "$LOG_DIR"
 cd "$REPO_ROOT"
 
@@ -113,22 +119,18 @@ has_linux_docker() {
   [ "$(docker info --format '{{.OSType}}' 2>/dev/null)" = "linux" ]
 }
 
-# trivy natively when it is on PATH, otherwise the container. --pull=always
-# matters more than the tag: without it docker reuses whatever :latest resolved
-# to months ago -- unpinned AND stale. The docker.sock mount is what lets the
-# containerised trivy see the image `image` just built locally; without it trivy
-# falls back to pulling the never-pushed tag from the registry and fails.
+# Always the pinned container ($TRIVY_IMAGE), never a trivy on PATH -- see the
+# pin for why. Docker is there: every caller sits behind has_linux_docker.
+# --pull=missing, not always: a digest cannot move, so it is fetched once per
+# bump. The docker.sock mount is what lets the containerised trivy see the
+# image `image` just built locally; without it trivy falls back to pulling the
+# never-pushed tag from the registry and fails.
 trivy_image() {
   local task=$1 ref=$2
-  if command -v trivy >/dev/null 2>&1; then
-    run "$task" trivy image --quiet --exit-code 1 \
-      --severity HIGH,CRITICAL --ignore-unfixed "$ref"
-  else
-    run "$task" docker run --rm --pull=always -e NO_COLOR=1 \
-      -v /var/run/docker.sock:/var/run/docker.sock \
-      aquasec/trivy:latest image --quiet --exit-code 1 \
-      --severity HIGH,CRITICAL --ignore-unfixed "$ref"
-  fi
+  run "$task" docker run --rm --pull=missing -e NO_COLOR=1 \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    "$TRIVY_IMAGE" image --quiet --exit-code 1 \
+    --severity HIGH,CRITICAL --ignore-unfixed "$ref"
 }
 
 # --- tasks ------------------------------------------------------------------

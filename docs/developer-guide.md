@@ -4,7 +4,7 @@
 
 ```bash
 git clone <repository-url>
-cd solabs-msg-utility
+cd solace-msg-utility
 npm install
 npm run dev          # Dev server at http://localhost:5173
 npm run preview      # Serve an already-built dist/ bundle
@@ -24,9 +24,11 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 | `npm run build:admin` | `solAdmin.html` (the standalone administration app — see [architecture.md -> The admin app](architecture.md#the-admin-app-soladmin)) |
 | `npm run build` | `mock.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, AND `solAdmin.html` in one pass |
 
+`dist/` is git-ignored build output; nothing in it is committed. Tagged Releases publish the bundles and gateway binaries (see [git.md -> Release assets](git.md#release-assets)). For local runs, drop `solclient.js` / `jszip.min.js` in beside the bundles (see [deployment.md -> External Runtime Dependencies](deployment.md#external-runtime-dependencies)).
+
 **The gates are `scripts/dev.sh` / `scripts/dev.ps1`, not the npm scripts.** The table above is the variant reference — reach for an individual `build:*` script when iterating on one variant. For anything you would call a gate, use the task: `./scripts/dev.sh all` (`build vet test`; CI runs `all scan`), `cov`, `scan`, `image`, or `full` for the pre-tag sweep. The tasks call the npm scripts above plus the Go halves, and they are the only place a build command lives — see [contributing.md](contributing.md#development-workflow) for the task table and [git.md](git.md) for how a tag turns into a release.
 
-The npm scripts the tasks wrap: `typecheck` (`tsc --noEmit`), `check:docs` (the credential-transform secrecy check), `audit:gate` (the npm half of `scan`: [scripts/npm-audit-gate.mjs](../scripts/npm-audit-gate.mjs) runs `npm audit` and fails only on fixable HIGH/CRITICAL advisories), `test` / `test:coverage`, and `build`. The `image` and `scan` tasks otherwise run their commands directly (`docker compose build`, `govulncheck`, trivy) rather than through the `image:*` / `scan:*` npm scripts. `scan` runs `go tool govulncheck`, which resolves through the `tool` directive pinned in [go-web-proxy/go.mod](../go-web-proxy/go.mod) — never `go run pkg@version`, which runs module-less and ignores the toolchain pin.
+The npm scripts the tasks wrap: `typecheck` (`tsc --noEmit`), `check:docs` (the credential-transform secrecy check: [scripts/check-docs-secrecy.mjs](../scripts/check-docs-secrecy.mjs) scans `docs/`, `README.md` and `CLAUDE.md`, and also fails if one of them is missing or no markdown is found), `audit:gate` (the npm half of `scan`: [scripts/npm-audit-gate.mjs](../scripts/npm-audit-gate.mjs) runs `npm audit` and fails only on fixable HIGH/CRITICAL advisories), `test` / `test:coverage`, and `build`. The `image` and `scan` tasks otherwise run their commands directly (`docker compose build`, `go tool govulncheck`, and the pinned Trivy container, see [git.md](git.md#keeping-the-workflow-pins-current)); there are deliberately no `image:*` / `scan:*` npm scripts, so each gate has one definition. `scan` runs `go tool govulncheck`, which resolves through the `tool` directive pinned in [go-web-proxy/go.mod](../go-web-proxy/go.mod) — never `go run pkg@version`, which runs module-less and ignores the toolchain pin.
 
 Custom variants are built via the `scripts/vite-build.mjs` wrapper, which surfaces `--variant=<name>`, `--out-filename=<name>`, and `--show-payload=<bool>` because Vite's CLI parser (CAC) rejects unknown flags. The wrapper forwards them to `vite.config.ts` via private env vars. Example: `node scripts/vite-build.mjs --variant=min --out-filename=min.html`.
 
@@ -172,7 +174,7 @@ tests/
   helpers/             # loadModuleDOM, resetQueueBrowserState
   core/                # Kernel, EventBus, toast, utils tests (dom.ts is exercised transitively by module tests)
   modules/             # Per-module test files
-  build/               # module-registry-plugin.test.ts — manifest → virtual:module-registry
+  build/               # scripts/*.mjs tests — module-registry-plugin (manifest → virtual:module-registry), npm-audit-gate, check-docs-secrecy
   variants.test.ts     # Every variant manifest resolves and keeps its shape invariants
   registry.test.ts     # Registry resolution + kernel integration
   main.test.ts         # Bootstrap
@@ -180,6 +182,7 @@ tests/
     full-flow.test.ts        # Kernel mechanics with stub modules
     module-events.test.ts    # Real modules + shared EventBus + mocked services
     message-pipeline.test.ts # Broker message → ingest → filter → DOM, end-to-end
+    admin-session.test.ts    # /solAdmin session lifecycle: real admin-login + user-management
   main.test.ts         # Bootstrap tests
   registry.test.ts     # Registry invariant tests
 ```
@@ -240,6 +243,7 @@ All inter-module coordination goes through typed events:
 | `config:max-messages-changed` | `{ value }` | Connections -> Queue Browser |
 | `app:message-delete` | `{ id }` | Queue Browser row -> Queue Browser handler |
 | `rbac:changed` | void | Connections (Managed panel) / User Mgmt / Admin Login -> Kernel (sidebar re-render) + any module holding entitlement-derived state |
+| `rbac:sign-out-requested` | void | User Mgmt -> Admin Login / Connections (Managed panel): end the managed session (own password changed / own account deleted) |
 | `jszip:loaded` | void | Window -> Queue Browser |
 
 ### Factory Pattern

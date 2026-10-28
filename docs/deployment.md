@@ -40,7 +40,7 @@ Then open <https://localhost:9443/>.
 
 `/tls` is baked into the image as an empty directory owned by UID `65532`, so a **named volume** (`solace-tls` above) inherits that ownership and works out of the box. A **bind mount** does NOT inherit image ownership — the host directory must already be owned by UID `65532`, or pre-populated with `tls.crt` / `tls.key` so the gateway never needs to write.
 
-**Image tags:** `ghcr.io/solacelabs/solace-msg-utility` is published multi-arch (`linux/amd64`, `linux/arm64`) with `:latest`, `:<major>`, `:<major>.<minor>`, and `:<major>.<minor>.<patch>` tags on every release; the Release notes quote the exact digest. Pin to a specific tag for production. The same release also publishes a [managed](#managed-mode-rbac) image under the `managed-` prefixed tags (`:managed-latest`, `:managed-<major>`, `:managed-<major>.<minor>`, `:managed-<version>`).
+**Image tags:** `ghcr.io/solacelabs/solace-msg-utility` is published multi-arch (`linux/amd64`, `linux/arm64`) with `:latest`, `:<major>`, `:<major>.<minor>`, and `:<major>.<minor>.<patch>` tags on every release; the Release notes quote the exact digest, and a tag only ever moves to a digest that passed the Trivy gate on both architectures. Pin to a specific tag for production. The same release also publishes a [managed](#managed-mode-rbac) image under the `managed-` prefixed tags (`:managed-latest`, `:managed-<major>`, `:managed-<major>.<minor>`, `:managed-<version>`).
 
 **Environment variables** (all optional):
 
@@ -83,7 +83,7 @@ Then open <https://localhost:9443/>.
 
 > **Building the image locally** (for developers iterating on the gateway): `docker compose -f docker/docker-compose.yaml up --build` rebuilds from source. Note it starts **both** services — `gateway` on host port `19443` and `gateway-managed` on `29443` — since no profile restricts the default `up`; pass a service name (`up --build gateway`) to start just one. Production users should pull the published image above. See [developer-guide.md](developer-guide.md) for the full build workflow.
 
-**Vendor scripts in compose:** both compose services bind-mount `../dist/solclient.js` and `../dist/jszip.min.js` read-only into `/SolaceMsgUtility/`, so those two files must exist in your local `dist/` before `docker compose up` — they are deliberately not baked into the image (see [External Runtime Dependencies](#external-runtime-dependencies)).
+**Vendor scripts in compose:** both compose services bind-mount `../dist/solclient.js` and `../dist/jszip.min.js` read-only into `/SolaceMsgUtility/`, so those two files must exist in your local `dist/` before `docker compose up` — they are deliberately not baked into the image (see [External Runtime Dependencies](#external-runtime-dependencies)). `dist/` is git-ignored, so a fresh clone has none: create it and drop both files in before the first `up`. A missing file makes Docker create an empty directory in its place (root-owned on a Linux engine, and the same goes for `dist/` itself, which then makes the next build fail to write) — delete it and retry.
 
 **No `HEALTHCHECK`:** the `scratch` image has no shell or `curl`, so the image deliberately declares none. Use an external check (a Kubernetes liveness probe, a swarm healthcheck, a monitoring agent) against `https://<host>:9443/hosted` with the certificate pinned or verification disabled.
 
@@ -127,7 +127,7 @@ docker run --rm -p 9443:9443 \
   ghcr.io/solacelabs/solace-msg-utility:managed-latest
 ```
 
-**First-run bootstrap:** if `USERS_FILE` is missing, the gateway writes a default admin — username `admin`, password `msgutility`, with **no** broker access. This password is public in this repo, so **log in and change it immediately via the User Management module** (and grant yourself entitlements there or in Connection Management). Do not edit the YAML files by hand in production — use the admin modules so the credential obfuscation stays consistent. (Out-of-band edits are still picked up without a restart: the **Refresh** button in the Managed panel makes the gateway re-read both YAML files from disk.)
+**First-run bootstrap:** if `USERS_FILE` is missing, the gateway writes a default admin — username `admin`, password `msgutility`, with **no** broker access. This password is public in this repo, so **log in and change it immediately via the User Management module** (saving your own new password signs you out of `/solAdmin`; sign in again with it) (and grant yourself entitlements there or in Connection Management). Do not edit the YAML files by hand in production — use the admin modules so the credential obfuscation stays consistent. (Out-of-band edits are still picked up without a restart: the **Refresh** button in the Managed panel makes the gateway re-read both YAML files from disk.)
 
 **Site seed:** the gateway generates `SITE_SEED_FILE` with random bytes on first run and uses it to obfuscate/reveal broker credentials. **Back it up and treat it as a secret.** Losing or replacing it orphans every stored broker credential (they can no longer be revealed) — re-seeding then requires re-entering every connection's credentials via Connection Management. Keep it on the same persistent volume as the YAML stores.
 
@@ -151,7 +151,13 @@ Managed mode is fit for **trusted-internal** use only; the broker relay itself s
 
 ### Self-host the static files
 
-The simplest deployment without Docker. `index.html` is attached to every [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) (alongside the other bundle variants, the `go-web-proxy` binaries and a `SHA256SUMS.txt` to verify them). The two vendor libraries are not release assets — they are not committed to `main` — so take those from the `dist` branch of this repo:
+The simplest deployment without Docker. `index.html` is attached to every [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) the tag pipeline creates (alongside the other bundle variants, the `go-web-proxy` binaries and a `SHA256SUMS.txt` to verify them); releases up to v3.3.4 predate the pipeline and carry no assets. The newest is always at a stable URL, so a script can fetch it directly — keep `-f`, so a failed download is an error instead of a saved error page:
+
+```bash
+curl -fLO https://github.com/SolaceLabs/solace-msg-utility/releases/latest/download/index.html
+```
+
+The two vendor libraries are not release assets — they are not committed to `main` — so take those from the `dist` branch of this repo:
 
 ```text
 your-server/

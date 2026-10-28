@@ -44,8 +44,8 @@ improvement-plan.md
 # Dev-script task logs (scripts/dev.sh, dev.ps1)
 scripts/logs
 
-# Gateway binaries written by `dev.sh build` (*.exe above only covers Windows)
-dist/go-web-proxy-*
+# Build output (every bundle variant, both gateway binaries); Releases publish it
+/dist/
 
 # graphify: regenerated caches, dated snapshots and per-machine stamps
 graphify-out/20*/

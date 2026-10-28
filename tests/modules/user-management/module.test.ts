@@ -60,6 +60,25 @@ async function setup(managed: ManagedSession | null = ADMIN) {
 
 const rowCount = (c: HTMLElement) => el(c, '#user-mgmt-rows').querySelectorAll('tr').length;
 
+/** Click row `i`'s Edit (`.btn-secondary`) or Delete (`.btn-danger`) button. */
+function clickRow(c: HTMLElement, i: number, cls: '.btn-secondary' | '.btn-danger'): void {
+    el(c, '#user-mgmt-rows').querySelectorAll('tr')[i].querySelector<HTMLButtonElement>(cls)!.click();
+}
+
+/**
+ * Stand in for the module that owns the login (admin-login / the Managed
+ * panel): answer a sign-out request the way its logout does — clear the
+ * session, then emit rbac:changed.
+ */
+function answerSignOut(ctx: AppContext) {
+    const signOut = vi.fn(() => {
+        ctx.setState('managed', null);
+        ctx.eventBus.emit('rbac:changed');
+    });
+    ctx.eventBus.on('rbac:sign-out-requested', signOut);
+    return signOut;
+}
+
 beforeEach(() => {
     svcMock.listUsers.mockReset();
     svcMock.saveUser.mockReset();
@@ -341,5 +360,102 @@ describe('user-management — delete', () => {
             .querySelector<HTMLButtonElement>('.btn-danger')!.click();
         await Promise.resolve();
         expect(svcMock.deleteUser).not.toHaveBeenCalled();
+    });
+});
+
+// Changing your own password (or deleting your own account) leaves the session
+// holding a token the gateway no longer accepts, so the module must hand the
+// sign-out to the login owner instead of patching the session or reloading.
+describe('user-management — your own session', () => {
+    it('changing your own password asks the login owner to sign out, with a sign-in-again message', async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        svcMock.saveUser.mockResolvedValue(true);
+        svcMock.listUsers.mockClear();
+        clickRow(container, 0, '.btn-secondary'); // admin = own record
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'new-pw';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+
+        expect(svcMock.saveUser).toHaveBeenCalledWith('admin', 'tok',
+            expect.objectContaining({ username: 'admin', password: 'S1:admin:new-pw' }));
+        expect(toastMock.showToast).toHaveBeenCalledWith('Password changed. Sign in again with the new password.', 'ok', 5000);
+        expect(toastMock.showToast).not.toHaveBeenCalledWith('User saved', 'ok');
+        // Signed out → gated, and the list was never reloaded with the dead token.
+        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+        expect(hidden(container, '#user-mgmt-list-error')).toBe(true);
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+        expect(el<HTMLInputElement>(container, '#user-mgmt-password').value).toBe('');
+    });
+
+    it('editing your own record without a password keeps you signed in', async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        const rbac = vi.fn();
+        ctx.eventBus.on('rbac:changed', rbac);
+        svcMock.saveUser.mockResolvedValue(true);
+        clickRow(container, 0, '.btn-secondary');
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(rbac).toHaveBeenCalled());
+
+        expect(signOut).not.toHaveBeenCalled();
+        expect(ctx.appState.managed).toMatchObject({ username: 'admin', token: 'tok', admin: true });
+        expect(toastMock.showToast).toHaveBeenCalledWith('User saved', 'ok');
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+    });
+
+    it("changing another user's password keeps you signed in", async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        svcMock.saveUser.mockResolvedValue(true);
+        svcMock.listUsers.mockClear();
+        clickRow(container, 1, '.btn-secondary'); // viewer
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'pw2';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledWith('admin', 'tok'));
+
+        expect(svcMock.saveUser.mock.calls[0][2].password).toBe('S1:viewer:pw2');
+        expect(signOut).not.toHaveBeenCalled();
+        expect(ctx.appState.managed).toBe(ADMIN);
+    });
+
+    it('a rejected save of your own password does not sign you out', async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        svcMock.saveUser.mockResolvedValue(false);
+        clickRow(container, 0, '.btn-secondary');
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'new-pw';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toBe('Save failed.'));
+
+        expect(signOut).not.toHaveBeenCalled();
+        expect(ctx.appState.managed).toBe(ADMIN);
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(false);
+    });
+
+    it('deleting your own account signs you out instead of reloading the list', async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        svcMock.deleteUser.mockResolvedValue(true);
+        svcMock.listUsers.mockClear();
+        clickRow(container, 0, '.btn-danger');
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+
+        expect(globalThis.confirm).toHaveBeenCalledWith(expect.stringMatching(/your own account.*signed out/i));
+        expect(svcMock.deleteUser).toHaveBeenCalledWith('admin', 'tok', 'admin');
+        expect(toastMock.showToast).toHaveBeenCalledWith('Account deleted. You have been signed out.', 'ok', 5000);
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+    });
+
+    it('a refused delete of your own account (last admin, 409) does not sign you out', async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        svcMock.deleteUser.mockResolvedValue(false);
+        clickRow(container, 0, '.btn-danger');
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Delete failed', 'error'));
+
+        expect(signOut).not.toHaveBeenCalled();
+        expect(ctx.appState.managed).toBe(ADMIN);
     });
 });

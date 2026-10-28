@@ -160,6 +160,18 @@ export interface BusEvents {
      * demote); never fires in an unmanaged session.
      */
     'rbac:changed':                void;
+    /**
+     * Ask the module that owns the managed login to end the session with its
+     * ordinary sign-out (drop any managed broker connection, clear
+     * `managedStore` + `AppState.managed`, emit `rbac:changed`, show its
+     * sign-in view). Emitted by user-management when the signed-in admin
+     * changes their own password or deletes their own account: the gateway no
+     * longer accepts the session's token, so it cannot be patched in place.
+     * Answered by admin-login (while it holds the session) and by the
+     * connections module (routed to the Managed panel when `appState.managed`
+     * is set).
+     */
+    'rbac:sign-out-requested':     void;
     'browser:available':           void;
     'browser:browse-queue':        { queue: string };
     /** Connections module finished switching VPN on a queue-copy origin request. */

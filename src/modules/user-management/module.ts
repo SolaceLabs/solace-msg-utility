@@ -10,7 +10,11 @@
  *
  * Passwords are one-way-stamped client-side before they leave the browser; the
  * proxy never returns a stored token, so editing a user with a blank password
- * keeps the existing one. Imports only from `src/core/*` and its own service.
+ * keeps the existing one. Changing your OWN password (or deleting your own
+ * account) makes the gateway drop the session's token, so instead of patching
+ * the session the module asks the login owner to sign out
+ * (`rbac:sign-out-requested`). Imports only from `src/core/*` and its own
+ * service.
  */
 import { required } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
@@ -28,6 +32,10 @@ const GLOB_FIELDS = [
     { key: 'msgVpns', placeholder: 'msgVpns (e.g. *)' },
     { key: 'queues', placeholder: 'queues (e.g. *)' },
 ];
+
+// Sign-out toasts carry an instruction and the view changes underneath them —
+// keep them up longer than the 1s default.
+const SIGNED_OUT_TOAST_MS = 5000;
 
 export const UserManagementModule = {
     name: 'User Mgmt.',
@@ -196,13 +204,27 @@ export const UserManagementModule = {
                     setError(els.formError, 'Save failed.');
                     return;
                 }
+                const own = username === m.username;
+                if (own && payload.password) {
+                    // Your own password changed: the gateway now holds the new
+                    // token, so this session's token no longer authenticates and
+                    // patching AppState.managed would only fail on the next call.
+                    // Ask the login owner to sign out; its rbac:changed re-gates
+                    // this module via applyGate. Don't leave the typed password
+                    // in the hidden form.
+                    els.password.value = '';
+                    showToast('Password changed. Sign in again with the new password.', 'ok', SIGNED_OUT_TOAST_MS);
+                    eventBus.emit('rbac:sign-out-requested');
+                    return;
+                }
                 showToast('User saved', 'ok');
-                // Editing your own record may flip your own admin flag. Update the
+                // Editing your own record without a new password (the session's
+                // token is still valid) may flip your own admin flag. Update the
                 // local session (preserving token/broker/vpns via the spread)
                 // BEFORE emitting so the kernel + this module's rbac:changed handler
                 // (applyGate) re-gate off fresh state — emitting alone leaves
                 // appState.managed.admin stale. A self-demote then lands on the gate.
-                if (username === m.username) {
+                if (own) {
                     app.setState('managed', { ...m, admin: payload.admin, operate: payload.operate, readOnly: payload.readOnly });
                     eventBus.emit('rbac:changed');
                 } else {
@@ -218,11 +240,22 @@ export const UserManagementModule = {
         async function removeUser(username: string): Promise<void> {
             const m = appState.managed;
             if (!m) return;
-            if (!confirm(`Delete user "${username}"?`)) return;
+            const own = username === m.username;
+            const question = own
+                ? `Delete your own account "${username}"? You will be signed out.`
+                : `Delete user "${username}"?`;
+            if (!confirm(question)) return;
             try {
                 const ok = await service.deleteUser(m.username, m.token, username);
                 if (!ok) {
                     showToast('Delete failed', 'error');
+                    return;
+                }
+                if (own) {
+                    // The session's account is gone, so reloading the list with
+                    // its token would only fail — sign out instead.
+                    showToast('Account deleted. You have been signed out.', 'ok', SIGNED_OUT_TOAST_MS);
+                    eventBus.emit('rbac:sign-out-requested');
                     return;
                 }
                 showToast('User deleted', 'ok');

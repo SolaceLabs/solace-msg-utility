@@ -47,7 +47,7 @@ services:
       #- tls:/tls
       # Optional: bind-mount your own PWA bundle. Comment out to use the bundle
       # baked into the image at /SolaceMsgUtility.
-      # - ./dist:/SolaceMsgUtility:ro
+      # - ../dist:/SolaceMsgUtility:ro
       - ../dist/solclient.js:/SolaceMsgUtility/solclient.js:ro
       - ../dist/jszip.min.js:/SolaceMsgUtility/jszip.min.js:ro
     # No HEALTHCHECK: the scratch image has no shell or curl. Use an external

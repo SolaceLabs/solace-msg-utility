@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createEventBus } from '../../../src/core/event-bus';
 import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
-import type { AppContext, AppState, EventBus } from '../../../src/core/types';
+import type { AppContext, AppState, EventBus, ManagedSession } from '../../../src/core/types';
 
 /**
  * Admin login — the entry point of the standalone /solAdmin app. Same managed
@@ -182,5 +182,48 @@ describe('admin-login — sign out', () => {
         expect(seen).toEqual([null]);
         expect(hidden('#admin-login-view')).toBe(false);
         expect(el<HTMLInputElement>('#admin-login-password').value).toBe('');
+    });
+});
+
+describe('admin-login — sign-out requested by another module', () => {
+    it('signs out on request while it holds the session', async () => {
+        const { el, hidden } = await install();
+        getConnections.mockResolvedValue(ADMIN_PROFILE);
+        signIn(el);
+        await vi.waitFor(() => expect(hidden('#admin-session-view')).toBe(false));
+
+        const seen: (string | null)[] = [];
+        eventBus.on('rbac:changed', () => seen.push(appState.managed ? 'session' : null));
+        eventBus.emit('rbac:sign-out-requested');
+
+        // The same sign-out as the button, including navigating back here.
+        expect(appState.managed).toBeNull();
+        expect(ctx.managedStore.isActive()).toBe(false);
+        expect(seen).toEqual([null]);
+        expect(hidden('#admin-login-view')).toBe(false);
+        expect(hidden('#admin-session-view')).toBe(true);
+        expect(el<HTMLInputElement>('#admin-login-password').value).toBe('');
+        expect(ctx.loadSelf).toHaveBeenCalledTimes(1);
+
+        // The session is no longer this module's: a repeat request is ignored.
+        eventBus.emit('rbac:sign-out-requested');
+        expect(ctx.loadSelf).toHaveBeenCalledTimes(1);
+        expect(seen).toEqual([null]);
+    });
+
+    it('ignores the request while it holds no session (the Connections Managed tab may own it)', async () => {
+        await install();
+        const other: ManagedSession = {
+            admin: true, username: 'ops', token: 'tok', broker: 'b1', vpns: ['v1'], operate: [], readOnly: [],
+        };
+        appState.managed = other;
+        const rbac = vi.fn();
+        eventBus.on('rbac:changed', rbac);
+
+        eventBus.emit('rbac:sign-out-requested');
+
+        expect(appState.managed).toBe(other);
+        expect(ctx.loadSelf).not.toHaveBeenCalled();
+        expect(rbac).not.toHaveBeenCalled();
     });
 });

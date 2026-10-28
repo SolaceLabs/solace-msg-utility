@@ -410,6 +410,46 @@ describe('managed-connections — disconnect / logout', () => {
     });
 });
 
+// user-management asks for this after the admin changes their own password or
+// deletes their own account; the module shell routes it to the panel's logout.
+describe('connections/managed panel — rbac:sign-out-requested', () => {
+    it('ends the managed session and drops its broker connection', async () => {
+        const { container, ctx } = await setup();
+        await connectToB1Vpn1(container, ctx);
+        const rbac = vi.fn();
+        ctx.eventBus.on('rbac:changed', rbac);
+
+        ctx.eventBus.emit('rbac:sign-out-requested');
+
+        expect(solaceMock.disconnect).toHaveBeenCalled();
+        expect(sempMock.disconnect).toHaveBeenCalled();
+        expect(ctx.appState.managed).toBeNull();
+        expect(ctx.managedStore.isActive()).toBe(false);
+        expect(rbac).toHaveBeenCalled();
+        expect(hidden(container, '#managed-login-view')).toBe(false);
+        expect(el<HTMLInputElement>(container, '#managed-username').value).toBe('');
+    });
+
+    it('leaves a Direct-only session alone', async () => {
+        // Both tabs offered (the `bothTabs()` config of this file's
+        // "connections/managed panel — mode interlock + tab activation" suite),
+        // Direct live, no managed session.
+        hostedMock.probeDeployment.mockResolvedValue({
+            hosted: true, conn: { connModes: 'both', defaultConn: 'direct' },
+        });
+        const { ctx } = await setup();
+        ctx.appState.isConnected = true;
+        ctx.appState.isSempConnected = true;
+
+        ctx.eventBus.emit('rbac:sign-out-requested');
+
+        for (const inst of [...solaceMock.instances, ...sempMock.instances]) {
+            expect(inst.disconnect).not.toHaveBeenCalled();
+        }
+        expect(ctx.appState.isSempConnected).toBe(true);
+    });
+});
+
 describe('managed-connections — refresh entitlements', () => {
     it('re-fetches and updates the session', async () => {
         const { container, ctx } = await setup();

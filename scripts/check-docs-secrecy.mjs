@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Documentation secrecy check.
  *
@@ -16,14 +15,20 @@
  * Failures print FILE:LINE and the rule that tripped — never the surrounding
  * prose, so a CI log never becomes the leak the check exists to prevent.
  *
- * Usage: node scripts/check-docs-secrecy.mjs
+ * A missing target, or a scan that finds no markdown at all, is an ERROR, never
+ * a pass: the check once resolved a wrong root on Linux and "passed" having
+ * read 0 files.
+ *
+ * No `#!` line, on purpose: tests import this file, and Vite's SSR transform
+ * only recognises an LF-terminated hashbang (see scripts/npm-audit-gate.mjs).
+ *
+ * Usage: npm run check:docs (any working directory: the root comes from this file's location)
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.slice(1)), '..');
-
-/** Files and trees to scan. Directories are walked for `.md` only. */
+/** Files and trees to scan, relative to the repo root. Directories are walked for `.md` only. Every entry must exist. */
 const TARGETS = ['docs', 'README.md', 'CLAUDE.md'];
 
 /**
@@ -56,42 +61,102 @@ const ALLOWED = [
     /\bsha256:[0-9a-f]{8,}/i,
 ];
 
-/** Recursively collect markdown files under a target path. */
-function collect(target) {
-    const abs = path.join(ROOT, target);
+/**
+ * The repo root: this file lives in `<root>/scripts/`. `fileURLToPath`, never
+ * `new URL(...).pathname` — slicing that path's leading `/` (meant to drop the
+ * one before a Windows drive letter) left a cwd-relative root on Linux.
+ */
+export function repoRoot() {
+    return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+}
+
+/** Recursively collect markdown files under a target path. A missing target throws. */
+function collect(root, target) {
+    const abs = path.join(root, target);
     let st;
     try {
         st = statSync(abs);
-    } catch {
-        // A target that isn't there yet is not a failure — the check is about
-        // what the docs SAY, not about which of them exist.
-        return [];
+    } catch (err) {
+        throw new Error(
+            `"${target}" not found under ${root} (${err.code}). Every TARGETS entry in ` +
+            'scripts/check-docs-secrecy.mjs must exist — update the list if the file moved.',
+            { cause: err },
+        );
     }
     if (st.isFile()) return abs.endsWith('.md') ? [abs] : [];
-    return readdirSync(abs).flatMap(entry => collect(path.join(target, entry)));
+    return readdirSync(abs).flatMap(entry => collect(root, path.join(target, entry)));
 }
 
-const files = TARGETS.flatMap(collect);
-const violations = [];
-
-for (const file of files) {
-    const rel = path.relative(ROOT, file).replace(/\\/g, '/');
-    readFileSync(file, 'utf-8').split(/\r?\n/).forEach((line, i) => {
+/**
+ * Check one file's text. One `rel:line  [rule-id]` per hit — never the line itself.
+ *
+ * @param {string} rel   repo-relative path, as reported
+ * @param {string} text  file contents
+ * @returns {string[]}
+ */
+export function scanText(rel, text) {
+    const violations = [];
+    text.split(/\r?\n/).forEach((line, i) => {
         if (ALLOWED.some(re => re.test(line))) return;
         for (const rule of RULES) {
             if (rule.re.test(line)) violations.push(`${rel}:${i + 1}  [${rule.id}]`);
         }
     });
+    return violations;
 }
 
-if (violations.length) {
-    console.error(
-        `Documentation secrecy check FAILED: ${violations.length} line(s) describe a cryptographic\n` +
-        'construction. The credential transform is undocumented by policy — say what a value IS\n' +
-        '("packed with the deployment site seed") and what the posture guarantees, never how.\n',
-    );
-    violations.forEach(v => console.error(`  ${v}`));
-    process.exit(1);
+/**
+ * Check every markdown file under `targets`.
+ *
+ * @param {string} root  directory the targets are relative to
+ * @param {string[]} [targets]
+ * @returns {{ files: string[], violations: string[] }}  files repo-relative, `/`-separated
+ */
+export function scanDocs(root, targets = TARGETS) {
+    const files = targets
+        .flatMap(target => collect(root, target))
+        .map(file => path.relative(root, file).replace(/\\/g, '/'));
+    if (!files.length) {
+        throw new Error(
+            `scanned 0 markdown files under ${root} (targets: ${targets.join(', ')}) — a pass on ` +
+            'nothing proves nothing. Check TARGETS in scripts/check-docs-secrecy.mjs.',
+        );
+    }
+    const violations = files.flatMap(rel => scanText(rel, readFileSync(path.join(root, rel), 'utf-8')));
+    return { files, violations };
 }
 
-console.log(`Documentation secrecy check passed (${files.length} files).`);
+/**
+ * The CLI: scan, report, and return the exit code. Never throws — a scan error
+ * (missing target, empty scan, unreadable file) is one ERROR line and a failure.
+ *
+ * @param {string} [root]
+ * @returns {0 | 1}
+ */
+export function main(root = repoRoot()) {
+    let result;
+    try {
+        result = scanDocs(root);
+    } catch (err) {
+        console.error(`Documentation secrecy check ERROR: ${err.message}`);
+        return 1;
+    }
+    const { files, violations } = result;
+    if (violations.length) {
+        console.error(
+            `Documentation secrecy check FAILED: ${violations.length} line(s) describe a cryptographic\n` +
+            'construction. The credential transform is undocumented by policy — say what a value IS\n' +
+            '("packed with the deployment site seed") and what the posture guarantees, never how.\n',
+        );
+        violations.forEach(v => console.error(`  ${v}`));
+        return 1;
+    }
+    console.log(`Documentation secrecy check passed (${files.length} files).`);
+    return 0;
+}
+
+// Basename, not full-path, comparison (as in npm-audit-gate.mjs): a drive-letter
+// case or symlink mismatch on Windows must never make the check skip itself and pass.
+if (process.argv[1] && path.basename(process.argv[1]) === path.basename(fileURLToPath(import.meta.url))) {
+    process.exitCode = main();
+}

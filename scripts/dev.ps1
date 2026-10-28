@@ -13,6 +13,12 @@ $GoDir       = Join-Path $RepoRoot 'go-web-proxy'
 $CovDir      = Join-Path $RepoRoot 'coverage'
 $ComposeFile = Join-Path $RepoRoot 'docker/docker-compose.yaml'
 $ImageRepo   = 'ghcr.io/solacelabs/solace-msg-utility'
+# The image scanner is pinned like any other dependency: a newer trivy can turn
+# the same image red on its own. The digest is the multi-arch index. Bump the
+# version and digest together with dev.sh and tag.yml's trivy-action
+# `version:` -- see docs/git.md, "Keeping the workflow pins current". A trivy on
+# PATH is deliberately not used: it cannot be pinned, and CI runners have none.
+$TrivyImage = 'aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c'
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Set-Location $RepoRoot
 $env:NO_COLOR = '1'
@@ -144,22 +150,18 @@ function Test-LinuxDocker {
   return ("$t".Trim() -eq 'linux')
 }
 
-# trivy natively when it is on PATH, otherwise the container. --pull=always
-# matters more than the tag: without it docker reuses whatever :latest resolved
-# to months ago -- unpinned AND stale. The docker.sock mount is what lets the
-# containerised trivy see the image `image` just built locally; without it trivy
-# falls back to pulling the never-pushed tag from the registry and fails.
+# Always the pinned container ($TrivyImage), never a trivy on PATH -- see the
+# pin for why. Docker is there: every caller sits behind Test-LinuxDocker.
+# --pull=missing, not always: a digest cannot move, so it is fetched once per
+# bump. The docker.sock mount is what lets the containerised trivy see the
+# image `image` just built locally; without it trivy falls back to pulling the
+# never-pushed tag from the registry and fails.
 # Docker Desktop on Windows accepts the same Linux socket path.
 function Invoke-TrivyImage {
   param([string]$Task, [string]$Ref)
-  if (Get-Command trivy -ErrorAction SilentlyContinue) {
-    return (Invoke-Logged $Task 'trivy' @(
-      'image','--quiet','--exit-code','1',
-      '--severity','HIGH,CRITICAL','--ignore-unfixed',$Ref))
-  }
   return (Invoke-Logged $Task 'docker' @(
-    'run','--rm','--pull=always','-e','NO_COLOR=1',
-    '-v','/var/run/docker.sock:/var/run/docker.sock','aquasec/trivy:latest','image',
+    'run','--rm','--pull=missing','-e','NO_COLOR=1',
+    '-v','/var/run/docker.sock:/var/run/docker.sock',$TrivyImage,'image',
     '--quiet','--exit-code','1','--severity','HIGH,CRITICAL','--ignore-unfixed',$Ref))
 }
 

@@ -14,6 +14,11 @@
  * Adopting the profile into `ctx.managedStore` matters even with no broker in
  * play — `connection-management` seals credentials with the deployment's site
  * seed through `packSecret`, and the store is the only holder of that seed.
+ *
+ * It is the session's only writer in the admin app, so a sign-out another
+ * module needs (user-management, after an own-password change or own-account
+ * delete) arrives as `rbac:sign-out-requested` and runs the same `doLogout` as
+ * the Sign out button.
  */
 import { required } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
@@ -73,6 +78,12 @@ export const AdminLoginModule = {
             gate.show();
         }
 
+        // Whether THIS module holds the managed session. Module-local rather
+        // than read off appState.managed: in the kitchen-sink build the
+        // Connections Managed tab can own the session instead (and answers the
+        // same sign-out request itself, before this handler runs).
+        let signedIn = false;
+
         async function doLogin(): Promise<void> {
             const username = els.username.value.trim();
             const password = els.password.value;
@@ -103,6 +114,7 @@ export const AdminLoginModule = {
                     admin: true, username, token, broker: '',
                     operate: p.operate, readOnly: p.readOnly, vpns: [],
                 });
+                signedIn = true;
                 eventBus.emit('rbac:changed');
                 els.sessionSummary.textContent = `Signed in as ${username} (administrator).`;
                 showView('session');
@@ -114,6 +126,7 @@ export const AdminLoginModule = {
         }
 
         function doLogout(): void {
+            signedIn = false;
             store.clear();
             app.setState('managed', null);
             eventBus.emit('rbac:changed');
@@ -131,6 +144,11 @@ export const AdminLoginModule = {
                 if ((e as KeyboardEvent).key === 'Enter') void doLogin();
             });
         });
+        // Another module invalidated the session: user-management after the
+        // admin changed their own password or deleted their own account. Sign
+        // out exactly as the button does (store, AppState, rbac:changed, login
+        // view, navigate here) so they sign in again with the new password.
+        eventBus.on('rbac:sign-out-requested', () => { if (signedIn) doLogout(); });
 
         const info = await probeDeployment();
         if (info.hosted) {

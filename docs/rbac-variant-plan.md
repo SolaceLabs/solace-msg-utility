@@ -133,6 +133,34 @@ mode. There is no longer a separate `managed` variant: a managed deployment ship
   broker-admin) so a captured credential's blast radius is bounded. Managed mode is fit for
   **trusted-internal** use only.
 
+## Open hardening items (input to the connections rework)
+
+Found in the October 2026 branch review and parked here for the Managed connections / Connections module rework. None is fixed yet. Items the threat model above already accepts (the ungated relay, `CONN_MODES=both`, the shared site seed, the bearer login token) are not repeated; these are the gaps beyond them. Wording follows the docs-secrecy policy: what a value is and what the posture should be, never how the transform works.
+
+**Gateway (`go-web-proxy/`)**
+
+1. **Login guessing.** `getConnections`, `authUser` and `authAdmin` in [store.go](../go-web-proxy/store.go) compare the presented token with a plain string compare, and nothing throttles or locks out `/managed/*`, so tokens can be guessed online at line rate. Direction: a constant-time compare, plus per-user and per-client throttling with back-off.
+2. **Unbounded bodies before auth.** `managedHandler.decodeBody` in [managed.go](../go-web-proxy/managed.go) decodes the request body before the caller is authenticated and with no size cap. Direction: `http.MaxBytesReader` with a small limit on every `/managed/*` route.
+3. **Bootstrap admin.** A missing `users.yaml` bootstraps `admin` / `msgutility` with a fixed token (`bootstrapAdminToken` in [store.go](../go-web-proxy/store.go)); a deployment that never changes it is open to anyone who can reach it, `/solAdmin` included. Direction: force a password change at first sign-in, or take the bootstrap password from an env var / secret file, and warn on every start while the default is in place.
+4. **Site seed to every user.** `getConnections` returns `siteSeed` to any authenticated user, including one with no entitlements at all. Direction: return it only to admins and to users entitled to at least one VPN.
+5. **`/managed/reload` is open to any user.** Any signed-in user can make the gateway re-read both YAML files. Direction: admin-only, or throttled.
+6. **No shape check on stored secrets.** `saveUser` / `saveConnection` store whatever the caller sends; the gateway never checks that a login token is stamped or that a broker password is packed, so a direct API caller with admin credentials can store plaintext. Direction: reject values that are not in the stamped / packed shape.
+7. **Queue entitlement is client-side only.** The server checks broker + VPN; queue globs are enforced only in the browser. Direction: decide whether the rework moves queue gating server-side, which only matters once the relay is gated too.
+
+**Browser (`src/`)**
+
+8. **Plaintext outlives the dial.** In a managed session the unpacked broker password is written into `AppState.solaceConnection.pass` and `AppState.sempCredentials.pass` (the Managed panel's lifecycle hooks), kept in the panel's `lastSolaceAttempt`, and copied by Queue Copy into the disabled `#copy-source-sol-pass` / `#copy-source-semp-pass` inputs, where devtools can read it. Direction: keep the plaintext inside the `managedStore.connect` dial callback, and give Queue Copy a "provisioned source" path that needs no password field.
+9. **Permission upgrade on browse.** The Managed panel's `createQueueBrowser` wrap overwrites the SDK-private `_messageConsumer._permissions` with `READ_WRITE` for operate-entitled queues regardless of what the broker reported, so Delete can appear on a queue the broker says is read-only; it also depends on listener order on UP. Direction: downgrade-only (as Queue Copy's `effectiveSourceAccess` already is), without writing SDK-private state.
+10. **Two session owners.** The Connections Managed panel and `admin-login` can each own the managed login. The panel's `logout` disconnects SEMP unconditionally, which can wipe a live Direct SEMP connection's state; `rbac:sign-out-requested` (added for the own-password-change sign-out) gives that a new trigger in the kitchen-sink build. Direction: one explicit session owner, a logout that disconnects only what it owns, and keep the `rbac:sign-out-requested` contract.
+11. **Self-demotion in `/solAdmin`.** An admin who clears their own Administrator flag keeps a non-admin session, and admin-login's session view still says "(administrator)". Direction: sign out on self-demotion too.
+12. **Generic admin errors and in-memory sessions.** Any non-204 from the admin CRUD endpoints shows "Save failed" / "Delete failed", including the gateway's 409 "cannot delete the last admin"; and the session lives only in memory, so a page reload signs the user out. Direction: map the gateway's status codes to specific messages; decide whether a reload should survive.
+
+**Also for the rework**
+
+- Stale text: the `src/core/encode.ts` and `scripts/module-registry-plugin.mjs` headers still say the transform stays out of builds that do not list the managed modules (it ships in every bundle now, see the threat model); `connection-management/module.ts` mentions an `ADMIN_ONLY_MODULES` set that is now `MODULE_REQUIREMENTS`; the user-management / connection-management gates say "Sign in to Connections as an administrator", but `/solAdmin` signs in on the Administration page; admin-login's help text says "Connection Mgmt." while the sidebar label is "Conn. Mgmt".
+- Queue Subscription Explorer and Queue Discovery are hidden in every managed session (admins included) because they read over unfiltered SEMP v1 RPC; `SubscriptionSource` exists as types only.
+- `src/css/main.css` still imports the stylesheets of modules the variant registry no longer bundles (queue-discovery everywhere; queue-copy and the subscription explorer in `min.html`).
+
 ## YAML schemas (managed by the admin modules; never hand-edit in production)
 
 ```yaml

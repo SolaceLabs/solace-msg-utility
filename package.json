@@ -18,13 +18,7 @@
     "audit:gate": "node scripts/npm-audit-gate.mjs",
     "test": "vitest run --pool=threads --maxWorkers=12",
     "test:watch": "vitest --pool=threads --maxWorkers=12",
-    "test:coverage": "vitest run --pool=threads --maxWorkers=12 --coverage",
-    "scan": "npm run scan:go && npm run scan:npm && npm run scan:image",
-    "scan:go": "go -C go-web-proxy tool govulncheck -tags=managed ./...",
-    "scan:npm": "npm audit --audit-level=high",
-    "scan:image": "trivy image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed ghcr.io/solacelabs/solace-msg-utility:latest && trivy image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed ghcr.io/solacelabs/solace-msg-utility:managed-latest",
-    "image:build": "docker compose -f docker/docker-compose.yaml build",
-    "image:scan": "npm run image:build && npm run scan:image"
+    "test:coverage": "vitest run --pool=threads --maxWorkers=12 --coverage"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

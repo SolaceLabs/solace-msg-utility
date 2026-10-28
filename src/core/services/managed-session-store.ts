@@ -19,9 +19,11 @@
  * the plaintext. `packSecret` is the sealing counterpart, for the admin module
  * that must pack a credential before it leaves the browser.
  *
- * The writer is whichever module owns the managed login (today the connections
- * module; the standalone admin app once it exists). Writer moments are login,
- * refresh, and clear — see docs/architecture.md.
+ * The writer is whichever module owns the managed login (the connections
+ * module's Managed panel, or admin-login in the `/solAdmin` app). Another module
+ * that needs the session ended asks the owner via `rbac:sign-out-requested`
+ * rather than clearing the store itself. Writer moments are login, refresh, and
+ * clear — see docs/architecture.md.
  */
 import { fromB64, importSeed, pack, unpack } from '../encode';
 import { generateUuid } from '../utils';

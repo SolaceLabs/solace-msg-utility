@@ -409,7 +409,7 @@ See [deployment.md](deployment.md#external-runtime-dependencies) for download so
 
 ## Demo Mode (`mock.html`)
 
-`dist/mock.html` runs the **whole** application against an in-browser mock broker. It is not a set of canned
+`mock.html` runs the **whole** application against an in-browser mock broker. It is not a set of canned
 screens: the broker holds real queues and messages, so actions compose. Delete a message and the depth drops. Copy
 a queue and the destination genuinely receives it — browse it afterwards and the same messages are there.
 
@@ -518,5 +518,7 @@ Signed in there, you get two modules:
 
 - **User Management** — list, add, edit, and delete users. For each user you set the username, password, the **Administrator** flag, and the **Operate** / **Read-only** entitlement rows (each row is a *brokers / msgVpns / queues* glob, e.g. `* / vpn-prod / orders.*`). Leave the password blank when editing to keep the current one. The last remaining administrator cannot be deleted (to avoid locking everyone out).
 - **Connection Management** — list, add, edit, and delete broker connections. For each connection you set the broker name, hostname, the **SEMP** account (port / username / password), the **client** port, and one or more **Message VPNs** (name / username / password). Use a **read-only or least-privilege SEMP account**. Leave a password field blank when editing to keep the stored one.
+
+**Changing your own password signs you out.** As soon as the save succeeds the admin app returns to its sign-in screen with the message *Password changed. Sign in again with the new password.* — the old password no longer works, so the session it opened ends with it. Deleting your own account signs you out the same way (the confirmation tells you so; the last remaining administrator still cannot be deleted). Editing your own record **without** entering a password keeps you signed in.
 
 Changes take effect for users on their next sign-in or **Refresh**. Glob matching is **case-sensitive** and supports `*` anywhere (leading, middle, trailing, multiple).

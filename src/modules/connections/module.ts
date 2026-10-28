@@ -204,7 +204,8 @@ export const ConnectionsModule = {
             })
             : null;
         /** Mirror image: drop a managed session before a Direct connect, so RBAC
-         *  (which keys off appState.managed) can't leak onto a direct session. */
+         *  (which keys off appState.managed) can't leak onto a direct session.
+         *  Also the answer to `rbac:sign-out-requested` (router below). */
         function tearDownManaged(): void {
             if (appState.managed) managedPanel?.logout();
         }
@@ -605,6 +606,12 @@ export const ConnectionsModule = {
             }
             if (loadSelf) loadSelf();
         });
+
+        // Cross-Module: end the managed session on request (user-management,
+        // after the admin changed their own password or deleted their own
+        // account). Same teardown as the Direct-connect interlock: disconnect,
+        // then clear the store + appState.managed. No-op without a session.
+        eventBus.on('rbac:sign-out-requested', tearDownManaged);
 
         eventBus.on('connection:check-connection', (payload) => {
             // Route by the ACTIVE connection mode: a managed session drives the

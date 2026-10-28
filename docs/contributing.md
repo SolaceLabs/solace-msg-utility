@@ -30,7 +30,7 @@ npm install && npm test
 | `vet` | `npm run typecheck`, `npm run check:docs`, `go vet ./...` **and** `go vet -tags managed ./...` |
 | `test` | `npm test`, `go test ./...` **and** `go test -tags managed ./...` |
 | `cov` | `npm run test:coverage` plus a Go coverage profile; prints both totals |
-| `scan` | `npm run audit:gate` (`npm audit`, fatal on fixable HIGH/CRITICAL advisories, warns on unfixable ones), `go tool govulncheck -tags=managed ./...`, then a Trivy scan of both freshly-built images |
+| `scan` | `npm run audit:gate` (`npm audit`, fatal on fixable HIGH/CRITICAL advisories, warns on unfixable ones), `go tool govulncheck -tags=managed ./...`, then a Trivy scan of both freshly-built images with the pinned Trivy container (never a `trivy` on PATH; see [git.md](git.md#keeping-the-workflow-pins-current)) |
 | `image` | Builds both container images via `docker/docker-compose.yaml` |
 | `up` / `down` | Brings the compose stack up or down |
 | `graphify` | Refreshes the knowledge graph (local only — skipped when `CI` is set) |

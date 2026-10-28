@@ -35,7 +35,9 @@ export interface ManagedPanel {
     /**
      * Tear the managed session down completely — disconnect the broker and clear
      * `appState.managed` (so RBAC stops applying). Called when the Direct tab
-     * takes over the connection, since only one mode may be live at a time.
+     * takes over the connection (only one mode may be live at a time), and when
+     * another module asks for a sign-out (`rbac:sign-out-requested`, routed here
+     * by the module shell).
      */
     logout(): void;
     /** Re-show the panel's own view for the current state (used on tab activate). */
