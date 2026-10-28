@@ -2,7 +2,7 @@ module github.com/solace/go-web-proxy
 
 go 1.26.3
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require gopkg.in/yaml.v3 v3.0.1
 

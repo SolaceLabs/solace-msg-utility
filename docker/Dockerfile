@@ -53,7 +53,7 @@
 #               lost it looks wrong rather than merely out of date.
 
 # ---- Stage 1: build the static Go gateway ------------------------------------
-FROM golang:1.27.2-alpine AS gateway-builder
+FROM golang:1.27.3-alpine AS gateway-builder
 WORKDIR /src
 # go.sum is needed for the managed build (it pulls gopkg.in/yaml.v3); it is
 # harmless for the default stdlib-only hosted build, which imports nothing
