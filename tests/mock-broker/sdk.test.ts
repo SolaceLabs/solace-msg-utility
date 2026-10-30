@@ -19,9 +19,9 @@ beforeEach(() => {
 
 describe('mock-broker/emitter — dispatch order', () => {
     it('calls listeners synchronously, in registration order', () => {
-        // The managed panel registers its UP handler before queue-browser's and
-        // writes _permissions from inside it. Reordering or deferring here would
-        // silently disable RBAC enforcement in the demo.
+        // The real SDK dispatches this way, and the managed panel (managed.html)
+        // registers its UP handler before queue-browser's and writes _permissions
+        // from inside it. The emulation keeps that order.
         const emitter = createEmitter();
         const order: string[] = [];
         emitter.on('UP', () => order.push('rbac'));
@@ -55,9 +55,9 @@ describe('mock-broker/sdk — session', () => {
     }
 
     it('exposes createQueueBrowser as a reassignable own property', () => {
-        // The managed panel replaces this method on the live session to wrap it
-        // with the entitlement check. A prototype/class method would make that
-        // patch a silent no-op and disable RBAC with no error anywhere.
+        // As in the real SDK: the managed panel (managed.html) replaces this
+        // method on the live session to wrap it with the entitlement check, which
+        // a prototype/class method would make a silent no-op.
         const { session } = connectedSession();
         expect(Object.prototype.hasOwnProperty.call(session, 'createQueueBrowser')).toBe(true);
 
@@ -168,8 +168,9 @@ describe('mock-broker/sdk — queue browser', () => {
     }
 
     it('exposes _messageConsumer._permissions before UP fires', async () => {
-        // The managed panel writes this from inside its own UP handler, so it
-        // must already exist by then — and the read-only fixture must report it.
+        // queue-browser reads it at UP (and the managed panel in managed.html
+        // writes it there), so it must already exist — and the read-only fixture
+        // must report it.
         const { sdk, browser } = browserFor('vpn-prod', 'Q/LOGS/AUDIT');
         let permissionsAtUp: string | undefined;
         browser.on(sdk.QueueBrowserEventName.UP, () => { permissionsAtUp = browser._messageConsumer._permissions; });

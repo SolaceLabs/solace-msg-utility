@@ -93,9 +93,9 @@ Then open <https://localhost:9443/>. The `/managed` volume holds the gateway's `
 
 ### Managed Mode (RBAC)
 
-**Managed mode** abstracts broker credentials from users: instead of typing SMF/SEMP credentials, users log in and pick from the brokers/VPNs they are entitled to. It is a **runtime posture, not a separate bundle** — every bundle carries both connection paths, and the gateway decides which the app offers. It **only runs behind the gateway** with managed mode enabled, because it relies on the gateway both to relay broker traffic *and* to serve the `/managed/*` RBAC endpoints. For the design and threat model see [rbac-variant-plan.md](rbac-variant-plan.md); for the internals see [architecture.md](architecture.md) § Managed Connections.
+**Managed mode** abstracts broker credentials from users: instead of typing SMF/SEMP credentials, users log in and pick from the brokers/VPNs they are entitled to. It ships **only in the managed image**: that image serves `managed.html`, the one bundle with the Managed sign-in, as its `index.html`, and the gateway decides which connection paths it offers. Every Release bundle (`index.html` and its variants) is Direct-only, whatever the gateway advertises. It **only runs behind the gateway** with managed mode enabled, because it relies on the gateway both to relay broker traffic *and* to serve the `/managed/*` RBAC endpoints. For the design and threat model see [rbac-variant-plan.md](rbac-variant-plan.md); for the internals see [architecture.md](architecture.md) § Managed Connections.
 
-The managed image's gateway binary is compiled with the RBAC store + `/managed/*` handler built in (`-tags managed`); the standard image's gateway binary stays stdlib-only (no `/managed/*` support). Use the `managed-` tagged image for managed deployments — setting `MANAGED=true` on the standard image only logs a "built without managed support" warning.
+The managed image's gateway binary is compiled with the RBAC store + `/managed/*` handler built in (`-tags managed`); the standard image's gateway binary has no `/managed/*` support, and the standard image serves the Direct-only bundle. Use the `managed-` tagged image for managed deployments — setting `MANAGED=true` on the standard image only logs a "built without managed support" warning.
 
 **Deploying it (prebuilt image — recommended):** pull `ghcr.io/solacelabs/solace-msg-utility:managed-latest` (or a pinned `:managed-<version>`). This image bakes `MANAGED=true`, `HOSTED=true` and `CONN_MODES=managed` as defaults, so it runs as a managed deployment out of the box — just mount a writable `/managed` volume (and `/tls`).
 
@@ -139,7 +139,7 @@ docker run --rm -p 9443:9443 \
 
 User Management and Connection Management are **not in the everyday bundles**. They ship as a separate app at `https://<gateway>:9443/solAdmin`, served only when the gateway is hosted **and** managed. Sign in there with an administrator account; a valid non-admin account is refused at the login screen. The admin app opens no broker connection at all — it exists to edit `users.yaml` and `connections.yaml` through the proxy.
 
-The managed image ships `solAdmin.html` alongside the main bundle. If you assemble `APP_DIR` yourself, copy it too, or `/solAdmin` will 404 (the gateway logs "admin app requested but not deployed" so the cause is visible).
+The managed image ships `solAdmin.html` alongside the main bundle. If you assemble `APP_DIR` yourself, use `managed.html` (built by `npm run build:managed`) as `index.html` and copy `solAdmin.html` too: a Release `index.html` has no Managed tab, and without `solAdmin.html` `/solAdmin` will 404 (the gateway logs "admin app requested but not deployed" so the cause is visible). Neither file is a Release asset.
 
 #### Managed-mode security checklist
 
@@ -197,7 +197,7 @@ You can open `index.html` directly in a browser via `file:///…`, but **SEMP AP
 
 ## External Runtime Dependencies
 
-The PWA loads two external scripts via `<script>` tags. They are not bundled into the HTML and must be mounted alongside it at the deployment location. The same requirement applies to `min.html`, `mock.html`, `no-payload.html`, and `no-queue-copy.html`; every variant of the PWA expects the two vendor files next to it. `solAdmin.html` uses none of what those files provide (it never opens a broker connection and has no ZIP export), but it is built from the same shell, so it still runs the vendor loader and will show the "not found" banner if they are absent. The managed image ships them alongside it.
+The PWA loads two external scripts via `<script>` tags. They are not bundled into the HTML and must be mounted alongside it at the deployment location. The same requirement applies to `min.html`, `mock.html`, `no-payload.html`, and `no-queue-copy.html`; every variant of the PWA expects the two vendor files next to it. `managed.html` (the managed image's `index.html`) needs them too. `solAdmin.html` uses none of what those files provide (it never opens a broker connection and has no ZIP export), but it is built from the same shell, so it still runs the vendor loader and will show the "not found" banner if they are absent. The managed image ships them alongside it.
 
 The shell tries each file in two locations, in order:
 

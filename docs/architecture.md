@@ -24,7 +24,7 @@ flowchart TB
     core --> semp["<b>SEMP API — REST</b><br/>HTTP / S"]
 ```
 
-The broker-side service factories live in `src/core/services/` as **pure libraries** — they take lifecycle hooks (no AppContext, no UI, no global bus). The connections module (priority 100) is the *primary specialist*: its `module.ts` defines `solaceHooks` / `sempHooks` that bridge factory lifecycle events to global AppState + bus events that other modules consume. This pattern lets a future module (queue-copy) own a *secondary* connection by passing different hooks to the same factories — module symmetry, no cross-module imports.
+The broker-side service factories live in `src/core/services/` as **pure libraries** — they take lifecycle hooks (no AppContext, no UI, no global bus). The connections module (priority 100) is the *primary specialist*: `installDirect` in its `module.ts` (shared by both of its entry files) defines `solaceHooks` / `sempHooks` that bridge factory lifecycle events to global AppState + bus events that other modules consume. This pattern lets a future module (queue-copy) own a *secondary* connection by passing different hooks to the same factories — module symmetry, no cross-module imports.
 
 ### Publishing pipeline (`solace-publisher`)
 
@@ -69,7 +69,7 @@ src/core/                          Shared infrastructure
   utils.ts                         Pure utilities (escapeHtml, escapeXml, formatBytes, generateUuid, matchString,
                                    topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage, isValidHost, isValidPort)
 
-src/modules/connections/                  Module — primary connection setup (Direct + Managed tabs)
+src/modules/connections/                  Module — primary connection setup: module.ts (Direct, every Release bundle), module.managed.ts (Direct + Managed tabs, managed.html)
 src/modules/queue-browser/                Module — queue-browser session + message table
 src/modules/queue-copy/                   Module — cross-broker queue copy
 src/modules/queue-subscription-explorer/  Module — flat (vpn, queue, topic) table (SEMP v1)
@@ -487,15 +487,15 @@ The repo-root `index.html` is a generic PWA shell — sidebar, header, `#module-
 <!-- @module-templates -->
 ```
 
-The `inject-module-templates` Vite plugin in `vite.config.ts` reads each `src/modules/<id>/index.html` at build time, wraps each in `<template data-module-id="<id>">...</template>`, and replaces the `@module-templates` marker with the concatenated blocks. Only the active variant's modules are injected, so the output single-file bundle has exactly those templates inline, ready for the Kernel to find at startup.
+The `inject-module-templates` Vite plugin in `vite.config.ts` reads each active module's template at build time, wraps each in `<template data-module-id="<id>">...</template>`, and replaces the `@module-templates` marker with the concatenated blocks. Only the active variant's modules are injected, so the output single-file bundle has exactly those templates inline, ready for the Kernel to find at startup. A module's template is its `index.html`, unless the variant maps it to an entry (`MODULE_ENTRIES`, below): then `index.<entry>.html` is used, with the base `index.html` spliced in at its `<!-- @module-base -->` marker. Composition lives in `readModuleTemplate` ([scripts/module-registry-plugin.mjs](../scripts/module-registry-plugin.mjs)), which the tests' `loadModuleDOM(id, entry?)` also calls, so a test DOM is exactly the shipped one.
 
 ```mermaid
 flowchart TD
     plugin["vite.config.ts plugin<br/>(transformIndexHtml)"]
-    plugin --> read["reads src/modules/&lt;id&gt;/index.html<br/>for every module dir"]
+    plugin --> read["reads each active module's template<br/>(index.html, or its entry template)"]
     read --> wrap["wraps each in<br/>&lt;template data-module-id='&lt;id&gt;'&gt;"]
     wrap --> splice["splices into src/index.html<br/>at &lt;!-- @module-templates --&gt;"]
-    splice --> out["single dist/index.html<br/>with all templates embedded"]
+    splice --> out["single dist/&lt;variant&gt;.html<br/>with all templates embedded"]
 ```
 
 At startup, the Kernel:
@@ -512,7 +512,7 @@ Navigation toggles the `.hidden` class on module wrappers — no routing, no pag
 
 ### Module registration — variant manifests
 
-Active modules are listed in **variant manifest** files under [src/variants/](../src/variants/). Each manifest is a small file exporting `ACTIVE_MODULES: Record<string, number>` — id → priority. To disable a module in a variant, comment one line. To enable, uncomment. To create a new module, drop `src/modules/<id>/{module.ts, index.html}` and add a line to the variant. No second list to maintain.
+Active modules are listed in **variant manifest** files under [src/variants/](../src/variants/). Each manifest is a small file exporting `ACTIVE_MODULES: Record<string, number>` — id → priority. To disable a module in a variant, comment one line. To enable, uncomment. To create a new module, drop `src/modules/<id>/{module.ts, index.html}` and add a line to the variant. No second list to maintain. A manifest may also export `MODULE_ENTRIES: Record<string, string>` (id → entry name) to install a different entry file for a module: `{ connections: 'managed' }` installs `src/modules/connections/module.managed.ts` with `index.managed.html`. The module keeps its id and sidebar entry; only the file changes. An override for an id the manifest does not list fails the build.
 
 ```ts
 // src/variants/standard.ts — every module the default build ships
@@ -529,6 +529,11 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'queue-browser':                80,
 };
 
+// src/variants/managed.ts — the managed image's bundle (dist/managed.html):
+// standard's modules, with connections on its managed entry
+export const ACTIVE_MODULES = { 'connections': 100, 'queue-browser': 80, 'queue-copy': 70, 'queue-subscription-explorer': 45 };
+export const MODULE_ENTRIES = { 'connections': 'managed' };
+
 // src/variants/admin.ts — the standalone /solAdmin app (no messaging modules)
 export const ACTIVE_MODULES: Record<string, number> = {
     'admin-login':                 100,
@@ -541,13 +546,13 @@ export const ACTIVE_MODULES: Record<string, number> = {
 
 A module directory may exist on disk but not appear in any variant (e.g. [`src/modules/queue-discovery/`](../src/modules/queue-discovery/)). Neither its `<template>` block nor its code is emitted: the `inject-module-templates` plugin and the **module registry** both work from the active variant's manifest only (see below), so the kernel never installs it. This is the intentional "carry the code, ship the bundle without it" shape — stronger than tree-shaking, because the unlisted module's `module.ts` is never imported.
 
-**Manifest-driven registry (manifest is authoritative for bundling, not just activation).** [src/registry.ts](../src/registry.ts) reads `ACTIVE_MODULES` from `_active` for the id→priority map and resolves each id to its `PwaModule` via `moduleFiles` from the **`virtual:module-registry`** module. That virtual module is generated per build by the `moduleRegistryPlugin` ([scripts/module-registry-plugin.mjs](../scripts/module-registry-plugin.mjs)) — it transpiles the active `src/variants/<name>.ts`, then emits literal `import * as` statements for **exactly** the listed ids. So a module absent from the active variant is never imported and never reaches the bundle; the manifest-driven plugin is the only enforcement (there is no post-build isolation grep). If a manifest lists an id with no matching `module.ts`, or a `module.ts` whose exported `.id` doesn't match its directory, the registry throws a clear error — boot fails fast. (vitest registers the same plugin so tests resolve `virtual:module-registry`, defaulting to the `standard` variant.)
+**Manifest-driven registry (manifest is authoritative for bundling, not just activation).** [src/registry.ts](../src/registry.ts) reads `ACTIVE_MODULES` from `_active` for the id→priority map and resolves each id to its `PwaModule` via `moduleFiles` from the **`virtual:module-registry`** module. That virtual module is generated per build by the `moduleRegistryPlugin` ([scripts/module-registry-plugin.mjs](../scripts/module-registry-plugin.mjs)) — it reads the active `src/variants/<name>.ts`, then emits literal `import * as` statements for **exactly** the listed ids (each id's `module.ts`, or `module.<entry>.ts` under `MODULE_ENTRIES`), keyed by module id. So a module absent from the active variant is never imported and never reaches the bundle, and neither is the entry file a variant does not select. For the one split that matters today, the build proves it on the output: `npm run check:bundles` ([scripts/check-bundles.mjs](../scripts/check-bundles.mjs), run by the `build` task) fails if any Release bundle carries a managed-UI marker, or if `managed.html` lacks one. If a manifest lists an id with no matching entry file, the plugin fails the build; if an entry file's exported `.id` doesn't match its directory, the registry throws a clear error — boot fails fast. (vitest registers the same plugin so tests resolve `virtual:module-registry`, defaulting to the `standard` variant.)
 
-The `inject-module-templates` Vite plugin takes the active variant's module ids (from the same manifest as the registry) and injects each one's `src/modules/<id>/index.html` as a `<template data-module-id="<id>">...</template>` block, so a non-active module's markup never reaches the shipped HTML. A module in the active variant whose `index.html` is missing on disk is skipped by the plugin and surfaces a kernel console error at startup.
+The `inject-module-templates` Vite plugin takes the active variant's module ids and entries (from the same manifest as the registry) and injects each one's template as a `<template data-module-id="<id>">...</template>` block, so a non-active module's markup never reaches the shipped HTML. A module in the active variant with no template on disk is skipped by the plugin and surfaces a kernel console error at startup.
 
 **To add a new module**: create `src/modules/<id>/` with `module.ts` and `index.html`, then add a line to whichever variant should ship it. The build plugin and the registry pick it up automatically.
 
-**To ship a build variant**: drop a new `src/variants/<name>.ts` listing the desired subset, then `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>.html` (and add it to the `build` npm script if every release should carry it).
+**To ship a build variant**: drop a new `src/variants/<name>.ts` listing the desired subset, then `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>.html` (and add it to the `build` npm script if every release should carry it; a bundle the Release uploads must also join `RELEASE_BUNDLES` in `scripts/check-bundles.mjs` and the `release` step of `tag.yml`, which a test keeps equal). The dev server takes a variant the same way: `__VITE_VARIANT=managed npm run dev` serves the managed bundle.
 
 ### Build flavors vs variants
 
@@ -563,7 +568,7 @@ The first flavor is the queue-browser **no-payload** build. [src/modules/queue-b
 
 ## Managed Connections (RBAC)
 
-**Managed** is a connection *mode*, not a build. Every bundle contains both the manual (**Direct**) and login-gated (**Managed**) paths; which of the two the app offers is resolved at runtime from the gateway. Managed abstracts broker credentials away from the user: they sign in with an app account, and the deployment holds the broker credentials and grants each account a scoped set of brokers, VPNs and queues. It runs only behind the [go-web-proxy](../go-web-proxy) in `MANAGED=true HOSTED=true` mode. The user-facing design, locked decisions, and **threat model** live in [rbac-variant-plan.md](rbac-variant-plan.md); operations in [deployment.md](deployment.md). This section is the *how*.
+**Managed** is a connection *mode* that only one bundle carries. Every Release bundle installs the Direct-only connections entry; the login-gated (**Managed**) path ships only in `dist/managed.html` (the `managed` variant, [module.managed.ts](../src/modules/connections/module.managed.ts)), which the managed container image serves as its `index.html`. Within that bundle, which of the two modes the app offers is resolved at runtime from the gateway. Managed abstracts broker credentials away from the user: they sign in with an app account, and the deployment holds the broker credentials and grants each account a scoped set of brokers, VPNs and queues. It runs only behind the [go-web-proxy](../go-web-proxy) in `MANAGED=true HOSTED=true` mode. The user-facing design, locked decisions, and **threat model** live in [rbac-variant-plan.md](rbac-variant-plan.md); operations in [deployment.md](deployment.md). This section is the *how*.
 
 On the gateway side the RBAC store + `/managed/*` handler are gated behind the `managed` **Go build tag** (`store.go`, `managed.go`, `rbac.go` carry `//go:build managed`; `main.go` reaches them through `newManagedRouting`, with a `//go:build !managed` stub for the default build). So the gateway ships as **two binaries**: the standard/hosted image's binary omits the RBAC files (both binaries link `gopkg.in/yaml.v3`, which the `config.yaml` loader needs), and the managed image builds the gateway with `-tags managed` (the `GO_TAGS=managed` Docker build arg). Running the stdlib-only binary with `MANAGED=true` logs a "built without managed support" warning and leaves `/managed/*` falling through to the SPA.
 
@@ -581,14 +586,19 @@ The config reaches the app through the gateway probe only:
 
 The resolved config is published once to `AppState.connConfig` by the connections module, so no other module probes the gateway again. `resolveDestCredModes(cfg)` derives what a **secondary** connection may offer from the very same enum (`direct` ⇒ manual only, `managed` ⇒ provisioned only, `both` ⇒ both) — one source of truth, so the primary's tabs and the secondary's credential sources cannot drift apart.
 
-### The connections module — two tabs, one owner
+### The connections module — two entries, one owner
 
-[src/modules/connections/](../src/modules/connections/) owns the primary connection in both modes. The Direct form lives in `ui.js` / `config.js`; the managed flow lives in [managed-panel.ts](../src/modules/connections/managed-panel.ts) and the `/managed/*` client in [core/services/managed-service.ts](../src/core/services/managed-service.ts). Both drive the *same* pure core factories and produce the same AppState writes and bus emits — the module is still the one place that bridges factory hooks to global state (Anchor #4).
+[src/modules/connections/](../src/modules/connections/) owns the primary connection in both modes, through two entry files with the same id and sidebar entry:
 
-Three consequences of the merge are load-bearing:
+- [module.ts](../src/modules/connections/module.ts) is the Release entry. It exports `installDirect(app, { onBeforeConnect? })` — the Direct form (`ui.js` / `config.js`), its factory pair bridged to global state, and the Direct VPN-switch dance — and installs it alone. It publishes a Direct-only `connConfig` whatever `/hosted` advertises (warning when the gateway offers managed sign-in), so no module offers a provisioned mode this bundle cannot back.
+- [module.managed.ts](../src/modules/connections/module.managed.ts) is the managed entry. It renders the Direct / Managed tab bar, calls the same `installDirect`, then builds [managed-panel.ts](../src/modules/connections/managed-panel.ts) (which uses the `/managed/*` client in [core/services/managed-service.ts](../src/core/services/managed-service.ts)). Its template `index.managed.html` wraps the shared Direct markup in the Direct tab panel.
 
-- **Mode interlock.** Only one mode may be live. Connecting on Managed tears down a Direct session; connecting on Direct clears `appState.managed`. Without this, RBAC — which keys entirely off that field — would keep filtering a session it knows nothing about. Switching *tabs* is non-destructive; teardown happens at connect time.
-- **Single cross-module router.** `connection:check-connection` and `connection:edit-requested` route to the Managed panel when `appState.managed` is set, else run the Direct form's VPN-switch dance. Callers stay mode-agnostic. `rbac:sign-out-requested` is routed the same way, to the Managed panel's logout (the Direct-connect interlock's teardown), and is a no-op without a managed session.
+Both modes drive the *same* pure core factories and produce the same AppState writes and bus emits — the module is still the one place that bridges factory hooks to global state (Anchor #4).
+
+Three consequences of running both modes in the managed entry are load-bearing:
+
+- **Mode interlock.** Only one mode may be live. Connecting on Managed tears down a Direct session (`direct.disconnect()`); connecting on Direct clears `appState.managed` (the entry's `onBeforeConnect`). Without this, RBAC — which keys entirely off that field — would keep filtering a session it knows nothing about. Switching *tabs* is non-destructive; teardown happens at connect time.
+- **Single cross-module router.** In the managed entry, `connection:check-connection` and `connection:edit-requested` route to the Managed panel when `appState.managed` is set, else run the Direct form's VPN-switch dance. The Release entry routes both to the Direct form and registers no `rbac:sign-out-requested` listener, since no managed session can exist there. Callers stay mode-agnostic. `rbac:sign-out-requested` is routed the same way, to the Managed panel's logout (the Direct-connect interlock's teardown), and is a no-op without a managed session.
 - **The Managed tab is offered only when the deployment offers it** — tab visibility *is* the availability signal, which is why the old "Deployment Gateway Required" gate card was removed.
 
 On login the panel `POST`s `{username, token}` to `/managed/getConnections` and hands the returned profile to the managed session store (below). The **Refresh** button first calls `POST /managed/reload` (auth'd as any logged-in user), which makes the proxy re-read `users.yaml` + `connections.yaml` from disk into its in-memory store under the write lock — so out-of-band edits take effect without a restart — then re-fetches `getConnections`; a reload that fails only server-side leaves the in-memory store intact and surfaces a soft warning while still showing last-known data. A browser refresh ends the session (token and seed are in-memory only).
@@ -649,7 +659,7 @@ Module visibility is a **requirement map**, `MODULE_REQUIREMENTS: Record<string,
 
 ### Credential transform (posture only — algorithm is code-only)
 
-[src/core/encode.ts](../src/core/encode.ts) provides a one-way, deterministic **login token** derived from the username and password, and a reversible **pack/unpack** for broker credentials keyed by the per-deployment **site seed** (imported non-extractable). Every output carries a neutral version tag so the transform is **swappable** behind a stable interface. It ships in **every** bundle: connection posture is now a runtime decision (see [Connection modes](#connection-modes)), so there is no build in which the managed path is absent. This is obfuscation — it protects a leaked YAML file from offline reversal, not a legitimately entitled user. The algorithm and identifiers are deliberately neutral and are **not documented** anywhere; see the threat model in [rbac-variant-plan.md](rbac-variant-plan.md) for what it does and does not protect.
+[src/core/encode.ts](../src/core/encode.ts) provides a one-way, deterministic **login token** derived from the username and password, and a reversible **pack/unpack** for broker credentials keyed by the per-deployment **site seed** (imported non-extractable). Every output carries a neutral version tag so the transform is **swappable** behind a stable interface. It still ships in **every** bundle, through the core managed session store the kernel creates, even though the managed UI ships only in `managed.html`; removing it from the browser is planned (see [rbac-rework-plan.md](rbac-rework-plan.md)). This is obfuscation — it protects a leaked YAML file from offline reversal, not a legitimately entitled user. The algorithm and identifiers are deliberately neutral and are **not documented** anywhere; see the threat model in [rbac-variant-plan.md](rbac-variant-plan.md) for what it does and does not protect.
 
 ### Enforcement points
 
@@ -715,10 +725,10 @@ and lets the real code run against it.
 which installs three things before any module installs:
 
 1. **`window.solace`** — a full SDK emulation (factory, constructors, enums, session, queue browser, message).
-2. **A `window.fetch` interceptor** answering `/hosted`, `/managed/*`, the SEMP v2 monitor endpoints and SEMP v1
-   RPCs, falling through to the real `fetch` for anything else.
-3. **The demo control panel**, which drives queue state, connection faults, the signed-in managed identity, and
-   latency/volume.
+2. **A `window.fetch` interceptor** answering `/hosted` (hosted, Direct only), the SEMP v2 monitor endpoints and
+   SEMP v1 RPCs, falling through to the real `fetch` for anything else. The demo is a Release bundle, so it has
+   no Managed tab and no `/managed/*` surface.
+3. **The demo control panel**, which drives queue state, connection faults, and latency/volume.
 
 Because both seams present the real contract, `solace-client`, `semp-client`, `solace-publisher`,
 `semp-discovery`, queue-copy's verify and copy engines and the subscription parser all run **unmodified** in the
@@ -735,9 +745,9 @@ depth, a copy run really moves messages, and a topic publish fans out to subscri
 depth and spool usage by reading the same store, so verify's numbers always agree with what browsing shows.
 
 Fidelity details that are load-bearing rather than decorative, each covered by a test in `tests/mock-broker/`:
-the session's `createQueueBrowser` is a **reassignable own property** (the managed panel patches it at runtime to
-enforce entitlements — a class method would silently disable RBAC); the event emitter is **synchronous and
-FIFO** (that patch's `UP` handler must run before queue-browser's); publish acks round-trip through
+the session's `createQueueBrowser` is a **reassignable own property** and the event emitter is **synchronous and
+FIFO**, as in the real SDK (the managed panel in `managed.html` patches the method and needs its `UP` handler to run
+before queue-browser's; the Direct-only demo keeps the emulation faithful rather than guarding a live patch); publish acks round-trip through
 `ACKNOWLEDGED_MESSAGE` with the correlation key nested exactly where the publisher looks; the queue browser
 delivers in **spool-ID order** and its `stop()`/`start()` genuinely suspend delivery (the copy engine's drift
 detection and backpressure depend on both). The SEMP v1 detail response even reproduces the broker bug the product

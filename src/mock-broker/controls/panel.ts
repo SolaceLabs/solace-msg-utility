@@ -5,17 +5,11 @@
  * mock-broker tree, which production never imports, so this UI cannot leak into
  * a shipped bundle — no build flag and no dead code to tree-shake.
  *
- * Role switching deliberately drives the app's **real** refresh path: it sets
- * the scenario role, then clicks the Managed panel's own Refresh button. That
- * is exactly what happens in production when an administrator changes someone's
- * entitlements, so the sidebar, pickers and Queue Copy destination all re-derive
- * through the code that ships.
- *
  * Mock-only.
  */
 import {
-    FAULT, MOCK_HOST, QUEUE_STATE, ROLE, VPNS, resetScenario, scenario,
-    type Fault, type QueueState, type Role,
+    FAULT, MOCK_HOST, QUEUE_STATE, VPNS, resetScenario, scenario,
+    type Fault, type QueueState,
 } from '../fixtures';
 import { seed } from '../broker/store';
 import { dropAllSessions } from '../sdk';
@@ -108,8 +102,7 @@ function connectionReference(): HTMLElement {
         + 'is checked. Any other host reports a connection failure, and a host containing '
         + 'the cert-error value simulates an untrusted certificate.'));
     wrap.appendChild(el('p', 'mockctl-hint',
-        'The VPN you connect with decides which queues the pickers list. On the Managed tab '
-        + 'any username and password sign in — the entitlements come from the identity below.'));
+        'The VPN you connect with decides which queues the pickers list.'));
     return wrap;
 }
 
@@ -152,24 +145,6 @@ export function mountControlPanel(): void {
     faultSection.appendChild(el('p', 'mockctl-hint',
         'Connect failure is one-shot; SEMP faults stay armed until cleared.'));
 
-    /* ---- RBAC ---- */
-    const rbacSection = section('Managed identity');
-    const rolePick = select([
-        { value: ROLE.SIGNED_OUT, label: 'Signed out' },
-        { value: ROLE.ADMIN, label: 'admin — full entitlements' },
-        { value: ROLE.OPERATOR, label: 'operator — operate on Q/ORDER/* in vpn-prod' },
-        { value: ROLE.READ_ONLY, label: 'readonly — browse only' },
-    ], v => {
-        scenario.role = v as Role;
-        // Drive the product's own refresh, exactly as an entitlement change does.
-        const refresh = document.querySelector<HTMLButtonElement>('#btn-managed-refresh');
-        if (refresh && refresh.offsetParent !== null) refresh.click();
-    });
-    rbacSection.appendChild(rolePick);
-    rbacSection.appendChild(el('p', 'mockctl-hint',
-        'Sign in on the Managed tab with any username and password. Switching while '
-        + 'signed in clicks Refresh for you.'));
-
     /* ---- latency + volume ---- */
     const tuneSection = section('Latency and volume');
     const latency = el('input', 'mockctl-range');
@@ -197,12 +172,11 @@ export function mountControlPanel(): void {
             latency.value = String(scenario.latencyMs);
             latencyLabel.textContent = `${scenario.latencyMs} ms`;
             faultPick.value = scenario.fault;
-            rolePick.value = scenario.role;
             volumePick.value = '1';
             statePick.value = scenario.queueState.get(selectedQueue) ?? QUEUE_STATE.NORMAL;
         }));
 
-    body.append(connectionReference(), queueSection, faultSection, rbacSection, tuneSection);
+    body.append(connectionReference(), queueSection, faultSection, tuneSection);
     root.append(header, body);
     document.body.appendChild(root);
 }

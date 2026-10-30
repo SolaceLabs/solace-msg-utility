@@ -41,7 +41,7 @@ Once the app is loaded:
 3. **Save All Config** — your settings persist in the browser for next time.
 4. **Use the sidebar** to switch between Queue Browser, Queue Copy, and Queue Subscriptions.
 
-> **Managed deployments:** where the gateway enables it, Connections offers a second **Managed** tab — sign in with an account an administrator provisioned and pick from the brokers and VPNs you are entitled to, instead of typing credentials at all. See [Managed Connections](docs/user-guide.md#managed-connections).
+> **Managed deployments:** the managed container image's Connections offers a second **Managed** tab — sign in with an account an administrator provisioned and pick from the brokers and VPNs you are entitled to, instead of typing credentials at all. See [Managed Connections](docs/user-guide.md#managed-connections).
 
 > **Self-signed TLS certificates:** if `wss://` connection is blocked, the app shows a helper dialog with one-click instructions to trust the broker certificate.
 
@@ -50,7 +50,7 @@ Once the app is loaded:
 ### Connections
 
 - Two independent connections (Solace Web Messaging + SEMP REST), shared broker host.
-- **Direct** or **Managed** tab, where the deployment offers both — Managed signs you in and hands you only the brokers/VPNs you are entitled to, with no credentials to type.
+- **Direct** or **Managed** tab in the managed container image, where the deployment offers both — Managed signs you in and hands you only the brokers/VPNs you are entitled to, with no credentials to type.
 - **Basic** or **OAuth2** authentication for the Solace client.
 - **Save / Load / Reset** connection profiles (localStorage).
 - **Advanced settings** — connect/reconnect retries, timeouts, per-queue message cap (1–10 000).

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountControlPanel } from '../../src/mock-broker/controls/panel';
 import { seed, getQueue } from '../../src/mock-broker/broker/store';
 import {
-    MOCK_HOST, QUEUE_STATE, ROLE, VPNS, resetScenario, scenario,
+    MOCK_HOST, QUEUE_STATE, VPNS, resetScenario, scenario,
 } from '../../src/mock-broker/fixtures';
 
 /**
@@ -69,14 +69,6 @@ describe('mock-broker/panel — levers', () => {
         expect(scenario.queueState.get('vpn-prod/Q/ORDER/NEW')).toBe(QUEUE_STATE.READ_ONLY);
     });
 
-    it('sets the managed identity, which is what the profile endpoint reads', () => {
-        const rolePick = selects().find(s => s.querySelector('option[value="operator"]'))!;
-        rolePick.value = ROLE.OPERATOR;
-        rolePick.dispatchEvent(new Event('change'));
-
-        expect(scenario.role).toBe(ROLE.OPERATOR);
-    });
-
     it('reseeds the store when the volume changes', () => {
         const before = getQueue('vpn-prod', 'Q/ORDER/NEW')!.messages.length;
         const volumePick = selects().find(s => s.querySelector('option[value="5"]'))!;
@@ -88,14 +80,12 @@ describe('mock-broker/panel — levers', () => {
 
     it('Reset restores every lever and rebuilds the data', () => {
         scenario.latencyMs = 900;
-        scenario.role = ROLE.ADMIN;
         scenario.queueState.set('default/test-queue-1', QUEUE_STATE.BIND_DENIED);
 
         const reset = Array.from(panel().querySelectorAll<HTMLButtonElement>('.mockctl-btn'))
             .find(b => b.textContent === 'Reset demo data')!;
         reset.click();
 
-        expect(scenario.role).toBe(ROLE.SIGNED_OUT);
         expect(scenario.queueState.get('default/test-queue-1')).toBe(QUEUE_STATE.NORMAL);
         expect(scenario.latencyMs).toBe(120);
     });

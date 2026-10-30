@@ -2,16 +2,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { installMockServer } from '../../src/mock-broker/server';
 import { seed, getQueue, listQueues } from '../../src/mock-broker/broker/store';
 import { createSempDiscovery } from '../../src/core/services/semp-discovery';
-import { importSeed, fromB64, unpack } from '../../src/core/encode';
 import { probeDeployment } from '../../src/core/hosted';
 import { resolveConnTabs } from '../../src/core/connections/conn-modes';
 import {
-    DEMO_SITE_SEED, FAULT, ROLE, VPNS, resetScenario, scenario,
+    FAULT, VPNS, resetScenario, scenario,
 } from '../../src/mock-broker/fixtures';
 
 /**
  * The HTTP layer is what lets the REAL semp-client, semp-discovery,
- * service-verify, hosted.ts and managed-service run in the demo. These assert
+ * service-verify and hosted.ts run in the demo. These assert
  * the response shapes those unmocked parsers depend on.
  */
 let realFetch: typeof window.fetch;
@@ -31,32 +30,30 @@ afterEach(() => {
 const text = (r: Response) => r.text();
 
 describe('mock-broker/server — /hosted', () => {
-    it('advertises both connection tabs so Managed is reachable in the demo', async () => {
+    it('advertises a hosted, Direct-only deployment, like every Release bundle', async () => {
         const body = await (await fetch('/hosted')).json();
-        expect(body).toEqual({ hosted: true, connModes: 'both', defaultConn: 'direct' });
+        expect(body).toEqual({ hosted: true, connModes: 'direct', defaultConn: 'direct' });
     });
 
-    it('makes the REAL probe report hosted, so the Managed tab renders with no gateway', async () => {
-        // The whole point: there is no /hosted endpoint anywhere in a demo opened
-        // from disk. Asserting through the shipping probe + tab resolver — rather
-        // than just the response body — is what proves the tab actually appears.
+    it('makes the REAL probe report hosted, so broker URLs take the gateway shape the demo answers', async () => {
+        // There is no /hosted endpoint anywhere in a demo opened from disk.
+        // Asserting through the shipping probe + tab resolver, rather than just
+        // the response body, proves what the app will actually do with it.
         const info = await probeDeployment();
 
         expect(info.hosted).toBe(true);
-        expect(resolveConnTabs(info.conn)).toEqual(['direct', 'managed']);
+        expect(resolveConnTabs(info.conn)).toEqual(['direct']);
     });
 
-    it('never delegates /hosted or /managed to the real fetch, on any platform', async () => {
+    it('never delegates /hosted to the real fetch, on any platform', async () => {
         // The demo is opened from disk, where a relative request resolves against
-        // a file:// origin. These are mocked outright — reaching the real fetch
-        // would mean attempting a filesystem load that cannot succeed, which is
-        // what left the Managed tab missing.
+        // a file:// origin. /hosted is mocked outright: reaching the real fetch
+        // would mean attempting a filesystem load that cannot succeed.
         let delegated = 0;
         window.fetch = (() => { delegated++; return Promise.resolve(new Response('nope')); }) as typeof window.fetch;
         installMockServer();
 
         expect((await fetch('/hosted')).ok).toBe(true);
-        expect((await fetch('/managed/reload', { method: 'POST' })).status).toBe(204);
         expect(delegated).toBe(0);
     });
 
@@ -74,20 +71,13 @@ describe('mock-broker/server — /hosted', () => {
     it('answers a Windows file:// URL, where the drive letter lands in the path', async () => {
         // Opened from disk on Windows, `new URL('/hosted', 'file:///C:/…')`
         // resolves to file:///C:/hosted, so pathname is '/C:/hosted'. Matching
-        // the pathname exactly meant the demo silently fell back to Direct-only
-        // — the Managed tab never appeared. jsdom's http:// location hides this,
-        // so assert the resolved shape directly.
+        // the pathname exactly meant the demo silently fell back to non-hosted
+        // URLs it does not answer. jsdom's http:// location hides this, so
+        // assert the resolved shape directly.
         expect(new URL('/hosted', 'file:///C:/demo/mock.html').pathname).toBe('/C:/hosted');
 
         const body = await (await fetch('file:///C:/hosted')).json();
         expect(body.hosted).toBe(true);
-    });
-
-    it('answers /managed from a Windows file:// URL too', async () => {
-        scenario.role = ROLE.ADMIN;
-        const res = await fetch('file:///C:/managed/getConnections', { method: 'POST' });
-        expect(res.status).toBe(200);
-        expect((await res.json()).admin).toBe(true);
     });
 
     it('still reports Direct-only without the interceptor, which is the bug this fixes', async () => {
@@ -213,44 +203,6 @@ describe('mock-broker/server — SEMP v1 RPC', () => {
         const second = await text(await post(
             '<rpc><show><queue><name>*</name><vpn-name>*</vpn-name><subscriptions/><mock-page>2</mock-page></queue></show></rpc>'));
         expect(second).not.toContain('<more-cookie>');
-    });
-});
-
-describe('mock-broker/server — /managed', () => {
-    it('refuses getConnections with an opaque 400 while signed out', async () => {
-        const res = await fetch('/managed/getConnections', { method: 'POST' });
-        expect(res.status).toBe(400);
-    });
-
-    it('returns a profile whose credentials unpack with the real transform', async () => {
-        // Packed for real against the demo seed, so the managed store's
-        // just-in-time unpack path runs rather than being bypassed.
-        scenario.role = ROLE.OPERATOR;
-        const profile: any = await (await fetch('/managed/getConnections', { method: 'POST' })).json();
-
-        expect(profile.admin).toBe(false);
-        expect(profile.operate[0]).toMatchObject({ msgVpns: 'vpn-prod', queues: 'Q/ORDER/*' });
-
-        const key = await importSeed(fromB64(DEMO_SITE_SEED));
-        expect(await unpack(profile.brokers[0].semp.pass, key)).toBe('demo-semp-secret');
-    });
-
-    it('grants full entitlements to the admin identity', async () => {
-        scenario.role = ROLE.ADMIN;
-        const profile: any = await (await fetch('/managed/getConnections', { method: 'POST' })).json();
-        expect(profile.admin).toBe(true);
-        expect(profile.operate[0]).toMatchObject({ brokers: '*', msgVpns: '*', queues: '*' });
-    });
-
-    it('gives the read-only identity no operate rows', async () => {
-        scenario.role = ROLE.READ_ONLY;
-        const profile: any = await (await fetch('/managed/getConnections', { method: 'POST' })).json();
-        expect(profile.operate).toEqual([]);
-        expect(profile.readOnly).toHaveLength(1);
-    });
-
-    it('accepts reload with 204, matching the real proxy', async () => {
-        expect((await fetch('/managed/reload', { method: 'POST' })).status).toBe(204);
     });
 });
 

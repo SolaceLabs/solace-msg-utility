@@ -26,7 +26,7 @@ npm install && npm test
 
 | Task | What it runs |
 | --- | --- |
-| `build` | `npm run build` (every variant) plus both gateway binaries, version-stamped, into `dist/` |
+| `build` | `npm run build` (every variant), `npm run check:bundles` (no Release bundle carries managed UI), plus both gateway binaries, version-stamped, into `dist/` |
 | `vet` | `npm run typecheck`, `npm run check:docs`, `go vet ./...` **and** `go vet -tags managed ./...` |
 | `test` | `npm test`, `go test ./...` **and** `go test -tags managed ./...` |
 | `cov` | `npm run test:coverage` plus a Go coverage profile; prints both totals |
@@ -171,8 +171,8 @@ describe('ModuleName', () => {
 });
 ```
 
-- **Always use `loadModuleDOM(moduleId)`** ([tests/helpers/loadModuleDOM.ts](../tests/helpers/loadModuleDOM.ts)) for module-level tests instead of hand-rolling an `innerHTML` literal. The helper reads the real `src/modules/<id>/index.html` and appends a container to `document.body` — so when a template grows a new element, every test picks it up automatically.
-- The `moduleId` parameter is a plain `string` (the directory name under `src/modules/`); a typo throws ENOENT at `fs.readFileSync` time. The compile-time enumeration was dropped along with `src/module-ids.ts` when active modules moved to the variant manifests under [src/variants/](../src/variants/).
+- **Always use `loadModuleDOM(moduleId, entry?)`** ([tests/helpers/loadModuleDOM.ts](../tests/helpers/loadModuleDOM.ts)) for module-level tests instead of hand-rolling an `innerHTML` literal. The helper reads the real `src/modules/<id>/index.html` (or, with `entry`, the composed `index.<entry>.html`) and appends a container to `document.body` — so when a template grows a new element, every test picks it up automatically.
+- The `moduleId` parameter is a plain `string` (the directory name under `src/modules/`); a typo throws at read time. The compile-time enumeration was dropped along with `src/module-ids.ts` when active modules moved to the variant manifests under [src/variants/](../src/variants/).
 - For tests that explicitly need a partial or malformed DOM (e.g. to verify a defensive path with a missing element), keep the inline `innerHTML` — that's a legitimate exception.
 
 ### Defensive-Guard Tests

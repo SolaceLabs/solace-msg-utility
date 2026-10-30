@@ -1,5 +1,6 @@
 /**
- * Managed connection panel (the "Managed" tab of the connections module).
+ * Managed connection panel (the "Managed" tab of the connections module's
+ * managed entry, `module.managed.ts`; Release bundles never import this file).
  *
  * A login screen + entitled broker/VPN dropdowns instead of a manual credential
  * form. Ported from the former standalone `managed-connections` module when the

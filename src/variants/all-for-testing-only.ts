@@ -1,9 +1,9 @@
 /**
  * Kitchen-sink variant — every module, for test/QA builds only.
  *
- * `connections` carries both connection modes (Direct + Managed tabs), selected
- * at runtime from the gateway's `/hosted` response rather than by the variant,
- * so there is no separate managed connection module to list here.
+ * `connections` uses its managed entry (`MODULE_ENTRIES` below), so the build
+ * carries both connection modes (Direct + Managed tabs), offered at runtime from
+ * the gateway's `/hosted` response.
  *
  * Built via `node scripts/vite-build.mjs --variant=all-for-testing-only --out-filename=all-test.html`.
  * The admin-only `user-management` + `connection-management` modules ship at
@@ -19,4 +19,9 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'admin-login': 25,             // /solAdmin entry point
     'user-management': 20,         // admin-only
     'connection-management': 15,   // admin-only
+};
+
+/** Module id -> entry name: the connections module's managed entry. */
+export const MODULE_ENTRIES: Record<string, string> = {
+    'connections': 'managed',
 };

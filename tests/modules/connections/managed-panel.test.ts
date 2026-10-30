@@ -6,15 +6,16 @@ import type { AppContext, AppState } from '../../../src/core/types';
 /**
  * Managed panel of the connections module (the "Managed" tab).
  *
- * Installs the REAL ConnectionsModule against a `/hosted` probe that advertises
- * managed mode, then drives the same `#managed-*` DOM the former standalone
- * managed-connections module owned — so this suite still covers the managed
- * login / provisioned-select / connect / refresh contract end-to-end after the
- * two connection modes were merged into one module.
+ * Installs the REAL managed entry (`module.managed.ts`, the `managed` variant)
+ * with its composed `index.managed.html`, against a `/hosted` probe that
+ * advertises managed mode, then drives the `#managed-*` DOM end to end: login /
+ * provisioned-select / connect / refresh, the mode interlock and
+ * `rbac:sign-out-requested` with a live session. The entry's tab bar and its
+ * Direct fallbacks are in tests/modules/connections/module.managed.test.ts.
  *
- * The module builds TWO factory pairs (Direct first, then Managed — see
- * module.ts step 3a), so the mocks below record every created instance and the
- * managed one is the last (`.at(-1)`).
+ * The entry builds TWO factory pairs (Direct first, then Managed — see
+ * module.managed.ts step 2), so the mocks below record every created instance
+ * and the managed one is the last (`.at(-1)`).
  */
 // --- mocked dependencies (hoisted so vi.mock factories can close over them) ---
 const solaceMock = vi.hoisted(() => {
@@ -72,7 +73,7 @@ vi.mock('../../../src/core/services/managed-service', () => ({
 }));
 
 // Import AFTER the mocks are registered.
-import { ConnectionsModule } from '../../../src/modules/connections/module';
+import { ConnectionsModule } from '../../../src/modules/connections/module.managed';
 import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
 import { unpack } from '../../../src/core/encode';
 
@@ -118,7 +119,7 @@ function makeCtx(container: HTMLElement): AppContext {
 }
 
 async function setup() {
-    const container = loadModuleDOM('connections');
+    const container = loadModuleDOM('connections', 'managed');
     const ctx = makeCtx(container);
     await ConnectionsModule.install(ctx);
     return { container, ctx };
@@ -411,7 +412,7 @@ describe('managed-connections — disconnect / logout', () => {
 });
 
 // user-management asks for this after the admin changes their own password or
-// deletes their own account; the module shell routes it to the panel's logout.
+// deletes their own account; the managed entry routes it to the panel's logout.
 describe('connections/managed panel — rbac:sign-out-requested', () => {
     it('ends the managed session and drops its broker connection', async () => {
         const { container, ctx } = await setup();
@@ -803,7 +804,7 @@ describe('managed-connections — connection:check-connection', () => {
     });
 });
 
-// The merged module runs Direct and Managed side by side, so exactly one may be
+// The managed entry runs Direct and Managed side by side, so exactly one may be
 // live at a time and the Managed tab must re-show the right view when activated.
 describe('connections/managed panel — mode interlock + tab activation', () => {
     /** Both tabs offered, Direct active first (so tab switching is exercisable). */
@@ -812,7 +813,7 @@ describe('connections/managed panel — mode interlock + tab activation', () => 
             hosted: true, conn: { connModes: 'both', defaultConn: 'direct' },
         });
     }
-    // Install order (module.ts step 3a): Direct pair first, Managed pair last.
+    // Install order (module.managed.ts step 2): Direct pair first, Managed pair last.
     const directSolace = () => solaceMock.instances[0];
     const directSemp = () => sempMock.instances[0];
 

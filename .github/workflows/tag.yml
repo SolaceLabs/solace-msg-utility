@@ -27,9 +27,10 @@ name: Tag
 #      `image`. Without it the shape auto-detect finds no Dockerfile and no
 #      image ships.
 #   2. `image` is a 2-leg matrix (standard, managed). The managed leg bakes
-#      MANAGED/HOSTED/CONN_MODES, ships the /solAdmin app, and builds the
-#      gateway with -tags managed. The stock single-image job would silently
-#      drop the managed image family.
+#      MANAGED/HOSTED/CONN_MODES, serves managed.html as its index.html and
+#      ships the /solAdmin app (MANAGED_UI), and builds the gateway with
+#      -tags managed. The stock single-image job would silently drop the
+#      managed image family.
 #   3. Both legs pass APP_VERSION so the tag reaches the Go binary's ldflags
 #      and the PWA bundle's __APP_VERSION__. Git is not available inside the
 #      build, so it has to arrive as a build-arg.
@@ -48,6 +49,10 @@ name: Tag
 #      legs and `binaries` passed. The stock job pushed its tags and scanned
 #      afterwards, so a red scan blocked the Release but `latest` already
 #      pointed at the failing image.
+#   8. `release` uploads an explicit list (RELEASE_BUNDLES plus the gateway
+#      binaries), not dist/*. The build also emits managed.html and
+#      solAdmin.html, which exist only inside the managed image; a Release
+#      carries no managed UI.
 #
 # Repo variables (Settings > Secrets and variables > Actions > Variables):
 #   BUILD_TARGETS  JSON array, e.g. [{"os":"linux","arch":"amd64"}]
@@ -131,16 +136,17 @@ jobs:
       # both legs' findings. `publish` still tags neither unless both passed.
       fail-fast: false
       matrix:
-        # Both legs ship the SAME PWA bundle -- connection posture is a runtime
-        # decision (CONN_MODES via /hosted), not a per-image build. The managed
-        # leg additionally ships solAdmin.html and a gateway built with the
-        # `managed` tag (RBAC store + /managed/* handler + the yaml dep).
+        # The legs serve DIFFERENT PWA bundles. standard serves index.html
+        # (Direct only, the file the Release carries). managed serves
+        # managed.html (Direct + the Managed sign-in) as its index.html, plus
+        # solAdmin.html -- MANAGED_UI selects both -- and a gateway built with
+        # the `managed` tag (RBAC store + /managed/* handler).
         include:
           - name: standard
             managed: ""
             hosted: ""
             conn_modes: ""
-            with_admin: ""
+            managed_ui: ""
             go_tags: ""
             flavor: ""
             tags: |
@@ -152,7 +158,7 @@ jobs:
             managed: "true"
             hosted: "true"
             conn_modes: "managed"
-            with_admin: "true"
+            managed_ui: "true"
             go_tags: "managed"
             # prefix=managed-,onlatest=true + latest=true turns the semver
             # patterns into managed-X.Y.Z / managed-X.Y / managed-X and the
@@ -218,7 +224,7 @@ jobs:
             MANAGED=${{ matrix.managed }}
             HOSTED=${{ matrix.hosted }}
             CONN_MODES=${{ matrix.conn_modes }}
-            WITH_ADMIN=${{ matrix.with_admin }}
+            MANAGED_UI=${{ matrix.managed_ui }}
             GO_TAGS=${{ matrix.go_tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Per-variant cache scope so the two parallel legs don't race writing
@@ -509,6 +515,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          # Deviation 8: the PWA bundles a Release carries -- never solAdmin.html
+          # or managed.html. Same list as RELEASE_BUNDLES in
+          # scripts/check-bundles.mjs; tests/build/check-bundles.test.ts fails
+          # if the two drift.
+          RELEASE_BUNDLES: "index.html min.html no-payload.html no-queue-copy.html mock.html"
         run: |
           set -euo pipefail
 
@@ -518,11 +529,25 @@ jobs:
             exit 0
           fi
 
-          # Checksums over whatever the matrix produced, before it is listed
-          # as an asset so SHA256SUMS.txt never hashes itself.
+          # Assets: the listed bundles plus every gateway binary, never all of
+          # dist/. No binaries artifact means no assets at all.
+          assets=()
           if [ -d dist ] && [ -n "$(ls -A dist 2>/dev/null)" ]; then
-            ( cd dist && sha256sum -- * > ../SHA256SUMS.txt )
+            for f in $RELEASE_BUNDLES; do
+              if [ ! -f "dist/$f" ]; then
+                echo "::error::dist/$f is missing -- the binaries job must emit every Release bundle"
+                exit 1
+              fi
+              assets+=("dist/$f")
+            done
+            shopt -s nullglob
+            assets+=(dist/go-web-proxy-*)
+            shopt -u nullglob
+            # Checksums over exactly the assets, before SHA256SUMS.txt joins
+            # them, so it never hashes itself.
+            ( cd dist && sha256sum -- "${assets[@]#dist/}" > ../SHA256SUMS.txt )
             mv SHA256SUMS.txt dist/
+            assets+=(dist/SHA256SUMS.txt)
           fi
 
           # Compose notes up front so the release is correct at creation.
@@ -534,10 +559,8 @@ jobs:
             printf '\nPinned by digest -- dependents must redeploy to pick this up.\n' >> notes.md
           fi
 
-          # Word-splitting is intentional: no binaries means no file args.
-          # shellcheck disable=SC2046
           gh release create "$TAG" \
             --verify-tag \
             --title "$TAG" \
             --notes-file notes.md \
-            $(ls -1 dist/* 2>/dev/null || true)
+            "${assets[@]}"

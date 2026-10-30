@@ -65,8 +65,9 @@ first start, admin-editable in the managed image, hand-edited in the standard on
 ```
 
 - `connections` keeps its id, name and single sidebar entry. The directory gains a second entry,
-  `module.managed.ts` with `index.managed.html`, composing the shared Direct pieces (`direct/*.ts`)
-  plus the Managed tab (today's `managed-panel.ts`). The `managed` and `all-for-testing-only`
+  `module.managed.ts` with `index.managed.html`, composing the Direct form (`installDirect`,
+  exported by `module.ts`; markup spliced from `index.html`) plus the Managed tab
+  (`managed-panel.ts`). The `managed` and `all-for-testing-only`
   manifests name that entry; the registry plugin and template injector learn one optional
   per-variant entry override. `module.ts` never imports the managed files, so Release bundles
   carry none of them. The hook-to-`AppState` bridge stays in the module directory, shared by
@@ -123,13 +124,15 @@ as one commit series straight on the branch (no sub-branches; CI by `workflow_di
 - `config.yaml` loader with every setting, seeded from env on first start; the file wins afterwards.
 - Client access list and trusted proxies on every route; the startup checks read the loaded config.
 
-**Phase 1: Browser split, no security change.**
-- `connections` split into shared `direct/*.ts` plus two entries, `module.ts` (Direct) and
-  `module.managed.ts` (Direct + Managed), with `index.html` / `index.managed.html`; the registry
-  plugin, template injector and `loadModuleDOM` learn the per-variant entry override.
+**Phase 1: Browser split, no security change.** Code on `feature/rbac` 2026-10-30.
+- `connections` split into two entries, `module.ts` (Direct; exports `installDirect`) and
+  `module.managed.ts` (Direct + Managed), with `index.html` / `index.managed.html` (base spliced
+  in at `<!-- @module-base -->`); the registry plugin, template injector and `loadModuleDOM` learn
+  the per-variant entry override (`MODULE_ENTRIES`). `mock.html` became Direct-only.
 - `managed` variant, `dist/managed.html`, Dockerfile overwrite in the managed leg; `tag.yml`
   uploads an explicit Release list.
-- Build test: Release bundles contain no managed code.
+- Build check (`scripts/check-bundles.mjs`, in the `build` task): Release bundles carry no
+  managed UI, `managed.html` does. The core managed store still ships everywhere until Phase 3.
 - Docs: variants, build modes, Dockerfile and `tag.yml` comments ("same bundle" is no longer true).
 
 **Phase 2: Gateway sessions and auth.**

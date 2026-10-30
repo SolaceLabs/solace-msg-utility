@@ -1,10 +1,14 @@
 /**
  * The demo's HTTP layer: a `window.fetch` interceptor.
  *
- * One seam serves everything the app fetches — `/hosted`, `/managed/*`, SEMP v2
- * monitor endpoints and SEMP v1 RPCs — which is why `semp-client`,
- * `semp-discovery`, `service-verify`, `hosted.ts` and `managed-service` can all
- * run unmodified in the demo, URL building and pagination included.
+ * One seam serves everything the app fetches — `/hosted`, SEMP v2 monitor
+ * endpoints and SEMP v1 RPCs — which is why `semp-client`, `semp-discovery`,
+ * `service-verify` and `hosted.ts` can all run unmodified in the demo, URL
+ * building and pagination included.
+ *
+ * The demo is Direct-only: `mock.html` is a Release asset, and Release bundles
+ * carry no managed sign-in (that ships only in the managed image's bundle), so
+ * there is no `/managed/*` surface to mock.
  *
  * Anything the router does not recognise falls through to the real `fetch`, so
  * an unrelated request from the page is unaffected.
@@ -14,7 +18,6 @@
 import { delay, FAULT, scenario } from '../fixtures';
 import { handleSempV2 } from './semp-v2';
 import { handleSempV1 } from './semp-v1';
-import { getConnectionsResponse, hostedResponse } from './managed';
 
 function json(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), {
@@ -34,8 +37,8 @@ function xml(body: string): Response {
  * `file://` URL, and resolving `/hosted` against one is platform-dependent: on
  * Windows the URL spec preserves the drive letter, so
  * `new URL('/hosted', 'file:///C:/…/mock.html')` yields `file:///C:/hosted` and
- * a pathname of `/C:/hosted`. Routing on that made the demo miss `/hosted` and
- * `/managed/*` entirely and fall back to Direct-only.
+ * a pathname of `/C:/hosted`. Routing on that made the demo miss `/hosted`
+ * entirely and fall back to non-hosted URLs the demo does not answer.
  *
  * These requests are mocked outright — nothing is ever loaded from disk — so the
  * base only has to be *stable*. A fixed, non-resolvable one makes the routing
@@ -67,15 +70,13 @@ function readBody(init?: RequestInit): string {
     return typeof init?.body === 'string' ? init.body : '';
 }
 
-async function handleManaged(path: string): Promise<Response> {
-    await delay();
-    if (path === '/managed/getConnections') {
-        const profile = await getConnectionsResponse();
-        // The real proxy answers an unknown user with an opaque 400.
-        return profile ? json(profile) : new Response('Bad Request', { status: 400 });
-    }
-    if (path === '/managed/reload') return new Response(null, { status: 204 });
-    return new Response('Bad Request', { status: 400 });
+/**
+ * `/hosted`. Hosted stays on so broker URLs take the gateway path shape the
+ * router below answers (and the TLS probe a gateway makes unnecessary is
+ * skipped); the connection modes are Direct only, like every Release bundle.
+ */
+export function hostedResponse(): unknown {
+    return { hosted: true, connModes: 'direct', defaultConn: 'direct' };
 }
 
 async function handleSemp(path: string, url: URL, init?: RequestInit): Promise<Response | null> {
@@ -104,8 +105,6 @@ export function installMockServer(): void {
             await delay();
             return json(hostedResponse());
         }
-
-        if (path.startsWith('/managed/')) return handleManaged(path);
 
         const semp = await handleSemp(path, url, init);
         if (semp) return semp;

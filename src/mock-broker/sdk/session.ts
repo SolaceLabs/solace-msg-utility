@@ -2,7 +2,8 @@
  * Session emulation.
  *
  * Deliberately a plain object literal with own, writable function properties.
- * The managed panel reassigns `session.createQueueBrowser` at runtime to wrap
+ * Like the real SDK's. The managed panel (managed.html only; the demo is
+ * Direct-only) reassigns `session.createQueueBrowser` at runtime to wrap
  * it with the entitlement check — a class instance (non-configurable prototype
  * method) would make that patch a silent no-op and disable RBAC enforcement
  * with no error anywhere. Keep it an object literal.

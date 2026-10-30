@@ -17,24 +17,26 @@
 
 import type { PwaModule, RegisteredModule } from './core/types';
 import { ACTIVE_MODULES } from './variants/_active';
-// Generated per active variant by moduleRegistryPlugin: a map of
-// './modules/<id>/module.ts' → that module's namespace, for exactly the
+// Generated per active variant by moduleRegistryPlugin: a map of module id →
+// the namespace of the entry file the variant installs for it (`module.ts`,
+// or `module.<entry>.ts` under a MODULE_ENTRIES override), for exactly the
 // variant's modules. Non-active modules are never imported, so they never
 // enter the bundle (stronger than tree-shaking).
 import { moduleFiles } from 'virtual:module-registry';
 
 export const modules: RegisteredModule[] = Object.entries(ACTIVE_MODULES).map(([id, priority]) => {
-    const file = moduleFiles[`./modules/${id}/module.ts`] as Record<string, unknown> | undefined;
+    const file = moduleFiles[id] as Record<string, unknown> | undefined;
     /* v8 ignore start -- developer-experience guardrail: fires only if a
      * `src/variants/<name>.ts` lists a module id that doesn't exist on disk.
-     * Caught at build time for the shipped variants by `tests/variants.test.ts`,
-     * which loads each variant; testing the throw itself requires mocking
-     * `import.meta.glob` to return an empty map. */
+     * The registry plugin already fails the build when the entry file is
+     * missing, so this only fires if the virtual module and the manifest
+     * disagree; testing it requires mocking `virtual:module-registry`. */
     if (!file) {
         throw new Error(
-            `[registry] "${id}" is in the active variant manifest but ` +
-            `src/modules/${id}/module.ts does not exist. Either create the module ` +
-            `or remove the entry from the variant file under src/variants/.`
+            `[registry] "${id}" is in the active variant manifest but the module ` +
+            `registry has no entry file for it (src/modules/${id}/module.ts, or ` +
+            `module.<entry>.ts under MODULE_ENTRIES). Create it or remove the id ` +
+            `from the variant file under src/variants/.`
         );
     }
     /* v8 ignore stop */
@@ -42,12 +44,12 @@ export const modules: RegisteredModule[] = Object.entries(ACTIVE_MODULES).map(([
         (v): v is PwaModule => !!v && typeof v === 'object' && (v as { id?: unknown }).id === id
     );
     /* v8 ignore start -- developer-experience guardrail: fires only if a
-     * `src/modules/<id>/module.ts` exports an object whose `.id` doesn't
+     * module entry file exports an object whose `.id` doesn't
      * match its directory name. Caught at code-review time; reproducing in a
      * test would require committing a malformed module dir into the repo. */
     if (!moduleObject) {
         throw new Error(
-            `[registry] src/modules/${id}/module.ts does not export an object with id="${id}". ` +
+            `[registry] the entry file for "${id}" does not export an object with id="${id}". ` +
             `Each module file must export a const whose .id matches the directory name.`
         );
     }

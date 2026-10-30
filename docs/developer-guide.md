@@ -22,15 +22,17 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 | `npm run build:no-queue-copy` | `no-queue-copy.html` (standard variant minus the Queue Copy module) |
 | `npm run build:all` | `all-test.html` (kitchen-sink QA build — every module, including the admin ones) |
 | `npm run build:admin` | `solAdmin.html` (the standalone administration app — see [architecture.md -> The admin app](architecture.md#the-admin-app-soladmin)) |
-| `npm run build` | `mock.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, AND `solAdmin.html` in one pass |
+| `npm run build:managed` | `managed.html` (standard plus the Managed sign-in; the managed image serves it as its `index.html`) |
+| `npm run build` | `mock.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, `solAdmin.html` AND `managed.html` in one pass |
+| `npm run check:bundles` | Checks `dist/`: no Release bundle carries managed UI, `managed.html` does. The `build` task runs it after `npm run build` |
 
-`dist/` is git-ignored build output; nothing in it is committed. Tagged Releases publish the bundles and gateway binaries (see [git.md -> Release assets](git.md#release-assets)). For local runs, drop `solclient.js` / `jszip.min.js` in beside the bundles (see [deployment.md -> External Runtime Dependencies](deployment.md#external-runtime-dependencies)).
+`dist/` is git-ignored build output; nothing in it is committed. Tagged Releases publish the Direct-only bundles and the gateway binaries, never `solAdmin.html` or `managed.html`, which ship only inside the managed image (see [git.md -> Release assets](git.md#release-assets)). For local runs, drop `solclient.js` / `jszip.min.js` in beside the bundles (see [deployment.md -> External Runtime Dependencies](deployment.md#external-runtime-dependencies)).
 
 **The gates are `scripts/dev.sh` / `scripts/dev.ps1`, not the npm scripts.** The table above is the variant reference — reach for an individual `build:*` script when iterating on one variant. For anything you would call a gate, use the task: `./scripts/dev.sh all` (`build vet test`; CI runs `all scan`), `cov`, `scan`, `image`, or `full` for the pre-tag sweep. The tasks call the npm scripts above plus the Go halves, and they are the only place a build command lives — see [contributing.md](contributing.md#development-workflow) for the task table and [git.md](git.md) for how a tag turns into a release.
 
 The npm scripts the tasks wrap: `typecheck` (`tsc --noEmit`), `check:docs` (the credential-transform secrecy check: [scripts/check-docs-secrecy.mjs](../scripts/check-docs-secrecy.mjs) scans `docs/`, `README.md` and `CLAUDE.md`, and also fails if one of them is missing or no markdown is found), `audit:gate` (the npm half of `scan`: [scripts/npm-audit-gate.mjs](../scripts/npm-audit-gate.mjs) runs `npm audit` and fails only on fixable HIGH/CRITICAL advisories), `test` / `test:coverage`, and `build`. The `image` and `scan` tasks otherwise run their commands directly (`docker compose build`, `go tool govulncheck`, and the pinned Trivy container, see [git.md](git.md#keeping-the-workflow-pins-current)); there are deliberately no `image:*` / `scan:*` npm scripts, so each gate has one definition. `scan` runs `go tool govulncheck`, which resolves through the `tool` directive pinned in [go-web-proxy/go.mod](../go-web-proxy/go.mod) — never `go run pkg@version`, which runs module-less and ignores the toolchain pin.
 
-Custom variants are built via the `scripts/vite-build.mjs` wrapper, which surfaces `--variant=<name>`, `--out-filename=<name>`, and `--show-payload=<bool>` because Vite's CLI parser (CAC) rejects unknown flags. The wrapper forwards them to `vite.config.ts` via private env vars. Example: `node scripts/vite-build.mjs --variant=min --out-filename=min.html`.
+Custom variants are built via the `scripts/vite-build.mjs` wrapper, which surfaces `--variant=<name>`, `--out-filename=<name>`, and `--show-payload=<bool>` because Vite's CLI parser (CAC) rejects unknown flags. The wrapper forwards them to `vite.config.ts` via private env vars. Example: `node scripts/vite-build.mjs --variant=min --out-filename=min.html`. The dev server reads the same variant from the environment: `__VITE_VARIANT=managed npm run dev` serves the managed bundle (Managed tab included; it needs a managed gateway behind `/hosted` and `/managed/*` to sign in).
 
 ### Build-time feature flags
 
@@ -118,14 +120,17 @@ src/
                        # css-variant-redirect plugin swaps it in for --variant=admin
   modules/
     connections/       # Priority 100. Owns the PRIMARY connection lifecycle.
-      module.ts        # Orchestrator — defines solaceHooks/sempHooks that bridge factory
-                       # lifecycle events (onConnected/onDisconnected/etc.) to ctx.setState +
-                       # eventBus.emit + the connections form's UI updates.
+      module.ts        # Release entry (Direct only). Exports installDirect, which defines
+                       # solaceHooks/sempHooks bridging factory lifecycle events
+                       # (onConnected/onDisconnected/etc.) to ctx.setState + eventBus.emit +
+                       # the connections form's UI updates.
+      module.managed.ts # Managed entry (the managed variant): tab bar + installDirect + panel
       managed-panel.ts # The Managed tab — login, provisioned dropdowns, browser guardrails
       config.js        # localStorage persistence (values obfuscated at rest)
       ui.js            # Element caching, auth mode, visual feedback
       styles.css       # Module-scoped styles
-      index.html       # Module HTML template (injected by build plugin)
+      index.html       # Module HTML template (injected by build plugin) — the Direct form
+      index.managed.html # Managed entry template: tab bar + index.html (at <!-- @module-base -->) + Managed panel
     queue-browser/     # Priority 80
       module.ts        # Event listener wiring
       service.ts       # Browser create, forward, delete
@@ -155,16 +160,17 @@ src/
     min.ts             # Minimal variant — connections + queue-browser only
     no-queue-copy.ts   # Standard variant minus the Queue Copy module
     admin.ts           # The /solAdmin app — admin-login + the two entitlement editors
+    managed.ts         # The managed image's bundle — standard + connections' managed entry (MODULE_ENTRIES)
     all-for-testing-only.ts  # Kitchen-sink QA build — every module, incl. the admin ones
     _active.ts         # One-line re-export from one variant (default ./standard)
   mock-broker/         # DEMO ONLY — entered solely via the mock-mode import redirect,
                        # so no production bundle contains it.
     boot.ts            # Installs window.solace, the fetch interceptor and the panel
     fixtures.ts        # THE demo dataset + scenario enums — single source of truth
-    emitter.ts         # Synchronous FIFO emitter (RBAC patch ordering depends on it)
+    emitter.ts         # Synchronous FIFO emitter, as in the real SDK
     sdk/               # enums, session, browser, message — the solace global
     broker/store.ts    # Queues, messages, seeding, publish routing, deletes
-    server/            # fetch router: SEMP v2 + v1, /hosted, /managed/*
+    server/            # fetch router: SEMP v2 + v1, /hosted (Direct only)
     controls/          # The demo scenario switcher (.mockctl-* only)
   main.ts              # Bootstrap (imports ./css/main.css and ./registry)
   registry.ts          # Resolves variant manifest → PwaModule via virtual:module-registry (moduleRegistryPlugin)
@@ -174,7 +180,7 @@ tests/
   helpers/             # loadModuleDOM, resetQueueBrowserState
   core/                # Kernel, EventBus, toast, utils tests (dom.ts is exercised transitively by module tests)
   modules/             # Per-module test files
-  build/               # scripts/*.mjs tests — module-registry-plugin (manifest → virtual:module-registry), npm-audit-gate, check-docs-secrecy
+  build/               # scripts/*.mjs tests — module-registry-plugin (manifest → virtual:module-registry, entry overrides), check-bundles, npm-audit-gate, check-docs-secrecy
   variants.test.ts     # Every variant manifest resolves and keeps its shape invariants
   registry.test.ts     # Registry resolution + kernel integration
   main.test.ts         # Bootstrap
@@ -278,7 +284,7 @@ export interface SolaceConnectionHooks {
 export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient;
 ```
 
-The connections module owns the **primary** connection: its `module.ts` defines `solaceHooks`/`sempHooks` that bridge factory events to `ctx.setState` + `eventBus.emit('client:connected'…)` + the connections form's UI updates. Other modules subscribe to those bus events as they always have. queue-copy is the secondary-connection caller: it defines different hooks that target module-scoped state instead of global state — same factory, different bridging. When its destination uses provisioned credentials it asks `ctx.managedStore` to dial the target and creates the client inside that callback, so the credential never leaves core.
+The connections module owns the **primary** connection: `installDirect` in its `module.ts` (shared by the Release and managed entries) defines `solaceHooks`/`sempHooks` that bridge factory events to `ctx.setState` + `eventBus.emit('client:connected'…)` + the connections form's UI updates. Other modules subscribe to those bus events as they always have. queue-copy is the secondary-connection caller: it defines different hooks that target module-scoped state instead of global state — same factory, different bridging. When its destination uses provisioned credentials it asks `ctx.managedStore` to dial the target and creates the client inside that callback, so the credential never leaves core.
 
 The same shape applies to SEMP: `createServiceSemp(hooks)` and the discovery generator `createSempDiscovery(sempCtx)` (from `src/core/services/semp-discovery.ts`) which is parameterized by a `SempContext` — a `{ fetch, baseUrl }` pair scoped to a specific broker. Build a primary SempContext via `unfilteredPrimarySempContext(ctx)` from `src/core/services/sempContext.ts` — read its docstring before adding a consumer, because only two SEMP v2 list shapes are entitlement-filtered. For discovery, prefer `queueSourceFrom(ctx, scope)` from `src/core/services/queue-source.ts`; components take a `QueueSource` and never run their own SEMP calls.
 
@@ -358,7 +364,7 @@ serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser });
    };
    ```
 
-   Pick a priority that slots into the existing list (higher installs first, renders higher in the sidebar). [src/registry.ts](../src/registry.ts) resolves each id in the manifest to the `PwaModule` exported by `src/modules/<id>/module.ts` via the `virtual:module-registry` module (generated per variant by `scripts/module-registry-plugin.mjs`), so no import section needs touching and only the active variant's modules enter the bundle. To **disable** a module in a variant, comment its line. To **ship a different variant**, drop a new `src/variants/<name>.ts` and build it with `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>.html` (add a matching `build:<name>` npm script, and a pass in `build`, if it should ship).
+   Pick a priority that slots into the existing list (higher installs first, renders higher in the sidebar). [src/registry.ts](../src/registry.ts) resolves each id in the manifest to the `PwaModule` exported by `src/modules/<id>/module.ts` via the `virtual:module-registry` module (generated per variant by `scripts/module-registry-plugin.mjs`), so no import section needs touching and only the active variant's modules enter the bundle. To **disable** a module in a variant, comment its line. To **ship a different variant**, drop a new `src/variants/<name>.ts` and build it with `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>.html` (add a matching `build:<name>` npm script, and a pass in `build`, if it should ship). To give one variant a different **entry** for a module, export `MODULE_ENTRIES = { '<id>': '<entry>' }` from the manifest and add `src/modules/<id>/module.<entry>.ts` (and optionally `index.<entry>.html`, which can pull the base `index.html` in at a `<!-- @module-base -->` marker). The connections module does this for the `managed` variant; its `module.ts` must never import the managed entry's files.
 
    > **Gating a module in managed deployments:** add its id to `MODULE_REQUIREMENTS` in [src/core/rbac.ts](../src/core/rbac.ts) — `'admin'` for admin-only CRUD (like `user-management` / `connection-management`, which ship only in `src/variants/admin.ts`), or `'unfiltered-semp'` for a module that reaches the broker over a path RBAC cannot filter, which hides it in **every** managed session. The kernel hides the sidebar entry and re-evaluates on `rbac:changed`. See [architecture.md → Managed Connections](architecture.md#managed-connections-rbac).
 
@@ -409,7 +415,7 @@ Provides global mocks installed before every test:
 
 ### Writing Tests for a New Module
 
-Load the real per-module `index.html` via [`loadModuleDOM`](../tests/helpers/loadModuleDOM.ts) so the test DOM can never drift from the production template. The `moduleId` argument is a plain `string` (the directory name under `src/modules/`) — typos throw `ENOENT` at `fs.readFileSync` time, loud enough for tests. The previous compile-time enumeration was retired along with `src/module-ids.ts` when variant manifests became the single source of truth.
+Load the real per-module `index.html` via [`loadModuleDOM`](../tests/helpers/loadModuleDOM.ts) so the test DOM can never drift from the production template. The `moduleId` argument is a plain `string` (the directory name under `src/modules/`) — a typo throws at read time, loud enough for tests. Pass an entry to load a variant entry's composed template, exactly as the build injects it: `loadModuleDOM('connections', 'managed')`. The previous compile-time enumeration was retired along with `src/module-ids.ts` when variant manifests became the single source of truth.
 
 ```ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';

@@ -14,11 +14,12 @@ from the **brokers and Message VPNs they are entitled to**, and the broker crede
 (still obfuscated) and unpacked client-side just-in-time. Two admin-only modules
 (`user-management`, `connection-management`) manage the entitlement data.
 
-**It is a runtime posture, not a build.** Every bundle carries both paths; which tabs the app offers
-is decided by the gateway's `/hosted` response (`CONN_MODES` / `DEFAULT_CONN` — see
+**It ships only in the managed image's bundle.** `managed.html` (the `managed` variant) carries both
+paths and is served as that image's `index.html`; every Release bundle is Direct-only. Within
+`managed.html`, which tabs the app offers is decided by the gateway's `/hosted` response (`CONN_MODES` / `DEFAULT_CONN` — see
 [deployment.md](deployment.md)). With no gateway there is no `/hosted`, so Managed never appears.
 Managed mode only works behind the [go-web-proxy](../go-web-proxy) in `MANAGED=true HOSTED=true`
-mode. There is no longer a separate `managed` variant: a managed deployment ships the standard bundle. The entitlement editors live in their own `admin` variant, served at `/solAdmin` (see [architecture.md](architecture.md) — The admin app).
+mode, and only in the managed image, which serves the `managed` variant (`managed.html`) as its `index.html`; the standard bundle and every Release bundle are Direct-only. The entitlement editors live in their own `admin` variant, served at `/solAdmin` (see [architecture.md](architecture.md) — The admin app).
 
 ## Topology
 
@@ -121,10 +122,11 @@ mode. There is no longer a separate `managed` variant: a managed deployment ship
 - The **site seed is shared across users** and traverses the wire, so it is recoverable by any
   entitled user. Its real value: a stolen connections file cannot be reversed offline without also
   compromising a session or the key file.
-- The **credential transform now ships in every bundle** (it did not before, when managed code was
-  excluded from non-managed builds by non-import). It was always present in *managed* bundles and
-  always recoverable by an entitled user, so this changes the **breadth** of exposure, not its kind —
-  but the build-level separation, and the isolation grep that enforced it, are gone by design.
+- The **credential transform still ships in every bundle**, through the core managed session store
+  the kernel creates, even though the managed UI is now confined to `managed.html` (a build check,
+  `scripts/check-bundles.mjs`, enforces that half). It was always present in *managed* bundles and
+  always recoverable by an entitled user, so this is **breadth** of exposure, not its kind; removing
+  it from the browser is planned in [rbac-rework-plan.md](rbac-rework-plan.md).
   `scripts/check-docs-secrecy.mjs` guards only against *documenting* the construction.
 - The **login token is a bearer credential**; reading the users file yields replayable bearers.
   Mitigations: filesystem permissions + TLS. (The admin CRUD list endpoints never return stored

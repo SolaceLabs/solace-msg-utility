@@ -3,8 +3,12 @@ import { ACTIVE_MODULES as STANDARD_VARIANT } from '../src/variants/standard';
 import { ACTIVE_MODULES as MIN_VARIANT } from '../src/variants/min';
 import { ACTIVE_MODULES as NO_QUEUE_COPY_VARIANT } from '../src/variants/no-queue-copy';
 import { ACTIVE_MODULES as ADMIN_VARIANT } from '../src/variants/admin';
-import { ACTIVE_MODULES as ALL_VARIANT } from '../src/variants/all-for-testing-only';
+import { ACTIVE_MODULES as ALL_VARIANT, MODULE_ENTRIES as ALL_ENTRIES } from '../src/variants/all-for-testing-only';
+import { ACTIVE_MODULES as MANAGED_VARIANT, MODULE_ENTRIES as MANAGED_ENTRIES } from '../src/variants/managed';
 import { ACTIVE_MODULES as ACTIVE_VARIANT } from '../src/variants/_active';
+import * as standardManifest from '../src/variants/standard';
+import * as minManifest from '../src/variants/min';
+import * as noQueueCopyManifest from '../src/variants/no-queue-copy';
 
 /**
  * Each variant manifest is a flat record of `{ moduleId: priority }`. Loading
@@ -49,7 +53,7 @@ describe('variants', () => {
     it('no shipping variant carries the admin modules — they live at /solAdmin', () => {
         // The entitlement editors moved to their own app, so an everyday bundle
         // must not carry them even hidden: the surface should not exist.
-        [STANDARD_VARIANT, MIN_VARIANT, NO_QUEUE_COPY_VARIANT].forEach((v) => {
+        [STANDARD_VARIANT, MIN_VARIANT, NO_QUEUE_COPY_VARIANT, MANAGED_VARIANT].forEach((v) => {
             expect(Object.keys(v)).not.toContain('user-management');
             expect(Object.keys(v)).not.toContain('connection-management');
             expect(Object.keys(v)).not.toContain('admin-login');
@@ -69,8 +73,8 @@ describe('variants', () => {
     });
 
     it('all variant ships the all modules for visual testing purpose', () => {
-        // Kitchen-sink build. `connections` covers both connection modes, so no
-        // separate managed connection module appears here either.
+        // Kitchen-sink build. `connections` runs its managed entry, which covers
+        // both connection modes, so no separate managed connection module appears.
         expect(Object.keys(ALL_VARIANT).sort()).toEqual([
             'admin-login',
             'connection-management',
@@ -80,15 +84,23 @@ describe('variants', () => {
             'queue-subscription-explorer',
             'user-management',
         ]);
+        expect(ALL_ENTRIES).toEqual({ connections: 'managed' });
     });
 
-    it('no variant ships a separate managed connection module', () => {
-        // Both connection modes live in the one `connections` module; which tabs
-        // it offers is decided at runtime from /hosted, not by the variant. There
-        // is therefore no `managed` variant either — a managed deployment ships
-        // the standard bundle and switches posture through CONN_MODES.
-        [STANDARD_VARIANT, MIN_VARIANT, NO_QUEUE_COPY_VARIANT, ALL_VARIANT].forEach((v) => {
-            expect(Object.keys(v)).not.toContain('managed-connections');
+    it('managed variant ships the standard modules, with connections on its managed entry', () => {
+        // managed.html is the managed image's index.html: the everyday app plus
+        // the Managed sign-in, and nothing else. Same modules, same order.
+        expect(MANAGED_VARIANT).toEqual(STANDARD_VARIANT);
+        expect(MANAGED_ENTRIES).toEqual({ connections: 'managed' });
+    });
+
+    it('no Release variant overrides an entry, so none installs the managed connections entry', () => {
+        // Release bundles (index/min/no-payload/no-queue-copy/mock) build from
+        // these manifests; scripts/check-bundles.mjs proves the result on the
+        // built files. The managed sign-in is never a separate module either.
+        [standardManifest, minManifest, noQueueCopyManifest].forEach((m) => {
+            expect(m).not.toHaveProperty('MODULE_ENTRIES');
+            expect(Object.keys(m.ACTIVE_MODULES)).not.toContain('managed-connections');
         });
     });
 

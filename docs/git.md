@@ -4,7 +4,7 @@ This project ships in four forms:
 
 1. A **container image** at `ghcr.io/solacelabs/solace-msg-utility` (produced by [docker/Dockerfile](../docker/Dockerfile)), in a standard and a `managed-` prefixed variant.
 2. A **public PWA** hosted on GitHub Pages at `https://solacelabs.github.io/solace-msg-utility/`.
-3. The **PWA bundles** (`index.html` and its variants) attached to the GitHub Release.
+3. The **PWA bundles** (`index.html` and its Direct-only variants) attached to the GitHub Release. The managed sign-in ships only inside the `managed-` image.
 4. The **gateway binaries** (`go-web-proxy`), cross-compiled and attached to the same Release.
 
 All four are produced by [`.github/workflows/tag.yml`](../.github/workflows/tag.yml), which fires when you **push a `v*` tag**. Nothing is built or pushed on an ordinary branch push or pull request (the only automatic runs are listed under [Day-to-day branching](#day-to-day-branching): the narrow CI trigger and the SCA scan).
@@ -94,7 +94,7 @@ gh run watch
 | --- | --- | --- | --- |
 | `plan` | — | Resolves the project shape once, loudly: is there a `docker/Dockerfile`, and is the `BUILD_TARGETS` repo variable valid JSON. | `BUILD_TARGETS` is malformed, or nothing at all would ship. |
 | `gates` | `plan` | Calls [`ci.yml`](../.github/workflows/ci.yml), which runs `./scripts/dev.sh all scan` on `ubuntu-24.04` and `./scripts/dev.ps1 all scan` on `windows-2025`, then uploads `scripts/logs/` as an artifact. | A build, type, doc-secrecy, test, `npm audit`, `govulncheck` or Trivy failure on either platform. |
-| `image` | `plan`, `gates` | A 2-leg matrix (`standard`, `managed`) builds multi-arch (`linux/amd64,linux/arm64`) with buildx and pushes to GHCR **by digest only** (no tag) with provenance and SBOM, then Trivy-scans each platform's manifest of that digest separately (Trivy on a multi-arch index scans only one platform). Both legs ship the same bundle; `managed` bakes `MANAGED`/`HOSTED`/`CONN_MODES`, adds `/solAdmin` via `WITH_ADMIN`, and builds the gateway with `GO_TAGS=managed`. | Any HIGH/CRITICAL fixable OS or library vuln on either platform of either image, or a pushed platform with no Trivy step. Nothing is tagged yet, so `latest` and `managed-latest` stay where they were. |
+| `image` | `plan`, `gates` | A 2-leg matrix (`standard`, `managed`) builds multi-arch (`linux/amd64,linux/arm64`) with buildx and pushes to GHCR **by digest only** (no tag) with provenance and SBOM, then Trivy-scans each platform's manifest of that digest separately (Trivy on a multi-arch index scans only one platform). The legs serve different bundles: `standard` serves `index.html`; `managed` bakes `MANAGED`/`HOSTED`/`CONN_MODES`, serves `managed.html` as its `index.html` and adds `/solAdmin` (both via `MANAGED_UI`), and builds the gateway with `GO_TAGS=managed`. | Any HIGH/CRITICAL fixable OS or library vuln on either platform of either image, or a pushed platform with no Trivy step. Nothing is tagged yet, so `latest` and `managed-latest` stay where they were. |
 | `binaries` | `plan`, `gates` | Runs `./scripts/dev.sh build` once per `BUILD_TARGETS` entry. Each leg emits both gateway variants named `go-web-proxy[-managed]-<os>-<arch>[.exe]`, plus the PWA bundles. | A cross-compile failure. |
 | `publish` | `image`, `binaries` | Points every tag `docker/metadata-action` derived (see [Image tags](#image-tags)) at the digest its leg scanned, with `docker buildx imagetools create`. That re-pushes the index byte-for-byte, so the digest does not change; it then checks that each tag resolves to that digest. Runs only when both image legs and the binaries passed, one tag run at a time. | A registry error, or a tag that does not resolve to the scanned digest. |
 | `pages` | `plan`, `gates`, `image`, `binaries`, `publish` | Checks out the `dist` branch, copies *only* `index.html` into the branch root, commits, pushes. Pages auto-redeploys. | Only runs when everything upstream passed — a red scan no longer redeploys the site. |
@@ -124,11 +124,13 @@ Within each leg all four tags point to the same digest: the one `image` pushed a
 
 ### Release assets
 
-- `index.html`, `min.html`, `mock.html`, `no-payload.html`, `no-queue-copy.html`, `solAdmin.html`
+- `index.html`, `min.html`, `mock.html`, `no-payload.html`, `no-queue-copy.html` (the `RELEASE_BUNDLES` list in the `release` step, kept equal to `scripts/check-bundles.mjs` by a test)
 - `go-web-proxy-<os>-<arch>[.exe]` and `go-web-proxy-managed-<os>-<arch>[.exe]`, one pair per `BUILD_TARGETS` entry
 - `SHA256SUMS.txt` over all of the above
 
-`dist/` is git-ignored on `main`. The bundles and binaries are build output, published by this Release (Pages also serves `index.html`, and the images bake in `index.html` / `solAdmin.html`). Never commit them: a tracked bundle is stale as soon as `src/` moves on, and because `build` rewrites it the tree turns dirty mid-sweep -- the binary is stamped before the build, `git describe --dirty` runs after it, and the version check under [Pre-release checklist](#pre-release-checklist-local) stops matching.
+The build also emits `solAdmin.html` and `managed.html`. The `release` step uploads an explicit list, never `dist/*`, so neither is a Release asset: both exist only inside the managed image.
+
+`dist/` is git-ignored on `main`. The bundles and binaries are build output, published by this Release (Pages also serves `index.html`; the standard image bakes in `index.html`, the managed image `managed.html` (as its `index.html`) and `solAdmin.html`). Never commit them: a tracked bundle is stale as soon as `src/` moves on, and because `build` rewrites it the tree turns dirty mid-sweep -- the binary is stamped before the build, `git describe --dirty` runs after it, and the version check under [Pre-release checklist](#pre-release-checklist-local) stops matching.
 
 The two vendor JS files (`solclient.js`, `jszip.min.js`) are **not** release assets — they are not committed to `main`. Take them from the `dist` branch. See [deployment.md](deployment.md).
 
@@ -148,7 +150,7 @@ Pages is fed from the **`dist` branch**, not from a workflow-uploaded Pages arti
 
 - `https://solacelabs.github.io/solace-msg-utility/` → `index.html` (production bundle)
 
-The non-default variants are built and attached to the Release but **not** deployed to Pages. Managed deployments use the same `index.html`, shipped in the `managed-` prefixed container image; that image also carries `solAdmin.html`, which the gateway serves at `/solAdmin`.
+The other Direct-only variants are built and attached to the Release but **not** deployed to Pages. Managed deployments use the `managed-` prefixed container image, which serves `managed.html` (the only bundle with the Managed sign-in) as its `index.html` and also carries `solAdmin.html`, which the gateway serves at `/solAdmin`.
 
 Pages is gateway-less, so it is Direct-connection-only by design.
 

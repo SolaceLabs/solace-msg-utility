@@ -3,9 +3,9 @@
  *
  * Three behaviours here are load-bearing for the app, not decoration:
  *
- * 1. **`_messageConsumer._permissions` exists before `UP` fires.** The managed
- *    panel overwrites it from inside its own `UP` handler, and queue-browser's
- *    badge + verify both read it afterwards.
+ * 1. **`_messageConsumer._permissions` exists before `UP` fires.** queue-browser's
+ *    badge + verify read it; in managed.html (not this Direct-only demo) the
+ *    managed panel also overwrites it from inside its own `UP` handler.
  * 2. **Messages arrive in spool-ID order, one at a time.** The copy engine's
  *    drift detection and max-consumed logic assume the broker delivers that way.
  * 3. **`stop()` / `start()` genuinely suspend and resume delivery.** They are
@@ -40,8 +40,8 @@ export function createQueueBrowser(vpn: string, props: any): MockQueueBrowser {
     let snapshot: SpooledMessage[] = [];
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    // Present from construction so it is populated well before UP — the managed
-    // panel's patch assumes it can write here inside its UP handler.
+    // Present from construction so it is populated well before UP, as in the
+    // real SDK (the managed panel in managed.html writes here inside its UP handler).
     const state = queueStateOf(vpn, queueName);
     const permissions = state === QUEUE_STATE.READ_ONLY ? 'READ_ONLY' : 'READ_WRITE';
 

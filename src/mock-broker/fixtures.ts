@@ -65,46 +65,6 @@ export const FAULT = {
 export type Fault = typeof FAULT[keyof typeof FAULT];
 
 /* ------------------------------------------------------------------ */
-/*  RBAC identities                                                    */
-/* ------------------------------------------------------------------ */
-
-/**
- * Who is signed in on the Managed tab. Switching emits `rbac:changed`, so the
- * sidebar, pickers and Queue Copy destination all re-derive exactly as they do
- * in production.
- */
-export const ROLE = {
-    SIGNED_OUT: 'signed-out',
-    ADMIN: 'admin',
-    OPERATOR: 'operator',
-    READ_ONLY: 'readonly',
-} as const;
-export type Role = typeof ROLE[keyof typeof ROLE];
-
-/** Entitlement rows per role, in the same shape `users.yaml` would carry. */
-export const ROLE_ENTITLEMENTS: Record<Exclude<Role, 'signed-out'>, {
-    admin: boolean;
-    operate: { brokers: string; msgVpns: string; queues: string }[];
-    readOnly: { brokers: string; msgVpns: string; queues: string }[];
-}> = {
-    admin: {
-        admin: true,
-        operate: [{ brokers: '*', msgVpns: '*', queues: '*' }],
-        readOnly: [],
-    },
-    operator: {
-        admin: false,
-        operate: [{ brokers: '*', msgVpns: 'vpn-prod', queues: 'Q/ORDER/*' }],
-        readOnly: [{ brokers: '*', msgVpns: '*', queues: '*' }],
-    },
-    readonly: {
-        admin: false,
-        operate: [],
-        readOnly: [{ brokers: '*', msgVpns: '*', queues: '*' }],
-    },
-};
-
-/* ------------------------------------------------------------------ */
 /*  Topology                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -164,23 +124,6 @@ export const VPNS: VpnFixture[] = [
     },
 ];
 
-/** The broker name the Managed tab offers, and the SEMP/client ports it reports. */
-export const MANAGED_BROKER = {
-    broker: 'demo-broker',
-    hostname: MOCK_HOST.OK,
-    sempPort: '1943',
-    sempUser: 'monitor',
-    clientPort: '1443',
-    clientUser: 'demo',
-} as const;
-
-/**
- * Base64 seed the mock `/managed/getConnections` packs credentials against.
- * Must decode to a valid key length (32 bytes here) — the real `importSeed`
- * runs against it, so a wrong length fails loudly at sign-in.
- */
-export const DEMO_SITE_SEED = 'ZGVtby1zaXRlLXNlZWQtMDEyMzQ1Njc4OWFiY2RlZmc=';
-
 /* ------------------------------------------------------------------ */
 /*  Live scenario state                                                */
 /* ------------------------------------------------------------------ */
@@ -190,8 +133,6 @@ export interface ScenarioState {
     queueState: Map<string, QueueState>;
     /** Armed fault, consumed or sticky depending on the fault. */
     fault: Fault;
-    /** Signed-in managed identity. */
-    role: Role;
     /** Artificial delay applied to broker and SEMP responses, in ms. */
     latencyMs: number;
     /** Multiplier applied to every queue's `seed` when the store reseeds. */
@@ -204,7 +145,6 @@ function seedState(): ScenarioState {
     return {
         queueState,
         fault: FAULT.NONE,
-        role: ROLE.SIGNED_OUT,
         latencyMs: 120,
         volume: 1,
     };
@@ -223,7 +163,6 @@ export function resetScenario(): void {
     const fresh = seedState();
     scenario.queueState = fresh.queueState;
     scenario.fault = fresh.fault;
-    scenario.role = fresh.role;
     scenario.latencyMs = fresh.latencyMs;
     scenario.volume = fresh.volume;
 }

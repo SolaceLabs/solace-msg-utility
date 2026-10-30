@@ -1,8 +1,10 @@
 /**
  * A deliberately dumb event emitter: **synchronous, strictly FIFO**.
  *
- * Both properties are load-bearing, not stylistic. The connections module's
- * managed panel monkey-patches `session.createQueueBrowser` and registers its
+ * Both properties match the real SDK, which the managed build depends on (the
+ * demo itself is Direct-only, so here they keep the emulation faithful). The
+ * connections module's managed panel (managed.html only) monkey-patches
+ * `session.createQueueBrowser` and registers its
  * own `UP` listener on the returned browser *before* queue-browser's service
  * registers one, then overwrites `_messageConsumer._permissions` from inside
  * that handler. If this emitter reordered listeners, or deferred them to a

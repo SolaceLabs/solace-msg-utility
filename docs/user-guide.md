@@ -11,7 +11,7 @@ The interface has a **sidebar** on the left for navigation and a **main content 
 3. **Queue Copy** — Copy messages from a source queue to a destination queue (same broker or cross-broker)
 4. **Queue Subscriptions** — Search every queue subscription on the broker by VPN, queue, or topic
 
-Which modules appear depends on the build [variant](#shipped-variants). Deployments behind the gateway can also enable **Managed** connections, a second tab in **Connections** for users who do not have broker credentials — you sign in and pick from the brokers you are entitled to. See [Managed Connections](#managed-connections) below.
+Which modules appear depends on the build [variant](#shipped-variants). Deployments of the **managed** container image also offer **Managed** connections, a second tab in **Connections** for users who do not have broker credentials — you sign in and pick from the brokers you are entitled to. See [Managed Connections](#managed-connections) below.
 
 ---
 
@@ -380,7 +380,7 @@ The loaded subscription list is held in memory for the session. Subsequent filte
 
 ## Shipped Variants
 
-The project builds several HTML variants, and every one is attached to each [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases). `index.html` is also what GitHub Pages and the container images serve; the managed image additionally serves `solAdmin.html` at `/solAdmin`.
+The project builds several HTML variants. The Direct-only ones below are attached to each [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases); `index.html` is also what GitHub Pages and the standard container image serve. The managed container image serves its own bundle (`managed.html`, standard plus the Managed sign-in) as `index.html`, and `solAdmin.html` at `/solAdmin`; neither is a Release download.
 
 | File | Variant | Use |
 | --- | --- | --- |
@@ -388,7 +388,6 @@ The project builds several HTML variants, and every one is attached to each [Git
 | `min.html` | **Minimal** | Stripped-down variant — only Connections + Queue Browser. Smaller bundle for environments that don't need the copy/move or subscription-browser modules |
 | `no-payload.html` | **No-payload** | Same as Standard, except the Queue Browser never shows or exports the message **body**. The Content Preview, Show Raw Content, Copy Content, Download Content, Download Full, and Body-Content filter are all removed; Forward, Delete, all metadata, and the other filters remain. Use where message bodies must not be visible to the operator. |
 | `no-queue-copy.html` | **No Queue Copy** | Same as Standard, minus the Queue Copy module. For deployments where operators should browse and forward but never bulk-copy between queues. |
-| `solAdmin.html` | **Administration** | The standalone admin app: sign in as an administrator to manage users and broker connections. Served by the gateway at `/solAdmin` in managed deployments, never as the main app. See [Administration](#administration-soladmin). |
 | `mock.html` | Standard + demo broker | Interactive demo (see [Demo Mode](#demo-mode-mockhtml)) |
 
 Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately**:
@@ -423,18 +422,14 @@ other export works without it.)
 required.
 
 (For developers building from source, `npm run build:mock` produces `dist/mock.html`; `npm run build` produces
-every variant in one pass. See [developer-guide.md](developer-guide.md) for the full build workflow.)
+every variant in one pass, including the image-only `managed.html` and `solAdmin.html`. See [developer-guide.md](developer-guide.md) for the full build workflow.)
 
 ### Connecting
 
 Use host **`broker.solace.com`** with any non-empty credentials. Any other hostname surfaces a connection failure,
 and a hostname containing `untrust.com` simulates an untrusted certificate, so the error paths are demoable too.
 
-Both connection tabs are available even though a demo opened from disk has no gateway: the broker answers the
-`/hosted` probe itself, so the app resolves the same Direct + Managed tabs it would behind the real proxy.
-**Direct** works as above. **Managed** signs you in against the mock RBAC
-backend — any username and password are accepted; which entitlements you get is chosen in the demo controls
-(below), not by what you type.
+The demo is Direct-only, like every Release bundle: the Managed sign-in ships only in the managed container image.
 
 ### The demo topology
 
@@ -464,10 +459,6 @@ A **Demo controls** panel sits at the bottom-right, collapsed by default. It bot
 - **Queue state** — switch any queue between normal, read-only, bind-denied and empty. Applies on the next bind.
 - **Connection faults** — fail the next connect, simulate SEMP `401` or `500`, or drop a live session to show the
   disconnect path. The connect failure is one-shot; the SEMP faults stay armed until you clear them.
-- **Managed identity** — switch between `admin` (everything), `operator` (operate on `Q/ORDER/*` in `vpn-prod`,
-  read-only elsewhere), `readonly` and signed out. Switching while signed in clicks Refresh for you, so the
-  sidebar, queue pickers and Queue Copy destination all re-derive exactly as they would in production when an
-  administrator changes your access.
 - **Latency and volume** — tune the artificial response delay and the seeded message count, then **Reset demo
   data** to rebuild everything from scratch.
 
@@ -475,8 +466,8 @@ Nothing is persisted: reloading the page reseeds the broker, so a reload is alwa
 
 ### What is not in the demo
 
-The `/solAdmin` administration app is not part of the demo build — managing users and connections needs the real
-gateway. Everything else is exercisable offline.
+Managed sign-in and the `/solAdmin` administration app are not part of the demo build — both need the real
+gateway and ship only in the managed container image. Everything else is exercisable offline.
 
 ---
 
@@ -484,7 +475,7 @@ gateway. Everything else is exercisable offline.
 
 **Managed** mode is for users who should not handle broker credentials. Instead of typing connection details, you **log in** and pick from the brokers and Message VPNs an administrator has granted you.
 
-It appears as a second tab in the **Connections** module — **Direct** (type your own credentials) and **Managed** (sign in). Which tabs you see is decided by the deployment: you may get both, or only one. Managed runs **only behind the deployment gateway**, so if you are using a plain copy of the app with no gateway, the Managed tab simply isn't there. See [deployment.md](deployment.md#managed-mode-rbac) to stand one up.
+It appears as a second tab in the **Connections** module — **Direct** (type your own credentials) and **Managed** (sign in). Which tabs you see is decided by the deployment: you may get both, or only one. Managed runs **only in the managed container image**: the copies of the app attached to a Release, and the standard image, have no Managed tab. See [deployment.md](deployment.md#managed-mode-rbac) to stand one up.
 
 ### Signing in and connecting
 

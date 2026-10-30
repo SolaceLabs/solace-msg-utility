@@ -12,9 +12,11 @@
 #   /tls         — TLS material (tls.crt, tls.key, trust/*.crt, trust/*.pem).
 #                  If tls.crt / tls.key are missing, the gateway generates a
 #                  self-signed pair on startup (writable mount required for that).
-#   /pwa         — PWA bundle (index.html, solAdmin.html on managed images, plus
-#                  any sibling assets such as solclient.js). Defaults to
-#                  /SolaceMsgUtility inside the image; override with APP_DIR.
+#   /pwa         — PWA bundle (index.html, plus solAdmin.html on managed images,
+#                  plus any sibling assets such as solclient.js). The managed
+#                  image's index.html is the managed build (managed.html).
+#                  Defaults to /SolaceMsgUtility inside the image; override
+#                  with APP_DIR.
 #   /managed     — Writable gateway store: config.yaml on every image, plus
 #                  users.yaml, connections.yaml and site.seed for MANAGED=true.
 #                  Baked empty + owned by UID 65532 so a named volume there
@@ -52,11 +54,12 @@
 #               the managed image).
 #   CONN_MODES  Baked default for the CONN_MODES env var (default empty → "direct";
 #               the managed image passes "managed").
-#   GO_TAGS     Go build tags for the gateway (default empty → stdlib-only hosted
-#               binary; the managed image passes "managed" to compile in the RBAC
-#               store + /managed/* handler and the yaml dependency).
-#   WITH_ADMIN  Non-empty ships solAdmin.html (the administration app) alongside
-#               the main bundle. Managed images only → see stage 2.
+#   GO_TAGS     Go build tags for the gateway (default empty → the hosted binary
+#               without RBAC; the managed image passes "managed" to compile in the
+#               RBAC store + /managed/* handler).
+#   MANAGED_UI  Non-empty serves managed.html (the bundle with the Managed
+#               sign-in) as index.html and ships solAdmin.html (the
+#               administration app). Managed images only → see stage 2.
 #   APP_VERSION The release tag (e.g. v3.6.0), stamped into the gateway binary's
 #               `version` var and the PWA's `__APP_VERSION__`. Git is not
 #               available inside the build, so the value has to arrive this way;
@@ -117,12 +120,19 @@ RUN APP_VERSION="$APP_VERSION" npm run build
 # Declared after `npm run build` so the expensive build layer stays cached and
 # shared across both image variants.
 #
-# Both images serve the SAME index.html: which connection modes it offers is a
-# runtime decision from CONN_MODES via /hosted, not a per-image bundle.
-ARG WITH_ADMIN=""
+# The images serve DIFFERENT index.html files. The standard image serves the
+# Release bundle (Direct only). The managed image (MANAGED_UI) serves
+# managed.html, the only bundle that carries the Managed sign-in, under the
+# same name, plus solAdmin.html. Which tabs managed.html offers is still a
+# runtime decision from CONN_MODES via /hosted.
+ARG MANAGED_UI=""
 RUN mkdir -p /staging/app \
- && cp -f /pwa/dist/index.html /staging/app/index.html \
- && if [ -n "$WITH_ADMIN" ]; then cp -f /pwa/dist/solAdmin.html /staging/app/solAdmin.html; fi
+ && if [ -n "$MANAGED_UI" ]; then \
+      cp -f /pwa/dist/managed.html /staging/app/index.html \
+      && cp -f /pwa/dist/solAdmin.html /staging/app/solAdmin.html; \
+    else \
+      cp -f /pwa/dist/index.html /staging/app/index.html; \
+    fi
 
 # ---- Stage 3: scratch runtime ------------------------------------------------
 FROM scratch

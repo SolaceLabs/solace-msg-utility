@@ -2,7 +2,7 @@ import { defineConfig, type PluginOption } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import fs from 'node:fs';
 import path from 'node:path';
-import { moduleRegistryPlugin, activeModuleIds } from './scripts/module-registry-plugin.mjs';
+import { moduleRegistryPlugin, activeModuleIds, activeModuleEntries, readModuleTemplate } from './scripts/module-registry-plugin.mjs';
 
 /**
  * The git tag is the single source of version truth — `scripts/dev.sh` derives
@@ -23,9 +23,12 @@ const appVersion: string = (process.env.APP_VERSION ?? '0.0.0-dev').replace(/^v/
  * `<!-- @module-templates -->` marker in the shell HTML.
  *
  * Scoped to the active variant (not every dir on disk) so a non-active module's
- * markup — e.g. the managed modules in a standard build — never leaks into the
- * shipped HTML. Mirrors the manifest-driven module registry: the variant `.ts`
- * is authoritative for both bundled code and injected templates.
+ * markup never leaks into the shipped HTML, and entry-aware: a module the
+ * variant maps through `MODULE_ENTRIES` gets its entry template (e.g. the
+ * connections module's `index.managed.html` in the managed build), composed by
+ * `readModuleTemplate` exactly as the tests' `loadModuleDOM` composes it.
+ * Mirrors the manifest-driven module registry: the variant `.ts` is
+ * authoritative for both bundled code and injected templates.
  *
  * Output is alphabetized for stable build diffs; runtime kernel lookups are
  * by id (querySelector), so order is cosmetic.
@@ -34,14 +37,12 @@ function injectModuleTemplates(variant: string | undefined): PluginOption {
     return {
         name: 'inject-module-templates',
         transformIndexHtml(html) {
-            const modulesDir = path.resolve(__dirname, 'src/modules');
-            const ids = activeModuleIds(__dirname, variant)
-                .filter(id => fs.existsSync(path.join(modulesDir, id, 'index.html')))
-                .sort();
-            const blocks = ids.map(id => {
-                const content = fs.readFileSync(path.join(modulesDir, id, 'index.html'), 'utf-8');
-                return `    <template data-module-id="${id}">\n${content}\n    </template>`;
-            });
+            const entries = activeModuleEntries(__dirname, variant);
+            const blocks = activeModuleIds(__dirname, variant)
+                .sort()
+                .map(id => ({ id, content: readModuleTemplate(__dirname, id, entries[id]) }))
+                .filter(({ content }) => content !== null)
+                .map(({ id, content }) => `    <template data-module-id="${id}">\n${content}\n    </template>`);
             return html.replace('<!-- @module-templates -->', blocks.join('\n\n'));
         }
     };
