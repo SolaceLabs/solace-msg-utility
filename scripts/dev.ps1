@@ -177,8 +177,9 @@ function Task-build {
   # identical copy; merge-multiple in the release job collapses them.
   $c = Invoke-Logged 'build' 'npm' @('run','build'); if ($c -ne 0) { return $c }
 
-  # Both gateway variants: the stdlib-only hosted binary and the managed one
-  # (RBAC store + /managed/* handler + the yaml dep behind `-tags managed`).
+  # Both gateway variants: the hosted binary and the managed one (RBAC store +
+  # /managed/* handler behind `-tags managed`). Both link gopkg.in/yaml.v3 for
+  # config.yaml; the tag only selects the RBAC files.
   $env:CGO_ENABLED = '0'; $env:GOOS = $TOs; $env:GOARCH = $TArch
   try {
     foreach ($tag in @('', 'managed')) {
@@ -283,9 +284,9 @@ function Task-scan {
 
   $c = Invoke-Logged 'scan' 'npm' @('run','audit:gate'); if ($c -ne 0) { return $c }
 
-  # The managed superset: go-web-proxy's only third-party dependency
-  # (gopkg.in/yaml.v3) is compiled in behind `-tags managed`, so an untagged
-  # scan would never compile those files and would silently skip yaml.
+  # The managed superset: every Go file compiles under `-tags managed` (the
+  # untagged build drops the RBAC files), so one tagged scan covers both
+  # binaries and the one third-party dependency, gopkg.in/yaml.v3.
   # `go tool`, never `go run pkg@version` -- the latter runs module-less and
   # ignores go.mod's toolchain pin.
   $c = Invoke-Logged 'scan' 'go' @('-C',$GoDir,'tool','govulncheck','-tags=managed','./...')

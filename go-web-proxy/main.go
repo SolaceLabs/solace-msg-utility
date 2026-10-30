@@ -55,30 +55,59 @@ type config struct {
 	// Direct-only.
 	connModes   string
 	defaultConn string
+	// Client access list. Lives in config.yaml only (no env var); an empty
+	// allow list admits every client. See access.go.
+	access accessConfig
 }
 
-func loadConfig() config {
+// defaultConfig is the built-in baseline: what an unconfigured deployment runs
+// with, and what a config.yaml key falls back to when it is missing.
+func defaultConfig() config {
+	return config{
+		appDir:          "/SolaceMsgUtility",
+		certFile:        "/tls/tls.crt",
+		keyFile:         "/tls/tls.key",
+		trustDir:        "/tls/trust",
+		logLevel:        slog.LevelWarn,
+		usersFile:       "/managed/users.yaml",
+		connectionsFile: "/managed/connections.yaml",
+		siteSeedFile:    defaultSiteSeedFile,
+		connModes:       connDirect,
+		defaultConn:     connDirect,
+	}
+}
+
+// loadConfig reads the environment. It seeds config.yaml on first start
+// (resolveConfig) and is compared against the file on later starts; it never
+// overrides the file.
+func loadConfig() (config, error) {
+	d := defaultConfig()
+	level, err := parseLogLevel(envOr("LOG_LEVEL", levelName(d.logLevel)))
+	if err != nil {
+		return config{}, fmt.Errorf("LOG_LEVEL=%q: %w", os.Getenv("LOG_LEVEL"), err)
+	}
 	return config{
 		hosted:             os.Getenv("HOSTED") == "true",
-		appDir:             envOr("APP_DIR", "/SolaceMsgUtility"),
-		certFile:           envOr("SSL_CERT_FILE", "/tls/tls.crt"),
-		keyFile:            envOr("SSL_KEY_FILE", "/tls/tls.key"),
-		trustDir:           envOr("SSL_TRUST_DIR", "/tls/trust"),
+		appDir:             envOr("APP_DIR", d.appDir),
+		certFile:           envOr("SSL_CERT_FILE", d.certFile),
+		keyFile:            envOr("SSL_KEY_FILE", d.keyFile),
+		trustDir:           envOr("SSL_TRUST_DIR", d.trustDir),
 		insecureSkipVerify: os.Getenv("SSL_INSECURE_SKIP_VERIFY") == "true",
-		logLevel:           parseLogLevel(envOr("LOG_LEVEL", "warn")),
+		logLevel:           level,
 		managed:            os.Getenv("MANAGED") == "true",
-		usersFile:          envOr("USERS_FILE", "/managed/users.yaml"),
-		connectionsFile:    envOr("CONNECTIONS_FILE", "/managed/connections.yaml"),
-		siteSeedFile:       envOr("SITE_SEED_FILE", "/managed/site.seed"),
-		connModes:          strings.ToLower(envOr("CONN_MODES", connDirect)),
-		defaultConn:        strings.ToLower(envOr("DEFAULT_CONN", connDirect)),
-	}
+		usersFile:          envOr("USERS_FILE", d.usersFile),
+		connectionsFile:    envOr("CONNECTIONS_FILE", d.connectionsFile),
+		siteSeedFile:       envOr("SITE_SEED_FILE", d.siteSeedFile),
+		connModes:          strings.ToLower(envOr("CONN_MODES", d.connModes)),
+		defaultConn:        strings.ToLower(envOr("DEFAULT_CONN", d.defaultConn)),
+	}, nil
 }
 
 // validateConnModes reports whether the advertised connection modes can actually
 // be served. Called at startup and fatal on failure: a deployment that promises
 // Managed sign-in but cannot serve /managed/* would show users a tab that only
-// fails at login, so it must refuse to start instead.
+// fails at login, so it must refuse to start instead. Messages name the
+// config.yaml key and the env var that seeds it, since either may be the source.
 //
 // `managedRouting` is whether the managed handler was actually built + loaded
 // (false on the stdlib-only binary compiled without the `managed` build tag).
@@ -86,25 +115,25 @@ func validateConnModes(cfg config, managedRouting bool) error {
 	switch cfg.connModes {
 	case connDirect, connManaged, connBoth:
 	default:
-		return fmt.Errorf("CONN_MODES=%q must be one of %q, %q, %q", cfg.connModes, connDirect, connManaged, connBoth)
+		return fmt.Errorf("connModes=%q (config.yaml; seeded by CONN_MODES) must be one of %q, %q, %q", cfg.connModes, connDirect, connManaged, connBoth)
 	}
 	switch cfg.defaultConn {
 	case connDirect, connManaged:
 	default:
-		return fmt.Errorf("DEFAULT_CONN=%q must be one of %q, %q", cfg.defaultConn, connDirect, connManaged)
+		return fmt.Errorf("defaultConn=%q (config.yaml; seeded by DEFAULT_CONN) must be one of %q, %q", cfg.defaultConn, connDirect, connManaged)
 	}
 	if cfg.connModes == connDirect {
 		return nil // managed never offered — nothing else to check
 	}
 	// Managed is advertised: every prerequisite must be in place.
 	if !cfg.hosted {
-		return fmt.Errorf("CONN_MODES=%q offers managed sign-in but HOSTED is not \"true\", so the app cannot detect the gateway", cfg.connModes)
+		return fmt.Errorf("connModes=%q offers managed sign-in but hosted is false (config.yaml; seeded by HOSTED), so the app cannot detect the gateway", cfg.connModes)
 	}
 	if !cfg.managed {
-		return fmt.Errorf("CONN_MODES=%q offers managed sign-in but MANAGED is not \"true\", so /managed/* would not be served", cfg.connModes)
+		return fmt.Errorf("connModes=%q offers managed sign-in but managed is false (config.yaml; seeded by MANAGED), so /managed/* would not be served", cfg.connModes)
 	}
 	if !managedRouting {
-		return fmt.Errorf("CONN_MODES=%q offers managed sign-in but this gateway was built without the \"managed\" build tag", cfg.connModes)
+		return fmt.Errorf("connModes=%q offers managed sign-in but this gateway was built without the \"managed\" build tag", cfg.connModes)
 	}
 	return nil
 }
@@ -116,17 +145,20 @@ func envOr(key, def string) string {
 	return def
 }
 
-func parseLogLevel(s string) slog.Level {
+// parseLogLevel is strict: the value persists in config.yaml, so a typo must
+// fail at startup rather than silently run at warn.
+func parseLogLevel(s string) (slog.Level, error) {
 	switch strings.ToLower(s) {
 	case "debug":
-		return slog.LevelDebug
+		return slog.LevelDebug, nil
 	case "info":
-		return slog.LevelInfo
+		return slog.LevelInfo, nil
+	case "warn":
+		return slog.LevelWarn, nil
 	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelWarn
+		return slog.LevelError, nil
 	}
+	return 0, errors.New("must be one of debug, info, warn, error")
 }
 
 // printVersionIfRequested handles the version query before any configuration is
@@ -154,13 +186,30 @@ func main() {
 // serve is the gateway proper. Split from main so the version query above does
 // not add a branch to an already dense function.
 func serve() {
-	cfg := loadConfig()
+	// config.yaml first: the log level lives in it, so the real logger cannot
+	// exist yet. A bootstrap logger at the default level carries the one error
+	// that can happen before it.
+	configFile := configPath()
+	load, err := resolveConfig(configFile)
+	if err != nil {
+		slog.New(slog.NewTextHandler(os.Stderr, nil)).Error("configuration failed", "err", err)
+		os.Exit(1)
+	}
+	cfg := load.cfg
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.logLevel}))
 	slog.SetDefault(logger)
 
+	if load.seeded {
+		logger.Info("config file seeded from the environment; it is authoritative from now on", "path", configFile)
+	}
+	for _, o := range load.overrides {
+		logger.Warn("env var ignored, config.yaml wins", "env", o.Env, "key", o.Key, "env_value", o.EnvValue, "file_value", o.FileValue)
+	}
+
 	logger.Info("gateway starting",
 		"version", version,
+		"config_file", configFile,
 		"hosted", cfg.hosted,
 		"app_dir", cfg.appDir,
 		"cert_file", cfg.certFile,
@@ -228,7 +277,9 @@ func serve() {
 		}
 	})
 
-	handler := accessLog(root, logger)
+	// Access list inside the access log, so a denial is logged as a 403 like
+	// any other response (the ACL adds its own warn line with the reason).
+	handler := accessLog(clientACL(cfg.access, root, logger), logger)
 
 	srv := &http.Server{
 		Addr:              ":9443",

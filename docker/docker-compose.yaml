@@ -8,8 +8,9 @@
 #   docker compose up --build       # build and run in foreground
 #   docker compose up -d --build    # detached
 #   docker compose logs -f gateway  # follow logs
-#   docker compose down             # stop and remove containers (keeps tls volume)
-#   docker compose down -v          # also remove the tls volume (forces a new self-signed cert)
+#   docker compose down             # stop and remove containers (keeps the volumes)
+#   docker compose down -v          # also remove the volumes: config.yaml is re-seeded
+#                                   # from the environment, the managed store bootstraps again
 #
 # After it's up: open https://localhost:9443/
 name: sol-msg-util-svc
@@ -31,6 +32,9 @@ services:
     ports:
       - "19443:9443"
     environment:
+      # These SEED config.yaml on the first start only. Afterwards the file in
+      # the gateway-config volume is authoritative: edit it and restart; a
+      # changed value here is logged as ignored. See docs/deployment.md.
       # Enables the /hosted probe so the PWA knows it's running behind the gateway.
       HOSTED: "true"
       # Log level: debug | info | warn | error. Bump to info/debug while testing.
@@ -45,6 +49,10 @@ services:
       # into this volume (or replace with a bind mount whose host directory is
       # owned by UID 65532) before first start.
       #- tls:/tls
+      # config.yaml lives here. The named volume inherits the baked /managed
+      # dir's UID-65532 ownership so the gateway can write the file on the first
+      # start; without the volume it would be re-seeded on every recreate.
+      - gateway-config:/managed
       # Optional: bind-mount your own PWA bundle. Comment out to use the bundle
       # baked into the image at /SolaceMsgUtility.
       # - ../dist:/SolaceMsgUtility:ro
@@ -83,16 +91,19 @@ services:
       - "29443:9443"
     environment:
       # MANAGED and HOSTED are baked into the image; only the operational knobs
-      # are set here.
+      # are set here. Like the baked values they seed config.yaml on the first
+      # start only; afterwards the file in the managed volume wins.
       LOG_LEVEL: warn
       SSL_INSECURE_SKIP_VERIFY: "true"
     volumes:
-      # Writable RBAC store. The named volume inherits the baked /managed dir's
-      # UID-65532 ownership, so the gateway can write users.yaml + site.seed on
-      # first run. `docker compose down -v` wipes it (forces a fresh bootstrap).
+      # Writable gateway store. The named volume inherits the baked /managed
+      # dir's UID-65532 ownership, so the gateway can write config.yaml,
+      # users.yaml + site.seed on first run. `docker compose down -v` wipes it
+      # (re-seeds the config and forces a fresh bootstrap).
       - managed:/managed
       - ../dist/solclient.js:/SolaceMsgUtility/solclient.js:ro
       - ../dist/jszip.min.js:/SolaceMsgUtility/jszip.min.js:ro
 
 volumes:
+  gateway-config:
   managed:

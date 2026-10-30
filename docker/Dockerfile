@@ -15,11 +15,20 @@
 #   /pwa         — PWA bundle (index.html, solAdmin.html on managed images, plus
 #                  any sibling assets such as solclient.js). Defaults to
 #                  /SolaceMsgUtility inside the image; override with APP_DIR.
-#   /managed     — Writable RBAC store (users.yaml, connections.yaml, site.seed)
-#                  for MANAGED=true. Baked empty + owned by UID 65532 so a named
-#                  volume there inherits write access; unused when MANAGED is off.
+#   /managed     — Writable gateway store: config.yaml on every image, plus
+#                  users.yaml, connections.yaml and site.seed for MANAGED=true.
+#                  Baked empty + owned by UID 65532 so a named volume there
+#                  inherits write access. Without a volume it lives in the
+#                  container's writable layer and config.yaml is re-seeded
+#                  from the environment whenever the container is recreated.
 #
-# Environment (all optional):
+# Environment (all optional). Except CONFIG_FILE and SITE_SEED_FILE, these only
+# SEED config.yaml on the first start, when the file does not exist; afterwards
+# the file is authoritative and a differing variable is logged, not applied.
+# The client access list (access.allow, access.trustedProxies) has no variable
+# and lives only in the file. See docs/deployment.md.
+#   CONFIG_FILE               /managed/config.yaml (environment-only, never in
+#                             the file). Startup fails if it cannot be written.
 #   HOSTED                    "true" enables the /hosted probe endpoint.
 #   MANAGED                   "true" loads the RBAC store and serves /managed/*.
 #   CONN_MODES                direct|managed|both → which connection tabs the app
@@ -31,7 +40,10 @@
 #   SSL_KEY_FILE              /tls/tls.key
 #   SSL_TRUST_DIR             /tls/trust
 #   SSL_INSECURE_SKIP_VERIFY  "true" disables upstream cert validation.
-#   LOG_LEVEL                 debug|info|warn|error  (default warn)
+#   LOG_LEVEL                 debug|info|warn|error  (default warn; anything
+#                             else fails startup)
+#   SITE_SEED_FILE            /managed/site.seed (managed; environment-only,
+#                             never in the file)
 #
 # Build args (select which image variant to build):
 #   MANAGED     Baked default for the MANAGED env var (default empty; "true" for
@@ -71,11 +83,12 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # Stage the /tls and /managed layouts in the builder so we can ship them
 # pre-owned by the non-root runtime UID. Scratch has no shell, so this is the
 # only way to bake an empty, correctly-permissioned directory into the final
-# image. /managed is the writable RBAC store (users.yaml, site.seed) the gateway
-# bootstraps on first run when MANAGED=true — a managed store-load failure is
-# fatal, so the dir must be writable by UID 65532. A named volume mounted there
+# image. /managed is the gateway's writable store: config.yaml on every image
+# (seeded from env on the first start; an unwritable dir is fatal) plus
+# users.yaml and site.seed when MANAGED=true (a store-load failure is fatal
+# too). So the dir must be writable by UID 65532. A named volume mounted there
 # inherits this ownership; with no volume the store lives in the container's
-# writable layer (ephemeral). Unused by the standard image (MANAGED off).
+# writable layer (ephemeral: config.yaml is re-seeded on every recreate).
 RUN mkdir -p /staging/tls/trust /staging/managed \
  && chown -R 65532:65532 /staging/tls /staging/managed \
  && chmod 0755 /staging/tls /staging/tls/trust /staging/managed
@@ -115,7 +128,8 @@ RUN mkdir -p /staging/app \
 FROM scratch
 # Baked ENV defaults. Empty for the standard image (a no-op — os.Getenv returns
 # "" either way), set to "true" for the managed image so it runs correctly out
-# of the box. Operators can still override both with `docker run -e` at runtime.
+# of the box. They seed config.yaml on the first start only; afterwards the file
+# wins and a differing `docker run -e` value is logged as ignored.
 ARG MANAGED=""
 ARG HOSTED=""
 ARG CONN_MODES=""

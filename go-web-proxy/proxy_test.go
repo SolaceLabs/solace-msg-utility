@@ -235,7 +235,10 @@ func TestValidateConnModes(t *testing.T) {
 func TestLoadConfig_ConnModeDefaults(t *testing.T) {
 	t.Setenv("CONN_MODES", "")
 	t.Setenv("DEFAULT_CONN", "")
-	cfg := loadConfig()
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.connModes != connDirect || cfg.defaultConn != connDirect {
 		t.Fatalf("want direct/direct, got %q/%q", cfg.connModes, cfg.defaultConn)
 	}
@@ -248,7 +251,10 @@ func TestLoadConfig_ConnModeDefaults(t *testing.T) {
 func TestLoadConfig_ConnModesLowercased(t *testing.T) {
 	t.Setenv("CONN_MODES", "BOTH")
 	t.Setenv("DEFAULT_CONN", "Managed")
-	cfg := loadConfig()
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.connModes != connBoth || cfg.defaultConn != connManaged {
 		t.Fatalf("want both/managed, got %q/%q", cfg.connModes, cfg.defaultConn)
 	}

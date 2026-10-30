@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -19,17 +20,23 @@ func TestEnvOr(t *testing.T) {
 
 func TestParseLogLevel(t *testing.T) {
 	cases := map[string]slog.Level{
-		"debug":   slog.LevelDebug,
-		"DEBUG":   slog.LevelDebug,
-		"info":    slog.LevelInfo,
-		"warn":    slog.LevelWarn,
-		"error":   slog.LevelError,
-		"garbage": slog.LevelWarn, // default
-		"":        slog.LevelWarn,
+		"debug": slog.LevelDebug,
+		"DEBUG": slog.LevelDebug,
+		"info":  slog.LevelInfo,
+		"warn":  slog.LevelWarn,
+		"Error": slog.LevelError,
 	}
 	for in, want := range cases {
-		if got := parseLogLevel(in); got != want {
-			t.Errorf("parseLogLevel(%q): want %v, got %v", in, want, got)
+		got, err := parseLogLevel(in)
+		if err != nil || got != want {
+			t.Errorf("parseLogLevel(%q): want %v, got %v (err %v)", in, want, got, err)
+		}
+	}
+	// A typo is a startup error, never a silent fallback to warn: the value
+	// persists in config.yaml, so it has to be right.
+	for _, in := range []string{"garbage", "", "warning"} {
+		if _, err := parseLogLevel(in); err == nil {
+			t.Errorf("parseLogLevel(%q): want an error", in)
 		}
 	}
 }
@@ -39,7 +46,10 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	for _, k := range []string{"HOSTED", "APP_DIR", "SSL_CERT_FILE", "SSL_KEY_FILE", "SSL_TRUST_DIR", "SSL_INSECURE_SKIP_VERIFY", "LOG_LEVEL"} {
 		t.Setenv(k, "")
 	}
-	cfg := loadConfig()
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.hosted {
 		t.Errorf("hosted: want false")
 	}
@@ -72,7 +82,10 @@ func TestLoadConfig_FromEnv(t *testing.T) {
 	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "true")
 	t.Setenv("LOG_LEVEL", "debug")
 
-	cfg := loadConfig()
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !cfg.hosted {
 		t.Errorf("hosted: want true")
 	}
@@ -91,9 +104,20 @@ func TestLoadConfig_HostedRequiresExactTrue(t *testing.T) {
 	// HOSTED must be literally "true" — anything else is false.
 	for _, v := range []string{"1", "yes", "TRUE", "True", "y", ""} {
 		t.Setenv("HOSTED", v)
-		if cfg := loadConfig(); cfg.hosted {
+		if cfg, _ := loadConfig(); cfg.hosted {
 			t.Errorf("HOSTED=%q: want hosted=false", v)
 		}
+	}
+}
+
+func TestLoadConfig_InvalidLogLevelFails(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "verbose")
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("LOG_LEVEL=verbose: want an error, the value would persist in config.yaml")
+	}
+	if !strings.Contains(err.Error(), `LOG_LEVEL="verbose"`) {
+		t.Errorf("error must name the variable and value, got %q", err)
 	}
 }
 

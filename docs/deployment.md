@@ -33,19 +33,23 @@ The image ships `FROM scratch` — only the static Go binary and the PWA assets,
 docker run --rm -p 9443:9443 \
   -e HOSTED=true \
   -v solace-tls:/tls \
+  -v solace-config:/managed \
   ghcr.io/solacelabs/solace-msg-utility:latest
 ```
 
-Then open <https://localhost:9443/>.
+Then open <https://localhost:9443/>. The `/managed` volume holds the gateway's `config.yaml` (see below); without it the file is re-seeded from the environment whenever the container is recreated.
 
 `/tls` is baked into the image as an empty directory owned by UID `65532`, so a **named volume** (`solace-tls` above) inherits that ownership and works out of the box. A **bind mount** does NOT inherit image ownership — the host directory must already be owned by UID `65532`, or pre-populated with `tls.crt` / `tls.key` so the gateway never needs to write.
 
 **Image tags:** `ghcr.io/solacelabs/solace-msg-utility` is published multi-arch (`linux/amd64`, `linux/arm64`) with `:latest`, `:<major>`, `:<major>.<minor>`, and `:<major>.<minor>.<patch>` tags on every release; the Release notes quote the exact digest, and a tag only ever moves to a digest that passed the Trivy gate on both architectures. Pin to a specific tag for production. The same release also publishes a [managed](#managed-mode-rbac) image under the `managed-` prefixed tags (`:managed-latest`, `:managed-<major>`, `:managed-<major>.<minor>`, `:managed-<version>`).
 
-**Environment variables** (all optional):
+**Configuration file.** The gateway keeps every setting in `config.yaml` (default `/managed/config.yaml`; the path comes from the environment-only `CONFIG_FILE`). On the first start, when the file does not exist, the gateway writes it from the variables below and refuses to start if it cannot; the error names the path and the fix (a writable `/managed`, or `CONFIG_FILE` pointing somewhere writable). From then on the file is authoritative: a changed variable is not applied, and each start logs one warning per variable that disagrees with the file. Edit the file and restart, or delete it to re-seed. Unknown keys and invalid values fail startup with the key and value named. The keys that have no variable, the client access list, are described under [Gateway configuration file](#gateway-configuration-file).
+
+**Seed variables** (all optional; read on the first start only, as described above):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `CONFIG_FILE` | `/managed/config.yaml` | Where `config.yaml` lives. Environment-only: read on every start and never stored in the file. |
 | `HOSTED` | unset | When `"true"`, `/hosted` returns `200` + the JSON config below; otherwise it returns `404`. |
 | `CONN_MODES` | `direct` | Which connection tabs the app offers: `direct` \| `managed` \| `both`. Anything else fails startup. |
 | `DEFAULT_CONN` | `direct` | Which tab opens first when `CONN_MODES=both`: `direct` \| `managed`. |
@@ -54,7 +58,7 @@ Then open <https://localhost:9443/>.
 | `SSL_KEY_FILE` | `/tls/tls.key` | TLS private key (PEM). |
 | `SSL_TRUST_DIR` | `/tls/trust` | Directory of additional CA bundles (`*.crt`, `*.pem`, non-recursive). Added to the system pool for upstream verification. |
 | `SSL_INSECURE_SKIP_VERIFY` | `false` | When `"true"`, the gateway does NOT verify upstream broker certificates. Logged as a warning at startup. Lab use only. |
-| `LOG_LEVEL` | `warn` | `debug` \| `info` \| `warn` \| `error`. |
+| `LOG_LEVEL` | `warn` | `debug` \| `info` \| `warn` \| `error`. Anything else fails startup. |
 
 **TLS material:** if `SSL_CERT_FILE` and `SSL_KEY_FILE` both exist, the gateway loads them and refuses to start if either fails to parse (so it never silently overwrites a user-supplied keypair). If either is missing, it generates a self-signed ECDSA P-256 keypair valid for 365 days with `CN=localhost` and SANs `DNS:localhost, IP:::1, IP:127.0.0.1`, writing the cert (`0644`) and key (`0600`) at the configured paths. The SHA-256 fingerprint of the generated cert is logged at startup so operators can pin it.
 
@@ -77,7 +81,7 @@ Then open <https://localhost:9443/>.
 | --- | --- |
 | `/tls` | TLS material: `tls.crt`, `tls.key`, and `trust/*.{crt,pem}` for upstream CA validation. Baked into the image as an empty directory owned by UID `65532`. Named volumes inherit that ownership automatically; bind mounts must already be owned by UID `65532` (or pre-populated with the keypair so no writes are needed). |
 | `/SolaceMsgUtility` (or override via `APP_DIR`) | PWA bundle. Baked into the image by default; mount to override at runtime. |
-| `/managed` | Writable RBAC store (`users.yaml`, `connections.yaml`, `site.seed`) — only used in [managed mode](#managed-mode-rbac) (`MANAGED=true`). Baked as an empty directory owned by UID `65532`, so a named volume inherits write access automatically; bind mounts must already be owned by UID `65532`. With no mount the store lives in the container's writable layer and is lost when the container is removed. |
+| `/managed` | Writable gateway store: `config.yaml` on every image, plus `users.yaml`, `connections.yaml` and `site.seed` in [managed mode](#managed-mode-rbac) (`MANAGED=true`). Baked as an empty directory owned by UID `65532`, so a named volume inherits write access automatically; bind mounts must already be owned by UID `65532`. With no mount the store lives in the container's writable layer: it survives a restart but is lost when the container is recreated, and `config.yaml` is then re-seeded from the environment. |
 
 **Shutdown:** `SIGINT` / `SIGTERM` triggers graceful shutdown with a 10-second drain.
 
@@ -109,14 +113,14 @@ The managed image's gateway binary is compiled with the RBAC store + `/managed/*
 
 The gateway **fails to start** if `CONN_MODES` advertises managed without `HOSTED=true`, `MANAGED=true`, and a binary built with the `managed` tag — a half-configured deployment stops at boot instead of showing a tab that cannot work. With `MANAGED` unset the gateway behaves exactly as the standard gateway above and `/managed/*` falls through to the SPA. With no gateway at all (static hosting) there is no `/hosted`, so the app is Direct-only and the Managed tab never appears.
 
-**Managed-mode environment variables** (in addition to the gateway variables above):
+**Managed-mode environment variables** (in addition to the seed variables above; they too seed `config.yaml` on the first start only, except `SITE_SEED_FILE`, which is environment-only and never written to the file):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MANAGED` | unset | When `"true"`, the gateway loads the RBAC store and serves `/managed/*`. Otherwise none of the managed code path runs. |
 | `USERS_FILE` | `/managed/users.yaml` | User + entitlement store. Created with a default admin if missing (see below). |
 | `CONNECTIONS_FILE` | `/managed/connections.yaml` | Broker connection store (credentials stored obfuscated, never in plaintext). |
-| `SITE_SEED_FILE` | `/managed/site.seed` | Per-deployment key material. **Critical persistent state** — see below. |
+| `SITE_SEED_FILE` | `/managed/site.seed` | Per-deployment key material. **Critical persistent state** — see below. Environment-only: read on every start, never stored in `config.yaml`, so the settings file can never point the gateway at a different seed. |
 
 The default paths put all three files under **`/managed/`**, so mount a **writable** volume there (the gateway writes the bootstrap admin and the site seed on first run). Using the prebuilt managed image, `MANAGED` / `HOSTED` / `CONN_MODES` are already baked in:
 
@@ -146,6 +150,7 @@ Managed mode is fit for **trusted-internal** use only; the broker relay itself s
 - **Change the default `admin` / `msgutility` password** immediately.
 - **Protect the store files** (`USERS_FILE`, `CONNECTIONS_FILE`, `SITE_SEED_FILE`) with filesystem permissions — the users file holds replayable login tokens and the seed is shared key material.
 - **Always serve over TLS** (the gateway does by default) — login tokens and the site seed traverse the wire.
+- **Restrict who can reach the gateway** with `access.allow` in `config.yaml` (a CIDR list; empty means everyone). Behind a reverse proxy, list the proxy in `access.trustedProxies` so the client address is taken from `X-Forwarded-For`; from any other peer that header is ignored and the peer itself is judged. See [Gateway configuration file](#gateway-configuration-file).
 - **Treat `/solAdmin` as privileged.** It is the only surface that edits entitlements. It is reachable by anyone who can reach the gateway, so its protection is the administrator password — change the bootstrap one and use network controls if you need more.
 - **Expect two modules to be missing.** Queue Subscription Explorer and Queue Discovery are hidden in every managed session (including for admins) because they read over a SEMP path that cannot be entitlement-filtered. That is deliberate; see [rbac-variant-plan.md](rbac-variant-plan.md) § Threat model.
 
@@ -260,9 +265,20 @@ For `wss://` connections with self-signed certificates, the browser must trust t
 
 ## Configuration
 
-All configuration is done at runtime through the UI. There are no environment variables or config files for the PWA itself. (Container-side environment variables for the gateway are listed under [Containerised Gateway](#containerised-gateway) above.)
+All PWA configuration is done at runtime through the UI. There are no environment variables or config files for the PWA itself. (The gateway's own settings live in `config.yaml`, below.)
 
 Connection profiles are stored in the browser's `localStorage`. They persist across browser sessions but are specific to the origin (protocol + host + port) where the app is served.
+
+### Gateway configuration file
+
+`config.yaml` (default `/managed/config.yaml`) holds every gateway setting. It is written once, on the first start without a file, from the seed variables listed under [Containerised Gateway](#containerised-gateway); afterwards the file wins and the environment is only compared against it (one warning per differing variable at each start, with both values). The header the gateway writes maps every key to the variable that seeds it. Keys that have no variable:
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `access.allow` | `[]` | CIDR list of clients allowed to reach the gateway, on every route including the broker relay and its WebSocket upgrades. Empty means everyone. A denied client gets `403` with an empty body; the gateway logs one warning with the client address, method and path, and the access log records the 403. |
+| `access.trustedProxies` | `[]` | CIDR list of reverse proxies whose `X-Forwarded-For` is believed. The header is walked right to left and the first address that is not itself a trusted proxy is the client. From any other peer the header is ignored. An address that does not parse is denied. |
+
+Rules: unknown keys, an empty file, a missing `version: 1` and invalid values (a CIDR without a prefix length, an IPv4-mapped IPv6 prefix, an unknown log level or connection mode) fail startup with the key and value named. Missing keys take the built-in defaults, never an environment value. Two values never live in the file and are read from the environment on every start: `CONFIG_FILE` and `SITE_SEED_FILE`. The managed image bakes `MANAGED`, `HOSTED` and `CONN_MODES` into its environment; once those keys are changed in the file, every start reports the baked values as ignored, which is expected. The file is written `0644` (it holds no secret); the managed store files stay `0600`.
 
 ---
 

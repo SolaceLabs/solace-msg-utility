@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -485,47 +484,23 @@ func loadOrGenerateSeed(path string, logger *slog.Logger) (string, error) {
 		return "", err
 	}
 	b64 := base64.StdEncoding.EncodeToString(raw)
-	if err := writeFileAtomic(path, []byte(b64)); err != nil {
+	if err := writeFileAtomic(path, []byte(b64), 0o600); err != nil {
 		return "", err
 	}
 	return b64, nil
 }
 
-// ----- atomic file helpers ----------------------------------------------------
+// ----- YAML file helpers ------------------------------------------------------
+// (writeFileAtomic itself lives in fileutil.go, shared with the config loader.)
 
-// writeFileAtomic writes data via a same-directory temp file + fsync + rename so
-// a crash mid-write can't leave a truncated YAML/seed file.
-func writeFileAtomic(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once the rename succeeds
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
-}
-
+// writeYAML persists a store document owner-only: both files hold material
+// that must not be readable by other users on the volume.
 func writeYAML(path string, v any) error {
 	data, err := yaml.Marshal(v)
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(path, data)
+	return writeFileAtomic(path, data, 0o600)
 }
 
 func readYAML(path string, v any) error {
