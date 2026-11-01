@@ -3,14 +3,13 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
+	"net"
 	"os"
 	"regexp"
 	"slices"
@@ -134,8 +133,9 @@ type profileResponse struct {
 
 // store holds the parsed users + connections + the site seed, guarded by an
 // RWMutex (reads under RLock, CRUD writes under Lock). The file paths are
-// retained so admin-CRUD mutations can persist back to the same files. The
-// gateway is the only writer: a hand edit on the volume needs a restart.
+// retained so admin-CRUD mutations can persist back to the same files. Both
+// files are encrypted with the store key (storecrypt.go), so the gateway is
+// the only writer and nobody edits them by hand.
 type store struct {
 	mu        sync.RWMutex
 	users     []userRec
@@ -143,20 +143,31 @@ type store struct {
 	siteSeed  string // base64 of the raw seed bytes
 	usersPath string // retained for CRUD persistence
 	connsPath string // retained for CRUD persistence
+	seal      *sealer
 	hasher    *hasher
 }
 
 type storeOptions struct {
-	usersPath, connsPath, seedPath string
-	hasher                         *hasher
-	getenv                         func(string) string // os.Getenv; injected for tests
+	usersPath, connsPath, seedPath, keyPath string
+	hasher                                  *hasher
+	getenv                                  func(string) string // os.Getenv; injected for tests
 }
 
 func loadStore(opts storeOptions, logger *slog.Logger) (*store, error) {
-	s := &store{usersPath: opts.usersPath, connsPath: opts.connsPath, hasher: opts.hasher}
+	// The key comes first: it decides whether the store files may be created
+	// (fresh volume) or must be opened (and refused without their key).
+	key, err := loadStoreKey(opts.keyPath, []string{opts.usersPath, opts.connsPath}, logger)
+	if err != nil {
+		return nil, err
+	}
+	sl, err := newSealer(key)
+	if err != nil {
+		return nil, fmt.Errorf("store key file %q: %w", opts.keyPath, err)
+	}
+	s := &store{usersPath: opts.usersPath, connsPath: opts.connsPath, seal: sl, hasher: opts.hasher}
 
 	if _, err := os.Stat(opts.usersPath); errors.Is(err, os.ErrNotExist) {
-		doc, err := bootstrapUsers(opts, logger)
+		doc, err := bootstrapUsers(opts, sl, logger)
 		if err != nil {
 			return nil, fmt.Errorf("bootstrap users file %q: %w", opts.usersPath, err)
 		}
@@ -168,7 +179,7 @@ func loadStore(opts storeOptions, logger *slog.Logger) (*store, error) {
 			}
 		}
 		var doc usersDoc
-		if err := readYAMLStrict(opts.usersPath, &doc); err != nil {
+		if err := sl.readDoc(roleUsers, opts.usersPath, &doc); err != nil {
 			return nil, fmt.Errorf("read users file %q: %w", opts.usersPath, err)
 		}
 		if err := validateUsers(doc.Users); err != nil {
@@ -181,7 +192,7 @@ func loadStore(opts storeOptions, logger *slog.Logger) (*store, error) {
 		logger.Warn("connections file missing — no brokers will be offered", "path", opts.connsPath)
 	} else {
 		var doc connsDoc
-		if err := readYAMLStrict(opts.connsPath, &doc); err != nil {
+		if err := sl.readDoc(roleConns, opts.connsPath, &doc); err != nil {
 			return nil, fmt.Errorf("read connections file %q: %w", opts.connsPath, err)
 		}
 		if err := validateConns(doc.Connections); err != nil {
@@ -263,8 +274,10 @@ func validateConns(conns []connRec) error {
 	return nil
 }
 
-// validateConn checks one record. Ports may be blank (the form allows it) but
-// must be a TCP port when set; VPN names must be present and unique.
+// validateConn checks one record. The gateway builds broker URLs and a Basic
+// header from these values, so the hostname must be a bare host, a port must
+// be given wherever it is used (blank never means a default), and credentials
+// hold no control characters. Errors never echo a credential.
 func validateConn(c connRec) error {
 	if !validName(brokerPattern, c.Broker) {
 		return fmt.Errorf("broker %q %s", c.Broker, brokerRule)
@@ -284,7 +297,40 @@ func validateConn(c connRec) error {
 		}
 		vpns[v.Name] = true
 	}
+	if !validHost(c.Hostname) {
+		return fmt.Errorf("broker %q: hostname %q %s", c.Broker, c.Hostname, hostRule)
+	}
+	if c.Semp.Username != "" && c.Semp.Port == "" {
+		return fmt.Errorf("broker %q: semp.port is required when a SEMP username is set", c.Broker)
+	}
+	if len(c.Client.MsgVpns) > 0 && c.Client.Port == "" {
+		return fmt.Errorf("broker %q: client.port is required when message VPNs are listed", c.Broker)
+	}
+	if strings.Contains(c.Semp.Username, ":") || hasControl(c.Semp.Username) || hasControl(c.Semp.Password) {
+		return fmt.Errorf("broker %q: the SEMP username and password must not contain control characters, and the username no ':'", c.Broker)
+	}
+	for _, v := range c.Client.MsgVpns {
+		if hasControl(v.Name) || hasControl(v.Username) || hasControl(v.Password) {
+			return fmt.Errorf("broker %q: message VPN %q: the name, username and password must not contain control characters", c.Broker, v.Name)
+		}
+	}
 	return nil
+}
+
+// hostPattern is a DNS-style host name; validHost also takes IP literals
+// (IPv6 without brackets). No scheme, port, path, user info or spaces.
+var hostPattern = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_.-]{0,251}[A-Za-z0-9_])?$`)
+
+const hostRule = "must be a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port"
+
+func validHost(h string) bool {
+	return net.ParseIP(h) != nil || hostPattern.MatchString(h)
+}
+
+// hasControl reports a C0 control character or DEL, which must never reach a
+// URL or a header.
+func hasControl(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
 }
 
 func validatePort(p string) error {
@@ -462,7 +508,7 @@ func (s *store) upsertUser(ctx context.Context, u userRec, password string) (dro
 		}
 		next = append(next, u)
 	}
-	if err := writeYAML(s.usersPath, usersDoc{Users: next}); err != nil {
+	if err := s.seal.writeDoc(roleUsers, s.usersPath, usersDoc{Users: next}); err != nil {
 		return false, err
 	}
 	s.users = next
@@ -483,7 +529,7 @@ func (s *store) setPassword(ctx context.Context, username, password string) erro
 		if next[i].Username == username {
 			next[i].Password = hash
 			next[i].MustChangePassword = false
-			if err := writeYAML(s.usersPath, usersDoc{Users: next}); err != nil {
+			if err := s.seal.writeDoc(roleUsers, s.usersPath, usersDoc{Users: next}); err != nil {
 				return err
 			}
 			s.users = next
@@ -513,7 +559,7 @@ func (s *store) deleteUser(username string) (bool, error) {
 		return false, errLastAdmin
 	}
 	next := append(append([]userRec(nil), s.users[:idx]...), s.users[idx+1:]...)
-	if err := writeYAML(s.usersPath, usersDoc{Users: next}); err != nil {
+	if err := s.seal.writeDoc(roleUsers, s.usersPath, usersDoc{Users: next}); err != nil {
 		return false, err
 	}
 	s.users = next
@@ -554,7 +600,7 @@ func (s *store) upsertConnection(c connRec) error {
 	if !found {
 		next = append(next, c)
 	}
-	if err := writeYAML(s.connsPath, connsDoc{Connections: next}); err != nil {
+	if err := s.seal.writeDoc(roleConns, s.connsPath, connsDoc{Connections: next}); err != nil {
 		return err
 	}
 	s.conns = next
@@ -598,7 +644,7 @@ func (s *store) deleteConnection(broker string) (bool, error) {
 		return false, nil
 	}
 	next := append(append([]connRec(nil), s.conns[:idx]...), s.conns[idx+1:]...)
-	if err := writeYAML(s.connsPath, connsDoc{Connections: next}); err != nil {
+	if err := s.seal.writeDoc(roleConns, s.connsPath, connsDoc{Connections: next}); err != nil {
 		return false, err
 	}
 	s.conns = next
@@ -636,7 +682,7 @@ func adminSeed(getenv func(string) string) (password, source string, err error) 
 // bootstrapUsers writes the first users file: one admin who must change the
 // password at first sign-in. The password comes from the environment, or is
 // generated and logged once (the operator's only way to read it).
-func bootstrapUsers(opts storeOptions, logger *slog.Logger) (usersDoc, error) {
+func bootstrapUsers(opts storeOptions, sl *sealer, logger *slog.Logger) (usersDoc, error) {
 	password, source, err := adminSeed(opts.getenv)
 	if err != nil {
 		return usersDoc{}, err
@@ -657,7 +703,7 @@ func bootstrapUsers(opts storeOptions, logger *slog.Logger) (usersDoc, error) {
 		Operate:            []permRow{},
 		ReadOnly:           []permRow{},
 	}}}
-	if err := writeYAML(opts.usersPath, doc); err != nil {
+	if err := sl.writeDoc(roleUsers, opts.usersPath, doc); err != nil {
 		return usersDoc{}, err
 	}
 	if generated {
@@ -688,32 +734,4 @@ func loadOrGenerateSeed(path string, logger *slog.Logger) (string, error) {
 		return "", err
 	}
 	return b64, nil
-}
-
-// ----- YAML file helpers ------------------------------------------------------
-// (writeFileAtomic itself lives in fileutil.go, shared with the config loader.)
-
-// writeYAML persists a store document owner-only: both files hold material
-// that must not be readable by other users on the volume.
-func writeYAML(path string, v any) error {
-	data, err := yaml.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return writeFileAtomic(path, data, 0o600)
-}
-
-// readYAMLStrict decodes a store document, rejecting unknown keys. An empty
-// file decodes to an empty document.
-func readYAMLStrict(path string, v any) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(v); err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-	return nil
 }

@@ -24,6 +24,7 @@ func clearSeedEnv(t *testing.T) {
 	}
 	t.Setenv("CONFIG_FILE", "")
 	t.Setenv("SITE_SEED_FILE", "")
+	t.Setenv("STORE_KEY_FILE", "")
 }
 
 const fullConfigYAML = `version: 1
@@ -99,6 +100,7 @@ func TestDecodeConfigFile_UnknownFieldFails(t *testing.T) {
 		"version: 1\nbogus: 1\n":              "bogus",
 		"version: 1\ntls:\n  nope: true\n":    "nope",
 		"version: 1\nsiteSeedFile: /x/seed\n": "siteSeedFile", // the seed path is env-only by design
+		"version: 1\nstoreKeyFile: /x/key\n":  "storeKeyFile", // so is the store key path
 	}
 	for doc, field := range cases {
 		_, err := decodeConfigFile([]byte(doc), "/etc/gw/config.yaml")
@@ -172,7 +174,7 @@ func TestToConfig_InvalidValues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fc := base()
 			tc.mutate(&fc)
-			_, err := fc.toConfig("/s")
+			_, err := fc.toConfig(secretPaths{})
 			if err == nil {
 				t.Fatal("want an error")
 			}
@@ -188,21 +190,21 @@ func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 	fc := defaultFileConfig()
 	fc.ConnModes = "Both" // a hand-edited file is lowercased like the env
 	fc.Managed = true
-	if _, err := fc.toConfig("/s"); err == nil || !strings.Contains(err.Error(), "hosted is false") {
+	if _, err := fc.toConfig(secretPaths{}); err == nil || !strings.Contains(err.Error(), "hosted is false") {
 		t.Fatalf("both without hosted must fail the cross check, got %v", err)
 	}
 	fc.Hosted = true
 	fc.Access.Allow = []string{"10.1.2.3/8", "2001:db8::1/32"}
 	fc.Access.TrustedProxies = []string{"192.0.2.0/24"}
-	cfg, err := fc.toConfig("/seed/site.seed")
+	cfg, err := fc.toConfig(secretPaths{siteSeed: "/seed/site.seed", storeKey: "/seed/store.key"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.connModes != connBoth || cfg.defaultConn != connDirect {
 		t.Errorf("modes: got %q/%q", cfg.connModes, cfg.defaultConn)
 	}
-	if cfg.siteSeedFile != "/seed/site.seed" {
-		t.Errorf("siteSeedFile must come from the caller (env), got %q", cfg.siteSeedFile)
+	if cfg.siteSeedFile != "/seed/site.seed" || cfg.storeKeyFile != "/seed/store.key" {
+		t.Errorf("the secret paths must come from the caller (env), got %q and %q", cfg.siteSeedFile, cfg.storeKeyFile)
 	}
 	if got := prefixStrings(cfg.access.allow); !reflect.DeepEqual(got, []string{"10.0.0.0/8", "2001:db8::/32"}) {
 		t.Errorf("allow: want masked prefixes, got %v", got)
@@ -229,7 +231,7 @@ func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 func TestToConfig_ModulesInCatalogOrder(t *testing.T) {
 	fc := defaultFileConfig()
 	fc.Modules.Offered = []string{"queue-copy", "queue-browser"}
-	cfg, err := fc.toConfig("/s")
+	cfg, err := fc.toConfig(secretPaths{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +239,7 @@ func TestToConfig_ModulesInCatalogOrder(t *testing.T) {
 		t.Errorf("want catalog order, got %v", cfg.modules.offered)
 	}
 	fc.Modules.Offered = []string{}
-	if cfg, err = fc.toConfig("/s"); err != nil || len(cfg.modules.offered) != 0 || cfg.modules.offered == nil {
+	if cfg, err = fc.toConfig(secretPaths{}); err != nil || len(cfg.modules.offered) != 0 || cfg.modules.offered == nil {
 		t.Errorf("an empty list offers nothing (as [], not null): %v %#v", err, cfg.modules.offered)
 	}
 }
@@ -284,12 +286,12 @@ func TestFileConfig_CloneIsIndependent(t *testing.T) {
 func TestToConfig_BoundsNameTheOtherKey(t *testing.T) {
 	fc := defaultFileConfig()
 	fc.Session.IdleMinutes = 40
-	if _, err := fc.toConfig("/s"); err == nil || !strings.Contains(err.Error(), "(session.absoluteMinutes is 30)") {
+	if _, err := fc.toConfig(secretPaths{}); err == nil || !strings.Contains(err.Error(), "(session.absoluteMinutes is 30)") {
 		t.Errorf("idle: got %v", err)
 	}
 	fc = defaultFileConfig()
 	fc.Login.BackoffSeconds = 1000
-	if _, err := fc.toConfig("/s"); err == nil || !strings.Contains(err.Error(), "(login.maxBackoffSeconds is 900)") {
+	if _, err := fc.toConfig(secretPaths{}); err == nil || !strings.Contains(err.Error(), "(login.maxBackoffSeconds is 900)") {
 		t.Errorf("backoff: got %v", err)
 	}
 }
@@ -297,6 +299,7 @@ func TestToConfig_BoundsNameTheOtherKey(t *testing.T) {
 func TestEncodeConfigFile_HeaderNoSecretsRoundTrip(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.siteSeedFile = "/very/secret/custom.seed"
+	cfg.storeKeyFile = "/very/secret/custom.key"
 	cfg.access.allow = prefixes(t, "10.0.0.0/8")
 	out, err := encodeConfigFile(fileConfigFromConfig(cfg))
 	if err != nil {
@@ -306,9 +309,9 @@ func TestEncodeConfigFile_HeaderNoSecretsRoundTrip(t *testing.T) {
 	if !strings.HasPrefix(s, "# config.yaml -- AUTHORITATIVE") {
 		t.Errorf("header missing: %q", s[:60])
 	}
-	for _, forbidden := range []string{"custom.seed", "siteSeed", "site.seed"} {
+	for _, forbidden := range []string{"custom.seed", "siteSeed", "site.seed", "custom.key", "storeKey"} {
 		if strings.Contains(s, forbidden) {
-			t.Errorf("the file must never carry the seed path, found %q", forbidden)
+			t.Errorf("the file must never carry a secret path, found %q", forbidden)
 		}
 	}
 	for _, v := range seedVars {
@@ -338,6 +341,7 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	t.Setenv("CONN_MODES", "both")
 	t.Setenv("LOG_LEVEL", "Info")
 	t.Setenv("SITE_SEED_FILE", "/x/site.seed")
+	t.Setenv("STORE_KEY_FILE", "/x/store.key")
 
 	load, err := resolveConfig(path)
 	if err != nil {
@@ -349,15 +353,15 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	if !load.cfg.hosted || !load.cfg.managed || load.cfg.connModes != connBoth || load.cfg.logLevel != slog.LevelInfo {
 		t.Errorf("seeded config does not reflect env: %+v", load.cfg)
 	}
-	if load.cfg.siteSeedFile != "/x/site.seed" {
-		t.Errorf("siteSeedFile: want the env value, got %q", load.cfg.siteSeedFile)
+	if load.cfg.siteSeedFile != "/x/site.seed" || load.cfg.storeKeyFile != "/x/store.key" {
+		t.Errorf("secret paths: want the env values, got %q and %q", load.cfg.siteSeedFile, load.cfg.storeKeyFile)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("seed file not written: %v", err)
 	}
-	if strings.Contains(string(raw), "/x/site.seed") {
-		t.Error("the seed path leaked into config.yaml")
+	if strings.Contains(string(raw), "/x/site.seed") || strings.Contains(string(raw), "/x/store.key") {
+		t.Error("a secret path leaked into config.yaml")
 	}
 	if load.sum != sha256.Sum256(raw) {
 		t.Error("the seeded load must carry the hash of the bytes it wrote")
@@ -475,6 +479,7 @@ func TestResolveConfig_FileWinsAndReportsOverrides(t *testing.T) {
 	t.Setenv("HOSTED", "TRUE")                        // parses to false: agrees with the file
 	t.Setenv("USERS_FILE", "/managed/users.yaml")     // equal to the file: nothing to report
 	t.Setenv("SITE_SEED_FILE", "/elsewhere/site.seed") // env-only: applied, never compared
+	t.Setenv("STORE_KEY_FILE", "/elsewhere/store.key") // likewise
 
 	load, err := resolveConfig(path)
 	if err != nil {
@@ -486,8 +491,8 @@ func TestResolveConfig_FileWinsAndReportsOverrides(t *testing.T) {
 	if load.cfg.connModes != connDirect || load.cfg.logLevel != slog.LevelWarn || load.cfg.appDir != "/SolaceMsgUtility" {
 		t.Errorf("the file must win: %+v", load.cfg)
 	}
-	if load.cfg.siteSeedFile != "/elsewhere/site.seed" {
-		t.Errorf("siteSeedFile: want the env value, got %q", load.cfg.siteSeedFile)
+	if load.cfg.siteSeedFile != "/elsewhere/site.seed" || load.cfg.storeKeyFile != "/elsewhere/store.key" {
+		t.Errorf("secret paths: want the env values, got %q and %q", load.cfg.siteSeedFile, load.cfg.storeKeyFile)
 	}
 	got := map[string]envOverride{}
 	for _, o := range load.overrides {

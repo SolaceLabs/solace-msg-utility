@@ -38,7 +38,7 @@ func newManagedEnv(t *testing.T, mutate func(*config)) *managedEnv {
 	f := newStoreFixture(t)
 	cfg := defaultConfig()
 	cfg.hosted, cfg.managed, cfg.connModes = true, true, connBoth
-	cfg.usersFile, cfg.connectionsFile, cfg.siteSeedFile = f.usersPath, f.connsPath, f.seedPath
+	cfg.usersFile, cfg.connectionsFile, cfg.siteSeedFile, cfg.storeKeyFile = f.usersPath, f.connsPath, f.seedPath, f.keyPath
 	cfg.login.unauthPerMinute = 1000
 	if mutate != nil {
 		mutate(&cfg)

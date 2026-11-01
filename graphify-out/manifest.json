@@ -30,9 +30,9 @@
     "semantic_hash": ""
   },
   "go-web-proxy/main.go": {
-    "mtime": 1793500031.0125308,
-    "seen": 1793511873.588529,
-    "ast_hash": "a6e5ce085c56e20745c3a62d898ac21f",
+    "mtime": 1793547773.7346516,
+    "seen": 1793548875.1629992,
+    "ast_hash": "4f79111be809d151e273de3441435886",
     "semantic_hash": ""
   },
   "go-web-proxy/main_test.go": {
@@ -702,15 +702,15 @@
     "semantic_hash": ""
   },
   "docker/docker-compose.yaml": {
-    "mtime": 1793347191.4158475,
-    "seen": 1793498199.7801952,
-    "ast_hash": "51ed32258a149b3558582694bf14cc34",
+    "mtime": 1793548020.1829503,
+    "seen": 1793548875.1633377,
+    "ast_hash": "051f3ab8000b60b22cadf03950b6edce",
     "semantic_hash": ""
   },
   "docs/architecture.md": {
-    "mtime": 1793524999.979581,
-    "seen": 1793542645.4248946,
-    "ast_hash": "a66ed4df5b83bf4766e42ccdaefc0dca",
+    "mtime": 1793548050.2103841,
+    "seen": 1793548875.1633394,
+    "ast_hash": "1303b15fdda36846057dfd6ac5b5e2e4",
     "semantic_hash": ""
   },
   "docs/contributing.md": {
@@ -720,9 +720,9 @@
     "semantic_hash": ""
   },
   "docs/deployment.md": {
-    "mtime": 1793546759.3727999,
-    "seen": 1793547066.5096695,
-    "ast_hash": "9e722ee363f2de997a955011fc1dd831",
+    "mtime": 1793548020.181449,
+    "seen": 1793548875.1633415,
+    "ast_hash": "5882186372af02289df6e5ef96edc37c",
     "semantic_hash": ""
   },
   "docs/developer-guide.md": {
@@ -738,15 +738,15 @@
     "semantic_hash": ""
   },
   "docs/test-report.md": {
-    "mtime": 1793546765.8587413,
-    "seen": 1793547066.509676,
-    "ast_hash": "2d2543cc2f2ec5851e8d6a259867935b",
+    "mtime": 1793548034.1244376,
+    "seen": 1793548875.163347,
+    "ast_hash": "4bfc824c206f1468b3d6dc13bb426742",
     "semantic_hash": ""
   },
   "docs/user-guide.md": {
-    "mtime": 1793524999.9809597,
-    "seen": 1793542645.4249039,
-    "ast_hash": "57a47835262699f6d5ee8e4451f3c75b",
+    "mtime": 1793548193.7864728,
+    "seen": 1793548875.1633482,
+    "ast_hash": "82877b5d6497a74216cc94ffae286988",
     "semantic_hash": ""
   },
   "src/index.html": {
@@ -864,9 +864,9 @@
     "semantic_hash": ""
   },
   "go-web-proxy/managed_test.go": {
-    "mtime": 1793525008.3016522,
-    "seen": 1793542645.4246116,
-    "ast_hash": "bea7a92f89e0f208d8f5755dad4d95a9",
+    "mtime": 1793547820.7610004,
+    "seen": 1793548875.1630085,
+    "ast_hash": "30e98ed162757ea6d36a71f7abb9c7fa",
     "semantic_hash": ""
   },
   "go-web-proxy/rbac.go": {
@@ -882,15 +882,15 @@
     "semantic_hash": ""
   },
   "go-web-proxy/store.go": {
-    "mtime": 1793524736.2401133,
-    "seen": 1793542645.424631,
-    "ast_hash": "8b94a7d45547710db1ab81ac71b7a3c2",
+    "mtime": 1793547756.2622864,
+    "seen": 1793548875.1630275,
+    "ast_hash": "898fcd456c097d1cf76ffb5470442711",
     "semantic_hash": ""
   },
   "go-web-proxy/store_test.go": {
-    "mtime": 1793524736.2409894,
-    "seen": 1793542645.4246323,
-    "ast_hash": "6a2393447731f3ac4f8f27a7f8668673",
+    "mtime": 1793547903.8095317,
+    "seen": 1793548875.163029,
+    "ast_hash": "7e59b57f07f9d5cf16e1b5119b103aad",
     "semantic_hash": ""
   },
   "scripts/module-registry-plugin.mjs": {
@@ -1038,9 +1038,9 @@
     "semantic_hash": ""
   },
   "go-web-proxy/managed_routing.go": {
-    "mtime": 1793499969.4593165,
-    "seen": 1793511873.5885358,
-    "ast_hash": "f0fa83daacdc3d5b1f20f844bd485378",
+    "mtime": 1793547773.7352133,
+    "seen": 1793548875.163004,
+    "ast_hash": "61ac6a47e1d8d0c3382215e8e375f6eb",
     "semantic_hash": ""
   },
   "go-web-proxy/managed_routing_stub.go": {
@@ -1332,15 +1332,15 @@
     "semantic_hash": ""
   },
   "go-web-proxy/configfile.go": {
-    "mtime": 1793499860.8608375,
-    "seen": 1793511873.5885134,
-    "ast_hash": "8310202615f50a8dd5efbd57f1e045dc",
+    "mtime": 1793547773.734417,
+    "seen": 1793548875.162981,
+    "ast_hash": "6e17b2e175ac0a81900835c5a35f1bc1",
     "semantic_hash": ""
   },
   "go-web-proxy/configfile_test.go": {
-    "mtime": 1793500094.0741177,
-    "seen": 1793511873.5885153,
-    "ast_hash": "7f57df33b82db4be502ca03b1273a98e",
+    "mtime": 1793547800.0199068,
+    "seen": 1793548875.1629837,
+    "ast_hash": "80c0e19bb7a28af7c48ed8a9f3ed752d",
     "semantic_hash": ""
   },
   "go-web-proxy/fileutil.go": {
@@ -1356,9 +1356,9 @@
     "semantic_hash": ""
   },
   "docs/rbac-rework-plan.md": {
-    "mtime": 1793524892.4313,
-    "seen": 1793542645.4249,
-    "ast_hash": "397b0846fc069085f665a2547a15c695",
+    "mtime": 1793548034.1234212,
+    "seen": 1793548875.1633449,
+    "ast_hash": "b7915c2a24b2e5f3184d9edb19589380",
     "semantic_hash": ""
   },
   "scripts/check-bundles.mjs": {
@@ -1392,9 +1392,9 @@
     "semantic_hash": ""
   },
   "go-web-proxy/managed_routing_test.go": {
-    "mtime": 1793500234.3189933,
-    "seen": 1793511873.5885398,
-    "ast_hash": "4d1ff4bb51f96ee4257b347556a94351",
+    "mtime": 1793547820.7612178,
+    "seen": 1793548875.1630073,
+    "ast_hash": "472e212d2d9c899f66be62290cfd528d",
     "semantic_hash": ""
   },
   "go-web-proxy/pages.go": {
@@ -1476,15 +1476,15 @@
     "semantic_hash": ""
   },
   "go-web-proxy/settings.go": {
-    "mtime": 1793524669.0591977,
-    "seen": 1793542645.424628,
-    "ast_hash": "23a23b1efca7914882db8cebfe321721",
+    "mtime": 1793547773.7348027,
+    "seen": 1793548875.1630244,
+    "ast_hash": "98e25946db8fe4fec3d90a36010b4db0",
     "semantic_hash": ""
   },
   "go-web-proxy/settings_test.go": {
-    "mtime": 1793524690.3518803,
-    "seen": 1793542645.4246297,
-    "ast_hash": "7084ce073933e98af576a8dc3ec84050",
+    "mtime": 1793547820.7605667,
+    "seen": 1793548875.1630256,
+    "ast_hash": "ad11d4ef9a8b50f03f423d83fa526f82",
     "semantic_hash": ""
   },
   "src/modules/gateway-settings/module.ts": {
@@ -1515,6 +1515,30 @@
     "mtime": 1793524852.0269742,
     "seen": 1793542645.4249146,
     "ast_hash": "b9e817bfe457a66e90a3cb58351b3d44",
+    "semantic_hash": ""
+  },
+  "go-web-proxy/keyfile.go": {
+    "mtime": 1793547698.185766,
+    "seen": 1793548875.1629913,
+    "ast_hash": "5e53f53feb7e9bcc0bad1748729ae30b",
+    "semantic_hash": ""
+  },
+  "go-web-proxy/keyfile_test.go": {
+    "mtime": 1793547974.5547745,
+    "seen": 1793548875.162993,
+    "ast_hash": "cb3232c3b41b73ca53f148d21fac80e6",
+    "semantic_hash": ""
+  },
+  "go-web-proxy/storecrypt.go": {
+    "mtime": 1793547698.1217654,
+    "seen": 1793548875.1630309,
+    "ast_hash": "b1b86cd914b73a6070e89c31c0794f3c",
+    "semantic_hash": ""
+  },
+  "go-web-proxy/storecrypt_test.go": {
+    "mtime": 1793547941.5084915,
+    "seen": 1793548875.1630466,
+    "ast_hash": "a70f4b83169c062cd8a89e940b097207",
     "semantic_hash": ""
   }
 }

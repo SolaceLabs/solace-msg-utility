@@ -52,6 +52,7 @@ type config struct {
 	usersFile       string
 	connectionsFile string
 	siteSeedFile    string
+	storeKeyFile    string // encrypts usersFile and connectionsFile (keyfile.go)
 	// Connection-mode config surfaced to the SPA through /hosted. connModes is
 	// one of direct|managed|both; defaultConn (direct|managed) picks the tab
 	// shown first when both are offered. Defaults keep a plain deployment
@@ -126,6 +127,7 @@ func defaultConfig() config {
 		usersFile:       "/managed/users.yaml",
 		connectionsFile: "/managed/connections.yaml",
 		siteSeedFile:    defaultSiteSeedFile,
+		storeKeyFile:    defaultStoreKeyFile,
 		connModes:       connDirect,
 		defaultConn:     connDirect,
 		session:         sessionLimits{idle: 10 * time.Minute, absolute: 30 * time.Minute},
@@ -160,6 +162,7 @@ func loadConfig() (config, error) {
 		usersFile:          envOr("USERS_FILE", d.usersFile),
 		connectionsFile:    envOr("CONNECTIONS_FILE", d.connectionsFile),
 		siteSeedFile:       envOr("SITE_SEED_FILE", d.siteSeedFile),
+		storeKeyFile:       envOr("STORE_KEY_FILE", d.storeKeyFile),
 		connModes:          strings.ToLower(envOr("CONN_MODES", d.connModes)),
 		defaultConn:        strings.ToLower(envOr("DEFAULT_CONN", d.defaultConn)),
 		session:            d.session,

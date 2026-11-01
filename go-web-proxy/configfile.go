@@ -20,22 +20,24 @@ import (
 
 // config.yaml is the gateway's single source of settings. Environment variables
 // seed it on first start only (see resolveConfig); afterwards the file wins and
-// a differing env var is reported, never applied. Two values are deliberately
+// a differing env var is reported, never applied. Some values are deliberately
 // environment-only and never written to the file: CONFIG_FILE (where the file
-// is) and SITE_SEED_FILE (where the deployment secret is), so an admin-editable
-// settings file can never point the gateway at a different secret.
+// is), SITE_SEED_FILE and STORE_KEY_FILE (where the deployment secrets are), so
+// an admin-editable settings file can never point the gateway at a different
+// secret.
 const (
 	configVersion       = 1
 	defaultConfigFile   = "/managed/config.yaml"
 	defaultSiteSeedFile = "/managed/site.seed"
+	defaultStoreKeyFile = "/managed/store.key"
 )
 
 const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # Environment variables seed this file on first start only, when it does not
 # exist. Afterwards the file wins; a changed env var is ignored and logged.
 # Edit this file and restart the gateway, or delete it to re-seed from env.
-# CONFIG_FILE (this file) and SITE_SEED_FILE (the deployment secret) are
-# environment-only and never appear here.
+# CONFIG_FILE (this file), SITE_SEED_FILE and STORE_KEY_FILE (the deployment
+# secrets) are environment-only and never appear here.
 # access.*, session.*, login.* and modules.* have no env var: edit them here.
 # An empty allow list admits every client; trustedProxies lists the reverse
 # proxies whose X-Forwarded-For is believed. session.*, login.* and modules.*
@@ -196,9 +198,23 @@ var seedVars = []seedVar{
 func boolEnv(raw string) string { return strconv.FormatBool(raw == "true") }
 func identity(raw string) string { return raw }
 
-// configPath is one of the two environment-only settings (the other is
-// SITE_SEED_FILE, read in resolveConfig).
+// configPath is one of the environment-only settings (the others are the
+// secret paths, read by secretPathsFromEnv).
 func configPath() string { return envOr("CONFIG_FILE", defaultConfigFile) }
+
+// secretPaths are the environment-only locations of the gateway's secrets.
+// toConfig takes them from its caller, never from the file.
+type secretPaths struct {
+	siteSeed string // SITE_SEED_FILE
+	storeKey string // STORE_KEY_FILE
+}
+
+func secretPathsFromEnv() secretPaths {
+	return secretPaths{
+		siteSeed: envOr("SITE_SEED_FILE", defaultSiteSeedFile),
+		storeKey: envOr("STORE_KEY_FILE", defaultStoreKeyFile),
+	}
+}
 
 func defaultFileConfig() fileConfig { return fileConfigFromConfig(defaultConfig()) }
 
@@ -249,8 +265,8 @@ func prefixStrings(ps []netip.Prefix) []string {
 }
 
 // toConfig validates every value and converts to the runtime config.
-// siteSeedFile comes from the environment, never from the file.
-func (fc fileConfig) toConfig(siteSeedFile string) (config, error) {
+// The secret paths come from the environment, never from the file.
+func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 	level, err := parseLogLevel(fc.LogLevel)
 	if err != nil {
 		return config{}, fmt.Errorf("key %q has invalid value %q: %w", "logLevel", fc.LogLevel, err)
@@ -286,7 +302,8 @@ func (fc fileConfig) toConfig(siteSeedFile string) (config, error) {
 		managed:            fc.Managed,
 		usersFile:          fc.UsersFile,
 		connectionsFile:    fc.ConnectionsFile,
-		siteSeedFile:       siteSeedFile,
+		siteSeedFile:       secrets.siteSeed,
+		storeKeyFile:       secrets.storeKey,
 		connModes:          strings.ToLower(fc.ConnModes),
 		defaultConn:        strings.ToLower(fc.DefaultConn),
 		access:             accessConfig{allow: allow, trustedProxies: trusted},
@@ -453,7 +470,7 @@ type configSource struct {
 // resolveConfig loads config.yaml, seeding it from the environment when it does
 // not exist yet. Every failure is fatal for the caller and names the path.
 func resolveConfig(path string) (configLoad, error) {
-	siteSeed := envOr("SITE_SEED_FILE", defaultSiteSeedFile)
+	secrets := secretPathsFromEnv()
 	data, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -462,7 +479,7 @@ func resolveConfig(path string) (configLoad, error) {
 			return configLoad{}, fmt.Errorf("cannot seed config file %q from the environment: %w", path, err)
 		}
 		// Validate before writing, so a rejected value never lands in the file.
-		cfg, err := fileConfigFromConfig(envCfg).toConfig(siteSeed)
+		cfg, err := fileConfigFromConfig(envCfg).toConfig(secrets)
 		if err != nil {
 			return configLoad{}, fmt.Errorf("cannot seed config file %q from the environment: %w", path, err)
 		}
@@ -478,7 +495,7 @@ func resolveConfig(path string) (configLoad, error) {
 	if err != nil {
 		return configLoad{}, err
 	}
-	cfg, err := fc.toConfig(siteSeed)
+	cfg, err := fc.toConfig(secrets)
 	if err != nil {
 		return configLoad{}, fmt.Errorf("config file %q: %w", path, err)
 	}

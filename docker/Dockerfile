@@ -18,13 +18,15 @@
 #                  Defaults to /SolaceMsgUtility inside the image; override
 #                  with APP_DIR.
 #   /managed     — Writable gateway store: config.yaml on every image, plus
-#                  users.yaml, connections.yaml and site.seed for MANAGED=true.
+#                  users.yaml, connections.yaml (both encrypted with
+#                  store.key), store.key and site.seed for MANAGED=true.
 #                  Baked empty + owned by UID 65532 so a named volume there
 #                  inherits write access. Without a volume it lives in the
 #                  container's writable layer and config.yaml is re-seeded
 #                  from the environment whenever the container is recreated.
 #
-# Environment (all optional). Except CONFIG_FILE and SITE_SEED_FILE, these only
+# Environment (all optional). Except CONFIG_FILE, SITE_SEED_FILE and
+# STORE_KEY_FILE, these only
 # SEED config.yaml on the first start, when the file does not exist; afterwards
 # the file is authoritative and a differing variable is logged, not applied.
 # The client access list (access.allow, access.trustedProxies) has no variable
@@ -46,6 +48,9 @@
 #                             else fails startup)
 #   SITE_SEED_FILE            /managed/site.seed (managed; environment-only,
 #                             never in the file)
+#   STORE_KEY_FILE            /managed/store.key (managed; environment-only;
+#                             encrypts users.yaml and connections.yaml, made
+#                             on a fresh volume only -- back it up)
 #
 # Build args (select which image variant to build):
 #   MANAGED     Baked default for the MANAGED env var (default empty; "true" for
@@ -91,7 +96,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # only way to bake an empty, correctly-permissioned directory into the final
 # image. /managed is the gateway's writable store: config.yaml on every image
 # (seeded from env on the first start; an unwritable dir is fatal) plus
-# users.yaml and site.seed when MANAGED=true (a store-load failure is fatal
+# users.yaml, store.key and site.seed when MANAGED=true (a store-load failure is fatal
 # too). So the dir must be writable by UID 65532. A named volume mounted there
 # inherits this ownership; with no volume the store lives in the container's
 # writable layer (ephemeral: config.yaml is re-seeded on every recreate).

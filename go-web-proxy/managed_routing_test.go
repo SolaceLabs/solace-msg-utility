@@ -25,6 +25,7 @@ func TestNewManagedRouting_Enabled(t *testing.T) {
 	cfg.usersFile = filepath.Join(dir, "users.yaml")
 	cfg.connectionsFile = filepath.Join(dir, "connections.yaml")
 	cfg.siteSeedFile = filepath.Join(dir, "site.seed")
+	cfg.storeKeyFile = filepath.Join(dir, "store.key")
 	t.Setenv(envAdminPassword, "")
 	t.Setenv(envAdminPasswordFile, "")
 	var buf strings.Builder
@@ -42,9 +43,9 @@ func TestNewManagedRouting_Enabled(t *testing.T) {
 
 func TestBuildManagedRoutes_StoreErrorIsReturned(t *testing.T) {
 	f := newStoreFixture(t)
-	writeFile(t, f.usersPath, "msg-utility-users: [")
+	f.writeUsers(t, "msg-utility-users: [")
 	cfg := defaultConfig()
-	cfg.managed, cfg.usersFile, cfg.connectionsFile, cfg.siteSeedFile = true, f.usersPath, f.connsPath, f.seedPath
+	cfg.managed, cfg.usersFile, cfg.connectionsFile, cfg.siteSeedFile, cfg.storeKeyFile = true, f.usersPath, f.connsPath, f.seedPath, f.keyPath
 	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, quietLogger()); err == nil || !strings.Contains(err.Error(), f.usersPath) {
 		t.Fatalf("want the store error naming the file, got %v", err)
 	}

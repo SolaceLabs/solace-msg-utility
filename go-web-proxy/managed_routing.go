@@ -33,7 +33,7 @@ func newManagedRouting(cfg config, lv *live, src configSource, logger *slog.Logg
 // can supply a cheap hasher, an environment and a clock.
 func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, getenv func(string) string, now func() time.Time, logger *slog.Logger) (*managedRoutes, error) {
 	st, err := loadStore(storeOptions{
-		usersPath: cfg.usersFile, connsPath: cfg.connectionsFile, seedPath: cfg.siteSeedFile,
+		usersPath: cfg.usersFile, connsPath: cfg.connectionsFile, seedPath: cfg.siteSeedFile, keyPath: cfg.storeKeyFile,
 		hasher: h, getenv: getenv,
 	}, logger)
 	if err != nil {

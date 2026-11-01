@@ -105,29 +105,74 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// storeFixture is a temp dir holding the users (admin + viewer) and
-// connections (brokers b1, b2) fixtures.
+// testStoreKeyHex is the fixture store key, as the key file holds it.
+const testStoreKeyHex = "00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f"
+
+// storeFixture is a temp dir holding the store key and the users (admin +
+// viewer) and connections (brokers b1, b2) fixtures, sealed as the gateway
+// writes them.
 type storeFixture struct {
-	usersPath, connsPath, seedPath string
-	h                              *hasher
+	usersPath, connsPath, seedPath, keyPath string
+	h                                       *hasher
 }
 
 func newStoreFixture(t *testing.T) storeFixture {
 	t.Helper()
-	dir := t.TempDir()
-	f := storeFixture{
-		usersPath: filepath.Join(dir, "users.yaml"),
-		connsPath: filepath.Join(dir, "conns.yaml"),
-		seedPath:  filepath.Join(dir, "s.seed"),
-		h:         testHasher(t),
+	f := bootstrapFixture(t)
+	if err := os.WriteFile(f.keyPath, []byte(testStoreKeyHex+"\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	writeFile(t, f.usersPath, fmt.Sprintf(usersYAMLTemplate, mustHash(t, f.h, adminPW), mustHash(t, f.h, viewerPW)))
-	writeFile(t, f.connsPath, connsYAML)
+	f.writeUsers(t, fmt.Sprintf(usersYAMLTemplate, mustHash(t, f.h, adminPW), mustHash(t, f.h, viewerPW)))
+	f.writeConns(t, connsYAML)
 	return f
 }
 
 func (f storeFixture) opts(getenv func(string) string) storeOptions {
-	return storeOptions{usersPath: f.usersPath, connsPath: f.connsPath, seedPath: f.seedPath, hasher: f.h, getenv: getenv}
+	return storeOptions{usersPath: f.usersPath, connsPath: f.connsPath, seedPath: f.seedPath, keyPath: f.keyPath, hasher: f.h, getenv: getenv}
+}
+
+// sealer opens and seals with the key in the fixture's key file, whether the
+// fixture wrote it or the gateway generated it.
+func (f storeFixture) sealer(t *testing.T) *sealer {
+	t.Helper()
+	data, err := os.ReadFile(f.keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := parseStoreKey(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sl, err := newSealer(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sl
+}
+
+// writeUsers and writeConns seal YAML text into the store files.
+func (f storeFixture) writeUsers(t *testing.T, doc string) {
+	t.Helper()
+	writeFile(t, f.usersPath, string(f.sealer(t).seal(roleUsers, []byte(doc))))
+}
+
+func (f storeFixture) writeConns(t *testing.T, doc string) {
+	t.Helper()
+	writeFile(t, f.connsPath, string(f.sealer(t).seal(roleConns, []byte(doc))))
+}
+
+// readUsers returns the users file decrypted.
+func (f storeFixture) readUsers(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(f.usersPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := f.sealer(t).open(roleUsers, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(plain)
 }
 
 func (f storeFixture) load(t *testing.T) *store {
@@ -164,6 +209,7 @@ func bootstrapFixture(t *testing.T) storeFixture {
 		usersPath: filepath.Join(dir, "users.yaml"),
 		connsPath: filepath.Join(dir, "conns.yaml"),
 		seedPath:  filepath.Join(dir, "site.seed"),
+		keyPath:   filepath.Join(dir, "store.key"),
 		h:         testHasher(t),
 	}
 }
@@ -187,8 +233,8 @@ func TestLoadStore_BootstrapGeneratedPasswordIsLoggedOnceAndMustChange(t *testin
 	if admin, _ := s.isAdmin("admin"); !admin {
 		t.Error("bootstrap user must be admin")
 	}
-	data, _ := os.ReadFile(f.usersPath)
-	if strings.Contains(string(data), pw) || !strings.Contains(string(data), "mustChangePassword: true") {
+	data := f.readUsers(t)
+	if strings.Contains(data, pw) || !strings.Contains(data, "mustChangePassword: true") {
 		t.Errorf("users file must hold a hash and the change flag, never the password:\n%s", data)
 	}
 	if info, _ := os.Stat(f.usersPath); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
@@ -306,7 +352,7 @@ func TestLoadStore_RejectsInvalidUsersFile(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newStoreFixture(t)
-			writeFile(t, f.usersPath, tc.doc)
+			f.writeUsers(t, tc.doc)
 			_, err := loadStore(f.opts(noEnv), quietLogger())
 			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), f.usersPath) {
 				t.Fatalf("want an error naming the file and %q, got %v", tc.want, err)
@@ -336,11 +382,12 @@ func TestLoadStore_RejectsInvalidConnectionsFile(t *testing.T) {
 		{"client port", "msg-utility-connections:\n" + conn("b1", "    client:\n      port: tcp\n"), `client.port "tcp" is not a port`},
 		{"vpn without name", "msg-utility-connections:\n" + conn("b1", vpns("")), "a message VPN has no name"},
 		{"duplicate vpn", "msg-utility-connections:\n" + conn("b1", vpns("v1", "v1")), `message VPN "v1" appears more than once`},
+		{"bad hostname", "msg-utility-connections:\n  - broker: b1\n    hostname: 'https://h'\n", `hostname "https://h" must be a host name`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newStoreFixture(t)
-			writeFile(t, f.connsPath, tc.doc)
+			f.writeConns(t, tc.doc)
 			_, err := loadStore(f.opts(noEnv), quietLogger())
 			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), f.connsPath) {
 				t.Fatalf("want an error naming the file and %q, got %v", tc.want, err)
@@ -355,13 +402,151 @@ func TestLoadStore_EmptyOrMissingConnectionsFileYieldsNoBrokers(t *testing.T) {
 		if content == "-" {
 			_ = os.Remove(f.connsPath)
 		} else {
-			writeFile(t, f.connsPath, content)
+			f.writeConns(t, content)
 		}
 		s := f.load(t)
 		prof, _ := s.profile("admin", defaultConfig().modules)
 		if len(prof.Brokers) != 0 {
 			t.Errorf("content %q: want no brokers, got %d", content, len(prof.Brokers))
 		}
+	}
+}
+
+// ----- encrypted store files ---------------------------------------------------------
+
+func TestStore_FilesOnDiskAreEncrypted(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	if _, err := s.upsertUser(context.Background(), userRec{Username: "bob", Operate: []permRow{}, ReadOnly: []permRow{}}, "bob-password-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.upsertConnection(connRec{Broker: "b3", Hostname: "host3", Semp: sempRec{Port: "1943", Username: "mon3", Password: "semp-secret-3"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{f.usersPath, f.connsPath} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(string(raw), storeMagic) {
+			t.Errorf("%s: want the store header, got %q", filepath.Base(path), raw[:min(len(raw), 8)])
+		}
+		for _, plain := range []string{"username", "admin", "mon3", "semp-secret-3", "host3", "PKD:"} {
+			if strings.Contains(string(raw), plain) {
+				t.Errorf("%s holds %q in the clear", filepath.Base(path), plain)
+			}
+		}
+		if info, _ := os.Stat(path); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+			t.Errorf("%s must be owner-only, got %v", filepath.Base(path), info.Mode().Perm())
+		}
+	}
+	// A fresh load with the same key reads both writes.
+	s2 := f.load(t)
+	if !signsIn(t, s2, "bob", "bob-password-1") || len(s2.listConnections()) != 3 {
+		t.Error("the sealed writes must load again with the same key")
+	}
+}
+
+func TestLoadStore_RefusesStoresItCannotOpen(t *testing.T) {
+	cases := []struct {
+		name    string
+		prepare func(t *testing.T, f storeFixture)
+		path    func(f storeFixture) string
+		want    string
+	}{
+		{"plaintext users file", func(t *testing.T, f storeFixture) {
+			writeFile(t, f.usersPath, "msg-utility-users: []\n")
+		}, func(f storeFixture) string { return f.usersPath }, "plaintext store from an earlier build"},
+		{"plaintext connections file", func(t *testing.T, f storeFixture) {
+			writeFile(t, f.connsPath, connsYAML)
+		}, func(f storeFixture) string { return f.connsPath }, "plaintext store from an earlier build"},
+		{"empty users file", func(t *testing.T, f storeFixture) {
+			writeFile(t, f.usersPath, "")
+		}, func(f storeFixture) string { return f.usersPath }, "is empty (damaged)"},
+		{"another key", func(t *testing.T, f storeFixture) {
+			writeFile(t, f.keyPath, strings.Repeat("ab", storeKeyBytes))
+		}, func(f storeFixture) string { return f.usersPath }, "wrong store key file, or the file is damaged"},
+		{"files swapped", func(t *testing.T, f storeFixture) {
+			users, _ := os.ReadFile(f.usersPath)
+			writeFile(t, f.connsPath, string(users))
+		}, func(f storeFixture) string { return f.connsPath }, "holds the users store, not the connections store"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newStoreFixture(t)
+			tc.prepare(t, f)
+			_, err := loadStore(f.opts(noEnv), quietLogger())
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), tc.path(f)) {
+				t.Fatalf("want an error naming %s and %q, got %v", tc.path(f), tc.want, err)
+			}
+		})
+	}
+}
+
+func TestLoadStore_KeyProblemsStopTheLoad(t *testing.T) {
+	f := newStoreFixture(t)
+	_ = os.Remove(f.keyPath)
+	if _, err := loadStore(f.opts(noEnv), quietLogger()); err == nil || !strings.Contains(err.Error(), "is missing but") {
+		t.Fatalf("a missing key beside the stores must refuse, got %v", err)
+	}
+	if _, err := os.Stat(f.keyPath); err == nil {
+		t.Error("a refused start must not create a key")
+	}
+}
+
+func TestValidateConn_HostPortsAndCredentials(t *testing.T) {
+	base := func() connRec {
+		return connRec{
+			Broker: "b1", Hostname: "broker-1.example.com",
+			Semp:   sempRec{Port: "1943", Username: "mon", Password: "semp-pw"},
+			Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v1", Username: "u1", Password: "vpn-pw"}}},
+		}
+	}
+	for _, host := range []string{"h", "10.0.0.1", "::1", "2001:db8::5", "my_host.local"} {
+		c := base()
+		c.Hostname = host
+		if err := validateConn(c); err != nil {
+			t.Errorf("hostname %q must be accepted: %v", host, err)
+		}
+	}
+	cases := []struct {
+		name   string
+		mutate func(*connRec)
+		want   string
+	}{
+		{"no hostname", func(c *connRec) { c.Hostname = "" }, `hostname "" must be a host name`},
+		{"scheme", func(c *connRec) { c.Hostname = "https://h" }, "must be a host name"},
+		{"port in host", func(c *connRec) { c.Hostname = "h:1943" }, "must be a host name"},
+		{"path", func(c *connRec) { c.Hostname = "h/x" }, "must be a host name"},
+		{"user info", func(c *connRec) { c.Hostname = "u@h" }, "must be a host name"},
+		{"space", func(c *connRec) { c.Hostname = "h x" }, "must be a host name"},
+		{"bracketed v6", func(c *connRec) { c.Hostname = "[::1]" }, "must be a host name"},
+		{"semp port missing", func(c *connRec) { c.Semp.Port = "" }, "semp.port is required when a SEMP username is set"},
+		{"client port missing", func(c *connRec) { c.Client.Port = "" }, "client.port is required when message VPNs are listed"},
+		{"colon in semp user", func(c *connRec) { c.Semp.Username = "a:b" }, "the username no ':'"},
+		{"control in semp password", func(c *connRec) { c.Semp.Password = "semp\npw" }, "must not contain control characters"},
+		{"control in vpn password", func(c *connRec) { c.Client.MsgVpns[0].Password = "vpn\x7fpw" }, `message VPN "v1": the name, username and password`},
+		{"control in vpn user", func(c *connRec) { c.Client.MsgVpns[0].Username = "u\t1" }, "must not contain control characters"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := base()
+			tc.mutate(&c)
+			err := validateConn(c)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+			if strings.Contains(err.Error(), "pw") {
+				t.Errorf("the error must not echo a password: %v", err)
+			}
+		})
+	}
+	// Ports stay optional where nothing uses them.
+	c := base()
+	c.Semp = sempRec{}
+	c.Client = clientRec{}
+	if err := validateConn(c); err != nil {
+		t.Errorf("a connection with no SEMP user and no VPNs needs no ports: %v", err)
 	}
 }
 
@@ -463,8 +648,7 @@ func TestStore_UpsertUser_CreateHashesAndPersists(t *testing.T) {
 	if err != nil || drop {
 		t.Fatalf("create: drop=%v err=%v", drop, err)
 	}
-	data, _ := os.ReadFile(f.usersPath)
-	if strings.Contains(string(data), "bob-password-1") {
+	if strings.Contains(f.readUsers(t), "bob-password-1") {
 		t.Error("the plaintext password must never reach the file")
 	}
 	s2 := f.load(t)

@@ -49,8 +49,8 @@ func TestSettings_GetReportsTheFile(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	rec := e.do("GET", "/managed/settings", "", e.cookie("admin", false))
 	expect(t, rec, http.StatusOK, "")
-	if body := rec.Body.String(); strings.Contains(body, "version") || strings.Contains(body, "seed") {
-		t.Errorf("the version and the seed path are not the page's to see: %s", body)
+	if body := rec.Body.String(); strings.Contains(body, "version") || strings.Contains(body, "seed") || strings.Contains(body, "store.key") || strings.Contains(body, "storeKey") {
+		t.Errorf("the version and the secret paths are not the page's to see: %s", body)
 	}
 	s := e.settings(t)
 	want := fileConfigFromConfig(e.cfg)
@@ -168,6 +168,7 @@ func TestSettings_Refusals(t *testing.T) {
 		{"cross check", `{"hosted":false,"connModes":"both"}`, 422, "invalid", "settings", "hosted is false"},
 		{"unknown key", `{"bogus":1}`, 400, "bad_request", "", ""},
 		{"version is the gateway's", `{"version":2}`, 400, "bad_request", "", ""},
+		{"store key path is env-only", `{"storeKeyFile":"/tmp/k"}`, 400, "bad_request", "", ""},
 		{"lock-out", `{"access":{"allow":["10.0.0.0/8"]}}`, 409, "would_lock_out", "access.allow", "(192.0.2.10)"},
 	}
 	for _, tc := range cases {
