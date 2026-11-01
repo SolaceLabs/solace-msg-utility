@@ -49,7 +49,7 @@ scripts/logs
 
 # graphify: regenerated caches, dated snapshots and per-machine stamps
 graphify-out/20*/
-graphify-out/cache/ast/
+graphify-out/cache
 */graphify-out/cache/
 **/cache/last_query_stamp
 graphify-out/*.sig
