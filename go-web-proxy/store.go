@@ -3,24 +3,30 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
-// bootstrapAdminToken is the stored token for the default admin (username
-// "admin", password "msgutility"). It is the client-side stamp() of those
-// values — Go never computes it. PINNED by tests/core/encode.test.ts
-// ("pins the bootstrap admin token"); if that test's expected value changes,
-// update this literal in lockstep or admin login (string-match) breaks.
-const bootstrapAdminToken = "S1:K160PHJHFKEGE8N50K9CRQZRF0"
+// Bootstrap admin password sources, read only when the users file is missing.
+// Environment-only and never written to config.yaml: the value is a secret.
+const (
+	envAdminPassword     = "ADMIN_PASSWORD"
+	envAdminPasswordFile = "ADMIN_PASSWORD_FILE"
+	bootstrapAdminName   = "admin"
+)
 
 // flexStr unmarshals a YAML scalar (int or string) into a string, so ports can
 // be written unquoted (`port: 1943`) or quoted (`port: "1943"`).
@@ -40,11 +46,14 @@ type permRow struct {
 }
 
 type userRec struct {
-	Username string    `yaml:"username"`
-	Password string    `yaml:"password"` // stored token (client stamp); never decrypted
-	Admin    bool      `yaml:"admin"`
-	Operate  []permRow `yaml:"operate"`
-	ReadOnly []permRow `yaml:"read-only"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"` // pbkdf2-sha256 hash (password.go)
+	// MustChangePassword limits the user's session to the password page until
+	// they set a new one. Set for the bootstrap admin.
+	MustChangePassword bool      `yaml:"mustChangePassword,omitempty"`
+	Admin              bool      `yaml:"admin"`
+	Operate            []permRow `yaml:"operate"`
+	ReadOnly           []permRow `yaml:"read-only"`
 }
 
 type usersDoc struct {
@@ -79,7 +88,7 @@ type connsDoc struct {
 	Connections []connRec `yaml:"msg-utility-connections"`
 }
 
-// ----- getConnections response shapes (JSON to the browser) -------------------
+// ----- /managed/me response shapes (JSON to the browser) ----------------------
 
 type respPerm struct {
 	Brokers string `json:"brokers"`
@@ -107,6 +116,7 @@ type respBroker struct {
 	MsgVpns  []respVpn `json:"msgVpns"`
 }
 type profileResponse struct {
+	Username string       `json:"username"`
 	Admin    bool         `json:"admin"`
 	SiteSeed string       `json:"siteSeed"` // base64; client imports NON-extractable
 	Operate  []respPerm   `json:"operate"`
@@ -118,7 +128,8 @@ type profileResponse struct {
 
 // store holds the parsed users + connections + the site seed, guarded by an
 // RWMutex (reads under RLock, CRUD writes under Lock). The file paths are
-// retained so admin-CRUD mutations can persist back to the same files.
+// retained so admin-CRUD mutations can persist back to the same files. The
+// gateway is the only writer: a hand edit on the volume needs a restart.
 type store struct {
 	mu        sync.RWMutex
 	users     []userRec
@@ -126,37 +137,54 @@ type store struct {
 	siteSeed  string // base64 of the raw seed bytes
 	usersPath string // retained for CRUD persistence
 	connsPath string // retained for CRUD persistence
+	hasher    *hasher
 }
 
-func loadStore(usersPath, connsPath, seedPath string, logger *slog.Logger) (*store, error) {
-	s := &store{usersPath: usersPath, connsPath: connsPath}
+type storeOptions struct {
+	usersPath, connsPath, seedPath string
+	hasher                         *hasher
+	getenv                         func(string) string // os.Getenv; injected for tests
+}
 
-	if _, err := os.Stat(usersPath); errors.Is(err, os.ErrNotExist) {
-		logger.Warn("users file missing — bootstrapping a default admin", "path", usersPath)
-		doc, err := bootstrapUsers(usersPath)
+func loadStore(opts storeOptions, logger *slog.Logger) (*store, error) {
+	s := &store{usersPath: opts.usersPath, connsPath: opts.connsPath, hasher: opts.hasher}
+
+	if _, err := os.Stat(opts.usersPath); errors.Is(err, os.ErrNotExist) {
+		doc, err := bootstrapUsers(opts, logger)
 		if err != nil {
-			return nil, fmt.Errorf("bootstrap users: %w", err)
+			return nil, fmt.Errorf("bootstrap users file %q: %w", opts.usersPath, err)
 		}
 		s.users = doc.Users
 	} else {
+		for _, name := range []string{envAdminPassword, envAdminPasswordFile} {
+			if opts.getenv(name) != "" {
+				logger.Warn("users file exists, so the bootstrap password variable is ignored; remove it", "env", name, "path", opts.usersPath)
+			}
+		}
 		var doc usersDoc
-		if err := readYAML(usersPath, &doc); err != nil {
-			return nil, fmt.Errorf("read users: %w", err)
+		if err := readYAMLStrict(opts.usersPath, &doc); err != nil {
+			return nil, fmt.Errorf("read users file %q: %w", opts.usersPath, err)
+		}
+		if err := validateUsers(doc.Users); err != nil {
+			return nil, fmt.Errorf("users file %q: %w", opts.usersPath, err)
 		}
 		s.users = doc.Users
 	}
 
-	if _, err := os.Stat(connsPath); errors.Is(err, os.ErrNotExist) {
-		logger.Warn("connections file missing — no brokers will be offered", "path", connsPath)
+	if _, err := os.Stat(opts.connsPath); errors.Is(err, os.ErrNotExist) {
+		logger.Warn("connections file missing — no brokers will be offered", "path", opts.connsPath)
 	} else {
 		var doc connsDoc
-		if err := readYAML(connsPath, &doc); err != nil {
-			return nil, fmt.Errorf("read connections: %w", err)
+		if err := readYAMLStrict(opts.connsPath, &doc); err != nil {
+			return nil, fmt.Errorf("read connections file %q: %w", opts.connsPath, err)
+		}
+		if err := validateConns(doc.Connections); err != nil {
+			return nil, fmt.Errorf("connections file %q: %w", opts.connsPath, err)
 		}
 		s.conns = doc.Connections
 	}
 
-	seed, err := loadOrGenerateSeed(seedPath, logger)
+	seed, err := loadOrGenerateSeed(opts.seedPath, logger)
 	if err != nil {
 		return nil, fmt.Errorf("site seed: %w", err)
 	}
@@ -164,52 +192,116 @@ func loadStore(usersPath, connsPath, seedPath string, logger *slog.Logger) (*sto
 	return s, nil
 }
 
-// reload re-reads users + connections from disk into the in-memory store, under
-// the write lock, so out-of-band edits to the YAML files take effect without a
-// restart. Unlike loadStore it does NOT bootstrap a missing users file or touch
-// the site seed. A missing connections file is tolerated (→ no brokers), matching
-// loadStore. The slices are swapped only after both reads succeed, so a failed
-// read leaves the store unchanged.
-func (s *store) reload() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// ----- validation (on load; the CRUD handlers apply the same rules) -----------
 
-	var udoc usersDoc
-	if err := readYAML(s.usersPath, &udoc); err != nil {
-		return fmt.Errorf("reload users: %w", err)
+var (
+	usernamePattern = regexp.MustCompile(`^[A-Za-z0-9._@-]{1,64}$`)
+	brokerPattern   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+)
+
+const (
+	usernameRule = "must be 1 to 64 characters from A-Z a-z 0-9 . _ @ -"
+	brokerRule   = "must be 1 to 64 characters from A-Z a-z 0-9 . _ -"
+)
+
+func validateUsers(users []userRec) error {
+	seen := map[string]bool{}
+	admins := 0
+	for i, u := range users {
+		if !usernamePattern.MatchString(u.Username) {
+			return fmt.Errorf("user %d: username %q %s", i+1, u.Username, usernameRule)
+		}
+		if seen[u.Username] {
+			return fmt.Errorf("user %q appears more than once", u.Username)
+		}
+		seen[u.Username] = true
+		if strings.HasPrefix(u.Password, "S1:") {
+			return fmt.Errorf("user %q has a password token from an older build; delete the users file to bootstrap a new admin", u.Username)
+		}
+		if _, _, _, err := parsePasswordHash(u.Password); err != nil {
+			return fmt.Errorf("user %q: password is %w", u.Username, err)
+		}
+		if u.Admin {
+			admins++
+		}
 	}
-
-	var cdoc connsDoc
-	if _, err := os.Stat(s.connsPath); errors.Is(err, os.ErrNotExist) {
-		cdoc.Connections = nil
-	} else if err := readYAML(s.connsPath, &cdoc); err != nil {
-		return fmt.Errorf("reload connections: %w", err)
+	if admins == 0 {
+		return errors.New("no user has admin: true; at least one administrator is required")
 	}
-
-	s.users = udoc.Users
-	s.conns = cdoc.Connections
 	return nil
 }
 
-// getConnections validates the credentials (string-match — never decrypts) and
-// returns the entitled profile, or ok=false for unknown-user / token-mismatch
-// (the caller maps both to 400, indistinguishable by design).
-func (s *store) getConnections(username, token string) (*profileResponse, bool) {
+func validateConns(conns []connRec) error {
+	seen := map[string]bool{}
+	for i, c := range conns {
+		if err := validateConn(c); err != nil {
+			return fmt.Errorf("connection %d: %w", i+1, err)
+		}
+		if seen[c.Broker] {
+			return fmt.Errorf("broker %q appears more than once", c.Broker)
+		}
+		seen[c.Broker] = true
+	}
+	return nil
+}
+
+// validateConn checks one record. Ports may be blank (the form allows it) but
+// must be a TCP port when set; VPN names must be present and unique.
+func validateConn(c connRec) error {
+	if !brokerPattern.MatchString(c.Broker) {
+		return fmt.Errorf("broker %q %s", c.Broker, brokerRule)
+	}
+	for key, port := range map[string]flexStr{"semp.port": c.Semp.Port, "client.port": c.Client.Port} {
+		if err := validatePort(string(port)); err != nil {
+			return fmt.Errorf("broker %q: %s %w", c.Broker, key, err)
+		}
+	}
+	vpns := map[string]bool{}
+	for _, v := range c.Client.MsgVpns {
+		if v.Name == "" {
+			return fmt.Errorf("broker %q: a message VPN has no name", c.Broker)
+		}
+		if vpns[v.Name] {
+			return fmt.Errorf("broker %q: message VPN %q appears more than once", c.Broker, v.Name)
+		}
+		vpns[v.Name] = true
+	}
+	return nil
+}
+
+func validatePort(p string) error {
+	if p == "" {
+		return nil
+	}
+	if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("%q is not a port (1 to 65535)", p)
+	}
+	return nil
+}
+
+// ----- queries ----------------------------------------------------------------
+
+func (s *store) findUser(username string) (userRec, bool) {
+	for _, u := range s.users {
+		if u.Username == username {
+			return u, true
+		}
+	}
+	return userRec{}, false
+}
+
+// profile returns the user's entitled profile for /managed/me, or ok=false
+// when the user no longer exists.
+func (s *store) profile(username string) (*profileResponse, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var u *userRec
-	for i := range s.users {
-		if s.users[i].Username == username {
-			u = &s.users[i]
-			break
-		}
-	}
-	if u == nil || u.Password != token {
+	u, ok := s.findUser(username)
+	if !ok {
 		return nil, false
 	}
-
 	resp := &profileResponse{
+		Username: u.Username,
 		Admin:    u.Admin,
 		SiteSeed: s.siteSeed,
 		Operate:  toRespPerms(u.Operate),
@@ -219,7 +311,7 @@ func (s *store) getConnections(username, token string) (*profileResponse, bool) 
 	for _, c := range s.conns {
 		vpns := []respVpn{}
 		for _, v := range c.Client.MsgVpns {
-			if entitled(u, c.Broker, v.Name) {
+			if entitled(&u, c.Broker, v.Name) {
 				vpns = append(vpns, respVpn{
 					Name:   v.Name,
 					Client: respClient{Port: string(c.Client.Port), User: v.Username, Pass: v.Password},
@@ -238,6 +330,29 @@ func (s *store) getConnections(username, token string) (*profileResponse, bool) 
 	return resp, true
 }
 
+// isAdmin reports the user's current admin flag; exists is false for a user
+// that was deleted.
+func (s *store) isAdmin(username string) (admin, exists bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	u, ok := s.findUser(username)
+	return u.Admin, ok
+}
+
+// checkPassword verifies a sign-in. An unknown user is checked against the
+// hasher's dummy, so both answers take the same time. The hash runs outside
+// the lock. err is set only when the hash could not run (request gone).
+func (s *store) checkPassword(ctx context.Context, username, pw string) (mustChange, ok bool, err error) {
+	s.mu.RLock()
+	u, found := s.findUser(username)
+	s.mu.RUnlock()
+	match, err := s.hasher.verify(ctx, u.Password, pw)
+	if err != nil {
+		return false, false, err
+	}
+	return u.MustChangePassword, found && match, nil
+}
+
 func toRespPerms(rows []permRow) []respPerm {
 	out := []respPerm{}
 	for _, r := range rows {
@@ -246,44 +361,26 @@ func toRespPerms(rows []permRow) []respPerm {
 	return out
 }
 
-// ----- admin CRUD (string-match auth; never decrypts) -------------------------
+// ----- admin CRUD --------------------------------------------------------------
 
-// errBlankNewUserPassword rejects creating a brand-new user with no password —
-// an empty stored token would authenticate against an empty token string.
-// (A blank password on EDIT legitimately keeps the existing token.)
+// errBlankNewUserPassword rejects creating a brand-new user with no password.
+// (A blank password on EDIT legitimately keeps the existing hash.)
 var errBlankNewUserPassword = errors.New("new user requires a password")
 
-// errLastAdmin refuses deleting the only remaining admin, which would lock
-// every /managed/* admin endpoint out with no in-app recovery.
-var errLastAdmin = errors.New("cannot delete the last admin")
+// errLastAdmin refuses deleting or demoting the only remaining admin, which
+// would leave no one able to reach the admin app.
+var errLastAdmin = errors.New("cannot remove the last admin")
 
-// authAdmin reports whether username+token match a stored user with admin:true
-// (string-match, never decrypts). Unknown user, wrong token, and non-admin are
-// all indistinguishable false — the caller maps every false to 400. Takes its
-// own RLock, so it must NOT be called while already holding the lock.
-func (s *store) authAdmin(username, token string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for i := range s.users {
-		if s.users[i].Username == username && s.users[i].Password == token {
-			return s.users[i].Admin
+var errUserNotFound = errors.New("user not found")
+
+func countAdmins(users []userRec) int {
+	n := 0
+	for _, u := range users {
+		if u.Admin {
+			n++
 		}
 	}
-	return false
-}
-
-// authUser reports whether username+token match ANY stored user (string-match,
-// never decrypts) — the admin flag is ignored. Used to gate operations any
-// logged-in user may trigger (e.g. reloading the store from disk).
-func (s *store) authUser(username, token string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for i := range s.users {
-		if s.users[i].Username == username && s.users[i].Password == token {
-			return true
-		}
-	}
-	return false
+	return n
 }
 
 // listUsers returns a deep copy of the stored users — the nested permRow slices
@@ -301,42 +398,80 @@ func (s *store) listUsers() []userRec {
 }
 
 // upsertUser replaces the user with the same username, or appends a new one,
-// then persists. A blank Password on an EXISTING user keeps the stored token
-// (edit-without-changing-password); a blank Password on a NEW user is rejected
-// (errBlankNewUserPassword) so the store never holds an empty-token account.
-// Persist-then-commit: the in-memory slice is swapped only after the file write
-// succeeds, so a failed write leaves the store unchanged.
-func (s *store) upsertUser(u userRec) error {
+// then persists. password is plaintext: blank on an EXISTING user keeps the
+// stored hash (edit without changing the password), blank on a NEW user is
+// rejected (errBlankNewUserPassword). The hash is computed before the lock.
+// Demoting the last admin is refused (errLastAdmin). dropSessions reports a
+// change that must end the user's sessions: a new password or a changed admin
+// flag. Persist-then-commit: the in-memory slice is swapped only after the file
+// write succeeds, so a failed write leaves the store unchanged.
+func (s *store) upsertUser(ctx context.Context, u userRec, password string) (dropSessions bool, err error) {
+	if password != "" {
+		if u.Password, err = s.hasher.hash(ctx, password); err != nil {
+			return false, err
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := append([]userRec(nil), s.users...)
 	found := false
 	for i := range next {
-		if next[i].Username == u.Username {
-			if u.Password == "" {
-				u.Password = next[i].Password // keep existing
-			}
-			next[i] = u
-			found = true
-			break
+		if next[i].Username != u.Username {
+			continue
 		}
+		old := next[i]
+		if old.Admin && !u.Admin && countAdmins(next) <= 1 {
+			return false, errLastAdmin
+		}
+		if password == "" {
+			u.Password = old.Password // keep existing
+			u.MustChangePassword = old.MustChangePassword
+		}
+		dropSessions = password != "" || old.Admin != u.Admin
+		next[i] = u
+		found = true
+		break
 	}
 	if !found {
-		if u.Password == "" {
-			return errBlankNewUserPassword
+		if password == "" {
+			return false, errBlankNewUserPassword
 		}
 		next = append(next, u)
 	}
 	if err := writeYAML(s.usersPath, usersDoc{Users: next}); err != nil {
-		return err
+		return false, err
 	}
 	s.users = next
-	return nil
+	return dropSessions, nil
+}
+
+// setPassword is a user changing their own password: it stores the new hash and
+// clears MustChangePassword. The caller drops the user's sessions.
+func (s *store) setPassword(ctx context.Context, username, password string) error {
+	hash, err := s.hasher.hash(ctx, password)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := append([]userRec(nil), s.users...)
+	for i := range next {
+		if next[i].Username == username {
+			next[i].Password = hash
+			next[i].MustChangePassword = false
+			if err := writeYAML(s.usersPath, usersDoc{Users: next}); err != nil {
+				return err
+			}
+			s.users = next
+			return nil
+		}
+	}
+	return errUserNotFound
 }
 
 // deleteUser removes the named user and persists. Returns found=false (and no
 // error, no write) when there is no such user, or errLastAdmin when the target
-// is the only remaining admin (refused — deleting it would lock out /managed/*).
+// is the only remaining admin.
 func (s *store) deleteUser(username string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -350,16 +485,8 @@ func (s *store) deleteUser(username string) (bool, error) {
 	if idx == -1 {
 		return false, nil
 	}
-	if s.users[idx].Admin {
-		admins := 0
-		for i := range s.users {
-			if s.users[i].Admin {
-				admins++
-			}
-		}
-		if admins <= 1 {
-			return false, errLastAdmin
-		}
+	if s.users[idx].Admin && countAdmins(s.users) <= 1 {
+		return false, errLastAdmin
 	}
 	next := append(append([]userRec(nil), s.users[:idx]...), s.users[idx+1:]...)
 	if err := writeYAML(s.usersPath, usersDoc{Users: next}); err != nil {
@@ -456,16 +583,65 @@ func (s *store) deleteConnection(broker string) (bool, error) {
 
 // ----- bootstrap + seed -------------------------------------------------------
 
-func bootstrapUsers(path string) (usersDoc, error) {
-	doc := usersDoc{Users: []userRec{{
-		Username: "admin",
-		Password: bootstrapAdminToken,
-		Admin:    true,
-		Operate:  []permRow{},
-		ReadOnly: []permRow{},
-	}}}
-	if err := writeYAML(path, doc); err != nil {
+// adminSeed returns the bootstrap admin password from ADMIN_PASSWORD or the
+// file named by ADMIN_PASSWORD_FILE (a Docker secret), and which variable gave
+// it. Neither set: "" and "", and the caller generates one. The value is never
+// echoed in an error.
+func adminSeed(getenv func(string) string) (password, source string, err error) {
+	direct, file := getenv(envAdminPassword), getenv(envAdminPasswordFile)
+	switch {
+	case direct != "" && file != "":
+		return "", "", fmt.Errorf("set %s or %s, not both", envAdminPassword, envAdminPasswordFile)
+	case file != "":
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", "", fmt.Errorf("%s=%q cannot be read: %w", envAdminPasswordFile, file, err)
+		}
+		password, source = strings.TrimRight(string(data), "\r\n"), envAdminPasswordFile
+	case direct != "":
+		password, source = direct, envAdminPassword
+	default:
+		return "", "", nil
+	}
+	if err := checkPasswordPolicy(password); err != nil {
+		return "", "", fmt.Errorf("%s: %w", source, err)
+	}
+	return password, source, nil
+}
+
+// bootstrapUsers writes the first users file: one admin who must change the
+// password at first sign-in. The password comes from the environment, or is
+// generated and logged once (the operator's only way to read it).
+func bootstrapUsers(opts storeOptions, logger *slog.Logger) (usersDoc, error) {
+	password, source, err := adminSeed(opts.getenv)
+	if err != nil {
 		return usersDoc{}, err
+	}
+	generated := source == ""
+	if generated {
+		password = rand.Text()
+	}
+	hash, err := opts.hasher.hash(context.Background(), password)
+	if err != nil {
+		return usersDoc{}, err
+	}
+	doc := usersDoc{Users: []userRec{{
+		Username:           bootstrapAdminName,
+		Password:           hash,
+		MustChangePassword: true,
+		Admin:              true,
+		Operate:            []permRow{},
+		ReadOnly:           []permRow{},
+	}}}
+	if err := writeYAML(opts.usersPath, doc); err != nil {
+		return usersDoc{}, err
+	}
+	if generated {
+		logger.Warn("users file missing: bootstrap admin created with a generated password; sign in and change it now (shown once; delete the users file to bootstrap again)",
+			"path", opts.usersPath, "username", bootstrapAdminName, "password", password)
+	} else {
+		logger.Warn("users file missing: bootstrap admin created; the password must be changed at first sign-in",
+			"path", opts.usersPath, "username", bootstrapAdminName, "source", source)
 	}
 	return doc, nil
 }
@@ -503,10 +679,17 @@ func writeYAML(path string, v any) error {
 	return writeFileAtomic(path, data, 0o600)
 }
 
-func readYAML(path string, v any) error {
+// readYAMLStrict decodes a store document, rejecting unknown keys. An empty
+// file decodes to an empty document.
+func readYAMLStrict(path string, v any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	return yaml.Unmarshal(data, v)
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(v); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }

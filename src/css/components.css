@@ -110,6 +110,12 @@
     font-size: 0.95rem;
 }
 
+/* A link styled as a button (e.g. "Sign in", which goes to the gateway's
+   own page) must not look like inline link text. */
+a.btn {
+    text-decoration: none;
+}
+
 .btn-primary {
     background-color: var(--accent-primary);
     color: var(--accent-text);

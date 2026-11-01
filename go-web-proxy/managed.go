@@ -5,136 +5,170 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 )
 
-// managedHandler serves the /managed/* endpoints (managed RBAC mode). It is
-// only wired into the mux when MANAGED=true; otherwise /managed/* falls through
-// to the SPA, leaving non-managed deployments exactly as before.
+// maxBodyBytes caps every /managed/* request body and the sign-in forms. The
+// largest legitimate body, a connection with its VPN list, is a few KiB.
+const maxBodyBytes = 64 << 10
+
+// managedHandler serves the /managed/* JSON API behind the session cookie. It
+// is only wired into the mux when managed is true and the binary carries the
+// managed tag; otherwise /managed/* is a plain 404.
+//
+// Every request without a valid session gets the same 401, whatever the path,
+// so nothing about routes, users or brokers leaks to a client that has not
+// signed in. A session that must change its password gets 403 everywhere but
+// logout. Errors are JSON {"error": code} with an optional field and reason;
+// the browser maps the code to a message (src/core/services/managed-api.ts).
 type managedHandler struct {
-	store  *store
-	logger *slog.Logger
+	store    *store
+	sessions *sessions
+	throttle *throttle
+	cop      *http.CrossOriginProtection
+	logger   *slog.Logger
+	mux      *http.ServeMux
 }
 
-func newManagedHandler(s *store, logger *slog.Logger) *managedHandler {
-	return &managedHandler{store: s, logger: logger}
+func newManagedHandler(st *store, ss *sessions, th *throttle, logger *slog.Logger) *managedHandler {
+	h := &managedHandler{store: st, sessions: ss, throttle: th, cop: http.NewCrossOriginProtection(), logger: logger}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /managed/me", h.me)
+	mux.HandleFunc("POST /managed/logout", h.logout)
+	mux.HandleFunc("GET /managed/users", h.adminOnly(h.listUsers))
+	mux.HandleFunc("PUT /managed/users/{name}", h.adminOnly(h.saveUser))
+	mux.HandleFunc("DELETE /managed/users/{name}", h.adminOnly(h.deleteUser))
+	mux.HandleFunc("GET /managed/connections", h.adminOnly(h.listConnections))
+	mux.HandleFunc("PUT /managed/connections/{broker}", h.adminOnly(h.saveConnection))
+	mux.HandleFunc("DELETE /managed/connections/{broker}", h.adminOnly(h.deleteConnection))
+	// Anything else, including a known path with the wrong method, is a 404:
+	// a signed-in client learns nothing a 405 would add.
+	mux.HandleFunc("/managed/", func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusNotFound, "not_found")
+	})
+	h.mux = mux
+	return h
 }
 
 func (h *managedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.URL.Path {
-	case "/managed/getConnections":
-		h.getConnections(w, r)
-	case "/managed/reload":
-		h.reload(w, r)
-	case "/managed/listUsers":
-		h.listUsers(w, r)
-	case "/managed/saveUser":
-		h.saveUser(w, r)
-	case "/managed/deleteUser":
-		h.deleteUser(w, r)
-	case "/managed/listConnections":
-		h.listConnections(w, r)
-	case "/managed/saveConnection":
-		h.saveConnection(w, r)
-	case "/managed/deleteConnection":
-		h.deleteConnection(w, r)
-	default:
-		http.NotFound(w, r)
-	}
-}
-
-// methodPost rejects non-POST requests with 405; returns true to proceed. All
-// /managed/* endpoints are POST (the resend-token creds travel in the JSON
-// body, which fetch cannot attach to a GET).
-func (h *managedHandler) methodPost(w http.ResponseWriter, r *http.Request) bool {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return false
-	}
-	return true
-}
-
-// decodeBody decodes the JSON request body into dst; on a malformed body it
-// writes 400 and returns false (the caller must return). Shared by every
-// /managed/* handler so the bad-body response is identical across them.
-func (h *managedHandler) decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
-	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return false
-	}
-	return true
-}
-
-// writeJSON sends v as JSON with no-store caching. A late encode failure (after
-// headers are sent) is only logged — it cannot be turned into an error status.
-func (h *managedHandler) writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		h.logger.Error("managed: response encode failed", "err", err)
-	}
-}
-
-func (h *managedHandler) getConnections(w http.ResponseWriter, r *http.Request) {
-	if !h.methodPost(w, r) {
-		return
-	}
-	var body struct {
-		Username string `json:"username"`
-		Token    string `json:"token"`
-	}
-	if !h.decodeBody(w, r, &body) {
-		return
-	}
-
-	profile, ok := h.store.getConnections(body.Username, body.Token)
+	as, ok := h.sessions.fromRequest(r)
 	if !ok {
-		// Unknown user and bad token are intentionally indistinguishable.
-		w.WriteHeader(http.StatusBadRequest)
+		client, resolved := clientOf(r)
+		if allowed, wait := h.throttle.allowUnauthenticated(client, resolved); !allowed {
+			writeRateLimited(w, wait)
+			return
+		}
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
-	h.writeJSON(w, profile)
+	if err := h.cop.Check(r); err != nil {
+		writeError(w, http.StatusForbidden, "cross_origin")
+		return
+	}
+	if as.mustChange && r.URL.Path != "/managed/logout" {
+		writeError(w, http.StatusForbidden, "password_change_required")
+		return
+	}
+	h.mux.ServeHTTP(w, r.WithContext(withSession(r.Context(), as)))
 }
 
-// reload re-reads users.yaml + connections.yaml from disk into the in-memory
-// store so out-of-band edits take effect without a restart. Available to any
-// logged-in user (the connections Managed tab's Refresh button drives it). 400 for an
-// unknown user / bad token; 500 if a file can't be re-read.
-func (h *managedHandler) reload(w http.ResponseWriter, r *http.Request) {
-	if !h.methodPost(w, r) {
+// adminOnly reads the admin flag from the store on every call, so a demotion
+// takes effect at once (the demoted user's sessions are dropped as well).
+func (h *managedHandler) adminOnly(fn http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		admin, exists := h.store.isAdmin(sessionOf(r).user)
+		switch {
+		case !exists:
+			writeError(w, http.StatusUnauthorized, "unauthenticated")
+		case !admin:
+			writeError(w, http.StatusForbidden, "forbidden")
+		default:
+			fn(w, r)
+		}
+	}
+}
+
+// ----- responses ----------------------------------------------------------------
+
+type apiError struct {
+	Error  string `json:"error"`
+	Field  string `json:"field,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v) // a late failure cannot change the status
+}
+
+func writeError(w http.ResponseWriter, status int, code string) {
+	writeJSON(w, status, apiError{Error: code})
+}
+
+// writeInvalid is a 422 naming the offending field and a reason fit to show
+// the admin (never a secret).
+func writeInvalid(w http.ResponseWriter, field, reason string) {
+	writeJSON(w, http.StatusUnprocessableEntity, apiError{Error: "invalid", Field: field, Reason: reason})
+}
+
+func writeRateLimited(w http.ResponseWriter, wait time.Duration) {
+	w.Header().Set("Retry-After", strconv.Itoa(retrySeconds(wait)))
+	writeError(w, http.StatusTooManyRequests, "rate_limited")
+}
+
+// decodeJSON reads one JSON value of at most maxBodyBytes into dst, rejecting
+// unknown fields and trailing data. On failure it has written the response
+// (413 too_large or 400 bad_request) and returns false.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(dst)
+	if err == nil {
+		if _, trailing := dec.Token(); trailing != io.EOF {
+			err = errors.New("trailing data after the JSON value")
+		}
+	}
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "too_large")
+		} else {
+			writeError(w, http.StatusBadRequest, "bad_request")
+		}
+		return false
+	}
+	return true
+}
+
+func (h *managedHandler) serverError(w http.ResponseWriter, op string, err error) {
+	h.logger.Error("managed: "+op+" failed", "err", err)
+	writeError(w, http.StatusInternalServerError, "server_error")
+}
+
+// ----- session endpoints ----------------------------------------------------------
+
+func (h *managedHandler) me(w http.ResponseWriter, r *http.Request) {
+	profile, ok := h.store.profile(sessionOf(r).user)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
-	var body struct {
-		Username string `json:"username"`
-		Token    string `json:"token"`
-	}
-	if !h.decodeBody(w, r, &body) {
-		return
-	}
-	if !h.store.authUser(body.Username, body.Token) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	if err := h.store.reload(); err != nil {
-		h.logger.Error("reload: re-read failed", "err", err)
-		http.Error(w, "reload failed", http.StatusInternalServerError)
-		return
-	}
+	writeJSON(w, http.StatusOK, profile)
+}
+
+func (h *managedHandler) logout(w http.ResponseWriter, r *http.Request) {
+	h.sessions.drop(sessionOf(r).id)
+	clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ----- admin CRUD endpoints (resend-token; admin-gated) -----------------------
-//
-// Every endpoint is POST with a JSON body carrying the caller's admin
-// {username, token} (resent per call — there is no session layer; documented as
-// an accepted non-standard choice for these few admin-only endpoints) plus the
-// operation payload. Auth is string-match + admin:true; unknown user, bad
-// token, and non-admin are all the same opaque 400. Passwords are NEVER read
-// back to the client: list endpoints strip them, and a blank password on edit
-// keeps the stored secret (see store.upsertUser / mergeConnSecrets).
-
-// --- JSON wire shapes (camelCase; distinct from the YAML structs) ---
+// ----- JSON wire shapes (camelCase; distinct from the YAML structs) ------------
 
 type permJSON struct {
 	Brokers string `json:"brokers"`
@@ -142,9 +176,20 @@ type permJSON struct {
 	Queues  string `json:"queues"`
 }
 
+// userJSON is a user as the admin app lists it. The password hash never
+// leaves the gateway.
 type userJSON struct {
-	Username string     `json:"username"`
-	Password string     `json:"password"` // client-stamped (S1:); "" = keep on edit
+	Username           string     `json:"username"`
+	Admin              bool       `json:"admin"`
+	MustChangePassword bool       `json:"mustChangePassword"`
+	Operate            []permJSON `json:"operate"`
+	ReadOnly           []permJSON `json:"readOnly"`
+}
+
+// userSaveJSON is the PUT /managed/users/{name} body. The username comes from
+// the path. Password is plaintext over TLS, hashed here; "" keeps it on edit.
+type userSaveJSON struct {
+	Password string     `json:"password"`
 	Admin    bool       `json:"admin"`
 	Operate  []permJSON `json:"operate"`
 	ReadOnly []permJSON `json:"readOnly"`
@@ -153,21 +198,34 @@ type userJSON struct {
 type vpnJSON struct {
 	Name string `json:"name"`
 	User string `json:"user"`
-	Pass string `json:"pass"` // client-packed (V1:); "" = keep on edit
+	Pass string `json:"pass"` // client-packed; "" = keep on edit; never listed
 }
 
+type sempJSON struct {
+	Port string `json:"port"`
+	User string `json:"user"`
+	Pass string `json:"pass"` // client-packed; "" = keep on edit; never listed
+}
+
+type clientJSON struct {
+	Port    string    `json:"port"`
+	MsgVpns []vpnJSON `json:"msgVpns"`
+}
+
+// connJSON is a connection as the admin app lists it.
 type connJSON struct {
-	Broker   string `json:"broker"`
-	Hostname string `json:"hostname"`
-	Semp     struct {
-		Port string `json:"port"`
-		User string `json:"user"`
-		Pass string `json:"pass"` // client-packed (V1:); "" = keep on edit
-	} `json:"semp"`
-	Client struct {
-		Port    string    `json:"port"`
-		MsgVpns []vpnJSON `json:"msgVpns"`
-	} `json:"client"`
+	Broker   string     `json:"broker"`
+	Hostname string     `json:"hostname"`
+	Semp     sempJSON   `json:"semp"`
+	Client   clientJSON `json:"client"`
+}
+
+// connSaveJSON is the PUT /managed/connections/{broker} body; the broker name
+// comes from the path.
+type connSaveJSON struct {
+	Hostname string     `json:"hostname"`
+	Semp     sempJSON   `json:"semp"`
+	Client   clientJSON `json:"client"`
 }
 
 func permsToRows(in []permJSON) []permRow {
@@ -178,42 +236,35 @@ func permsToRows(in []permJSON) []permRow {
 	return out
 }
 
-func (u userJSON) toRec() userRec {
-	return userRec{
-		Username: u.Username,
-		Password: u.Password,
-		Admin:    u.Admin,
-		Operate:  permsToRows(u.Operate),
-		ReadOnly: permsToRows(u.ReadOnly),
+func rowsToPerms(rows []permRow) []permJSON {
+	out := make([]permJSON, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, permJSON{Brokers: string(r.Brokers), MsgVpns: string(r.MsgVpns), Queues: string(r.Queues)})
 	}
+	return out
 }
 
-func (c connJSON) toRec() connRec {
+func (c connSaveJSON) toRec(broker string) connRec {
 	vpns := make([]vpnRec, 0, len(c.Client.MsgVpns))
 	for _, v := range c.Client.MsgVpns {
 		vpns = append(vpns, vpnRec{Name: v.Name, Username: v.User, Password: v.Pass})
 	}
 	return connRec{
-		Broker:   c.Broker,
+		Broker:   broker,
 		Hostname: c.Hostname,
 		Semp:     sempRec{Port: flexStr(c.Semp.Port), Username: c.Semp.User, Password: c.Semp.Pass},
 		Client:   clientRec{Port: flexStr(c.Client.Port), MsgVpns: vpns},
 	}
 }
 
-// list outputs strip secrets (the one-way user token, the packed conn blobs).
-
 func userToOutput(u userRec) userJSON {
-	conv := func(rows []permRow) []permJSON {
-		out := make([]permJSON, 0, len(rows))
-		for _, r := range rows {
-			out = append(out, permJSON{Brokers: string(r.Brokers), MsgVpns: string(r.MsgVpns), Queues: string(r.Queues)})
-		}
-		return out
+	return userJSON{
+		Username: u.Username, Admin: u.Admin, MustChangePassword: u.MustChangePassword,
+		Operate: rowsToPerms(u.Operate), ReadOnly: rowsToPerms(u.ReadOnly),
 	}
-	return userJSON{Username: u.Username, Admin: u.Admin, Operate: conv(u.Operate), ReadOnly: conv(u.ReadOnly)}
 }
 
+// connToOutput strips the packed passwords.
 func connToOutput(c connRec) connJSON {
 	out := connJSON{Broker: c.Broker, Hostname: c.Hostname}
 	out.Semp.Port = string(c.Semp.Port)
@@ -228,170 +279,103 @@ func connToOutput(c connRec) connJSON {
 	return out
 }
 
-// --- handlers ---
+// ----- admin endpoints -------------------------------------------------------------
 
-func (h *managedHandler) listUsers(w http.ResponseWriter, r *http.Request) {
-	if !h.methodPost(w, r) {
-		return
-	}
-	var body struct {
-		Username string `json:"username"`
-		Token    string `json:"token"`
-	}
-	if !h.decodeBody(w, r, &body) {
-		return
-	}
-	if !h.store.authAdmin(body.Username, body.Token) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
+func (h *managedHandler) listUsers(w http.ResponseWriter, _ *http.Request) {
 	out := []userJSON{}
 	for _, u := range h.store.listUsers() {
 		out = append(out, userToOutput(u))
 	}
-	h.writeJSON(w, map[string]any{"users": out})
+	writeJSON(w, http.StatusOK, map[string]any{"users": out})
 }
 
+// saveUser creates or edits a user. A new password, a changed admin flag or a
+// deletion ends the target's sessions, the requester's own included: an admin
+// who changes their own password signs in again.
 func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request) {
-	if !h.methodPost(w, r) {
+	name := r.PathValue("name")
+	var body userSaveJSON
+	if !decodeJSON(w, r, &body) {
 		return
 	}
-	var body struct {
-		Username string   `json:"username"`
-		Token    string   `json:"token"`
-		User     userJSON `json:"user"`
-	}
-	if !h.decodeBody(w, r, &body) {
+	if !usernamePattern.MatchString(name) {
+		writeInvalid(w, "username", "Username "+usernameRule+".")
 		return
 	}
-	if !h.store.authAdmin(body.Username, body.Token) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	if body.User.Username == "" {
-		http.Error(w, "username required", http.StatusBadRequest)
-		return
-	}
-	if err := h.store.upsertUser(body.User.toRec()); err != nil {
-		if errors.Is(err, errBlankNewUserPassword) {
-			http.Error(w, "password required", http.StatusBadRequest)
+	if body.Password != "" {
+		if err := checkPasswordPolicy(body.Password); err != nil {
+			writeInvalid(w, "password", "Password must be "+strconv.Itoa(passwordMinLen)+" to "+strconv.Itoa(passwordMaxLen)+" characters.")
 			return
 		}
-		h.logger.Error("saveUser: persist failed", "err", err)
-		http.Error(w, "save failed", http.StatusInternalServerError)
+	}
+	rec := userRec{Username: name, Admin: body.Admin, Operate: permsToRows(body.Operate), ReadOnly: permsToRows(body.ReadOnly)}
+	drop, err := h.store.upsertUser(r.Context(), rec, body.Password)
+	switch {
+	case errors.Is(err, errBlankNewUserPassword):
+		writeInvalid(w, "password", "A new user needs a password.")
 		return
+	case errors.Is(err, errLastAdmin):
+		writeError(w, http.StatusConflict, "last_admin")
+		return
+	case err != nil:
+		h.serverError(w, "saveUser", err)
+		return
+	}
+	if drop {
+		h.sessions.dropUser(name)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *managedHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
-	if !h.methodPost(w, r) {
-		return
+	name := r.PathValue("name")
+	found, err := h.store.deleteUser(name)
+	switch {
+	case errors.Is(err, errLastAdmin):
+		writeError(w, http.StatusConflict, "last_admin")
+	case err != nil:
+		h.serverError(w, "deleteUser", err)
+	case !found:
+		writeError(w, http.StatusNotFound, "not_found")
+	default:
+		h.sessions.dropUser(name)
+		w.WriteHeader(http.StatusNoContent)
 	}
-	var body struct {
-		Username string `json:"username"`
-		Token    string `json:"token"`
-		Target   string `json:"target"`
-	}
-	if !h.decodeBody(w, r, &body) {
-		return
-	}
-	if !h.store.authAdmin(body.Username, body.Token) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	found, err := h.store.deleteUser(body.Target)
-	if errors.Is(err, errLastAdmin) {
-		http.Error(w, "cannot delete the last admin", http.StatusConflict)
-		return
-	}
-	if err != nil {
-		h.logger.Error("deleteUser: persist failed", "err", err)
-		http.Error(w, "delete failed", http.StatusInternalServerError)
-		return
-	}
-	if !found {
-		http.NotFound(w, r)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *managedHandler) listConnections(w http.ResponseWriter, r *http.Request) {
-	if !h.methodPost(w, r) {
-		return
-	}
-	var body struct {
-		Username string `json:"username"`
-		Token    string `json:"token"`
-	}
-	if !h.decodeBody(w, r, &body) {
-		return
-	}
-	if !h.store.authAdmin(body.Username, body.Token) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
+func (h *managedHandler) listConnections(w http.ResponseWriter, _ *http.Request) {
 	out := []connJSON{}
 	for _, c := range h.store.listConnections() {
 		out = append(out, connToOutput(c))
 	}
-	h.writeJSON(w, map[string]any{"connections": out})
+	writeJSON(w, http.StatusOK, map[string]any{"connections": out})
 }
 
 func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request) {
-	if !h.methodPost(w, r) {
+	var body connSaveJSON
+	if !decodeJSON(w, r, &body) {
 		return
 	}
-	var body struct {
-		Username   string   `json:"username"`
-		Token      string   `json:"token"`
-		Connection connJSON `json:"connection"`
-	}
-	if !h.decodeBody(w, r, &body) {
+	rec := body.toRec(r.PathValue("broker"))
+	if err := validateConn(rec); err != nil {
+		writeInvalid(w, "connection", err.Error())
 		return
 	}
-	if !h.store.authAdmin(body.Username, body.Token) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	if body.Connection.Broker == "" {
-		http.Error(w, "broker required", http.StatusBadRequest)
-		return
-	}
-	if err := h.store.upsertConnection(body.Connection.toRec()); err != nil {
-		h.logger.Error("saveConnection: persist failed", "err", err)
-		http.Error(w, "save failed", http.StatusInternalServerError)
+	if err := h.store.upsertConnection(rec); err != nil {
+		h.serverError(w, "saveConnection", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *managedHandler) deleteConnection(w http.ResponseWriter, r *http.Request) {
-	if !h.methodPost(w, r) {
-		return
+	found, err := h.store.deleteConnection(r.PathValue("broker"))
+	switch {
+	case err != nil:
+		h.serverError(w, "deleteConnection", err)
+	case !found:
+		writeError(w, http.StatusNotFound, "not_found")
+	default:
+		w.WriteHeader(http.StatusNoContent)
 	}
-	var body struct {
-		Username string `json:"username"`
-		Token    string `json:"token"`
-		Target   string `json:"target"`
-	}
-	if !h.decodeBody(w, r, &body) {
-		return
-	}
-	if !h.store.authAdmin(body.Username, body.Token) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	found, err := h.store.deleteConnection(body.Target)
-	if err != nil {
-		h.logger.Error("deleteConnection: persist failed", "err", err)
-		http.Error(w, "delete failed", http.StatusInternalServerError)
-		return
-	}
-	if !found {
-		http.NotFound(w, r)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }

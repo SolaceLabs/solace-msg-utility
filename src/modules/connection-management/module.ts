@@ -1,13 +1,13 @@
 /**
  * Connection Management Module (managed/RBAC variant, admin-only).
  *
- * CRUD over the proxy's connection store (/managed/listConnections,
- * /managed/saveConnection, /managed/deleteConnection). Admin-only via
+ * CRUD over the gateway's connection store (`/managed/connections`), on the
+ * gateway session cookie. Admin-only via
  * `isModuleVisible` (the id is in rbac.ts's ADMIN_ONLY_MODULES set); the kernel
  * re-renders on `rbac:changed`, on which this module reloads its list.
  *
  * Broker credentials are PACKED client-side with the per-deployment siteSeed
- * (WebCrypto) before they leave the browser — the proxy stores opaque blobs and
+ * (WebCrypto) before they leave the browser — the gateway stores opaque blobs and
  * never unpacks them. The list response omits the blobs, so editing a
  * connection with blank password fields keeps the stored secrets. Imports only
  * from `src/core/*` and its own service.
@@ -18,20 +18,17 @@ import { createRowList } from '../../core/components/row-list';
 // Credential sealing goes through the core managed store: the deployment seed
 // stays inside its closure and never reaches this module.
 import { showToast } from '../../core/toast';
-import { escapeHtml } from '../../core/utils';
+import { errMessage, escapeHtml } from '../../core/utils';
 import { logger } from '../../core/logger';
+import { reportManagedFailure } from '../../core/services/managed-api';
 import { createConnMgmtService, type ManagedConnRecord } from './service';
-import type { AppContext, ManagedSession } from '../../core/types';
+import type { AppContext } from '../../core/types';
 
 const VPN_FIELDS = [
     { key: 'name', placeholder: 'vpn name' },
     { key: 'user', placeholder: 'username' },
     { key: 'pass', placeholder: 'password (blank = keep)', type: 'password' as const },
 ];
-
-function errMessage(e: unknown): string {
-    return e instanceof Error ? e.message : String(e);
-}
 
 export const ConnectionManagementModule = {
     name: 'Conn. Mgmt',
@@ -69,7 +66,7 @@ export const ConnectionManagementModule = {
         const gate = createGate(container, {
             id: 'conn-mgmt-gate',
             title: 'Administrator Sign-in Required',
-            message: 'Sign in to Connections as an administrator to manage connections.',
+            message: 'Sign in as an administrator to manage connections.',
         });
 
         function showView(view: 'list' | 'form'): void {
@@ -122,21 +119,17 @@ export const ConnectionManagementModule = {
                 return;
             }
             showView('list');
-            void loadList(m);
+            void loadList();
         }
 
-        async function loadList(m: ManagedSession): Promise<void> {
+        async function loadList(): Promise<void> {
             setError(els.listError, null);
-            try {
-                const conns = await service.listConnections(m.username, m.token);
-                if (!conns) {
-                    setError(els.listError, 'Failed to load connections.');
-                    return;
-                }
-                renderList(conns);
-            } catch (e) {
-                setError(els.listError, errMessage(e));
+            const res = await service.listConnections();
+            if (!res.ok) {
+                reportManagedFailure(res, eventBus, msg => setError(els.listError, msg));
+                return;
             }
+            renderList(res.data);
         }
 
         function openCreate(): void {
@@ -173,8 +166,6 @@ export const ConnectionManagementModule = {
         }
 
         async function saveForm(): Promise<void> {
-            const m = appState.managed;
-            if (!m) return;
             const broker = els.broker.value.trim();
             if (!broker) {
                 setError(els.formError, 'Broker name is required.');
@@ -202,9 +193,9 @@ export const ConnectionManagementModule = {
                     },
                     client: { port: els.clientPort.value.trim(), msgVpns },
                 };
-                const ok = await service.saveConnection(m.username, m.token, connection);
-                if (!ok) {
-                    setError(els.formError, 'Save failed.');
+                const res = await service.saveConnection(connection);
+                if (!res.ok) {
+                    reportManagedFailure(res, eventBus, msg => setError(els.formError, msg));
                     return;
                 }
                 showToast('Connection saved', 'ok');
@@ -217,20 +208,14 @@ export const ConnectionManagementModule = {
         }
 
         async function removeConn(broker: string): Promise<void> {
-            const m = appState.managed;
-            if (!m) return;
             if (!confirm(`Delete connection "${broker}"?`)) return;
-            try {
-                const ok = await service.deleteConnection(m.username, m.token, broker);
-                if (!ok) {
-                    showToast('Delete failed', 'error');
-                    return;
-                }
-                showToast('Connection deleted', 'ok');
-                await loadList(m);
-            } catch (e) {
-                showToast(errMessage(e), 'error');
+            const res = await service.deleteConnection(broker);
+            if (!res.ok) {
+                reportManagedFailure(res, eventBus, msg => showToast(msg, 'error'));
+                return;
             }
+            showToast('Connection deleted', 'ok');
+            await loadList();
         }
 
         els.btnAdd.addEventListener('click', openCreate);

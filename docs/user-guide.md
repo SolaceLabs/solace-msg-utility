@@ -473,17 +473,19 @@ gateway and ship only in the managed container image. Everything else is exercis
 
 ## Managed Connections
 
-**Managed** mode is for users who should not handle broker credentials. Instead of typing connection details, you **log in** and pick from the brokers and Message VPNs an administrator has granted you.
+**Managed** mode is for users who should not handle broker credentials. Instead of typing connection details, you **sign in** and pick from the brokers and Message VPNs an administrator has granted you.
 
 It appears as a second tab in the **Connections** module — **Direct** (type your own credentials) and **Managed** (sign in). Which tabs you see is decided by the deployment: you may get both, or only one. Managed runs **only in the managed container image**: the copies of the app attached to a Release, and the standard image, have no Managed tab. See [deployment.md](deployment.md#managed-mode-rbac) to stand one up.
 
 ### Signing in and connecting
 
-1. Open **Connections** and choose the **Managed** tab (it may already be selected).
-2. **Sign in** with the username and password your administrator gave you. (A brand-new deployment bootstraps a single administrator, `admin` / `msgutility` — the administrator should change this immediately, see below.)
+1. **Sign in.** On a deployment that offers only Managed, opening the app takes you straight to the sign-in page. Otherwise open **Connections**, choose the **Managed** tab and click **Sign in**. Enter the username and password your administrator gave you; you return to the app with the **Managed** tab open.
+2. **First sign-in of a new deployment:** the bootstrap `admin` account is asked to choose a new password (12 to 128 characters) before anything else.
 3. Pick a **Broker** and **Message VPN** from the dropdowns — these list only what you're entitled to. The host is shown read-only for confirmation.
 4. Click **Connect**. From here the **Queue Browser** and **Queue Copy** work exactly as usual, but scoped to your entitlements.
-5. **Refresh** asks the server to re-read its connection + user files from disk into memory, then re-fetches your entitlements without signing out (useful right after an admin grants you access, or after the YAML files are edited directly on the server). **Sign out** clears your session. Note that a **browser page refresh (F5) ends your session** and returns you to the login screen — the session is held in memory only.
+5. **Refresh** re-fetches your entitlements and brokers without signing out (useful right after an admin grants you access). **Change password** opens the gateway's password page. **Sign out** ends your session.
+
+**Your session** survives a page refresh (F5). It ends after 10 minutes without activity or 30 minutes after you signed in (your deployment may set other limits), when you sign out, and when an administrator changes your password, your administrator flag or deletes your account. You then see *Your session has ended. Sign in again.* the next time the app asks the gateway (for example on **Refresh**). Too many wrong passwords in a row lock sign-in for a while; the page says how long.
 
 **One mode at a time.** Connecting on the Managed tab drops a Direct connection, and connecting on the Direct tab ends your managed session — otherwise your entitlements would be applied to a connection they were never issued for. Just *switching* tabs changes nothing; only Connect does.
 
@@ -503,13 +505,15 @@ If your entitlements change while you are working (you or an admin hit Refresh, 
 
 ### Administration (`/solAdmin`)
 
-Administration is a **separate app**, not a pair of extra sidebar entries in the main one. Open `https://<your-gateway>/solAdmin` and sign in with an administrator account — an ordinary account is refused at the login screen. The admin app never connects to a broker; it only edits the deployment's user and connection data. It exists only on deployments running in managed mode; anywhere else the URL simply 404s.
+Administration is a **separate app**, not a pair of extra sidebar entries in the main one. Open `https://<your-gateway>/solAdmin`: without a session you are sent to the sign-in page first, and an ordinary account gets an *Administrator access required* page instead of the app. Its **Administration** page shows who is signed in, with **Change password** and **Sign out**. The admin app never connects to a broker; it only edits the deployment's user and connection data. It exists only on deployments running in managed mode; anywhere else the URL simply 404s.
 
 Signed in there, you get two modules:
 
-- **User Management** — list, add, edit, and delete users. For each user you set the username, password, the **Administrator** flag, and the **Operate** / **Read-only** entitlement rows (each row is a *brokers / msgVpns / queues* glob, e.g. `* / vpn-prod / orders.*`). Leave the password blank when editing to keep the current one. The last remaining administrator cannot be deleted (to avoid locking everyone out).
+- **User Management** — list, add, edit, and delete users. For each user you set the username (letters, digits and `. _ @ -`, up to 64), password (12 to 128 characters), the **Administrator** flag, and the **Operate** / **Read-only** entitlement rows (each row is a *brokers / msgVpns / queues* glob, e.g. `* / vpn-prod / orders.*`). Leave the password blank when editing to keep the current one. The last remaining administrator cannot be deleted or have the flag removed (to avoid locking everyone out). Setting a user's password, changing their Administrator flag or deleting them signs that user out everywhere.
 - **Connection Management** — list, add, edit, and delete broker connections. For each connection you set the broker name, hostname, the **SEMP** account (port / username / password), the **client** port, and one or more **Message VPNs** (name / username / password). Use a **read-only or least-privilege SEMP account**. Leave a password field blank when editing to keep the stored one.
 
-**Changing your own password signs you out.** As soon as the save succeeds the admin app returns to its sign-in screen with the message *Password changed. Sign in again with the new password.* — the old password no longer works, so the session it opened ends with it. Deleting your own account signs you out the same way (the confirmation tells you so; the last remaining administrator still cannot be deleted). Editing your own record **without** entering a password keeps you signed in.
+**Changing your own password or Administrator flag signs you out.** As soon as the save succeeds the admin app shows *Password changed. Sign in again.* (or *Administrator flag changed. Sign in again.*) and returns to its signed-out view, because the gateway has ended your session. Deleting your own account signs you out the same way (the confirmation tells you so). Editing your own entitlements **without** entering a password keeps you signed in. (To change only your own password, **Change password** on the Administration page is the shorter way and keeps you signed in.)
 
-Changes take effect for users on their next sign-in or **Refresh**. Glob matching is **case-sensitive** and supports `*` anywhere (leading, middle, trailing, multiple).
+Errors name their cause: for example *At least one administrator must remain.* or the gateway's reason for a rejected field.
+
+Entitlement changes reach a signed-in user on their next **Refresh** or sign-in. Glob matching is **case-sensitive** and supports `*` anywhere (leading, middle, trailing, multiple).

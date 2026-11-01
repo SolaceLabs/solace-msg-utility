@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -159,5 +162,79 @@ func TestPrintVersionIfRequested(t *testing.T) {
 	// not a version query.
 	if printVersionIfRequested([]string{"serve", "--version"}, &buf) {
 		t.Error("trailing --version: want handled=false")
+	}
+}
+
+// stubHandler answers with its name, so a test can see which handler a route
+// reached.
+func stubHandler(name string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, name) })
+}
+
+func route(h http.Handler, path string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	return rec
+}
+
+func TestRootHandler_WithoutManagedRouting(t *testing.T) {
+	h := newRootHandler(stubHandler("hosted"), stubHandler("admin"), stubHandler("app"), stubHandler("relay"), nil)
+	for path, want := range map[string]string{
+		"/hosted":                  "hosted",
+		"/solAdmin":                "admin",
+		"/solAdmin/":               "admin",
+		"/https/943/broker/SEMP/x": "relay",
+		"/":                        "app",
+		"/login":                   "app", // no managed routing: an SPA route like any other
+	} {
+		if got := route(h, path).Body.String(); got != want {
+			t.Errorf("%s: want %s, got %q", path, want, got)
+		}
+	}
+	// /managed/* never falls through to the SPA.
+	if rec := route(h, "/managed/me"); rec.Code != http.StatusNotFound || rec.Body.String() == "app" {
+		t.Errorf("/managed/me without managed routing: want 404, got %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRootHandler_RobotsOnEveryResponse(t *testing.T) {
+	h := newRootHandler(stubHandler("hosted"), stubHandler("admin"), stubHandler("app"), stubHandler("relay"), nil)
+	rec := route(h, "/robots.txt")
+	if rec.Body.String() != "User-agent: *\nDisallow: /\n" || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") {
+		t.Errorf("robots.txt: %q %v", rec.Body.String(), rec.Header())
+	}
+	for _, path := range []string{"/", "/hosted", "/managed/x", "/robots.txt"} {
+		if got := route(h, path).Header().Get("X-Robots-Tag"); got != "noindex, nofollow" {
+			t.Errorf("%s: X-Robots-Tag %q", path, got)
+		}
+	}
+}
+
+func TestRootHandler_WithManagedRouting(t *testing.T) {
+	gate := func(tag string) func(http.Handler) http.Handler {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, tag+">")
+				next.ServeHTTP(w, r)
+			})
+		}
+	}
+	mr := &managedRoutes{api: stubHandler("api"), pages: stubHandler("pages"), gateApp: gate("appgate"), gateAdmin: gate("admingate")}
+	h := newRootHandler(stubHandler("hosted"), stubHandler("admin"), stubHandler("app"), stubHandler("relay"), mr)
+	for path, want := range map[string]string{
+		"/managed/me":     "api",
+		"/login":          "pages",
+		"/login/password": "pages",
+		"/solAdmin":       "admingate>admin",
+		"/":               "appgate>app",
+		"/hosted":         "hosted",
+		"/http/80/host/x": "relay",
+	} {
+		if got := route(h, path).Body.String(); got != want {
+			t.Errorf("%s: want %s, got %q", path, want, got)
+		}
+	}
+	if got := noGate(stubHandler("x")); route(got, "/").Body.String() != "x" {
+		t.Error("noGate must pass through")
 	}
 }

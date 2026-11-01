@@ -7,49 +7,34 @@ const CONN: ManagedConnRecord = {
     client: { port: '1443', msgVpns: [{ name: 'v1', user: 'u1', pass: 'V1:c' }] },
 };
 
+const fetchMock = () => globalThis.fetch as any;
+
 describe('connection-management/service', () => {
-    it('listConnections POSTs {username, token} and returns connections on 200', async () => {
+    it('listConnections GETs /managed/connections and unwraps the list', async () => {
         const connections = [{ broker: 'b1', hostname: 'h', semp: { port: '', user: '', pass: '' }, client: { port: '', msgVpns: [] } }];
-        (globalThis.fetch as any).mockResolvedValue({ status: 200, json: async () => ({ connections }) });
+        fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => ({ connections }) });
 
-        const result = await createConnMgmtService().listConnections('admin', 'tok');
+        expect(await createConnMgmtService().listConnections()).toEqual({ ok: true, data: connections });
+        expect(fetchMock()).toHaveBeenCalledWith('/managed/connections', { method: 'GET', credentials: 'same-origin' });
+    });
 
-        expect(result).toEqual(connections);
-        expect(globalThis.fetch).toHaveBeenCalledWith('/managed/listConnections', expect.objectContaining({
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: 'admin', token: 'tok' }),
+    it('listConnections passes a failure through', async () => {
+        fetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: 'unauthenticated' }) });
+        expect(await createConnMgmtService().listConnections()).toEqual(expect.objectContaining({ ok: false, code: 'unauthenticated' }));
+    });
+
+    it('saveConnection PUTs the record under its broker name, broker not repeated in the body', async () => {
+        fetchMock().mockResolvedValue({ ok: true, status: 204 });
+        expect(await createConnMgmtService().saveConnection(CONN)).toEqual({ ok: true, data: undefined });
+        const { broker: _broker, ...body } = CONN;
+        expect(fetchMock()).toHaveBeenCalledWith('/managed/connections/b1', expect.objectContaining({
+            method: 'PUT', body: JSON.stringify(body),
         }));
     });
 
-    it('listConnections returns null on a non-200', async () => {
-        (globalThis.fetch as any).mockResolvedValue({ status: 400 });
-        expect(await createConnMgmtService().listConnections('x', 'y')).toBeNull();
-    });
-
-    it('saveConnection POSTs the connection and returns true on 204', async () => {
-        (globalThis.fetch as any).mockResolvedValue({ status: 204 });
-        expect(await createConnMgmtService().saveConnection('admin', 'tok', CONN)).toBe(true);
-        expect(globalThis.fetch).toHaveBeenCalledWith('/managed/saveConnection', expect.objectContaining({
-            body: JSON.stringify({ username: 'admin', token: 'tok', connection: CONN }),
-        }));
-    });
-
-    it('saveConnection returns false on a non-204', async () => {
-        (globalThis.fetch as any).mockResolvedValue({ status: 400 });
-        expect(await createConnMgmtService().saveConnection('a', 'b', CONN)).toBe(false);
-    });
-
-    it('deleteConnection POSTs the target and returns true on 204', async () => {
-        (globalThis.fetch as any).mockResolvedValue({ status: 204 });
-        expect(await createConnMgmtService().deleteConnection('admin', 'tok', 'b1')).toBe(true);
-        expect(globalThis.fetch).toHaveBeenCalledWith('/managed/deleteConnection', expect.objectContaining({
-            body: JSON.stringify({ username: 'admin', token: 'tok', target: 'b1' }),
-        }));
-    });
-
-    it('deleteConnection returns false on a non-204', async () => {
-        (globalThis.fetch as any).mockResolvedValue({ status: 404 });
-        expect(await createConnMgmtService().deleteConnection('a', 'b', 'c')).toBe(false);
+    it('deleteConnection DELETEs the escaped broker path', async () => {
+        fetchMock().mockResolvedValue({ ok: true, status: 204 });
+        expect(await createConnMgmtService().deleteConnection('b 1')).toEqual({ ok: true, data: undefined });
+        expect(fetchMock()).toHaveBeenCalledWith('/managed/connections/b%201', { method: 'DELETE', credentials: 'same-origin' });
     });
 });

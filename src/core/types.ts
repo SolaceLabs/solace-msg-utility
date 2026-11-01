@@ -39,8 +39,8 @@ export interface QGlob {
 }
 
 /**
- * The current user's managed session, populated by the connections module's
- * Managed panel after login. `null`/absent whenever no managed login is active
+ * The current user's managed session, adopted from the gateway session
+ * (`GET /managed/me`) by the connections module's Managed panel or admin-login. `null`/absent whenever no managed login is active
  * (including every Direct-mode session), where RBAC helpers degrade to allow-all.
  *
  * This carries only **matcher inputs**. The packed broker credentials and the
@@ -50,15 +50,17 @@ export interface QGlob {
 export interface ManagedSession {
     /** Whether the user may see the admin-only management modules. */
     admin: boolean;
-    /** Username, resent (with `token`) to authenticate admin CRUD calls. */
+    /**
+     * The signed-in username, so a module can tell a change to the session's
+     * own account. The gateway's HttpOnly cookie is the credential; nothing
+     * here authenticates.
+     */
     username: string;
-    /** Login bearer (the one-way `stamp` of the password); in-memory only. */
-    token: string;
     /** Connected broker NAME — the source of the `broker` argument to matchers. */
     broker: string;
     /**
      * Provisioned VPN names for the connected `broker`, published by the
-     * connections module from `getConnections` (`connections.yaml` ∩ entitled).
+     * connections module from `/managed/me` (`connections.yaml` ∩ entitled).
      * `[]` until connected. This is what bounds the queue-picker's VPN list in
      * managed mode (via `queueSourceFrom`) so it matches the Connections dropdown
      * — provisioning, not the broader entitlement globs.
@@ -162,11 +164,12 @@ export interface BusEvents {
     'rbac:changed':                void;
     /**
      * Ask the module that owns the managed login to end the session with its
-     * ordinary sign-out (drop any managed broker connection, clear
-     * `managedStore` + `AppState.managed`, emit `rbac:changed`, show its
-     * sign-in view). Emitted by user-management when the signed-in admin
-     * changes their own password or deletes their own account: the gateway no
-     * longer accepts the session's token, so it cannot be patched in place.
+     * ordinary sign-out (`POST /managed/logout`, drop any managed broker
+     * connection, clear `managedStore` + `AppState.managed`, emit
+     * `rbac:changed`, show its signed-out view). Emitted by user-management
+     * when a change to the signed-in admin's own account (new password,
+     * administrator flag, deletion) ended the session at the gateway, and by
+     * any admin module on a 401: the session cannot be patched in place.
      * Answered by admin-login (while it holds the session) and by the
      * connections module (routed to the Managed panel when `appState.managed`
      * is set).

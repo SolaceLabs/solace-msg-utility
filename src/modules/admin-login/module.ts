@@ -1,33 +1,35 @@
 /**
  * Admin Login Module — the entry point of the standalone `/solAdmin` app.
  *
- * Same managed-login intent as the connections module's Managed tab, minus the
- * broker: it authenticates against the managed user list and adopts the profile,
- * but never creates a Solace or SEMP connection. The admin app exists to edit
- * entitlement data, not to browse queues, so `AppState.isConnected` /
- * `isSempConnected` stay false for its whole lifetime.
+ * The gateway serves `/solAdmin` only to an administrator's session (sign-in
+ * happens on its own `/login` page), so this module does not sign anyone in:
+ * it reads the session back (`GET /managed/me`), adopts the profile, and shows
+ * who is signed in with Change password and Sign out. It never creates a
+ * Solace or SEMP connection, so `AppState.isConnected` / `isSempConnected`
+ * stay false for the app's whole lifetime.
  *
- * Non-admins are refused **at login**: the profile is discarded and no session is
- * published, so an ordinary user who reaches this URL gets an error rather than a
- * signed-in shell with an empty sidebar.
+ * A non-admin profile is refused before anything is adopted (the gateway's
+ * gate makes that a race with a demotion, not a normal path), so no ordinary
+ * user gets a signed-in shell with an empty sidebar.
  *
  * Adopting the profile into `ctx.managedStore` matters even with no broker in
  * play — `connection-management` seals credentials with the deployment's site
  * seed through `packSecret`, and the store is the only holder of that seed.
  *
- * It is the session's only writer in the admin app, so a sign-out another
- * module needs (user-management, after an own-password change or own-account
- * delete) arrives as `rbac:sign-out-requested` and runs the same `doLogout` as
- * the Sign out button.
+ * It is the session's only owner in the admin app, so a sign-out another
+ * module needs (user-management, after a change that ended the session, or a
+ * 401 from the gateway) arrives as `rbac:sign-out-requested` and runs the same
+ * `doLogout` as the Sign out button.
  */
 import { required } from '../../core/dom';
-import { createGate } from '../../core/components/module-gate';
-import { stamp } from '../../core/encode';
-import { probeDeployment } from '../../core/hosted';
 import { createManagedService } from '../../core/services/managed-service';
+import { managedErrorMessage } from '../../core/services/managed-api';
 import { logger } from '../../core/logger';
 import { errMessage } from '../../core/utils';
 import type { AppContext } from '../../core/types';
+
+const SIGN_IN = '/login?next=/solAdmin';
+const CHANGE_PASSWORD = '/login/password?next=/solAdmin';
 
 export const AdminLoginModule = {
     name: 'Administration',
@@ -41,9 +43,7 @@ export const AdminLoginModule = {
 
         const els = {
             loginView: required<HTMLElement>(container, '#admin-login-view'),
-            username: required<HTMLInputElement>(container, '#admin-login-username'),
-            password: required<HTMLInputElement>(container, '#admin-login-password'),
-            btnLogin: required<HTMLButtonElement>(container, '#btn-admin-login'),
+            btnLogin: required<HTMLAnchorElement>(container, '#btn-admin-login'),
             loginError: required<HTMLElement>(container, '#admin-login-error'),
 
             sessionView: required<HTMLElement>(container, '#admin-session-view'),
@@ -51,31 +51,19 @@ export const AdminLoginModule = {
             btnLogout: required<HTMLButtonElement>(container, '#btn-admin-logout'),
         };
 
-        // Unlike the Managed tab — whose availability is expressed by the tab
-        // simply not being offered — this app IS the deployment surface, so it
-        // has to say why it cannot work when served without a gateway.
-        const gate = createGate(container, {
-            id: 'admin-login-gate',
-            title: 'Deployment Gateway Required',
-            message: 'Administration is served by the deployment gateway in managed mode. '
-                + 'Open it at /solAdmin on a gateway that has managed mode enabled.',
-        });
-
-        function setError(el: HTMLElement, msg: string | null): void {
-            el.textContent = msg ?? '';
-            el.classList.toggle('hidden', !msg);
-        }
-
-        function showView(view: 'login' | 'session'): void {
-            gate.hide();
-            els.loginView.classList.toggle('hidden', view !== 'login');
-            els.sessionView.classList.toggle('hidden', view !== 'session');
-        }
-
-        function showGate(): void {
-            els.loginView.classList.add('hidden');
+        function showSignedOut(message: string | null, mustChange = false): void {
+            els.btnLogin.href = mustChange ? CHANGE_PASSWORD : SIGN_IN;
+            els.btnLogin.textContent = mustChange ? 'Change password' : 'Sign in';
+            els.loginError.textContent = message ?? '';
+            els.loginError.classList.toggle('hidden', !message);
+            els.loginView.classList.remove('hidden');
             els.sessionView.classList.add('hidden');
-            gate.show();
+        }
+
+        function showSession(username: string): void {
+            els.sessionSummary.textContent = `Signed in as ${username} (administrator).`;
+            els.loginView.classList.add('hidden');
+            els.sessionView.classList.remove('hidden');
         }
 
         // Whether THIS module holds the managed session. Module-local rather
@@ -84,78 +72,58 @@ export const AdminLoginModule = {
         // same sign-out request itself, before this handler runs).
         let signedIn = false;
 
-        async function doLogin(): Promise<void> {
-            const username = els.username.value.trim();
-            const password = els.password.value;
-            if (!username || !password) {
-                setError(els.loginError, 'Enter a username and password.');
+        async function restore(): Promise<void> {
+            const res = await service.me();
+            if (!res.ok) {
+                const quiet = res.code === 'unauthenticated';
+                showSignedOut(quiet ? null : managedErrorMessage(res), res.code === 'password_change_required');
                 return;
             }
-            els.btnLogin.disabled = true;
-            setError(els.loginError, null);
+            const p = res.data;
+            if (!p.admin) {
+                // Refuse before anything is adopted: no store, no AppState,
+                // no emit. The account is valid, just not for this app.
+                logger.warn(`[AdminLogin] refused non-admin session for "${p.username}"`);
+                showSignedOut('This account is not an administrator.');
+                return;
+            }
             try {
-                const token = stamp(username, password);
-                const p = await service.getConnections(username, token);
-                if (!p) {
-                    setError(els.loginError, 'Invalid username or password.');
-                    return;
-                }
-                if (!p.admin) {
-                    // Refuse before anything is adopted: no store, no AppState,
-                    // no emit. The account is valid, just not for this app.
-                    logger.warn(`[AdminLogin] refused non-admin sign-in for "${username}"`);
-                    setError(els.loginError, 'This account is not an administrator.');
-                    return;
-                }
                 // Adopt the profile BEFORE publishing state or emitting, so no
                 // observer of `rbac:changed` can see a half-built session.
                 await store.setProfile(p);
-                app.setState('managed', {
-                    admin: true, username, token, broker: '',
-                    operate: p.operate, readOnly: p.readOnly, vpns: [],
-                });
-                signedIn = true;
-                eventBus.emit('rbac:changed');
-                els.sessionSummary.textContent = `Signed in as ${username} (administrator).`;
-                showView('session');
             } catch (e) {
-                setError(els.loginError, errMessage(e));
-            } finally {
-                els.btnLogin.disabled = false;
+                showSignedOut(errMessage(e));
+                return;
             }
+            app.setState('managed', {
+                admin: true, username: p.username, broker: '',
+                operate: p.operate, readOnly: p.readOnly, vpns: [],
+            });
+            signedIn = true;
+            eventBus.emit('rbac:changed');
+            showSession(p.username);
         }
 
         function doLogout(): void {
+            // End the gateway session too; an already-ended one is the same
+            // outcome, so the answer is not awaited.
+            void service.logout();
             signedIn = false;
             store.clear();
             app.setState('managed', null);
             eventBus.emit('rbac:changed');
-            els.username.value = '';
-            els.password.value = '';
-            setError(els.loginError, null);
-            showView('login');
+            showSignedOut(null);
             app.loadSelf();
         }
 
-        els.btnLogin.addEventListener('click', () => { void doLogin(); });
         els.btnLogout.addEventListener('click', doLogout);
-        [els.username, els.password].forEach((input) => {
-            input.addEventListener('keydown', (e) => {
-                if ((e as KeyboardEvent).key === 'Enter') void doLogin();
-            });
-        });
-        // Another module invalidated the session: user-management after the
-        // admin changed their own password or deleted their own account. Sign
-        // out exactly as the button does (store, AppState, rbac:changed, login
-        // view, navigate here) so they sign in again with the new password.
+        // Another module ended the session: user-management after a change to
+        // the admin's own account, or any admin module on a 401. Sign out
+        // exactly as the button does (store, AppState, rbac:changed, signed-out
+        // view, navigate here).
         eventBus.on('rbac:sign-out-requested', () => { if (signedIn) doLogout(); });
 
-        const info = await probeDeployment();
-        if (info.hosted) {
-            showView('login');
-        } else {
-            showGate();
-        }
+        await restore();
         logger.info('Admin Login Module Setup Complete');
     },
 };

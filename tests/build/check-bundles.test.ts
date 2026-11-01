@@ -43,10 +43,10 @@ describe('check-bundles — checkBundles', () => {
     });
 
     it('fails a Release bundle that carries a managed marker, naming the file and the marker', () => {
-        const root = fakeBuild({ 'mock.html': '<html>fetch("/managed/reload")</html>' });
+        const root = fakeBuild({ 'mock.html': '<html>fetch("/managed/logout")</html>' });
         const problems = checkBundles(path.join(root, 'dist'));
         expect(problems).toHaveLength(1);
-        expect(problems[0]).toMatch(/^mock\.html: contains the managed marker "\/managed\/reload"/);
+        expect(problems[0]).toMatch(/^mock\.html: contains the managed marker "\/managed\/logout"/);
         expect(problems[0]).toContain('module.ts');
     });
 
@@ -69,7 +69,7 @@ describe('check-bundles — checkBundles', () => {
 
 describe('check-bundles — findMarkers', () => {
     it('returns only the markers present', () => {
-        expect(findMarkers('x conn-panel-managed y', ['conn-panel-managed', '/managed/reload'])).toEqual(['conn-panel-managed']);
+        expect(findMarkers('x conn-panel-managed y', ['conn-panel-managed', '/managed/logout'])).toEqual(['conn-panel-managed']);
         expect(findMarkers('plain direct bundle')).toEqual([]);
     });
 });

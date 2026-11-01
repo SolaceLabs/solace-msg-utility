@@ -30,7 +30,6 @@ function session(over: Partial<ManagedSession> = {}): ManagedSession {
     return {
         admin: false,
         username: 'u',
-        token: 't',
         broker: 'b1',
         vpns: [],
         operate: [],

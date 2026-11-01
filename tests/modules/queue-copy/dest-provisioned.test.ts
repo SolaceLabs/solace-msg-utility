@@ -95,7 +95,7 @@ beforeAll(async () => {
 });
 
 const SESSION: ManagedSession = {
-    admin: false, username: 'u', token: 't', broker: 'b1', vpns: ['v1', 'v2'],
+    admin: false, username: 'u', broker: 'b1', vpns: ['v1', 'v2'],
     operate: [{ brokers: '*', msgVpns: '*', queues: 'ops.*' }], readOnly: [],
 };
 

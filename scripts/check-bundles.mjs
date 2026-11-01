@@ -39,7 +39,7 @@ export const RELEASE_BUNDLES = ['index.html', 'min.html', 'no-payload.html', 'no
 export const MANAGED_BUNDLE = 'managed.html';
 
 /** Strings only the managed connections entry puts into a bundle. */
-export const MANAGED_MARKERS = ['conn-panel-managed', 'btn-managed-login', '/managed/getConnections', '/managed/reload'];
+export const MANAGED_MARKERS = ['conn-panel-managed', 'btn-managed-login', '/managed/me', '/managed/logout'];
 
 /** The repo root: this file lives in `<root>/scripts/`. */
 export function repoRoot() {

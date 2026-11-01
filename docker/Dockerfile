@@ -74,8 +74,11 @@ WORKDIR /src
 # harmless for the default stdlib-only hosted build, which imports nothing
 # third-party. GO_TAGS selects the variant: "" → stdlib-only hosted binary,
 # "managed" → compile in the RBAC store + /managed/* handler + yaml.
+# pages/ holds the sign-in page the managed binary embeds (go:embed); the
+# hosted binary does not compile pages.go and ignores it.
 COPY go-web-proxy/go.mod go-web-proxy/go.sum ./
 COPY go-web-proxy/*.go ./
+COPY go-web-proxy/pages/ ./pages/
 ARG GO_TAGS=""
 ARG APP_VERSION="0.0.0-dev"
 RUN CGO_ENABLED=0 GOOS=linux go build \

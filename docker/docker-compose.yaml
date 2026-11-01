@@ -66,8 +66,11 @@ services:
   # index.html) with MANAGED/HOSTED/CONN_MODES baked into the image (via the
   # build args below) so it offers the Managed sign-in instead of the Direct form. Exposed on a
   # different host port so it can run alongside the standard gateway. Open
-  # https://localhost:29443/ — bootstrap admin is admin / msgutility (change it).
-  # Administration lives at https://localhost:29443/solAdmin.
+  # https://localhost:29443/ (it redirects to the gateway's sign-in page). The
+  # first start creates the user "admin" with ADMIN_PASSWORD, or with a
+  # generated password printed once in `docker compose logs gateway-managed`;
+  # either way it must be changed at first sign-in. Administration lives at
+  # https://localhost:29443/solAdmin.
   gateway-managed:
     build:
       context: ..
@@ -95,6 +98,11 @@ services:
       # start only; afterwards the file in the managed volume wins.
       LOG_LEVEL: warn
       SSL_INSECURE_SKIP_VERIFY: "true"
+      # Bootstrap admin password, read only when users.yaml does not exist yet
+      # (12 to 128 characters). Put it in a .env file next to this one rather
+      # than here; never written to config.yaml or the log. For a Docker secret
+      # set ADMIN_PASSWORD_FILE to its path instead.
+      # ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     volumes:
       # Writable gateway store. The named volume inherits the baked /managed
       # dir's UID-65532 ownership, so the gateway can write config.yaml,

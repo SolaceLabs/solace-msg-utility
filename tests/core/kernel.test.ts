@@ -7,7 +7,7 @@ import type { PwaModule, RegisteredModule, AppContext, ManagedSession } from '..
 
 function managedSession(over: Partial<ManagedSession> = {}): ManagedSession {
     return {
-        admin: false, username: 'u', token: 't', broker: 'b',
+        admin: false, username: 'u', broker: 'b',
         vpns: [], operate: [], readOnly: [],
         ...over,
     };

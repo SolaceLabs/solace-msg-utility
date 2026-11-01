@@ -1,41 +1,36 @@
 /**
  * User Management Module (managed/RBAC variant, admin-only).
  *
- * CRUD over the proxy's user store (/managed/listUsers|saveUser|deleteUser).
+ * CRUD over the gateway's user store (`/managed/users`).
  * Ships in the standalone `/solAdmin` app (the `admin` variant). Sidebar
  * visibility is gated by `isModuleVisible` (the id maps to `'admin'` in rbac.ts's
  * MODULE_REQUIREMENTS) keyed off `appState.managed.admin`; the kernel re-renders
  * on `rbac:changed`, so this module appears the moment an admin logs in and the
  * list is (re)loaded on that event.
  *
- * Passwords are one-way-stamped client-side before they leave the browser; the
- * proxy never returns a stored token, so editing a user with a blank password
- * keeps the existing one. Changing your OWN password (or deleting your own
- * account) makes the gateway drop the session's token, so instead of patching
- * the session the module asks the login owner to sign out
- * (`rbac:sign-out-requested`). Imports only from `src/core/*` and its own
- * service.
+ * The password is sent as typed, over TLS, and hashed by the gateway, which
+ * never returns a hash, so editing a user with a blank password keeps the
+ * existing one. A new password, a changed administrator flag or a deletion
+ * ends that user's sessions at the gateway. When it is the signed-in admin's
+ * own account, the module asks the session owner to sign out
+ * (`rbac:sign-out-requested`) instead of patching a session that no longer
+ * exists. Imports only from `src/core/*` and its own service.
  */
 import { required } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import { createRowList } from '../../core/components/row-list';
-import { stamp } from '../../core/encode';
 import { showToast } from '../../core/toast';
 import { escapeHtml } from '../../core/utils';
 import { logger } from '../../core/logger';
-import { errMessage } from '../../core/utils';
+import { reportManagedFailure, SIGNED_OUT_TOAST_MS } from '../../core/services/managed-api';
 import { createUserMgmtService, type ManagedUser, type UserPayload } from './service';
-import type { AppContext, QGlob, ManagedSession } from '../../core/types';
+import type { AppContext, QGlob } from '../../core/types';
 
 const GLOB_FIELDS = [
     { key: 'brokers', placeholder: 'brokers (e.g. *)' },
     { key: 'msgVpns', placeholder: 'msgVpns (e.g. *)' },
     { key: 'queues', placeholder: 'queues (e.g. *)' },
 ];
-
-// Sign-out toasts carry an instruction and the view changes underneath them —
-// keep them up longer than the 1s default.
-const SIGNED_OUT_TOAST_MS = 5000;
 
 export const UserManagementModule = {
     name: 'User Mgmt.',
@@ -73,7 +68,7 @@ export const UserManagementModule = {
         const gate = createGate(container, {
             id: 'user-mgmt-gate',
             title: 'Administrator Sign-in Required',
-            message: 'Sign in to Connections as an administrator to manage users.',
+            message: 'Sign in as an administrator to manage users.',
         });
 
         // null = creating a new user; otherwise the username being edited.
@@ -129,21 +124,17 @@ export const UserManagementModule = {
                 return;
             }
             showView('list');
-            void loadList(m);
+            void loadList();
         }
 
-        async function loadList(m: ManagedSession): Promise<void> {
+        async function loadList(): Promise<void> {
             setError(els.listError, null);
-            try {
-                const users = await service.listUsers(m.username, m.token);
-                if (!users) {
-                    setError(els.listError, 'Failed to load users.');
-                    return;
-                }
-                renderList(users);
-            } catch (e) {
-                setError(els.listError, errMessage(e));
+            const res = await service.listUsers();
+            if (!res.ok) {
+                reportManagedFailure(res, eventBus, msg => setError(els.listError, msg));
+                return;
             }
+            renderList(res.data);
         }
 
         function openCreate(): void {
@@ -191,49 +182,42 @@ export const UserManagementModule = {
             }
             const payload: UserPayload = {
                 username,
-                password: pw ? stamp(username, pw) : '',
+                password: pw,
                 admin: els.admin.checked,
                 operate: operateList.readRows() as unknown as QGlob[],
                 readOnly: readonlyList.readRows() as unknown as QGlob[],
             };
             els.btnSave.disabled = true;
             setError(els.formError, null);
-            try {
-                const ok = await service.saveUser(m.username, m.token, payload);
-                if (!ok) {
-                    setError(els.formError, 'Save failed.');
-                    return;
-                }
-                const own = username === m.username;
-                if (own && payload.password) {
-                    // Your own password changed: the gateway now holds the new
-                    // token, so this session's token no longer authenticates and
-                    // patching AppState.managed would only fail on the next call.
-                    // Ask the login owner to sign out; its rbac:changed re-gates
-                    // this module via applyGate. Don't leave the typed password
-                    // in the hidden form.
-                    els.password.value = '';
-                    showToast('Password changed. Sign in again with the new password.', 'ok', SIGNED_OUT_TOAST_MS);
-                    eventBus.emit('rbac:sign-out-requested');
-                    return;
-                }
-                showToast('User saved', 'ok');
-                // Editing your own record without a new password (the session's
-                // token is still valid) may flip your own admin flag. Update the
-                // local session (preserving token/broker/vpns via the spread)
-                // BEFORE emitting so the kernel + this module's rbac:changed handler
-                // (applyGate) re-gate off fresh state — emitting alone leaves
-                // appState.managed.admin stale. A self-demote then lands on the gate.
-                if (own) {
-                    app.setState('managed', { ...m, admin: payload.admin, operate: payload.operate, readOnly: payload.readOnly });
-                    eventBus.emit('rbac:changed');
-                } else {
-                    applyGate(); // back to the list, reloaded
-                }
-            } catch (e) {
-                setError(els.formError, errMessage(e));
-            } finally {
-                els.btnSave.disabled = false;
+            const res = await service.saveUser(payload);
+            els.btnSave.disabled = false;
+            if (!res.ok) {
+                reportManagedFailure(res, eventBus, msg => setError(els.formError, msg));
+                return;
+            }
+            // Don't leave the typed password in the hidden form.
+            els.password.value = '';
+            const own = username === m.username;
+            if (own && (pw !== '' || payload.admin !== m.admin)) {
+                // A new password or administrator flag on your own account ended
+                // this session at the gateway, so patching AppState.managed
+                // would only fail on the next call. Ask the session owner to
+                // sign out; its rbac:changed re-gates this module via applyGate.
+                const what = pw ? 'Password changed' : 'Administrator flag changed';
+                showToast(`${what}. Sign in again.`, 'ok', SIGNED_OUT_TOAST_MS);
+                eventBus.emit('rbac:sign-out-requested');
+                return;
+            }
+            showToast('User saved', 'ok');
+            // Editing your own entitlements leaves the session alive. Update the
+            // local copy (preserving broker/vpns via the spread) BEFORE emitting
+            // so the kernel + this module's rbac:changed handler (applyGate)
+            // re-read fresh state.
+            if (own) {
+                app.setState('managed', { ...m, operate: payload.operate, readOnly: payload.readOnly });
+                eventBus.emit('rbac:changed');
+            } else {
+                applyGate(); // back to the list, reloaded
             }
         }
 
@@ -245,24 +229,20 @@ export const UserManagementModule = {
                 ? `Delete your own account "${username}"? You will be signed out.`
                 : `Delete user "${username}"?`;
             if (!confirm(question)) return;
-            try {
-                const ok = await service.deleteUser(m.username, m.token, username);
-                if (!ok) {
-                    showToast('Delete failed', 'error');
-                    return;
-                }
-                if (own) {
-                    // The session's account is gone, so reloading the list with
-                    // its token would only fail — sign out instead.
-                    showToast('Account deleted. You have been signed out.', 'ok', SIGNED_OUT_TOAST_MS);
-                    eventBus.emit('rbac:sign-out-requested');
-                    return;
-                }
-                showToast('User deleted', 'ok');
-                await loadList(m);
-            } catch (e) {
-                showToast(errMessage(e), 'error');
+            const res = await service.deleteUser(username);
+            if (!res.ok) {
+                reportManagedFailure(res, eventBus, msg => showToast(msg, 'error'));
+                return;
             }
+            if (own) {
+                // The session's account is gone, and the gateway ended the
+                // session with it — sign out instead of reloading the list.
+                showToast('Account deleted. You have been signed out.', 'ok', SIGNED_OUT_TOAST_MS);
+                eventBus.emit('rbac:sign-out-requested');
+                return;
+            }
+            showToast('User deleted', 'ok');
+            await loadList();
         }
 
         els.btnAdd.addEventListener('click', openCreate);

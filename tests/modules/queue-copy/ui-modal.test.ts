@@ -51,7 +51,7 @@ const DIRECT: SourceAccess = { session: null, broker: '', vpn: '' };
 /** A managed session with explicit operate/read-only globs. */
 function managed(over: Partial<ManagedSession> = {}): ManagedSession {
     return {
-        admin: false, username: 'u', token: 't', broker: 'b1', vpns: [],
+        admin: false, username: 'u', broker: 'b1', vpns: [],
         operate: [{ brokers: 'b1', msgVpns: 'vpn1', queues: 'ops.*' }],
         readOnly: [{ brokers: 'b1', msgVpns: 'vpn1', queues: 'ro.*' }],
         ...over,

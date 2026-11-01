@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{.Title}} - Solace Message Utility</title>
+<style>
+  :root { --green: #00C895; --green-hover: #00a87d; --navy: #03213B; --text: #334155; --muted: #64748b; --error: #b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f8f9fa; color: var(--text); }
+  main { width: 100%; max-width: 380px; margin: 16px; background: #fff; border-radius: 8px;
+         box-shadow: 0 1px 3px rgba(0,0,0,.12); overflow: hidden; }
+  header { background: var(--navy); color: #fff; padding: 16px 24px; font-weight: 600; }
+  header span { color: var(--green); }
+  form, .body { padding: 24px; }
+  h1 { font-size: 1.15rem; margin: 0 0 16px; }
+  label { display: block; font-size: .85rem; color: var(--muted); margin: 12px 0 4px; }
+  input { width: 100%; padding: 8px 10px; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 4px; background: #f1f5f9; }
+  input:focus { outline: 2px solid var(--green); background: #fff; }
+  button { margin-top: 20px; width: 100%; padding: 10px; font-size: 1rem; font-weight: 600; color: #fff;
+           background: var(--green); border: 0; border-radius: 4px; cursor: pointer; }
+  button:hover { background: var(--green-hover); }
+  .error { color: var(--error); background: #fef2f2; border: 1px solid #fecaca; border-radius: 4px; padding: 8px 10px; font-size: .9rem; }
+  .note { color: var(--muted); font-size: .85rem; margin: 8px 0 0; }
+  .links { margin-top: 16px; font-size: .9rem; text-align: center; }
+  a { color: #009193; }
+</style>
+</head>
+<body>
+<main>
+  <header>Solace <span>Message Utility</span></header>
+  {{if eq .Mode "login"}}
+  <form method="post" action="/login" autocomplete="on">
+    <h1>Sign in</h1>
+    {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+    <input type="hidden" name="next" value="{{.Next}}">
+    <label for="username">Username</label>
+    <input id="username" name="username" autocomplete="username" required autofocus maxlength="64">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="128">
+    <button type="submit">Sign in</button>
+  </form>
+  {{else if eq .Mode "password"}}
+  <form method="post" action="/login/password">
+    <h1>Change password</h1>
+    {{if .Required}}<p class="note">You must set a new password before you continue.</p>{{end}}
+    {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+    <input type="hidden" name="next" value="{{.Next}}">
+    <label for="current">Current password</label>
+    <input id="current" name="current" type="password" autocomplete="current-password" required autofocus maxlength="128">
+    <label for="new">New password</label>
+    <input id="new" name="new" type="password" autocomplete="new-password" required minlength="{{.MinLen}}" maxlength="{{.MaxLen}}">
+    <label for="confirm">Confirm new password</label>
+    <input id="confirm" name="confirm" type="password" autocomplete="new-password" required minlength="{{.MinLen}}" maxlength="{{.MaxLen}}">
+    <p class="note">{{.MinLen}} to {{.MaxLen}} characters.</p>
+    <button type="submit">Change password</button>
+    {{if not .Required}}<p class="links"><a href="{{.Next}}">Cancel</a></p>{{end}}
+  </form>
+  {{else}}
+  <div class="body">
+    <h1>{{.Title}}</h1>
+    {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+    <p class="links"><a href="/">Back to the app</a></p>
+  </div>
+  {{end}}
+</main>
+</body>
+</html>

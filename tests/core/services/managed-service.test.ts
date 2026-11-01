@@ -2,38 +2,22 @@ import { describe, it, expect } from 'vitest';
 import { createManagedService } from '../../../src/core/services/managed-service';
 
 describe('core/services/managed-service', () => {
-    it('POSTs username+token and returns the profile on 200', async () => {
-        const profile = { admin: false, siteSeed: 'AAA=', operate: [], readOnly: [], brokers: [] };
-        (globalThis.fetch as any).mockResolvedValue({ status: 200, json: async () => profile });
+    it('me() GETs /managed/me on the session cookie and returns the profile', async () => {
+        const profile = { username: 'alice', admin: false, siteSeed: 'AAA=', operate: [], readOnly: [], brokers: [] };
+        (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200, json: async () => profile });
 
-        const result = await createManagedService().getConnections('admin', 'tok-abc');
-
-        expect(result).toEqual(profile);
-        expect(globalThis.fetch).toHaveBeenCalledWith('/managed/getConnections', expect.objectContaining({
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: 'admin', token: 'tok-abc' }),
-        }));
+        expect(await createManagedService().me()).toEqual({ ok: true, data: profile });
+        expect(globalThis.fetch).toHaveBeenCalledWith('/managed/me', { method: 'GET', credentials: 'same-origin' });
     });
 
-    it('returns null on 400 (unknown user / bad password — indistinguishable)', async () => {
-        (globalThis.fetch as any).mockResolvedValue({ status: 400 });
-        expect(await createManagedService().getConnections('x', 'y')).toBeNull();
+    it('me() hands back the gateway code when there is no session', async () => {
+        (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: 'unauthenticated' }) });
+        expect(await createManagedService().me()).toEqual(expect.objectContaining({ ok: false, status: 401, code: 'unauthenticated' }));
     });
 
-    it('reload POSTs username+token to /managed/reload and returns true on 204', async () => {
-        (globalThis.fetch as any).mockResolvedValue({ status: 204 });
-        const result = await createManagedService().reload('admin', 'tok-abc');
-        expect(result).toBe(true);
-        expect(globalThis.fetch).toHaveBeenCalledWith('/managed/reload', expect.objectContaining({
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: 'admin', token: 'tok-abc' }),
-        }));
-    });
-
-    it('reload returns false on a non-204 (auth failure or server reload error)', async () => {
-        (globalThis.fetch as any).mockResolvedValue({ status: 400 });
-        expect(await createManagedService().reload('x', 'y')).toBe(false);
+    it('logout() POSTs /managed/logout with no body', async () => {
+        (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 204 });
+        expect(await createManagedService().logout()).toEqual({ ok: true, data: undefined });
+        expect(globalThis.fetch).toHaveBeenCalledWith('/managed/logout', { method: 'POST', credentials: 'same-origin' });
     });
 });

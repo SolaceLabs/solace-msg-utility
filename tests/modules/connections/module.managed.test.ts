@@ -40,9 +40,11 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; appState:
     return { ctx, appState };
 }
 
+/** `/hosted` answers `json`; `/managed/me` finds no gateway session. */
 function stubHosted(json: unknown) {
     (globalThis.fetch as any).mockImplementation((url: string) => {
         if (url === '/hosted') return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(json)) });
+        if (url === '/managed/me') return Promise.resolve({ ok: false, status: 401, json: () => Promise.resolve({ error: 'unauthenticated' }) });
         return Promise.resolve({ ok: true, status: 200 });
     });
 }

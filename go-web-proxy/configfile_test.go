@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // clearSeedEnv isolates a test from the developer's shell: every seeding
@@ -40,6 +41,14 @@ connectionsFile: /m/connections.yaml
 access:
   allow: [10.0.0.0/8, "2001:db8::/32"]
   trustedProxies: [10.0.0.1/32]
+session:
+  idleMinutes: 5
+  absoluteMinutes: 60
+login:
+  maxFailures: 3
+  backoffSeconds: 10
+  maxBackoffSeconds: 600
+  unauthenticatedPerMinute: 20
 `
 
 func TestDecodeConfigFile_Valid(t *testing.T) {
@@ -51,7 +60,9 @@ func TestDecodeConfigFile_Valid(t *testing.T) {
 		Version: 1, Hosted: true, Managed: true, ConnModes: "both", DefaultConn: "managed", AppDir: "/pwa",
 		TLS:      fileTLS{CertFile: "/c/tls.crt", KeyFile: "/c/tls.key", TrustDir: "/c/trust", InsecureSkipVerify: true},
 		LogLevel: "debug", UsersFile: "/m/users.yaml", ConnectionsFile: "/m/connections.yaml",
-		Access: fileAccess{Allow: []string{"10.0.0.0/8", "2001:db8::/32"}, TrustedProxies: []string{"10.0.0.1/32"}},
+		Access:  fileAccess{Allow: []string{"10.0.0.0/8", "2001:db8::/32"}, TrustedProxies: []string{"10.0.0.1/32"}},
+		Session: fileSession{IdleMinutes: 5, AbsoluteMinutes: 60},
+		Login:   fileLogin{MaxFailures: 3, BackoffSeconds: 10, MaxBackoffSeconds: 600, UnauthenticatedPerMinute: 20},
 	}
 	if !reflect.DeepEqual(fc, want) {
 		t.Errorf("decoded:\n%+v\nwant:\n%+v", fc, want)
@@ -139,6 +150,13 @@ func TestToConfig_InvalidValues(t *testing.T) {
 		{"allow bare address", func(fc *fileConfig) { fc.Access.Allow = []string{"10.0.0.0/8", "10.0.0.1"} }, "access.allow[1]", "10.0.0.1"},
 		{"allow mapped", func(fc *fileConfig) { fc.Access.Allow = []string{"::ffff:10.0.0.0/104"} }, "access.allow[0]", "::ffff:10.0.0.0/104"},
 		{"trusted proxy", func(fc *fileConfig) { fc.Access.TrustedProxies = []string{"nope"} }, "access.trustedProxies[0]", "nope"},
+		{"absolute zero", func(fc *fileConfig) { fc.Session.AbsoluteMinutes = 0 }, "session.absoluteMinutes", "0"},
+		{"absolute over a day", func(fc *fileConfig) { fc.Session.AbsoluteMinutes = 1441 }, "session.absoluteMinutes", "1441"},
+		{"idle over absolute", func(fc *fileConfig) { fc.Session.IdleMinutes = 31 }, "session.idleMinutes", "31"},
+		{"max failures", func(fc *fileConfig) { fc.Login.MaxFailures = 0 }, "login.maxFailures", "0"},
+		{"max backoff", func(fc *fileConfig) { fc.Login.MaxBackoffSeconds = 86401 }, "login.maxBackoffSeconds", "86401"},
+		{"backoff over max", func(fc *fileConfig) { fc.Login.BackoffSeconds = 901 }, "login.backoffSeconds", "901"},
+		{"unauthenticated", func(fc *fileConfig) { fc.Login.UnauthenticatedPerMinute = -1 }, "login.unauthenticatedPerMinute", "-1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -184,6 +202,26 @@ func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 	}
 	if cfg.logLevel != slog.LevelWarn || cfg.appDir != "/SolaceMsgUtility" {
 		t.Errorf("defaults not carried: %+v", cfg)
+	}
+	if cfg.session != (sessionLimits{idle: 10 * time.Minute, absolute: 30 * time.Minute}) {
+		t.Errorf("session defaults: %+v", cfg.session)
+	}
+	if want := (loginLimits{maxFailures: 5, backoff: 30 * time.Second, maxBackoff: 15 * time.Minute, unauthPerMinute: 60}); cfg.login != want {
+		t.Errorf("login defaults: %+v", cfg.login)
+	}
+}
+
+// The cross-field messages say which other key bounds the value.
+func TestToConfig_BoundsNameTheOtherKey(t *testing.T) {
+	fc := defaultFileConfig()
+	fc.Session.IdleMinutes = 40
+	if _, err := fc.toConfig("/s"); err == nil || !strings.Contains(err.Error(), "(session.absoluteMinutes is 30)") {
+		t.Errorf("idle: got %v", err)
+	}
+	fc = defaultFileConfig()
+	fc.Login.BackoffSeconds = 1000
+	if _, err := fc.toConfig("/s"); err == nil || !strings.Contains(err.Error(), "(login.maxBackoffSeconds is 900)") {
+		t.Errorf("backoff: got %v", err)
 	}
 }
 

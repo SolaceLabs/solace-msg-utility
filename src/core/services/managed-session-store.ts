@@ -3,14 +3,14 @@
  * profile and the per-deployment seed.
  *
  * Why it exists: a managed session's broker credentials arrive PACKED inside the
- * `getConnections` profile, and more than one module needs to open a connection
+ * `/managed/me` profile, and more than one module needs to open a connection
  * with them (the connections module's primary connection, queue-copy's
  * provisioned destination). Anchor 1 forbids reaching into another module, and
  * the packed credentials are deliberately kept out of `AppState`, so the profile
  * lives here in core and is reached through `AppContext.managedStore`.
  *
  * State ownership line:
- *   - `AppState.managed`  = matcher inputs (admin, username, token, broker, vpns, operate, readOnly)
+ *   - `AppState.managed`  = matcher inputs (admin, username, broker, vpns, operate, readOnly)
  *   - this store          = connection inputs (the seed + the packed profile)
  *
  * Credential posture: the seed and the packed passwords never leave this

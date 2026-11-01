@@ -1,17 +1,15 @@
 /**
- * Connection-management service — admin CRUD over /managed/listConnections,
- * /managed/saveConnection, /managed/deleteConnection on the go-web-proxy.
+ * Connection-management service — admin CRUD over the gateway's
+ * `/managed/connections` endpoints, authenticated by the session cookie (see
+ * `src/core/services/managed-api.ts`).
  *
- * Same-origin plain `fetch`; resend-token auth in the JSON body (see
- * user-management/service.ts for the shared rationale). Broker credentials are
- * packed client-side (WebCrypto, the per-deployment siteSeed) BEFORE they reach
- * this service — the proxy stores the opaque blobs and never unpacks them. The
- * list response omits the packed blobs, so editing a connection with blank
- * password fields keeps the stored secrets.
- *
- * Contract: list → 200 with body, else null. save/delete → 204 on success,
- * else false. Transport errors reject.
+ * Broker credentials are packed client-side (WebCrypto, the per-deployment
+ * siteSeed) BEFORE they reach this service — the gateway stores the opaque
+ * blobs and never unpacks them. The list response omits the packed blobs, so
+ * editing a connection with blank password fields keeps the stored secrets.
  */
+import { managedRequest, type ManagedResult } from '../../core/services/managed-api';
+
 export interface ManagedConnVpn {
     name: string;
     user: string;
@@ -26,38 +24,21 @@ export interface ManagedConnRecord {
 }
 
 export interface ConnMgmtService {
-    listConnections(username: string, token: string): Promise<ManagedConnRecord[] | null>;
-    saveConnection(username: string, token: string, connection: ManagedConnRecord): Promise<boolean>;
-    deleteConnection(username: string, token: string, target: string): Promise<boolean>;
+    listConnections(): Promise<ManagedResult<ManagedConnRecord[]>>;
+    /** PUT /managed/connections/{broker}: create, or edit an existing broker. */
+    saveConnection(connection: ManagedConnRecord): Promise<ManagedResult<void>>;
+    deleteConnection(broker: string): Promise<ManagedResult<void>>;
 }
 
-const JSON_HEADERS = { 'Content-Type': 'application/json' };
+const connPath = (broker: string) => `/managed/connections/${encodeURIComponent(broker)}`;
 
 export function createConnMgmtService(): ConnMgmtService {
-    async function listConnections(username: string, token: string): Promise<ManagedConnRecord[] | null> {
-        const res = await fetch('/managed/listConnections', {
-            method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username, token }),
-        });
-        if (res.status === 200) {
-            const json = (await res.json()) as { connections: ManagedConnRecord[] };
-            return json.connections;
-        }
-        return null;
-    }
-
-    async function saveConnection(username: string, token: string, connection: ManagedConnRecord): Promise<boolean> {
-        const res = await fetch('/managed/saveConnection', {
-            method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username, token, connection }),
-        });
-        return res.status === 204;
-    }
-
-    async function deleteConnection(username: string, token: string, target: string): Promise<boolean> {
-        const res = await fetch('/managed/deleteConnection', {
-            method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username, token, target }),
-        });
-        return res.status === 204;
-    }
-
-    return { listConnections, saveConnection, deleteConnection };
+    return {
+        async listConnections() {
+            const res = await managedRequest<{ connections: ManagedConnRecord[] }>('GET', '/managed/connections');
+            return res.ok ? { ok: true, data: res.data.connections } : res;
+        },
+        saveConnection: ({ broker, ...body }) => managedRequest('PUT', connPath(broker), body),
+        deleteConnection: (broker) => managedRequest('DELETE', connPath(broker)),
+    };
 }

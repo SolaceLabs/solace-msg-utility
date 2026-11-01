@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,12 @@ func prefixes(t *testing.T, cidrs ...string) []netip.Prefix {
 		t.Fatal(err)
 	}
 	return ps
+}
+
+// aclChain is the access list as serve() mounts it: withClient resolves the
+// address, clientACL decides.
+func aclChain(ac accessConfig, next http.Handler, logger *slog.Logger) http.Handler {
+	return withClient(ac.trustedProxies, clientACL(ac, next, logger))
 }
 
 type countingHandler struct{ calls int }
@@ -76,11 +83,28 @@ func TestClientACL_EmptyAllowListReturnsNextItself(t *testing.T) {
 	}
 }
 
+// The ACL reads the address withClient resolved. Mounted without it, every
+// client is unresolved and denied: a wiring mistake fails closed.
+func TestClientACL_WithoutWithClientFailsClosed(t *testing.T) {
+	next := &countingHandler{}
+	h := clientACL(accessConfig{allow: prefixes(t, "0.0.0.0/0")}, next, quietLogger())
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:1"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || next.calls != 0 {
+		t.Fatalf("want 403 without the resolver, got %d (calls %d)", rec.Code, next.calls)
+	}
+	if _, ok := clientOf(req); ok {
+		t.Error("clientOf must report an unresolved client outside withClient")
+	}
+}
+
 func TestClientACL_DeniedIsOpaque403(t *testing.T) {
 	var buf strings.Builder
 	next := &countingHandler{}
-	h := clientACL(accessConfig{allow: prefixes(t, "10.0.0.0/8")}, next, newCapturingLogger(&buf))
-	req := httptest.NewRequest(http.MethodPost, "/managed/getConnections", nil)
+	h := aclChain(accessConfig{allow: prefixes(t, "10.0.0.0/8")}, next, newCapturingLogger(&buf))
+	req := httptest.NewRequest(http.MethodPost, "/managed/me", nil)
 	req.RemoteAddr = "192.0.2.1:4444"
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -98,7 +122,7 @@ func TestClientACL_DeniedIsOpaque403(t *testing.T) {
 		t.Error("inner handler must not run for a denied client")
 	}
 	log := buf.String()
-	for _, want := range []string{"level=WARN", "client denied by access list", "client=192.0.2.1", "method=POST", "path=/managed/getConnections"} {
+	for _, want := range []string{"level=WARN", "client denied by access list", "client=192.0.2.1", "method=POST", "path=/managed/me"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("log missing %q: %s", want, log)
 		}
@@ -110,7 +134,7 @@ func TestClientACL_DeniedIsOpaque403(t *testing.T) {
 
 func TestClientACL_Allowed(t *testing.T) {
 	next := &countingHandler{}
-	h := clientACL(accessConfig{allow: prefixes(t, "10.0.0.0/8", "2001:db8::/32")}, next, quietLogger())
+	h := aclChain(accessConfig{allow: prefixes(t, "10.0.0.0/8", "2001:db8::/32")}, next, quietLogger())
 	for _, remote := range []string{"10.20.30.40:1", "[2001:db8::9]:1", "[::ffff:10.0.0.1]:1"} {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = remote
@@ -127,7 +151,7 @@ func TestClientACL_Allowed(t *testing.T) {
 
 func TestClientACL_BadPeerFailsClosed(t *testing.T) {
 	var buf strings.Builder
-	h := clientACL(accessConfig{allow: prefixes(t, "0.0.0.0/0")}, &countingHandler{}, newCapturingLogger(&buf))
+	h := aclChain(accessConfig{allow: prefixes(t, "0.0.0.0/0")}, &countingHandler{}, newCapturingLogger(&buf))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "garbage"
 	rec := httptest.NewRecorder()
@@ -142,7 +166,7 @@ func TestClientACL_BadPeerFailsClosed(t *testing.T) {
 
 func TestClientACL_XFFBelievedOnlyFromTrustedProxy(t *testing.T) {
 	ac := accessConfig{allow: prefixes(t, "203.0.113.0/24"), trustedProxies: prefixes(t, "10.0.0.0/8")}
-	h := clientACL(ac, &countingHandler{}, quietLogger())
+	h := aclChain(ac, &countingHandler{}, quietLogger())
 	send := func(remote, xff string) int {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = remote
@@ -167,7 +191,7 @@ func TestClientACL_XFFBelievedOnlyFromTrustedProxy(t *testing.T) {
 func TestClientACL_InsideAccessLog(t *testing.T) {
 	var buf strings.Builder
 	logger := newCapturingLogger(&buf)
-	h := accessLog(clientACL(accessConfig{allow: prefixes(t, "10.0.0.0/8")}, &countingHandler{}, logger), logger)
+	h := accessLog(aclChain(accessConfig{allow: prefixes(t, "10.0.0.0/8")}, &countingHandler{}, logger), logger)
 	req := httptest.NewRequest(http.MethodGet, "/solAdmin", nil)
 	req.RemoteAddr = "192.0.2.1:1"
 	rec := httptest.NewRecorder()
@@ -203,13 +227,13 @@ func TestClientACL_HijackSurvivesBothWrappers(t *testing.T) {
 	const upgrade = "GET /ws HTTP/1.1\r\nHost: gateway\r\nConnection: Upgrade\r\nUpgrade: test\r\n\r\n"
 	logger := quietLogger()
 
-	allowed := httptest.NewServer(accessLog(clientACL(accessConfig{allow: prefixes(t, "127.0.0.0/8", "::1/128")}, inner, logger), logger))
+	allowed := httptest.NewServer(accessLog(aclChain(accessConfig{allow: prefixes(t, "127.0.0.0/8", "::1/128")}, inner, logger), logger))
 	defer allowed.Close()
 	if status := rawStatusLine(t, allowed.Listener.Addr().String(), upgrade); !strings.HasPrefix(status, "HTTP/1.1 101") {
 		t.Fatalf("allowed client: want a 101 from the hijacked connection, got %q", status)
 	}
 
-	denied := httptest.NewServer(accessLog(clientACL(accessConfig{allow: prefixes(t, "192.0.2.0/24")}, inner, logger), logger))
+	denied := httptest.NewServer(accessLog(aclChain(accessConfig{allow: prefixes(t, "192.0.2.0/24")}, inner, logger), logger))
 	defer denied.Close()
 	if status := rawStatusLine(t, denied.Listener.Addr().String(), upgrade); !strings.HasPrefix(status, "HTTP/1.1 403") {
 		t.Fatalf("denied client: want 403, got %q", status)
@@ -238,7 +262,7 @@ func rawStatusLine(t *testing.T, addr, request string) string {
 // untouched for an allowed client.
 func TestClientACL_HostedPayloadUnchanged(t *testing.T) {
 	hh := newHostedHandler(true, connBoth, connManaged)
-	h := clientACL(accessConfig{allow: prefixes(t, "10.0.0.0/8")}, hh, quietLogger())
+	h := aclChain(accessConfig{allow: prefixes(t, "10.0.0.0/8")}, hh, quietLogger())
 
 	direct := httptest.NewRecorder()
 	hh.ServeHTTP(direct, httptest.NewRequest(http.MethodGet, "/hosted", nil))

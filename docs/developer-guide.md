@@ -83,7 +83,7 @@ src/
     hosted.ts          # /hosted probe + buildBrokerUrl — the single gateway-rewrite point
     constants.ts       # App-wide constants
     rbac.ts            # Stateless RBAC matchers — matchGlob, isModuleVisible, isVpnVisible, isQueueVisible, canOperate
-    encode.ts          # Credential transform (login token + site-seed pack/unpack). Algorithm is code-only —
+    encode.ts          # Credential transform (site-seed pack/unpack). Algorithm is code-only —
                        # never describe it in docs (scripts/check-docs-secrecy.mjs enforces this)
     managed-semp-filter.ts # filterSempFetch — scopes SEMP discovery to entitled VPNs/queues (managed)
     services/                  # Pure broker-side factories — no AppContext, no UI.
@@ -95,7 +95,8 @@ src/
                                # Named for what it does NOT do: only two SEMP v2 list shapes are filtered
       queue-source.ts          # QueueSource + typed Access/scope — the discovery seam components consume
       managed-session-store.ts # Owns the provisioned profile + site seed; dials targets on request
-      managed-service.ts       # createManagedService() → the POST /managed/* client
+      managed-api.ts           # managedRequest() — /managed/* on the gateway session cookie; error codes → text
+      managed-service.ts       # createManagedService() → GET /managed/me, POST /managed/logout
     connections/               # Connection-domain library (types only — no orchestration here).
       types.ts                 # SolaceConfig, SempConfig, ConnectionConfig, ConnectionCredentials, SempContext
       defaults.ts              # DEFAULT_CONFIG + validateConfig (data-shape validator)
@@ -125,7 +126,7 @@ src/
                        # (onConnected/onDisconnected/etc.) to ctx.setState + eventBus.emit +
                        # the connections form's UI updates.
       module.managed.ts # Managed entry (the managed variant): tab bar + installDirect + panel
-      managed-panel.ts # The Managed tab — login, provisioned dropdowns, browser guardrails
+      managed-panel.ts # The Managed tab — gateway session restore, provisioned dropdowns, browser guardrails
       config.js        # localStorage persistence (values obfuscated at rest)
       ui.js            # Element caching, auth mode, visual feedback
       styles.css       # Module-scoped styles
@@ -152,7 +153,7 @@ src/
     queue-subscription-explorer/  # Priority 45 — SEMP v1 (vpn, queue, topic) browser
     queue-discovery/   # Present on disk but NOT in any active variant — sits inert at runtime.
                        # Kept for code archaeology; the kernel never installs it.
-    admin-login/           # /solAdmin entry point — managed auth only, opens no broker connection
+    admin-login/           # /solAdmin entry point — restores the gateway session, opens no broker connection
     user-management/       # Admin-only (/solAdmin) — user + entitlement CRUD
     connection-management/ # Admin-only (/solAdmin) — broker connection CRUD
   variants/
@@ -249,7 +250,7 @@ All inter-module coordination goes through typed events:
 | `config:max-messages-changed` | `{ value }` | Connections -> Queue Browser |
 | `app:message-delete` | `{ id }` | Queue Browser row -> Queue Browser handler |
 | `rbac:changed` | void | Connections (Managed panel) / User Mgmt / Admin Login -> Kernel (sidebar re-render) + any module holding entitlement-derived state |
-| `rbac:sign-out-requested` | void | User Mgmt -> Admin Login / Connections (Managed panel): end the managed session (own password changed / own account deleted) |
+| `rbac:sign-out-requested` | void | User Mgmt / Connection Mgmt -> Admin Login / Connections (Managed panel): end the managed session (own password or administrator flag changed, own account deleted, or a `401` from the gateway) |
 | `jszip:loaded` | void | Window -> Queue Browser |
 
 ### Factory Pattern

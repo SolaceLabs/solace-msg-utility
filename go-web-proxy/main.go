@@ -58,6 +58,58 @@ type config struct {
 	// Client access list. Lives in config.yaml only (no env var); an empty
 	// allow list admits every client. See access.go.
 	access accessConfig
+	// Managed sign-in limits, config.yaml only (no env var). Unused when
+	// managed is false.
+	session sessionLimits
+	login   loginLimits
+}
+
+// managedRoutes is what the managed build adds to the router; nil in the
+// stdlib-only binary or when managed is false.
+type managedRoutes struct {
+	api       http.Handler                    // /managed/*
+	pages     http.Handler                    // /login, /login/password
+	gateApp   func(http.Handler) http.Handler // the PWA; a session under connModes=managed
+	gateAdmin func(http.Handler) http.Handler // /solAdmin; an admin session, every mode
+}
+
+func noGate(h http.Handler) http.Handler { return h }
+
+// robotsTxt asks every crawler to stay out; X-Robots-Tag on each response says
+// the same to the ones that skip robots.txt.
+const robotsTxt = "User-agent: *\nDisallow: /\n"
+
+// newRootHandler routes a request to the gateway's handlers. /managed/* never
+// falls through to the SPA: without managed routing it is a plain 404.
+func newRootHandler(hosted, admin, app, relay http.Handler, mr *managedRoutes) http.Handler {
+	if mr != nil {
+		app, admin = mr.gateApp(app), mr.gateAdmin(admin)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+		p := r.URL.Path
+		switch {
+		case p == "/robots.txt":
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = io.WriteString(w, robotsTxt)
+		case p == "/hosted":
+			hosted.ServeHTTP(w, r)
+		case p == adminPath || p == adminPath+"/":
+			admin.ServeHTTP(w, r)
+		case strings.HasPrefix(p, "/managed/"):
+			if mr == nil {
+				http.NotFound(w, r)
+				return
+			}
+			mr.api.ServeHTTP(w, r)
+		case mr != nil && (p == "/login" || p == "/login/password"):
+			mr.pages.ServeHTTP(w, r)
+		case isProxyPath(p):
+			relay.ServeHTTP(w, r)
+		default:
+			app.ServeHTTP(w, r)
+		}
+	})
 }
 
 // defaultConfig is the built-in baseline: what an unconfigured deployment runs
@@ -74,6 +126,13 @@ func defaultConfig() config {
 		siteSeedFile:    defaultSiteSeedFile,
 		connModes:       connDirect,
 		defaultConn:     connDirect,
+		session:         sessionLimits{idle: 10 * time.Minute, absolute: 30 * time.Minute},
+		login: loginLimits{
+			maxFailures:     5,
+			backoff:         30 * time.Second,
+			maxBackoff:      15 * time.Minute,
+			unauthPerMinute: 60,
+		},
 	}
 }
 
@@ -100,6 +159,8 @@ func loadConfig() (config, error) {
 		siteSeedFile:       envOr("SITE_SEED_FILE", d.siteSeedFile),
 		connModes:          strings.ToLower(envOr("CONN_MODES", d.connModes)),
 		defaultConn:        strings.ToLower(envOr("DEFAULT_CONN", d.defaultConn)),
+		session:            d.session,
+		login:              d.login,
 	}, nil
 }
 
@@ -236,12 +297,12 @@ func serve() {
 	pwa := newPWAHandler(cfg.appDir, logger)
 	rp := newReverseProxy(trustPool, cfg.insecureSkipVerify, logger)
 
-	// Managed (RBAC) routing is compiled in only with `-tags managed`; the
-	// stdlib-only hosted binary links a stub that returns a nil handler. A load
-	// failure is fatal (misconfiguration shouldn't silently fall back to an
-	// unauthenticated app). When disabled or absent, mh is nil and /managed/*
-	// falls through to the SPA.
-	mh, err := newManagedRouting(cfg, logger)
+	// Managed sign-in and the /managed/* API are compiled in only with
+	// `-tags managed`; the stdlib-only hosted binary links a stub that returns
+	// nil. A load failure is fatal (misconfiguration shouldn't silently fall
+	// back to an unauthenticated app). When disabled or absent, mr is nil and
+	// /managed/* is a 404.
+	mr, err := newManagedRouting(cfg, logger)
 	if err != nil {
 		logger.Error("managed store load failed", "err", err)
 		os.Exit(1)
@@ -249,7 +310,7 @@ func serve() {
 
 	// Refuse to start when the advertised connection modes can't be served — a
 	// Managed tab that always fails at login is worse than a clear startup error.
-	if err := validateConnModes(cfg, mh != nil); err != nil {
+	if err := validateConnModes(cfg, mr != nil); err != nil {
 		logger.Error("invalid connection-mode configuration", "err", err)
 		os.Exit(1)
 	}
@@ -257,29 +318,18 @@ func serve() {
 
 	// The admin app edits the managed store, so it only exists where that store
 	// is actually served: hosted, managed, and built with the managed tag.
-	admin := newAdminHandler(cfg.appDir, cfg.hosted && mh != nil, logger)
+	admin := newAdminHandler(cfg.appDir, cfg.hosted && mr != nil, logger)
 	if admin.enabled {
 		logger.Info("administration app enabled", "path", adminPath)
 	}
 
-	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/hosted":
-			hh.ServeHTTP(w, r)
-		case r.URL.Path == adminPath || r.URL.Path == adminPath+"/":
-			admin.ServeHTTP(w, r)
-		case mh != nil && strings.HasPrefix(r.URL.Path, "/managed/"):
-			mh.ServeHTTP(w, r)
-		case isProxyPath(r.URL.Path):
-			rp.ServeHTTP(w, r)
-		default:
-			pwa.ServeHTTP(w, r)
-		}
-	})
+	root := newRootHandler(hh, admin, pwa, rp, mr)
 
-	// Access list inside the access log, so a denial is logged as a 403 like
-	// any other response (the ACL adds its own warn line with the reason).
-	handler := accessLog(clientACL(cfg.access, root, logger), logger)
+	// The client address is resolved once (trusted proxies) for the access
+	// list and the sign-in throttle. The access list sits inside the access
+	// log, so a denial is logged as a 403 like any other response (the ACL
+	// adds its own warn line with the reason).
+	handler := accessLog(withClient(cfg.access.trustedProxies, clientACL(cfg.access, root, logger)), logger)
 
 	srv := &http.Server{
 		Addr:              ":9443",

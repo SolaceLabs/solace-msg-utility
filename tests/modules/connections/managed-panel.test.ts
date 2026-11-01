@@ -8,9 +8,10 @@ import type { AppContext, AppState } from '../../../src/core/types';
  *
  * Installs the REAL managed entry (`module.managed.ts`, the `managed` variant)
  * with its composed `index.managed.html`, against a `/hosted` probe that
- * advertises managed mode, then drives the `#managed-*` DOM end to end: login /
- * provisioned-select / connect / refresh, the mode interlock and
- * `rbac:sign-out-requested` with a live session. The entry's tab bar and its
+ * advertises managed mode, then drives the `#managed-*` DOM end to end: the
+ * gateway session restored at install / provisioned-select / connect /
+ * refresh / sign-out, the mode interlock and `rbac:sign-out-requested` with a
+ * live session. Sign-in itself is the gateway's page (go-web-proxy/pages_test.go). The entry's tab bar and its
  * Direct fallbacks are in tests/modules/connections/module.managed.test.ts.
  *
  * The entry builds TWO factory pairs (Direct first, then Managed — see
@@ -38,7 +39,7 @@ const sempMock = vi.hoisted(() => {
         get disconnect() { return instances.at(-1)!.disconnect; },
     };
 });
-const svcMock = vi.hoisted(() => ({ getConnections: vi.fn(), reload: vi.fn() }));
+const svcMock = vi.hoisted(() => ({ me: vi.fn(), logout: vi.fn() }));
 // Advertise managed mode so the module renders (and instantiates) the Managed tab.
 const hostedMock = vi.hoisted(() => ({
     probeDeployment: vi.fn(async () => ({ hosted: true, conn: { connModes: 'managed', defaultConn: 'managed' } })),
@@ -62,22 +63,22 @@ vi.mock('../../../src/core/hosted', () => ({
     probeDeployment: hostedMock.probeDeployment, setHosted: vi.fn(), isHosted: () => true, buildBrokerUrl: () => '',
 }));
 vi.mock('../../../src/core/encode', () => ({
-    stamp: (u: string) => `tok:${u}`,
     importSeed: vi.fn(async () => ({ k: 'seed' })),
     fromB64: () => new Uint8Array([1]),
     unpack: vi.fn(async (blob: string) => `plain:${blob}`),
     pack: vi.fn(async (v: string) => `V1:${v}`),   // imported by the store; unused here
 }));
 vi.mock('../../../src/core/services/managed-service', () => ({
-    createManagedService: () => ({ getConnections: svcMock.getConnections, reload: svcMock.reload }),
+    createManagedService: () => ({ me: svcMock.me, logout: svcMock.logout }),
 }));
 
 // Import AFTER the mocks are registered.
 import { ConnectionsModule } from '../../../src/modules/connections/module.managed';
 import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
-import { unpack } from '../../../src/core/encode';
+import { importSeed, unpack } from '../../../src/core/encode';
 
 const PROFILE = {
+    username: 'admin',
     admin: true,
     siteSeed: 'c2VlZA==',
     operate: [{ brokers: '*', msgVpns: '*', queues: '*' }],
@@ -118,26 +119,28 @@ function makeCtx(container: HTMLElement): AppContext {
     } as AppContext;
 }
 
-async function setup() {
+const NO_SESSION = { ok: false, status: 401, code: 'unauthenticated' };
+const OK = (profile: unknown = PROFILE) => ({ ok: true, data: profile });
+
+/**
+ * Install with the gateway answering `GET /managed/me` with `me` (default: no
+ * session). `before` runs on the context first, e.g. to subscribe to an event
+ * the install emits.
+ */
+async function setup(me: unknown = NO_SESSION, before?: (ctx: AppContext) => void) {
+    svcMock.me.mockResolvedValue(me);
     const container = loadModuleDOM('connections', 'managed');
     const ctx = makeCtx(container);
+    before?.(ctx);
     await ConnectionsModule.install(ctx);
     return { container, ctx };
 }
 
-async function login(container: HTMLElement, ctx: AppContext, profile: unknown = PROFILE) {
-    svcMock.getConnections.mockResolvedValue(profile);
-    el<HTMLInputElement>(container, '#managed-username').value = 'admin';
-    el<HTMLInputElement>(container, '#managed-password').value = 'pw';
-    el<HTMLButtonElement>(container, '#btn-managed-login').click();
-    // Truthy, not `not.toBeNull()` — the session starts out `undefined`, which
-    // would satisfy a null check on the very first poll and not wait at all.
-    await vi.waitFor(() => expect(ctx.appState.managed).toBeTruthy());
-}
+/** Install with a live gateway session for `profile`: the panel restores it. */
+const signedIn = (profile: unknown = PROFILE, before?: (ctx: AppContext) => void) => setup(OK(profile), before);
 
-/** Login → connect → drive both onConnected hooks so we're fully "connected to vpn1 on b1". */
+/** Signed in → connect → drive both onConnected hooks so we're fully "connected to vpn1 on b1". */
 async function connectToB1Vpn1(container: HTMLElement, ctx: AppContext) {
-    await login(container, ctx);
     el<HTMLButtonElement>(container, '#btn-managed-connect').click();
     await vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalled());
     sempMock.hooks.onConnected({ fetch: vi.fn(), baseUrl: 'base' }, { user: 'mon', pass: 'plain:V1:sempb1' });
@@ -145,9 +148,9 @@ async function connectToB1Vpn1(container: HTMLElement, ctx: AppContext) {
 }
 
 beforeEach(() => {
-    svcMock.getConnections.mockReset();
-    svcMock.reload.mockReset();
-    svcMock.reload.mockResolvedValue(true); // refresh reloads the proxy store; default to success
+    svcMock.me.mockReset();
+    svcMock.logout.mockReset();
+    svcMock.logout.mockResolvedValue({ ok: true });
     // Each install creates a Direct pair then a Managed pair; clear so `.at(-1)`
     // always resolves to THIS test's managed instances.
     solaceMock.instances.length = 0;
@@ -156,92 +159,81 @@ beforeEach(() => {
     (unpack as any).mockImplementation(async (blob: string) => `plain:${blob}`);
 });
 
-describe('connections/managed panel — login', () => {
-    it('shows the login view on install', async () => {
+describe('connections/managed panel — restoring the gateway session', () => {
+    it('without a session shows the sign-in link, quietly', async () => {
         const { container } = await setup();
         expect(hidden(container, '#managed-login-view')).toBe(false);
         expect(hidden(container, '#managed-select-view')).toBe(true);
         expect(hidden(container, '#managed-connected-view')).toBe(true);
+        expect(hidden(container, '#managed-login-error')).toBe(true);
+        const link = el<HTMLAnchorElement>(container, '#btn-managed-login');
+        expect(link.getAttribute('href')).toBe('/login');
+        expect(link.textContent).toBe('Sign in');
         // Gateway advertised managed → the Managed panel is the active tab.
         expect(hidden(container, '#conn-panel-managed')).toBe(false);
     });
 
     // Replaces the former "gateway required" gate: availability is now encoded in
     // tab visibility — a deployment that doesn't advertise managed never renders
-    // the tab, so the panel (and its login form) simply isn't reachable.
+    // the tab, so the panel is not reachable and asks the gateway nothing.
     it('does not offer the Managed tab when the gateway does not advertise managed', async () => {
         hostedMock.probeDeployment.mockResolvedValue({ hosted: false, conn: { connModes: 'direct', defaultConn: 'direct' } });
         const { container } = await setup();
         expect(hidden(container, '#conn-panel-managed')).toBe(true);
         expect(hidden(container, '#conn-tab-managed')).toBe(true);
         expect(hidden(container, '#conn-panel-direct')).toBe(false); // Direct is the only mode
+        expect(svcMock.me).not.toHaveBeenCalled();
     });
 
-    it('rejects empty credentials without calling the backend', async () => {
-        const { container } = await setup();
-        el<HTMLButtonElement>(container, '#btn-managed-login').click();
-        await Promise.resolve();
-        expect(hidden(container, '#managed-login-error')).toBe(false);
-        expect(svcMock.getConnections).not.toHaveBeenCalled();
-    });
-
-    it('logs in: sets the managed session, emits rbac:changed, shows selection', async () => {
-        const { container, ctx } = await setup();
+    it('adopts a live session: sets the managed session, emits rbac:changed, shows selection', async () => {
         const rbac = vi.fn();
-        ctx.eventBus.on('rbac:changed', rbac);
+        const { container, ctx } = await signedIn(PROFILE, c => c.eventBus.on('rbac:changed', rbac));
 
-        await login(container, ctx);
-
-        expect(ctx.appState.managed).toMatchObject({
-            admin: true, username: 'admin', token: 'tok:admin', broker: '',
+        expect(ctx.appState.managed).toEqual({
+            admin: true, username: 'admin', broker: '', vpns: [],
             operate: PROFILE.operate, readOnly: PROFILE.readOnly,
         });
+        expect(ctx.managedStore.isActive()).toBe(true);
         expect(rbac).toHaveBeenCalled();
         expect(hidden(container, '#managed-select-view')).toBe(false);
         expect([...el<HTMLSelectElement>(container, '#managed-broker-select').options].map(o => o.value)).toEqual(['b1', 'b2']);
         expect([...el<HTMLSelectElement>(container, '#managed-vpn-select').options].map(o => o.value)).toEqual(['vpn1', 'vpn2']);
         expect(el<HTMLInputElement>(container, '#managed-broker-host').value).toBe('host1');
         expect(el<HTMLButtonElement>(container, '#btn-managed-connect').disabled).toBe(false);
+        expect(el<HTMLAnchorElement>(container, '#managed-change-password').getAttribute('href')).toBe('/login/password');
     });
 
-    it('shows an error on invalid credentials (proxy 400 → null)', async () => {
-        const { container, ctx } = await setup();
-        svcMock.getConnections.mockResolvedValue(null);
-        el<HTMLInputElement>(container, '#managed-username').value = 'admin';
-        el<HTMLInputElement>(container, '#managed-password').value = 'bad';
-        el<HTMLButtonElement>(container, '#btn-managed-login').click();
-        await vi.waitFor(() => expect(hidden(container, '#managed-login-error')).toBe(false));
-        expect(el(container, '#managed-login-error').textContent).toMatch(/invalid/i);
+    it('a session opens the Managed tab even when Direct is the default', async () => {
+        hostedMock.probeDeployment.mockResolvedValue({ hosted: true, conn: { connModes: 'both', defaultConn: 'direct' } });
+        const { container } = await signedIn();
+        expect(hidden(container, '#conn-panel-managed')).toBe(false);
+        expect(hidden(container, '#conn-panel-direct')).toBe(true);
+    });
+
+    it('points at the password page when the gateway requires a change', async () => {
+        const { container, ctx } = await setup({ ok: false, status: 403, code: 'password_change_required' });
+        const link = el<HTMLAnchorElement>(container, '#btn-managed-login');
+        expect(link.getAttribute('href')).toBe('/login/password');
+        expect(link.textContent).toBe('Change password');
+        expect(el(container, '#managed-login-error').textContent).toBe('You must change your password before you continue.');
         expect(ctx.appState.managed).toBeUndefined();
     });
 
-    it('surfaces a thrown error from the backend', async () => {
-        const { container } = await setup();
-        svcMock.getConnections.mockRejectedValue(new Error('boom'));
-        el<HTMLInputElement>(container, '#managed-username').value = 'admin';
-        el<HTMLInputElement>(container, '#managed-password').value = 'pw';
-        el<HTMLButtonElement>(container, '#btn-managed-login').click();
-        await vi.waitFor(() => expect(el(container, '#managed-login-error').textContent).toBe('boom'));
+    it('shows why when the gateway cannot be reached', async () => {
+        const { container } = await setup({ ok: false, status: 0, code: 'network' });
+        expect(el(container, '#managed-login-error').textContent).toBe('The gateway could not be reached.');
     });
 
-    it('Enter in the password field triggers login', async () => {
-        const { container, ctx } = await setup();
-        svcMock.getConnections.mockResolvedValue(PROFILE);
-        el<HTMLInputElement>(container, '#managed-username').value = 'admin';
-        el<HTMLInputElement>(container, '#managed-password').value = 'pw';
-        el<HTMLInputElement>(container, '#managed-password').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-        await vi.waitFor(() => expect(ctx.appState.managed).not.toBeNull());
-    });
-
-    it('ignores non-Enter keys in the credential fields', async () => {
-        const { container } = await setup();
-        el<HTMLInputElement>(container, '#managed-username').dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }));
-        expect(svcMock.getConnections).not.toHaveBeenCalled();
+    it('surfaces a profile the store cannot adopt, staying signed out', async () => {
+        (importSeed as any).mockRejectedValueOnce(new Error('bad seed'));
+        const { container, ctx } = await signedIn();
+        expect(el(container, '#managed-login-error').textContent).toBe('bad seed');
+        expect(hidden(container, '#managed-login-view')).toBe(false);
+        expect(ctx.appState.managed).toBeUndefined();
     });
 
     it('shows the empty-state when the user has no entitled connections', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx, { ...PROFILE, brokers: [] });
+        const { container } = await signedIn({ ...PROFILE, brokers: [] });
         expect(hidden(container, '#managed-empty-state')).toBe(false);
         expect(hidden(container, '#managed-connect-controls')).toBe(true);
     });
@@ -249,8 +241,7 @@ describe('connections/managed panel — login', () => {
 
 describe('managed-connections — selection', () => {
     it('a broker with no VPNs disables the VPN select and Connect', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+        const { container, ctx } = await signedIn();
         const broker = el<HTMLSelectElement>(container, '#managed-broker-select');
         broker.value = 'b2';
         broker.dispatchEvent(new Event('change'));
@@ -260,8 +251,7 @@ describe('managed-connections — selection', () => {
     });
 
     it('vpn change re-evaluates the Connect button', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+        const { container, ctx } = await signedIn();
         const vpn = el<HTMLSelectElement>(container, '#managed-vpn-select');
         vpn.value = 'vpn2';
         vpn.dispatchEvent(new Event('change'));
@@ -271,10 +261,9 @@ describe('managed-connections — selection', () => {
 
 describe('managed-connections — connect', () => {
     it('unpacks creds and connects SEMP + Solace, then emits the message cap', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         const cap = vi.fn();
         ctx.eventBus.on('config:max-messages-changed', cap);
-        await login(container, ctx);
 
         el<HTMLButtonElement>(container, '#btn-managed-connect').click();
         await vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalled());
@@ -295,8 +284,7 @@ describe('managed-connections — connect', () => {
     // won't fire activation on a disabled button), then clear a select's value
     // directly so doConnect runs and hits the !brokerName / !vpnName guard.
     it('Connect is a no-op when no broker is selected', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+        const { container, ctx } = await signedIn();
         el<HTMLSelectElement>(container, '#managed-broker-select').value = '';
         sempMock.connect.mockClear();
         el<HTMLButtonElement>(container, '#btn-managed-connect').click();
@@ -305,8 +293,7 @@ describe('managed-connections — connect', () => {
     });
 
     it('Connect is a no-op when no VPN is selected', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+        const { container, ctx } = await signedIn();
         el<HTMLSelectElement>(container, '#managed-vpn-select').value = '';
         sempMock.connect.mockClear();
         el<HTMLButtonElement>(container, '#btn-managed-connect').click();
@@ -315,10 +302,9 @@ describe('managed-connections — connect', () => {
     });
 
     it('SEMP onConnected publishes sempCredentials + emits semp:connected', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         const semp = vi.fn();
         ctx.eventBus.on('semp:connected', semp);
-        await login(container, ctx);
         el<HTMLButtonElement>(container, '#btn-managed-connect').click();
         await vi.waitFor(() => expect(sempMock.connect).toHaveBeenCalled());
 
@@ -330,7 +316,7 @@ describe('managed-connections — connect', () => {
     });
 
     it('Solace onConnected publishes state, emits client:connected, shows connected view', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         const client = vi.fn();
         ctx.eventBus.on('client:connected', client);
         await connectToB1Vpn1(container, ctx);
@@ -343,8 +329,7 @@ describe('managed-connections — connect', () => {
     });
 
     it('surfaces an unpack failure as a connect error', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+        const { container, ctx } = await signedIn();
         (unpack as any).mockRejectedValueOnce(new Error('bad seed'));
         el<HTMLButtonElement>(container, '#btn-managed-connect').click();
         await vi.waitFor(() => expect(el(container, '#managed-connect-error').textContent).toBe('bad seed'));
@@ -353,7 +338,7 @@ describe('managed-connections — connect', () => {
 
 describe('managed-connections — lifecycle hooks', () => {
     it('Solace onDisconnected clears state and returns to selection', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         solaceMock.hooks.onDisconnected();
         expect(ctx.appState.isConnected).toBe(false);
@@ -362,8 +347,7 @@ describe('managed-connections — lifecycle hooks', () => {
     });
 
     it('Solace onConnectFailed / onError surface to the connect error', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+        const { container, ctx } = await signedIn();
         solaceMock.hooks.onConnectFailed({ infoStr: 'refused' });
         expect(el(container, '#managed-connect-error').textContent).toMatch(/refused/);
         solaceMock.hooks.onError(new Error('tls'));
@@ -371,8 +355,7 @@ describe('managed-connections — lifecycle hooks', () => {
     });
 
     it('SEMP onDisconnected / onAuthFailed / onError', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+        const { container, ctx } = await signedIn();
         // Connect first so lastSempAttempt is set before onConnected fires
         // (the hook only fires after connectSemp in the real flow).
         el<HTMLButtonElement>(container, '#btn-managed-connect').click();
@@ -390,32 +373,33 @@ describe('managed-connections — lifecycle hooks', () => {
 
 describe('managed-connections — disconnect / logout', () => {
     it('Disconnect button tears down both connections', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         el<HTMLButtonElement>(container, '#btn-managed-disconnect').click();
         expect(solaceMock.disconnect).toHaveBeenCalled();
         expect(sempMock.disconnect).toHaveBeenCalled();
     });
 
-    it('Logout clears the session, emits rbac:changed, returns to login', async () => {
-        const { container, ctx } = await setup();
+    it('Sign out ends the gateway session, clears the local one, emits rbac:changed, returns to sign-in', async () => {
+        const { container, ctx } = await signedIn();
         const rbac = vi.fn();
-        await login(container, ctx);
         ctx.eventBus.on('rbac:changed', rbac);
         el<HTMLButtonElement>(container, '#btn-managed-logout').click();
+        expect(svcMock.logout).toHaveBeenCalledTimes(1);
         expect(ctx.appState.managed).toBeNull();
+        expect(ctx.managedStore.isActive()).toBe(false);
         expect(rbac).toHaveBeenCalled();
         expect(hidden(container, '#managed-login-view')).toBe(false);
-        expect(el<HTMLInputElement>(container, '#managed-username').value).toBe('');
+        expect(hidden(container, '#managed-login-error')).toBe(true);
         expect(solaceMock.disconnect).toHaveBeenCalled();
     });
 });
 
-// user-management asks for this after the admin changes their own password or
-// deletes their own account; the managed entry routes it to the panel's logout.
+// user-management asks for this after a change ended the admin's own session;
+// the managed entry routes it to the panel's sign-out.
 describe('connections/managed panel — rbac:sign-out-requested', () => {
     it('ends the managed session and drops its broker connection', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         const rbac = vi.fn();
         ctx.eventBus.on('rbac:changed', rbac);
@@ -428,7 +412,7 @@ describe('connections/managed panel — rbac:sign-out-requested', () => {
         expect(ctx.managedStore.isActive()).toBe(false);
         expect(rbac).toHaveBeenCalled();
         expect(hidden(container, '#managed-login-view')).toBe(false);
-        expect(el<HTMLInputElement>(container, '#managed-username').value).toBe('');
+        expect(svcMock.logout).toHaveBeenCalledTimes(1);
     });
 
     it('leaves a Direct-only session alone', async () => {
@@ -452,74 +436,62 @@ describe('connections/managed panel — rbac:sign-out-requested', () => {
 });
 
 describe('managed-connections — refresh entitlements', () => {
-    it('re-fetches and updates the session', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+    it('re-reads the session and updates it', async () => {
+        const { container, ctx } = await signedIn();
         const rbac = vi.fn();
         ctx.eventBus.on('rbac:changed', rbac);
-        svcMock.getConnections.mockResolvedValue({ ...PROFILE, admin: false, operate: [], readOnly: [{ brokers: '*', msgVpns: '*', queues: '*' }] });
-        // Clear call history (getConnections already ran once during login) so the
-        // order check below reflects only the refresh's calls. mockClear keeps the
-        // mockResolvedValue set above — it resets call records, not the impl.
-        svcMock.reload.mockClear();
-        svcMock.getConnections.mockClear();
+        svcMock.me.mockResolvedValue(OK({ ...PROFILE, admin: false, operate: [], readOnly: [{ brokers: '*', msgVpns: '*', queues: '*' }] }));
         el<HTMLButtonElement>(container, '#btn-managed-refresh').click();
         await vi.waitFor(() => expect(ctx.appState.managed!.admin).toBe(false));
         expect(ctx.appState.managed!.readOnly.length).toBe(1);
         expect(rbac).toHaveBeenCalled();
-        // Refresh first reloads the proxy store from disk, THEN re-fetches —
-        // fetch-before-reload would return stale data, so guard the order.
-        expect(svcMock.reload.mock.invocationCallOrder[0])
-            .toBeLessThan(svcMock.getConnections.mock.invocationCallOrder[0]);
+        expect(hidden(container, '#managed-connect-error')).toBe(true);
     });
 
-    it('shows a warning but still updates when the proxy reload fails', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
-        svcMock.reload.mockResolvedValue(false); // server-side reload failed
-        svcMock.getConnections.mockResolvedValue({ ...PROFILE, admin: false });
-        el<HTMLButtonElement>(container, '#btn-managed-refresh').click();
-        await vi.waitFor(() => expect(el(container, '#managed-connect-error').textContent).toMatch(/reload failed/i));
-        // The in-memory entitlements were still applied (showing last-known data).
-        expect(ctx.appState.managed!.admin).toBe(false);
-    });
-
-    it('does nothing when not logged in', async () => {
-        const { container } = await setup();
-        el<HTMLButtonElement>(container, '#btn-managed-refresh').click();
-        await Promise.resolve();
-        expect(svcMock.reload).not.toHaveBeenCalled();
-        expect(svcMock.getConnections).not.toHaveBeenCalled();
-    });
-
-    it('logs the user out if the session is no longer valid', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
-        svcMock.getConnections.mockResolvedValue(null);
+    it('drops the session when the gateway has ended it', async () => {
+        const { container, ctx } = await signedIn();
+        svcMock.me.mockResolvedValue(NO_SESSION);
         el<HTMLButtonElement>(container, '#btn-managed-refresh').click();
         await vi.waitFor(() => expect(ctx.appState.managed).toBeNull());
+        expect(ctx.managedStore.isActive()).toBe(false);
         expect(hidden(container, '#managed-login-view')).toBe(false);
+        expect(el(container, '#managed-login-error').textContent).toBe('Your session has ended. Sign in again.');
+        expect(el<HTMLAnchorElement>(container, '#btn-managed-login').getAttribute('href')).toBe('/login');
     });
 
-    it('surfaces a refresh error, stringifying non-Error rejections', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
-        // Reject with a non-Error to exercise errMessage's String(e) branch.
-        svcMock.getConnections.mockRejectedValue('net-str');
+    it('drops the session and points at the password page when a change is now required', async () => {
+        const { container, ctx } = await signedIn();
+        svcMock.me.mockResolvedValue({ ok: false, status: 403, code: 'password_change_required' });
         el<HTMLButtonElement>(container, '#btn-managed-refresh').click();
-        await vi.waitFor(() => expect(el(container, '#managed-connect-error').textContent).toBe('net-str'));
+        await vi.waitFor(() => expect(ctx.appState.managed).toBeNull());
+        expect(el<HTMLAnchorElement>(container, '#btn-managed-login').getAttribute('href')).toBe('/login/password');
+    });
+
+    it('keeps the last-known connections when the gateway fails otherwise', async () => {
+        const { container, ctx } = await signedIn();
+        svcMock.me.mockResolvedValue({ ok: false, status: 0, code: 'network' });
+        el<HTMLButtonElement>(container, '#btn-managed-refresh').click();
+        await vi.waitFor(() => expect(el(container, '#managed-connect-error').textContent).toBe('The gateway could not be reached.'));
+        expect(ctx.appState.managed!.username).toBe('admin');
+        expect(hidden(container, '#managed-select-view')).toBe(false);
+    });
+
+    it('surfaces a refreshed profile the store cannot adopt', async () => {
+        const { container } = await signedIn();
+        (importSeed as any).mockRejectedValueOnce('seed-str'); // non-Error → errMessage's String(e) branch
+        el<HTMLButtonElement>(container, '#btn-managed-refresh').click();
+        await vi.waitFor(() => expect(el(container, '#managed-connect-error').textContent).toBe('seed-str'));
     });
 });
 
 describe('managed-connections — provisioned VPN publishing', () => {
-    it('login alone leaves the provisioned VPN set empty (not connected yet)', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+    it('signing in alone leaves the provisioned VPN set empty (not connected yet)', async () => {
+        const { container, ctx } = await signedIn();
         expect(ctx.appState.managed!.vpns).toEqual([]);
     });
 
     it('connect publishes the connected broker\'s provisioned VPNs', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         // b1 provisions vpn1 + vpn2 in PROFILE — that's what the picker should list,
         // regardless of the broad `msgVpns: '*'` entitlement glob.
@@ -527,7 +499,7 @@ describe('managed-connections — provisioned VPN publishing', () => {
     });
 
     it('refresh recomputes the provisioned VPNs for the connected broker', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         expect(ctx.appState.managed!.vpns).toEqual(['vpn1', 'vpn2']);
 
@@ -539,16 +511,16 @@ describe('managed-connections — provisioned VPN publishing', () => {
                 PROFILE.brokers[1],
             ],
         };
-        svcMock.getConnections.mockResolvedValue(trimmed);
+        svcMock.me.mockResolvedValue(OK(trimmed));
         el<HTMLButtonElement>(container, '#btn-managed-refresh').click();
         await vi.waitFor(() => expect(ctx.appState.managed!.vpns).toEqual(['vpn1']));
     });
 
     it('refresh empties the provisioned VPNs when the connected broker is no longer provisioned', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         const noB1 = { ...PROFILE, brokers: [PROFILE.brokers[1]] }; // b1 dropped entirely
-        svcMock.getConnections.mockResolvedValue(noB1);
+        svcMock.me.mockResolvedValue(OK(noB1));
         el<HTMLButtonElement>(container, '#btn-managed-refresh').click();
         await vi.waitFor(() => expect(ctx.appState.managed!.vpns).toEqual([]));
     });
@@ -556,8 +528,7 @@ describe('managed-connections — provisioned VPN publishing', () => {
 
 describe('managed-connections — defensive paths', () => {
     it('Solace onDisconnected after logout leaves the login view (no profile)', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+        const { container, ctx } = await signedIn();
         el<HTMLButtonElement>(container, '#btn-managed-logout').click();
         // A late SDK disconnect callback with the session already torn down.
         solaceMock.hooks.onDisconnected();
@@ -567,7 +538,7 @@ describe('managed-connections — defensive paths', () => {
     });
 
     it('gives up the VPN switch when the reconnect itself disconnects', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         (globalThis.confirm as any).mockReturnValue(true);
         const browse = vi.fn();
@@ -583,8 +554,7 @@ describe('managed-connections — defensive paths', () => {
 
 describe('managed-connections — connection:edit-requested', () => {
     it('navigates to selection when logged in', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+        const { container, ctx } = await signedIn();
         ctx.eventBus.emit('connection:edit-requested');
         expect(ctx.loadSelf).toHaveBeenCalled();
         expect(hidden(container, '#managed-select-view')).toBe(false);
@@ -613,8 +583,7 @@ describe('managed-connections — createQueueBrowser wrap', () => {
 
     // Connect, then deliver a session that exposes createQueueBrowser so the wrap installs.
     async function connectWithSession(session: any, profile: unknown = PROFILE) {
-        const { container, ctx } = await setup();
-        await login(container, ctx, profile);
+        const { container, ctx } = await signedIn(profile);
         el<HTMLButtonElement>(container, '#btn-managed-connect').click();
         await vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalled());
         solaceMock.hooks.onConnected(session, 'vpn1'); // installs the wrap on `session`
@@ -685,8 +654,7 @@ describe('managed-connections — createQueueBrowser wrap', () => {
 
 describe('managed-connections — connection:check-connection', () => {
     it('navigates to selection when not connected', async () => {
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+        const { container, ctx } = await signedIn();
         ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn1', queue: 'q1' });
         expect(ctx.loadSelf).toHaveBeenCalled();
         expect(hidden(container, '#managed-select-view')).toBe(false);
@@ -700,7 +668,7 @@ describe('managed-connections — connection:check-connection', () => {
     });
 
     it('finishes immediately when already on the target VPN (browse)', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         const browse = vi.fn();
         ctx.eventBus.on('browser:browse-queue', browse);
@@ -709,7 +677,7 @@ describe('managed-connections — connection:check-connection', () => {
     });
 
     it('routes to copy:vpn-switched when returnTo is queue-copy', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         const copy = vi.fn();
         ctx.eventBus.on('copy:vpn-switched', copy);
@@ -718,7 +686,7 @@ describe('managed-connections — connection:check-connection', () => {
     });
 
     it('switches VPN: disconnect → reconnect → finish', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         const browse = vi.fn();
         ctx.eventBus.on('browser:browse-queue', browse);
@@ -738,7 +706,7 @@ describe('managed-connections — connection:check-connection', () => {
     });
 
     it('does not switch when the user cancels the confirm', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         (globalThis.confirm as any).mockReturnValue(false);
         solaceMock.disconnect.mockClear();
@@ -747,7 +715,7 @@ describe('managed-connections — connection:check-connection', () => {
     });
 
     it('ignores a duplicate request while a switch is in progress', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         (globalThis.confirm as any).mockReturnValue(true);
         ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
@@ -758,7 +726,7 @@ describe('managed-connections — connection:check-connection', () => {
     });
 
     it('errors when the target VPN is not on the connected broker', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         (globalThis.confirm as any).mockReturnValue(true);
         solaceMock.connect.mockClear();
@@ -769,7 +737,7 @@ describe('managed-connections — connection:check-connection', () => {
     });
 
     it('clears the in-progress flag if the reconnect never completes (30s timeout)', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         (globalThis.confirm as any).mockReturnValue(true);
         vi.useFakeTimers();
@@ -788,7 +756,7 @@ describe('managed-connections — connection:check-connection', () => {
     });
 
     it('aborts the switch if the disconnect never arrives (10s timeout)', async () => {
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         (globalThis.confirm as any).mockReturnValue(true);
         vi.useFakeTimers();
@@ -817,19 +785,21 @@ describe('connections/managed panel — mode interlock + tab activation', () => 
     const directSolace = () => solaceMock.instances[0];
     const directSemp = () => sempMock.instances[0];
 
-    it('re-shows the login / select / connected view as the Managed tab is activated', async () => {
+    it('re-shows the sign-in view as the Managed tab is activated without a session', async () => {
         bothTabs();
-        const { container, ctx } = await setup();
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#conn-tab-managed').click();
+        expect(hidden(container, '#managed-login-view')).toBe(false);
+    });
+
+    it('re-shows the select / connected view as the Managed tab is activated', async () => {
+        bothTabs();
+        const { container } = await signedIn();
         const managedTab = el<HTMLButtonElement>(container, '#conn-tab-managed');
         const directTab = el<HTMLButtonElement>(container, '#conn-tab-direct');
 
-        // Not signed in → login view.
-        managedTab.click();
-        expect(hidden(container, '#managed-login-view')).toBe(false);
-
         // Signed in, not connected → selection view.
         directTab.click();
-        await login(container, ctx);
         managedTab.click();
         expect(hidden(container, '#managed-select-view')).toBe(false);
 
@@ -845,12 +815,11 @@ describe('connections/managed panel — mode interlock + tab activation', () => 
 
     it('connecting via Managed tears down a live Direct connection', async () => {
         bothTabs();
-        const { container, ctx } = await setup();
+        const { container, ctx } = await signedIn();
         // Pretend the Direct tab already holds both connections.
         ctx.appState.isConnected = true;
         ctx.appState.isSempConnected = true;
 
-        await login(container, ctx);
         el<HTMLButtonElement>(container, '#btn-managed-connect').click();
 
         await vi.waitFor(() => expect(directSolace().disconnect).toHaveBeenCalled());
@@ -859,8 +828,7 @@ describe('connections/managed panel — mode interlock + tab activation', () => 
 
     it('connecting via Direct clears the managed session so RBAC cannot leak onto it', async () => {
         bothTabs();
-        const { container, ctx } = await setup();
-        await login(container, ctx);
+        const { container, ctx } = await signedIn();
         expect(ctx.appState.managed).not.toBeNull();
 
         // Fill the minimum valid Direct form and connect.

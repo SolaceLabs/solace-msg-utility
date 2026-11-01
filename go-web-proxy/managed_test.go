@@ -4,409 +4,350 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func newTestHandler(t *testing.T) *managedHandler {
-	t.Helper()
-	dir := t.TempDir()
-	usersPath := filepath.Join(dir, "users.yaml")
-	connsPath := filepath.Join(dir, "conns.yaml")
-	writeFile(t, usersPath, usersYAML)
-	writeFile(t, connsPath, connsYAML)
-	s, err := loadStore(usersPath, connsPath, filepath.Join(dir, "s.seed"), quietLogger())
-	if err != nil {
-		t.Fatalf("loadStore: %v", err)
-	}
-	return newManagedHandler(s, quietLogger())
+// managedEnv is the managed gateway as serve() mounts it, over the store
+// fixtures (admin + viewer, brokers b1, b2), with a fake clock. The hosted,
+// admin, app and relay handlers are stubs that answer with their name.
+type managedEnv struct {
+	f      storeFixture
+	clock  *fakeClock
+	log    *strings.Builder
+	routes *managedRoutes
+	api    *managedHandler
+	pages  *authPages
+	root   http.Handler
 }
 
-func post(h *managedHandler, path string, body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+func named(name string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, name) })
+}
+
+func newManagedEnv(t *testing.T, mutate func(*config)) *managedEnv {
+	t.Helper()
+	f := newStoreFixture(t)
+	cfg := defaultConfig()
+	cfg.hosted, cfg.managed, cfg.connModes = true, true, connBoth
+	cfg.usersFile, cfg.connectionsFile, cfg.siteSeedFile = f.usersPath, f.connsPath, f.seedPath
+	cfg.login.unauthPerMinute = 1000
+	if mutate != nil {
+		mutate(&cfg)
+	}
+	clock := newFakeClock()
+	log := &strings.Builder{}
+	routes, err := buildManagedRoutes(cfg, f.h, noEnv, clock.now, newCapturingLogger(log))
+	if err != nil {
+		t.Fatalf("buildManagedRoutes: %v", err)
+	}
+	return &managedEnv{
+		f: f, clock: clock, log: log, routes: routes,
+		api:   routes.api.(*managedHandler),
+		pages: routes.pages.(*authPages),
+		root:  withClient(nil, newRootHandler(named("hosted"), named("admin"), named("app"), named("relay"), routes)),
+	}
+}
+
+// cookie signs user in directly (the sign-in form has its own tests).
+func (e *managedEnv) cookie(user string, mustChange bool) *http.Cookie {
+	return &http.Cookie{Name: sessionCookie, Value: e.api.sessions.create(user, mustChange)}
+}
+
+func (e *managedEnv) do(method, path, body string, c *http.Cookie, headers ...string) *httptest.ResponseRecorder {
+	var r io.Reader
+	if body != "" {
+		r = strings.NewReader(body)
+	}
+	req := httptest.NewRequest(method, "https://gw.example"+path, r)
+	req.RemoteAddr = "192.0.2.10:5000"
+	if c != nil {
+		req.AddCookie(c)
+	}
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	e.root.ServeHTTP(rec, req)
 	return rec
 }
 
-func TestManaged_GetConnections_OK(t *testing.T) {
-	h := newTestHandler(t)
-	body, _ := json.Marshal(map[string]string{"username": "admin", "token": "tok-admin"})
-	rec := post(h, "/managed/getConnections", string(body))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", rec.Code)
+func errorCode(t *testing.T, rec *httptest.ResponseRecorder) apiError {
+	t.Helper()
+	var e apiError
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatalf("want a JSON error body, got %q", rec.Body.String())
 	}
-	var prof profileResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &prof); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !prof.Admin || len(prof.Brokers) != 2 {
-		t.Errorf("unexpected profile: admin=%v brokers=%d", prof.Admin, len(prof.Brokers))
-	}
-	if prof.SiteSeed == "" {
-		t.Error("response should carry the siteSeed")
-	}
+	return e
 }
 
-func TestManaged_GetConnections_BadCredsReturns400(t *testing.T) {
-	h := newTestHandler(t)
-	body, _ := json.Marshal(map[string]string{"username": "admin", "token": "wrong"})
-	rec := post(h, "/managed/getConnections", string(body))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("want 400, got %d", rec.Code)
+func expect(t *testing.T, rec *httptest.ResponseRecorder, status int, code string) {
+	t.Helper()
+	if rec.Code != status {
+		t.Fatalf("status: want %d, got %d (%s)", status, rec.Code, rec.Body.String())
 	}
-}
-
-func TestManaged_GetConnections_BadBodyReturns400(t *testing.T) {
-	h := newTestHandler(t)
-	rec := post(h, "/managed/getConnections", "not json")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("want 400, got %d", rec.Code)
-	}
-}
-
-func TestManaged_GetConnections_MethodNotAllowed(t *testing.T) {
-	h := newTestHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/managed/getConnections", nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("want 405, got %d", rec.Code)
-	}
-}
-
-func TestManaged_Reload_OK_AppliesDiskEditsForAnyUser(t *testing.T) {
-	h := newTestHandler(t)
-	// Out-of-band edit: add broker b3 on disk.
-	writeFile(t, h.store.connsPath, connsYAML+"  - broker: b3\n    hostname: host3\n    semp:\n      port: 1943\n      username: mon\n      password: PKD:semp-b3\n    client:\n      port: 1443\n      msgVpns:\n        - name: v3\n          username: u3\n          password: PKD:cli-b3v3\n")
-
-	// Reload as a NON-admin user (viewer) — any logged-in user may trigger it.
-	rec := post(h, "/managed/reload", `{"username":"viewer","token":"tok-viewer"}`)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("reload: want 204, got %d", rec.Code)
-	}
-
-	// The disk edit is now visible: admin sees the new broker.
-	rec2 := post(h, "/managed/getConnections", `{"username":"admin","token":"tok-admin"}`)
-	var prof profileResponse
-	if err := json.Unmarshal(rec2.Body.Bytes(), &prof); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(prof.Brokers) != 3 {
-		t.Errorf("reload should have added b3; want 3 brokers, got %d", len(prof.Brokers))
-	}
-}
-
-func TestManaged_Reload_BadCredsReturns400(t *testing.T) {
-	h := newTestHandler(t)
-	rec := post(h, "/managed/reload", `{"username":"viewer","token":"wrong"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("want 400, got %d", rec.Code)
-	}
-}
-
-func TestManaged_Reload_BadBodyReturns400(t *testing.T) {
-	h := newTestHandler(t)
-	if rec := post(h, "/managed/reload", "not json"); rec.Code != http.StatusBadRequest {
-		t.Fatalf("want 400, got %d", rec.Code)
-	}
-}
-
-func TestManaged_Reload_MethodNotAllowed(t *testing.T) {
-	h := newTestHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/managed/reload", nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("want 405, got %d", rec.Code)
-	}
-}
-
-func TestManaged_Reload_ReadErrorReturns500(t *testing.T) {
-	h := newTestHandler(t)
-	writeFile(t, h.store.usersPath, "msg-utility-users:\n  - [malformed") // unparseable
-	rec := post(h, "/managed/reload", `{"username":"admin","token":"tok-admin"}`)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("want 500, got %d", rec.Code)
-	}
-}
-
-func TestManaged_UnknownPathReturns404(t *testing.T) {
-	h := newTestHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/managed/nope", nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("want 404, got %d", rec.Code)
-	}
-}
-
-// ----- admin CRUD endpoints --------------------------------------------------
-
-var crudPaths = []string{
-	"/managed/listUsers", "/managed/saveUser", "/managed/deleteUser",
-	"/managed/listConnections", "/managed/saveConnection", "/managed/deleteConnection",
-}
-
-func TestManaged_CRUD_MethodNotAllowed(t *testing.T) {
-	h := newTestHandler(t)
-	for _, p := range crudPaths {
-		req := httptest.NewRequest(http.MethodGet, p, nil)
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		if rec.Code != http.StatusMethodNotAllowed {
-			t.Errorf("%s GET: want 405, got %d", p, rec.Code)
+	if code != "" {
+		if got := errorCode(t, rec).Error; got != code {
+			t.Fatalf("error code: want %q, got %q", code, got)
 		}
 	}
 }
 
-func TestManaged_CRUD_BadBodyReturns400(t *testing.T) {
-	h := newTestHandler(t)
-	for _, p := range crudPaths {
-		rec := post(h, p, "not json")
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("%s bad body: want 400, got %d", p, rec.Code)
-		}
-	}
-}
+// ----- the gate ------------------------------------------------------------------
 
-func TestManaged_CRUD_NonAdminRejected(t *testing.T) {
-	h := newTestHandler(t)
-	// viewer is a valid, authenticated, NON-admin user — every CRUD endpoint
-	// must reject it with the same opaque 400.
-	bodies := map[string]string{
-		"/managed/listUsers":        `{"username":"viewer","token":"tok-viewer"}`,
-		"/managed/saveUser":         `{"username":"viewer","token":"tok-viewer","user":{"username":"x","password":"p"}}`,
-		"/managed/deleteUser":       `{"username":"viewer","token":"tok-viewer","target":"x"}`,
-		"/managed/listConnections":  `{"username":"viewer","token":"tok-viewer"}`,
-		"/managed/saveConnection":   `{"username":"viewer","token":"tok-viewer","connection":{"broker":"x"}}`,
-		"/managed/deleteConnection": `{"username":"viewer","token":"tok-viewer","target":"x"}`,
-	}
-	for p, b := range bodies {
-		rec := post(h, p, b)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("%s non-admin: want 400, got %d", p, rec.Code)
-		}
-	}
-}
-
-func TestManaged_ListUsers_OK_NoPasswordLeak(t *testing.T) {
-	h := newTestHandler(t)
-	rec := post(h, "/managed/listUsers", `{"username":"admin","token":"tok-admin"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", rec.Code)
-	}
-	var resp struct {
-		Users []userJSON `json:"users"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(resp.Users) != 2 {
-		t.Fatalf("want 2 users, got %d", len(resp.Users))
-	}
-	for _, u := range resp.Users {
-		if u.Password != "" {
-			t.Errorf("listUsers must not leak the token for %s, got %q", u.Username, u.Password)
-		}
-	}
-}
-
-func TestManaged_SaveUser_CreateThenAuthsAsAdmin(t *testing.T) {
-	h := newTestHandler(t)
-	body, _ := json.Marshal(map[string]any{
-		"username": "admin", "token": "tok-admin",
-		"user": map[string]any{
-			"username": "carol", "password": "S1:carol", "admin": true,
-			"operate": []map[string]string{{"brokers": "*", "msgVpns": "*", "queues": "*"}},
-		},
-	})
-	rec := post(h, "/managed/saveUser", string(body))
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("want 204, got %d", rec.Code)
-	}
-	// carol is now an admin and can drive an admin endpoint.
-	rec2 := post(h, "/managed/listUsers", `{"username":"carol","token":"S1:carol"}`)
-	if rec2.Code != http.StatusOK {
-		t.Errorf("new admin carol should list users, got %d", rec2.Code)
-	}
-}
-
-func TestManaged_SaveUser_MissingUsername400(t *testing.T) {
-	h := newTestHandler(t)
-	body, _ := json.Marshal(map[string]any{
-		"username": "admin", "token": "tok-admin",
-		"user": map[string]any{"username": "", "password": "S1:x"},
-	})
-	rec := post(h, "/managed/saveUser", string(body))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("want 400, got %d", rec.Code)
-	}
-}
-
-func TestManaged_SaveUser_PersistError500(t *testing.T) {
-	h := newTestHandler(t)
-	dir := t.TempDir()
-	blocker := filepath.Join(dir, "blocker")
-	writeFile(t, blocker, "x")
-	h.store.usersPath = filepath.Join(blocker, "users.yaml") // parent is a file → write fails
-	body, _ := json.Marshal(map[string]any{
-		"username": "admin", "token": "tok-admin",
-		"user": map[string]any{"username": "bob", "password": "S1:bob"},
-	})
-	rec := post(h, "/managed/saveUser", string(body))
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("want 500, got %d", rec.Code)
-	}
-}
-
-func TestManaged_SaveUser_BlankNewPassword400(t *testing.T) {
-	h := newTestHandler(t)
-	body, _ := json.Marshal(map[string]any{
-		"username": "admin", "token": "tok-admin",
-		"user": map[string]any{"username": "ghost", "password": "", "admin": true},
-	})
-	rec := post(h, "/managed/saveUser", string(body))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("blank-password new user: want 400, got %d", rec.Code)
-	}
-	// no empty-token admin must have been minted
-	if rec2 := post(h, "/managed/listUsers", `{"username":"ghost","token":""}`); rec2.Code == http.StatusOK {
-		t.Error("an empty-token admin account must not exist")
-	}
-}
-
-func TestManaged_DeleteUser_LastAdminReturns409(t *testing.T) {
-	h := newTestHandler(t)
-	rec := post(h, "/managed/deleteUser", `{"username":"admin","token":"tok-admin","target":"admin"}`)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("deleting the last admin: want 409, got %d", rec.Code)
-	}
-}
-
-func TestConnToOutput_EmptyVpnsSerializesAsArray(t *testing.T) {
-	out := connToOutput(connRec{Broker: "b", Hostname: "h"})
-	b, err := json.Marshal(out)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !strings.Contains(string(b), `"msgVpns":[]`) {
-		t.Errorf("a VPN-less connection must serialize msgVpns as [], got %s", b)
-	}
-}
-
-func TestManaged_DeleteUser_PersistError500(t *testing.T) {
-	h := newTestHandler(t)
-	dir := t.TempDir()
-	blocker := filepath.Join(dir, "blocker")
-	writeFile(t, blocker, "x")
-	h.store.usersPath = filepath.Join(blocker, "users.yaml") // parent is a file → write fails
-	rec := post(h, "/managed/deleteUser", `{"username":"admin","token":"tok-admin","target":"viewer"}`)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("want 500, got %d", rec.Code)
-	}
-}
-
-func TestManaged_DeleteUser_OKAndNotFound(t *testing.T) {
-	h := newTestHandler(t)
-	rec := post(h, "/managed/deleteUser", `{"username":"admin","token":"tok-admin","target":"viewer"}`)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("want 204, got %d", rec.Code)
-	}
-	rec2 := post(h, "/managed/deleteUser", `{"username":"admin","token":"tok-admin","target":"ghost"}`)
-	if rec2.Code != http.StatusNotFound {
-		t.Errorf("deleting unknown user: want 404, got %d", rec2.Code)
-	}
-}
-
-func TestManaged_ListConnections_OK_NoPasswordLeak(t *testing.T) {
-	h := newTestHandler(t)
-	rec := post(h, "/managed/listConnections", `{"username":"admin","token":"tok-admin"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", rec.Code)
-	}
-	var resp struct {
-		Connections []connJSON `json:"connections"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(resp.Connections) != 2 {
-		t.Fatalf("want 2 connections, got %d", len(resp.Connections))
-	}
-	for _, c := range resp.Connections {
-		if c.Semp.Pass != "" {
-			t.Errorf("semp pass leaked for %s: %q", c.Broker, c.Semp.Pass)
-		}
-		for _, v := range c.Client.MsgVpns {
-			if v.Pass != "" {
-				t.Errorf("vpn pass leaked for %s/%s: %q", c.Broker, v.Name, v.Pass)
+// Without a session every /managed/* request gets byte-for-byte the same 401:
+// known, unknown, admin-only and state-changing paths alike.
+func TestManagedAPI_UnauthenticatedIsUniform(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	forged := &http.Cookie{Name: sessionCookie, Value: "forged"}
+	var first string
+	for _, c := range []*http.Cookie{nil, forged} {
+		for _, rq := range [][2]string{
+			{"GET", "/managed/me"}, {"GET", "/managed/users"}, {"POST", "/managed/logout"},
+			{"GET", "/managed/nope"}, {"PUT", "/managed/users/x"}, {"DELETE", "/managed/connections/b1"},
+		} {
+			rec := e.do(rq[0], rq[1], `{"a":1}`, c)
+			expect(t, rec, http.StatusUnauthorized, "unauthenticated")
+			if first == "" {
+				first = rec.Body.String()
+			}
+			if rec.Body.String() != first || rec.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("%s %s: response differs: %q", rq[0], rq[1], rec.Body.String())
 			}
 		}
 	}
 }
 
-func TestManaged_SaveConnection_CreateAndMissingBroker(t *testing.T) {
-	h := newTestHandler(t)
-	body, _ := json.Marshal(map[string]any{
-		"username": "admin", "token": "tok-admin",
-		"connection": map[string]any{
-			"broker": "b3", "hostname": "host3",
-			"semp":   map[string]string{"port": "1943", "user": "mon", "pass": "V1:s"},
-			"client": map[string]any{"port": "1443", "msgVpns": []map[string]string{{"name": "v1", "user": "u", "pass": "V1:c"}}},
-		},
-	})
-	if rec := post(h, "/managed/saveConnection", string(body)); rec.Code != http.StatusNoContent {
-		t.Fatalf("create: want 204, got %d", rec.Code)
+func TestManagedAPI_UnauthenticatedIsThrottled(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.login.unauthPerMinute = 2 })
+	e.do("GET", "/managed/me", "", nil)
+	e.do("GET", "/managed/me", "", nil)
+	rec := e.do("GET", "/managed/me", "", nil)
+	expect(t, rec, http.StatusTooManyRequests, "rate_limited")
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("429 must carry Retry-After")
 	}
-	body2, _ := json.Marshal(map[string]any{
-		"username": "admin", "token": "tok-admin",
-		"connection": map[string]any{"broker": ""},
-	})
-	if rec := post(h, "/managed/saveConnection", string(body2)); rec.Code != http.StatusBadRequest {
-		t.Errorf("missing broker: want 400, got %d", rec.Code)
+	expect(t, e.do("GET", "/managed/me", "", e.cookie("admin", false)), http.StatusOK, "")
+}
+
+func TestManagedAPI_MustChangeAllowsOnlyLogout(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", true)
+	expect(t, e.do("GET", "/managed/me", "", c), http.StatusForbidden, "password_change_required")
+	expect(t, e.do("GET", "/managed/users", "", c), http.StatusForbidden, "password_change_required")
+	expect(t, e.do("POST", "/managed/logout", "", c), http.StatusNoContent, "")
+}
+
+func TestManagedAPI_CrossOriginStateChangeRefused(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	expect(t, e.do("DELETE", "/managed/users/viewer", "", c, "Sec-Fetch-Site", "cross-site"), http.StatusForbidden, "cross_origin")
+	expect(t, e.do("POST", "/managed/logout", "", c, "Origin", "https://evil.example"), http.StatusForbidden, "cross_origin")
+	expect(t, e.do("GET", "/managed/me", "", c, "Sec-Fetch-Site", "cross-site"), http.StatusOK, "")
+	expect(t, e.do("DELETE", "/managed/users/viewer", "", c, "Sec-Fetch-Site", "same-origin"), http.StatusNoContent, "")
+}
+
+func TestManagedAPI_UnknownPathOrMethodIs404(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("viewer", false)
+	expect(t, e.do("GET", "/managed/nope", "", c), http.StatusNotFound, "not_found")
+	expect(t, e.do("POST", "/managed/me", "", c), http.StatusNotFound, "not_found")
+}
+
+// ----- session endpoints -------------------------------------------------------------
+
+func TestManagedAPI_Me(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	rec := e.do("GET", "/managed/me", "", e.cookie("viewer", false))
+	expect(t, rec, http.StatusOK, "")
+	var p profileResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Username != "viewer" || p.Admin || len(p.Brokers) != 1 || p.SiteSeed == "" {
+		t.Errorf("viewer profile: %+v", p)
+	}
+	if rec.Header().Get("Content-Type") != "application/json" || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("headers: %v", rec.Header())
+	}
+	// A session whose user was removed behind its back is not signed in.
+	c := e.cookie("ghost", false)
+	expect(t, e.do("GET", "/managed/me", "", c), http.StatusUnauthorized, "unauthenticated")
+	expect(t, e.do("GET", "/managed/users", "", c), http.StatusUnauthorized, "unauthenticated")
+}
+
+func TestManagedAPI_Logout(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("viewer", false)
+	rec := e.do("POST", "/managed/logout", "", c)
+	expect(t, rec, http.StatusNoContent, "")
+	if cl := rec.Result().Cookies(); len(cl) != 1 || cl[0].MaxAge >= 0 {
+		t.Errorf("logout must expire the cookie: %+v", cl)
+	}
+	expect(t, e.do("GET", "/managed/me", "", c), http.StatusUnauthorized, "unauthenticated")
+}
+
+// ----- users ----------------------------------------------------------------------------
+
+func TestManagedAPI_AdminOnly(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("viewer", false)
+	for _, rq := range [][2]string{
+		{"GET", "/managed/users"}, {"PUT", "/managed/users/x"}, {"DELETE", "/managed/users/x"},
+		{"GET", "/managed/connections"}, {"PUT", "/managed/connections/b1"}, {"DELETE", "/managed/connections/b1"},
+	} {
+		expect(t, e.do(rq[0], rq[1], "{}", c), http.StatusForbidden, "forbidden")
 	}
 }
 
-func TestManaged_SaveConnection_PersistError500(t *testing.T) {
-	h := newTestHandler(t)
-	dir := t.TempDir()
-	blocker := filepath.Join(dir, "blocker")
-	writeFile(t, blocker, "x")
-	h.store.connsPath = filepath.Join(blocker, "conns.yaml") // parent is a file → write fails
-	body, _ := json.Marshal(map[string]any{
-		"username": "admin", "token": "tok-admin",
-		"connection": map[string]any{"broker": "b9", "hostname": "h9"},
-	})
-	rec := post(h, "/managed/saveConnection", string(body))
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("want 500, got %d", rec.Code)
+func TestManagedAPI_ListUsersNeverSendsHashes(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	rec := e.do("GET", "/managed/users", "", e.cookie("admin", false))
+	expect(t, rec, http.StatusOK, "")
+	body := rec.Body.String()
+	if strings.Contains(body, "pbkdf2") || strings.Contains(body, `"password"`) {
+		t.Errorf("the hash must never leave the gateway: %s", body)
+	}
+	var out struct{ Users []userJSON }
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.Users) != 2 {
+		t.Fatalf("users: %v %s", err, body)
+	}
+	if out.Users[1].Username != "viewer" || len(out.Users[1].ReadOnly) != 1 || out.Users[1].ReadOnly[0].Brokers != "b1" {
+		t.Errorf("viewer row: %+v", out.Users[1])
 	}
 }
 
-func TestManaged_DeleteConnection_OKAndNotFound(t *testing.T) {
-	h := newTestHandler(t)
-	rec := post(h, "/managed/deleteConnection", `{"username":"admin","token":"tok-admin","target":"b2"}`)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("want 204, got %d", rec.Code)
+func TestManagedAPI_SaveUser_CreateAndValidate(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	put := func(name, body string) *httptest.ResponseRecorder { return e.do("PUT", "/managed/users/"+name, body, c) }
+
+	expect(t, put("bob", `{"password":"bob-password-1","admin":false,"operate":[],"readOnly":[{"brokers":"b1","msgVpns":"*","queues":"*"}]}`), http.StatusNoContent, "")
+	if !signsIn(t, e.api.store, "bob", "bob-password-1") {
+		t.Error("the created user must sign in")
 	}
-	rec2 := post(h, "/managed/deleteConnection", `{"username":"admin","token":"tok-admin","target":"nope"}`)
-	if rec2.Code != http.StatusNotFound {
-		t.Errorf("want 404, got %d", rec2.Code)
+	cases := []struct {
+		name, user, body string
+		status           int
+		code, field      string
+	}{
+		{"bad username", "a%20b", `{"password":"long-enough-pw"}`, 422, "invalid", "username"},
+		{"short password", "carol", `{"password":"short"}`, 422, "invalid", "password"},
+		{"new without password", "carol", `{}`, 422, "invalid", "password"},
+		{"unknown field", "carol", `{"password":"long-enough-pw","role":"x"}`, 400, "bad_request", ""},
+		{"trailing data", "carol", `{"password":"long-enough-pw"} {}`, 400, "bad_request", ""},
+		{"malformed", "carol", `{`, 400, "bad_request", ""},
+		{"too large", "carol", `{"password":"` + strings.Repeat("x", maxBodyBytes) + `"}`, 413, "too_large", ""},
+		{"last admin", "admin", `{"admin":false}`, 409, "last_admin", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := put(tc.user, tc.body)
+			expect(t, rec, tc.status, tc.code)
+			if got := errorCode(t, rec).Field; got != tc.field {
+				t.Errorf("field: want %q, got %q", tc.field, got)
+			}
+		})
+	}
+	if _, exists := e.api.store.isAdmin("carol"); exists {
+		t.Error("no rejected save may create the user")
 	}
 }
 
-func TestManaged_DeleteConnection_PersistError500(t *testing.T) {
-	h := newTestHandler(t)
-	dir := t.TempDir()
-	blocker := filepath.Join(dir, "blocker")
-	writeFile(t, blocker, "x")
-	h.store.connsPath = filepath.Join(blocker, "conns.yaml") // parent is a file → write fails
-	rec := post(h, "/managed/deleteConnection", `{"username":"admin","token":"tok-admin","target":"b1"}`)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("want 500, got %d", rec.Code)
+func TestManagedAPI_SaveUser_SessionsEndOnPasswordOrRoleChange(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	admin := e.cookie("admin", false)
+	viewer := e.cookie("viewer", false)
+
+	// An edit that changes neither keeps the user signed in.
+	expect(t, e.do("PUT", "/managed/users/viewer", `{"readOnly":[]}`, admin), http.StatusNoContent, "")
+	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusOK, "")
+
+	expect(t, e.do("PUT", "/managed/users/viewer", `{"password":"viewer-new-pw-1"}`, admin), http.StatusNoContent, "")
+	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusUnauthorized, "unauthenticated")
+
+	viewer = e.cookie("viewer", false)
+	expect(t, e.do("PUT", "/managed/users/viewer", `{"admin":true}`, admin), http.StatusNoContent, "")
+	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusUnauthorized, "unauthenticated")
+
+	// The admin's own password change ends the admin's own session too.
+	expect(t, e.do("PUT", "/managed/users/admin", `{"admin":true,"password":"admin-new-pw-1"}`, admin), http.StatusNoContent, "")
+	expect(t, e.do("GET", "/managed/me", "", admin), http.StatusUnauthorized, "unauthenticated")
+}
+
+func TestManagedAPI_SaveAndDeleteUser_PersistErrorIs500(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	blockWrites(t, &e.api.store.usersPath)
+	expect(t, e.do("PUT", "/managed/users/bob", `{"password":"bob-password-1"}`, c), http.StatusInternalServerError, "server_error")
+	expect(t, e.do("DELETE", "/managed/users/viewer", "", c), http.StatusInternalServerError, "server_error")
+	if !strings.Contains(e.log.String(), "managed: saveUser failed") {
+		t.Errorf("the cause must reach the log: %s", e.log.String())
+	}
+}
+
+func TestManagedAPI_DeleteUser(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	admin := e.cookie("admin", false)
+	viewer := e.cookie("viewer", false)
+	expect(t, e.do("DELETE", "/managed/users/admin", "", admin), http.StatusConflict, "last_admin")
+	expect(t, e.do("DELETE", "/managed/users/ghost", "", admin), http.StatusNotFound, "not_found")
+	expect(t, e.do("DELETE", "/managed/users/viewer", "", admin), http.StatusNoContent, "")
+	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusUnauthorized, "unauthenticated")
+}
+
+// ----- connections ----------------------------------------------------------------------
+
+func TestManagedAPI_ListConnectionsNeverSendsSecrets(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	expect(t, e.do("PUT", "/managed/connections/b3", `{"hostname":"h3","semp":{"port":"","user":"","pass":""},"client":{"port":"","msgVpns":[]}}`, c), http.StatusNoContent, "")
+	rec := e.do("GET", "/managed/connections", "", c)
+	expect(t, rec, http.StatusOK, "")
+	body := rec.Body.String()
+	if strings.Contains(body, "PKD:") {
+		t.Errorf("packed passwords must never be listed: %s", body)
+	}
+	if !strings.Contains(body, `"broker":"b3","hostname":"h3"`) || !strings.Contains(body, `"msgVpns":[]`) {
+		t.Errorf("a VPN-less connection must list msgVpns as []: %s", body)
+	}
+}
+
+func TestManagedAPI_SaveConnection(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	ok := `{"hostname":"h","semp":{"port":"1943","user":"mon","pass":"V1:x"},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u","pass":"V1:y"}]}}`
+	expect(t, e.do("PUT", "/managed/connections/b3", ok, c), http.StatusNoContent, "")
+	if n := len(e.api.store.listConnections()); n != 3 {
+		t.Errorf("want 3 connections, got %d", n)
+	}
+	rec := e.do("PUT", "/managed/connections/b3", `{"semp":{"port":"x"}}`, c)
+	expect(t, rec, http.StatusUnprocessableEntity, "invalid")
+	if r := errorCode(t, rec); r.Field != "connection" || !strings.Contains(r.Reason, `semp.port "x" is not a port`) {
+		t.Errorf("want the field and reason, got %+v", r)
+	}
+	expect(t, e.do("PUT", "/managed/connections/b%203", ok, c), http.StatusUnprocessableEntity, "invalid")
+	expect(t, e.do("PUT", "/managed/connections/b3", `{"vpn":1}`, c), http.StatusBadRequest, "bad_request")
+	blockWrites(t, &e.api.store.connsPath)
+	expect(t, e.do("PUT", "/managed/connections/b4", ok, c), http.StatusInternalServerError, "server_error")
+}
+
+func TestManagedAPI_DeleteConnection(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	expect(t, e.do("DELETE", "/managed/connections/nope", "", c), http.StatusNotFound, "not_found")
+	expect(t, e.do("DELETE", "/managed/connections/b2", "", c), http.StatusNoContent, "")
+	blockWrites(t, &e.api.store.connsPath)
+	expect(t, e.do("DELETE", "/managed/connections/b1", "", c), http.StatusInternalServerError, "server_error")
+}
+
+func TestWriteJSON_EncodeFailureKeepsStatus(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeJSON(rec, http.StatusOK, map[string]any{"bad": func() {}})
+	if rec.Code != http.StatusOK {
+		t.Errorf("status already sent must stand, got %d", rec.Code)
 	}
 }

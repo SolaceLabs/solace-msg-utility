@@ -135,7 +135,9 @@ as one commit series straight on the branch (no sub-branches; CI by `workflow_di
   managed UI, `managed.html` does. The core managed store still ships everywhere until Phase 3.
 - Docs: variants, build modes, Dockerfile and `tag.yml` comments ("same bundle" is no longer true).
 
-**Phase 2: Gateway sessions and auth.**
+**Phase 2: Gateway sessions and auth.** Step 2A (sign-in, sessions, cookie auth) code on
+`feature/rbac` 2026-10-30: `password.go`, `session.go`, `throttle.go`, `pages.go`, REST
+`managed.go`; browser `managed-api.ts`, `stamp()` removed. Step 2B (module control, settings) next.
 - `/login` page, `/managed/logout`, `/managed/me`; cookie sessions with the 10/30 min defaults;
   bundle served only with a session under `CONN_MODES=managed`; password hashing; throttle; body
   caps; random bootstrap with forced change; session invalidation; uniform responses; module

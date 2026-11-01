@@ -2,8 +2,10 @@
  * Managed connection panel (the "Managed" tab of the connections module's
  * managed entry, `module.managed.ts`; Release bundles never import this file).
  *
- * A login screen + entitled broker/VPN dropdowns instead of a manual credential
- * form. Ported from the former standalone `managed-connections` module when the
+ * Entitled broker/VPN dropdowns instead of a manual credential form, for the
+ * user signed in at the gateway. Sign-in itself happens on the gateway's
+ * `/login` page; this panel reads the session back (`GET /managed/me`) and
+ * signs out (`POST /managed/logout`). Ported from the former standalone `managed-connections` module when the
  * two connection modes were merged into one tabbed module; it keeps that
  * module's exact contract — the same AppState writes, the same bus events, and
  * the same `createQueueBrowser` RBAC monkey-patch — so every downstream module
@@ -17,6 +19,11 @@
  * writer — it owns the managed login — and reads provisioned identities back
  * from it, so no packed credential or seed passes through here.
  *
+ * The gateway's HttpOnly cookie is the session. A page reload keeps it, so
+ * `restore()` adopts it again at install; a 401 from the gateway means it
+ * ended (idle or absolute limit, or an admin changed the account) and the
+ * panel drops its local state to match.
+ *
  * Visibility is decided by the caller: the Managed tab is only rendered when the
  * gateway advertised managed mode via `/hosted`, so this panel never needs its
  * own "gateway required" gate.
@@ -24,8 +31,8 @@
 import { required } from '../../core/dom';
 import { createServiceSolace, type SolaceConnectionHooks } from '../../core/services/solace-client';
 import { createServiceSemp, type SempConnectionHooks } from '../../core/services/semp-client';
-import { createManagedService } from '../../core/services/managed-service';
-import { stamp } from '../../core/encode';
+import { createManagedService, type ManagedProfile } from '../../core/services/managed-service';
+import { managedErrorMessage } from '../../core/services/managed-api';
 import { isQueueVisible, canOperate } from '../../core/rbac';
 import { logger } from '../../core/logger';
 import { errMessage } from '../../core/utils';
@@ -34,7 +41,12 @@ import type { AppContext, SolaceConfig, SempConfig } from '../../core/types';
 /** Controller returned to the module shell so it can drive the panel. */
 export interface ManagedPanel {
     /**
-     * Tear the managed session down completely — disconnect the broker and clear
+     * Adopt the gateway session, if there is one (`GET /managed/me`). Resolves
+     * true when the user is signed in, so the shell can open the Managed tab.
+     */
+    restore(): Promise<boolean>;
+    /**
+     * Sign out: end the gateway session, disconnect the broker and clear
      * `appState.managed` (so RBAC stops applying). Called when the Direct tab
      * takes over the connection (only one mode may be live at a time), and when
      * another module asks for a sign-out (`rbac:sign-out-requested`, routed here
@@ -63,9 +75,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
 
     const els = {
         loginView: required<HTMLElement>(container, '#managed-login-view'),
-        username: required<HTMLInputElement>(container, '#managed-username'),
-        password: required<HTMLInputElement>(container, '#managed-password'),
-        btnLogin: required<HTMLButtonElement>(container, '#btn-managed-login'),
+        btnLogin: required<HTMLAnchorElement>(container, '#btn-managed-login'),
         loginError: required<HTMLElement>(container, '#managed-login-error'),
 
         selectView: required<HTMLElement>(container, '#managed-select-view'),
@@ -262,87 +272,91 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         populateVpns(els.brokerSelect.value);
     }
 
-    // --- login / logout / refresh ---
-    async function doLogin(): Promise<void> {
-        const username = els.username.value.trim();
-        const password = els.password.value;
-        if (!username || !password) {
-            setError(els.loginError, 'Enter a username and password.');
-            return;
-        }
-        els.btnLogin.disabled = true;
-        setError(els.loginError, null);
-        try {
-            const token = stamp(username, password);
-            const p = await service.getConnections(username, token);
-            if (!p) {
-                setError(els.loginError, 'Invalid username or password.');
-                return;
-            }
-            // Writer moment 1 of 3 (login). Adopt the profile BEFORE publishing
-            // state or emitting — `rbac:changed` means "state is already
-            // consistent, react now", so no observer can see a half-built session.
-            await store.setProfile(p);
-            app.setState('managed', {
-                admin: p.admin, username, token, broker: '',
-                operate: p.operate, readOnly: p.readOnly, vpns: [],
-            });
-            eventBus.emit('rbac:changed');
-            populateSelect();
-            showView('select');
-        } catch (e) {
-            setError(els.loginError, errMessage(e));
-        } finally {
-            els.btnLogin.disabled = false;
-        }
+    // --- session: restore / sign out / refresh ---
+    /**
+     * Adopt a profile from the gateway. The store takes it BEFORE AppState is
+     * published or `rbac:changed` emitted — that event means "state is already
+     * consistent, react now", so no observer can see a half-built session.
+     * Re-adopting also re-imports the seed, so a rotated deployment seed is
+     * picked up for free. The connected broker (if any) is kept, with its
+     * provisioned VPNs re-read ([] if it is no longer provisioned).
+     */
+    async function adopt(p: ManagedProfile): Promise<void> {
+        await store.setProfile(p);
+        const broker = appState.managed?.broker ?? '';
+        app.setState('managed', {
+            admin: p.admin, username: p.username, operate: p.operate, readOnly: p.readOnly,
+            broker, vpns: broker ? store.vpnsFor(broker) : [],
+        });
+        eventBus.emit('rbac:changed');
+        populateSelect();
     }
 
-    function doLogout(): void {
-        serviceSolace.disconnect();
-        void serviceSemp.disconnect();
-        // Writer moment 3 of 3 (clear). Store and AppState are both cleared
-        // BEFORE the emit, so every observer sees a fully signed-out session.
-        store.clear();
-        app.setState('managed', null);
-        eventBus.emit('rbac:changed');
-        els.username.value = '';
-        els.password.value = '';
-        setError(els.connectError, null);
+    /**
+     * The signed-out view. Its button is a plain link to the gateway's sign-in
+     * page, or to the password page when the gateway requires a change first.
+     */
+    function showSignedOut(message: string | null, mustChange = false): void {
+        els.btnLogin.href = mustChange ? '/login/password' : '/login';
+        els.btnLogin.textContent = mustChange ? 'Change password' : 'Sign in';
+        setError(els.loginError, message);
         showView('login');
     }
 
-    async function doRefresh(): Promise<void> {
-        // Refresh = (1) make the proxy re-read users.yaml + connections.yaml
-        // from disk so out-of-band edits take effect, then (2) re-fetch the
-        // user's entitlements. NOT a page refresh — a full reload ends the
-        // session (managed state is memory-only). An invalid session is still
-        // detected by getConnections → doLogout; a reload that fails only
-        // server-side leaves the in-memory store intact, so we warn but still
-        // show the last-known connections.
-        const m = appState.managed;
-        if (!m) return;
+    /** Drop every local trace of the session. Store and AppState are both
+     *  cleared BEFORE the emit, so every observer sees a fully signed-out state. */
+    function clearSession(): void {
+        serviceSolace.disconnect();
+        void serviceSemp.disconnect();
+        store.clear();
+        app.setState('managed', null);
+        eventBus.emit('rbac:changed');
+        setError(els.connectError, null);
+    }
+
+    async function restore(): Promise<boolean> {
+        const res = await service.me();
+        if (!res.ok) {
+            // No session is the ordinary signed-out state, not an error.
+            const quiet = res.code === 'unauthenticated';
+            showSignedOut(quiet ? null : managedErrorMessage(res), res.code === 'password_change_required');
+            return false;
+        }
         try {
-            const reloaded = await service.reload(m.username, m.token);
-            const p = await service.getConnections(m.username, m.token);
-            if (!p) {
-                doLogout();
+            await adopt(res.data);
+        } catch (e) {
+            showSignedOut(errMessage(e));
+            return false;
+        }
+        showView('select');
+        return true;
+    }
+
+    function doLogout(): void {
+        // End the gateway session as well. An already-ended one is the same
+        // outcome, so the answer is not awaited or shown.
+        void service.logout();
+        clearSession();
+        showSignedOut(null);
+    }
+
+    async function doRefresh(): Promise<void> {
+        // Refresh = re-read the user's entitlements and provisioned brokers from
+        // the gateway. NOT a page refresh. A session the gateway has ended is
+        // dropped here too; any other failure keeps the last-known connections.
+        const res = await service.me();
+        if (!res.ok) {
+            if (res.code === 'unauthenticated' || res.code === 'password_change_required') {
+                clearSession();
+                showSignedOut(managedErrorMessage(res), res.code === 'password_change_required');
                 return;
             }
-            // Writer moment 2 of 3 (refresh) — re-adopting also re-imports the
-            // seed, so a rotated deployment seed is picked up for free. Without
-            // this the store's provisioned set would go stale while AppState's
-            // moved on, and every consumer (e.g. queue-copy) would read the old one.
-            await store.setProfile(p);
-            // Keep the published provisioned VPNs in step with the refreshed
-            // profile so the picker re-reads them ([] if the connected broker
-            // is no longer provisioned, or we aren't connected yet).
-            app.setState('managed', {
-                ...m, operate: p.operate, readOnly: p.readOnly, admin: p.admin,
-                vpns: m.broker ? store.vpnsFor(m.broker) : [],
-            });
-            eventBus.emit('rbac:changed');
-            populateSelect();
-            setError(els.connectError, reloaded ? null : 'Server reload failed — showing last-known connections.');
+            setError(els.connectError, managedErrorMessage(res));
+            return;
+        }
+        try {
+            await adopt(res.data);
+            setError(els.connectError, null);
         } catch (e) {
             setError(els.connectError, errMessage(e));
         }
@@ -375,10 +389,6 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     }
 
     // --- wire UI events ---
-    els.btnLogin.addEventListener('click', () => void doLogin());
-    [els.username, els.password].forEach(input =>
-        input.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); els.btnLogin.click(); } })
-    );
     els.brokerSelect.addEventListener('change', () => populateVpns(els.brokerSelect.value));
     els.vpnSelect.addEventListener('change', updateConnectEnabled);
     els.btnConnect.addEventListener('click', () => void doConnect());
@@ -391,7 +401,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
 
     // Both handlers below are only routed here while `appState.managed` is set,
     // and that flag moves in lockstep with the store's profile (adopted together
-    // on login, cleared together on logout) — so a signed-out session is
+    // on restore, cleared together on sign-out) — so a signed-out session is
     // unreachable here and the selection view is always the right target.
     function handleEditRequested(): void {
         app.loadSelf();
@@ -469,6 +479,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     logger.info('Managed connection panel ready');
 
     return {
+        restore,
         logout: doLogout,
         refreshView(): void {
             if (!signedIn()) showView('login');

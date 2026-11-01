@@ -2,7 +2,7 @@
  * Connections Module -- managed entry (the `managed` variant).
  *
  * Same module id, sidebar entry and Direct form as `module.ts`, plus the
- * Managed tab: sign-in, entitled broker/VPN pickers and the managed session
+ * Managed tab: the gateway session's entitled broker/VPN pickers
  * (`managed-panel.ts`). Built only into `dist/managed.html`, which the managed
  * container image serves as its index. Release bundles install `module.ts`,
  * which never imports this file or the panel.
@@ -93,6 +93,9 @@ export const ConnectionsModule = {
         function tearDownManaged(): void {
             if (appState.managed) managedPanel?.logout();
         }
+        // A gateway session survives a page reload (and a sign-in on /login
+        // lands here): adopt it and open the Managed tab.
+        if (managedPanel && await managedPanel.restore()) tabBar.show('managed');
         tabBar.tabDirect.addEventListener('click', () => tabBar.show('direct'));
         tabBar.tabManaged.addEventListener('click', () => {
             tabBar.show('managed');
@@ -109,9 +112,9 @@ export const ConnectionsModule = {
             loadSelf();
         });
 
-        // End the managed session on request (user-management, after the admin
-        // changed their own password or deleted their own account). Same
-        // teardown as the Direct-connect interlock; no-op without a session.
+        // End the managed session on request (user-management, after a change
+        // to the signed-in admin's own account, or any admin module on a 401).
+        // Same teardown as the Direct-connect interlock; no-op without a session.
         eventBus.on('rbac:sign-out-requested', tearDownManaged);
 
         eventBus.on('connection:check-connection', (payload) => {

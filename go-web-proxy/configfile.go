@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -33,24 +34,27 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # Edit this file and restart the gateway, or delete it to re-seed from env.
 # CONFIG_FILE (this file) and SITE_SEED_FILE (the deployment secret) are
 # environment-only and never appear here.
-# access.* has no env var: edit it here. An empty allow list admits every
-# client; trustedProxies lists the reverse proxies whose X-Forwarded-For is
-# believed.
+# access.*, session.* and login.* have no env var: edit them here. An empty
+# allow list admits every client; trustedProxies lists the reverse proxies
+# whose X-Forwarded-For is believed. session.* and login.* bound managed
+# sign-in and apply only when managed is true.
 `
 
 // fileConfig is the on-disk shape. Field order is the order yaml.Marshal writes.
 type fileConfig struct {
-	Version         int        `yaml:"version"`
-	Hosted          bool       `yaml:"hosted"`
-	Managed         bool       `yaml:"managed"`
-	ConnModes       string     `yaml:"connModes"`
-	DefaultConn     string     `yaml:"defaultConn"`
-	AppDir          string     `yaml:"appDir"`
-	TLS             fileTLS    `yaml:"tls"`
-	LogLevel        string     `yaml:"logLevel"`
-	UsersFile       string     `yaml:"usersFile"`
-	ConnectionsFile string     `yaml:"connectionsFile"`
-	Access          fileAccess `yaml:"access"`
+	Version         int         `yaml:"version"`
+	Hosted          bool        `yaml:"hosted"`
+	Managed         bool        `yaml:"managed"`
+	ConnModes       string      `yaml:"connModes"`
+	DefaultConn     string      `yaml:"defaultConn"`
+	AppDir          string      `yaml:"appDir"`
+	TLS             fileTLS     `yaml:"tls"`
+	LogLevel        string      `yaml:"logLevel"`
+	UsersFile       string      `yaml:"usersFile"`
+	ConnectionsFile string      `yaml:"connectionsFile"`
+	Access          fileAccess  `yaml:"access"`
+	Session         fileSession `yaml:"session"`
+	Login           fileLogin   `yaml:"login"`
 }
 
 type fileTLS struct {
@@ -63,6 +67,32 @@ type fileTLS struct {
 type fileAccess struct {
 	Allow          []string `yaml:"allow"`
 	TrustedProxies []string `yaml:"trustedProxies"`
+}
+
+type fileSession struct {
+	IdleMinutes     int `yaml:"idleMinutes"`
+	AbsoluteMinutes int `yaml:"absoluteMinutes"`
+}
+
+type fileLogin struct {
+	MaxFailures              int `yaml:"maxFailures"`
+	BackoffSeconds           int `yaml:"backoffSeconds"`
+	MaxBackoffSeconds        int `yaml:"maxBackoffSeconds"`
+	UnauthenticatedPerMinute int `yaml:"unauthenticatedPerMinute"`
+}
+
+// sessionLimits bound a managed sign-in session: idle is measured from the
+// last request, absolute from sign-in (session.go).
+type sessionLimits struct{ idle, absolute time.Duration }
+
+// loginLimits drive the sign-in throttle (throttle.go): back-off after
+// maxFailures failed sign-ins, doubling from backoff up to maxBackoff, and a
+// per-client budget for requests that carry no session.
+type loginLimits struct {
+	maxFailures     int
+	backoff         time.Duration
+	maxBackoff      time.Duration
+	unauthPerMinute int
 }
 
 // seedVar maps one environment variable to its config.yaml key. fromEnv
@@ -120,6 +150,16 @@ func fileConfigFromConfig(c config) fileConfig {
 			Allow:          prefixStrings(c.access.allow),
 			TrustedProxies: prefixStrings(c.access.trustedProxies),
 		},
+		Session: fileSession{
+			IdleMinutes:     int(c.session.idle / time.Minute),
+			AbsoluteMinutes: int(c.session.absolute / time.Minute),
+		},
+		Login: fileLogin{
+			MaxFailures:              c.login.maxFailures,
+			BackoffSeconds:           int(c.login.backoff / time.Second),
+			MaxBackoffSeconds:        int(c.login.maxBackoff / time.Second),
+			UnauthenticatedPerMinute: c.login.unauthPerMinute,
+		},
 	}
 }
 
@@ -146,6 +186,14 @@ func (fc fileConfig) toConfig(siteSeedFile string) (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	session, err := fc.Session.limits()
+	if err != nil {
+		return config{}, err
+	}
+	login, err := fc.Login.limits()
+	if err != nil {
+		return config{}, err
+	}
 	cfg := config{
 		hosted:             fc.Hosted,
 		appDir:             fc.AppDir,
@@ -161,6 +209,8 @@ func (fc fileConfig) toConfig(siteSeedFile string) (config, error) {
 		connModes:          strings.ToLower(fc.ConnModes),
 		defaultConn:        strings.ToLower(fc.DefaultConn),
 		access:             accessConfig{allow: allow, trustedProxies: trusted},
+		session:            session,
+		login:              login,
 	}
 	// Value and cross checks on the connection modes. Whether managed routing
 	// actually loaded is serve()'s knowledge, so the build-tag leg is assumed
@@ -169,6 +219,55 @@ func (fc fileConfig) toConfig(siteSeedFile string) (config, error) {
 		return config{}, err
 	}
 	return cfg, nil
+}
+
+// limits validates the session block. The upper bound keeps a session from
+// outliving a day; idle can never exceed absolute.
+func (sc fileSession) limits() (sessionLimits, error) {
+	if err := intInRange("session.absoluteMinutes", sc.AbsoluteMinutes, 1, 1440); err != nil {
+		return sessionLimits{}, err
+	}
+	if err := intInRange("session.idleMinutes", sc.IdleMinutes, 1, sc.AbsoluteMinutes); err != nil {
+		return sessionLimits{}, fmt.Errorf("%w (session.absoluteMinutes is %d)", err, sc.AbsoluteMinutes)
+	}
+	return sessionLimits{
+		idle:     time.Duration(sc.IdleMinutes) * time.Minute,
+		absolute: time.Duration(sc.AbsoluteMinutes) * time.Minute,
+	}, nil
+}
+
+// limits validates the login block; maxBackoffSeconds can never be below
+// backoffSeconds.
+func (fl fileLogin) limits() (loginLimits, error) {
+	checks := []struct {
+		key       string
+		v, lo, hi int
+	}{
+		{"login.maxFailures", fl.MaxFailures, 1, 1000},
+		{"login.maxBackoffSeconds", fl.MaxBackoffSeconds, 1, 86400},
+		{"login.unauthenticatedPerMinute", fl.UnauthenticatedPerMinute, 1, 10000},
+	}
+	for _, c := range checks {
+		if err := intInRange(c.key, c.v, c.lo, c.hi); err != nil {
+			return loginLimits{}, err
+		}
+	}
+	if err := intInRange("login.backoffSeconds", fl.BackoffSeconds, 1, fl.MaxBackoffSeconds); err != nil {
+		return loginLimits{}, fmt.Errorf("%w (login.maxBackoffSeconds is %d)", err, fl.MaxBackoffSeconds)
+	}
+	return loginLimits{
+		maxFailures:     fl.MaxFailures,
+		backoff:         time.Duration(fl.BackoffSeconds) * time.Second,
+		maxBackoff:      time.Duration(fl.MaxBackoffSeconds) * time.Second,
+		unauthPerMinute: fl.UnauthenticatedPerMinute,
+	}, nil
+}
+
+func intInRange(key string, v, lo, hi int) error {
+	if v < lo || v > hi {
+		return fmt.Errorf("key %q has invalid value %q: must be %d to %d", key, strconv.Itoa(v), lo, hi)
+	}
+	return nil
 }
 
 // parseCIDRs turns the file's CIDR strings into masked prefixes. A bare address

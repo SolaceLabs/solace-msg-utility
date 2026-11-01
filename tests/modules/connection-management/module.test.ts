@@ -16,7 +16,7 @@ vi.mock('../../../src/modules/connection-management/service', () => ({
 import { ConnectionManagementModule } from '../../../src/modules/connection-management/module';
 
 const ADMIN: ManagedSession = {
-    admin: true, username: 'admin', token: 'tok', broker: '', vpns: [], operate: [], readOnly: [],
+    admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [],
 };
 const CONNS = [
     { broker: 'b1', hostname: 'host1', semp: { port: '1943', user: 'mon', pass: '' }, client: { port: '1443', msgVpns: [{ name: 'v1', user: 'u1', pass: '' }] } },
@@ -50,7 +50,7 @@ function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppCon
 async function setup(managed: ManagedSession | null = ADMIN) {
     const container = loadModuleDOM('connection-management');
     const ctx = makeCtx(container, managed);
-    svcMock.listConnections.mockResolvedValue(CONNS);
+    svcMock.listConnections.mockResolvedValue({ ok: true, data: CONNS });
     await ConnectionManagementModule.install(ctx);
     if (managed?.admin) {
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').children.length).toBeGreaterThan(0));
@@ -96,23 +96,27 @@ describe('connection-management — list', () => {
         await vi.waitFor(() => expect(svcMock.listConnections).toHaveBeenCalled());
     });
 
-    it('shows an error when listConnections returns null', async () => {
+    it("shows the gateway's reason when the list fails", async () => {
         const container = loadModuleDOM('connection-management');
-        svcMock.listConnections.mockResolvedValue(null);
+        svcMock.listConnections.mockResolvedValue({ ok: false, status: 429, code: 'rate_limited' });
         await ConnectionManagementModule.install(makeCtx(container, ADMIN));
-        await vi.waitFor(() => expect(hidden(container, '#conn-mgmt-list-error')).toBe(false));
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-list-error').textContent).toBe('Too many requests. Wait a minute and try again.'));
     });
 
-    it('surfaces a thrown error from listConnections', async () => {
+    it('a 401 on the list asks the session owner to sign out', async () => {
         const container = loadModuleDOM('connection-management');
-        svcMock.listConnections.mockRejectedValue(new Error('boom'));
-        await ConnectionManagementModule.install(makeCtx(container, ADMIN));
-        await vi.waitFor(() => expect(el(container, '#conn-mgmt-list-error').textContent).toBe('boom'));
+        const ctx = makeCtx(container, ADMIN);
+        const signOut = vi.fn();
+        ctx.eventBus.on('rbac:sign-out-requested', signOut);
+        svcMock.listConnections.mockResolvedValue({ ok: false, status: 401, code: 'unauthenticated' });
+        await ConnectionManagementModule.install(ctx);
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+        expect(toastMock.showToast).toHaveBeenCalledWith('Your session has ended. Sign in again.', 'error', 5000);
     });
 
     it('renders an empty-state row when there are no connections', async () => {
         const container = loadModuleDOM('connection-management');
-        svcMock.listConnections.mockResolvedValue([]);
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: [] });
         await ConnectionManagementModule.install(makeCtx(container, ADMIN));
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').textContent).toMatch(/no connections/i));
     });
@@ -153,7 +157,7 @@ describe('connection-management — create / edit form', () => {
 
     it('creates a connection: packs the SEMP + VPN passwords', async () => {
         const { container } = await setup();
-        svcMock.saveConnection.mockResolvedValue(true);
+        svcMock.saveConnection.mockResolvedValue({ ok: true });
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
         el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'b9';
         el<HTMLInputElement>(container, '#conn-mgmt-hostname').value = 'h9';
@@ -169,7 +173,7 @@ describe('connection-management — create / edit form', () => {
         // The toast fires after the saveConnection await — wait for it, then the
         // call (with its captured args) has necessarily already happened.
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Connection saved', 'ok'));
-        expect(svcMock.saveConnection).toHaveBeenCalledWith('admin', 'tok', {
+        expect(svcMock.saveConnection).toHaveBeenCalledWith({
             broker: 'b9', hostname: 'h9',
             semp: { port: '1943', user: 'mon', pass: 'V1:secret' },
             client: { port: '1443', msgVpns: [{ name: 'v1', user: 'u1', pass: 'V1:vpnpw' }] },
@@ -178,35 +182,40 @@ describe('connection-management — create / edit form', () => {
 
     it('keeps blank SEMP + VPN passwords blank (no packing) on edit', async () => {
         const { container } = await setup();
-        svcMock.saveConnection.mockResolvedValue(true);
+        svcMock.saveConnection.mockResolvedValue({ ok: true });
         // Edit b1 (first row) — passwords arrive blank from the list.
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
             .querySelector<HTMLButtonElement>('.btn-secondary')!.click();
         expect(el<HTMLInputElement>(container, '#conn-mgmt-broker').disabled).toBe(true);
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
         await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
-        const sent = svcMock.saveConnection.mock.calls[0][2];
+        const sent = svcMock.saveConnection.mock.calls[0][0];
         expect(sent.semp.pass).toBe('');
         expect(sent.client.msgVpns[0].pass).toBe('');
         expect(sent.client.msgVpns[0].name).toBe('v1');
     });
 
-    it('shows an error when the save is rejected', async () => {
+    it("shows the gateway's reason when the save is rejected", async () => {
         const { container } = await setup();
-        svcMock.saveConnection.mockResolvedValue(false);
+        svcMock.saveConnection.mockResolvedValue({
+            ok: false, status: 422, code: 'invalid', field: 'connection', reason: 'broker "bX": semp.port "x" is not a port (1 to 65535)',
+        });
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
         el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'bX';
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
-        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toMatch(/failed/i));
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe('broker "bX": semp.port "x" is not a port (1 to 65535)'));
     });
 
-    it('surfaces a thrown error from saveConnection', async () => {
-        const { container } = await setup();
-        svcMock.saveConnection.mockRejectedValue('net-fail');
+    it('surfaces a sealing failure before anything is sent', async () => {
+        const { container, ctx } = await setup();
+        (ctx.managedStore as any).packSecret = async () => { throw new Error('no profile to seal with'); };
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
         el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'bX';
+        el<HTMLInputElement>(container, '#conn-mgmt-semp-pass').value = 'secret';
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
-        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe('net-fail'));
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe('no profile to seal with'));
+        expect(svcMock.saveConnection).not.toHaveBeenCalled();
+        expect(el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').disabled).toBe(false);
     });
 
     it('Edit pre-fills the form and blanks the password fields', async () => {
@@ -225,9 +234,9 @@ describe('connection-management — create / edit form', () => {
         const container = loadModuleDOM('connection-management');
         const ctx = makeCtx(container, ADMIN);
         // msgVpns omitted → undefined at runtime
-        svcMock.listConnections.mockResolvedValue([
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: [
             { broker: 'b3', hostname: 'h3', semp: { port: '', user: '', pass: '' }, client: { port: '' } },
-        ]);
+        ] });
         await ConnectionManagementModule.install(ctx);
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').children.length).toBeGreaterThan(0));
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
@@ -250,25 +259,17 @@ describe('connection-management — create / edit form', () => {
         expect(el(container, '#conn-mgmt-vpn-rows').querySelectorAll('.row-list-row').length).toBe(1);
     });
 
-    it('save is a no-op if the managed session vanished mid-form', async () => {
-        const { container, ctx } = await setup();
-        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
-        ctx.setState('managed', null);
-        el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
-        await Promise.resolve();
-        expect(svcMock.saveConnection).not.toHaveBeenCalled();
-    });
 });
 
 describe('connection-management — delete', () => {
     it('deletes after confirmation', async () => {
         const { container } = await setup();
-        svcMock.deleteConnection.mockResolvedValue(true);
+        svcMock.deleteConnection.mockResolvedValue({ ok: true });
         (globalThis.confirm as any).mockReturnValue(true);
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
             .querySelector<HTMLButtonElement>('.btn-danger')!.click();
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Connection deleted', 'ok'));
-        expect(svcMock.deleteConnection).toHaveBeenCalledWith('admin', 'tok', 'b1');
+        expect(svcMock.deleteConnection).toHaveBeenCalledWith('b1');
     });
 
     it('does nothing when cancelled', async () => {
@@ -280,30 +281,13 @@ describe('connection-management — delete', () => {
         expect(svcMock.deleteConnection).not.toHaveBeenCalled();
     });
 
-    it('toasts an error when the delete is rejected', async () => {
+    it("toasts the gateway's reason when the delete is rejected", async () => {
         const { container } = await setup();
-        svcMock.deleteConnection.mockResolvedValue(false);
+        svcMock.deleteConnection.mockResolvedValue({ ok: false, status: 500, code: 'server_error' });
         (globalThis.confirm as any).mockReturnValue(true);
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
             .querySelector<HTMLButtonElement>('.btn-danger')!.click();
-        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Delete failed', 'error'));
-    });
-
-    it('toasts a thrown error from deleteConnection', async () => {
-        const { container } = await setup();
-        svcMock.deleteConnection.mockRejectedValue(new Error('nope'));
-        (globalThis.confirm as any).mockReturnValue(true);
-        el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.btn-danger')!.click();
-        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('nope', 'error'));
-    });
-
-    it('delete is a no-op if the managed session vanished', async () => {
-        const { container, ctx } = await setup();
-        ctx.setState('managed', null);
-        el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.btn-danger')!.click();
-        await Promise.resolve();
-        expect(svcMock.deleteConnection).not.toHaveBeenCalled();
+        await vi.waitFor(() => expect(toastMock.showToast)
+            .toHaveBeenCalledWith('The gateway could not complete the request. Its log has the cause.', 'error'));
     });
 });

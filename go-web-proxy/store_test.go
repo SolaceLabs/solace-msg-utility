@@ -3,49 +3,38 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
 
-// newStoreWithFixtures loads a store seeded with the package usersYAML/connsYAML
-// fixtures (admin + viewer, brokers b1/b2) in a fresh temp dir.
-func newStoreWithFixtures(t *testing.T) *store {
-	t.Helper()
-	dir := t.TempDir()
-	usersPath := filepath.Join(dir, "users.yaml")
-	connsPath := filepath.Join(dir, "conns.yaml")
-	writeFile(t, usersPath, usersYAML)
-	writeFile(t, connsPath, connsYAML)
-	s, err := loadStore(usersPath, connsPath, filepath.Join(dir, "s.seed"), quietLogger())
-	if err != nil {
-		t.Fatalf("loadStore: %v", err)
-	}
-	return s
-}
+// quietLogger is defined in tls_test.go and newCapturingLogger in
+// proxy_test.go (same package), both reused here.
 
-// quietLogger is defined in tls_test.go (same package) and reused here.
+// Fixture passwords for the admin and viewer users. Hashed at test time with a
+// one-iteration hasher, so the store holds real hashes without the real cost.
+const (
+	adminPW  = "admin-password-1"
+	viewerPW = "viewer-password-1"
+)
 
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
-}
-
-const usersYAML = `msg-utility-users:
+const usersYAMLTemplate = `msg-utility-users:
   - username: admin
-    password: tok-admin
+    password: %s
     admin: true
     operate:
       - brokers: '*'
         msgVpns: '*'
         queues: '*'
   - username: viewer
-    password: tok-viewer
+    password: %s
     admin: false
     read-only:
       - brokers: b1
@@ -83,58 +72,312 @@ const connsYAML = `msg-utility-connections:
           password: PKD:cli-b2v9
 `
 
-func TestLoadStore_BootstrapsAdminWhenUsersFileMissing(t *testing.T) {
-	dir := t.TempDir()
-	usersPath := filepath.Join(dir, "users.yaml")
-	seedPath := filepath.Join(dir, "site.seed")
+func testHasher(t *testing.T) *hasher {
+	t.Helper()
+	h, err := newHasher(1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
 
-	s, err := loadStore(usersPath, filepath.Join(dir, "conns.yaml"), seedPath, quietLogger())
+func mustHash(t *testing.T, h *hasher, pw string) string {
+	t.Helper()
+	s, err := h.hash(context.Background(), pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func noEnv(string) string { return "" }
+
+func envOf(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// storeFixture is a temp dir holding the users (admin + viewer) and
+// connections (brokers b1, b2) fixtures.
+type storeFixture struct {
+	usersPath, connsPath, seedPath string
+	h                              *hasher
+}
+
+func newStoreFixture(t *testing.T) storeFixture {
+	t.Helper()
+	dir := t.TempDir()
+	f := storeFixture{
+		usersPath: filepath.Join(dir, "users.yaml"),
+		connsPath: filepath.Join(dir, "conns.yaml"),
+		seedPath:  filepath.Join(dir, "s.seed"),
+		h:         testHasher(t),
+	}
+	writeFile(t, f.usersPath, fmt.Sprintf(usersYAMLTemplate, mustHash(t, f.h, adminPW), mustHash(t, f.h, viewerPW)))
+	writeFile(t, f.connsPath, connsYAML)
+	return f
+}
+
+func (f storeFixture) opts(getenv func(string) string) storeOptions {
+	return storeOptions{usersPath: f.usersPath, connsPath: f.connsPath, seedPath: f.seedPath, hasher: f.h, getenv: getenv}
+}
+
+func (f storeFixture) load(t *testing.T) *store {
+	t.Helper()
+	s, err := loadStore(f.opts(noEnv), quietLogger())
 	if err != nil {
 		t.Fatalf("loadStore: %v", err)
 	}
-	if _, err := os.Stat(usersPath); err != nil {
-		t.Fatalf("users file should have been written: %v", err)
+	return s
+}
+
+func newStoreWithFixtures(t *testing.T) *store {
+	t.Helper()
+	return newStoreFixture(t).load(t)
+}
+
+// signsIn reports whether the store accepts user/pw.
+func signsIn(t *testing.T, s *store, user, pw string) bool {
+	t.Helper()
+	_, ok, err := s.checkPassword(context.Background(), user, pw)
+	if err != nil {
+		t.Fatal(err)
 	}
-	prof, ok := s.getConnections("admin", bootstrapAdminToken)
-	if !ok {
-		t.Fatal("bootstrap admin should authenticate with the pinned token")
+	return ok
+}
+
+// ----- bootstrap ------------------------------------------------------------------
+
+// bootstrapFixture is an empty temp dir: no users file yet.
+func bootstrapFixture(t *testing.T) storeFixture {
+	t.Helper()
+	dir := t.TempDir()
+	return storeFixture{
+		usersPath: filepath.Join(dir, "users.yaml"),
+		connsPath: filepath.Join(dir, "conns.yaml"),
+		seedPath:  filepath.Join(dir, "site.seed"),
+		h:         testHasher(t),
 	}
-	if !prof.Admin {
-		t.Error("bootstrap admin should be admin")
+}
+
+func TestLoadStore_BootstrapGeneratedPasswordIsLoggedOnceAndMustChange(t *testing.T) {
+	f := bootstrapFixture(t)
+	var buf strings.Builder
+	s, err := loadStore(f.opts(noEnv), newCapturingLogger(&buf))
+	if err != nil {
+		t.Fatalf("loadStore: %v", err)
 	}
-	if len(prof.Brokers) != 0 {
-		t.Errorf("bootstrap admin has no broker access, got %d", len(prof.Brokers))
+	m := regexp.MustCompile(`password=(\S+)`).FindStringSubmatch(buf.String())
+	if m == nil {
+		t.Fatalf("the generated password must be logged: %s", buf.String())
+	}
+	pw := m[1]
+	mustChange, ok, err := s.checkPassword(context.Background(), "admin", pw)
+	if err != nil || !ok || !mustChange {
+		t.Fatalf("bootstrap admin must sign in with the logged password and must change it: ok=%v mustChange=%v err=%v", ok, mustChange, err)
+	}
+	if admin, _ := s.isAdmin("admin"); !admin {
+		t.Error("bootstrap user must be admin")
+	}
+	data, _ := os.ReadFile(f.usersPath)
+	if strings.Contains(string(data), pw) || !strings.Contains(string(data), "mustChangePassword: true") {
+		t.Errorf("users file must hold a hash and the change flag, never the password:\n%s", data)
+	}
+	if info, _ := os.Stat(f.usersPath); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Errorf("users file must be owner-only, got %v", info.Mode().Perm())
 	}
 	if s.siteSeed == "" {
 		t.Error("site seed should be generated")
 	}
-	if _, err := os.Stat(seedPath); err != nil {
-		t.Fatalf("seed file should have been written: %v", err)
+
+	buf.Reset()
+	if _, err := loadStore(f.opts(noEnv), newCapturingLogger(&buf)); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "bootstrap admin created") {
+		t.Error("the password is shown once: a second start must not bootstrap again")
 	}
 }
 
-func TestGetConnections_AuthAndEntitlement(t *testing.T) {
-	dir := t.TempDir()
-	usersPath := filepath.Join(dir, "users.yaml")
-	connsPath := filepath.Join(dir, "conns.yaml")
-	writeFile(t, usersPath, usersYAML)
-	writeFile(t, connsPath, connsYAML)
-
-	s, err := loadStore(usersPath, connsPath, filepath.Join(dir, "site.seed"), quietLogger())
-	if err != nil {
-		t.Fatalf("loadStore: %v", err)
+func TestLoadStore_BootstrapFromEnvironmentIsNeverLogged(t *testing.T) {
+	const pw = "operator-chosen-pw"
+	secretFile := filepath.Join(t.TempDir(), "admin.pw")
+	writeFile(t, secretFile, pw+"\r\n") // a trailing newline from `echo` is not part of it
+	for _, env := range []map[string]string{
+		{envAdminPassword: pw},
+		{envAdminPasswordFile: secretFile},
+	} {
+		f := bootstrapFixture(t)
+		var buf strings.Builder
+		s, err := loadStore(f.opts(envOf(env)), newCapturingLogger(&buf))
+		if err != nil {
+			t.Fatalf("%v: %v", env, err)
+		}
+		if strings.Contains(buf.String(), pw) {
+			t.Errorf("%v: a supplied password must never be logged: %s", env, buf.String())
+		}
+		for name := range env {
+			if !strings.Contains(buf.String(), "source="+name) {
+				t.Errorf("log must name the source %s: %s", name, buf.String())
+			}
+		}
+		mustChange, ok, _ := s.checkPassword(context.Background(), "admin", pw)
+		if !ok || !mustChange {
+			t.Errorf("%v: admin must sign in with the supplied password and still change it (ok=%v mustChange=%v)", env, ok, mustChange)
+		}
 	}
+}
 
-	if _, ok := s.getConnections("ghost", "x"); ok {
-		t.Error("unknown user should fail")
+func TestLoadStore_BootstrapRefusesBadSources(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"both set", map[string]string{envAdminPassword: "long-enough-pw", envAdminPasswordFile: "/x"}, "not both"},
+		{"too short", map[string]string{envAdminPassword: "short"}, "ADMIN_PASSWORD: password must be 12 to 128"},
+		{"file too short", map[string]string{envAdminPasswordFile: "SHORTFILE"}, "ADMIN_PASSWORD_FILE: password must be"},
+		{"file unreadable", map[string]string{envAdminPasswordFile: "/nonexistent/admin.pw"}, `ADMIN_PASSWORD_FILE="/nonexistent/admin.pw" cannot be read`},
 	}
-	if _, ok := s.getConnections("admin", "wrong"); ok {
-		t.Error("bad token should fail")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := bootstrapFixture(t)
+			if v := tc.env[envAdminPasswordFile]; v == "SHORTFILE" {
+				p := filepath.Join(t.TempDir(), "pw")
+				writeFile(t, p, "tiny")
+				tc.env[envAdminPasswordFile] = p
+			}
+			_, err := loadStore(f.opts(envOf(tc.env)), quietLogger())
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), f.usersPath) {
+				t.Fatalf("want an error naming the users file and %q, got %v", tc.want, err)
+			}
+			if strings.Contains(err.Error(), "tiny") || strings.Contains(err.Error(), "short\"") {
+				t.Errorf("the error must not echo the value: %v", err)
+			}
+			if _, statErr := os.Stat(f.usersPath); statErr == nil {
+				t.Error("a refused bootstrap must not write the users file")
+			}
+		})
 	}
+}
 
-	prof, ok := s.getConnections("admin", "tok-admin")
-	if !ok {
-		t.Fatal("admin auth failed")
+func TestLoadStore_ExistingUsersFileIgnoresBootstrapVariables(t *testing.T) {
+	f := newStoreFixture(t)
+	var buf strings.Builder
+	env := envOf(map[string]string{envAdminPassword: "x", envAdminPasswordFile: "/nowhere"})
+	if _, err := loadStore(f.opts(env), newCapturingLogger(&buf)); err != nil {
+		t.Fatalf("an invalid bootstrap variable must not matter once the users file exists: %v", err)
+	}
+	for _, name := range []string{envAdminPassword, envAdminPasswordFile} {
+		if !strings.Contains(buf.String(), "env="+name) {
+			t.Errorf("want a warn naming %s: %s", name, buf.String())
+		}
+	}
+}
+
+// ----- strict load ------------------------------------------------------------------
+
+func TestLoadStore_RejectsInvalidUsersFile(t *testing.T) {
+	h := testHasher(t)
+	good := mustHash(t, h, adminPW)
+	user := func(name, pw string, admin bool) string {
+		return fmt.Sprintf("  - username: %s\n    password: %s\n    admin: %v\n", name, pw, admin)
+	}
+	cases := []struct{ name, doc, want string }{
+		{"malformed", "msg-utility-users:\n  - [unclosed", "read users file"},
+		{"unknown key", "msg-utility-users:\n" + user("admin", good, true) + "    role: x\n", "field role not found"},
+		{"older token", "msg-utility-users:\n" + user("admin", "S1:K160PHJHFKEGE8N50K9CRQZRF0", true), "password token from an older build; delete the users file"},
+		{"not a hash", "msg-utility-users:\n" + user("admin", "plaintext", true), `user "admin": password is not a pbkdf2-sha256 password hash`},
+		{"bad username", "msg-utility-users:\n" + user("'a b'", good, true), `username "a b" must be 1 to 64`},
+		{"duplicate", "msg-utility-users:\n" + user("admin", good, true) + user("admin", good, false), `user "admin" appears more than once`},
+		{"no admin", "msg-utility-users:\n" + user("viewer", good, false), "at least one administrator"},
+		{"empty", "", "at least one administrator"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newStoreFixture(t)
+			writeFile(t, f.usersPath, tc.doc)
+			_, err := loadStore(f.opts(noEnv), quietLogger())
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), f.usersPath) {
+				t.Fatalf("want an error naming the file and %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestLoadStore_RejectsInvalidConnectionsFile(t *testing.T) {
+	conn := func(broker, extra string) string {
+		return "  - broker: " + broker + "\n    hostname: h\n" + extra
+	}
+	vpns := func(names ...string) string {
+		out := "    client:\n      msgVpns:\n"
+		for _, n := range names {
+			out += "        - name: '" + n + "'\n"
+		}
+		return out
+	}
+	cases := []struct{ name, doc, want string }{
+		{"malformed", "msg-utility-connections: [", "read connections file"},
+		{"unknown key", "msg-utility-connections:\n" + conn("b1", "    vpn: x\n"), "field vpn not found"},
+		{"bad broker", "msg-utility-connections:\n" + conn("'b 1'", ""), `broker "b 1" must be 1 to 64`},
+		{"duplicate broker", "msg-utility-connections:\n" + conn("b1", "") + conn("b1", ""), `broker "b1" appears more than once`},
+		{"semp port", "msg-utility-connections:\n" + conn("b1", "    semp:\n      port: 99999\n"), `semp.port "99999" is not a port`},
+		{"client port", "msg-utility-connections:\n" + conn("b1", "    client:\n      port: tcp\n"), `client.port "tcp" is not a port`},
+		{"vpn without name", "msg-utility-connections:\n" + conn("b1", vpns("")), "a message VPN has no name"},
+		{"duplicate vpn", "msg-utility-connections:\n" + conn("b1", vpns("v1", "v1")), `message VPN "v1" appears more than once`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newStoreFixture(t)
+			writeFile(t, f.connsPath, tc.doc)
+			_, err := loadStore(f.opts(noEnv), quietLogger())
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), f.connsPath) {
+				t.Fatalf("want an error naming the file and %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestLoadStore_EmptyOrMissingConnectionsFileYieldsNoBrokers(t *testing.T) {
+	for _, content := range []string{"", "-"} {
+		f := newStoreFixture(t)
+		if content == "-" {
+			_ = os.Remove(f.connsPath)
+		} else {
+			writeFile(t, f.connsPath, content)
+		}
+		s := f.load(t)
+		prof, _ := s.profile("admin")
+		if len(prof.Brokers) != 0 {
+			t.Errorf("content %q: want no brokers, got %d", content, len(prof.Brokers))
+		}
+	}
+}
+
+func TestLoadStore_SeedPersistsAcrossLoads(t *testing.T) {
+	f := newStoreFixture(t)
+	s1, s2 := f.load(t), f.load(t)
+	if s1.siteSeed == "" || s1.siteSeed != s2.siteSeed {
+		t.Errorf("seed should persist across loads: %q vs %q", s1.siteSeed, s2.siteSeed)
+	}
+}
+
+// ----- queries ------------------------------------------------------------------------
+
+func TestStore_ProfileAndEntitlement(t *testing.T) {
+	s := newStoreWithFixtures(t)
+	if _, ok := s.profile("ghost"); ok {
+		t.Error("unknown user has no profile")
+	}
+	prof, ok := s.profile("admin")
+	if !ok || prof.Username != "admin" || !prof.Admin {
+		t.Fatalf("admin profile: %+v", prof)
 	}
 	if len(prof.Brokers) != 2 {
 		t.Fatalf("admin should see 2 brokers, got %d", len(prof.Brokers))
@@ -149,245 +392,179 @@ func TestGetConnections_AuthAndEntitlement(t *testing.T) {
 		t.Error("siteSeed should be present")
 	}
 
-	vp, ok := s.getConnections("viewer", "tok-viewer")
-	if !ok {
-		t.Fatal("viewer auth failed")
-	}
-	if len(vp.Brokers) != 1 || vp.Brokers[0].Broker != "b1" {
+	vp, _ := s.profile("viewer")
+	if vp.Admin || len(vp.Brokers) != 1 || vp.Brokers[0].Broker != "b1" {
 		t.Fatalf("viewer should see only b1, got %+v", vp.Brokers)
 	}
 	if len(vp.Brokers[0].MsgVpns) != 1 || vp.Brokers[0].MsgVpns[0].Name != "v1" {
 		t.Error("viewer should see only v1 on b1")
 	}
-	if vp.Admin {
-		t.Error("viewer is not admin")
-	}
 }
 
-func TestLoadStore_MissingConnectionsFileYieldsNoBrokers(t *testing.T) {
-	dir := t.TempDir()
-	usersPath := filepath.Join(dir, "users.yaml")
-	writeFile(t, usersPath, usersYAML)
-	s, err := loadStore(usersPath, filepath.Join(dir, "absent.yaml"), filepath.Join(dir, "s.seed"), quietLogger())
-	if err != nil {
-		t.Fatalf("loadStore: %v", err)
-	}
-	prof, _ := s.getConnections("admin", "tok-admin")
-	if len(prof.Brokers) != 0 {
-		t.Error("no connections file should yield no brokers")
-	}
-}
-
-func TestLoadStore_SeedPersistsAcrossLoads(t *testing.T) {
-	dir := t.TempDir()
-	usersPath := filepath.Join(dir, "users.yaml")
-	seedPath := filepath.Join(dir, "s.seed")
-	writeFile(t, usersPath, usersYAML)
-	s1, _ := loadStore(usersPath, filepath.Join(dir, "c.yaml"), seedPath, quietLogger())
-	s2, _ := loadStore(usersPath, filepath.Join(dir, "c.yaml"), seedPath, quietLogger())
-	if s1.siteSeed == "" || s1.siteSeed != s2.siteSeed {
-		t.Errorf("seed should persist across loads: %q vs %q", s1.siteSeed, s2.siteSeed)
-	}
-}
-
-func TestLoadStore_MalformedUsersYAML(t *testing.T) {
-	dir := t.TempDir()
-	usersPath := filepath.Join(dir, "users.yaml")
-	writeFile(t, usersPath, "msg-utility-users:\n  - [unclosed")
-	_, err := loadStore(usersPath, filepath.Join(dir, "c.yaml"), filepath.Join(dir, "s.seed"), quietLogger())
-	if err == nil {
-		t.Error("malformed users YAML should error")
-	}
-}
-
-func TestGetConnections_RaceSafe(t *testing.T) {
-	dir := t.TempDir()
-	usersPath := filepath.Join(dir, "users.yaml")
-	connsPath := filepath.Join(dir, "conns.yaml")
-	writeFile(t, usersPath, usersYAML)
-	writeFile(t, connsPath, connsYAML)
-	s, _ := loadStore(usersPath, connsPath, filepath.Join(dir, "s.seed"), quietLogger())
-
-	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			s.getConnections("admin", "tok-admin")
-		}()
-	}
-	wg.Wait()
-}
-
-// ----- admin CRUD store methods ----------------------------------------------
-
-func TestStore_AuthAdmin(t *testing.T) {
+func TestStore_CheckPassword(t *testing.T) {
 	s := newStoreWithFixtures(t)
-	if !s.authAdmin("admin", "tok-admin") {
-		t.Error("admin with correct token should pass")
+	if !signsIn(t, s, "admin", adminPW) {
+		t.Error("correct password must sign in")
 	}
-	if s.authAdmin("viewer", "tok-viewer") {
-		t.Error("a valid non-admin user must be rejected")
+	if signsIn(t, s, "admin", viewerPW) {
+		t.Error("another user's password must not sign in")
 	}
-	if s.authAdmin("admin", "wrong") {
-		t.Error("bad token must be rejected")
+	if signsIn(t, s, "ghost", adminPW) {
+		t.Error("unknown user must not sign in")
 	}
-	if s.authAdmin("ghost", "x") {
-		t.Error("unknown user must be rejected")
-	}
-}
-
-func TestStore_AuthUser(t *testing.T) {
-	s := newStoreWithFixtures(t)
-	if !s.authUser("admin", "tok-admin") {
-		t.Error("admin with correct token should pass")
-	}
-	if !s.authUser("viewer", "tok-viewer") {
-		t.Error("a valid NON-admin user must pass (the key difference from authAdmin)")
-	}
-	if s.authUser("viewer", "wrong") {
-		t.Error("bad token must be rejected")
-	}
-	if s.authUser("ghost", "x") {
-		t.Error("unknown user must be rejected")
+	// Both hashing slots busy and the request gone: the check gives up with
+	// the context error instead of waiting.
+	s.hasher = &hasher{iter: 1, slots: make(chan struct{}, 1), dummy: s.hasher.dummy}
+	s.hasher.slots <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, ok, err := s.checkPassword(ctx, "admin", adminPW); ok || !errors.Is(err, context.Canceled) {
+		t.Errorf("want context.Canceled, got ok=%v err=%v", ok, err)
 	}
 }
 
-func TestStore_Reload_PicksUpDiskEdits(t *testing.T) {
+func TestStore_IsAdmin(t *testing.T) {
 	s := newStoreWithFixtures(t)
-	// Out-of-band edits to both files: add a user and a broker on disk.
-	writeFile(t, s.usersPath, usersYAML+"  - username: carol\n    password: tok-carol\n    admin: false\n")
-	writeFile(t, s.connsPath, connsYAML+"  - broker: b3\n    hostname: host3\n    semp:\n      port: 1943\n      username: mon\n      password: PKD:semp-b3\n    client:\n      port: 1443\n      msgVpns:\n        - name: v3\n          username: u3\n          password: PKD:cli-b3v3\n")
-
-	if s.authUser("carol", "tok-carol") {
-		t.Fatal("carol should not be known before reload (disk edit not yet applied)")
-	}
-	if err := s.reload(); err != nil {
-		t.Fatalf("reload: %v", err)
-	}
-	if !s.authUser("carol", "tok-carol") {
-		t.Error("reload should pick up the new user from disk")
-	}
-	found := false
-	for _, c := range s.listConnections() {
-		if c.Broker == "b3" {
-			found = true
+	cases := []struct {
+		user          string
+		admin, exists bool
+	}{{"admin", true, true}, {"viewer", false, true}, {"ghost", false, false}}
+	for _, tc := range cases {
+		if admin, exists := s.isAdmin(tc.user); admin != tc.admin || exists != tc.exists {
+			t.Errorf("%s: got admin=%v exists=%v", tc.user, admin, exists)
 		}
 	}
-	if !found {
-		t.Error("reload should pick up the new connection from disk")
-	}
 }
 
-func TestStore_Reload_ToleratesMissingConnectionsFile(t *testing.T) {
-	s := newStoreWithFixtures(t)
-	if err := os.Remove(s.connsPath); err != nil {
-		t.Fatalf("remove conns: %v", err)
-	}
-	if err := s.reload(); err != nil {
-		t.Fatalf("reload should tolerate a missing connections file: %v", err)
-	}
-	if len(s.listConnections()) != 0 {
-		t.Error("a missing connections file should reload to zero brokers")
-	}
-	if !s.authUser("admin", "tok-admin") {
-		t.Error("users must remain after reload")
-	}
-}
+// ----- user CRUD ------------------------------------------------------------------------
 
-func TestStore_Reload_ErrorLeavesStoreUnchanged(t *testing.T) {
-	s := newStoreWithFixtures(t)
-	beforeUsers := len(s.listUsers())
-	beforeConns := len(s.listConnections())
-	writeFile(t, s.usersPath, "msg-utility-users:\n  - [malformed")
-	if err := s.reload(); err == nil {
-		t.Fatal("reload should error on malformed users YAML")
-	}
-	if len(s.listUsers()) != beforeUsers || len(s.listConnections()) != beforeConns {
-		t.Error("a failed reload must leave the in-memory store unchanged")
-	}
-}
-
-func TestStore_Reload_ErrorOnMalformedConnections(t *testing.T) {
-	s := newStoreWithFixtures(t)
-	beforeConns := len(s.listConnections())
-	writeFile(t, s.connsPath, "msg-utility-connections:\n  - [malformed")
-	if err := s.reload(); err == nil {
-		t.Fatal("reload should error on malformed connections YAML")
-	}
-	if len(s.listConnections()) != beforeConns {
-		t.Error("a failed reload must leave the in-memory connections unchanged")
-	}
-}
-
-func TestStore_UpsertUser_CreateAndPersist(t *testing.T) {
-	dir := t.TempDir()
-	usersPath := filepath.Join(dir, "users.yaml")
-	connsPath := filepath.Join(dir, "conns.yaml")
-	writeFile(t, usersPath, usersYAML)
-	writeFile(t, connsPath, connsYAML)
-	s, err := loadStore(usersPath, connsPath, filepath.Join(dir, "s.seed"), quietLogger())
-	if err != nil {
-		t.Fatalf("loadStore: %v", err)
-	}
-	err = s.upsertUser(userRec{
-		Username: "bob", Password: "S1:bob", Admin: true,
+func TestStore_UpsertUser_CreateHashesAndPersists(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	drop, err := s.upsertUser(context.Background(), userRec{
+		Username: "bob", Admin: true,
 		Operate: []permRow{{Brokers: "*", MsgVpns: "*", Queues: "*"}},
-	})
-	if err != nil {
-		t.Fatalf("upsertUser: %v", err)
+	}, "bob-password-1")
+	if err != nil || drop {
+		t.Fatalf("create: drop=%v err=%v", drop, err)
 	}
-	// Persisted: a fresh load from the same file sees bob and authenticates him.
-	s2, err := loadStore(usersPath, connsPath, filepath.Join(dir, "s.seed"), quietLogger())
-	if err != nil {
-		t.Fatalf("reload: %v", err)
+	data, _ := os.ReadFile(f.usersPath)
+	if strings.Contains(string(data), "bob-password-1") {
+		t.Error("the plaintext password must never reach the file")
 	}
-	if !s2.authAdmin("bob", "S1:bob") {
-		t.Error("bob should authenticate as admin after reload (persistence)")
-	}
-}
-
-func TestStore_UpsertUser_EditKeepsPasswordOnBlank(t *testing.T) {
-	s := newStoreWithFixtures(t)
-	// Demote admin to non-admin without resupplying the password.
-	if err := s.upsertUser(userRec{Username: "admin", Password: "", Admin: false}); err != nil {
-		t.Fatalf("upsertUser: %v", err)
-	}
-	if s.authAdmin("admin", "tok-admin") {
-		t.Error("admin was demoted → authAdmin must now be false")
-	}
-	// The kept password still authenticates (string-match) — proving the blank
-	// password did not wipe the stored token.
-	if _, ok := s.getConnections("admin", "tok-admin"); !ok {
-		t.Error("blank password on edit must keep the existing token")
+	s2 := f.load(t)
+	if !signsIn(t, s2, "bob", "bob-password-1") {
+		t.Error("bob should sign in after a fresh load (persistence)")
 	}
 }
 
-func TestStore_UpsertUser_EditChangesPassword(t *testing.T) {
+func TestStore_UpsertUser_EditWithoutPasswordKeepsHashAndFlag(t *testing.T) {
 	s := newStoreWithFixtures(t)
-	if err := s.upsertUser(userRec{Username: "viewer", Password: "S1:new", Admin: false}); err != nil {
-		t.Fatalf("upsertUser: %v", err)
+	s.users[1].MustChangePassword = true
+	drop, err := s.upsertUser(context.Background(), userRec{Username: "viewer"}, "")
+	if err != nil || drop {
+		t.Fatalf("edit: drop=%v err=%v (no password, same admin flag: sessions stay)", drop, err)
 	}
-	if _, ok := s.getConnections("viewer", "tok-viewer"); ok {
-		t.Error("old token must stop working after a password change")
-	}
-	if _, ok := s.getConnections("viewer", "S1:new"); !ok {
-		t.Error("new token must authenticate")
+	mustChange, ok, _ := s.checkPassword(context.Background(), "viewer", viewerPW)
+	if !ok || !mustChange {
+		t.Errorf("blank password must keep the hash and the change flag: ok=%v mustChange=%v", ok, mustChange)
 	}
 }
 
-func TestStore_UpsertUser_RejectsBlankNewPassword(t *testing.T) {
+func TestStore_UpsertUser_NewPasswordOrAdminFlagDropsSessions(t *testing.T) {
 	s := newStoreWithFixtures(t)
+	s.users[1].MustChangePassword = true
+	drop, err := s.upsertUser(context.Background(), userRec{Username: "viewer"}, "viewer-new-pw-1")
+	if err != nil || !drop {
+		t.Fatalf("password change: drop=%v err=%v", drop, err)
+	}
+	if signsIn(t, s, "viewer", viewerPW) || !signsIn(t, s, "viewer", "viewer-new-pw-1") {
+		t.Error("the old password must stop working and the new one must work")
+	}
+	if mustChange, _, _ := s.checkPassword(context.Background(), "viewer", "viewer-new-pw-1"); mustChange {
+		t.Error("an admin-set password replaces the record, change flag included")
+	}
+
+	drop, err = s.upsertUser(context.Background(), userRec{Username: "viewer", Admin: true}, "")
+	if err != nil || !drop {
+		t.Fatalf("promotion: drop=%v err=%v", drop, err)
+	}
+}
+
+func TestStore_UpsertUser_Refusals(t *testing.T) {
+	s := newStoreWithFixtures(t)
+	if _, err := s.upsertUser(context.Background(), userRec{Username: "admin", Admin: false}, ""); !errors.Is(err, errLastAdmin) {
+		t.Errorf("demoting the last admin: want errLastAdmin, got %v", err)
+	}
+	if admin, _ := s.isAdmin("admin"); !admin {
+		t.Error("a refused demotion must leave the admin in place")
+	}
 	before := len(s.listUsers())
-	err := s.upsertUser(userRec{Username: "ghost", Password: "", Admin: true})
-	if !errors.Is(err, errBlankNewUserPassword) {
-		t.Fatalf("blank-password create must be rejected, got %v", err)
+	if _, err := s.upsertUser(context.Background(), userRec{Username: "ghost", Admin: true}, ""); !errors.Is(err, errBlankNewUserPassword) {
+		t.Errorf("blank-password create: want errBlankNewUserPassword, got %v", err)
 	}
 	if len(s.listUsers()) != before {
 		t.Error("a rejected create must not persist")
 	}
-	if s.authAdmin("ghost", "") {
-		t.Error("no empty-token admin account should have been minted")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.hasher = &hasher{iter: 1, slots: make(chan struct{}, 1)}
+	s.hasher.slots <- struct{}{}
+	if _, err := s.upsertUser(ctx, userRec{Username: "carol"}, "carol-password"); !errors.Is(err, context.Canceled) {
+		t.Errorf("hash failure: want context.Canceled, got %v", err)
+	}
+	if len(s.listUsers()) != before {
+		t.Error("a failed hash must not persist")
+	}
+}
+
+// blockWrites points path under a regular file so the atomic write's MkdirAll
+// fails, exercising persist-then-commit.
+func blockWrites(t *testing.T, path *string) {
+	t.Helper()
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	writeFile(t, blocker, "x")
+	*path = filepath.Join(blocker, "file.yaml")
+}
+
+func TestStore_PersistErrorLeavesMemoryUnchanged(t *testing.T) {
+	s := newStoreWithFixtures(t)
+	blockWrites(t, &s.usersPath)
+	before := len(s.listUsers())
+	if _, err := s.upsertUser(context.Background(), userRec{Username: "bob"}, "bob-password-1"); err == nil {
+		t.Fatal("expected a persist error")
+	}
+	if err := s.setPassword(context.Background(), "viewer", "viewer-new-pw-1"); err == nil {
+		t.Fatal("expected a persist error")
+	}
+	if len(s.listUsers()) != before || !signsIn(t, s, "viewer", viewerPW) {
+		t.Error("a failed write must leave the in-memory users unchanged")
+	}
+}
+
+func TestStore_SetPassword(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	s.users[0].MustChangePassword = true
+	if err := s.setPassword(context.Background(), "admin", "admin-new-pw-1"); err != nil {
+		t.Fatal(err)
+	}
+	mustChange, ok, _ := s.checkPassword(context.Background(), "admin", "admin-new-pw-1")
+	if !ok || mustChange {
+		t.Errorf("new password must work and clear the change flag: ok=%v mustChange=%v", ok, mustChange)
+	}
+	if !signsIn(t, f.load(t), "admin", "admin-new-pw-1") {
+		t.Error("the change must persist")
+	}
+	if err := s.setPassword(context.Background(), "ghost", "ghost-password"); !errors.Is(err, errUserNotFound) {
+		t.Errorf("unknown user: want errUserNotFound, got %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.hasher = &hasher{iter: 1, slots: make(chan struct{}, 1)}
+	s.hasher.slots <- struct{}{}
+	if err := s.setPassword(ctx, "admin", "admin-other-pw"); !errors.Is(err, context.Canceled) {
+		t.Errorf("hash failure: want context.Canceled, got %v", err)
 	}
 }
 
@@ -397,8 +574,8 @@ func TestStore_DeleteUser(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("delete viewer: found=%v err=%v", found, err)
 	}
-	if _, ok := s.getConnections("viewer", "tok-viewer"); ok {
-		t.Error("deleted user must not authenticate")
+	if signsIn(t, s, "viewer", viewerPW) {
+		t.Error("deleted user must not sign in")
 	}
 	found, err = s.deleteUser("ghost")
 	if err != nil || found {
@@ -406,51 +583,45 @@ func TestStore_DeleteUser(t *testing.T) {
 	}
 }
 
-func TestStore_DeleteUser_RefusesLastAdmin(t *testing.T) {
+func TestStore_DeleteUser_LastAdmin(t *testing.T) {
 	s := newStoreWithFixtures(t) // admin is the only admin
-	found, err := s.deleteUser("admin")
-	if !errors.Is(err, errLastAdmin) {
-		t.Fatalf("deleting the last admin must return errLastAdmin, got found=%v err=%v", found, err)
+	if _, err := s.deleteUser("admin"); !errors.Is(err, errLastAdmin) {
+		t.Fatalf("deleting the last admin must return errLastAdmin, got %v", err)
 	}
-	if _, ok := s.getConnections("admin", "tok-admin"); !ok {
-		t.Error("a refused delete must leave the admin in place")
+	if _, err := s.upsertUser(context.Background(), userRec{Username: "admin2", Admin: true}, "admin2-password"); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := s.deleteUser("admin"); err != nil || !found {
+		t.Fatalf("deleting a non-last admin must succeed, got found=%v err=%v", found, err)
 	}
 }
 
-func TestStore_DeleteUser_AllowsNonLastAdmin(t *testing.T) {
+func TestStore_DeleteUser_PersistError(t *testing.T) {
 	s := newStoreWithFixtures(t)
-	if err := s.upsertUser(userRec{Username: "admin2", Password: "S1:a2", Admin: true}); err != nil {
-		t.Fatalf("upsertUser: %v", err)
+	blockWrites(t, &s.usersPath)
+	if _, err := s.deleteUser("viewer"); err == nil {
+		t.Fatal("expected a persist error")
 	}
-	found, err := s.deleteUser("admin")
-	if err != nil || !found {
-		t.Fatalf("deleting a non-last admin must succeed, got found=%v err=%v", found, err)
-	}
-	if !s.authAdmin("admin2", "S1:a2") {
-		t.Error("the remaining admin should still authenticate")
+	if !signsIn(t, s, "viewer", viewerPW) {
+		t.Error("a failed delete must leave the user in place")
 	}
 }
 
 func TestStore_ListUsers_ReturnsDeepCopy(t *testing.T) {
 	s := newStoreWithFixtures(t)
 	us := s.listUsers()
-	if len(us) != 2 {
-		t.Fatalf("want 2 users, got %d", len(us))
+	if len(us) != 2 || len(us[0].Operate) == 0 {
+		t.Fatalf("fixture: want 2 users, admin with an operate row, got %+v", us)
 	}
 	us[0].Username = "MUTATED"
-	// admin (index 0) carries one operate glob row in the fixture.
-	if len(us[0].Operate) == 0 {
-		t.Fatal("fixture admin should have an operate row")
-	}
 	us[0].Operate[0].Queues = "MUTATED"
 	fresh := s.listUsers()
-	if fresh[0].Username == "MUTATED" {
-		t.Error("top-level field must be isolated")
-	}
-	if fresh[0].Operate[0].Queues == "MUTATED" {
-		t.Error("nested permRow slice must be isolated (deep copy)")
+	if fresh[0].Username == "MUTATED" || fresh[0].Operate[0].Queues == "MUTATED" {
+		t.Error("listUsers must return a deep copy")
 	}
 }
+
+// ----- connection CRUD -----------------------------------------------------------------
 
 func TestStore_UpsertConnection_Create(t *testing.T) {
 	s := newStoreWithFixtures(t)
@@ -497,20 +668,13 @@ func TestStore_UpsertConnection_MergeSecretsOnEdit(t *testing.T) {
 	for _, v := range b1.Client.MsgVpns {
 		got[v.Name] = v.Password
 	}
-	if got["v1"] != "PKD:cli-b1v1" {
-		t.Errorf("v1: blank + name match must keep, got %q", got["v1"])
-	}
-	if got["v2"] != "V1:changed" {
-		t.Errorf("v2: non-blank must replace, got %q", got["v2"])
-	}
-	if got["vX"] != "" {
-		t.Errorf("vX: blank + no match must stay blank, got %q", got["vX"])
+	if got["v1"] != "PKD:cli-b1v1" || got["v2"] != "V1:changed" || got["vX"] != "" {
+		t.Errorf("VPN secrets: want keep/replace/blank, got %v", got)
 	}
 }
 
 func TestStore_UpsertConnection_EditReplacesSemp(t *testing.T) {
 	s := newStoreWithFixtures(t)
-	// Non-blank semp password on edit must hit the replace (not keep) branch.
 	edit := connRec{
 		Broker: "b2", Hostname: "host2",
 		Semp:   sempRec{Port: "1943", Username: "mon", Password: "V1:semp-b2-new"},
@@ -535,8 +699,7 @@ func TestStore_DeleteConnection(t *testing.T) {
 	if len(s.listConnections()) != 1 {
 		t.Errorf("want 1 connection after delete, got %d", len(s.listConnections()))
 	}
-	found, _ = s.deleteConnection("nope")
-	if found {
+	if found, _ = s.deleteConnection("nope"); found {
 		t.Error("deleting an unknown broker must return found=false")
 	}
 }
@@ -544,45 +707,14 @@ func TestStore_DeleteConnection(t *testing.T) {
 func TestStore_ListConnections_ReturnsDeepCopy(t *testing.T) {
 	s := newStoreWithFixtures(t)
 	cs := s.listConnections()
-	if len(cs) != 2 {
-		t.Fatalf("want 2 connections, got %d", len(cs))
+	if len(cs) != 2 || len(cs[0].Client.MsgVpns) == 0 {
+		t.Fatalf("fixture: want 2 connections, b1 with VPNs, got %+v", cs)
 	}
 	cs[0].Broker = "MUTATED"
-	// b1 (index 0) carries VPN rows in the fixture.
-	if len(cs[0].Client.MsgVpns) == 0 {
-		t.Fatal("fixture b1 should have VPN rows")
-	}
 	cs[0].Client.MsgVpns[0].Password = "MUTATED"
 	fresh := s.listConnections()
-	if fresh[0].Broker == "MUTATED" {
-		t.Error("top-level field must be isolated")
-	}
-	if fresh[0].Client.MsgVpns[0].Password == "MUTATED" {
-		t.Error("nested VPN slice must be isolated (deep copy)")
-	}
-}
-
-func TestStore_UpsertUser_PersistErrorLeavesMemoryUnchanged(t *testing.T) {
-	dir := t.TempDir()
-	usersPath := filepath.Join(dir, "users.yaml")
-	connsPath := filepath.Join(dir, "conns.yaml")
-	writeFile(t, usersPath, usersYAML)
-	writeFile(t, connsPath, connsYAML)
-	s, err := loadStore(usersPath, connsPath, filepath.Join(dir, "s.seed"), quietLogger())
-	if err != nil {
-		t.Fatalf("loadStore: %v", err)
-	}
-	// Point the users file under a regular file so the atomic write's MkdirAll
-	// fails — exercising persist-then-commit (memory must not change).
-	blocker := filepath.Join(dir, "blocker")
-	writeFile(t, blocker, "x")
-	s.usersPath = filepath.Join(blocker, "users.yaml")
-	before := len(s.listUsers())
-	if err := s.upsertUser(userRec{Username: "bob", Password: "S1:b"}); err == nil {
-		t.Fatal("expected a persist error")
-	}
-	if len(s.listUsers()) != before {
-		t.Error("a failed write must leave the in-memory users unchanged")
+	if fresh[0].Broker == "MUTATED" || fresh[0].Client.MsgVpns[0].Password == "MUTATED" {
+		t.Error("listConnections must return a deep copy")
 	}
 }
 
@@ -593,10 +725,11 @@ func TestStore_CRUD_RaceSafe(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			s.getConnections("admin", "tok-admin")
+			s.profile("admin")
 			s.listUsers()
-			s.authAdmin("admin", "tok-admin")
-			_ = s.upsertUser(userRec{Username: fmt.Sprintf("u%d", n), Password: "S1:x"})
+			s.isAdmin("admin")
+			_, _, _ = s.checkPassword(context.Background(), "admin", adminPW)
+			_, _ = s.upsertUser(context.Background(), userRec{Username: fmt.Sprintf("u%d", n)}, "racer-password")
 			s.listConnections()
 		}(i)
 	}

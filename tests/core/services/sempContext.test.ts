@@ -59,7 +59,7 @@ describe('core/services/sempContext — unfilteredPrimarySempContext', () => {
                 user: 'u', pass: 'p', baseUrl: 'b', protocol: 'https', host: 'h', port: '1943', urlPath: '',
             },
             managed: {
-                admin: false, username: 'u', token: 't', broker: 'b1', vpns: [],
+                admin: false, username: 'u', broker: 'b1', vpns: [],
                 operate: [{ brokers: 'b1', msgVpns: 'vpn1', queues: '*' }], readOnly: [],
             },
         });
