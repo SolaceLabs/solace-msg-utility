@@ -54,6 +54,7 @@ function managed(over: Partial<ManagedSession> = {}): ManagedSession {
         admin: false, username: 'u', broker: 'b1', vpns: [],
         operate: [{ brokers: 'b1', msgVpns: 'vpn1', queues: 'ops.*' }],
         readOnly: [{ brokers: 'b1', msgVpns: 'vpn1', queues: 'ro.*' }],
+        modules: ['queue-copy'],
         ...over,
     };
 }

@@ -60,7 +60,7 @@ describe('core/services/sempContext — unfilteredPrimarySempContext', () => {
             },
             managed: {
                 admin: false, username: 'u', broker: 'b1', vpns: [],
-                operate: [{ brokers: 'b1', msgVpns: 'vpn1', queues: '*' }], readOnly: [],
+                operate: [{ brokers: 'b1', msgVpns: 'vpn1', queues: '*' }], readOnly: [], modules: [],
             },
         });
         (ctx.sempFetch as any).mockResolvedValue(

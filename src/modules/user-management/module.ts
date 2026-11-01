@@ -14,16 +14,22 @@
  * ends that user's sessions at the gateway. When it is the signed-in admin's
  * own account, the module asks the session owner to sign out
  * (`rbac:sign-out-requested`) instead of patching a session that no longer
- * exists. Imports only from `src/core/*` and its own service.
+ * exists.
+ *
+ * The modules editor sets which app modules the user may open: the
+ * deployment default (config.yaml's `modules.userDefault`), or a list of
+ * their own. The gateway only ever grants what `modules.offered` allows, so a
+ * module outside it is marked "not offered". Imports only from `src/core/*`
+ * and its own service.
  */
 import { required } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import { createRowList } from '../../core/components/row-list';
 import { showToast } from '../../core/toast';
-import { escapeHtml } from '../../core/utils';
+import { escapeHtml, moduleLabel } from '../../core/utils';
 import { logger } from '../../core/logger';
 import { reportManagedFailure, SIGNED_OUT_TOAST_MS } from '../../core/services/managed-api';
-import { createUserMgmtService, type ManagedUser, type UserPayload } from './service';
+import { createUserMgmtService, type ManagedUser, type ModuleChoices, type UserPayload } from './service';
 import type { AppContext, QGlob } from '../../core/types';
 
 const GLOB_FIELDS = [
@@ -53,6 +59,9 @@ export const UserManagementModule = {
             password: required<HTMLInputElement>(container, '#user-mgmt-password'),
             passwordHint: required<HTMLElement>(container, '#user-mgmt-password-hint'),
             admin: required<HTMLInputElement>(container, '#user-mgmt-admin'),
+            modulesDefault: required<HTMLInputElement>(container, '#user-mgmt-modules-default'),
+            modulesDefaultHint: required<HTMLElement>(container, '#user-mgmt-modules-default-hint'),
+            modules: required<HTMLElement>(container, '#user-mgmt-modules'),
             operateRows: required<HTMLElement>(container, '#user-mgmt-operate-rows'),
             readonlyRows: required<HTMLElement>(container, '#user-mgmt-readonly-rows'),
             btnAddOperate: required<HTMLButtonElement>(container, '#btn-user-mgmt-add-operate'),
@@ -73,6 +82,8 @@ export const UserManagementModule = {
 
         // null = creating a new user; otherwise the username being edited.
         let editing: string | null = null;
+        // From the last list load; empty until then.
+        let choices: ModuleChoices = { catalog: [], offered: [], userDefault: 'all' };
 
         function showView(view: 'list' | 'form'): void {
             gate.hide();
@@ -134,7 +145,40 @@ export const UserManagementModule = {
                 reportManagedFailure(res, eventBus, msg => setError(els.listError, msg));
                 return;
             }
-            renderList(res.data);
+            choices = res.data.modules;
+            renderList(res.data.users);
+        }
+
+        function defaultModules(): string[] {
+            return choices.userDefault === 'all' ? choices.offered : [];
+        }
+
+        function checkedModules(): string[] {
+            return [...els.modules.querySelectorAll<HTMLInputElement>('input')].filter(b => b.checked).map(b => b.value);
+        }
+
+        /**
+         * One checkbox per catalog module. Under the deployment default they
+         * show what the default grants and are locked; otherwise they edit the
+         * user's own list.
+         */
+        function renderModules(own: string[] | null): void {
+            const useDefault = own === null;
+            const shown = useDefault ? defaultModules() : own;
+            els.modulesDefault.checked = useDefault;
+            els.modulesDefaultHint.textContent = choices.userDefault === 'all' ? '(every offered module)' : '(no modules)';
+            els.modules.innerHTML = '';
+            for (const id of choices.catalog) {
+                const label = document.createElement('label');
+                label.className = 'flex-row items-center gap-2 m-0';
+                const box = document.createElement('input');
+                box.type = 'checkbox';
+                box.value = id;
+                box.checked = shown.includes(id);
+                box.disabled = useDefault;
+                label.append(box, ` ${moduleLabel(id)}${choices.offered.includes(id) ? '' : ' (not offered)'}`);
+                els.modules.appendChild(label);
+            }
         }
 
         function openCreate(): void {
@@ -145,6 +189,7 @@ export const UserManagementModule = {
             els.password.value = '';
             els.passwordHint.textContent = '(required)';
             els.admin.checked = false;
+            renderModules(null);
             operateList.clear();
             readonlyList.clear();
             setError(els.formError, null);
@@ -159,6 +204,7 @@ export const UserManagementModule = {
             els.password.value = '';
             els.passwordHint.textContent = '(leave blank to keep current)';
             els.admin.checked = u.admin;
+            renderModules(u.modules ?? null);
             operateList.clear();
             (u.operate ?? []).forEach(r => operateList.addRow(r as unknown as Record<string, string>));
             readonlyList.clear();
@@ -186,6 +232,7 @@ export const UserManagementModule = {
                 admin: els.admin.checked,
                 operate: operateList.readRows() as unknown as QGlob[],
                 readOnly: readonlyList.readRows() as unknown as QGlob[],
+                modules: els.modulesDefault.checked ? null : checkedModules(),
             };
             els.btnSave.disabled = true;
             setError(els.formError, null);
@@ -251,6 +298,10 @@ export const UserManagementModule = {
         els.btnCancel.addEventListener('click', () => showView('list'));
         els.btnAddOperate.addEventListener('click', () => operateList.addRow());
         els.btnAddReadonly.addEventListener('click', () => readonlyList.addRow());
+        // Leaving the default starts the user's own list from what the
+        // default grants; returning to it shows the default again.
+        els.modulesDefault.addEventListener('change', () =>
+            renderModules(els.modulesDefault.checked ? null : checkedModules()));
         eventBus.on('rbac:changed', () => applyGate());
 
         applyGate(); // gate until an admin session exists; load the list when it does

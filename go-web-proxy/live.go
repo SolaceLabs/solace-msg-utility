@@ -1,0 +1,88 @@
+package main
+
+import (
+	"log/slog"
+	"sync/atomic"
+)
+
+// live holds the config.yaml keys that take effect without a restart:
+// connModes, defaultConn, logLevel, access.*, session.*, login.* and
+// modules.*. serve() builds it from the loaded config and passes it to every
+// reader, which loads the current value per request. The managed settings
+// endpoint (settings.go) is the only writer. Every other key is read once at
+// startup (restartOnlyKeys) and applies at the next restart.
+type live struct {
+	cur   atomic.Pointer[liveSettings]
+	level slog.LevelVar // the logger's level; set with the rest by apply
+}
+
+type liveSettings struct {
+	connModes, defaultConn string
+	access                 accessConfig
+	session                sessionLimits
+	login                  loginLimits
+	modules                moduleSettings
+}
+
+func newLive(cfg config) *live {
+	lv := &live{}
+	lv.apply(cfg)
+	return lv
+}
+
+// apply swaps in cfg's live keys as one value: a reader sees the old set or
+// the new one, never a mix of the two.
+func (lv *live) apply(cfg config) {
+	lv.cur.Store(&liveSettings{
+		connModes:   cfg.connModes,
+		defaultConn: cfg.defaultConn,
+		access:      cfg.access,
+		session:     cfg.session,
+		login:       cfg.login,
+		modules:     cfg.modules,
+	})
+	lv.level.Set(cfg.logLevel)
+}
+
+func (lv *live) get() *liveSettings { return lv.cur.Load() }
+
+func (lv *live) sessionLimits() sessionLimits { return lv.get().session }
+func (lv *live) loginLimits() loginLimits     { return lv.get().login }
+
+// restartOnlyKeys are the config.yaml keys the gateway reads once at startup.
+// A saved change applies at the next restart; the settings page marks them.
+var restartOnlyKeys = []struct {
+	key   string
+	value func(fileConfig) any
+}{
+	{"hosted", func(f fileConfig) any { return f.Hosted }},
+	{"managed", func(f fileConfig) any { return f.Managed }},
+	{"appDir", func(f fileConfig) any { return f.AppDir }},
+	{"tls.certFile", func(f fileConfig) any { return f.TLS.CertFile }},
+	{"tls.keyFile", func(f fileConfig) any { return f.TLS.KeyFile }},
+	{"tls.trustDir", func(f fileConfig) any { return f.TLS.TrustDir }},
+	{"tls.insecureSkipVerify", func(f fileConfig) any { return f.TLS.InsecureSkipVerify }},
+	{"usersFile", func(f fileConfig) any { return f.UsersFile }},
+	{"connectionsFile", func(f fileConfig) any { return f.ConnectionsFile }},
+}
+
+func restartOnlyKeyNames() []string {
+	out := make([]string, 0, len(restartOnlyKeys))
+	for _, k := range restartOnlyKeys {
+		out = append(out, k.key)
+	}
+	return out
+}
+
+// pendingRestart lists the restart-only keys on which file differs from the
+// running gateway.
+func pendingRestart(running config, file fileConfig) []string {
+	run := fileConfigFromConfig(running)
+	out := []string{}
+	for _, k := range restartOnlyKeys {
+		if k.value(run) != k.value(file) {
+			out = append(out, k.key)
+		}
+	}
+	return out
+}

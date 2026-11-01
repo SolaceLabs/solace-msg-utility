@@ -19,6 +19,7 @@ import { importSeed, unpack } from '../../../src/core/encode';
 import type { ManagedProfile } from '../../../src/core/services/managed-service';
 
 const PROFILE: ManagedProfile = {
+    username: 'u',
     admin: false,
     siteSeed: 'c2VlZA==',
     operate: [],
@@ -31,6 +32,7 @@ const PROFILE: ManagedProfile = {
         },
         { broker: 'b2', hostname: 'host2', semp: { port: '1943', user: 'mon', pass: 'PK-semp-b2' }, msgVpns: [] },
     ],
+    modules: [],
 };
 
 /** Collects whatever the store dials so tests can assert the payload. */

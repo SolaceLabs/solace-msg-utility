@@ -27,20 +27,21 @@ type session struct {
 
 // sessions is the in-memory session table (single replica: a restart signs
 // everyone out). Ids are 32 random bytes; the table is the only place they
-// mean anything.
+// mean anything. limits returns the live session.* settings, so a change
+// applies to every session, existing ones included, at its next request.
 type sessions struct {
 	mu     sync.Mutex
 	byID   map[string]*session
-	limits sessionLimits
+	limits func() sessionLimits
 	now    func() time.Time
 }
 
-func newSessions(limits sessionLimits, now func() time.Time) *sessions {
+func newSessions(limits func() sessionLimits, now func() time.Time) *sessions {
 	return &sessions{byID: map[string]*session{}, limits: limits, now: now}
 }
 
-func (s *sessions) expired(ss *session, now time.Time) bool {
-	return now.Sub(ss.lastSeen) >= s.limits.idle || now.Sub(ss.created) >= s.limits.absolute
+func expired(ss *session, now time.Time, lim sessionLimits) bool {
+	return now.Sub(ss.lastSeen) >= lim.idle || now.Sub(ss.created) >= lim.absolute
 }
 
 // create starts a session and returns its id. Expired sessions are swept here,
@@ -51,9 +52,9 @@ func (s *sessions) create(user string, mustChange bool) string {
 	id := base64.RawURLEncoding.EncodeToString(b)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := s.now()
+	now, lim := s.now(), s.limits()
 	for k, ss := range s.byID {
-		if s.expired(ss, now) {
+		if expired(ss, now, lim) {
 			delete(s.byID, k)
 		}
 	}
@@ -71,7 +72,7 @@ func (s *sessions) lookup(id string) (session, bool) {
 		return session{}, false
 	}
 	now := s.now()
-	if s.expired(ss, now) {
+	if expired(ss, now, s.limits()) {
 		delete(s.byID, id)
 		return session{}, false
 	}

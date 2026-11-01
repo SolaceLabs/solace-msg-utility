@@ -34,6 +34,7 @@ function session(over: Partial<ManagedSession> = {}): ManagedSession {
         vpns: [],
         operate: [],
         readOnly: [],
+        modules: [],
         ...over,
     };
 }
@@ -52,15 +53,26 @@ describe('core/rbac — isModuleVisible', () => {
         expect(isModuleVisible(undefined, 'connection-management')).toBe(true);
     });
 
-    it('gates admin-only modules on the admin flag', () => {
-        expect(isModuleVisible(session({ admin: false }), 'user-management')).toBe(false);
-        expect(isModuleVisible(session({ admin: false }), 'connection-management')).toBe(false);
-        expect(isModuleVisible(session({ admin: true }), 'user-management')).toBe(true);
-        expect(isModuleVisible(session({ admin: true }), 'connection-management')).toBe(true);
+    it('gates admin-only modules on the admin flag, whatever the granted modules', () => {
+        for (const id of ['user-management', 'connection-management', 'gateway-settings']) {
+            expect(isModuleVisible(session({ admin: false, modules: [id] }), id)).toBe(false);
+            expect(isModuleVisible(session({ admin: true }), id)).toBe(true);
+        }
     });
 
-    it('always shows non-admin modules', () => {
-        expect(isModuleVisible(session({ admin: false }), 'queue-browser')).toBe(true);
+    // Module control: past the requirements, a managed user sees the sign-in
+    // surfaces and exactly the modules the gateway granted (/managed/me).
+    it('shows the sign-in surfaces in every managed session', () => {
+        expect(isModuleVisible(session(), 'connections')).toBe(true);
+        expect(isModuleVisible(session(), 'admin-login')).toBe(true);
+    });
+
+    it('shows any other module only when the session was granted it', () => {
+        const s = session({ modules: ['queue-browser'] });
+        expect(isModuleVisible(s, 'queue-browser')).toBe(true);
+        expect(isModuleVisible(s, 'queue-copy')).toBe(false);
+        // The admin flag does not widen module control.
+        expect(isModuleVisible(session({ admin: true }), 'queue-browser')).toBe(false);
     });
 
     // Modules that reach the broker over SEMP v1 RPC cannot be entitlement-
@@ -77,10 +89,10 @@ describe('core/rbac — isModuleVisible', () => {
             }
         });
 
-        it('is denied in any managed session, admin or not', () => {
+        it('is denied in any managed session, admin or not, even if granted', () => {
             for (const id of UNFILTERED) {
-                expect(isModuleVisible(session({ admin: false }), id)).toBe(false);
-                expect(isModuleVisible(session({ admin: true }), id)).toBe(false);
+                expect(isModuleVisible(session({ admin: false, modules: [id] }), id)).toBe(false);
+                expect(isModuleVisible(session({ admin: true, modules: [id] }), id)).toBe(false);
             }
         });
     });
@@ -94,7 +106,8 @@ describe('core/rbac — isModuleVisible', () => {
             ['queue-subscription-explorer', null, true],
             ['queue-subscription-explorer', session({ admin: true }), false],
             ['queue-browser', null, true],
-            ['queue-browser', session({ admin: false }), true],
+            ['queue-browser', session({ modules: ['queue-browser'] }), true],
+            ['queue-browser', session({ admin: true }), false],
             ['connections', session({ admin: false }), true],
         ];
         for (const [id, sess, expected] of cases) {

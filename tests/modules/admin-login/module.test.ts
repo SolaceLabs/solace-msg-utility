@@ -25,6 +25,7 @@ const ADMIN_PROFILE = {
     operate: [{ brokers: '*', msgVpns: '*', queues: '*' }],
     readOnly: [],
     brokers: [],
+    modules: [],
 };
 
 let container: HTMLElement;
@@ -71,7 +72,7 @@ describe('admin-login — restoring the gateway session', () => {
         expect(el('#admin-session-summary').textContent).toBe('Signed in as admin (administrator).');
         expect(appState.managed).toEqual({
             admin: true, username: 'admin', broker: '', vpns: [],
-            operate: ADMIN_PROFILE.operate, readOnly: [],
+            operate: ADMIN_PROFILE.operate, readOnly: [], modules: [],
         });
         expect(ctx.managedStore.isActive()).toBe(true);
         expect(rbac).toHaveBeenCalledTimes(1);
@@ -156,7 +157,7 @@ describe('admin-login — sign-out requested by another module', () => {
 
     it('ignores the request while it holds no session (the Connections Managed tab may own it)', async () => {
         await install({ ok: false, status: 401, code: 'unauthenticated' });
-        appState.managed = { admin: true, username: 'x', broker: 'b', vpns: [], operate: [], readOnly: [] };
+        appState.managed = { admin: true, username: 'x', broker: 'b', vpns: [], operate: [], readOnly: [], modules: [] };
         eventBus.emit('rbac:sign-out-requested');
         expect(logout).not.toHaveBeenCalled();
         expect(appState.managed).not.toBeNull();

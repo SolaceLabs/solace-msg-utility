@@ -16,7 +16,7 @@ vi.mock('../../../src/modules/connection-management/service', () => ({
 import { ConnectionManagementModule } from '../../../src/modules/connection-management/module';
 
 const ADMIN: ManagedSession = {
-    admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [],
+    admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
 };
 const CONNS = [
     { broker: 'b1', hostname: 'host1', semp: { port: '1943', user: 'mon', pass: '' }, client: { port: '1443', msgVpns: [{ name: 'v1', user: 'u1', pass: '' }] } },

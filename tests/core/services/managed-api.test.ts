@@ -80,6 +80,8 @@ describe('core/services/managed-api — managedErrorMessage', () => {
         ['last_admin', 'At least one administrator must remain.'],
         ['cross_origin', 'The gateway refused a cross-site request.'],
         ['rate_limited', 'Too many requests. Wait a minute and try again.'],
+        ['would_lock_out', 'This change would lock this browser out of the gateway.'],
+        ['config_changed_on_disk', 'config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.'],
         ['server_error', 'The gateway could not complete the request. Its log has the cause.'],
         ['network', 'The gateway could not be reached.'],
         ['bad_response', 'The gateway sent a response this page cannot read.'],
@@ -87,8 +89,10 @@ describe('core/services/managed-api — managedErrorMessage', () => {
         expect(managedErrorMessage(err(code))).toBe(text);
     });
 
-    it("shows the gateway's own reason for invalid, and a generic line without one", () => {
+    it("shows the gateway's own reason when it sends one, and a generic line without one", () => {
         expect(managedErrorMessage(err('invalid', { reason: 'Username must be 1 to 64 characters.' }))).toBe('Username must be 1 to 64 characters.');
+        expect(managedErrorMessage(err('would_lock_out', { reason: 'This allow list would deny your own address (192.0.2.1).' })))
+            .toBe('This allow list would deny your own address (192.0.2.1).');
         expect(managedErrorMessage(err('invalid', { status: 422 }))).toBe('Unexpected answer from the gateway (HTTP 422).');
         expect(managedErrorMessage(err('http_502', { status: 502 }))).toBe('Unexpected answer from the gateway (HTTP 502).');
     });

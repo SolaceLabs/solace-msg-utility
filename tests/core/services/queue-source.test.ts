@@ -40,7 +40,7 @@ const ALLOW_ALL: QGlob[] = [{ brokers: '*', msgVpns: '*', queues: '*' }];
 function managedSession(over: Partial<ManagedSession> = {}): ManagedSession {
     return {
         admin: false, username: 'u', broker: 'b1',
-        vpns: [], operate: ALLOW_ALL, readOnly: [],
+        vpns: [], operate: ALLOW_ALL, readOnly: [], modules: [],
         ...over,
     };
 }

@@ -11,7 +11,7 @@ import (
 )
 
 func TestNewManagedRouting_DisabledIsNil(t *testing.T) {
-	routes, err := newManagedRouting(defaultConfig(), quietLogger())
+	routes, err := newManagedRouting(defaultConfig(), liveWith(nil), configSource{}, quietLogger())
 	if routes != nil || err != nil {
 		t.Fatalf("managed false: want nil, nil; got %v, %v", routes, err)
 	}
@@ -28,7 +28,7 @@ func TestNewManagedRouting_Enabled(t *testing.T) {
 	t.Setenv(envAdminPassword, "")
 	t.Setenv(envAdminPasswordFile, "")
 	var buf strings.Builder
-	routes, err := newManagedRouting(cfg, newCapturingLogger(&buf))
+	routes, err := newManagedRouting(cfg, newLive(cfg), configSource{path: filepath.Join(dir, "config.yaml")}, newCapturingLogger(&buf))
 	if err != nil || routes == nil {
 		t.Fatalf("want routes, got %v %v", routes, err)
 	}
@@ -45,12 +45,14 @@ func TestBuildManagedRoutes_StoreErrorIsReturned(t *testing.T) {
 	writeFile(t, f.usersPath, "msg-utility-users: [")
 	cfg := defaultConfig()
 	cfg.managed, cfg.usersFile, cfg.connectionsFile, cfg.siteSeedFile = true, f.usersPath, f.connsPath, f.seedPath
-	if _, err := buildManagedRoutes(cfg, f.h, noEnv, time.Now, quietLogger()); err == nil || !strings.Contains(err.Error(), f.usersPath) {
+	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, quietLogger()); err == nil || !strings.Contains(err.Error(), f.usersPath) {
 		t.Fatalf("want the store error naming the file, got %v", err)
 	}
 }
 
 // Only connModes=managed gates the app bundle; /solAdmin is gated in every mode.
+// The settings page can change connModes, so the gate reads it live:
+// settings_test.go TestSettings_SaveAppliesLiveKeysAtOnce.
 func TestBuildManagedRoutes_GatesByMode(t *testing.T) {
 	for mode, gated := range map[string]bool{connDirect: false, connBoth: false, connManaged: true} {
 		e := newManagedEnv(t, func(c *config) { c.connModes = mode })

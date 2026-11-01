@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatBytes, generateUuid, matchString, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText} from '../../src/core/utils';
+import { formatBytes, generateUuid, matchString, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText, moduleLabel } from '../../src/core/utils';
 
 describe('core/utils', () => {
 
@@ -366,6 +366,14 @@ describe('core/utils', () => {
             expect(topicFilterMatches('B*', 'bulkq')).toBe(false);
             expect(topicFilterMatches('b*', 'BULKQ')).toBe(false);
         });
+    });
+});
+
+describe('core/utils moduleLabel', () => {
+    it('title-cases each dash-separated word', () => {
+        expect(moduleLabel('queue-browser')).toBe('Queue Browser');
+        expect(moduleLabel('queue-subscription-explorer')).toBe('Queue Subscription Explorer');
+        expect(moduleLabel('x')).toBe('X');
     });
 });
 

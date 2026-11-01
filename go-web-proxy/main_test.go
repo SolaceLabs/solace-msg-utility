@@ -234,7 +234,4 @@ func TestRootHandler_WithManagedRouting(t *testing.T) {
 			t.Errorf("%s: want %s, got %q", path, want, got)
 		}
 	}
-	if got := noGate(stubHandler("x")); route(got, "/").Body.String() != "x" {
-		t.Error("noGate must pass through")
-	}
 }

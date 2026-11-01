@@ -35,17 +35,18 @@ type authPages struct {
 	store    *store
 	sessions *sessions
 	throttle *throttle
+	live     *live
 	cop      *http.CrossOriginProtection
 	logger   *slog.Logger
 	tmpl     *template.Template
 }
 
-func newAuthPages(st *store, ss *sessions, th *throttle, logger *slog.Logger) (*authPages, error) {
+func newAuthPages(st *store, ss *sessions, th *throttle, lv *live, logger *slog.Logger) (*authPages, error) {
 	tmpl, err := template.ParseFS(pageFiles, "pages/login.html")
 	if err != nil {
 		return nil, err
 	}
-	return &authPages{store: st, sessions: ss, throttle: th, cop: http.NewCrossOriginProtection(), logger: logger, tmpl: tmpl}, nil
+	return &authPages{store: st, sessions: ss, throttle: th, live: lv, cop: http.NewCrossOriginProtection(), logger: logger, tmpl: tmpl}, nil
 }
 
 // safeNext keeps the post-sign-in redirect on one of the two app entry points,
@@ -265,11 +266,16 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-// gateApp guards the PWA under connModes=managed: nothing of the app reaches
-// a client without a session. Navigations are sent to the sign-in (or the
+// gateApp guards the PWA while connModes is managed (read live, so a settings
+// save applies to the next request): nothing of the app reaches a client
+// without a session. Navigations are sent to the sign-in (or the
 // forced password change); asset requests get a bare 401.
 func (p *authPages) gateApp(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p.live.get().connModes != connManaged {
+			next.ServeHTTP(w, r)
+			return
+		}
 		as, ok := p.sessions.fromRequest(r)
 		if ok && !as.mustChange {
 			next.ServeHTTP(w, r)

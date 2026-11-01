@@ -34,6 +34,8 @@ export interface ManagedProfile {
     operate: QGlob[];
     readOnly: QGlob[];
     brokers: ManagedConnection[];
+    /** App modules this user may open; drives module control (`rbac.ts`). */
+    modules: string[];
 }
 
 export interface ManagedService {

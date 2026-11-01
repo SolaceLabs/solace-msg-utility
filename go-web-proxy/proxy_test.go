@@ -143,7 +143,7 @@ func TestJoinHostPort(t *testing.T) {
 func TestHostedHandler_Enabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(true, connBoth, connManaged).ServeHTTP(rec, r)
+	newHostedHandler(true, liveWith(func(c *config) { c.connModes, c.defaultConn = connBoth, connManaged })).ServeHTTP(rec, r)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: want 200, got %d", rec.Code)
@@ -169,7 +169,7 @@ func TestHostedHandler_Enabled(t *testing.T) {
 func TestHostedHandler_EnabledDirectOnlyDefault(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(true, connDirect, connDirect).ServeHTTP(rec, r)
+	newHostedHandler(true, liveWith(nil)).ServeHTTP(rec, r)
 
 	var got hostedInfo
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -183,13 +183,32 @@ func TestHostedHandler_EnabledDirectOnlyDefault(t *testing.T) {
 func TestHostedHandler_Disabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(false, connDirect, connDirect).ServeHTTP(rec, r)
+	newHostedHandler(false, liveWith(nil)).ServeHTTP(rec, r)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: want 404, got %d", rec.Code)
 	}
 	if rec.Body.Len() != 0 {
 		t.Errorf("body: want empty, got %q", rec.Body.String())
+	}
+}
+
+// connModes and defaultConn apply without a restart: /hosted answers from the
+// live settings on every request.
+func TestHostedHandler_ReadsLiveSettings(t *testing.T) {
+	cfg := defaultConfig()
+	lv := newLive(cfg)
+	h := newHostedHandler(true, lv)
+	cfg.connModes, cfg.defaultConn = connBoth, connManaged
+	lv.apply(cfg)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/hosted", nil))
+	var got hostedInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ConnModes != connBoth || got.DefaultConn != connManaged {
+		t.Errorf("want the applied modes, got %+v", got)
 	}
 }
 

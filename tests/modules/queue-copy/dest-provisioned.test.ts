@@ -96,7 +96,7 @@ beforeAll(async () => {
 
 const SESSION: ManagedSession = {
     admin: false, username: 'u', broker: 'b1', vpns: ['v1', 'v2'],
-    operate: [{ brokers: '*', msgVpns: '*', queues: 'ops.*' }], readOnly: [],
+    operate: [{ brokers: '*', msgVpns: '*', queues: 'ops.*' }], readOnly: [], modules: ['queue-copy'],
 };
 
 let container: HTMLElement;

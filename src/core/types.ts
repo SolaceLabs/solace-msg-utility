@@ -70,6 +70,12 @@ export interface ManagedSession {
     operate: QGlob[];
     /** Queues the user may only view. */
     readOnly: QGlob[];
+    /**
+     * App modules the gateway lets this user open (`/managed/me`'s `modules`).
+     * Connections and the admin modules are not governed by it — see
+     * `isModuleVisible` in `rbac.ts`.
+     */
+    modules: string[];
 }
 
 /* ------------------------------------------------------------------ */

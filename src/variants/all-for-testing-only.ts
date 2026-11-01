@@ -6,8 +6,9 @@
  * the gateway's `/hosted` response.
  *
  * Built via `node scripts/vite-build.mjs --variant=all-for-testing-only --out-filename=all-test.html`.
- * The admin-only `user-management` + `connection-management` modules ship at
- * `/solAdmin` in production (the `admin` variant); they are listed here, with
+ * The admin-only `user-management`, `connection-management` and
+ * `gateway-settings` modules ship at `/solAdmin` in production (the `admin`
+ * variant); they are listed here, with
  * `admin-login`, so a single build exercises every module. `isModuleVisible`
  * (rbac.ts's MODULE_REQUIREMENTS) still hides them for non-admin sessions.
  */
@@ -19,6 +20,7 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'admin-login': 25,             // /solAdmin entry point
     'user-management': 20,         // admin-only
     'connection-management': 15,   // admin-only
+    'gateway-settings': 10,        // admin-only
 };
 
 /** Module id -> entry name: the connections module's managed entry. */

@@ -8,7 +8,7 @@ import type { PwaModule, RegisteredModule, AppContext, ManagedSession } from '..
 function managedSession(over: Partial<ManagedSession> = {}): ManagedSession {
     return {
         admin: false, username: 'u', broker: 'b',
-        vpns: [], operate: [], readOnly: [],
+        vpns: [], operate: [], readOnly: [], modules: ['queue-browser'],
         ...over,
     };
 }
@@ -935,6 +935,22 @@ describe('Kernel', () => {
 
             expect(document.getElementById('page-title')?.textContent).toBe('Browser');
             expect(nav().innerHTML).not.toContain('Users');
+        });
+
+        it('hides a module the managed session was not granted', async () => {
+            let ctx: AppContext | null = null;
+            const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
+            const qc = createMockModule({ id: 'queue-copy', name: 'Copy' });
+            setupDOM(['queue-browser', 'queue-copy']);
+            const kernel = new Kernel([reg(qb, 80), reg(qc, 70)]);
+            await kernel.start();
+            expect(nav().innerHTML).toContain('Copy');
+
+            ctx!.setState('managed', managedSession({ modules: ['queue-browser'] }));
+            ctx!.eventBus.emit('rbac:changed');
+
+            expect(nav().innerHTML).toContain('Browser');
+            expect(nav().innerHTML).not.toContain('Copy');
         });
 
         it('does not navigate when no module is visible after the session changes', async () => {

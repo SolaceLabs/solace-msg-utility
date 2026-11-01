@@ -18,12 +18,15 @@ vi.mock('../../../src/modules/user-management/service', () => ({
 import { UserManagementModule } from '../../../src/modules/user-management/module';
 
 const ADMIN: ManagedSession = {
-    admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [],
+    admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
 };
 const USERS = [
-    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [] },
-    { username: 'viewer', admin: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'v1', queues: '*' }] },
+    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null },
+    { username: 'viewer', admin: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'v1', queues: '*' }], modules: ['queue-browser'] },
 ];
+/** The deployment offers only queue-browser of the two catalog modules. */
+const CHOICES = { catalog: ['queue-browser', 'queue-copy'], offered: ['queue-browser'], userDefault: 'all' };
+const listed = (users: unknown[], modules: unknown = CHOICES) => ({ ok: true, data: { users, modules } });
 
 function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
     return c.querySelector(sel) as T;
@@ -46,7 +49,7 @@ function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppCon
 async function setup(managed: ManagedSession | null = ADMIN) {
     const container = loadModuleDOM('user-management');
     const ctx = makeCtx(container, managed);
-    svcMock.listUsers.mockResolvedValue({ ok: true, data: USERS });
+    svcMock.listUsers.mockResolvedValue(listed(USERS));
     await UserManagementModule.install(ctx);
     if (managed?.admin) {
         await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').children.length).toBeGreaterThan(0));
@@ -137,7 +140,7 @@ describe('user-management — list', () => {
     it('renders an empty-state row when there are no users', async () => {
         const container = loadModuleDOM('user-management');
         const ctx = makeCtx(container, ADMIN);
-        svcMock.listUsers.mockResolvedValue({ ok: true, data: [] });
+        svcMock.listUsers.mockResolvedValue(listed([]));
         await UserManagementModule.install(ctx);
         await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').textContent).toMatch(/no users/i));
     });
@@ -206,7 +209,7 @@ describe('user-management — create / edit form', () => {
         await vi.waitFor(() => expect(hidden(container, '#user-mgmt-list-view')).toBe(false));
         expect(svcMock.saveUser).toHaveBeenCalledWith({
             username: 'newbie', password: 'pw', admin: true,
-            operate: [{ brokers: '*', msgVpns: '*', queues: 'orders.*' }], readOnly: [],
+            operate: [{ brokers: '*', msgVpns: '*', queues: 'orders.*' }], readOnly: [], modules: null,
         });
         expect(toastMock.showToast).toHaveBeenCalledWith('User saved', 'ok');
     });
@@ -253,13 +256,15 @@ describe('user-management — create / edit form', () => {
         const container = loadModuleDOM('user-management');
         const ctx = makeCtx(container, ADMIN);
         // a legacy record missing both glob arrays → they arrive as undefined
-        svcMock.listUsers.mockResolvedValue({ ok: true, data: [{ username: 'legacy', admin: false }] });
+        svcMock.listUsers.mockResolvedValue(listed([{ username: 'legacy', admin: false }]));
         await UserManagementModule.install(ctx);
         await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').children.length).toBeGreaterThan(0));
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[0]
             .querySelector<HTMLButtonElement>('.btn-secondary')!.click();
         expect(el(container, '#user-mgmt-operate-rows').querySelectorAll('.row-list-row').length).toBe(0);
         expect(el(container, '#user-mgmt-readonly-rows').querySelectorAll('.row-list-row').length).toBe(0);
+        // No modules field either: the deployment default.
+        expect(el<HTMLInputElement>(container, '#user-mgmt-modules-default').checked).toBe(true);
     });
 
     it('Cancel returns to the list', async () => {
@@ -284,6 +289,70 @@ describe('user-management — create / edit form', () => {
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
         await Promise.resolve();
         expect(svcMock.saveUser).not.toHaveBeenCalled();
+    });
+});
+
+describe('user-management — modules', () => {
+    const boxes = (c: HTMLElement) => [...el(c, '#user-mgmt-modules').querySelectorAll<HTMLInputElement>('input')];
+    const defaultBox = (c: HTMLElement) => el<HTMLInputElement>(c, '#user-mgmt-modules-default');
+    function toggleDefault(c: HTMLElement, checked: boolean): void {
+        defaultBox(c).checked = checked;
+        defaultBox(c).dispatchEvent(new Event('change'));
+    }
+
+    it('a new user starts on the deployment default, shown and locked', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        expect(defaultBox(container).checked).toBe(true);
+        expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('(every offered module)');
+        expect(el(container, '#user-mgmt-modules').textContent).toBe(' Queue Browser Queue Copy (not offered)');
+        expect(boxes(container).map(b => [b.value, b.checked, b.disabled])).toEqual([
+            ['queue-browser', true, true],
+            ['queue-copy', false, true],
+        ]);
+    });
+
+    it("editing a user with a list of their own shows it, editable", async () => {
+        const { container } = await setup();
+        clickRow(container, 1, '.btn-secondary'); // viewer: ['queue-browser']
+        expect(defaultBox(container).checked).toBe(false);
+        expect(boxes(container).map(b => [b.checked, b.disabled])).toEqual([[true, false], [false, false]]);
+    });
+
+    it("leaving the default starts from what it grants; the save sends the user's own list", async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue({ ok: true });
+        clickRow(container, 0, '.btn-secondary'); // admin: default
+        toggleDefault(container, false);
+        expect(boxes(container).map(b => [b.checked, b.disabled])).toEqual([[true, false], [false, false]]);
+        boxes(container)[0].checked = false;
+        boxes(container)[1].checked = true;
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0].modules).toEqual(['queue-copy']);
+    });
+
+    it('returning to the default shows it again and sends null', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue({ ok: true });
+        clickRow(container, 1, '.btn-secondary'); // viewer
+        boxes(container)[1].checked = true;
+        toggleDefault(container, true);
+        expect(boxes(container).map(b => [b.checked, b.disabled])).toEqual([[true, true], [false, true]]);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0].modules).toBeNull();
+    });
+
+    it('under a "none" default the hint says so and nothing is granted', async () => {
+        const container = loadModuleDOM('user-management');
+        const ctx = makeCtx(container, ADMIN);
+        svcMock.listUsers.mockResolvedValue(listed(USERS, { ...CHOICES, userDefault: 'none' }));
+        await UserManagementModule.install(ctx);
+        await vi.waitFor(() => expect(rowCount(container)).toBe(2));
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('(no modules)');
+        expect(boxes(container).some(b => b.checked)).toBe(false);
     });
 });
 

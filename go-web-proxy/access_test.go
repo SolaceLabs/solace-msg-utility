@@ -25,7 +25,8 @@ func prefixes(t *testing.T, cidrs ...string) []netip.Prefix {
 // aclChain is the access list as serve() mounts it: withClient resolves the
 // address, clientACL decides.
 func aclChain(ac accessConfig, next http.Handler, logger *slog.Logger) http.Handler {
-	return withClient(ac.trustedProxies, clientACL(ac, next, logger))
+	lv := liveWith(func(c *config) { c.access = ac })
+	return withClient(lv, clientACL(lv, next, logger))
 }
 
 type countingHandler struct{ calls int }
@@ -70,16 +71,46 @@ func TestClientIP(t *testing.T) {
 	}
 }
 
-func TestClientACL_EmptyAllowListReturnsNextItself(t *testing.T) {
+// An empty allow list admits every client, even one withClient could not
+// resolve: the default deployment has no access list.
+func TestClientACL_EmptyAllowListAdmitsEveryClient(t *testing.T) {
 	next := &countingHandler{}
-	got := clientACL(accessConfig{trustedProxies: prefixes(t, "10.0.0.0/8")}, next, quietLogger())
-	if got != http.Handler(next) {
-		t.Fatal("an empty allow list must return the inner handler unchanged (allow all, zero cost)")
-	}
+	h := clientACL(liveWith(func(c *config) { c.access.trustedProxies = prefixes(t, "10.0.0.0/8") }), next, quietLogger())
 	rec := httptest.NewRecorder()
-	got.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusOK || next.calls != 1 {
 		t.Errorf("want pass-through 200, got %d (calls %d)", rec.Code, next.calls)
+	}
+}
+
+// The access list and the trusted proxies are read per request, so a settings
+// save applies to the very next request without a restart.
+func TestClientACL_FollowsLiveSettings(t *testing.T) {
+	next := &countingHandler{}
+	cfg := defaultConfig()
+	cfg.access.allow = prefixes(t, "10.0.0.0/8")
+	lv := newLive(cfg)
+	h := withClient(lv, clientACL(lv, next, quietLogger()))
+	send := func() int {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "192.0.2.1:9" // a proxy that says the client is 10.1.1.1
+		req.Header.Set("X-Forwarded-For", "10.1.1.1")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := send(); got != http.StatusForbidden {
+		t.Fatalf("untrusted proxy: want 403, got %d", got)
+	}
+	cfg.access.trustedProxies = prefixes(t, "192.0.2.1/32")
+	lv.apply(cfg)
+	if got := send(); got != http.StatusOK {
+		t.Fatalf("after trusting the proxy: want 200, got %d", got)
+	}
+	cfg.access.allow = prefixes(t, "172.16.0.0/12")
+	lv.apply(cfg)
+	if got := send(); got != http.StatusForbidden {
+		t.Fatalf("after narrowing the list: want 403, got %d", got)
 	}
 }
 
@@ -87,7 +118,7 @@ func TestClientACL_EmptyAllowListReturnsNextItself(t *testing.T) {
 // client is unresolved and denied: a wiring mistake fails closed.
 func TestClientACL_WithoutWithClientFailsClosed(t *testing.T) {
 	next := &countingHandler{}
-	h := clientACL(accessConfig{allow: prefixes(t, "0.0.0.0/0")}, next, quietLogger())
+	h := clientACL(liveWith(func(c *config) { c.access.allow = prefixes(t, "0.0.0.0/0") }), next, quietLogger())
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.1:1"
 	rec := httptest.NewRecorder()
@@ -261,7 +292,7 @@ func rawStatusLine(t *testing.T, addr, request string) string {
 // /hosted is behind the ACL like every other route, and its payload is
 // untouched for an allowed client.
 func TestClientACL_HostedPayloadUnchanged(t *testing.T) {
-	hh := newHostedHandler(true, connBoth, connManaged)
+	hh := newHostedHandler(true, liveWith(func(c *config) { c.connModes, c.defaultConn = connBoth, connManaged }))
 	h := aclChain(accessConfig{allow: prefixes(t, "10.0.0.0/8")}, hh, quietLogger())
 
 	direct := httptest.NewRecorder()

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -34,51 +36,72 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # Edit this file and restart the gateway, or delete it to re-seed from env.
 # CONFIG_FILE (this file) and SITE_SEED_FILE (the deployment secret) are
 # environment-only and never appear here.
-# access.*, session.* and login.* have no env var: edit them here. An empty
-# allow list admits every client; trustedProxies lists the reverse proxies
-# whose X-Forwarded-For is believed. session.* and login.* bound managed
-# sign-in and apply only when managed is true.
+# access.*, session.*, login.* and modules.* have no env var: edit them here.
+# An empty allow list admits every client; trustedProxies lists the reverse
+# proxies whose X-Forwarded-For is believed. session.*, login.* and modules.*
+# apply only when managed is true: modules.offered lists the app modules a
+# managed user may be given, modules.userDefault (all|none) what a user without
+# a list of their own gets. On a managed gateway an administrator can also edit
+# this file from the admin app's Gateway Settings, where every key except
+# hosted, managed, appDir, tls.*, usersFile and connectionsFile applies at once.
 `
 
 // fileConfig is the on-disk shape. Field order is the order yaml.Marshal writes.
+// The JSON names are the settings page's (GET/PUT /managed/settings): the same
+// keys, without the version, which the gateway owns.
 type fileConfig struct {
-	Version         int         `yaml:"version"`
-	Hosted          bool        `yaml:"hosted"`
-	Managed         bool        `yaml:"managed"`
-	ConnModes       string      `yaml:"connModes"`
-	DefaultConn     string      `yaml:"defaultConn"`
-	AppDir          string      `yaml:"appDir"`
-	TLS             fileTLS     `yaml:"tls"`
-	LogLevel        string      `yaml:"logLevel"`
-	UsersFile       string      `yaml:"usersFile"`
-	ConnectionsFile string      `yaml:"connectionsFile"`
-	Access          fileAccess  `yaml:"access"`
-	Session         fileSession `yaml:"session"`
-	Login           fileLogin   `yaml:"login"`
+	Version         int         `yaml:"version" json:"-"`
+	Hosted          bool        `yaml:"hosted" json:"hosted"`
+	Managed         bool        `yaml:"managed" json:"managed"`
+	ConnModes       string      `yaml:"connModes" json:"connModes"`
+	DefaultConn     string      `yaml:"defaultConn" json:"defaultConn"`
+	AppDir          string      `yaml:"appDir" json:"appDir"`
+	TLS             fileTLS     `yaml:"tls" json:"tls"`
+	LogLevel        string      `yaml:"logLevel" json:"logLevel"`
+	UsersFile       string      `yaml:"usersFile" json:"usersFile"`
+	ConnectionsFile string      `yaml:"connectionsFile" json:"connectionsFile"`
+	Access          fileAccess  `yaml:"access" json:"access"`
+	Session         fileSession `yaml:"session" json:"session"`
+	Login           fileLogin   `yaml:"login" json:"login"`
+	Modules         fileModules `yaml:"modules" json:"modules"`
 }
 
 type fileTLS struct {
-	CertFile           string `yaml:"certFile"`
-	KeyFile            string `yaml:"keyFile"`
-	TrustDir           string `yaml:"trustDir"`
-	InsecureSkipVerify bool   `yaml:"insecureSkipVerify"`
+	CertFile           string `yaml:"certFile" json:"certFile"`
+	KeyFile            string `yaml:"keyFile" json:"keyFile"`
+	TrustDir           string `yaml:"trustDir" json:"trustDir"`
+	InsecureSkipVerify bool   `yaml:"insecureSkipVerify" json:"insecureSkipVerify"`
 }
 
 type fileAccess struct {
-	Allow          []string `yaml:"allow"`
-	TrustedProxies []string `yaml:"trustedProxies"`
+	Allow          []string `yaml:"allow" json:"allow"`
+	TrustedProxies []string `yaml:"trustedProxies" json:"trustedProxies"`
 }
 
 type fileSession struct {
-	IdleMinutes     int `yaml:"idleMinutes"`
-	AbsoluteMinutes int `yaml:"absoluteMinutes"`
+	IdleMinutes     int `yaml:"idleMinutes" json:"idleMinutes"`
+	AbsoluteMinutes int `yaml:"absoluteMinutes" json:"absoluteMinutes"`
 }
 
 type fileLogin struct {
-	MaxFailures              int `yaml:"maxFailures"`
-	BackoffSeconds           int `yaml:"backoffSeconds"`
-	MaxBackoffSeconds        int `yaml:"maxBackoffSeconds"`
-	UnauthenticatedPerMinute int `yaml:"unauthenticatedPerMinute"`
+	MaxFailures              int `yaml:"maxFailures" json:"maxFailures"`
+	BackoffSeconds           int `yaml:"backoffSeconds" json:"backoffSeconds"`
+	MaxBackoffSeconds        int `yaml:"maxBackoffSeconds" json:"maxBackoffSeconds"`
+	UnauthenticatedPerMinute int `yaml:"unauthenticatedPerMinute" json:"unauthenticatedPerMinute"`
+}
+
+type fileModules struct {
+	Offered     []string `yaml:"offered" json:"offered"`
+	UserDefault string   `yaml:"userDefault" json:"userDefault"`
+}
+
+// clone copies fc deeply enough that decoding into the copy cannot write
+// through to fc's slices.
+func (fc fileConfig) clone() fileConfig {
+	fc.Access.Allow = slices.Clone(fc.Access.Allow)
+	fc.Access.TrustedProxies = slices.Clone(fc.Access.TrustedProxies)
+	fc.Modules.Offered = slices.Clone(fc.Modules.Offered)
+	return fc
 }
 
 // sessionLimits bound a managed sign-in session: idle is measured from the
@@ -93,6 +116,56 @@ type loginLimits struct {
 	backoff         time.Duration
 	maxBackoff      time.Duration
 	unauthPerMinute int
+}
+
+// moduleCatalog is every app module an administrator can give a managed user.
+// The sign-in module (connections) is always shown and the admin modules live
+// in the admin app, so neither is listed. Queue Subscription Explorer is left
+// out on purpose: it reads the broker over SEMP v1, which the entitlement
+// filter does not cover, so it stays hidden in every managed session
+// (src/core/rbac.ts). tests/variants.test.ts parses this line and checks it
+// against the managed variant.
+func moduleCatalog() []string { return []string{"queue-browser", "queue-copy"} }
+
+// modules.userDefault values: what a user without a list of their own gets.
+const (
+	modulesDefaultAll  = "all"
+	modulesDefaultNone = "none"
+)
+
+// moduleSettings is the validated modules block. offered is in catalog order.
+type moduleSettings struct {
+	offered     []string
+	userDefault string
+}
+
+// forUser is the modules a user may open: their own list, or the deployment
+// default when they have none, never beyond what is offered. granted nil means
+// "no list of their own"; an empty list means none.
+func (ms moduleSettings) forUser(granted *[]string) []string {
+	out := []string{}
+	for _, id := range ms.offered {
+		if granted == nil && ms.userDefault == modulesDefaultAll || granted != nil && slices.Contains(*granted, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// checkModuleIDs rejects an id outside the catalog and one listed twice; key
+// names the list in the error.
+func checkModuleIDs(key string, ids []string) error {
+	catalog := moduleCatalog()
+	for i, id := range ids {
+		at := fmt.Sprintf("%s[%d]", key, i)
+		if !slices.Contains(catalog, id) {
+			return fmt.Errorf("key %q has invalid value %q: must be one of %s", at, id, strings.Join(catalog, ", "))
+		}
+		if slices.Index(ids, id) < i {
+			return fmt.Errorf("key %q has invalid value %q: listed twice", at, id)
+		}
+	}
+	return nil
 }
 
 // seedVar maps one environment variable to its config.yaml key. fromEnv
@@ -160,6 +233,10 @@ func fileConfigFromConfig(c config) fileConfig {
 			MaxBackoffSeconds:        int(c.login.maxBackoff / time.Second),
 			UnauthenticatedPerMinute: c.login.unauthPerMinute,
 		},
+		Modules: fileModules{
+			Offered:     append([]string{}, c.modules.offered...),
+			UserDefault: c.modules.userDefault,
+		},
 	}
 }
 
@@ -194,6 +271,10 @@ func (fc fileConfig) toConfig(siteSeedFile string) (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	modules, err := fc.Modules.settings()
+	if err != nil {
+		return config{}, err
+	}
 	cfg := config{
 		hosted:             fc.Hosted,
 		appDir:             fc.AppDir,
@@ -211,6 +292,7 @@ func (fc fileConfig) toConfig(siteSeedFile string) (config, error) {
 		access:             accessConfig{allow: allow, trustedProxies: trusted},
 		session:            session,
 		login:              login,
+		modules:            modules,
 	}
 	// Value and cross checks on the connection modes. Whether managed routing
 	// actually loaded is serve()'s knowledge, so the build-tag leg is assumed
@@ -261,6 +343,25 @@ func (fl fileLogin) limits() (loginLimits, error) {
 		maxBackoff:      time.Duration(fl.MaxBackoffSeconds) * time.Second,
 		unauthPerMinute: fl.UnauthenticatedPerMinute,
 	}, nil
+}
+
+// settings validates the modules block.
+func (fm fileModules) settings() (moduleSettings, error) {
+	if err := checkModuleIDs("modules.offered", fm.Offered); err != nil {
+		return moduleSettings{}, err
+	}
+	switch fm.UserDefault {
+	case modulesDefaultAll, modulesDefaultNone:
+	default:
+		return moduleSettings{}, fmt.Errorf("key %q has invalid value %q: must be %q or %q", "modules.userDefault", fm.UserDefault, modulesDefaultAll, modulesDefaultNone)
+	}
+	offered := []string{}
+	for _, id := range moduleCatalog() {
+		if slices.Contains(fm.Offered, id) {
+			offered = append(offered, id)
+		}
+	}
+	return moduleSettings{offered: offered, userDefault: fm.UserDefault}, nil
 }
 
 func intInRange(key string, v, lo, hi int) error {
@@ -338,6 +439,15 @@ type configLoad struct {
 	cfg       config
 	seeded    bool
 	overrides []envOverride
+	sum       [32]byte // SHA-256 of the file as read or seeded
+}
+
+// configSource is where the running config came from: the file and the
+// SHA-256 of the bytes the gateway last read or wrote, so a settings save can
+// tell a hand edit it has not loaded from its own last write.
+type configSource struct {
+	path string
+	sum  [32]byte
 }
 
 // resolveConfig loads config.yaml, seeding it from the environment when it does
@@ -356,10 +466,11 @@ func resolveConfig(path string) (configLoad, error) {
 		if err != nil {
 			return configLoad{}, fmt.Errorf("cannot seed config file %q from the environment: %w", path, err)
 		}
-		if err := seedConfigFile(path, cfg); err != nil {
+		sum, err := seedConfigFile(path, cfg)
+		if err != nil {
 			return configLoad{}, err
 		}
-		return configLoad{cfg: cfg, seeded: true}, nil
+		return configLoad{cfg: cfg, seeded: true, sum: sum}, nil
 	case err != nil:
 		return configLoad{}, fmt.Errorf("cannot read config file %q: %w", path, err)
 	}
@@ -371,20 +482,20 @@ func resolveConfig(path string) (configLoad, error) {
 	if err != nil {
 		return configLoad{}, fmt.Errorf("config file %q: %w", path, err)
 	}
-	return configLoad{cfg: cfg, overrides: envOverrides(cfg)}, nil
+	return configLoad{cfg: cfg, overrides: envOverrides(cfg), sum: sha256.Sum256(data)}, nil
 }
 
-// seedConfigFile writes the first config.yaml. Readable by operators (0644):
-// it holds no secret, and the standard image has no admin UI to edit it with.
-func seedConfigFile(path string, cfg config) error {
+// seedConfigFile writes the first config.yaml and returns the SHA-256 of what
+// it wrote. Readable by operators (0644): it holds no secret.
+func seedConfigFile(path string, cfg config) ([32]byte, error) {
 	data, err := encodeConfigFile(fileConfigFromConfig(cfg))
 	if err != nil {
-		return fmt.Errorf("cannot encode config file %q: %w", path, err)
+		return [32]byte{}, fmt.Errorf("cannot encode config file %q: %w", path, err)
 	}
 	if err := writeFileAtomic(path, data, 0o644); err != nil {
-		return fmt.Errorf("cannot write config file %q: %w. The gateway creates it on first start. Fix: make the directory writable by the gateway user (UID 65532), e.g. mount a writable volume at /managed, or set CONFIG_FILE to a writable path", path, err)
+		return [32]byte{}, fmt.Errorf("cannot write config file %q: %w. The gateway creates it on first start. Fix: make the directory writable by the gateway user (UID 65532), e.g. mount a writable volume at /managed, or set CONFIG_FILE to a writable path", path, err)
 	}
-	return nil
+	return sha256.Sum256(data), nil
 }
 
 // envOverrides lists the seeding variables that are set but disagree with the

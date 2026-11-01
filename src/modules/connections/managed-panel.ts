@@ -286,7 +286,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         const broker = appState.managed?.broker ?? '';
         app.setState('managed', {
             admin: p.admin, username: p.username, operate: p.operate, readOnly: p.readOnly,
-            broker, vpns: broker ? store.vpnsFor(broker) : [],
+            modules: p.modules, broker, vpns: broker ? store.vpnsFor(broker) : [],
         });
         eventBus.emit('rbac:changed');
         populateSelect();

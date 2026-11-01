@@ -29,13 +29,15 @@ type managedHandler struct {
 	store    *store
 	sessions *sessions
 	throttle *throttle
+	live     *live
+	settings *settingsFile
 	cop      *http.CrossOriginProtection
 	logger   *slog.Logger
 	mux      *http.ServeMux
 }
 
-func newManagedHandler(st *store, ss *sessions, th *throttle, logger *slog.Logger) *managedHandler {
-	h := &managedHandler{store: st, sessions: ss, throttle: th, cop: http.NewCrossOriginProtection(), logger: logger}
+func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *settingsFile, logger *slog.Logger) *managedHandler {
+	h := &managedHandler{store: st, sessions: ss, throttle: th, live: lv, settings: sf, cop: http.NewCrossOriginProtection(), logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /managed/me", h.me)
 	mux.HandleFunc("POST /managed/logout", h.logout)
@@ -45,6 +47,8 @@ func newManagedHandler(st *store, ss *sessions, th *throttle, logger *slog.Logge
 	mux.HandleFunc("GET /managed/connections", h.adminOnly(h.listConnections))
 	mux.HandleFunc("PUT /managed/connections/{broker}", h.adminOnly(h.saveConnection))
 	mux.HandleFunc("DELETE /managed/connections/{broker}", h.adminOnly(h.deleteConnection))
+	mux.HandleFunc("GET /managed/settings", h.adminOnly(h.getSettings))
+	mux.HandleFunc("PUT /managed/settings", h.adminOnly(h.saveSettings))
 	// Anything else, including a known path with the wrong method, is a 404:
 	// a signed-in client learns nothing a 405 would add.
 	mux.HandleFunc("/managed/", func(w http.ResponseWriter, _ *http.Request) {
@@ -154,7 +158,7 @@ func (h *managedHandler) serverError(w http.ResponseWriter, op string, err error
 // ----- session endpoints ----------------------------------------------------------
 
 func (h *managedHandler) me(w http.ResponseWriter, r *http.Request) {
-	profile, ok := h.store.profile(sessionOf(r).user)
+	profile, ok := h.store.profile(sessionOf(r).user, h.live.get().modules)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
@@ -177,22 +181,32 @@ type permJSON struct {
 }
 
 // userJSON is a user as the admin app lists it. The password hash never
-// leaves the gateway.
+// leaves the gateway. Modules null means the deployment default.
 type userJSON struct {
 	Username           string     `json:"username"`
 	Admin              bool       `json:"admin"`
 	MustChangePassword bool       `json:"mustChangePassword"`
 	Operate            []permJSON `json:"operate"`
 	ReadOnly           []permJSON `json:"readOnly"`
+	Modules            *[]string  `json:"modules"`
 }
 
 // userSaveJSON is the PUT /managed/users/{name} body. The username comes from
 // the path. Password is plaintext over TLS, hashed here; "" keeps it on edit.
+// Modules null or absent means the deployment default.
 type userSaveJSON struct {
 	Password string     `json:"password"`
 	Admin    bool       `json:"admin"`
 	Operate  []permJSON `json:"operate"`
 	ReadOnly []permJSON `json:"readOnly"`
+	Modules  *[]string  `json:"modules"`
+}
+
+// modulesJSON is what the user editor needs to offer module choices.
+type modulesJSON struct {
+	Catalog     []string `json:"catalog"`
+	Offered     []string `json:"offered"`
+	UserDefault string   `json:"userDefault"`
 }
 
 type vpnJSON struct {
@@ -260,7 +274,7 @@ func (c connSaveJSON) toRec(broker string) connRec {
 func userToOutput(u userRec) userJSON {
 	return userJSON{
 		Username: u.Username, Admin: u.Admin, MustChangePassword: u.MustChangePassword,
-		Operate: rowsToPerms(u.Operate), ReadOnly: rowsToPerms(u.ReadOnly),
+		Operate: rowsToPerms(u.Operate), ReadOnly: rowsToPerms(u.ReadOnly), Modules: u.Modules,
 	}
 }
 
@@ -286,7 +300,11 @@ func (h *managedHandler) listUsers(w http.ResponseWriter, _ *http.Request) {
 	for _, u := range h.store.listUsers() {
 		out = append(out, userToOutput(u))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"users": out})
+	ms := h.live.get().modules
+	writeJSON(w, http.StatusOK, map[string]any{
+		"users":   out,
+		"modules": modulesJSON{Catalog: moduleCatalog(), Offered: ms.offered, UserDefault: ms.userDefault},
+	})
 }
 
 // saveUser creates or edits a user. A new password, a changed admin flag or a
@@ -308,7 +326,13 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rec := userRec{Username: name, Admin: body.Admin, Operate: permsToRows(body.Operate), ReadOnly: permsToRows(body.ReadOnly)}
+	if body.Modules != nil {
+		if err := checkModuleIDs("modules", *body.Modules); err != nil {
+			writeInvalid(w, "modules", err.Error())
+			return
+		}
+	}
+	rec := userRec{Username: name, Admin: body.Admin, Operate: permsToRows(body.Operate), ReadOnly: permsToRows(body.ReadOnly), Modules: body.Modules}
 	drop, err := h.store.upsertUser(r.Context(), rec, body.Password)
 	switch {
 	case errors.Is(err, errBlankNewUserPassword):

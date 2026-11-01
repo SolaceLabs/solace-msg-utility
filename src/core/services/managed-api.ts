@@ -69,14 +69,19 @@ const MESSAGES: Record<string, string> = {
     last_admin: 'At least one administrator must remain.',
     cross_origin: 'The gateway refused a cross-site request.',
     rate_limited: 'Too many requests. Wait a minute and try again.',
+    would_lock_out: 'This change would lock this browser out of the gateway.',
+    config_changed_on_disk: 'config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.',
     server_error: 'The gateway could not complete the request. Its log has the cause.',
     network: 'The gateway could not be reached.',
     bad_response: 'The gateway sent a response this page cannot read.',
 };
 
-/** Text for a failed call. An `invalid` answer shows the gateway's own reason. */
+/**
+ * Text for a failed call. A reason from the gateway (sent with `invalid` and
+ * `would_lock_out`, always fit to show an admin) wins over the stock line.
+ */
 export function managedErrorMessage(err: ManagedError): string {
-    if (err.code === 'invalid' && err.reason) return err.reason;
+    if (err.reason) return err.reason;
     return MESSAGES[err.code] ?? `Unexpected answer from the gateway (HTTP ${err.status}).`;
 }
 

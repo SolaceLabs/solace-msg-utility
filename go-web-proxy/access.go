@@ -25,12 +25,12 @@ type resolvedClient struct {
 }
 
 // withClient resolves the client address once per request (clientIP, with the
-// trusted proxies) and puts it on the context, where the access list and the
-// managed sign-in throttle read it with clientOf. The writer is passed through
-// untouched.
-func withClient(trusted []netip.Prefix, next http.Handler) http.Handler {
+// current trusted proxies) and puts it on the context, where the access list
+// and the managed sign-in throttle read it with clientOf. The writer is passed
+// through untouched.
+func withClient(lv *live, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip, ok := clientIP(r.RemoteAddr, r.Header.Values("X-Forwarded-For"), trusted)
+		ip, ok := clientIP(r.RemoteAddr, r.Header.Values("X-Forwarded-For"), lv.get().access.trustedProxies)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientCtxKey{}, resolvedClient{ip, ok})))
 	})
 }
@@ -42,19 +42,21 @@ func clientOf(r *http.Request) (netip.Addr, bool) {
 	return c.addr, c.ok
 }
 
-// clientACL wraps next with the access list; withClient must run first. With
-// an empty allow list it returns next itself, so the default deployment pays
-// nothing. A denied client gets a bare 403 with no body: nothing in the
-// response says why, the warn log line does. The writer is passed through
-// untouched, so the Hijacker that httputil.ReverseProxy needs for WebSocket
-// upgrades still reaches it.
-func clientACL(ac accessConfig, next http.Handler, logger *slog.Logger) http.Handler {
-	if len(ac.allow) == 0 {
-		return next
-	}
+// clientACL wraps next with the access list, read per request (a settings save
+// applies to the next request); withClient must run first. An empty allow list
+// admits every client. A denied client gets a bare 403 with no body: nothing
+// in the response says why, the warn log line does. The writer is passed
+// through untouched, so the Hijacker that httputil.ReverseProxy needs for
+// WebSocket upgrades still reaches it.
+func clientACL(lv *live, next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		allow := lv.get().access.allow
+		if len(allow) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
 		ip, ok := clientOf(r)
-		if ok && prefixContains(ac.allow, ip) {
+		if ok && prefixContains(allow, ip) {
 			next.ServeHTTP(w, r)
 			return
 		}

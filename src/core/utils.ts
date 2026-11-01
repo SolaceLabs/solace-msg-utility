@@ -261,6 +261,11 @@ export function normalizeUrlPath(val: string | null | undefined): string {
     return withLeading.replace(/\/+$/, '');
 }
 
+/** A module id as a label: "queue-browser" -> "Queue Browser". */
+export function moduleLabel(id: string): string {
+    return id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
 /**
  * Message from a thrown value, for display in a UI error slot. Non-Error
  * throws are stringified rather than dropped, so a rejected promise from a

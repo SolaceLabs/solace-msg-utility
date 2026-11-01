@@ -23,7 +23,7 @@ func addr(t *testing.T, s string) netip.Addr {
 func TestThrottle_BackoffGrowsDoublesAndCaps(t *testing.T) {
 	clock := newFakeClock()
 	var buf strings.Builder
-	th := newThrottle(testLoginLimits, clock.now, newCapturingLogger(&buf))
+	th := newThrottle(fixed(testLoginLimits), clock.now, newCapturingLogger(&buf))
 	client := addr(t, "192.0.2.7")
 	fail := func() time.Duration {
 		th.loginFailed("alice", client, true)
@@ -55,7 +55,7 @@ func TestThrottle_BackoffGrowsDoublesAndCaps(t *testing.T) {
 
 func TestThrottle_SuccessResetsAndQuietPeriodForgives(t *testing.T) {
 	clock := newFakeClock()
-	th := newThrottle(testLoginLimits, clock.now, quietLogger())
+	th := newThrottle(fixed(testLoginLimits), clock.now, quietLogger())
 	client := addr(t, "192.0.2.7")
 	th.loginFailed("alice", client, true)
 	th.loginFailed("alice", client, true)
@@ -75,7 +75,7 @@ func TestThrottle_SuccessResetsAndQuietPeriodForgives(t *testing.T) {
 // Spraying usernames from one client blocks the client; guessing one user
 // from many clients blocks the user.
 func TestThrottle_CountsPerUserAndPerClient(t *testing.T) {
-	th := newThrottle(testLoginLimits, newFakeClock().now, quietLogger())
+	th := newThrottle(fixed(testLoginLimits), newFakeClock().now, quietLogger())
 	sprayer := addr(t, "192.0.2.7")
 	for _, u := range []string{"u1", "u2", "u3"} {
 		th.loginFailed(u, sprayer, true)
@@ -118,7 +118,7 @@ func TestClientKey(t *testing.T) {
 
 func TestThrottle_FullFailureTableFailsClosed(t *testing.T) {
 	clock := newFakeClock()
-	th := newThrottle(testLoginLimits, clock.now, quietLogger())
+	th := newThrottle(fixed(testLoginLimits), clock.now, quietLogger())
 	th.maxTracked = 2
 	client := addr(t, "192.0.2.7")
 	th.loginFailed("u1", client, true)
@@ -139,7 +139,7 @@ func TestThrottle_FullFailureTableFailsClosed(t *testing.T) {
 func TestThrottle_UnauthenticatedBucket(t *testing.T) {
 	clock := newFakeClock()
 	var buf strings.Builder
-	th := newThrottle(testLoginLimits, clock.now, newCapturingLogger(&buf))
+	th := newThrottle(fixed(testLoginLimits), clock.now, newCapturingLogger(&buf))
 	client := addr(t, "192.0.2.7")
 	for i := 0; i < 3; i++ {
 		if ok, _ := th.allowUnauthenticated(client, true); !ok {
@@ -169,7 +169,7 @@ func TestThrottle_UnauthenticatedBucket(t *testing.T) {
 
 func TestThrottle_FullBucketTableFailsClosed(t *testing.T) {
 	clock := newFakeClock()
-	th := newThrottle(testLoginLimits, clock.now, quietLogger())
+	th := newThrottle(fixed(testLoginLimits), clock.now, quietLogger())
 	th.maxTracked = 1
 	th.allowUnauthenticated(addr(t, "192.0.2.7"), true)
 	if ok, wait := th.allowUnauthenticated(addr(t, "198.51.100.1"), true); ok || wait != time.Minute {
@@ -178,6 +178,32 @@ func TestThrottle_FullBucketTableFailsClosed(t *testing.T) {
 	clock.advance(time.Minute) // the first bucket has refilled: nothing to remember
 	if ok, _ := th.allowUnauthenticated(addr(t, "198.51.100.1"), true); !ok {
 		t.Error("a refilled bucket must be pruned to make room")
+	}
+}
+
+// The limits are read on every call, so a settings save applies at once: here a
+// larger unauthenticated budget refills an empty bucket faster.
+func TestThrottle_LimitsAreReadLive(t *testing.T) {
+	clock := newFakeClock()
+	lim := testLoginLimits
+	th := newThrottle(func() loginLimits { return lim }, clock.now, quietLogger())
+	client := addr(t, "192.0.2.7")
+	for i := 0; i < lim.unauthPerMinute; i++ {
+		th.allowUnauthenticated(client, true)
+	}
+	clock.advance(time.Second)
+	if ok, _ := th.allowUnauthenticated(client, true); ok {
+		t.Fatal("3 per minute: one second refills no whole token")
+	}
+	lim.unauthPerMinute = 600
+	clock.advance(time.Second)
+	if ok, _ := th.allowUnauthenticated(client, true); !ok {
+		t.Fatal("600 per minute: one second refills ten tokens")
+	}
+	lim.maxFailures = 1
+	th.loginFailed("bob", client, true)
+	if th.loginWait("bob", client, true) == 0 {
+		t.Error("with maxFailures 1 a single failure must block")
 	}
 }
 

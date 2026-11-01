@@ -97,7 +97,7 @@ export const AdminLoginModule = {
             }
             app.setState('managed', {
                 admin: true, username: p.username, broker: '',
-                operate: p.operate, readOnly: p.readOnly, vpns: [],
+                operate: p.operate, readOnly: p.readOnly, vpns: [], modules: p.modules,
             });
             signedIn = true;
             eventBus.emit('rbac:changed');

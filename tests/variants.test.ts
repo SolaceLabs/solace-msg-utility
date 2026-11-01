@@ -1,4 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isModuleVisible } from '../src/core/rbac';
 import { ACTIVE_MODULES as STANDARD_VARIANT } from '../src/variants/standard';
 import { ACTIVE_MODULES as MIN_VARIANT } from '../src/variants/min';
 import { ACTIVE_MODULES as NO_QUEUE_COPY_VARIANT } from '../src/variants/no-queue-copy';
@@ -9,6 +13,8 @@ import { ACTIVE_MODULES as ACTIVE_VARIANT } from '../src/variants/_active';
 import * as standardManifest from '../src/variants/standard';
 import * as minManifest from '../src/variants/min';
 import * as noQueueCopyManifest from '../src/variants/no-queue-copy';
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * Each variant manifest is a flat record of `{ moduleId: priority }`. Loading
@@ -56,20 +62,23 @@ describe('variants', () => {
         [STANDARD_VARIANT, MIN_VARIANT, NO_QUEUE_COPY_VARIANT, MANAGED_VARIANT].forEach((v) => {
             expect(Object.keys(v)).not.toContain('user-management');
             expect(Object.keys(v)).not.toContain('connection-management');
+            expect(Object.keys(v)).not.toContain('gateway-settings');
             expect(Object.keys(v)).not.toContain('admin-login');
         });
     });
 
-    it('admin variant ships the login plus both editors, and no messaging modules', () => {
+    it('admin variant ships the login plus the three editors, and no messaging modules', () => {
         // admin-login authenticates but opens no broker connection, so there is
         // nothing for the messaging modules to attach to.
         expect(Object.keys(ADMIN_VARIANT).sort()).toEqual([
             'admin-login',
             'connection-management',
+            'gateway-settings',
             'user-management',
         ]);
         expect(ADMIN_VARIANT['admin-login']).toBeGreaterThan(ADMIN_VARIANT['user-management']);
         expect(ADMIN_VARIANT['user-management']).toBeGreaterThan(ADMIN_VARIANT['connection-management']);
+        expect(ADMIN_VARIANT['connection-management']).toBeGreaterThan(ADMIN_VARIANT['gateway-settings']);
     });
 
     it('all variant ships the all modules for visual testing purpose', () => {
@@ -79,12 +88,31 @@ describe('variants', () => {
             'admin-login',
             'connection-management',
             'connections',
+            'gateway-settings',
             'queue-browser',
             'queue-copy',
             'queue-subscription-explorer',
             'user-management',
         ]);
         expect(ALL_ENTRIES).toEqual({ connections: 'managed' });
+    });
+
+    it("the gateway's module catalog is the managed variant's module-controlled modules", () => {
+        // An administrator grants modules from moduleCatalog() in
+        // go-web-proxy/configfile.go; the browser shows them through
+        // isModuleVisible. A module is module-controlled when granting it is
+        // what makes it visible: not connections (always shown), not one
+        // rbac.ts denies in every managed session (the SEMP v1 readers).
+        const go = readFileSync(path.join(REPO, 'go-web-proxy/configfile.go'), 'utf-8');
+        const literal = go.match(/^func moduleCatalog\(\) \[\]string \{ return \[\]string\{([^}]*)\} \}$/m);
+        expect(literal, 'moduleCatalog() must stay a one-line literal').not.toBeNull();
+        const catalog = literal![1].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+
+        const base = { admin: false, username: 'u', broker: '', vpns: [], operate: [], readOnly: [] };
+        const controlled = Object.keys(MANAGED_VARIANT).filter(id =>
+            isModuleVisible({ ...base, modules: [id] }, id) && !isModuleVisible({ ...base, modules: [] }, id));
+        expect(catalog).toEqual(controlled);
+        expect(catalog).not.toContain('queue-subscription-explorer');
     });
 
     it('managed variant ships the standard modules, with connections on its managed entry', () => {

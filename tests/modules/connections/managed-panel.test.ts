@@ -83,6 +83,7 @@ const PROFILE = {
     siteSeed: 'c2VlZA==',
     operate: [{ brokers: '*', msgVpns: '*', queues: '*' }],
     readOnly: [],
+    modules: ['queue-browser'],
     brokers: [
         {
             broker: 'b1', hostname: 'host1', semp: { port: '1943', user: 'mon', pass: 'V1:sempb1' },
@@ -191,7 +192,7 @@ describe('connections/managed panel — restoring the gateway session', () => {
 
         expect(ctx.appState.managed).toEqual({
             admin: true, username: 'admin', broker: '', vpns: [],
-            operate: PROFILE.operate, readOnly: PROFILE.readOnly,
+            operate: PROFILE.operate, readOnly: PROFILE.readOnly, modules: ['queue-browser'],
         });
         expect(ctx.managedStore.isActive()).toBe(true);
         expect(rbac).toHaveBeenCalled();

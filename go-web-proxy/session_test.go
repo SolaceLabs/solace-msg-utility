@@ -22,7 +22,7 @@ var testSessionLimits = sessionLimits{idle: 10 * time.Minute, absolute: 30 * tim
 
 func TestSessions_IdleExpiry(t *testing.T) {
 	clock := newFakeClock()
-	s := newSessions(testSessionLimits, clock.now)
+	s := newSessions(fixed(testSessionLimits), clock.now)
 	id := s.create("alice", false)
 	clock.advance(9 * time.Minute)
 	if ss, ok := s.lookup(id); !ok || ss.user != "alice" {
@@ -43,7 +43,7 @@ func TestSessions_IdleExpiry(t *testing.T) {
 
 func TestSessions_AbsoluteExpiry(t *testing.T) {
 	clock := newFakeClock()
-	s := newSessions(testSessionLimits, clock.now)
+	s := newSessions(fixed(testSessionLimits), clock.now)
 	id := s.create("alice", false)
 	for i := 0; i < 5; i++ { // busy for 25 minutes
 		clock.advance(5 * time.Minute)
@@ -57,8 +57,26 @@ func TestSessions_AbsoluteExpiry(t *testing.T) {
 	}
 }
 
+// The limits are read on every lookup: shortening them on the settings page
+// ends sessions that are already older than the new limit.
+func TestSessions_LimitsAreReadLive(t *testing.T) {
+	clock := newFakeClock()
+	lim := testSessionLimits
+	s := newSessions(func() sessionLimits { return lim }, clock.now)
+	id := s.create("alice", false)
+	clock.advance(5 * time.Minute)
+	if _, ok := s.lookup(id); !ok {
+		t.Fatal("within the limits the session must be live")
+	}
+	lim = sessionLimits{idle: 2 * time.Minute, absolute: 4 * time.Minute}
+	clock.advance(time.Minute)
+	if _, ok := s.lookup(id); ok {
+		t.Fatal("6 minutes after sign-in, a 4-minute absolute limit must end the session")
+	}
+}
+
 func TestSessions_DropAndDropUser(t *testing.T) {
-	s := newSessions(testSessionLimits, newFakeClock().now)
+	s := newSessions(fixed(testSessionLimits), newFakeClock().now)
 	a1, a2, b := s.create("alice", false), s.create("alice", true), s.create("bob", false)
 	if a1 == a2 || len(a1) != 43 {
 		t.Fatalf("ids must be distinct 32-byte base64url values, got %q %q", a1, a2)
@@ -87,7 +105,7 @@ func TestSessions_DropAndDropUser(t *testing.T) {
 
 func TestSessions_CreateSweepsExpired(t *testing.T) {
 	clock := newFakeClock()
-	s := newSessions(testSessionLimits, clock.now)
+	s := newSessions(fixed(testSessionLimits), clock.now)
 	s.create("old", false)
 	clock.advance(time.Hour)
 	s.create("new", false)
@@ -97,7 +115,7 @@ func TestSessions_CreateSweepsExpired(t *testing.T) {
 }
 
 func TestSessionCookie_FlagsAndRequestLookup(t *testing.T) {
-	s := newSessions(testSessionLimits, newFakeClock().now)
+	s := newSessions(fixed(testSessionLimits), newFakeClock().now)
 	rec := httptest.NewRecorder()
 	setSessionCookie(rec, s.create("alice", false))
 	c := rec.Result().Cookies()[0]

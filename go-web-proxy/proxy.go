@@ -23,7 +23,7 @@ import (
 // ----- /hosted ----------------------------------------------------------------
 
 // hostedInfo is the /hosted response body. Beyond the hosted flag it carries the
-// deployment's connection-mode config (from CONN_MODES / DEFAULT_CONN), which is
+// deployment's connection-mode config (connModes / defaultConn), which is
 // the only channel the statically-served SPA has for reading container env — it
 // decides which connection tabs (Direct / Managed) the app offers.
 type hostedInfo struct {
@@ -32,14 +32,15 @@ type hostedInfo struct {
 	DefaultConn string `json:"defaultConn"`
 }
 
+// hostedHandler reads connModes and defaultConn from live per request: both
+// keys apply without a restart.
 type hostedHandler struct {
-	hosted      bool
-	connModes   string
-	defaultConn string
+	hosted bool
+	live   *live
 }
 
-func newHostedHandler(hosted bool, connModes, defaultConn string) *hostedHandler {
-	return &hostedHandler{hosted: hosted, connModes: connModes, defaultConn: defaultConn}
+func newHostedHandler(hosted bool, lv *live) *hostedHandler {
+	return &hostedHandler{hosted: hosted, live: lv}
 }
 
 func (h *hostedHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
@@ -50,10 +51,11 @@ func (h *hostedHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
+	cur := h.live.get()
 	_ = json.NewEncoder(w).Encode(hostedInfo{
 		Hosted:      true,
-		ConnModes:   h.connModes,
-		DefaultConn: h.defaultConn,
+		ConnModes:   cur.connModes,
+		DefaultConn: cur.defaultConn,
 	})
 }
 

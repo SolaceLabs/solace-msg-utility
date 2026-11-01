@@ -156,11 +156,12 @@ src/
     admin-login/           # /solAdmin entry point — restores the gateway session, opens no broker connection
     user-management/       # Admin-only (/solAdmin) — user + entitlement CRUD
     connection-management/ # Admin-only (/solAdmin) — broker connection CRUD
+    gateway-settings/      # Admin-only (/solAdmin) — config.yaml editor
   variants/
     standard.ts        # Default variant -- the everyday bundle (no admin modules)
     min.ts             # Minimal variant — connections + queue-browser only
     no-queue-copy.ts   # Standard variant minus the Queue Copy module
-    admin.ts           # The /solAdmin app — admin-login + the two entitlement editors
+    admin.ts           # The /solAdmin app — admin-login, the two entitlement editors, gateway settings
     managed.ts         # The managed image's bundle — standard + connections' managed entry (MODULE_ENTRIES)
     all-for-testing-only.ts  # Kitchen-sink QA build — every module, incl. the admin ones
     _active.ts         # One-line re-export from one variant (default ./standard)
@@ -367,7 +368,7 @@ serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser });
 
    Pick a priority that slots into the existing list (higher installs first, renders higher in the sidebar). [src/registry.ts](../src/registry.ts) resolves each id in the manifest to the `PwaModule` exported by `src/modules/<id>/module.ts` via the `virtual:module-registry` module (generated per variant by `scripts/module-registry-plugin.mjs`), so no import section needs touching and only the active variant's modules enter the bundle. To **disable** a module in a variant, comment its line. To **ship a different variant**, drop a new `src/variants/<name>.ts` and build it with `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>.html` (add a matching `build:<name>` npm script, and a pass in `build`, if it should ship). To give one variant a different **entry** for a module, export `MODULE_ENTRIES = { '<id>': '<entry>' }` from the manifest and add `src/modules/<id>/module.<entry>.ts` (and optionally `index.<entry>.html`, which can pull the base `index.html` in at a `<!-- @module-base -->` marker). The connections module does this for the `managed` variant; its `module.ts` must never import the managed entry's files.
 
-   > **Gating a module in managed deployments:** add its id to `MODULE_REQUIREMENTS` in [src/core/rbac.ts](../src/core/rbac.ts) — `'admin'` for admin-only CRUD (like `user-management` / `connection-management`, which ship only in `src/variants/admin.ts`), or `'unfiltered-semp'` for a module that reaches the broker over a path RBAC cannot filter, which hides it in **every** managed session. The kernel hides the sidebar entry and re-evaluates on `rbac:changed`. See [architecture.md → Managed Connections](architecture.md#managed-connections-rbac).
+   > **Gating a module in managed deployments:** a module in the `managed` variant is under module control: a managed user sees it only if an administrator grants it, so add its id to `moduleCatalog()` in [go-web-proxy/configfile.go](../go-web-proxy/configfile.go) (`tests/variants.test.ts` fails until you do). To keep it out of managed sessions instead, add it to `MODULE_REQUIREMENTS` in [src/core/rbac.ts](../src/core/rbac.ts): `'admin'` for admin-only CRUD (like the editors, which ship only in `src/variants/admin.ts`), or `'unfiltered-semp'` for a module that reaches the broker over a path RBAC cannot filter, which hides it in **every** managed session and keeps it out of the catalog. The kernel hides the sidebar entry and re-evaluates on `rbac:changed`. See [architecture.md → Managed Connections](architecture.md#managed-connections-rbac).
 
 5. **Import the module's CSS** (if you added `styles.css`) from `src/css/main.css`:
 

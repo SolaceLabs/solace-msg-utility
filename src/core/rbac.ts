@@ -16,17 +16,21 @@ import type { ManagedSession, QGlob } from './types';
 
 /**
  * What a module REQUIRES of a managed session before the kernel will show it.
- * A module absent from this map has no requirement and is always visible.
+ * A module absent from this map is subject to module control instead (see
+ * `isModuleVisible`).
  *
  *   - `'admin'`           — only for `admin: true` sessions (the management UIs).
  *   - `'unfiltered-semp'` — the module reaches the broker by a route the
  *     entitlement filter cannot cover (SEMP v1 RPC), so it is only safe when no
  *     managed session is in force. Denied in EVERY managed session until it
- *     consumes an entitlement-filtered source.
+ *     consumes an entitlement-filtered source. The gateway's module catalog
+ *     (`moduleCatalog` in go-web-proxy/configfile.go) leaves these out too, so
+ *     an administrator cannot grant them.
  */
 const MODULE_REQUIREMENTS: Record<string, 'admin' | 'unfiltered-semp'> = {
     'user-management': 'admin',
     'connection-management': 'admin',
+    'gateway-settings': 'admin',
     // Lists every (VPN, queue, subscription) triple over SEMP v1 RPC, which
     // `filterSempFetch` does not rewrite — it would expose the whole
     // subscription inventory regardless of entitlement.
@@ -58,13 +62,21 @@ function vpnMatchesAny(rows: QGlob[], broker: string, vpn: string): boolean {
     return rows.some(r => matchGlob(r.brokers, broker) && matchGlob(r.msgVpns, vpn));
 }
 
-/** Whether a module's sidebar entry + view should be shown for this session. */
+/** The sign-in surfaces: shown in every managed session, never granted. */
+const ALWAYS_VISIBLE = new Set(['connections', 'admin-login']);
+
+/**
+ * Whether a module's sidebar entry + view should be shown for this session.
+ * Past the requirements above, a managed user sees the sign-in surfaces and
+ * the modules the gateway granted them (`session.modules`, from the user's
+ * own list or the deployment default, within what the deployment offers).
+ */
 export function isModuleVisible(s: ManagedSession | null | undefined, id: string): boolean {
     if (!s) return true;                       // no managed session — allow-all
     const requirement = MODULE_REQUIREMENTS[id];
     if (requirement === 'admin') return s.admin;
     if (requirement === 'unfiltered-semp') return false;
-    return true;
+    return ALWAYS_VISIBLE.has(id) || s.modules.includes(id);
 }
 
 /**

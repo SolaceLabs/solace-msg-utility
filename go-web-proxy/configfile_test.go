@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"log/slog"
@@ -49,6 +51,9 @@ login:
   backoffSeconds: 10
   maxBackoffSeconds: 600
   unauthenticatedPerMinute: 20
+modules:
+  offered: [queue-copy]
+  userDefault: none
 `
 
 func TestDecodeConfigFile_Valid(t *testing.T) {
@@ -63,6 +68,7 @@ func TestDecodeConfigFile_Valid(t *testing.T) {
 		Access:  fileAccess{Allow: []string{"10.0.0.0/8", "2001:db8::/32"}, TrustedProxies: []string{"10.0.0.1/32"}},
 		Session: fileSession{IdleMinutes: 5, AbsoluteMinutes: 60},
 		Login:   fileLogin{MaxFailures: 3, BackoffSeconds: 10, MaxBackoffSeconds: 600, UnauthenticatedPerMinute: 20},
+		Modules: fileModules{Offered: []string{"queue-copy"}, UserDefault: "none"},
 	}
 	if !reflect.DeepEqual(fc, want) {
 		t.Errorf("decoded:\n%+v\nwant:\n%+v", fc, want)
@@ -157,6 +163,10 @@ func TestToConfig_InvalidValues(t *testing.T) {
 		{"max backoff", func(fc *fileConfig) { fc.Login.MaxBackoffSeconds = 86401 }, "login.maxBackoffSeconds", "86401"},
 		{"backoff over max", func(fc *fileConfig) { fc.Login.BackoffSeconds = 901 }, "login.backoffSeconds", "901"},
 		{"unauthenticated", func(fc *fileConfig) { fc.Login.UnauthenticatedPerMinute = -1 }, "login.unauthenticatedPerMinute", "-1"},
+		// The explorer reads the broker unfiltered, so it is not in the catalog.
+		{"module outside the catalog", func(fc *fileConfig) { fc.Modules.Offered = []string{"queue-subscription-explorer"} }, "modules.offered[0]", "queue-subscription-explorer"},
+		{"module twice", func(fc *fileConfig) { fc.Modules.Offered = []string{"queue-copy", "queue-copy"} }, "modules.offered[1]", "queue-copy"},
+		{"userDefault", func(fc *fileConfig) { fc.Modules.UserDefault = "some" }, "modules.userDefault", "some"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -208,6 +218,65 @@ func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 	}
 	if want := (loginLimits{maxFailures: 5, backoff: 30 * time.Second, maxBackoff: 15 * time.Minute, unauthPerMinute: 60}); cfg.login != want {
 		t.Errorf("login defaults: %+v", cfg.login)
+	}
+	if want := (moduleSettings{offered: moduleCatalog(), userDefault: modulesDefaultAll}); !reflect.DeepEqual(cfg.modules, want) {
+		t.Errorf("modules default: want every catalog module for every user, got %+v", cfg.modules)
+	}
+}
+
+// offered is kept in catalog order whatever order the file lists it in; an
+// empty list offers nothing.
+func TestToConfig_ModulesInCatalogOrder(t *testing.T) {
+	fc := defaultFileConfig()
+	fc.Modules.Offered = []string{"queue-copy", "queue-browser"}
+	cfg, err := fc.toConfig("/s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.modules.offered, []string{"queue-browser", "queue-copy"}) {
+		t.Errorf("want catalog order, got %v", cfg.modules.offered)
+	}
+	fc.Modules.Offered = []string{}
+	if cfg, err = fc.toConfig("/s"); err != nil || len(cfg.modules.offered) != 0 || cfg.modules.offered == nil {
+		t.Errorf("an empty list offers nothing (as [], not null): %v %#v", err, cfg.modules.offered)
+	}
+}
+
+func TestModuleSettings_ForUser(t *testing.T) {
+	all := moduleSettings{offered: []string{"queue-browser", "queue-copy"}, userDefault: modulesDefaultAll}
+	none := moduleSettings{offered: []string{"queue-browser"}, userDefault: modulesDefaultNone}
+	list := func(ids ...string) *[]string { return &ids }
+	cases := []struct {
+		name    string
+		ms      moduleSettings
+		granted *[]string
+		want    []string
+	}{
+		{"no list, default all", all, nil, []string{"queue-browser", "queue-copy"}},
+		{"no list, default none", none, nil, []string{}},
+		{"own list", all, list("queue-copy"), []string{"queue-copy"}},
+		{"own empty list", all, list(), []string{}},
+		{"own list beyond the offer", none, list("queue-copy", "queue-browser"), []string{"queue-browser"}},
+	}
+	for _, tc := range cases {
+		if got := tc.ms.forUser(tc.granted); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: want %v, got %v", tc.name, tc.want, got)
+		}
+	}
+}
+
+// The settings endpoint decodes a request into a clone of the saved file: a
+// decode must never write through to the original's slices.
+func TestFileConfig_CloneIsIndependent(t *testing.T) {
+	orig := defaultFileConfig()
+	orig.Access.Allow = []string{"10.0.0.0/8"}
+	c := orig.clone()
+	body := `{"access":{"allow":["192.0.2.0/24"],"trustedProxies":["198.51.100.1/32"]},"modules":{"offered":["queue-copy"]}}`
+	if err := json.Unmarshal([]byte(body), &c); err != nil {
+		t.Fatal(err)
+	}
+	if orig.Access.Allow[0] != "10.0.0.0/8" || orig.Modules.Offered[0] != "queue-browser" || len(orig.Access.TrustedProxies) != 0 {
+		t.Errorf("the original changed: %+v", orig)
 	}
 }
 
@@ -290,6 +359,9 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	if strings.Contains(string(raw), "/x/site.seed") {
 		t.Error("the seed path leaked into config.yaml")
 	}
+	if load.sum != sha256.Sum256(raw) {
+		t.Error("the seeded load must carry the hash of the bytes it wrote")
+	}
 	if !strings.Contains(string(raw), "connModes: both") || !strings.Contains(string(raw), "logLevel: info") {
 		t.Errorf("file content: %s", raw)
 	}
@@ -297,6 +369,9 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	again, err := resolveConfig(path)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if again.sum != load.sum {
+		t.Error("reading the file back must carry the same hash")
 	}
 	if again.seeded || len(again.overrides) != 0 {
 		t.Errorf("second start: want file read with no overrides, got seeded=%v overrides=%v", again.seeded, again.overrides)
@@ -331,7 +406,7 @@ func TestSeedConfigFile_WriteFailureIsActionable(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(blocker, "config.yaml")
-	err := seedConfigFile(path, defaultConfig())
+	_, err := seedConfigFile(path, defaultConfig())
 	if err == nil {
 		t.Fatal("want an error when the directory cannot be created")
 	}

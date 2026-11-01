@@ -1,0 +1,39 @@
+/* Gateway Settings module styles. Module-prefixed (.gw-set-*) so they never
+ * collide in the shared (inlined) cascade. Shipped only in the admin app
+ * (main-admin.css). */
+
+.gw-set-card {
+    max-width: 720px;
+    margin: 2rem auto;
+}
+
+.gw-set-intro {
+    font-size: 0.9rem;
+}
+
+.gw-set-section {
+    margin: 1.25rem 0 0.5rem;
+    font-size: 0.95rem;
+}
+
+.gw-set-banner {
+    border-left: 3px solid var(--status-warning);
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+/* The "restart" tag: in the intro, and after the label of every key the
+ * gateway reads only at startup. */
+.gw-set-tag,
+.gw-set-restart > label::after {
+    border: 1px solid var(--status-warning);
+    border-radius: 4px;
+    padding: 0 0.4rem;
+    font-size: 0.75rem;
+}
+
+.gw-set-restart > label::after {
+    content: 'restart';
+    margin-left: 0.5rem;
+}

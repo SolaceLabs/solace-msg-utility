@@ -25,7 +25,8 @@ const throttleMaxTracked = 10_000
 // /64, so rotating within it buys nothing.
 type throttle struct {
 	mu         sync.Mutex
-	limits     loginLimits
+	limits     func() loginLimits // the live login.* settings
+	lim        loginLimits        // limits() as read at the start of the current call, under mu
 	now        func() time.Time
 	logger     *slog.Logger
 	maxTracked int
@@ -46,7 +47,7 @@ type bucket struct {
 	limited bool // a warn was logged for this episode
 }
 
-func newThrottle(limits loginLimits, now func() time.Time, logger *slog.Logger) *throttle {
+func newThrottle(limits func() loginLimits, now func() time.Time, logger *slog.Logger) *throttle {
 	return &throttle{
 		limits: limits, now: now, logger: logger, maxTracked: throttleMaxTracked,
 		users:   map[string]*failures{},
@@ -81,7 +82,7 @@ func userKey(user string) string {
 // stale reports whether a failure record no longer matters: not blocked, and
 // quiet for longer than the longest back-off.
 func (t *throttle) stale(f *failures, now time.Time) bool {
-	return !now.Before(f.blockedUntil) && now.Sub(f.last) > t.limits.maxBackoff
+	return !now.Before(f.blockedUntil) && now.Sub(f.last) > t.lim.maxBackoff
 }
 
 // loginWait is how long a sign-in for user from client must wait; 0 means it
@@ -90,6 +91,7 @@ func (t *throttle) stale(f *failures, now time.Time) bool {
 func (t *throttle) loginWait(user string, client netip.Addr, ok bool) time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.lim = t.limits()
 	now := t.now()
 	return max(failureWait(t, t.users, userKey(user), now), failureWait(t, t.clients, clientKey(client, ok), now))
 }
@@ -99,7 +101,7 @@ func failureWait[K comparable](t *throttle, m map[K]*failures, k K, now time.Tim
 		return max(f.blockedUntil.Sub(now), 0)
 	}
 	if !hasRoom(t, m, now) {
-		return t.limits.backoff
+		return t.lim.backoff
 	}
 	return 0
 }
@@ -122,6 +124,7 @@ func hasRoom[K comparable](t *throttle, m map[K]*failures, now time.Time) bool {
 func (t *throttle) loginFailed(user string, client netip.Addr, ok bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.lim = t.limits()
 	now := t.now()
 	ck := clientKey(client, ok)
 	recordFailure(t, t.users, userKey(user), now, "user", userKey(user))
@@ -145,16 +148,16 @@ func recordFailure[K comparable](t *throttle, m map[K]*failures, k K, now time.T
 	}
 	f.count++
 	f.last = now
-	if f.count < t.limits.maxFailures {
+	if f.count < t.lim.maxFailures {
 		return
 	}
-	backoff := t.limits.backoff
-	for i := t.limits.maxFailures; i < f.count && backoff < t.limits.maxBackoff; i++ {
+	backoff := t.lim.backoff
+	for i := t.lim.maxFailures; i < f.count && backoff < t.lim.maxBackoff; i++ {
 		backoff *= 2
 	}
-	backoff = min(backoff, t.limits.maxBackoff)
+	backoff = min(backoff, t.lim.maxBackoff)
 	f.blockedUntil = now.Add(backoff)
-	if f.count == t.limits.maxFailures {
+	if f.count == t.lim.maxFailures {
 		t.logger.Warn("sign-in throttled after repeated failures", kind, label, "failures", f.count, "retry_after_s", int(backoff.Seconds()))
 	}
 }
@@ -172,8 +175,9 @@ func (t *throttle) loginSucceeded(user string, client netip.Addr, ok bool) {
 func (t *throttle) allowUnauthenticated(client netip.Addr, ok bool) (bool, time.Duration) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.lim = t.limits()
 	now := t.now()
-	capacity := float64(t.limits.unauthPerMinute)
+	capacity := float64(t.lim.unauthPerMinute)
 	perSecond := capacity / 60
 	k := clientKey(client, ok)
 	b := t.buckets[k]
@@ -201,7 +205,7 @@ func (t *throttle) allowUnauthenticated(client netip.Addr, ok bool) (bool, time.
 	}
 	if !b.limited {
 		b.limited = true
-		t.logger.Warn("unauthenticated requests throttled", "client", k.String(), "limit_per_minute", t.limits.unauthPerMinute)
+		t.logger.Warn("unauthenticated requests throttled", "client", k.String(), "limit_per_minute", t.lim.unauthPerMinute)
 	}
 	return false, time.Duration((1 - b.tokens) / perSecond * float64(time.Second))
 }

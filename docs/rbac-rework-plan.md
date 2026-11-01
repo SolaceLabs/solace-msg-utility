@@ -29,7 +29,7 @@ hardening items" section of [rbac-variant-plan.md](rbac-variant-plan.md) when ad
 | Docs-secrecy policy | Retired in Phase 3, once the browser transform is deleted | `CLAUDE.md` section, `check-docs-secrecy.mjs` and its tests removed; docs become specific. |
 | Managed demo | A separate one-time mini app that mimics managed behaviour; not shared code | Phase 4. `mock.html` stays a Direct-only demo. |
 | SEMP v1 RPC | Not parsed by the gateway (follows from the SEMP relay decision) | Which modules a managed session sees is decided by module control, below. |
-| Module control | Deployment ceiling in `config.yaml` (modules the image offers) plus a per-user `modules` list in `users.yaml` within it, editable in `/solAdmin`; `/managed/me` returns the result. A user without a list gets the deployment default, itself a `config.yaml` setting (`all` or `none`, default `all`). Admin-only modules still require `admin` | Replaces the hard-coded table in `src/core/rbac.ts`. The SEMP v1 modules become ordinary entries the operator may or may not offer. |
+| Module control | Deployment ceiling in `config.yaml` (modules the image offers) plus a per-user `modules` list in `users.yaml` within it, editable in `/solAdmin`; `/managed/me` returns the result. A user without a list gets the deployment default, itself a `config.yaml` setting (`all` or `none`, default `all`). Admin-only modules still require `admin` | Replaces "every other module is visible" in `src/core/rbac.ts`. The SEMP v1 modules stay out of the catalog and hidden in every managed session (decided 2026-11-01: what a managed user sees must follow the admin's queue rows, which those modules cannot honour). |
 | Module scope | Show/hide only. Read-only vs operate stays per queue | A read-only queue admits no operate action in any module, e.g. `queue-copy` cannot copy into it. No per-module level. |
 | Config editing | `config.yaml` holds every setting: connection modes, default tab, hosted flag, paths, TLS, log level, timeouts, throttle limits, module ceiling and default, client access list, trusted proxies. Env vars are read only on first start, to seed the file when it does not exist; the path to the file itself and the key file path stay env vars, never in the file. Admin-editable in `/solAdmin` via a settings page and endpoint | One more admin surface; same cookie auth, same validation as the other writers. The startup checks on connection modes run on load and on every write. A changed env var after first start has no effect until the file is removed. The standard image, with no admin UI, is hand-edited. The endpoint refuses an access list that would exclude the requesting client. |
 | Login guessing | Constant-time compare plus in-memory per-user and per-client back-off, limits in `config.yaml` | Item 1. |
@@ -137,7 +137,13 @@ as one commit series straight on the branch (no sub-branches; CI by `workflow_di
 
 **Phase 2: Gateway sessions and auth.** Step 2A (sign-in, sessions, cookie auth) code on
 `feature/rbac` 2026-10-30: `password.go`, `session.go`, `throttle.go`, `pages.go`, REST
-`managed.go`; browser `managed-api.ts`, `stamp()` removed. Step 2B (module control, settings) next.
+`managed.go`; browser `managed-api.ts`, `stamp()` removed. Step 2B (module control, settings) code
+on `feature/rbac` 2026-11-01: `live.go` (the live keys behind an `atomic.Pointer` plus a
+`slog.LevelVar`, read per request), `settings.go` (`GET`/`PUT /managed/settings`, lock-out and
+on-disk refusals), `moduleCatalog()` and `modules.*` in `configfile.go`, per-user `modules` in
+`store.go`; browser module control in `rbac.ts`, the modules editor in `user-management`, the new
+`gateway-settings` module, and the catalog drift guard in `tests/variants.test.ts`. The catalog is
+Queue Browser and Queue Copy; the SEMP v1 modules keep their `unfiltered-semp` rule.
 - `/login` page, `/managed/logout`, `/managed/me`; cookie sessions with the 10/30 min defaults;
   bundle served only with a session under `CONN_MODES=managed`; password hashing; throttle; body
   caps; random bootstrap with forced change; session invalidation; uniform responses; module

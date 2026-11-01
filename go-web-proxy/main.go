@@ -35,6 +35,9 @@ const (
 	adminIndexFile = "solAdmin.html"
 )
 
+// config is the validated config.yaml. The keys live.go lists as live are
+// copied into a *live at startup and swapped by the settings page; read them
+// there, per request, so a save reaches them. The rest apply at restart.
 type config struct {
 	hosted             bool
 	appDir             string
@@ -58,10 +61,11 @@ type config struct {
 	// Client access list. Lives in config.yaml only (no env var); an empty
 	// allow list admits every client. See access.go.
 	access accessConfig
-	// Managed sign-in limits, config.yaml only (no env var). Unused when
-	// managed is false.
+	// Managed sign-in limits and module control, config.yaml only (no env
+	// var). Unused when managed is false.
 	session sessionLimits
 	login   loginLimits
+	modules moduleSettings
 }
 
 // managedRoutes is what the managed build adds to the router; nil in the
@@ -72,8 +76,6 @@ type managedRoutes struct {
 	gateApp   func(http.Handler) http.Handler // the PWA; a session under connModes=managed
 	gateAdmin func(http.Handler) http.Handler // /solAdmin; an admin session, every mode
 }
-
-func noGate(h http.Handler) http.Handler { return h }
 
 // robotsTxt asks every crawler to stay out; X-Robots-Tag on each response says
 // the same to the ones that skip robots.txt.
@@ -133,6 +135,7 @@ func defaultConfig() config {
 			maxBackoff:      15 * time.Minute,
 			unauthPerMinute: 60,
 		},
+		modules: moduleSettings{offered: moduleCatalog(), userDefault: modulesDefaultAll},
 	}
 }
 
@@ -161,6 +164,7 @@ func loadConfig() (config, error) {
 		defaultConn:        strings.ToLower(envOr("DEFAULT_CONN", d.defaultConn)),
 		session:            d.session,
 		login:              d.login,
+		modules:            d.modules,
 	}, nil
 }
 
@@ -258,7 +262,10 @@ func serve() {
 	}
 	cfg := load.cfg
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.logLevel}))
+	// The live keys (live.go), the log level among them, are read per request
+	// from lv, so a save on the settings page reaches them without a restart.
+	lv := newLive(cfg)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: &lv.level}))
 	slog.SetDefault(logger)
 
 	if load.seeded {
@@ -293,7 +300,7 @@ func serve() {
 		logger.Warn("SSL_INSECURE_SKIP_VERIFY=true — upstream certificates will NOT be validated")
 	}
 
-	hh := newHostedHandler(cfg.hosted, cfg.connModes, cfg.defaultConn)
+	hh := newHostedHandler(cfg.hosted, lv)
 	pwa := newPWAHandler(cfg.appDir, logger)
 	rp := newReverseProxy(trustPool, cfg.insecureSkipVerify, logger)
 
@@ -302,7 +309,7 @@ func serve() {
 	// nil. A load failure is fatal (misconfiguration shouldn't silently fall
 	// back to an unauthenticated app). When disabled or absent, mr is nil and
 	// /managed/* is a 404.
-	mr, err := newManagedRouting(cfg, logger)
+	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, sum: load.sum}, logger)
 	if err != nil {
 		logger.Error("managed store load failed", "err", err)
 		os.Exit(1)
@@ -329,7 +336,7 @@ func serve() {
 	// list and the sign-in throttle. The access list sits inside the access
 	// log, so a denial is logged as a 403 like any other response (the ACL
 	// adds its own warn line with the reason).
-	handler := accessLog(withClient(cfg.access.trustedProxies, clientACL(cfg.access, root, logger)), logger)
+	handler := accessLog(withClient(lv, clientACL(lv, root, logger)), logger)
 
 	srv := &http.Server{
 		Addr:              ":9443",

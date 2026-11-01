@@ -37,6 +37,14 @@
         </label>
     </div>
     <div class="form-group">
+        <label class="m-0 mb-2">Modules this user may open</label>
+        <label class="flex-row items-center gap-2 m-0">
+            <input type="checkbox" id="user-mgmt-modules-default"> Deployment default
+            <span id="user-mgmt-modules-default-hint" class="text-secondary"></span>
+        </label>
+        <div id="user-mgmt-modules" class="flex-col mt-2"></div>
+    </div>
+    <div class="form-group">
         <div class="flex-row justify-between items-center mb-2">
             <label class="m-0">Operate entitlements (read + write)</label>
             <button id="btn-user-mgmt-add-operate" class="btn btn-secondary btn-sm">+ Add</button>

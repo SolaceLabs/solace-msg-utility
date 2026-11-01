@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -15,13 +17,16 @@ import (
 // fixtures (admin + viewer, brokers b1, b2), with a fake clock. The hosted,
 // admin, app and relay handlers are stubs that answer with their name.
 type managedEnv struct {
-	f      storeFixture
-	clock  *fakeClock
-	log    *strings.Builder
-	routes *managedRoutes
-	api    *managedHandler
-	pages  *authPages
-	root   http.Handler
+	f       storeFixture
+	clock   *fakeClock
+	log     *strings.Builder
+	cfg     config // as the gateway started
+	live    *live
+	cfgPath string // config.yaml, seeded from cfg
+	routes  *managedRoutes
+	api     *managedHandler
+	pages   *authPages
+	root    http.Handler
 }
 
 func named(name string) http.Handler {
@@ -40,15 +45,25 @@ func newManagedEnv(t *testing.T, mutate func(*config)) *managedEnv {
 	}
 	clock := newFakeClock()
 	log := &strings.Builder{}
-	routes, err := buildManagedRoutes(cfg, f.h, noEnv, clock.now, newCapturingLogger(log))
+	cfgPath := filepath.Join(filepath.Dir(f.usersPath), "config.yaml")
+	sum, err := seedConfigFile(cfgPath, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lv := newLive(cfg)
+	logger := newCapturingLogger(log)
+	routes, err := buildManagedRoutes(cfg, lv, configSource{path: cfgPath, sum: sum}, f.h, noEnv, clock.now, logger)
 	if err != nil {
 		t.Fatalf("buildManagedRoutes: %v", err)
 	}
+	// The chain serve() builds, minus the access log: the client list
+	// applies, so a saved allow list is enforced on the next request.
+	root := withClient(lv, clientACL(lv, newRootHandler(named("hosted"), named("admin"), named("app"), named("relay"), routes), logger))
 	return &managedEnv{
-		f: f, clock: clock, log: log, routes: routes,
+		f: f, clock: clock, log: log, cfg: cfg, live: lv, cfgPath: cfgPath, routes: routes,
 		api:   routes.api.(*managedHandler),
 		pages: routes.pages.(*authPages),
-		root:  withClient(nil, newRootHandler(named("hosted"), named("admin"), named("app"), named("relay"), routes)),
+		root:  root,
 	}
 }
 
@@ -170,6 +185,9 @@ func TestManagedAPI_Me(t *testing.T) {
 	if p.Username != "viewer" || p.Admin || len(p.Brokers) != 1 || p.SiteSeed == "" {
 		t.Errorf("viewer profile: %+v", p)
 	}
+	if !reflect.DeepEqual(p.Modules, []string{"queue-browser"}) {
+		t.Errorf("viewer modules: want their own list, got %v", p.Modules)
+	}
 	if rec.Header().Get("Content-Type") != "application/json" || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("headers: %v", rec.Header())
 	}
@@ -198,6 +216,7 @@ func TestManagedAPI_AdminOnly(t *testing.T) {
 	for _, rq := range [][2]string{
 		{"GET", "/managed/users"}, {"PUT", "/managed/users/x"}, {"DELETE", "/managed/users/x"},
 		{"GET", "/managed/connections"}, {"PUT", "/managed/connections/b1"}, {"DELETE", "/managed/connections/b1"},
+		{"GET", "/managed/settings"}, {"PUT", "/managed/settings"},
 	} {
 		expect(t, e.do(rq[0], rq[1], "{}", c), http.StatusForbidden, "forbidden")
 	}
@@ -211,12 +230,24 @@ func TestManagedAPI_ListUsersNeverSendsHashes(t *testing.T) {
 	if strings.Contains(body, "pbkdf2") || strings.Contains(body, `"password"`) {
 		t.Errorf("the hash must never leave the gateway: %s", body)
 	}
-	var out struct{ Users []userJSON }
+	var out struct {
+		Users   []userJSON
+		Modules modulesJSON
+	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.Users) != 2 {
 		t.Fatalf("users: %v %s", err, body)
 	}
 	if out.Users[1].Username != "viewer" || len(out.Users[1].ReadOnly) != 1 || out.Users[1].ReadOnly[0].Brokers != "b1" {
 		t.Errorf("viewer row: %+v", out.Users[1])
+	}
+	// The module editor's inputs: each user's own list (null = the default)
+	// and what the deployment offers.
+	if !strings.Contains(body, `"modules":null`) || !reflect.DeepEqual(*out.Users[1].Modules, []string{"queue-browser"}) {
+		t.Errorf("user modules: %s", body)
+	}
+	want := modulesJSON{Catalog: moduleCatalog(), Offered: moduleCatalog(), UserDefault: modulesDefaultAll}
+	if !reflect.DeepEqual(out.Modules, want) {
+		t.Errorf("modules block: want %+v, got %+v", want, out.Modules)
 	}
 }
 
@@ -242,6 +273,7 @@ func TestManagedAPI_SaveUser_CreateAndValidate(t *testing.T) {
 		{"malformed", "carol", `{`, 400, "bad_request", ""},
 		{"too large", "carol", `{"password":"` + strings.Repeat("x", maxBodyBytes) + `"}`, 413, "too_large", ""},
 		{"last admin", "admin", `{"admin":false}`, 409, "last_admin", ""},
+		{"unknown module", "carol", `{"password":"long-enough-pw","modules":["queue-subscription-explorer"]}`, 422, "invalid", "modules"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -254,6 +286,32 @@ func TestManagedAPI_SaveUser_CreateAndValidate(t *testing.T) {
 	}
 	if _, exists := e.api.store.isAdmin("carol"); exists {
 		t.Error("no rejected save may create the user")
+	}
+}
+
+// A module list is stored as sent; null goes back to the deployment default.
+// /managed/me reflects a change at once, without ending the session.
+func TestManagedAPI_SaveUser_Modules(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	admin, viewer := e.cookie("admin", false), e.cookie("viewer", false)
+	modules := func() []string {
+		var p profileResponse
+		rec := e.do("GET", "/managed/me", "", viewer)
+		expect(t, rec, http.StatusOK, "")
+		_ = json.Unmarshal(rec.Body.Bytes(), &p)
+		return p.Modules
+	}
+	expect(t, e.do("PUT", "/managed/users/viewer", `{"modules":["queue-copy"]}`, admin), http.StatusNoContent, "")
+	if got := modules(); !reflect.DeepEqual(got, []string{"queue-copy"}) {
+		t.Errorf("own list: got %v", got)
+	}
+	expect(t, e.do("PUT", "/managed/users/viewer", `{"modules":null}`, admin), http.StatusNoContent, "")
+	if got := modules(); !reflect.DeepEqual(got, moduleCatalog()) {
+		t.Errorf("null: want the deployment default (every module), got %v", got)
+	}
+	expect(t, e.do("PUT", "/managed/users/viewer", `{"modules":[]}`, admin), http.StatusNoContent, "")
+	if got := modules(); len(got) != 0 {
+		t.Errorf("empty list: want none, got %v", got)
 	}
 }
 

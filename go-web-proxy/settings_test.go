@@ -1,0 +1,238 @@
+//go:build managed
+
+package main
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+)
+
+func (e *managedEnv) settings(t *testing.T) settingsJSON {
+	t.Helper()
+	rec := e.do("GET", "/managed/settings", "", e.cookie("admin", false))
+	expect(t, rec, http.StatusOK, "")
+	var s settingsJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func (e *managedEnv) saveSettings(t *testing.T, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return e.do("PUT", "/managed/settings", body, e.cookie("admin", false))
+}
+
+func (e *managedEnv) fileOnDisk(t *testing.T) fileConfig {
+	t.Helper()
+	data, err := os.ReadFile(e.cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fc, err := decodeConfigFile(data, e.cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fc
+}
+
+func TestSettings_GetReportsTheFile(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	rec := e.do("GET", "/managed/settings", "", e.cookie("admin", false))
+	expect(t, rec, http.StatusOK, "")
+	if body := rec.Body.String(); strings.Contains(body, "version") || strings.Contains(body, "seed") {
+		t.Errorf("the version and the seed path are not the page's to see: %s", body)
+	}
+	s := e.settings(t)
+	want := fileConfigFromConfig(e.cfg)
+	want.Version = 0 // never sent
+	if !reflect.DeepEqual(s.Settings, want) {
+		t.Errorf("settings:\n%+v\nwant:\n%+v", s.Settings, want)
+	}
+	if !reflect.DeepEqual(s.RestartOnly, restartOnlyKeyNames()) || len(s.PendingRestart) != 0 || s.ChangedOnDisk {
+		t.Errorf("flags: %+v", s)
+	}
+	if !reflect.DeepEqual(s.Catalog, moduleCatalog()) {
+		t.Errorf("catalog: %v", s.Catalog)
+	}
+}
+
+// Live keys apply on the next request; keys the body leaves out keep their
+// saved value.
+func TestSettings_SaveAppliesLiveKeysAtOnce(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	if rec := e.do("GET", "/", "", nil); rec.Body.String() != "app" {
+		t.Fatalf("connModes both: the app is open, got %d", rec.Code)
+	}
+	rec := e.saveSettings(t, `{"connModes":"managed","logLevel":"debug","session":{"idleMinutes":1,"absoluteMinutes":30},"modules":{"offered":["queue-copy"],"userDefault":"none"}}`)
+	expect(t, rec, http.StatusOK, "")
+	if strings.TrimSpace(rec.Body.String()) != `{"restartRequired":[]}` {
+		t.Errorf("live keys need no restart: %s", rec.Body.String())
+	}
+	cur := e.live.get()
+	if cur.connModes != connManaged || cur.session.idle != time.Minute || e.live.level.Level() != slog.LevelDebug {
+		t.Errorf("not applied: %+v level %v", cur, e.live.level.Level())
+	}
+	if !reflect.DeepEqual(cur.modules, moduleSettings{offered: []string{"queue-copy"}, userDefault: modulesDefaultNone}) {
+		t.Errorf("modules: %+v", cur.modules)
+	}
+	if rec := e.do("GET", "/", "", nil); rec.Code != http.StatusSeeOther {
+		t.Errorf("connModes managed: the app must now need a session, got %d", rec.Code)
+	}
+	disk := e.fileOnDisk(t)
+	if disk.ConnModes != connManaged || disk.Session.IdleMinutes != 1 || disk.AppDir != e.cfg.appDir {
+		t.Errorf("file: %+v", disk)
+	}
+	if !strings.Contains(e.log.String(), "gateway settings saved") || !strings.Contains(e.log.String(), "by=admin") {
+		t.Errorf("a save must be logged with who made it: %s", e.log.String())
+	}
+	if got := e.settings(t); got.Settings.ConnModes != connManaged || got.ChangedOnDisk {
+		t.Errorf("GET after save: %+v", got)
+	}
+}
+
+func TestSettings_RestartOnlyKeysAreSavedAndFlagged(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	rec := e.saveSettings(t, `{"appDir":"/elsewhere","tls":{"certFile":"/c.crt","keyFile":"/tls/tls.key","trustDir":"/tls/trust","insecureSkipVerify":false}}`)
+	expect(t, rec, http.StatusOK, "")
+	if strings.TrimSpace(rec.Body.String()) != `{"restartRequired":["appDir","tls.certFile"]}` {
+		t.Errorf("restartRequired: %s", rec.Body.String())
+	}
+	if got := e.settings(t).PendingRestart; !reflect.DeepEqual(got, []string{"appDir", "tls.certFile"}) {
+		t.Errorf("pendingRestart: %v", got)
+	}
+	if e.fileOnDisk(t).AppDir != "/elsewhere" {
+		t.Error("a restart-only key is still saved")
+	}
+	expect(t, e.saveSettings(t, `{"appDir":"/SolaceMsgUtility","tls":{"certFile":"/tls/tls.crt"}}`), http.StatusOK, "")
+	if got := e.settings(t).PendingRestart; len(got) != 0 {
+		t.Errorf("back to the running values: want nothing pending, got %v", got)
+	}
+}
+
+// A refused save changes neither the file nor the running gateway.
+func TestSettings_Refusals(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	before, _ := os.ReadFile(e.cfgPath)
+	cases := []struct {
+		name, body          string
+		status              int
+		code, field, reason string
+	}{
+		{"bad value", `{"session":{"idleMinutes":0}}`, 422, "invalid", "settings", `"session.idleMinutes"`},
+		{"explorer offered", `{"modules":{"offered":["queue-subscription-explorer"]}}`, 422, "invalid", "settings", "must be one of queue-browser, queue-copy"},
+		{"cross check", `{"hosted":false,"connModes":"both"}`, 422, "invalid", "settings", "hosted is false"},
+		{"unknown key", `{"bogus":1}`, 400, "bad_request", "", ""},
+		{"version is the gateway's", `{"version":2}`, 400, "bad_request", "", ""},
+		{"lock-out", `{"access":{"allow":["10.0.0.0/8"]}}`, 409, "would_lock_out", "access.allow", "(192.0.2.10)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := e.saveSettings(t, tc.body)
+			expect(t, rec, tc.status, tc.code)
+			got := errorCode(t, rec)
+			if got.Field != tc.field || !strings.Contains(got.Reason, tc.reason) {
+				t.Errorf("want field %q and a reason with %q, got %+v", tc.field, tc.reason, got)
+			}
+		})
+	}
+	after, _ := os.ReadFile(e.cfgPath)
+	if string(after) != string(before) || len(e.live.get().access.allow) != 0 || e.live.get().session.idle != 10*time.Minute {
+		t.Error("a refused save must leave the file and the live settings alone")
+	}
+}
+
+// The lock-out check resolves this request's client with the NEW trusted
+// proxies, and an allow list that admits it is saved and enforced at once.
+func TestSettings_AccessListThatAdmitsTheAdmin(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	behindProxy := func(body string) *httptest.ResponseRecorder {
+		return e.do("PUT", "/managed/settings", body, e.cookie("admin", false), "X-Forwarded-For", "10.9.9.9")
+	}
+	expect(t, behindProxy(`{"access":{"allow":["10.0.0.0/8"],"trustedProxies":[]}}`), http.StatusConflict, "would_lock_out")
+	expect(t, behindProxy(`{"access":{"allow":["10.0.0.0/8"],"trustedProxies":["192.0.2.10/32"]}}`), http.StatusOK, "")
+	if rec := e.do("GET", "/managed/me", "", e.cookie("viewer", false)); rec.Code != http.StatusForbidden {
+		t.Errorf("a client outside the new list must be denied at once, got %d", rec.Code)
+	}
+}
+
+// A client the gateway cannot resolve is denied by any allow list, so saving
+// one would lock it out.
+func TestSettings_LockOutWhenClientUnresolved(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	req := httptest.NewRequest("PUT", "https://gw.example/managed/settings", strings.NewReader(`{"access":{"allow":["0.0.0.0/0","::/0"]}}`))
+	req.RemoteAddr = "not-an-address"
+	req.AddCookie(e.cookie("admin", false))
+	rec := httptest.NewRecorder()
+	e.root.ServeHTTP(rec, req)
+	expect(t, rec, http.StatusConflict, "would_lock_out")
+	if got := errorCode(t, rec).Reason; !strings.Contains(got, "cannot tell your address") {
+		t.Errorf("reason: %q", got)
+	}
+}
+
+// connModes applies at once but hosted only at restart: offering managed
+// sign-in on a gateway that is not hosted yet is refused with the order to
+// follow.
+func TestSettings_ConnModesNeedTheRunningGatewayHosted(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.hosted, c.connModes = false, connDirect })
+	rec := e.saveSettings(t, `{"hosted":true,"connModes":"managed"}`)
+	expect(t, rec, http.StatusUnprocessableEntity, "invalid")
+	if got := errorCode(t, rec); got.Field != "connModes" || !strings.Contains(got.Reason, "hosted is false") || !strings.Contains(got.Reason, "restart") {
+		t.Errorf("want the running-gateway reason, got %+v", got)
+	}
+	rec = e.saveSettings(t, `{"hosted":true}`)
+	expect(t, rec, http.StatusOK, "")
+	if strings.TrimSpace(rec.Body.String()) != `{"restartRequired":["hosted"]}` {
+		t.Errorf("hosted is restart-only: %s", rec.Body.String())
+	}
+}
+
+// The gateway never saves over a hand edit it has not loaded.
+func TestSettings_RefusesOverAHandEdit(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	f, err := os.OpenFile(e.cfgPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("# edited by hand\n")
+	f.Close()
+	if !e.settings(t).ChangedOnDisk {
+		t.Error("GET must report the hand edit")
+	}
+	expect(t, e.saveSettings(t, `{"logLevel":"info"}`), http.StatusConflict, "config_changed_on_disk")
+	if data, _ := os.ReadFile(e.cfgPath); !strings.HasSuffix(string(data), "# edited by hand\n") || e.live.level.Level() != slog.LevelWarn {
+		t.Error("the hand edit must survive and nothing may apply")
+	}
+	if err := os.Remove(e.cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	if !e.settings(t).ChangedOnDisk || !strings.Contains(e.log.String(), "cannot read config file") {
+		t.Errorf("a missing file counts as changed, with a warn: %s", e.log.String())
+	}
+}
+
+func TestSettings_WriteFailureIs500AndChangesNothing(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs POSIX permissions and a non-root user")
+	}
+	e := newManagedEnv(t, nil)
+	dir := filepath.Dir(e.cfgPath)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	expect(t, e.saveSettings(t, `{"logLevel":"info"}`), http.StatusInternalServerError, "server_error")
+	if e.live.level.Level() != slog.LevelWarn || !strings.Contains(e.log.String(), "managed: saveSettings failed") {
+		t.Errorf("a failed write must apply nothing and log the cause: %s", e.log.String())
+	}
+}

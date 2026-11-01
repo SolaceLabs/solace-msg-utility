@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,6 +55,10 @@ type userRec struct {
 	Admin              bool      `yaml:"admin"`
 	Operate            []permRow `yaml:"operate"`
 	ReadOnly           []permRow `yaml:"read-only"`
+	// Modules is the app modules this user may open (moduleCatalog ids),
+	// within config.yaml's modules.offered. nil (key absent) means the
+	// deployment's modules.userDefault; an empty list means none.
+	Modules *[]string `yaml:"modules,omitempty"`
 }
 
 type usersDoc struct {
@@ -122,6 +127,7 @@ type profileResponse struct {
 	Operate  []respPerm   `json:"operate"`
 	ReadOnly []respPerm   `json:"readOnly"`
 	Brokers  []respBroker `json:"brokers"`
+	Modules  []string     `json:"modules"` // the app modules this user may open
 }
 
 // ----- store ------------------------------------------------------------------
@@ -221,6 +227,11 @@ func validateUsers(users []userRec) error {
 		if _, _, _, err := parsePasswordHash(u.Password); err != nil {
 			return fmt.Errorf("user %q: password is %w", u.Username, err)
 		}
+		if u.Modules != nil {
+			if err := checkModuleIDs("modules", *u.Modules); err != nil {
+				return fmt.Errorf("user %q: %w", u.Username, err)
+			}
+		}
 		if u.Admin {
 			admins++
 		}
@@ -291,8 +302,8 @@ func (s *store) findUser(username string) (userRec, bool) {
 }
 
 // profile returns the user's entitled profile for /managed/me, or ok=false
-// when the user no longer exists.
-func (s *store) profile(username string) (*profileResponse, bool) {
+// when the user no longer exists. ms is the live modules setting.
+func (s *store) profile(username string, ms moduleSettings) (*profileResponse, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -307,6 +318,7 @@ func (s *store) profile(username string) (*profileResponse, bool) {
 		Operate:  toRespPerms(u.Operate),
 		ReadOnly: toRespPerms(u.ReadOnly),
 		Brokers:  []respBroker{},
+		Modules:  ms.forUser(u.Modules),
 	}
 	for _, c := range s.conns {
 		vpns := []respVpn{}
@@ -383,8 +395,9 @@ func countAdmins(users []userRec) int {
 	return n
 }
 
-// listUsers returns a deep copy of the stored users — the nested permRow slices
-// are cloned so a caller can't mutate the live store through the result.
+// listUsers returns a deep copy of the stored users — the nested permRow and
+// module slices are cloned so a caller can't mutate the live store through the
+// result.
 // Callers must strip secrets before sending them to a client (see userToOutput).
 func (s *store) listUsers() []userRec {
 	s.mu.RLock()
@@ -393,6 +406,10 @@ func (s *store) listUsers() []userRec {
 	for i := range out {
 		out[i].Operate = append([]permRow(nil), out[i].Operate...)
 		out[i].ReadOnly = append([]permRow(nil), out[i].ReadOnly...)
+		if m := out[i].Modules; m != nil {
+			c := slices.Clone(*m)
+			out[i].Modules = &c
+		}
 	}
 	return out
 }

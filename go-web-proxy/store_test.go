@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
@@ -40,6 +41,7 @@ const usersYAMLTemplate = `msg-utility-users:
       - brokers: b1
         msgVpns: v1
         queues: '*'
+    modules: [queue-browser]
 `
 
 const connsYAML = `msg-utility-connections:
@@ -297,6 +299,7 @@ func TestLoadStore_RejectsInvalidUsersFile(t *testing.T) {
 		{"bad username", "msg-utility-users:\n" + user("'a b'", good, true), `username "a b" must be 1 to 64`},
 		{"duplicate", "msg-utility-users:\n" + user("admin", good, true) + user("admin", good, false), `user "admin" appears more than once`},
 		{"no admin", "msg-utility-users:\n" + user("viewer", good, false), "at least one administrator"},
+		{"unknown module", "msg-utility-users:\n" + user("admin", good, true) + "    modules: [queue-subscription-explorer]\n", `user "admin": key "modules[0]" has invalid value "queue-subscription-explorer"`},
 		{"empty", "", "at least one administrator"},
 	}
 	for _, tc := range cases {
@@ -353,7 +356,7 @@ func TestLoadStore_EmptyOrMissingConnectionsFileYieldsNoBrokers(t *testing.T) {
 			writeFile(t, f.connsPath, content)
 		}
 		s := f.load(t)
-		prof, _ := s.profile("admin")
+		prof, _ := s.profile("admin", defaultConfig().modules)
 		if len(prof.Brokers) != 0 {
 			t.Errorf("content %q: want no brokers, got %d", content, len(prof.Brokers))
 		}
@@ -372,10 +375,10 @@ func TestLoadStore_SeedPersistsAcrossLoads(t *testing.T) {
 
 func TestStore_ProfileAndEntitlement(t *testing.T) {
 	s := newStoreWithFixtures(t)
-	if _, ok := s.profile("ghost"); ok {
+	if _, ok := s.profile("ghost", defaultConfig().modules); ok {
 		t.Error("unknown user has no profile")
 	}
-	prof, ok := s.profile("admin")
+	prof, ok := s.profile("admin", defaultConfig().modules)
 	if !ok || prof.Username != "admin" || !prof.Admin {
 		t.Fatalf("admin profile: %+v", prof)
 	}
@@ -392,12 +395,21 @@ func TestStore_ProfileAndEntitlement(t *testing.T) {
 		t.Error("siteSeed should be present")
 	}
 
-	vp, _ := s.profile("viewer")
+	vp, _ := s.profile("viewer", defaultConfig().modules)
 	if vp.Admin || len(vp.Brokers) != 1 || vp.Brokers[0].Broker != "b1" {
 		t.Fatalf("viewer should see only b1, got %+v", vp.Brokers)
 	}
 	if len(vp.Brokers[0].MsgVpns) != 1 || vp.Brokers[0].MsgVpns[0].Name != "v1" {
 		t.Error("viewer should see only v1 on b1")
+	}
+	// Modules: admin has no list of their own (the default: every offered
+	// module), viewer has one.
+	if !reflect.DeepEqual(prof.Modules, []string{"queue-browser", "queue-copy"}) || !reflect.DeepEqual(vp.Modules, []string{"queue-browser"}) {
+		t.Errorf("modules: admin %v, viewer %v", prof.Modules, vp.Modules)
+	}
+	narrow := moduleSettings{offered: []string{"queue-copy"}, userDefault: modulesDefaultAll}
+	if vp, _ := s.profile("viewer", narrow); len(vp.Modules) != 0 {
+		t.Errorf("a module the deployment no longer offers must drop out, got %v", vp.Modules)
 	}
 }
 
@@ -444,6 +456,7 @@ func TestStore_UpsertUser_CreateHashesAndPersists(t *testing.T) {
 	drop, err := s.upsertUser(context.Background(), userRec{
 		Username: "bob", Admin: true,
 		Operate: []permRow{{Brokers: "*", MsgVpns: "*", Queues: "*"}},
+		Modules: &[]string{},
 	}, "bob-password-1")
 	if err != nil || drop {
 		t.Fatalf("create: drop=%v err=%v", drop, err)
@@ -455,6 +468,13 @@ func TestStore_UpsertUser_CreateHashesAndPersists(t *testing.T) {
 	s2 := f.load(t)
 	if !signsIn(t, s2, "bob", "bob-password-1") {
 		t.Error("bob should sign in after a fresh load (persistence)")
+	}
+	// An empty module list (none) survives the file; no list stays absent.
+	if bob, _ := s2.findUser("bob"); bob.Modules == nil || len(*bob.Modules) != 0 {
+		t.Errorf("bob's empty module list must round-trip as empty, got %v", bob.Modules)
+	}
+	if admin, _ := s2.findUser("admin"); admin.Modules != nil {
+		t.Errorf("admin has no module list and must keep none, got %v", *admin.Modules)
 	}
 }
 
@@ -615,8 +635,9 @@ func TestStore_ListUsers_ReturnsDeepCopy(t *testing.T) {
 	}
 	us[0].Username = "MUTATED"
 	us[0].Operate[0].Queues = "MUTATED"
+	(*us[1].Modules)[0] = "MUTATED"
 	fresh := s.listUsers()
-	if fresh[0].Username == "MUTATED" || fresh[0].Operate[0].Queues == "MUTATED" {
+	if fresh[0].Username == "MUTATED" || fresh[0].Operate[0].Queues == "MUTATED" || (*fresh[1].Modules)[0] == "MUTATED" {
 		t.Error("listUsers must return a deep copy")
 	}
 }
@@ -725,7 +746,7 @@ func TestStore_CRUD_RaceSafe(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			s.profile("admin")
+			s.profile("admin", defaultConfig().modules)
 			s.listUsers()
 			s.isAdmin("admin")
 			_, _, _ = s.checkPassword(context.Background(), "admin", adminPW)

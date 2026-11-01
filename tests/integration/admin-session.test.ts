@@ -37,9 +37,10 @@ import { UserManagementModule } from '../../src/modules/user-management/module';
 
 const SEED_B64 = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 const USERS = [
-    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [] },
-    { username: 'viewer', admin: false, operate: [], readOnly: [] },
+    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null },
+    { username: 'viewer', admin: false, operate: [], readOnly: [], modules: null },
 ];
+const CHOICES = { catalog: ['queue-browser', 'queue-copy'], offered: ['queue-browser', 'queue-copy'], userDefault: 'all' };
 
 const q = <T extends HTMLElement>(c: HTMLElement, sel: string): T => c.querySelector(sel) as T;
 const hidden = (c: HTMLElement, sel: string) => q(c, sel).classList.contains('hidden');
@@ -50,10 +51,10 @@ const rowButton = (c: HTMLElement, i: number, cls: string) =>
  * Both modules of the admin app, sharing one bus, AppState and store, opened
  * with a live admin session at the gateway (admin-login restores it).
  */
-async function installAdminApp(list: unknown = { ok: true, data: USERS }) {
+async function installAdminApp(list: unknown = { ok: true, data: { users: USERS, modules: CHOICES } }) {
     me.mockResolvedValue({ ok: true, data: {
         username: 'admin', admin: true, siteSeed: SEED_B64,
-        operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], brokers: [],
+        operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], brokers: [], modules: [],
     } });
     umSvc.listUsers.mockResolvedValue(list);
     const eventBus = createEventBus();

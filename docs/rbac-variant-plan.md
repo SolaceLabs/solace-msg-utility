@@ -78,6 +78,10 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
   a shared conformance vector.
 - **Admin modules are gated by `admin: true`** via `isModuleVisible` (the kernel re-renders the
   sidebar on `rbac:changed`).
+- **Module control.** Every other module of the managed app is shown only if the gateway granted
+  it: `/managed/me` returns `modules`, the user's own list in `users.yaml` or the deployment
+  default (`modules.userDefault`), always within `modules.offered` in `config.yaml`. Connections is
+  always shown. The catalog an admin can grant from is Queue Browser and Queue Copy.
 - **Connection posture is one enum.** `CONN_MODES` (`direct` | `managed` | `both`) plus
   `DEFAULT_CONN` reach the app through `/hosted`; `resolveConnTabs` turns them into the tab list and
   `resolveDestCredModes` derives what a *secondary* connection may offer. One source of truth, so the
@@ -95,7 +99,8 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
 - **Modules that cannot be filtered are hidden, not trusted.** `MODULE_REQUIREMENTS` in
   [rbac.ts](../src/core/rbac.ts) marks `queue-subscription-explorer` and `queue-discovery` as
   requiring unfiltered SEMP; both are hidden in **every** managed session, admin included, because
-  they read over SEMP v1 RPC which the discovery filter does not rewrite (see Threat model).
+  they read over SEMP v1 RPC which the discovery filter does not rewrite (see Threat model). The
+  gateway's module catalog leaves them out too, so module control cannot grant them.
 - **Writes are gated where they happen.** Copying *into* a queue is a write, so queue-copy's
   destination picker lists at `operate` scope and a final destination gate refuses a target the user
   cannot operate on. **Topic destinations are refused on any provisioned publish path** — entitlements
@@ -162,7 +167,7 @@ Found in the October 2026 branch review and parked here for the Managed connecti
 
 **Also for the rework**
 
-- Stale text: the `src/core/encode.ts` and `scripts/module-registry-plugin.mjs` headers still say the transform stays out of builds that do not list the managed modules (it ships in every bundle now, see the threat model); `connection-management/module.ts` mentions an `ADMIN_ONLY_MODULES` set that is now `MODULE_REQUIREMENTS`; admin-login's help text says "Connection Mgmt." while the sidebar label is "Conn. Mgmt".
+- Stale text: the `src/core/encode.ts` and `scripts/module-registry-plugin.mjs` headers still say the transform stays out of builds that do not list the managed modules (it ships in every bundle now, see the threat model).
 - Queue Subscription Explorer and Queue Discovery are hidden in every managed session (admins included) because they read over unfiltered SEMP v1 RPC; `SubscriptionSource` exists as types only.
 - `src/css/main.css` still imports the stylesheets of modules the variant registry no longer bundles (queue-discovery everywhere; queue-copy and the subscription explorer in `min.html`).
 
@@ -177,6 +182,7 @@ msg-utility-users:
     admin: true
     operate:   [{ brokers: '*', msgVpns: vpn1, queues: queue1 }]
     read-only: [{ brokers: '*', msgVpns: '*',  queues: '*' }]
+    modules:   [queue-browser]   # optional: absent = modules.userDefault, [] = none
 # connections.yaml  (use a READ-ONLY SEMP account)
 msg-utility-connections:
   - broker: broker-name

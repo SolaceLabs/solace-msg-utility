@@ -3,7 +3,7 @@
  *
  * CRUD over the gateway's connection store (`/managed/connections`), on the
  * gateway session cookie. Admin-only via
- * `isModuleVisible` (the id is in rbac.ts's ADMIN_ONLY_MODULES set); the kernel
+ * `isModuleVisible` (the id maps to `'admin'` in rbac.ts's MODULE_REQUIREMENTS); the kernel
  * re-renders on `rbac:changed`, on which this module reloads its list.
  *
  * Broker credentials are PACKED client-side with the per-deployment siteSeed

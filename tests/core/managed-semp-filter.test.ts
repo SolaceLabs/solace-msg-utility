@@ -5,7 +5,7 @@ import type { ManagedSession } from '../../src/core/types';
 function managed(over: Partial<ManagedSession> = {}): ManagedSession {
     return {
         admin: false, username: 'u', broker: 'b1',
-        vpns: [], operate: [], readOnly: [],
+        vpns: [], operate: [], readOnly: [], modules: [],
         ...over,
     };
 }
