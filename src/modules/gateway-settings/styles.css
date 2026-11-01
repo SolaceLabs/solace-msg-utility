@@ -23,10 +23,11 @@
     font-size: 0.9rem;
 }
 
-/* The "restart" tag: in the intro, and after the label of every key the
- * gateway reads only at startup. */
+/* The "restart" and "edit on host" tags: in the intro, and after the label of
+ * every key the gateway reads only at startup or never lets a save change. */
 .gw-set-tag,
-.gw-set-restart > label::after {
+.gw-set-restart > label::after,
+.gw-set-host > label::after {
     border: 1px solid var(--status-warning);
     border-radius: 4px;
     padding: 0 0.4rem;
@@ -35,5 +36,10 @@
 
 .gw-set-restart > label::after {
     content: 'restart';
+    margin-left: 0.5rem;
+}
+
+.gw-set-host > label::after {
+    content: 'edit on host';
     margin-left: 0.5rem;
 }

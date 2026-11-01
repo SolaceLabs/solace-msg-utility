@@ -118,8 +118,9 @@ RUN APP_VERSION="$APP_VERSION" npm run build
 # Stage exactly what this image should serve, rather than copying all of dist/.
 # The build emits every variant, and an image has no business shipping bundles it
 # does not serve: mock.html is the demo build with its in-browser broker, and
-# solAdmin.html would be reachable as a plain file at /solAdmin.html, side-
-# stepping the hosted+managed check the gateway applies to the /solAdmin route.
+# solAdmin.html ships only in the managed image. There the gateway serves it
+# only on the /solAdmin route, behind the admin gate; a request for the plain
+# file /solAdmin.html gets 404.
 # Declared after `npm run build` so the expensive build layer stays cached and
 # shared across both image variants.
 #

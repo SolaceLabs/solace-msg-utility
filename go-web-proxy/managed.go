@@ -134,8 +134,13 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec.DisallowUnknownFields()
 	err := dec.Decode(dst)
 	if err == nil {
+		// Keep the reader's own error: the size cap can trip on trailing
+		// bytes, and that is a 413, not a 400.
 		if _, trailing := dec.Token(); trailing != io.EOF {
-			err = errors.New("trailing data after the JSON value")
+			err = trailing
+			if err == nil {
+				err = errors.New("trailing data after the JSON value")
+			}
 		}
 	}
 	if err != nil {
@@ -316,7 +321,7 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if !usernamePattern.MatchString(name) {
+	if !validName(usernamePattern, name) {
 		writeInvalid(w, "username", "Username "+usernameRule+".")
 		return
 	}

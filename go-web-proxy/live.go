@@ -51,25 +51,40 @@ func (lv *live) loginLimits() loginLimits     { return lv.get().login }
 
 // restartOnlyKeys are the config.yaml keys the gateway reads once at startup.
 // A saved change applies at the next restart; the settings page marks them.
+// The hostOnly keys name files and directories: the settings endpoint never
+// changes them, because a path an administrator could point anywhere would let
+// the gateway serve its own secrets or overwrite its stores at the next start.
+// They change only by editing config.yaml on the gateway host.
 var restartOnlyKeys = []struct {
-	key   string
-	value func(fileConfig) any
+	key      string
+	hostOnly bool
+	value    func(fileConfig) any
 }{
-	{"hosted", func(f fileConfig) any { return f.Hosted }},
-	{"managed", func(f fileConfig) any { return f.Managed }},
-	{"appDir", func(f fileConfig) any { return f.AppDir }},
-	{"tls.certFile", func(f fileConfig) any { return f.TLS.CertFile }},
-	{"tls.keyFile", func(f fileConfig) any { return f.TLS.KeyFile }},
-	{"tls.trustDir", func(f fileConfig) any { return f.TLS.TrustDir }},
-	{"tls.insecureSkipVerify", func(f fileConfig) any { return f.TLS.InsecureSkipVerify }},
-	{"usersFile", func(f fileConfig) any { return f.UsersFile }},
-	{"connectionsFile", func(f fileConfig) any { return f.ConnectionsFile }},
+	{"hosted", false, func(f fileConfig) any { return f.Hosted }},
+	{"managed", false, func(f fileConfig) any { return f.Managed }},
+	{"appDir", true, func(f fileConfig) any { return f.AppDir }},
+	{"tls.certFile", true, func(f fileConfig) any { return f.TLS.CertFile }},
+	{"tls.keyFile", true, func(f fileConfig) any { return f.TLS.KeyFile }},
+	{"tls.trustDir", true, func(f fileConfig) any { return f.TLS.TrustDir }},
+	{"tls.insecureSkipVerify", false, func(f fileConfig) any { return f.TLS.InsecureSkipVerify }},
+	{"usersFile", true, func(f fileConfig) any { return f.UsersFile }},
+	{"connectionsFile", true, func(f fileConfig) any { return f.ConnectionsFile }},
 }
 
 func restartOnlyKeyNames() []string {
 	out := make([]string, 0, len(restartOnlyKeys))
 	for _, k := range restartOnlyKeys {
 		out = append(out, k.key)
+	}
+	return out
+}
+
+func hostOnlyKeyNames() []string {
+	out := []string{}
+	for _, k := range restartOnlyKeys {
+		if k.hostOnly {
+			out = append(out, k.key)
+		}
 	}
 	return out
 }

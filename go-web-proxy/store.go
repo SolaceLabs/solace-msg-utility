@@ -206,15 +206,22 @@ var (
 )
 
 const (
-	usernameRule = "must be 1 to 64 characters from A-Z a-z 0-9 . _ @ -"
-	brokerRule   = "must be 1 to 64 characters from A-Z a-z 0-9 . _ -"
+	usernameRule = "must be 1 to 64 characters from A-Z a-z 0-9 . _ @ -, not only dots"
+	brokerRule   = "must be 1 to 64 characters from A-Z a-z 0-9 . _ -, not only dots"
 )
+
+// validName reports whether name matches pattern and is more than dots: "."
+// and ".." are path segments the router cleans away, so a record named that
+// way could never be edited or deleted through /managed.
+func validName(pattern *regexp.Regexp, name string) bool {
+	return pattern.MatchString(name) && strings.Trim(name, ".") != ""
+}
 
 func validateUsers(users []userRec) error {
 	seen := map[string]bool{}
 	admins := 0
 	for i, u := range users {
-		if !usernamePattern.MatchString(u.Username) {
+		if !validName(usernamePattern, u.Username) {
 			return fmt.Errorf("user %d: username %q %s", i+1, u.Username, usernameRule)
 		}
 		if seen[u.Username] {
@@ -259,7 +266,7 @@ func validateConns(conns []connRec) error {
 // validateConn checks one record. Ports may be blank (the form allows it) but
 // must be a TCP port when set; VPN names must be present and unique.
 func validateConn(c connRec) error {
-	if !brokerPattern.MatchString(c.Broker) {
+	if !validName(brokerPattern, c.Broker) {
 		return fmt.Errorf("broker %q %s", c.Broker, brokerRule)
 	}
 	for key, port := range map[string]flexStr{"semp.port": c.Semp.Port, "client.port": c.Client.Port} {

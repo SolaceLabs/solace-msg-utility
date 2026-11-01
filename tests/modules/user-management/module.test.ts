@@ -190,6 +190,16 @@ describe('user-management — create / edit form', () => {
         expect(svcMock.saveUser).not.toHaveBeenCalled();
     });
 
+    it('Add refuses a username that already exists', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-username').value = 'viewer';
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'long-enough-pw';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toBe('User "viewer" already exists. Use Edit to change it.'));
+        expect(svcMock.saveUser).not.toHaveBeenCalled();
+    });
+
     it('creates a user: sends the password as typed (the gateway hashes it)', async () => {
         const { container } = await setup();
         svcMock.saveUser.mockResolvedValue({ ok: true });

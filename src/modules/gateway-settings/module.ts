@@ -7,7 +7,9 @@
  *
  * The gateway validates a save exactly as at startup and applies most keys on
  * the next request. The keys it reports as `restartOnly` are tagged "restart"
- * here, and a banner lists the ones saved but not yet running. It refuses an
+ * here, and a banner lists the ones saved but not yet running. The path keys
+ * it reports as `hostOnly` are shown read-only and tagged "edit on host": only
+ * a hand edit of config.yaml changes them. It refuses an
  * access list that would deny this browser (`would_lock_out`, shown with the
  * gateway's reason) and a save over a hand edit of the file it has not loaded
  * (`changedOnDisk`, which also disables Save). Imports only from
@@ -115,6 +117,7 @@ export const GatewaySettingsModule = {
                 if (f.kind === 'bool') (input as HTMLInputElement).checked = value as boolean;
                 else if (f.kind === 'lines') input.value = (value as string[]).join('\n');
                 else input.value = String(value);
+                input.disabled = view.hostOnly.includes(f.key);
             }
             els.offered.innerHTML = '';
             for (const id of view.catalog) {
@@ -128,7 +131,10 @@ export const GatewaySettingsModule = {
                 els.offered.appendChild(label);
             }
             container.querySelectorAll<HTMLElement>('[data-key]').forEach(group => {
-                group.classList.toggle('gw-set-restart', view.restartOnly.includes(group.dataset.key as string));
+                const key = group.dataset.key as string;
+                const hostOnly = view.hostOnly.includes(key);
+                group.classList.toggle('gw-set-host', hostOnly);
+                group.classList.toggle('gw-set-restart', !hostOnly && view.restartOnly.includes(key));
             });
             const pending = view.pendingRestart;
             els.pending.textContent = pending.length ? `Saved, applies when the gateway restarts: ${pending.join(', ')}.` : '';

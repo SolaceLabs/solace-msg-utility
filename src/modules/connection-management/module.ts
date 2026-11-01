@@ -69,6 +69,13 @@ export const ConnectionManagementModule = {
             message: 'Sign in as an administrator to manage connections.',
         });
 
+        // null = adding a connection; otherwise the broker being edited.
+        let editing: string | null = null;
+        // Brokers from the last list load, and the VPNs the edited connection
+        // has a stored password for (none when adding).
+        let known: string[] = [];
+        let storedVpns = new Set<string>();
+
         function showView(view: 'list' | 'form'): void {
             gate.hide();
             els.listView.classList.toggle('hidden', view !== 'list');
@@ -129,10 +136,13 @@ export const ConnectionManagementModule = {
                 reportManagedFailure(res, eventBus, msg => setError(els.listError, msg));
                 return;
             }
+            known = res.data.map(c => c.broker);
             renderList(res.data);
         }
 
         function openCreate(): void {
+            editing = null;
+            storedVpns = new Set();
             els.formTitle.textContent = 'Add connection';
             els.broker.value = '';
             els.broker.disabled = false;
@@ -148,6 +158,8 @@ export const ConnectionManagementModule = {
         }
 
         function openEdit(c: ManagedConnRecord): void {
+            editing = c.broker;
+            storedVpns = new Set((c.client.msgVpns ?? []).map(v => v.name));
             els.formTitle.textContent = `Edit connection "${c.broker}"`;
             els.broker.value = c.broker;
             els.broker.disabled = true; // broker is the key; rename = delete + recreate
@@ -171,12 +183,26 @@ export const ConnectionManagementModule = {
                 setError(els.formError, 'Broker name is required.');
                 return;
             }
+            // The gateway's save replaces a connection of the same name, so
+            // Add must not reach an existing one.
+            if (!editing && known.includes(broker)) {
+                setError(els.formError, `Connection "${broker}" already exists. Use Edit to change it.`);
+                return;
+            }
+            // A blank password keeps the stored one, matched by VPN name; a new
+            // or renamed VPN has none to keep.
+            const rows = vpnList.readRows();
+            const unkept = rows.find(r => r.name && !r.pass && !storedVpns.has(r.name));
+            if (unkept) {
+                setError(els.formError, `VPN "${unkept.name}" has no stored password to keep. Enter its password.`);
+                return;
+            }
             els.btnSave.disabled = true;
             setError(els.formError, null);
             try {
                 const sempPlain = els.sempPass.value;
                 const msgVpns = [];
-                for (const r of vpnList.readRows()) {
+                for (const r of rows) {
                     msgVpns.push({
                         name: r.name,
                         user: r.user,

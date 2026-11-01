@@ -26,9 +26,10 @@ const SETTINGS = {
     modules: { offered: ['queue-browser'], userDefault: 'all' },
 };
 const RESTART_ONLY = ['hosted', 'managed', 'appDir', 'tls.certFile', 'tls.keyFile', 'tls.trustDir', 'tls.insecureSkipVerify', 'usersFile', 'connectionsFile'];
+const HOST_ONLY = ['appDir', 'tls.certFile', 'tls.keyFile', 'tls.trustDir', 'usersFile', 'connectionsFile'];
 const view = (over: Record<string, unknown> = {}) => ({
     ok: true,
-    data: { settings: SETTINGS, restartOnly: RESTART_ONLY, pendingRestart: [], changedOnDisk: false, catalog: ['queue-browser', 'queue-copy'], ...over },
+    data: { settings: SETTINGS, restartOnly: RESTART_ONLY, hostOnly: HOST_ONLY, pendingRestart: [], changedOnDisk: false, catalog: ['queue-browser', 'queue-copy'], ...over },
 });
 
 function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
@@ -89,10 +90,13 @@ describe('gateway-settings — load', () => {
         expect(el<HTMLButtonElement>(container, '#btn-gw-set-save').disabled).toBe(false);
     });
 
-    it('tags exactly the keys the gateway reads only at startup', async () => {
+    it('tags the restart-only keys, and shows the path keys read-only for a hand edit', async () => {
         const { container } = await setup();
-        const tagged = [...container.querySelectorAll<HTMLElement>('.gw-set-restart')].map(g => g.dataset.key);
-        expect(tagged).toEqual(['hosted', 'managed', 'appDir', 'usersFile', 'connectionsFile', 'tls.certFile', 'tls.keyFile', 'tls.trustDir', 'tls.insecureSkipVerify']);
+        const tagged = (cls: string) => [...container.querySelectorAll<HTMLElement>(`.${cls}`)].map(g => g.dataset.key);
+        expect(tagged('gw-set-restart')).toEqual(['hosted', 'managed', 'tls.insecureSkipVerify']);
+        expect(tagged('gw-set-host')).toEqual(['appDir', 'usersFile', 'connectionsFile', 'tls.certFile', 'tls.keyFile', 'tls.trustDir']);
+        const disabled = [...container.querySelectorAll<HTMLInputElement>('#gw-set-view .form-control:disabled')].map(i => i.id);
+        expect(disabled).toEqual(['gw-set-appDir', 'gw-set-usersFile', 'gw-set-connectionsFile', 'gw-set-tls-certFile', 'gw-set-tls-keyFile', 'gw-set-tls-trustDir']);
         // Every key the gateway may name has a field to tag.
         const keys = [...container.querySelectorAll<HTMLElement>('[data-key]')].map(g => g.dataset.key);
         expect(keys).toEqual(expect.arrayContaining(RESTART_ONLY));

@@ -82,6 +82,7 @@ describe('core/services/managed-api — managedErrorMessage', () => {
         ['rate_limited', 'Too many requests. Wait a minute and try again.'],
         ['would_lock_out', 'This change would lock this browser out of the gateway.'],
         ['config_changed_on_disk', 'config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.'],
+        ['config_unreadable', 'The gateway cannot read its config.yaml. Its log has the cause.'],
         ['server_error', 'The gateway could not complete the request. Its log has the cause.'],
         ['network', 'The gateway could not be reached.'],
         ['bad_response', 'The gateway sent a response this page cannot read.'],

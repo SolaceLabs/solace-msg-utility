@@ -27,6 +27,8 @@ export interface SettingsView {
     settings: GatewaySettings;
     /** Keys that apply when the gateway restarts; every other key applies at once. */
     restartOnly: string[];
+    /** Path keys a save may not change: only a hand edit of config.yaml on the host does. */
+    hostOnly: string[];
     /** Restart-only keys saved with a value the running gateway does not have yet. */
     pendingRestart: string[];
     /** The file was edited on the host since the gateway loaded it; a save is refused. */

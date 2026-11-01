@@ -334,6 +334,25 @@ func TestPWAHandler_SPAFallback_NoExtension(t *testing.T) {
 	}
 }
 
+// The admin bundle sits next to index.html in the managed image; only the
+// gated /solAdmin route may serve it.
+func TestPWAHandler_NeverServesTheAdminBundle(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"index.html": "<html>app</html>", adminIndexFile: "<html>admin</html>"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := newPWAHandler(dir, quietLogger())
+	for _, p := range []string{"/solAdmin.html", "/SOLADMIN.HTML", "/x/../solAdmin.html", "/solAdmin.html/"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
+		if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "admin") {
+			t.Errorf("%s: want 404 without the bundle, got %d %q", p, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestPWAHandler_MissingAsset_404(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html></html>"), 0o644); err != nil {

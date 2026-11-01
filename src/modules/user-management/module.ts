@@ -84,6 +84,7 @@ export const UserManagementModule = {
         let editing: string | null = null;
         // From the last list load; empty until then.
         let choices: ModuleChoices = { catalog: [], offered: [], userDefault: 'all' };
+        let known: string[] = [];
 
         function showView(view: 'list' | 'form'): void {
             gate.hide();
@@ -146,6 +147,7 @@ export const UserManagementModule = {
                 return;
             }
             choices = res.data.modules;
+            known = res.data.users.map(u => u.username);
             renderList(res.data.users);
         }
 
@@ -224,6 +226,12 @@ export const UserManagementModule = {
             }
             if (!editing && !pw) {
                 setError(els.formError, 'A password is required for a new user.');
+                return;
+            }
+            // The gateway's save replaces a user of the same name, so Add
+            // must not reach an existing one.
+            if (!editing && known.includes(username)) {
+                setError(els.formError, `User "${username}" already exists. Use Edit to change it.`);
                 return;
             }
             const payload: UserPayload = {

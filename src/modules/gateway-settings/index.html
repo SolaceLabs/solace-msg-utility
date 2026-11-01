@@ -1,7 +1,8 @@
 <!-- The admin gate is created at install by createGate() (see module.ts). -->
 
 <!-- Each .form-group's data-key is its config.yaml key; the module tags the
-     restart-only ones (gw-set-restart) from the gateway's own list. -->
+     restart-only ones (gw-set-restart) and the read-only path keys
+     (gw-set-host) from the gateway's own lists. -->
 <div id="gw-set-view" class="card gw-set-card hidden">
     <div class="flex-row justify-between items-center mb-4">
         <h2 class="m-0">Gateway Settings</h2>
@@ -9,7 +10,9 @@
     </div>
     <p class="text-secondary gw-set-intro">
         The gateway's config.yaml. Settings tagged <span class="gw-set-tag">restart</span> are saved at once
-        and apply when the gateway restarts; every other setting applies on the next request.
+        and apply when the gateway restarts; every other setting applies on the next request. Paths, tagged
+        <span class="gw-set-tag">edit on host</span>, are shown here but change only in config.yaml on the
+        gateway host, followed by a restart.
     </p>
     <div id="gw-set-disk" class="gw-set-banner hidden">
         config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load

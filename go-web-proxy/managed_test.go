@@ -266,12 +266,14 @@ func TestManagedAPI_SaveUser_CreateAndValidate(t *testing.T) {
 		code, field      string
 	}{
 		{"bad username", "a%20b", `{"password":"long-enough-pw"}`, 422, "invalid", "username"},
+		{"dots only", "...", `{"password":"long-enough-pw"}`, 422, "invalid", "username"},
 		{"short password", "carol", `{"password":"short"}`, 422, "invalid", "password"},
 		{"new without password", "carol", `{}`, 422, "invalid", "password"},
 		{"unknown field", "carol", `{"password":"long-enough-pw","role":"x"}`, 400, "bad_request", ""},
 		{"trailing data", "carol", `{"password":"long-enough-pw"} {}`, 400, "bad_request", ""},
 		{"malformed", "carol", `{`, 400, "bad_request", ""},
 		{"too large", "carol", `{"password":"` + strings.Repeat("x", maxBodyBytes) + `"}`, 413, "too_large", ""},
+		{"too large after the value", "carol", `{"password":"long-enough-pw"}` + strings.Repeat(" ", maxBodyBytes), 413, "too_large", ""},
 		{"last admin", "admin", `{"admin":false}`, 409, "last_admin", ""},
 		{"unknown module", "carol", `{"password":"long-enough-pw","modules":["queue-subscription-explorer"]}`, 422, "invalid", "modules"},
 	}
@@ -388,6 +390,7 @@ func TestManagedAPI_SaveConnection(t *testing.T) {
 		t.Errorf("want the field and reason, got %+v", r)
 	}
 	expect(t, e.do("PUT", "/managed/connections/b%203", ok, c), http.StatusUnprocessableEntity, "invalid")
+	expect(t, e.do("PUT", "/managed/connections/...", ok, c), http.StatusUnprocessableEntity, "invalid")
 	expect(t, e.do("PUT", "/managed/connections/b3", `{"vpn":1}`, c), http.StatusBadRequest, "bad_request")
 	blockWrites(t, &e.api.store.connsPath)
 	expect(t, e.do("PUT", "/managed/connections/b4", ok, c), http.StatusInternalServerError, "server_error")

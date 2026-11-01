@@ -61,6 +61,9 @@ func TestSettings_GetReportsTheFile(t *testing.T) {
 	if !reflect.DeepEqual(s.RestartOnly, restartOnlyKeyNames()) || len(s.PendingRestart) != 0 || s.ChangedOnDisk {
 		t.Errorf("flags: %+v", s)
 	}
+	if want := []string{"appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "usersFile", "connectionsFile"}; !reflect.DeepEqual(s.HostOnly, want) {
+		t.Errorf("hostOnly: %v, want %v", s.HostOnly, want)
+	}
 	if !reflect.DeepEqual(s.Catalog, moduleCatalog()) {
 		t.Errorf("catalog: %v", s.Catalog)
 	}
@@ -102,21 +105,53 @@ func TestSettings_SaveAppliesLiveKeysAtOnce(t *testing.T) {
 
 func TestSettings_RestartOnlyKeysAreSavedAndFlagged(t *testing.T) {
 	e := newManagedEnv(t, nil)
-	rec := e.saveSettings(t, `{"appDir":"/elsewhere","tls":{"certFile":"/c.crt","keyFile":"/tls/tls.key","trustDir":"/tls/trust","insecureSkipVerify":false}}`)
+	rec := e.saveSettings(t, `{"tls":{"insecureSkipVerify":true}}`)
 	expect(t, rec, http.StatusOK, "")
-	if strings.TrimSpace(rec.Body.String()) != `{"restartRequired":["appDir","tls.certFile"]}` {
+	if strings.TrimSpace(rec.Body.String()) != `{"restartRequired":["tls.insecureSkipVerify"]}` {
 		t.Errorf("restartRequired: %s", rec.Body.String())
 	}
-	if got := e.settings(t).PendingRestart; !reflect.DeepEqual(got, []string{"appDir", "tls.certFile"}) {
+	if got := e.settings(t).PendingRestart; !reflect.DeepEqual(got, []string{"tls.insecureSkipVerify"}) {
 		t.Errorf("pendingRestart: %v", got)
 	}
-	if e.fileOnDisk(t).AppDir != "/elsewhere" {
+	if !e.fileOnDisk(t).TLS.InsecureSkipVerify {
 		t.Error("a restart-only key is still saved")
 	}
-	expect(t, e.saveSettings(t, `{"appDir":"/SolaceMsgUtility","tls":{"certFile":"/tls/tls.crt"}}`), http.StatusOK, "")
+	expect(t, e.saveSettings(t, `{"tls":{"insecureSkipVerify":false}}`), http.StatusOK, "")
 	if got := e.settings(t).PendingRestart; len(got) != 0 {
 		t.Errorf("back to the running values: want nothing pending, got %v", got)
 	}
+}
+
+// A path key changes only by a hand edit: pointed anywhere, it would let the
+// gateway serve its own secrets or overwrite a store at the next start. The
+// page resends every key, so the saved paths themselves are accepted.
+func TestSettings_PathKeysChangeOnlyOnTheHost(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	before, _ := os.ReadFile(e.cfgPath)
+	for key, body := range map[string]string{
+		"appDir":          `{"appDir":"/managed"}`,
+		"tls.certFile":    `{"tls":{"certFile":"/managed/users.yaml"}}`,
+		"tls.keyFile":     `{"tls":{"keyFile":"/nowhere/tls.key"}}`,
+		"tls.trustDir":    `{"tls":{"trustDir":"/"}}`,
+		"usersFile":       `{"usersFile":"/tmp/users.yaml"}`,
+		"connectionsFile": `{"connectionsFile":"/tmp/connections.yaml"}`,
+	} {
+		t.Run(key, func(t *testing.T) {
+			rec := e.saveSettings(t, body)
+			expect(t, rec, http.StatusUnprocessableEntity, "invalid")
+			if got := errorCode(t, rec); got.Field != key || !strings.Contains(got.Reason, "only in config.yaml on the gateway host") {
+				t.Errorf("want field %q and the hand-edit reason, got %+v", key, got)
+			}
+		})
+	}
+	if after, _ := os.ReadFile(e.cfgPath); string(after) != string(before) {
+		t.Error("a refused path change must leave the file alone")
+	}
+	whole, err := json.Marshal(e.settings(t).Settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expect(t, e.saveSettings(t, string(whole)), http.StatusOK, "")
 }
 
 // A refused save changes neither the file nor the running gateway.
@@ -213,11 +248,34 @@ func TestSettings_RefusesOverAHandEdit(t *testing.T) {
 	if data, _ := os.ReadFile(e.cfgPath); !strings.HasSuffix(string(data), "# edited by hand\n") || e.live.level.Level() != slog.LevelWarn {
 		t.Error("the hand edit must survive and nothing may apply")
 	}
+}
+
+// A file the gateway cannot read is not a hand edit: both calls say what is
+// wrong and what to do, and the log has the cause.
+func TestSettings_UnreadableFileIsNotAHandEdit(t *testing.T) {
+	e := newManagedEnv(t, nil)
 	if err := os.Remove(e.cfgPath); err != nil {
 		t.Fatal(err)
 	}
-	if !e.settings(t).ChangedOnDisk || !strings.Contains(e.log.String(), "cannot read config file") {
-		t.Errorf("a missing file counts as changed, with a warn: %s", e.log.String())
+	for _, rec := range []*httptest.ResponseRecorder{
+		e.do("GET", "/managed/settings", "", e.cookie("admin", false)),
+		e.saveSettings(t, `{"logLevel":"info"}`),
+	} {
+		expect(t, rec, http.StatusInternalServerError, "config_unreadable")
+		if got := errorCode(t, rec).Reason; !strings.Contains(got, "missing on the gateway host") || !strings.Contains(got, "Restart the gateway") {
+			t.Errorf("reason: %q", got)
+		}
+	}
+	if e.live.level.Level() != slog.LevelWarn || !strings.Contains(e.log.String(), "managed: cannot read config file") {
+		t.Errorf("nothing may apply, and the log names the cause: %s", e.log.String())
+	}
+	if err := os.Mkdir(e.cfgPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.saveSettings(t, `{"logLevel":"info"}`)
+	expect(t, rec, http.StatusInternalServerError, "config_unreadable")
+	if got := errorCode(t, rec).Reason; !strings.HasPrefix(got, "The gateway cannot read config.yaml (") {
+		t.Errorf("reason: %q", got)
 	}
 }
 

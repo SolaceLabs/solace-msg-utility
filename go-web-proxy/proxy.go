@@ -138,6 +138,13 @@ func (h *pwaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if clean == "." {
 		clean = "/"
 	}
+	// The managed image ships the admin bundle in this directory, but only the
+	// /solAdmin route may serve it, behind its admin gate. Case-insensitive for
+	// file systems that are.
+	if strings.EqualFold(clean, "/"+adminIndexFile) {
+		http.NotFound(w, r)
+		return
+	}
 	// SPA history-mode fallback: if the requested path doesn't resolve to a real
 	// file, serve the root index.html inline. Asset requests (anything with a
 	// file extension) skip the fallback so a missing asset still 404s loudly.
