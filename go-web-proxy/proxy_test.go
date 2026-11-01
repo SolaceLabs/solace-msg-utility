@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -416,6 +417,60 @@ func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
 	// X-Forwarded-For must NOT be set — transparent passthrough.
 	if v := captured.Header.Get("X-Forwarded-For"); v != "" {
 		t.Errorf("X-Forwarded-For leaked: %q (must be empty per spec)", v)
+	}
+}
+
+func TestDropSessionCookie(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"no cookie header", nil, nil},
+		{"only the session", []string{"__Host-smu-session=abc"}, nil},
+		{"session among others", []string{"a=1; __Host-smu-session=abc; b=2"}, []string{"a=1; b=2"}},
+		{"one line per cookie", []string{"__Host-smu-session=abc", "c=3"}, []string{"c=3"}},
+		{"empty parts dropped", []string{" ; d=4 ;"}, []string{"d=4"}},
+		{"look-alike name kept", []string{"__Host-smu-session2=x"}, []string{"__Host-smu-session2=x"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := http.Header{}
+			for _, v := range c.in {
+				h.Add("Cookie", v)
+			}
+			dropSessionCookie(h)
+			if got := h.Values("Cookie"); !slices.Equal(got, c.want) {
+				t.Errorf("Cookie: want %q, got %q", c.want, got)
+			}
+		})
+	}
+}
+
+func TestReverseProxy_NeverForwardsTheSessionCookie(t *testing.T) {
+	var captured http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Header.Clone()
+	}))
+	defer upstream.Close()
+	upURL, _ := url.Parse(upstream.URL)
+	gw := httptest.NewServer(newReverseProxy(x509.NewCertPool(), false, quietLogger()))
+	defer gw.Close()
+
+	req, _ := http.NewRequest("GET", gw.URL+"/http/"+upURL.Port()+"/"+upURL.Hostname()+"/SEMP", nil)
+	req.Header.Add("Cookie", "theirs=1; __Host-smu-session=live-session-id")
+	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if got := captured.Values("Cookie"); !slices.Equal(got, []string{"theirs=1"}) {
+		t.Errorf("upstream Cookie: want [theirs=1], got %q", got)
+	}
+	// Direct SEMP needs the browser's own Basic header.
+	if got := captured.Get("Authorization"); got != "Basic dXNlcjpwYXNz" {
+		t.Errorf("upstream Authorization: want the browser's, got %q", got)
 	}
 }
 

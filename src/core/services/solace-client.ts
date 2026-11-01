@@ -174,7 +174,18 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
                 props.clientName = clientName;
             }
 
-            logger.info('Creating Session:', props);
+            // Log a fixed summary, never `props` itself: it carries the
+            // password (BASIC), or the access and id tokens (OAuth, where
+            // userName holds the access token too).
+            logger.info('Creating Session:', {
+                url: props.url,
+                vpnName: props.vpnName,
+                authMode: cfg.authMode,
+                userName: cfg.authMode === 'oauth' ? undefined : props.userName,
+                clientName: props.clientName,
+                connectRetries: props.connectRetries,
+                reconnectRetries: props.reconnectRetries,
+            });
             session = solace.SolclientFactory.createSession(props);
 
             // Event Listeners

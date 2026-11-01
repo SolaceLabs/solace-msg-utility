@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-// sessionCookie carries the session id. The __Host- prefix makes the browser
-// insist on Secure, Path=/ and no Domain, so no sibling host can set or read it.
-const sessionCookie = "__Host-smu-session"
-
 // session is one signed-in browser. Only the username is kept: the admin flag
 // and entitlements are read from the store on every request, so an edit takes
 // effect without waiting for the session to end.

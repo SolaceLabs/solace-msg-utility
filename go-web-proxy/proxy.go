@@ -220,6 +220,7 @@ func newReverseProxy(trustPool *x509.CertPool, insecure bool, logger *slog.Logge
 			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
 			pr.Out.Host = target.Host
 			pr.Out.Header = pr.In.Header.Clone()
+			dropSessionCookie(pr.Out.Header)
 			// Intentionally NOT calling pr.SetXForwarded() — transparent passthrough.
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -232,6 +233,38 @@ func newReverseProxy(trustPool *x509.CertPool, insecure bool, logger *slog.Logge
 		},
 	}
 	return p
+}
+
+// sessionCookie carries the managed session id (session.go). The __Host-
+// prefix makes the browser insist on Secure, Path=/ and no Domain, so no
+// sibling host can set or read it. It is declared here, untagged, because the
+// Direct relay must strip it in both builds.
+const sessionCookie = "__Host-smu-session"
+
+// dropSessionCookie removes the gateway's own sign-in cookie from a request
+// bound upstream. The Direct relay forwards every other header unchanged, so
+// without this a Direct connection to any host would hand that host a live
+// gateway session. Every Cookie line is rebuilt; other cookies pass as sent.
+func dropSessionCookie(h http.Header) {
+	lines := h.Values("Cookie")
+	if len(lines) == 0 {
+		return
+	}
+	h.Del("Cookie")
+	for _, line := range lines {
+		var kept []string
+		for _, part := range strings.Split(line, ";") {
+			part = strings.TrimSpace(part)
+			name, _, _ := strings.Cut(part, "=")
+			if part == "" || name == sessionCookie {
+				continue
+			}
+			kept = append(kept, part)
+		}
+		if len(kept) > 0 {
+			h.Add("Cookie", strings.Join(kept, "; "))
+		}
+	}
 }
 
 type targetURLKey struct{}

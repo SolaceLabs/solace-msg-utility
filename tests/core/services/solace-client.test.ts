@@ -150,6 +150,28 @@ describe('core/services/solace-client', () => {
             }
         });
 
+        it.each([
+            { mode: 'basic' as const, user: 'admin', secrets: ['basic-secret-pw'] },
+            { mode: 'oauth' as const, user: 'access-token-value', secrets: ['access-token-value', 'id-token-value'] },
+        ])('logs the session summary without any $mode credential', ({ mode, user, secrets }) => {
+            const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => { });
+            const prev = getLogLevel();
+            setLogLevel(LogLevel.INFO);
+            try {
+                const service = createServiceSolace(makeHooks());
+                service.init();
+                service.connect(baseCfg({ authMode: mode, user }), 'broker.test', secrets[secrets.length - 1]);
+
+                const call = infoSpy.mock.calls.find(c => c[0] === 'Creating Session:');
+                expect(call?.[1]).toMatchObject({ vpnName: 'default', authMode: mode });
+                const logged = JSON.stringify(call);
+                for (const s of secrets) expect(logged).not.toContain(s);
+                if (mode === 'basic') expect(call?.[1]).toMatchObject({ userName: 'admin' });
+            } finally {
+                setLogLevel(prev);
+            }
+        });
+
         it('debug-logs the event name and payload when a session event fires', () => {
             const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => { });
             // Generic listener emits at debug level — bump level so the call goes through.

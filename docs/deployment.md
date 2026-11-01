@@ -62,7 +62,7 @@ Then open <https://localhost:9443/>. The `/managed` volume holds the gateway's `
 
 **TLS material:** if `SSL_CERT_FILE` and `SSL_KEY_FILE` both exist, the gateway loads them and refuses to start if either fails to parse (so it never silently overwrites a user-supplied keypair). If either is missing, it generates a self-signed ECDSA P-256 keypair valid for 365 days with `CN=localhost` and SANs `DNS:localhost, IP:::1, IP:127.0.0.1`, writing the cert (`0644`) and key (`0600`) at the configured paths. The SHA-256 fingerprint of the generated cert is logged at startup so operators can pin it.
 
-**Proxy paths:** the gateway parses `/{scheme}/{port}/{host}/{rest...}` from the URL and forwards the request transparently. `{host}` accepts hostnames, IPv4, IPv6 (bare `::1` or bracketed `[::1]`), and FQDNs. `ws` / `wss` paths handle the WebSocket upgrade end-to-end. No `X-Forwarded-*` headers are added — headers pass through verbatim.
+**Proxy paths:** the gateway parses `/{scheme}/{port}/{host}/{rest...}` from the URL and forwards the request transparently. `{host}` accepts hostnames, IPv4, IPv6 (bare `::1` or bracketed `[::1]`), and FQDNs. `ws` / `wss` paths handle the WebSocket upgrade end-to-end. No `X-Forwarded-*` headers are added, and headers pass through verbatim with one exception: the gateway's own sign-in cookie (`__Host-smu-session`) is removed, so a Direct connection never hands its target host a gateway session.
 
 **Routes:**
 

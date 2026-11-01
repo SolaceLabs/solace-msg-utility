@@ -42,15 +42,15 @@
     "semantic_hash": ""
   },
   "go-web-proxy/proxy.go": {
-    "mtime": 1793524711.716789,
-    "seen": 1793542645.4246187,
-    "ast_hash": "3140c43b88727d6df730b1b506dab6da",
+    "mtime": 1793546741.1250458,
+    "seen": 1793547066.5093758,
+    "ast_hash": "48c5400203203adf4f80e213c707b5ee",
     "semantic_hash": ""
   },
   "go-web-proxy/proxy_test.go": {
-    "mtime": 1793524711.717111,
-    "seen": 1793542645.4246204,
-    "ast_hash": "389049ff0006d314daa11d85ef650da1",
+    "mtime": 1793546747.75512,
+    "seen": 1793547066.5093791,
+    "ast_hash": "b69368293e14d5d12bf0612b3f7d6e20",
     "semantic_hash": ""
   },
   "go-web-proxy/tls.go": {
@@ -186,9 +186,9 @@
     "semantic_hash": ""
   },
   "src/core/services/solace-client.ts": {
-    "mtime": 1791738358.1240335,
-    "seen": 1791766653.619686,
-    "ast_hash": "8a9e1e16da84bdb5fdae92f51d5ce2e8",
+    "mtime": 1793546740.8760428,
+    "seen": 1793547066.5094543,
+    "ast_hash": "9cda48398eb3e6b651434d6238c13a36",
     "semantic_hash": ""
   },
   "src/core/services/solace-publisher.ts": {
@@ -486,9 +486,9 @@
     "semantic_hash": ""
   },
   "tests/core/services/solace-client.test.ts": {
-    "mtime": 1791738358.144103,
-    "seen": 1791766653.619804,
-    "ast_hash": "0a23d272fbc73db5c36e016345316b8a",
+    "mtime": 1793546740.9430437,
+    "seen": 1793547066.509582,
+    "ast_hash": "f52df1038d5624537fca220639eb29e3",
     "semantic_hash": ""
   },
   "tests/core/services/solace-publisher.test.ts": {
@@ -720,9 +720,9 @@
     "semantic_hash": ""
   },
   "docs/deployment.md": {
-    "mtime": 1793524999.9801044,
-    "seen": 1793542645.4248965,
-    "ast_hash": "571010b700c030cf0a426c1950e44f16",
+    "mtime": 1793546759.3727999,
+    "seen": 1793547066.5096695,
+    "ast_hash": "9e722ee363f2de997a955011fc1dd831",
     "semantic_hash": ""
   },
   "docs/developer-guide.md": {
@@ -738,9 +738,9 @@
     "semantic_hash": ""
   },
   "docs/test-report.md": {
-    "mtime": 1793524907.5028794,
-    "seen": 1793542645.4249027,
-    "ast_hash": "01f9c5c5cb3807c2d857a9dfc2bf5eaa",
+    "mtime": 1793546765.8587413,
+    "seen": 1793547066.509676,
+    "ast_hash": "2d2543cc2f2ec5851e8d6a259867935b",
     "semantic_hash": ""
   },
   "docs/user-guide.md": {
@@ -1422,9 +1422,9 @@
     "semantic_hash": ""
   },
   "go-web-proxy/session.go": {
-    "mtime": 1793499899.8173666,
-    "seen": 1793511873.5885584,
-    "ast_hash": "c823f7baf9a39c71552d9b70cc9db0c2",
+    "mtime": 1793546741.0104518,
+    "seen": 1793547066.5093849,
+    "ast_hash": "5255c7d55a7e0f88ef7eb42be9724359",
     "semantic_hash": ""
   },
   "go-web-proxy/session_test.go": {
