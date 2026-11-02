@@ -22,14 +22,14 @@ func TestDial_IssuesTheVPNCredential(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	rec := e.do("POST", "/managed/dial", dialBody("b1", "v1"), e.cookie("viewer", false))
 	expect(t, rec, http.StatusOK, "")
-	if want := `{"smfPath":"/managed/smf/b1/v1","vpn":"v1","user":"u1","pass":"PKD:cli-b1v1"}` + "\n"; rec.Body.String() != want {
+	if want := `{"smfPath":"/managed/smf/b1/v1","vpn":"v1","user":"u1","pass":"cli-b1v1-pw"}` + "\n"; rec.Body.String() != want {
 		t.Errorf("body:\n got %s\nwant %s", rec.Body.String(), want)
 	}
 	if rec.Header().Get("Content-Type") != "application/json" || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("headers: %v", rec.Header())
 	}
 	log := e.log.String()
-	if !strings.Contains(log, `msg="dial issued" user=viewer broker=b1 vpn=v1`) || strings.Contains(log, "cli-b1v1") {
+	if !strings.Contains(log, `msg="dial issued" user=viewer broker=b1 vpn=v1`) || strings.Contains(log, "cli-b1v1-pw") {
 		t.Errorf("log must record the dial without the password:\n%s", log)
 	}
 }

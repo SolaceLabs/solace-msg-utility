@@ -82,6 +82,16 @@ export async function probeHosted(): Promise<boolean> {
 }
 
 /**
+ * The WebSocket URL of a gateway path on the page's own host: `wss://` on an
+ * https page, `ws://` otherwise. Managed SMF sockets use it
+ * (`SolaceConfig.smfPath`), so the gateway's Origin check sees its own origin.
+ */
+export function gatewayWsUrl(path: string): string {
+    const loc = window.location;
+    return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}${path}`;
+}
+
+/**
  * Build a broker URL appropriate for the current mode.
  *
  * Direct: `${scheme}://${host}:${port}${normalizedUrlPath}`.

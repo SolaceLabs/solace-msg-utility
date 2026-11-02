@@ -219,7 +219,7 @@ func TestRootHandler_WithManagedRouting(t *testing.T) {
 			})
 		}
 	}
-	mr := &managedRoutes{api: stubHandler("api"), pages: stubHandler("pages"), gateApp: gate("appgate"), gateAdmin: gate("admingate")}
+	mr := &managedRoutes{api: stubHandler("api"), pages: stubHandler("pages"), gateApp: gate("appgate"), gateAdmin: gate("admingate"), gateRelay: gate("relaygate")}
 	h := newRootHandler(stubHandler("hosted"), stubHandler("admin"), stubHandler("app"), stubHandler("relay"), mr)
 	for path, want := range map[string]string{
 		"/managed/me":     "api",
@@ -228,7 +228,7 @@ func TestRootHandler_WithManagedRouting(t *testing.T) {
 		"/solAdmin":       "admingate>admin",
 		"/":               "appgate>app",
 		"/hosted":         "hosted",
-		"/http/80/host/x": "relay",
+		"/http/80/host/x": "relaygate>relay",
 	} {
 		if got := route(h, path).Body.String(); got != want {
 			t.Errorf("%s: want %s, got %q", path, want, got)

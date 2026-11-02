@@ -105,7 +105,7 @@ func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	cfg, err := body.toConfig(secretPaths{siteSeed: sf.boot.siteSeedFile, storeKey: sf.boot.storeKeyFile})
+	cfg, err := body.toConfig(secretPaths{storeKey: sf.boot.storeKeyFile})
 	if err != nil {
 		writeInvalid(w, "settings", err.Error())
 		return

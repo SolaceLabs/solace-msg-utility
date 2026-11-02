@@ -84,6 +84,9 @@ describe('core/services/managed-api — managedErrorMessage', () => {
         ['config_changed_on_disk', 'config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.'],
         ['config_unreadable', 'The gateway cannot read its config.yaml. Its log has the cause.'],
         ['server_error', 'The gateway could not complete the request. Its log has the cause.'],
+        ['read_only', 'The gateway relays SEMP reads only; this request would change the broker.'],
+        ['upstream_auth', 'The broker refused the credential the gateway holds for it. Ask an administrator to check the connection.'],
+        ['upstream_unavailable', 'The gateway could not reach the broker, or the broker gave an answer it cannot pass on. Its log has the cause.'],
         ['network', 'The gateway could not be reached.'],
         ['bad_response', 'The gateway sent a response this page cannot read.'],
     ])('maps %s', (code, text) => {

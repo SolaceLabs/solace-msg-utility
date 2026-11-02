@@ -13,11 +13,12 @@
  *
  * Like the Direct panel, this bridges the pure core service factories
  * (`createServiceSolace` / `createServiceSemp`) to global AppState + bus events.
- * It does NOT hold the provisioned profile or the deployment seed: those live in
- * `ctx.managedStore`, which brokers credentials on request (see
- * `src/core/services/managed-session-store.ts`). This panel is that store's
- * writer — it owns the managed login — and reads provisioned identities back
- * from it, so no packed credential or seed passes through here.
+ * The provisioned names live in `ctx.managedProfile` (see
+ * `src/core/services/managed-profile.ts`); this panel is its writer — it owns
+ * the managed login — and attaches the gateway calls it dials through. SEMP
+ * goes through the gateway's relay, which adds the broker's account; the SMF
+ * password comes from dial at each connect and reaches only the SDK, never
+ * AppState, so a reconnect after a VPN switch dials again.
  *
  * The gateway's HttpOnly cookie is the session. A page reload keeps it, so
  * `restore()` adopts it again at install; a 401 from the gateway means it
@@ -33,7 +34,8 @@ import { createServiceSolace, type SolaceConnectionHooks } from '../../core/serv
 import { createServiceSemp, type SempConnectionHooks } from '../../core/services/semp-client';
 import { createManagedService, type ManagedProfile } from '../../core/services/managed-service';
 import { managedErrorMessage } from '../../core/services/managed-api';
-import { isQueueVisible, canOperate } from '../../core/rbac';
+import { isSessionEnded } from '../../core/services/managed-profile';
+import { isQueueVisible } from '../../core/rbac';
 import { logger } from '../../core/logger';
 import { errMessage } from '../../core/utils';
 import type { AppContext, SolaceConfig, SempConfig } from '../../core/types';
@@ -83,7 +85,6 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         connectControls: required<HTMLElement>(container, '#managed-connect-controls'),
         brokerSelect: required<HTMLSelectElement>(container, '#managed-broker-select'),
         vpnSelect: required<HTMLSelectElement>(container, '#managed-vpn-select'),
-        brokerHost: required<HTMLInputElement>(container, '#managed-broker-host'),
         btnConnect: required<HTMLButtonElement>(container, '#btn-managed-connect'),
         connectError: required<HTMLElement>(container, '#managed-connect-error'),
         btnRefresh: required<HTMLButtonElement>(container, '#btn-managed-refresh'),
@@ -95,9 +96,10 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     };
 
     const service = createManagedService();
-    const store = app.managedStore;
-    /** Signed in ⇔ the store holds a profile. No second copy of that truth here. */
-    const signedIn = (): boolean => store.isActive();
+    const profile = app.managedProfile;
+    profile.attachDialer(service);
+    /** Signed in ⇔ the profile is set. No second copy of that truth here. */
+    const signedIn = (): boolean => profile.isActive();
 
     // --- panel state ---
     // Guards the multi-step VPN-switch dance against duplicate cross-module requests.
@@ -106,8 +108,9 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     // Solace connect is initiated, read back when building the connected
     // summary so we don't have to null-guard appState.managed there.
     let connectedBroker = '';
-    let lastSolaceAttempt: { host: string; cfg: SolaceConfig; pass: string } | null = null;
-    let lastSempAttempt: { host: string; cfg: SempConfig } | null = null;
+    // What the hooks publish once connected: names and config, never a password.
+    let lastSolaceAttempt: { broker: string; cfg: SolaceConfig } | null = null;
+    let lastSempAttempt: { broker: string; cfg: SempConfig } | null = null;
 
     // --- view + error helpers ---
     function showView(view: 'login' | 'select' | 'connected'): void {
@@ -127,8 +130,8 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             app.setState('isConnected', true);
             app.setState('selectedVpn', vpn);
             app.setState('solaceConnection', {
-                host: a.host, protocol: a.cfg.protocol, port: a.cfg.port, urlPath: a.cfg.urlPath,
-                vpn: a.cfg.vpn, user: a.cfg.user, pass: a.pass,
+                host: a.broker, protocol: a.cfg.protocol, port: a.cfg.port, urlPath: a.cfg.urlPath,
+                vpn: a.cfg.vpn, user: a.cfg.user, pass: '',
             });
             wrapManagedBrowser(session, vpn);
             eventBus.emit('client:connected', { session });
@@ -154,11 +157,12 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     };
 
     const sempHooks: SempConnectionHooks = {
-        onConnected: (sempCtx, creds) => {
+        onConnected: (sempCtx) => {
             const a = lastSempAttempt!;
             app.setState('sempCredentials', {
-                user: creds.user, pass: creds.pass, baseUrl: sempCtx.baseUrl,
-                protocol: a.cfg.protocol, host: a.host, port: a.cfg.port, urlPath: a.cfg.urlPath,
+                user: '', pass: '', baseUrl: sempCtx.baseUrl,
+                protocol: a.cfg.protocol, host: a.broker, port: a.cfg.port, urlPath: a.cfg.urlPath,
+                relay: a.cfg.relayBase,
             });
             app.setState('isSempConnected', true);
             eventBus.emit('semp:connected');
@@ -169,7 +173,11 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             lastSempAttempt = null;
             eventBus.emit('semp:disconnected');
         },
-        onAuthFailed: () => setError(els.connectError, 'SEMP authentication failed (401).'),
+        // The relay answers 401 only when the gateway session has ended.
+        onAuthFailed: () => {
+            clearSession();
+            showSignedOut(managedErrorMessage({ ok: false, status: 401, code: 'unauthenticated' }));
+        },
         onError: ({ message }) => setError(els.connectError, `SEMP error: ${message}`),
     };
 
@@ -177,36 +185,46 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     const serviceSemp = createServiceSemp(sempHooks);
 
     // --- connect helpers ---
-    // Credentials are brokered by the core store: it unpacks just-in-time and
-    // hands back a ready payload, which these dial callbacks forward to this
-    // panel's own factory pair. The panel never sees a packed value or the seed.
+    // The core profile dials: SEMP gets the relay config, Solace the VPN's
+    // credential from the gateway, which these callbacks forward to this panel's
+    // own factory pair. The password goes straight to the SDK and nowhere else.
     async function connectSemp(brokerName: string): Promise<void> {
-        await store.connect({ broker: brokerName, kind: 'semp' }, {
+        await profile.dial({ broker: brokerName, kind: 'semp' }, {
             connect: async (c) => {
-                lastSempAttempt = { host: c.host, cfg: c.cfg };
-                await serviceSemp.connect(c.cfg, c.host, c.pass);
+                lastSempAttempt = { broker: c.broker, cfg: c.cfg };
+                await serviceSemp.connect(c.cfg, c.broker, '');
             },
         });
     }
 
     async function connectSolace(brokerName: string, vpnName: string): Promise<void> {
         connectedBroker = brokerName;
-        await store.connect({ broker: brokerName, vpn: vpnName, kind: 'solace' }, {
+        await profile.dial({ broker: brokerName, vpn: vpnName, kind: 'solace' }, {
             connect: (c) => {
-                lastSolaceAttempt = { host: c.host, cfg: c.cfg, pass: c.pass };
+                lastSolaceAttempt = { broker: c.broker, cfg: c.cfg };
                 serviceSolace.init();
-                serviceSolace.connect(c.cfg, c.host, c.pass, c.clientName);
+                serviceSolace.connect(c.cfg, c.broker, c.pass, c.clientName);
             },
         });
     }
 
-    // Inject the managed guardrails into the SDK session WITHOUT touching
-    // queue-browser: monkey-patch createQueueBrowser so (1) binding a
-    // non-entitled queue throws — queue-browser's createBrowser try/catch
-    // surfaces it via showBindError; and (2) on the browser's UP event the
-    // perceived `_messageConsumer._permissions` is overwritten per RBAC, so
-    // queue-browser's existing badge + Delete-hide logic gates by entitlement.
-    // Read-only blocks Delete only; Forward stays allowed (broker-consistent).
+    /** A failed connect: a dial refused because the gateway session ended
+     *  signs out; anything else is shown on the selection view. */
+    function connectFailed(e: unknown): void {
+        if (isSessionEnded(e)) {
+            clearSession();
+            showSignedOut(errMessage(e));
+            return;
+        }
+        setError(els.connectError, errMessage(e));
+    }
+
+    // Inject the managed guardrail into the SDK session WITHOUT touching
+    // queue-browser: monkey-patch createQueueBrowser so binding a non-entitled
+    // queue throws — queue-browser's createBrowser try/catch surfaces it via
+    // showBindError. Read-only rows are applied by queue-browser itself
+    // (ui-table.ts reads `appState.managed`), and only ever downgrade what the
+    // broker allows.
     function wrapManagedBrowser(session: any, vpn: string): void {
         const realCreate = typeof session.createQueueBrowser === 'function'
             ? session.createQueueBrowser.bind(session)
@@ -220,24 +238,13 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             if (!isQueueVisible(m, m.broker, vpn, queue)) {
                 throw new Error(`You are not entitled to browse queue "${queue}".`);
             }
-            const browser = realCreate(props);
-            const verdict = canOperate(m, m.broker, vpn, queue) ? 'READ_WRITE' : 'READ_ONLY';
-            // Set AFTER the SDK populates _permissions on UP — our listener is
-            // registered before queue-browser's, so it runs first on the event.
-            browser.on((globalThis as any).solace.QueueBrowserEventName.UP, () => {
-                if (browser._messageConsumer) browser._messageConsumer._permissions = verdict;
-            });
-            return browser;
+            return realCreate(props);
         };
     }
 
-    // --- selection UI (provisioned identities read back from the store) ---
+    // --- selection UI (provisioned names read back from the profile) ---
     function populateVpns(brokerName: string): void {
-        // Callers only ever pass a broker taken from `store.brokers()` (the
-        // dropdown is rendered from it), so the lookup always hits.
-        const hostname = store.brokers().find(b => b.broker === brokerName)!.hostname;
-        const vpns = store.vpnsFor(brokerName);
-        els.brokerHost.value = hostname;
+        const vpns = profile.vpnsFor(brokerName);
         els.vpnSelect.innerHTML = '';
         vpns.forEach(name => {
             const opt = document.createElement('option');
@@ -254,7 +261,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     }
 
     function populateSelect(): void {
-        const brokers = store.brokers();
+        const brokers = profile.brokers();
         if (brokers.length === 0) {
             els.emptyState.classList.remove('hidden');
             els.connectControls.classList.add('hidden');
@@ -263,10 +270,10 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         els.emptyState.classList.add('hidden');
         els.connectControls.classList.remove('hidden');
         els.brokerSelect.innerHTML = '';
-        brokers.forEach(b => {
+        brokers.forEach(name => {
             const opt = document.createElement('option');
-            opt.value = b.broker;
-            opt.textContent = b.broker;
+            opt.value = name;
+            opt.textContent = name;
             els.brokerSelect.appendChild(opt);
         });
         populateVpns(els.brokerSelect.value);
@@ -274,19 +281,18 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
 
     // --- session: restore / sign out / refresh ---
     /**
-     * Adopt a profile from the gateway. The store takes it BEFORE AppState is
+     * Adopt a profile from the gateway. The profile takes it BEFORE AppState is
      * published or `rbac:changed` emitted — that event means "state is already
-     * consistent, react now", so no observer can see a half-built session.
-     * Re-adopting also re-imports the seed, so a rotated deployment seed is
-     * picked up for free. The connected broker (if any) is kept, with its
-     * provisioned VPNs re-read ([] if it is no longer provisioned).
+     * consistent, react now", so no observer can see a half-built session. The
+     * connected broker (if any) is kept, with its provisioned VPNs re-read ([]
+     * if it is no longer provisioned).
      */
-    async function adopt(p: ManagedProfile): Promise<void> {
-        await store.setProfile(p);
+    function adopt(p: ManagedProfile): void {
+        profile.setProfile(p);
         const broker = appState.managed?.broker ?? '';
         app.setState('managed', {
             admin: p.admin, username: p.username, operate: p.operate, readOnly: p.readOnly,
-            modules: p.modules, broker, vpns: broker ? store.vpnsFor(broker) : [],
+            modules: p.modules, broker, vpns: broker ? profile.vpnsFor(broker) : [],
         });
         eventBus.emit('rbac:changed');
         populateSelect();
@@ -303,12 +309,12 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         showView('login');
     }
 
-    /** Drop every local trace of the session. Store and AppState are both
+    /** Drop every local trace of the session. Profile and AppState are both
      *  cleared BEFORE the emit, so every observer sees a fully signed-out state. */
     function clearSession(): void {
         serviceSolace.disconnect();
         void serviceSemp.disconnect();
-        store.clear();
+        profile.clear();
         app.setState('managed', null);
         eventBus.emit('rbac:changed');
         setError(els.connectError, null);
@@ -322,12 +328,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             showSignedOut(quiet ? null : managedErrorMessage(res), res.code === 'password_change_required');
             return false;
         }
-        try {
-            await adopt(res.data);
-        } catch (e) {
-            showSignedOut(errMessage(e));
-            return false;
-        }
+        adopt(res.data);
         showView('select');
         return true;
     }
@@ -354,12 +355,8 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             setError(els.connectError, managedErrorMessage(res));
             return;
         }
-        try {
-            await adopt(res.data);
-            setError(els.connectError, null);
-        } catch (e) {
-            setError(els.connectError, errMessage(e));
-        }
+        adopt(res.data);
+        setError(els.connectError, null);
     }
 
     // --- connect (initial) ---
@@ -373,16 +370,18 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         // picker (via queueSourceFrom) lists exactly what this panel shows —
         // not the broader entitlement-glob set.
         app.setState('managed', {
-            ...appState.managed!, broker: brokerName, vpns: store.vpnsFor(brokerName),
+            ...appState.managed!, broker: brokerName, vpns: profile.vpnsFor(brokerName),
         });
         setError(els.connectError, null);
         els.btnConnect.disabled = true;
         try {
             await connectSemp(brokerName);
+            // A relay 401 (the gateway session ended) has already signed out.
+            if (!signedIn()) return;
             await connectSolace(brokerName, vpnName);
             eventBus.emit('config:max-messages-changed', { value: 100 });
         } catch (e) {
-            setError(els.connectError, errMessage(e));
+            connectFailed(e);
         } finally {
             els.btnConnect.disabled = false;
         }
@@ -400,7 +399,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     //     managed session is active) ---
 
     // Both handlers below are only routed here while `appState.managed` is set,
-    // and that flag moves in lockstep with the store's profile (adopted together
+    // and that flag moves in lockstep with the profile (adopted together
     // on restore, cleared together on sign-out) — so a signed-out session is
     // unreachable here and the selection view is always the right target.
     function handleEditRequested(): void {
@@ -460,11 +459,10 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             clearTimeout(disconnectTimer);
             eventBus.off('client:disconnected', onDisconnected);
             waitForConnect();
-            // The store rejects an unprovisioned target — surface it rather than
-            // leaving an unhandled rejection. Parity with the pre-store panel,
-            // which set this same error and returned without connecting.
-            void connectSolace(brokerName, targetVpn)
-                .catch(e => setError(els.connectError, errMessage(e)));
+            // The profile rejects an unprovisioned target, and the gateway may
+            // refuse the dial — surface either rather than leaving an
+            // unhandled rejection.
+            void connectSolace(brokerName, targetVpn).catch(connectFailed);
         };
         eventBus.on('client:disconnected', onDisconnected);
         disconnectTimer = setTimeout(() => {

@@ -243,13 +243,13 @@ type modulesJSON struct {
 type vpnJSON struct {
 	Name string `json:"name"`
 	User string `json:"user"`
-	Pass string `json:"pass"` // client-packed; "" = keep on edit; never listed
+	Pass string `json:"pass"` // plaintext over TLS; "" = keep on edit; never listed
 }
 
 type sempJSON struct {
 	Port string `json:"port"`
 	User string `json:"user"`
-	Pass string `json:"pass"` // client-packed; "" = keep on edit; never listed
+	Pass string `json:"pass"` // plaintext over TLS; "" = keep on edit; never listed
 }
 
 type clientJSON struct {
@@ -309,7 +309,7 @@ func userToOutput(u userRec) userJSON {
 	}
 }
 
-// connToOutput strips the packed passwords.
+// connToOutput leaves the passwords out.
 func connToOutput(c connRec) connJSON {
 	out := connJSON{Broker: c.Broker, Hostname: c.Hostname}
 	out.Semp.Port = string(c.Semp.Port)

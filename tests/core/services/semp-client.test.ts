@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createServiceSemp, type SempConnectionHooks } from '../../../src/core/services/semp-client';
 import { setHosted } from '../../../src/core/hosted';
+import { managedErrorMessage } from '../../../src/core/services/managed-api';
 import type { SempConfig } from '../../../src/core/connections/types';
 
 /**
@@ -286,6 +287,61 @@ describe('core/services/semp-client', () => {
             const service = createServiceSemp(hooks);
             await service.disconnect();
             expect(hooks.onDisconnected).toHaveBeenCalled();
+        });
+    });
+
+    // A managed session's SEMP goes through the gateway's relay, which adds the
+    // broker's stored account: the browser sends its session cookie only.
+    describe('relay mode', () => {
+        const relayCfg = () => baseCfg({ user: '', relayBase: '/managed/relay/b1' });
+        afterEach(() => setHosted(false));
+
+        it.each([false, true])('probes and fetches through the relay with no Authorization header (hosted %s)', async (hosted) => {
+            setHosted(hosted);
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            let ctxFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
+            const hooks = makeHooks({ onConnected: vi.fn((c) => { ctxFetch = c.fetch; }) });
+
+            await createServiceSemp(hooks).connect(relayCfg(), 'b1', '');
+
+            expect(globalThis.fetch).toHaveBeenLastCalledWith('/managed/relay/b1/SEMP/v2/monitor/msgVpns?count=1',
+                { method: 'GET', signal: expect.any(AbortSignal), credentials: 'same-origin' });
+            expect(hooks.onConnected).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: '/managed/relay/b1' }), { user: '', pass: '' });
+
+            // A later call (here a SEMP v1 show) keeps its own headers and gains none.
+            await ctxFetch!('/SEMP', { method: 'POST', headers: { 'Content-Type': 'application/xml' }, body: '<rpc/>' });
+            expect(globalThis.fetch).toHaveBeenLastCalledWith('/managed/relay/b1/SEMP',
+                { method: 'POST', headers: { 'Content-Type': 'application/xml' }, body: '<rpc/>', credentials: 'same-origin' });
+        });
+
+        it('a relay 401 is onAuthFailed: the gateway session has ended', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' });
+            const hooks = makeHooks();
+            await createServiceSemp(hooks).connect(relayCfg(), 'b1', '');
+            expect(hooks.onAuthFailed).toHaveBeenCalled();
+            expect(hooks.onError).not.toHaveBeenCalled();
+        });
+
+        it.each([
+            [502, 'upstream_auth'],
+            [502, 'upstream_unavailable'],
+            [403, 'read_only'],
+        ])('a %i %s refusal reports the gateway code as text', async (status, code) => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: false, status, statusText: 'x', json: async () => ({ error: code }) });
+            const hooks = makeHooks();
+            await createServiceSemp(hooks).connect(relayCfg(), 'b1', '');
+            expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({
+                message: managedErrorMessage({ ok: false, status, code }), baseUrl: '/managed/relay/b1',
+            }));
+        });
+
+        it('an answer that is not the gateway JSON, or carries no code, reports the status', async () => {
+            const hooks = makeHooks();
+            (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, status: 502, statusText: 'Bad Gateway', json: async () => { throw new Error('html'); } });
+            await createServiceSemp(hooks).connect(relayCfg(), 'b1', '');
+            (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Internal Server Error', json: async () => ({}) });
+            await createServiceSemp(hooks).connect(relayCfg(), 'b1', '');
+            expect((hooks.onError as any).mock.calls.map((c: any[]) => c[0].message)).toEqual(['502 Bad Gateway', '500 Internal Server Error']);
         });
     });
 

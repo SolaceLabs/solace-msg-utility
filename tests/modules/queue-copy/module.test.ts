@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueueCopyModule } from '../../../src/modules/queue-copy/module';
 import { createEventBus } from '../../../src/core/event-bus';
-import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
+import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { createSessionMock, createBrowserMock } from '../../setup';
 import type { AppContext, AppState, EventBus } from '../../../src/core/types';
@@ -89,7 +89,7 @@ function makeCtx(eventBus: EventBus, container: HTMLElement, overrides: Partial<
         setState: vi.fn(),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
-        managedStore: createManagedSessionStore(),
+        managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: {},
     };

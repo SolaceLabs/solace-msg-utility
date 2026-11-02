@@ -7,7 +7,7 @@ import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { createSessionMock, createBrowserMock } from '../../setup';
 import type { SourceAccess } from '../../../src/modules/queue-copy/ui-modal';
 import type { AppContext, AppState, ManagedSession } from '../../../src/core/types';
-import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
+import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import type { CopyJob, VerifyResult } from '../../../src/modules/queue-copy/state';
 
 // Derive the structured sempCredentials fields from a baseUrl shorthand so
@@ -39,7 +39,7 @@ function makeCtx(overrides: Partial<AppContext['appState']> = {}): AppContext {
         setState: vi.fn(),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
-        managedStore: createManagedSessionStore(),
+        managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: {},
     };
@@ -124,6 +124,24 @@ describe('queue-copy/ui-modal', () => {
             expect(els.modalSourceVpn.textContent).toBe('vpn1');
             expect(els.modalDestBroker.textContent).toBe('broker.example:1943');
             expect(els.modalDestVpn.textContent).toBe('vpn1');
+        });
+
+        it('names a managed primary by its provisioned broker, not an address', () => {
+            const ctx = makeCtx({
+                sempCredentials: {
+                    user: '', pass: '', baseUrl: '/managed/relay/b1', protocol: 'https', host: 'b1', port: '', urlPath: '',
+                    relay: '/managed/relay/b1',
+                },
+                isSempConnected: true,
+            });
+            const state = createInitialState();
+            state.sourceQueue = 's';
+            state.dest = { type: 'queue', name: 'dst' };
+
+            openCopyModal(ctx, els, state, () => null);
+
+            expect(els.modalSourceBroker.textContent).toBe('b1');
+            expect(els.modalDestBroker.textContent).toBe('b1');
         });
 
         it('falls back to placeholders when there is no primary SEMP / selected VPN', () => {

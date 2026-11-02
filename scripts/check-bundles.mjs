@@ -15,16 +15,16 @@
  *     went stale after a rename -- either way the first half proved nothing).
  *
  * The markers are DOM ids from `index.managed.html` and endpoint paths from
- * `managed-service.ts`: strings minification keeps verbatim. The core managed
- * session store still ships everywhere until it is removed; it carries none
- * of these strings.
+ * `managed-service.ts` (sign-in, sign-out, dial and the SEMP relay): strings
+ * minification keeps verbatim. The core managed profile ships everywhere and
+ * carries none of them: the managed entry attaches the gateway calls to it.
  *
  * RELEASE_BUNDLES is also the Release upload list: `.github/workflows/tag.yml`
  * repeats it in its `release` step, and tests/build/check-bundles.test.ts
  * fails if the two drift.
  *
  * Run by the `build` task of scripts/dev.sh and dev.ps1, after `npm run build`.
- * No `#!` line, on purpose: tests import this file (see check-docs-secrecy.mjs).
+ * No `#!` line, on purpose: tests import this file.
  *
  * Usage: npm run check:bundles (any working directory: the root comes from this file's location)
  */
@@ -39,7 +39,7 @@ export const RELEASE_BUNDLES = ['index.html', 'min.html', 'no-payload.html', 'no
 export const MANAGED_BUNDLE = 'managed.html';
 
 /** Strings only the managed connections entry puts into a bundle. */
-export const MANAGED_MARKERS = ['conn-panel-managed', 'btn-managed-login', '/managed/me', '/managed/logout'];
+export const MANAGED_MARKERS = ['conn-panel-managed', 'btn-managed-login', '/managed/me', '/managed/logout', '/managed/dial', '/managed/relay/'];
 
 /** The repo root: this file lives in `<root>/scripts/`. */
 export function repoRoot() {
@@ -117,7 +117,8 @@ export function main(root = repoRoot()) {
     return 0;
 }
 
-// Basename, not full-path, comparison (as in check-docs-secrecy.mjs).
+// Basename, not full-path, comparison: the path the script was started by may
+// differ from this module's URL (a symlink, a relative path, Windows casing).
 if (process.argv[1] && path.basename(process.argv[1]) === path.basename(fileURLToPath(import.meta.url))) {
     process.exitCode = main();
 }

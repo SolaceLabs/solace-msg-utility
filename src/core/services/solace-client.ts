@@ -1,5 +1,5 @@
 import { logger } from '../logger';
-import { buildBrokerUrl, isHosted } from '../hosted';
+import { buildBrokerUrl, gatewayWsUrl, isHosted } from '../hosted';
 import { solaceErrorText } from '../utils';
 import type { SolaceConfig } from '../connections/types';
 
@@ -150,7 +150,11 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
 
         try {
             const props = new solace.SessionProperties();
-            props.url = buildBrokerUrl(cfg.protocol, host, cfg.port, cfg.urlPath, true);
+            // A managed session connects to the gateway's SMF socket for the
+            // VPN (from dial); a Direct one to the broker, relayed when hosted.
+            props.url = cfg.smfPath
+                ? gatewayWsUrl(cfg.smfPath)
+                : buildBrokerUrl(cfg.protocol, host, cfg.port, cfg.urlPath, true);
             props.vpnName = cfg.vpn;
             props.userName = cfg.user;
             props.publisherProperties = { acknowledgeMode: solace.MessagePublisherAcknowledgeMode.PER_MESSAGE };

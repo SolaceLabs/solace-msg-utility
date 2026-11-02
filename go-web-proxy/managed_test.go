@@ -45,7 +45,7 @@ func newManagedEnvWith(t *testing.T, mutate func(*config), upstream http.RoundTr
 	f := newStoreFixture(t)
 	cfg := defaultConfig()
 	cfg.hosted, cfg.managed, cfg.connModes = true, true, connBoth
-	cfg.usersFile, cfg.connectionsFile, cfg.siteSeedFile, cfg.storeKeyFile = f.usersPath, f.connsPath, f.seedPath, f.keyPath
+	cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = f.usersPath, f.connsPath, f.keyPath
 	cfg.login.unauthPerMinute = 1000
 	if mutate != nil {
 		mutate(&cfg)
@@ -191,11 +191,15 @@ func TestManagedAPI_Me(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Username != "viewer" || p.Admin || len(p.Brokers) != 1 || p.SiteSeed == "" {
+	if p.Username != "viewer" || p.Admin || len(p.Brokers) != 1 || len(p.Brokers[0].MsgVpns) != 1 {
 		t.Errorf("viewer profile: %+v", p)
 	}
 	if !reflect.DeepEqual(p.Modules, []string{"queue-browser"}) {
 		t.Errorf("viewer modules: want their own list, got %v", p.Modules)
+	}
+	// Names only: the relay and dial supply addresses and credentials.
+	if !strings.Contains(rec.Body.String(), `"brokers":[{"broker":"b1","msgVpns":[{"name":"v1"}]}]`) {
+		t.Errorf("viewer brokers must be names only: %s", rec.Body.String())
 	}
 	if rec.Header().Get("Content-Type") != "application/json" || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("headers: %v", rec.Header())
@@ -377,8 +381,8 @@ func TestManagedAPI_ListConnectionsNeverSendsSecrets(t *testing.T) {
 	rec := e.do("GET", "/managed/connections", "", c)
 	expect(t, rec, http.StatusOK, "")
 	body := rec.Body.String()
-	if strings.Contains(body, "PKD:") {
-		t.Errorf("packed passwords must never be listed: %s", body)
+	if strings.Contains(body, "-pw") || strings.Contains(strings.ReplaceAll(body, `"pass":""`, ""), `"pass"`) {
+		t.Errorf("stored passwords must never be listed: %s", body)
 	}
 	if !strings.Contains(body, `"broker":"b3","hostname":"h3"`) || !strings.Contains(body, `"msgVpns":[]`) {
 		t.Errorf("a VPN-less connection must list msgVpns as []: %s", body)

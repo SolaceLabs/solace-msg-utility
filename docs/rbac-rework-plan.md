@@ -26,9 +26,9 @@ hardening items" section of [rbac-variant-plan.md](rbac-variant-plan.md) when ad
 | SMF dial | `POST /managed/dial {broker, vpn}` returns `{smfPath, vpn, user, pass}` to an entitled user, read-only users included. Stateless: no ticket | A ticket would break the SDK's own reconnects, which re-use the session properties. "One-shot" means the password comes only from `dial` and the browser keeps it only inside the dial callback; a reconnect after a sign-in dials again. Dials and socket upgrades share 20 per minute per user. |
 | SMF socket | `GET /managed/smf/{broker}/{vpn}` upgraded behind the session, an `Origin` equal to the gateway's own `https` address and the entitlement; joined to the broker's SMF port over TLS with only the `Sec-WebSocket-*` headers passed. Closed only on revocation (decided 2026-11-01): sign-out, password change, user deleted or administrator flag changed, entitlement or VPN removed, broker deleted | No idle or absolute timer: the SMF API's keep-alive owns the connection's lifetime, so a socket can outlive its session. A Host-rewriting proxy in front fails the `Origin` check; an allowed-origins setting is out of scope. |
 | Bundle delivery | New `managed` variant builds `dist/managed.html`; the managed image copies it over `index.html`. The Release uploads an explicit list (`index`, `min`, `no-payload`, `no-queue-copy`, `mock`), never `solAdmin.html` or `managed.html` | Build-time registry, nothing loads at runtime. Release bundles lose the managed code; `tag.yml` stops uploading `dist/*`. |
-| `CONN_MODES=both` | Kept in the managed image | The Direct relay stays present there; its exposure is handled by the client access list below. |
-| Relay exposure | Relay stays open to any host. New client access list, CIDR-based, default allow-all | Applies to every route, not only the relay. Behind a reverse proxy the client IP comes from `X-Forwarded-For` only when the proxy is listed as trusted. |
-| Docs-secrecy policy | Retired in Phase 3, once the browser transform is deleted | `CLAUDE.md` section, `check-docs-secrecy.mjs` and its tests removed; docs become specific. |
+| `CONN_MODES=both` | Kept in the managed image; Direct stays a per-deployment switch (decided 2026-11-01) | Under `both` the Direct relay stays present and its exposure is handled by the client access list below; under `managed` it answers `404`, read live. The gateway's sign-in cookie is never forwarded by it in any mode. |
+| Relay exposure | The Direct relay stays open to any host under `direct` and `both` (closed under `managed`). New client access list, CIDR-based, default allow-all | Applies to every route, not only the relay. Behind a reverse proxy the client IP comes from `X-Forwarded-For` only when the proxy is listed as trusted. |
+| Docs-secrecy policy | Retired in Phase 3 (step 3E), with the browser transform | `CLAUDE.md` section, `check-docs-secrecy.mjs`, its test and `check:docs` removed; docs name the store format and primitive. |
 | Managed demo | A separate one-time mini app that mimics managed behaviour; not shared code | Phase 4. `mock.html` stays a Direct-only demo. |
 | SEMP v1 RPC | Checked only for its shape: one `<rpc>` with one `<show>` command (follows from the read-only relay) | Which modules a managed session sees is decided by module control, below. |
 | Module control | Deployment ceiling in `config.yaml` (modules the image offers) plus a per-user `modules` list in `users.yaml` within it, editable in `/solAdmin`; `/managed/me` returns the result. A user without a list gets the deployment default, itself a `config.yaml` setting (`all` or `none`, default `all`). Admin-only modules still require `admin` | Replaces "every other module is visible" in `src/core/rbac.ts`. The SEMP v1 modules stay out of the catalog and hidden in every managed session (decided 2026-11-01: what a managed user sees must follow the admin's queue rows, which those modules cannot honour). |
@@ -134,7 +134,8 @@ as one commit series straight on the branch (no sub-branches; CI by `workflow_di
 - `managed` variant, `dist/managed.html`, Dockerfile overwrite in the managed leg; `tag.yml`
   uploads an explicit Release list.
 - Build check (`scripts/check-bundles.mjs`, in the `build` task): Release bundles carry no
-  managed UI, `managed.html` does. The core managed store still ships everywhere until Phase 3.
+  managed UI, `managed.html` does. Phase 3 replaced the core managed store with the names-only
+  managed profile and added the `/managed/dial` and `/managed/relay/` markers.
 - Docs: variants, build modes, Dockerfile and `tag.yml` comments ("same bundle" is no longer true).
 
 **Phase 2: Gateway sessions and auth.** Step 2A (sign-in, sessions, cookie auth) code on
@@ -162,7 +163,18 @@ gateway's sign-in cookie; the SDK session log masks credentials) and step 3B (`k
 required ports and credential characters) code on `feature/rbac` 2026-11-01. Step 3C (`relay.go`: the read-only
 SEMP relay; `newUpstreamTransport` shared with the Direct relay, with a 10 s connect bound) and step 3D
 (`dial.go`, `smf.go`, `sockets.go`: the dial endpoint, the SMF WebSocket gate and socket revocation)
-code on `feature/rbac` 2026-11-02.
+code on `feature/rbac` 2026-11-02. Step 3E, the browser cutover, code on `feature/rbac` 2026-11-02:
+`/managed/me` names brokers and VPNs only and the site seed is gone (`SITE_SEED_FILE`,
+`loadOrGenerateSeed`); the Direct relay answers `404` under `CONN_MODES=managed`; the browser's
+`managed-profile.ts` (`ctx.managedProfile`, names only, `dial(target, {connect})`) replaces
+`encode.ts` and `managed-session-store.ts`; SEMP goes through the relay (`SempConfig.relayBase`,
+no Authorization header; a relay `401` signs out) and SMF through dial and the gate
+(`SolaceConfig.smfPath`, the password handed straight to the SDK); queue-copy's provisioned
+destination does the same; connection-management sends passwords as typed; Queue Browser's
+read-only rows became downgrade-only (`ui-table.ts`), replacing the `_permissions` write;
+`check-bundles` gained the `/managed/dial` and `/managed/relay/` markers; the docs-secrecy policy
+is retired and the docs name the store format. Phase 3 is complete except the end-to-end run
+against a local Docker broker (step 3F).
 - Key file generated on first run; `users.yaml` and `connections.yaml` encrypted whole; refuse to
   start on an encrypted store without its key; `/managed/relay/{broker}` with credential
   injection; `dial` endpoint; WebSocket upgrade gating.

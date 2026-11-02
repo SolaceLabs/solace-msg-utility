@@ -6,7 +6,7 @@ import { createInitialState } from '../../../src/modules/queue-copy/state';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { createSessionMock, createBrowserMock } from '../../setup';
 import type { AppContext } from '../../../src/core/types';
-import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
+import { createManagedProfile } from '../../../src/core/services/managed-profile';
 
 vi.mock('../../../src/core/components/queue-picker', () => ({
     pickQueue: vi.fn(async () => ({ vpn: 'default', queue: 'picked-q' })),
@@ -38,7 +38,7 @@ function makeCtx(overrides: Partial<AppContext['appState']> = {}): AppContext {
         setState: vi.fn(),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
-        managedStore: createManagedSessionStore(),
+        managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: {},
     };

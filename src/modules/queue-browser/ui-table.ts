@@ -5,14 +5,23 @@ import { escapeHtml } from '../../core/utils';
 import { required } from '../../core/dom';
 import { showPayload } from './features.js';
 import { logger } from '../../core/logger';
-import type { EventBus } from '../../core/types';
+import { canOperate } from '../../core/rbac';
+import type { AppState, EventBus } from '../../core/types';
 
 // ui-table.ts - Message List & Table Logic
-// Initialized via initTable(eventBus) to provide EventBus for delete events.
+// Initialized via initTable(eventBus, { appState }) to provide EventBus for
+// delete events and the managed session for read-only rows.
 
 declare const JSZip: any;
 
-export function initTable(eventBus: EventBus) {
+export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}) {
+
+    /** A managed session's read-only row covers this queue on the connected VPN. */
+    function rbacReadOnly(queueName: string): boolean {
+        const s = opts.appState;
+        const m = s?.managed;
+        return !!m && !canOperate(m, m.broker, s!.selectedVpn ?? '', queueName);
+    }
 
     ui.getSelectedMessageIds = function () {
         const els = ui.getElements();
@@ -172,19 +181,20 @@ export function initTable(eventBus: EventBus) {
     ui.updatePermissionUI = function (queueName: string) {
         const els = ui.getElements();
 
-        let isReadOnly = false;
         let perms: any = null;
         const browser = getBrowser(queueName);
         const consumer = browser ? browser._messageConsumer : null;
         perms = consumer ? consumer._permissions : null;
 
-        if (perms) {
-            if (typeof perms === 'string' && perms === 'READ_ONLY') isReadOnly = true;
-        }
+        // Downgrade only: the broker's own permission, made read-only by a
+        // managed session's read-only row; a row never upgrades a queue the
+        // broker keeps read-only.
+        const managedReadOnly = rbacReadOnly(queueName);
+        const isReadOnly = perms === 'READ_ONLY' || managedReadOnly;
 
         state.currentQueuePermissions = isReadOnly ? { READ_ONLY: true } : { READ_ONLY: false };
 
-        if (perms) {
+        if (perms || managedReadOnly) {
             els.hdrPermissions.classList.remove('hidden');
             if (isReadOnly) {
                 els.hdrPermissions.textContent = 'Read-Only';

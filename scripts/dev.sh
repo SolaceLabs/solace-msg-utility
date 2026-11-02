@@ -172,8 +172,6 @@ task_vet() {
   # The build strips types without checking them, so tsc --noEmit is the only
   # thing that catches a type error.
   run vet npm run typecheck || return $?
-  # Guards against a doc that starts explaining the credential transform.
-  run vet npm run check:docs || return $?
   # Both ways: the RBAC backend is behind the `managed` tag, so an untagged run
   # never compiles it at all.
   run vet go -C "$GO_DIR" vet ./... || return $?

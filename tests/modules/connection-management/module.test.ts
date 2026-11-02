@@ -38,12 +38,6 @@ function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppCon
         container, appState, eventBus,
         setState: (k, v) => { (appState as any)[k] = v; eventBus.emit('app:state-change', { key: k, value: v }); },
         loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(), config: {},
-        // Sealing goes through the core store; this module only needs packSecret.
-        // Deterministic so the test can still assert the packed value.
-        managedStore: {
-            isActive: () => true,
-            packSecret: async (v: string) => `V1:${v}`,
-        },
     } as unknown as AppContext;
 }
 
@@ -155,7 +149,7 @@ describe('connection-management — create / edit form', () => {
         expect(svcMock.saveConnection).not.toHaveBeenCalled();
     });
 
-    it('creates a connection: packs the SEMP + VPN passwords', async () => {
+    it('creates a connection: sends the SEMP + VPN passwords as typed (TLS to the gateway)', async () => {
         const { container } = await setup();
         svcMock.saveConnection.mockResolvedValue({ ok: true });
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
@@ -175,12 +169,12 @@ describe('connection-management — create / edit form', () => {
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Connection saved', 'ok'));
         expect(svcMock.saveConnection).toHaveBeenCalledWith({
             broker: 'b9', hostname: 'h9',
-            semp: { port: '1943', user: 'mon', pass: 'V1:secret' },
-            client: { port: '1443', msgVpns: [{ name: 'v1', user: 'u1', pass: 'V1:vpnpw' }] },
+            semp: { port: '1943', user: 'mon', pass: 'secret' },
+            client: { port: '1443', msgVpns: [{ name: 'v1', user: 'u1', pass: 'vpnpw' }] },
         });
     });
 
-    it('keeps blank SEMP + VPN passwords blank (no packing) on edit', async () => {
+    it('keeps blank SEMP + VPN passwords blank on edit, so the gateway keeps the stored ones', async () => {
         const { container } = await setup();
         svcMock.saveConnection.mockResolvedValue({ ok: true });
         // Edit b1 (first row) — passwords arrive blank from the list.
@@ -204,18 +198,6 @@ describe('connection-management — create / edit form', () => {
         el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'bX';
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe('broker "bX": semp.port "x" is not a port (1 to 65535)'));
-    });
-
-    it('surfaces a sealing failure before anything is sent', async () => {
-        const { container, ctx } = await setup();
-        (ctx.managedStore as any).packSecret = async () => { throw new Error('no profile to seal with'); };
-        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
-        el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'bX';
-        el<HTMLInputElement>(container, '#conn-mgmt-semp-pass').value = 'secret';
-        el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
-        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe('no profile to seal with'));
-        expect(svcMock.saveConnection).not.toHaveBeenCalled();
-        expect(el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').disabled).toBe(false);
     });
 
     it('Edit pre-fills the form and blanks the password fields', async () => {
@@ -275,7 +257,7 @@ describe('connection-management — create / edit form', () => {
         vpnInputs[2].value = 'vpnpw';
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
         await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
-        expect(svcMock.saveConnection.mock.calls[0][0].client.msgVpns).toEqual([{ name: 'v1-prod', user: 'u1', pass: 'V1:vpnpw' }]);
+        expect(svcMock.saveConnection.mock.calls[0][0].client.msgVpns).toEqual([{ name: 'v1-prod', user: 'u1', pass: 'vpnpw' }]);
     });
 
     it('a VPN on a new connection needs a password; one without a name is left to the gateway', async () => {

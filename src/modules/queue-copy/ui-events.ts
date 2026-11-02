@@ -255,7 +255,7 @@ export function wireUiEvents(
      */
     function offeredCredModes(): DestCredMode[] {
         const offered = resolveDestCredModes(ctx.appState.connConfig ?? null);
-        const usable = ctx.managedStore.isActive() ? offered : offered.filter(m => m !== 'provisioned');
+        const usable = ctx.managedProfile.isActive() ? offered : offered.filter(m => m !== 'provisioned');
         return usable.length ? usable : offered;
     }
 
@@ -270,7 +270,7 @@ export function wireUiEvents(
         ui.setDestManualFieldsEnabled(els, active === 'manual');
 
         if (active === 'provisioned') {
-            const brokers = ctx.managedStore.brokers().map(b => b.broker);
+            const brokers = ctx.managedProfile.brokers();
             ui.renderDestProvisionedBrokers(els, brokers, state.destForm.provisioned.broker);
             state.destForm.provisioned.broker = els.destProvBroker.value;
             refreshDestProvisionedVpns();
@@ -282,7 +282,7 @@ export function wireUiEvents(
     }
 
     function refreshDestProvisionedVpns(): void {
-        const vpns = ctx.managedStore.vpnsFor(state.destForm.provisioned.broker);
+        const vpns = ctx.managedProfile.vpnsFor(state.destForm.provisioned.broker);
         ui.renderDestProvisionedVpns(els, vpns, state.destForm.provisioned.vpn);
         state.destForm.provisioned.vpn = els.destProvVpn.value;
     }
@@ -368,7 +368,7 @@ export function wireUiEvents(
     // module.ts handles the run/connection lifecycle for the same event.
     ctx.eventBus.on('rbac:changed', () => {
         if (state.destForm.credMode === 'provisioned') {
-            const stillThere = ctx.managedStore
+            const stillThere = ctx.managedProfile
                 .vpnsFor(state.destForm.provisioned.broker)
                 .includes(state.destForm.provisioned.vpn);
             if (!stillThere) {

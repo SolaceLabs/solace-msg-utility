@@ -19,8 +19,8 @@ export type {
 } from './connections/types';
 
 // Type-only (erased at build time, so no runtime import cycle) — AppContext
-// carries the managed session store defined alongside the managed API client.
-import type { ManagedStore } from './services/managed-session-store';
+// carries the managed profile defined alongside the managed API client.
+import type { ManagedProfileStore } from './services/managed-profile';
 import type { ConnDeploymentConfig } from './connections/conn-modes';
 
 /* ------------------------------------------------------------------ */
@@ -43,9 +43,10 @@ export interface QGlob {
  * (`GET /managed/me`) by the connections module's Managed panel or admin-login. `null`/absent whenever no managed login is active
  * (including every Direct-mode session), where RBAC helpers degrade to allow-all.
  *
- * This carries only **matcher inputs**. The packed broker credentials and the
- * deployment seed live in `AppContext.managedStore` — see
- * `src/core/services/managed-session-store.ts` for the ownership split.
+ * This carries only **matcher inputs**. The provisioned broker and VPN names
+ * live in `AppContext.managedProfile` — see
+ * `src/core/services/managed-profile.ts` for the ownership split. No broker
+ * credential is held in the browser for a managed session.
  */
 export interface ManagedSession {
     /** Whether the user may see the admin-only management modules. */
@@ -88,7 +89,8 @@ export interface AppState {
     selectedVpn: string | null;
     /**
      * Live primary Solace connection info — including the password the user
-     * typed into the form. Populated by the connections module on
+     * typed into the form (Direct; a managed session leaves it '' and puts the
+     * broker name in `host`). Populated by the connections module on
      * `client:connected`, cleared on `client:disconnected`. Consumers
      * (e.g. queue-copy) use this to prefill destination forms and to mirror
      * the source-side connection read-only panel. The SolClientJS Session
@@ -111,7 +113,9 @@ export interface AppState {
      * client must POST against (gateway-prefixed in hosted mode), while
      * `protocol`/`host`/`port`/`urlPath` carry the ORIGINAL values the user
      * typed — useful for UI that needs to display or reuse the broker
-     * identity without reverse-engineering the wire URL.
+     * identity without reverse-engineering the wire URL. A managed session sets
+     * `relay` (the gateway's SEMP relay base, also `baseUrl`), puts the broker
+     * name in `host`, and leaves `user`/`pass` '': the gateway holds them.
      */
     sempCredentials: {
         user: string;
@@ -121,6 +125,7 @@ export interface AppState {
         host: string;
         port: string;
         urlPath: string;
+        relay?: string;
     } | null;
     isSempConnected: boolean;
     /**
@@ -171,7 +176,7 @@ export interface BusEvents {
     /**
      * Ask the module that owns the managed login to end the session with its
      * ordinary sign-out (`POST /managed/logout`, drop any managed broker
-     * connection, clear `managedStore` + `AppState.managed`, emit
+     * connection, clear `managedProfile` + `AppState.managed`, emit
      * `rbac:changed`, show its signed-out view). Emitted by user-management
      * when a change to the signed-in admin's own account (new password,
      * administrator flag, deletion) ended the session at the gateway, and by
@@ -239,16 +244,17 @@ export interface AppContext {
      * Helper for SEMP API requests. `path` is the endpoint + query string only
      * (e.g. '/SEMP/v2/monitor/msgVpns?count=100' or '/SEMP' for v1 RPC); the
      * kernel assembles the full URL from `appState.sempCredentials` on every
-     * call, applies hosted-mode gateway routing, and injects Basic auth.
+     * call, applies hosted-mode gateway routing, and injects Basic auth (a
+     * managed session's relay instead: no Authorization header).
      */
     sempFetch: (path: string, options?: RequestInit) => Promise<Response>;
     /**
-     * The managed session's provisioned profile + deployment seed, owned by core
-     * so any module can open a provisioned connection (or seal a credential)
-     * without reaching into the module that owns the login. Inert — and
-     * `isActive() === false` — outside a managed session.
+     * The managed session's provisioned profile, owned by core so any module
+     * can open a provisioned connection (`dial`) without reaching into the
+     * module that owns the login. Inert — and `isActive() === false` — outside
+     * a managed session.
      */
-    managedStore: ManagedStore;
+    managedProfile: ManagedProfileStore;
     /** Helper for clipboard copy with visual feedback */
     copyToClipboard: (text: string, btnElement?: HTMLElement) => Promise<void>;
     /** Global app config */

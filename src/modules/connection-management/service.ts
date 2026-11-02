@@ -3,17 +3,16 @@
  * `/managed/connections` endpoints, authenticated by the session cookie (see
  * `src/core/services/managed-api.ts`).
  *
- * Broker credentials are packed client-side (WebCrypto, the per-deployment
- * siteSeed) BEFORE they reach this service — the gateway stores the opaque
- * blobs and never unpacks them. The list response omits the packed blobs, so
- * editing a connection with blank password fields keeps the stored secrets.
+ * Broker passwords travel as typed, over TLS; the gateway keeps them in its
+ * encrypted connections file. The list response omits them, so editing a
+ * connection with blank password fields keeps the stored ones.
  */
 import { managedRequest, type ManagedResult } from '../../core/services/managed-api';
 
 export interface ManagedConnVpn {
     name: string;
     user: string;
-    pass: string; // packed (V1:) on write; '' from list / '' = keep on edit
+    pass: string; // as typed on write; '' from list / '' = keep on edit
 }
 
 export interface ManagedConnRecord {

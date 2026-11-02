@@ -1,14 +1,14 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createEventBus } from '../../../src/core/event-bus';
-import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
-import { fromB64, importSeed, pack } from '../../../src/core/encode';
+import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import type { AppContext, AppState, EventBus, ManagedSession } from '../../../src/core/types';
 
 /**
  * Provisioned destination (step 3b). A managed user selects a destination broker
  * and VPN they are entitled to instead of typing credentials; the core managed
- * store dials it, so no secret passes through this module.
+ * profile connects SEMP through the gateway's relay and dials SMF, so the only
+ * secret this module ever handles is the dialled password it passes to the SDK.
  *
  * Kept separate from `module.test.ts` because it mocks the copy engine, which
  * lets the `rbac:changed` halt be observed directly on `state.job`.
@@ -59,40 +59,20 @@ import { QueueCopyModule } from '../../../src/modules/queue-copy/module';
 import { destinationRefusal } from '../../../src/modules/queue-copy/ui-modal';
 import { createInitialState } from '../../../src/modules/queue-copy/state';
 
-const SEED_B64 = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
-/** Plaintext the store must hand the factories after unpacking. */
-const SECRET = { sempB1: 'semp-b1-pw', cliV1: 'cli-v1-pw', cliV2: 'cli-v2-pw' };
+/** The /managed/me profile: names only, as the gateway sends it. */
+const PROFILE: any = {
+    username: 'u', admin: false, modules: ['queue-copy'],
+    operate: [{ brokers: '*', msgVpns: '*', queues: 'ops.*' }],
+    readOnly: [],
+    brokers: [
+        { broker: 'b1', msgVpns: [{ name: 'v1' }, { name: 'v2' }] },
+        { broker: 'b2', msgVpns: [{ name: 'w1' }] },
+    ],
+};
 
-/**
- * The profile carries PACKED passwords, so they are produced with the real
- * transform against the real seed — a hand-written literal is rejected by
- * `unpack` and would only prove the error path.
- */
-let PROFILE: any;
-beforeAll(async () => {
-    const seed = await importSeed(fromB64(SEED_B64));
-    PROFILE = {
-        admin: false,
-        siteSeed: SEED_B64,
-        operate: [{ brokers: '*', msgVpns: '*', queues: 'ops.*' }],
-        readOnly: [],
-        brokers: [
-            {
-                broker: 'b1', hostname: 'host1',
-                semp: { port: '1943', user: 'mon', pass: await pack(SECRET.sempB1, seed) },
-                msgVpns: [
-                    { name: 'v1', client: { port: '1443', user: 'u1', pass: await pack(SECRET.cliV1, seed) } },
-                    { name: 'v2', client: { port: '1443', user: 'u2', pass: await pack(SECRET.cliV2, seed) } },
-                ],
-            },
-            {
-                broker: 'b2', hostname: 'host2',
-                semp: { port: '1943', user: 'mon', pass: await pack('semp-b2-pw', seed) },
-                msgVpns: [{ name: 'w1', client: { port: '1443', user: 'u3', pass: await pack('cli-w1-pw', seed) } }],
-            },
-        ],
-    };
-});
+/** The gateway calls the managed entry attaches to the profile. */
+const dialMock = vi.fn();
+const DIALER = { dial: dialMock, relayBase: (broker: string) => `/managed/relay/${broker}` };
 
 const SESSION: ManagedSession = {
     admin: false, username: 'u', broker: 'b1', vpns: ['v1', 'v2'],
@@ -108,6 +88,10 @@ beforeEach(() => {
     destSempConnect.mockClear();
     destSolConnect.mockClear();
     pickQueueMock.mockClear();
+    dialMock.mockReset();
+    dialMock.mockImplementation(async (broker: string, vpn: string) => ({
+        ok: true, data: { smfPath: `/managed/smf/${broker}/${vpn}`, vpn, user: `u-${vpn}`, pass: `pw-${vpn}` },
+    }));
     runCopyJobMock.mockReset();
     captured.state = null;
 });
@@ -134,11 +118,12 @@ async function setupProvisioned(over: Partial<AppState> = {}, signIn = true) {
         setState: vi.fn((k, v) => { (appState as any)[k] = v; }),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
-        managedStore: createManagedSessionStore(),
+        managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: {},
     };
-    if (signIn) await ctx.managedStore.setProfile(PROFILE as any);
+    ctx.managedProfile.attachDialer(DIALER);
+    if (signIn) ctx.managedProfile.setProfile(PROFILE);
     await QueueCopyModule.install(ctx);
     const el = <T extends HTMLElement>(sel: string): T => container.querySelector(sel) as T;
     const hidden = (sel: string) => el(sel).classList.contains('hidden');
@@ -230,7 +215,7 @@ describe('queue-copy — provisioned destination: credential-source control', ()
     });
 
     it('drops Provisioned from the offer when nothing is signed in', async () => {
-        // 'both' deployment, empty store: Manual is a legitimate remaining option.
+        // 'both' deployment, no profile: Manual is a legitimate remaining option.
         const { el, hidden } = await setupProvisioned({ managed: null }, false);
         needSecondary(el);
         expect(hidden('#copy-dest-cred-mode-row')).toBe(true);
@@ -262,8 +247,8 @@ describe('queue-copy — provisioned destination: credential-source control', ()
     });
 });
 
-describe('queue-copy — provisioned destination: connecting through the store', () => {
-    it('dials dest SEMP with the store-supplied host and an unpacked credential', async () => {
+describe('queue-copy — provisioned destination: connecting through the profile', () => {
+    it('connects dest SEMP through the gateway relay, with no credential and no dial', async () => {
         const { el } = await setupProvisioned();
         needSecondary(el);
         chooseProvisioned(el);
@@ -272,12 +257,13 @@ describe('queue-copy — provisioned destination: connecting through the store',
         await vi.waitFor(() => expect(destSempConnect).toHaveBeenCalled());
 
         const [cfg, host, pass] = destSempConnect.mock.calls[0];
-        expect(host).toBe('host1');                        // from the profile, never typed
-        expect(cfg).toMatchObject({ protocol: 'https', port: '1943', user: 'mon' });
-        expect(pass).toBe(SECRET.sempB1);                  // unpacked, not the packed blob
+        expect(host).toBe('b1');                           // the provisioned name, never an address
+        expect(cfg).toMatchObject({ relayBase: '/managed/relay/b1', user: '' });
+        expect(pass).toBe('');
+        expect(dialMock).not.toHaveBeenCalled();
     });
 
-    it('dials dest Solace for the selected VPN with a store-composed clientName', async () => {
+    it('dials dest Solace for the selected VPN with a profile-composed clientName', async () => {
         const { el } = await setupProvisioned();
         needSecondary(el);
         chooseProvisioned(el);
@@ -289,17 +275,44 @@ describe('queue-copy — provisioned destination: connecting through the store',
         await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
 
         const [cfg, host, pass, clientName] = destSolConnect.mock.calls[0];
-        expect(host).toBe('host1');
-        expect(cfg).toMatchObject({ vpn: 'v2', user: 'u2', port: '1443' });
-        expect(pass).toBe(SECRET.cliV2);
+        expect(dialMock).toHaveBeenCalledWith('b1', 'v2');
+        expect(host).toBe('b1');
+        expect(cfg).toMatchObject({ vpn: 'v2', user: 'u-v2', smfPath: '/managed/smf/b1/v2' });
+        expect(pass).toBe('pw-v2');
         expect(clientName).toMatch(/^SolMsgUtil\/\d{14}\/.+$/);
     });
 
-    it('surfaces a store refusal on the destination card instead of throwing', async () => {
+    it('a dial refused because the gateway session ended asks for a sign-out', async () => {
+        const { el } = await setupProvisioned();
+        needSecondary(el);
+        chooseProvisioned(el);
+        const signOut = vi.fn();
+        eventBus.on('rbac:sign-out-requested', signOut);
+        dialMock.mockResolvedValueOnce({ ok: false, status: 401, code: 'unauthenticated' });
+
+        el<HTMLButtonElement>('#copy-btn-dest-sol-connect').click();
+        await vi.waitFor(() => expect(el('#copy-dest-sol-error').textContent).toBe('Your session has ended. Sign in again.'));
+        expect(signOut).toHaveBeenCalledTimes(1);
+        expect(destSolConnect).not.toHaveBeenCalled();
+    });
+
+    it('a relay 401 on the provisioned destination asks for a sign-out', async () => {
+        const { el } = await setupProvisioned();
+        needSecondary(el);
+        chooseProvisioned(el);
+        const signOut = vi.fn();
+        eventBus.on('rbac:sign-out-requested', signOut);
+
+        destSempHooks.current.onAuthFailed();
+        expect(el('#copy-dest-semp-error').textContent).toBe('Your session has ended. Sign in again.');
+        expect(signOut).toHaveBeenCalledTimes(1);
+    });
+
+    it('surfaces a profile refusal on the destination card instead of throwing', async () => {
         const { ctx, el } = await setupProvisioned();
         needSecondary(el);
         chooseProvisioned(el);
-        ctx.managedStore.clear();      // signed out underneath the click
+        ctx.managedProfile.clear();    // signed out underneath the click
 
         el<HTMLButtonElement>('#copy-btn-dest-semp-connect').click();
         await vi.waitFor(() =>
@@ -307,16 +320,19 @@ describe('queue-copy — provisioned destination: connecting through the store',
         expect(destSempConnect).not.toHaveBeenCalled();
     });
 
-    it('surfaces a Solace store refusal too', async () => {
+    it('surfaces a Solace profile refusal too, without asking for a sign-out', async () => {
         const { ctx, el } = await setupProvisioned();
         needSecondary(el);
         chooseProvisioned(el);
-        ctx.managedStore.clear();
+        ctx.managedProfile.clear();
+        const signOut = vi.fn();
+        eventBus.on('rbac:sign-out-requested', signOut);
 
         el<HTMLButtonElement>('#copy-btn-dest-sol-connect').click();
         await vi.waitFor(() =>
             expect(el('#copy-dest-sol-error').textContent).toMatch(/requires a managed session/i));
         expect(destSolConnect).not.toHaveBeenCalled();
+        expect(signOut).not.toHaveBeenCalled();
     });
 });
 
@@ -527,7 +543,7 @@ describe('queue-copy — provisioned destination: rbac:changed lifecycle', () =>
         el<HTMLInputElement>('#copy-dest-input').value = 'ops.dest';
         el<HTMLInputElement>('#copy-dest-input').dispatchEvent(new Event('input'));
 
-        await ctx.managedStore.setProfile({
+        ctx.managedProfile.setProfile({
             ...PROFILE,
             brokers: [{ ...PROFILE.brokers[0], msgVpns: [] }, PROFILE.brokers[1]],
         } as any);
@@ -543,7 +559,7 @@ describe('queue-copy — provisioned destination: rbac:changed lifecycle', () =>
         el<HTMLInputElement>('#copy-dest-input').value = 'ops.dest';
         el<HTMLInputElement>('#copy-dest-input').dispatchEvent(new Event('input'));
 
-        await ctx.managedStore.setProfile(PROFILE);     // same provisioning
+        ctx.managedProfile.setProfile(PROFILE);     // same provisioning
         eventBus.emit('rbac:changed');
 
         expect(el<HTMLInputElement>('#copy-dest-input').value).toBe('ops.dest');
@@ -554,7 +570,7 @@ describe('queue-copy — provisioned destination: rbac:changed lifecycle', () =>
         needSecondary(el);
         chooseProvisioned(el);
 
-        await ctx.managedStore.setProfile({ ...PROFILE, brokers: [PROFILE.brokers[1]] } as any);
+        ctx.managedProfile.setProfile({ ...PROFILE, brokers: [PROFILE.brokers[1]] });
         eventBus.emit('rbac:changed');
 
         expect(Array.from(el<HTMLSelectElement>('#copy-dest-prov-broker').options).map(o => o.value))

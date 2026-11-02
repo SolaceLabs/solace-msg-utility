@@ -15,7 +15,6 @@
     "build:all": "node scripts/vite-build.mjs --variant=all-for-testing-only --out-filename=all-test.html",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "check:docs": "node scripts/check-docs-secrecy.mjs",
     "check:bundles": "node scripts/check-bundles.mjs",
     "audit:gate": "node scripts/npm-audit-gate.mjs",
     "test": "vitest run --pool=threads --maxWorkers=12",

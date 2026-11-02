@@ -3,7 +3,7 @@ import { ConnectionsModule } from '../../../src/modules/connections/module';
 import { ui } from '../../../src/modules/connections/ui.js';
 import { config } from '../../../src/modules/connections/config.js';
 import { createEventBus } from '../../../src/core/event-bus';
-import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
+import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import { INPUT_DEBOUNCE_MS } from '../../../src/core/timing';
 import { isHosted, setHosted } from '../../../src/core/hosted';
 import { logger } from '../../../src/core/logger';
@@ -29,7 +29,7 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; eventBus:
         setState: vi.fn((key: keyof AppState, value: any) => { (appState as any)[key] = value; }),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
-        managedStore: createManagedSessionStore(),
+        managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: { useMocks: false }
     };

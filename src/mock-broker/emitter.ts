@@ -1,16 +1,12 @@
 /**
  * A deliberately dumb event emitter: **synchronous, strictly FIFO**.
  *
- * Both properties match the real SDK, which the managed build depends on (the
- * demo itself is Direct-only, so here they keep the emulation faithful). The
- * connections module's managed panel (managed.html only) monkey-patches
- * `session.createQueueBrowser` and registers its
- * own `UP` listener on the returned browser *before* queue-browser's service
- * registers one, then overwrites `_messageConsumer._permissions` from inside
- * that handler. If this emitter reordered listeners, or deferred them to a
- * microtask, queue-browser would read the permission before RBAC had written
- * it — and entitlement enforcement would silently stop working, with no error
- * anywhere. So: an array, in insertion order, called inline.
+ * Both properties match the real SDK, and the app's listeners assume them:
+ * several modules register on the same session and browser events and expect
+ * to run in the order they registered, inline with the event. If this emitter
+ * reordered listeners, or deferred them to a microtask, the emulation would
+ * diverge from the broker the app really talks to. So: an array, in insertion
+ * order, called inline.
  *
  * Mock-only.
  */

@@ -106,7 +106,7 @@ services:
     volumes:
       # Writable gateway store. The named volume inherits the baked /managed
       # dir's UID-65532 ownership, so the gateway can write config.yaml,
-      # users.yaml, store.key + site.seed on first run. The store key encrypts
+      # users.yaml and store.key on first run. The store key encrypts
       # users.yaml and connections.yaml: back it up, or set STORE_KEY_FILE to
       # a separate mount. `docker compose down -v` wipes it all (re-seeds the
       # config and forces a fresh bootstrap).

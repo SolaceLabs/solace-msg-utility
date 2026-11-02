@@ -6,19 +6,16 @@
  * `isModuleVisible` (the id maps to `'admin'` in rbac.ts's MODULE_REQUIREMENTS); the kernel
  * re-renders on `rbac:changed`, on which this module reloads its list.
  *
- * Broker credentials are PACKED client-side with the per-deployment siteSeed
- * (WebCrypto) before they leave the browser — the gateway stores opaque blobs and
- * never unpacks them. The list response omits the blobs, so editing a
- * connection with blank password fields keeps the stored secrets. Imports only
- * from `src/core/*` and its own service.
+ * Broker passwords are sent as typed, over TLS; the gateway keeps them in its
+ * encrypted connections file and never sends them back. The list response
+ * omits them, so editing a connection with blank password fields keeps the
+ * stored ones. Imports only from `src/core/*` and its own service.
  */
 import { required } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import { createRowList } from '../../core/components/row-list';
-// Credential sealing goes through the core managed store: the deployment seed
-// stays inside its closure and never reaches this module.
 import { showToast } from '../../core/toast';
-import { errMessage, escapeHtml } from '../../core/utils';
+import { escapeHtml } from '../../core/utils';
 import { logger } from '../../core/logger';
 import { reportManagedFailure } from '../../core/services/managed-api';
 import { createConnMgmtService, type ManagedConnRecord } from './service';
@@ -200,24 +197,19 @@ export const ConnectionManagementModule = {
             els.btnSave.disabled = true;
             setError(els.formError, null);
             try {
-                const sempPlain = els.sempPass.value;
-                const msgVpns = [];
-                for (const r of rows) {
-                    msgVpns.push({
-                        name: r.name,
-                        user: r.user,
-                        pass: r.pass ? await app.managedStore.packSecret(r.pass) : '',
-                    });
-                }
+                // A blank password is sent blank: the gateway keeps the stored one.
                 const connection: ManagedConnRecord = {
                     broker,
                     hostname: els.hostname.value.trim(),
                     semp: {
                         port: els.sempPort.value.trim(),
                         user: els.sempUser.value.trim(),
-                        pass: sempPlain ? await app.managedStore.packSecret(sempPlain) : '',
+                        pass: els.sempPass.value,
                     },
-                    client: { port: els.clientPort.value.trim(), msgVpns },
+                    client: {
+                        port: els.clientPort.value.trim(),
+                        msgVpns: rows.map(r => ({ name: r.name, user: r.user, pass: r.pass })),
+                    },
                 };
                 const res = await service.saveConnection(connection);
                 if (!res.ok) {
@@ -226,8 +218,6 @@ export const ConnectionManagementModule = {
                 }
                 showToast('Connection saved', 'ok');
                 applyGate(); // back to the list, reloaded
-            } catch (e) {
-                setError(els.formError, errMessage(e));
             } finally {
                 els.btnSave.disabled = false;
             }

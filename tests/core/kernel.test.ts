@@ -520,12 +520,66 @@ describe('Kernel', () => {
             const disconnectHandler = vi.fn();
             capturedCtx!.eventBus.on('semp:disconnected', disconnectHandler);
 
+            const signOut = vi.fn();
+            capturedCtx!.eventBus.on('rbac:sign-out-requested', signOut);
+
             (globalThis.fetch as any).mockResolvedValue({ status: 401, ok: false });
             await capturedCtx!.sempFetch('/SEMP');
 
             expect(capturedCtx!.appState.isSempConnected).toBe(false);
             expect(capturedCtx!.appState.sempCredentials).toBe(null);
             expect(disconnectHandler).toHaveBeenCalled();
+            // A broker refusing a Direct credential is not a gateway sign-out.
+            expect(signOut).not.toHaveBeenCalled();
+        });
+
+        // A managed session's SEMP goes to the gateway relay, which adds the
+        // broker's stored account; the browser holds no SEMP credential.
+        describe('sempFetch in a managed session (relay)', () => {
+            async function relayCtx(): Promise<AppContext> {
+                let capturedCtx: AppContext | null = null;
+                const mod = createMockModule({
+                    id: 'test-module',
+                    install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
+                });
+                setupDOM(['test-module']);
+                await new Kernel([reg(mod)]).start();
+                capturedCtx!.setState('sempCredentials', {
+                    user: '', pass: '', baseUrl: '/managed/relay/b1', protocol: 'https', host: 'b1', port: '', urlPath: '',
+                    relay: '/managed/relay/b1',
+                });
+                capturedCtx!.setState('isSempConnected', true);
+                return capturedCtx!;
+            }
+
+            it('sends to the relay base with no Authorization header', async () => {
+                const ctx = await relayCtx();
+                (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
+                await ctx.sempFetch('/SEMP/v2/monitor/msgVpns?count=10', { headers: { Accept: 'application/json' } });
+                const [url, opts] = (globalThis.fetch as any).mock.calls[0];
+                expect(url).toBe('/managed/relay/b1/SEMP/v2/monitor/msgVpns?count=10');
+                expect(opts.headers).toEqual({ Accept: 'application/json' });
+            });
+
+            it('a relay 401 (the gateway session ended) also asks the session owner to sign out', async () => {
+                const ctx = await relayCtx();
+                const signOut = vi.fn();
+                ctx.eventBus.on('rbac:sign-out-requested', signOut);
+                (globalThis.fetch as any).mockResolvedValue({ status: 401, ok: false });
+                await ctx.sempFetch('/SEMP');
+                expect(ctx.appState.sempCredentials).toBeNull();
+                expect(signOut).toHaveBeenCalledTimes(1);
+            });
+
+            it.each([403, 502])("a relay %i (read_only, upstream_*) leaves the connection up", async (status) => {
+                const ctx = await relayCtx();
+                const signOut = vi.fn();
+                ctx.eventBus.on('rbac:sign-out-requested', signOut);
+                (globalThis.fetch as any).mockResolvedValue({ status, ok: false });
+                await ctx.sempFetch('/SEMP');
+                expect(ctx.appState.isSempConnected).toBe(true);
+                expect(signOut).not.toHaveBeenCalled();
+            });
         });
 
         it('sempFetch without credentials does not assemble or add auth header', async () => {
@@ -550,6 +604,13 @@ describe('Kernel', () => {
             const callArgs = (globalThis.fetch as any).mock.calls[0];
             expect(callArgs[0]).toBe('/SEMP');
             expect(callArgs[1].headers.Authorization).toBeUndefined();
+
+            // A 401 with nothing connected tears down and asks nobody to sign out.
+            const signOut = vi.fn();
+            capturedCtx!.eventBus.on('rbac:sign-out-requested', signOut);
+            (globalThis.fetch as any).mockResolvedValue({ status: 401, ok: false });
+            await capturedCtx!.sempFetch('/SEMP');
+            expect(signOut).not.toHaveBeenCalled();
         });
 
         it('sempFetch propagates fetch errors', async () => {

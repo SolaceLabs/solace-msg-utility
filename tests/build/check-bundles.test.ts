@@ -50,6 +50,13 @@ describe('check-bundles — checkBundles', () => {
         expect(problems[0]).toContain('module.ts');
     });
 
+    // The broker-facing calls are managed-only too: a Release bundle that could
+    // dial or reach the SEMP relay has imported the managed entry.
+    it.each(['/managed/dial', '/managed/relay/'])('fails a Release bundle that carries %s', (marker) => {
+        const problems = checkBundles(path.join(fakeBuild({ 'index.html': `<html>fetch("${marker}b1")</html>` }), 'dist'));
+        expect(problems).toEqual([expect.stringContaining(`index.html: contains the managed marker "${marker}"`)]);
+    });
+
     it('fails when a Release bundle is missing, so an incomplete build never passes', () => {
         const problems = checkBundles(path.join(fakeBuild({ 'min.html': null }), 'dist'));
         expect(problems).toEqual([expect.stringMatching(/^min\.html: missing/)]);

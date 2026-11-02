@@ -9,8 +9,8 @@ import { filterSempFetch } from '../managed-semp-filter';
  * without constructing an invalid context. The primary SempContext reuses
  * `ctx.sempFetch` (the kernel-provided helper that auto-injects the auth
  * header and assembles the full URL from connection-form values stored in
- * `appState.sempCredentials`) and the validated baseUrl as a diagnostic
- * display string.
+ * `appState.sempCredentials`, or in a managed session sends to the gateway's
+ * SEMP relay) and the validated baseUrl as a diagnostic display string.
  *
  * In a managed (RBAC) session (`appState.managed` set), the fetch is wrapped by
  * `filterSempFetch` so SEMP queue-list responses are RBAC-filtered and VPN-list

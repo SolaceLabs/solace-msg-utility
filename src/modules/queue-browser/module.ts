@@ -45,7 +45,7 @@ export const QueueBrowserModule = {
         wireForward({ hasInFlightForward: service.hasInFlightForward });
         const uiEvents = createUiEvents(app, service);
         initDetails(app);
-        initTable(eventBus);
+        initTable(eventBus, { appState });
 
         // Wire state's ingest path to the UI row-remove function so the moving-window
         // drop in ingestMessage can clean up the DOM without state.js importing ui directly.

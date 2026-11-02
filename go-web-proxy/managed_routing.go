@@ -36,7 +36,7 @@ func newManagedRouting(cfg config, lv *live, src configSource, upstream http.Rou
 // can supply a cheap hasher, an environment and a clock.
 func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, getenv func(string) string, now func() time.Time, upstream http.RoundTripper, logger *slog.Logger) (*managedRoutes, error) {
 	st, err := loadStore(storeOptions{
-		usersPath: cfg.usersFile, connsPath: cfg.connectionsFile, seedPath: cfg.siteSeedFile, keyPath: cfg.storeKeyFile,
+		usersPath: cfg.usersFile, connsPath: cfg.connectionsFile, keyPath: cfg.storeKeyFile,
 		hasher: h, getenv: getenv,
 	}, logger)
 	if err != nil {
@@ -68,8 +68,25 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 		pages:     pages,
 		gateApp:   pages.gateApp,
 		gateAdmin: pages.gateAdmin,
+		gateRelay: gateDirect(lv),
 	}
 	logger.Info("managed mode enabled", "users", cfg.usersFile, "connections", cfg.connectionsFile,
 		"session_idle", cfg.session.idle, "session_absolute", cfg.session.absolute, "app_gated", cfg.connModes == connManaged)
 	return routes, nil
+}
+
+// gateDirect closes the Direct relay while connModes is managed, read per
+// request like gateApp: a managed-only deployment offers no Direct tab, and its
+// managed sessions reach brokers through the SEMP relay and the SMF gate only.
+// Under both or direct the relay is unchanged.
+func gateDirect(lv *live) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if lv.get().connModes == connManaged {
+				http.NotFound(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionsModule } from '../../../src/modules/connections/module.managed';
 import { ConnectionsModule as ReleaseEntry } from '../../../src/modules/connections/module';
 import { createEventBus } from '../../../src/core/event-bus';
-import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
+import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import { setHosted } from '../../../src/core/hosted';
 import { createSolaceMock } from '../../setup';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
@@ -33,7 +33,7 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; appState:
         setState: vi.fn((key: keyof AppState, value: any) => { (appState as any)[key] = value; }),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
-        managedStore: createManagedSessionStore(),
+        managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: { useMocks: false },
     };

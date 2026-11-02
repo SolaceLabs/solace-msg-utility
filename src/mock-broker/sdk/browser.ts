@@ -4,8 +4,8 @@
  * Three behaviours here are load-bearing for the app, not decoration:
  *
  * 1. **`_messageConsumer._permissions` exists before `UP` fires.** queue-browser's
- *    badge + verify read it; in managed.html (not this Direct-only demo) the
- *    managed panel also overwrites it from inside its own `UP` handler.
+ *    badge + verify read it (a managed session can only downgrade it, from
+ *    `appState.managed`, never by writing it).
  * 2. **Messages arrive in spool-ID order, one at a time.** The copy engine's
  *    drift detection and max-consumed logic assume the broker delivers that way.
  * 3. **`stop()` / `start()` genuinely suspend and resume delivery.** They are

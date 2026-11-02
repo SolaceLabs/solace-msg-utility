@@ -11,8 +11,10 @@ The default app is a pure browser tool: the user types broker SMF + SEMP credent
 `connections` module and the browser connects directly. **Managed mode** is for users who must NOT
 hold broker credentials. The same `connections` module offers a second tab: the user signs in on the
 gateway's own page, picks
-from the **brokers and Message VPNs they are entitled to**, and the broker credentials are fetched
-(still obfuscated) and unpacked client-side just-in-time. Two admin-only modules
+from the **brokers and Message VPNs they are entitled to**, and the gateway connects them without
+handing over the broker's credentials: SEMP goes through the gateway's read-only relay, which adds
+the stored SEMP account, and SMF through the gateway's socket gate, with the VPN's client password
+fetched (`POST /managed/dial`) at the moment the SDK logs in. Two admin-only modules
 (`user-management`, `connection-management`) manage the entitlement data.
 
 **It ships only in the managed image's bundle.** `managed.html` (the `managed` variant) carries both
@@ -25,48 +27,65 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
 ## Topology
 
 ```text
- Browser (any bundle, served by go-web-proxy in managed mode)
+ Browser (managed.html, served by go-web-proxy in managed mode)
    /login (gateway page) ── password → session cookie (HttpOnly, SameSite=Lax)
    connections ── Managed tab: GET /managed/me on the cookie
-        └─ profile (incl. site seed) → core managed session store; on Connect the store unpacks
-           the entitled broker creds just-in-time and dials via the gateway
-   queue-browser ── unchanged; uses the entitlement-filtered queue-picker + the guardrailed session
-   queue-copy ── source filtered as above; destination may reuse the SAME provisioned credentials
+        └─ profile (broker + VPN NAMES only) → core managed profile; on Connect:
+             SEMP ── /managed/relay/{broker}/SEMP/...   (no Authorization header)
+             SMF  ── POST /managed/dial {broker, vpn} → {smfPath, user, pass}
+                     → SDK opens wss://{page host}/managed/smf/{broker}/{vpn}
+   queue-browser ── entitlement-filtered queue-picker; read-only rows downgrade Delete
+   queue-copy ── source filtered as above; destination may use a provisioned broker + VPN
    (administration is a SEPARATE app at /solAdmin: admin-login + user-management +
-    connection-management, on /managed/{users,connections}. Served only to an admin session;
-    it opens NO broker connection.)
-        │ broker traffic + /managed/* → same origin
+    connection-management, on /managed/{users,connections,settings}. Served only to an
+    admin session; it opens NO broker connection.)
+        │ every request → same origin, same session cookie
         ▼
- go-web-proxy (MANAGED mode — no credential transform; checks passwords itself)
-   /hosted {hosted, connModes, defaultConn}, SPA, transparent broker reverse-proxy (relay ungated)
-   + loads users + connections YAML strictly (RWMutex); bootstraps an admin who must change
-     the password if absent; generates a per-deployment site-seed file if absent
+ go-web-proxy (MANAGED mode)
+   /hosted {hosted, connModes, defaultConn}, SPA
+   Direct relay /{scheme}/{port}/{host}/... ── 404 under CONN_MODES=managed (open under both)
+   + users.yaml + connections.yaml sealed whole with the store key (STORE_KEY_FILE),
+     loaded strictly; bootstraps an admin who must change the password if absent
    + /login, /login/password → slow per-user password hash, throttle, session cookie
-   + GET /managed/me → entitled brokers/VPNs + queue globs; POST /managed/logout
-   + /managed/{users,connections} (admin-only CRUD on the session cookie)
+   + GET /managed/me → entitled broker/VPN names + queue globs + modules; POST /managed/logout
+   + /managed/relay/{broker}/SEMP... → reads only; adds the stored SEMP account
+   + POST /managed/dial → one VPN's client credential to an entitled user
+   + /managed/smf/{broker}/{vpn} → own-origin WebSocket joined to the broker's SMF port (TLS);
+     closed on revocation
+   + /managed/{users,connections,settings} (admin-only, on the session cookie)
         ▼
  Solace broker (SEMP + SMF/WebSocket) — use a READ-ONLY / least-privilege SEMP account
 ```
 
 ## Locked decisions
 
-- **Enforcement = proxy connection-gating + client guardrails only.** The proxy returns only the
-  entitled connections plus per-queue permission globs; the client filters discovery and guardrails
-  the UI. **The broker relay stays ungated** (see Threat model).
+- **Enforcement = gateway custody and gating per broker and VPN, client guardrails per queue.**
+  The gateway holds every broker credential and relays SEMP (reads only) and SMF only for a signed-in
+  user entitled to the broker and VPN; per-queue globs filter discovery and guardrail the UI in the
+  client (see Threat model).
 - **The gateway owns sign-in and the session.** Passwords are sent over TLS to the gateway's own
   `/login` page and checked there against a slow per-user password hash with a constant-time
   compare; the gateway throttles guessing and issues an `HttpOnly` `Secure` `SameSite=Lax` session
   cookie (10 minutes idle, 30 absolute, in `config.yaml`). Every `/managed/*` call, admin CRUD
   included, authenticates by that cookie. Nothing in the browser can read it.
-- **The gateway performs no broker-credential transform.** Broker credentials stay packed
-  client-side; the gateway stores and serves them opaque (until Phase 3 of
-  [rbac-rework-plan.md](rbac-rework-plan.md) moves them server-side).
-- **Credential model = one client-side value**, the per-deployment **site seed** (random bytes
-  generated by the gateway on first run, served post-auth, imported non-extractable, used to
-  obfuscate/reveal broker credentials). This is **obfuscation**: it raises
-  effort and protects a *leaked YAML file from offline reversal*; it gives no confidentiality against
-  a legitimately entitled user. The transform is **versioned and swappable**, and its algorithm is
-  **intentionally not documented** (code-only).
+- **Broker credentials live in the gateway.** `users.yaml` and `connections.yaml` are sealed whole
+  with AES-256-GCM under a 32-byte store key the gateway generates on a fresh volume
+  (`STORE_KEY_FILE`, environment-only); a 6-byte header (`SMUS`, version, role) is the associated
+  data, so neither file can stand in for the other. Admins send broker passwords as typed, over TLS.
+  `/managed/me` carries names only.
+- **SEMP never reaches the browser.** The relay adds the broker's stored SEMP account to each request
+  and forwards **reads only**: `GET`/`HEAD` under `/SEMP/v2/` and a SEMP v1 `<rpc>` whose one command
+  is `<show>`; anything else is `403 read_only`. A broker `401`/`407` or redirect is a `502`, so a
+  wrong stored credential never looks like an ended session.
+- **SMF needs the password in the browser, once.** The SDK must log in itself, so `POST
+  /managed/dial` returns the VPN's client username and password to an entitled user, and the browser
+  passes it straight to the SDK inside the dial callback; it is never stored in `AppState`, and a
+  reconnect dials again. Dial is stateless (no ticket), so the SDK's own reconnects keep working.
+- **The SMF socket is gated and revocable.** `/managed/smf/{broker}/{vpn}` upgrades only with the
+  session, an `Origin` equal to the gateway's own `https` address, and the entitlement. The gateway
+  sets no timer on an open socket (the SMF API's keep-alive owns its lifetime); it closes it on
+  sign-out, a password change, the user deleted or their administrator flag changed, the entitlement
+  or the VPN removed, or the broker deleted.
 - **Bootstrap admin.** If the users file is missing, the gateway writes one admin (`admin`, no broker
   access) whose password comes from `ADMIN_PASSWORD` / `ADMIN_PASSWORD_FILE`, or is generated and
   logged once; the first sign-in must change it before anything else is reachable.
@@ -91,11 +110,13 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
   user may simply switch to the Direct tab and type any credentials they happen to know — every
   entitlement guarantee in this document holds **only** under `CONN_MODES=managed`. `both` is
   supported deliberately (mixed audiences), and is a documented bypass, not an oversight.
-- **Credential-bearing state is core-owned and injected.** The provisioned profile and the site seed
-  live only in [managed-session-store.ts](../src/core/services/managed-session-store.ts), reached via
-  `AppContext.managedStore`. `AppState.managed` carries **matcher inputs only** (names, globs). Callers ask the store to *dial a target they name*; they never receive a credential,
-  and cannot enumerate one. This is what lets a second module (queue-copy) open a provisioned
-  connection without importing the connections module and without credential-bearing globals.
+- **The provisioned profile is core-owned and injected.** The broker and VPN names live in
+  [managed-profile.ts](../src/core/services/managed-profile.ts), reached via
+  `AppContext.managedProfile`. `AppState.managed` carries **matcher inputs only** (names, globs).
+  Callers ask the profile to *dial a target they name* and receive a ready config in a callback (the
+  relay base for SEMP, the dialled credential for SMF). This is what lets a second module (queue-copy)
+  open a provisioned connection without importing the connections module and without
+  credential-bearing globals.
 - **Modules that cannot be filtered are hidden, not trusted.** `MODULE_REQUIREMENTS` in
   [rbac.ts](../src/core/rbac.ts) marks `queue-subscription-explorer` and `queue-discovery` as
   requiring unfiltered SEMP; both are hidden in **every** managed session, admin included, because
@@ -109,12 +130,23 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
 
 ## Threat model (honest, documented)
 
-- The broker **relay is ungated** — only `/managed/*` is gated. An entitled user who captures their
-  own relayed credentials can exceed their queue-glob entitlement on reachable brokers. The
-  client-side queue/read-only guardrails are therefore **UX, not a security boundary**.
-- **`CONN_MODES=both` is a full bypass** of everything in this document: the Direct tab accepts any
-  credentials the user can supply. Deployments that need the entitlement model to *hold* must set
-  `CONN_MODES=managed`.
+- **The gateway checks the broker and the VPN, not the queue.** SEMP and SMF reach a broker only
+  for a signed-in user entitled to it (SEMP: to any of its VPNs; SMF: to that VPN). Within that, the
+  per-queue globs and read-only rows are applied in the client: they filter discovery, refuse a bind
+  to a non-entitled queue, and downgrade Delete, but the SMF session itself could do whatever the
+  VPN's client username allows. Queue rules are therefore **UX, not a security boundary**; scope each
+  VPN's client username to what its users may do.
+- **The relay reads what the SEMP account can see.** A user entitled to one VPN on a broker can
+  read, through the relay, every VPN the broker's stored SEMP account can. Provision brokers per
+  audience and give each a SEMP account scoped to them.
+- **The dialled password works outside the app.** An entitled user receives their VPN's client
+  password from `dial` and can use it against the broker from anywhere that reaches it directly.
+  Keep the broker's own ports off networks users can reach.
+- **A socket outlives its sign-in session.** By design it closes on revocation, not on the session's
+  idle or absolute limit.
+- **`CONN_MODES=both` is a full bypass** of everything in this document: the Direct tab and its open
+  relay accept any credentials the user can supply. Deployments that need the entitlement model to
+  *hold* must set `CONN_MODES=managed`, under which the Direct relay answers `404`.
 - **The filter is per-transport, not per-capability.** `filterSempFetch` rewrites exactly two SEMP
   **v2 monitor list** shapes. Every **SEMP v1 RPC** (`POST /SEMP`), every single-object GET, and every
   non-JSON response passes through untouched. Any code path that reaches the broker another way is
@@ -125,53 +157,49 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
   - queue-copy's verify also uses v1 RPC ⇒ a **source gate** refuses a non-entitled queue *before*
     the probe is spawned, so a managed user cannot type an arbitrary queue name and read back its
     depth, size and message IDs.
-- The **site seed is shared across users** and traverses the wire, so it is recoverable by any
-  entitled user. Its real value: a stolen connections file cannot be reversed offline without also
-  compromising a session or the key file.
-- The **credential transform still ships in every bundle**, through the core managed session store
-  the kernel creates, even though the managed UI is now confined to `managed.html` (a build check,
-  `scripts/check-bundles.mjs`, enforces that half). It was always present in *managed* bundles and
-  always recoverable by an entitled user, so this is **breadth** of exposure, not its kind; removing
-  it from the browser is planned in [rbac-rework-plan.md](rbac-rework-plan.md).
-  `scripts/check-docs-secrecy.mjs` guards only against *documenting* the construction.
+- **The store key opens both stores.** A stolen `users.yaml` or `connections.yaml` is useless
+  without it, so keep `STORE_KEY_FILE` on a separate mount or secret where you can; it shares the
+  `/managed` volume by default. Losing it means re-provisioning users and connections.
+- **No managed code or gateway call ships outside `managed.html`.** `scripts/check-bundles.mjs`
+  proves on the build that no Release bundle carries the managed UI or the `/managed/dial` and
+  `/managed/relay/` calls; the core managed profile in every bundle holds names only.
 - The **session cookie is a bearer credential** for its lifetime (`HttpOnly`, `Secure`,
   `SameSite=Lax`, ended by idle and absolute limits, sign-out, a restart, or an admin change to the
   account). The users file holds slow password hashes, not replayable bearers. Mitigations:
   filesystem permissions + TLS. (The admin CRUD list endpoints never return password hashes or
-  packed broker secrets.)
+  broker passwords.)
 - **Required mitigation:** configure per-broker **read-only / least-privilege SEMP accounts** (never
-  broker-admin) so a captured credential's blast radius is bounded. Managed mode is fit for
-  **trusted-internal** use only.
+  broker-admin) as the second line behind the read-only relay, and least-privilege VPN client
+  usernames. Managed mode is fit for **trusted-internal** use.
 
 ## Open hardening items (input to the connections rework)
 
-Found in the October 2026 branch review and parked here for the Managed connections / Connections module rework ([rbac-rework-plan.md](rbac-rework-plan.md) § 5 gives each item's phase). Phase 2 closed items 1, 2, 3, 5, 10, 11 and 12 and part of 6; each says what shipped. Items the threat model above already accepts (the ungated relay, `CONN_MODES=both`, the shared site seed) are not repeated; these are the gaps beyond them. Wording follows the docs-secrecy policy: what a value is and what the posture should be, never how the transform works.
+Found in the October 2026 branch review and parked here for the Managed connections / Connections module rework ([rbac-rework-plan.md](rbac-rework-plan.md) § 5 gives each item's phase). Phase 2 closed items 1, 2, 3, 5, 10, 11 and 12 and part of 6; Phase 3 closed 4, 6, 8 and 9. Each says what shipped. Items the threat model above already accepts are not repeated.
 
 **Gateway (`go-web-proxy/`)**
 
 1. **Login guessing.** *Closed in Phase 2.* The gateway checks passwords against a slow per-user hash with a constant-time compare ([password.go](../go-web-proxy/password.go)); an unknown user costs the same. [throttle.go](../go-web-proxy/throttle.go) backs off per username and per client after `login.maxFailures` failures and refuses a blocked attempt before the password is checked, and every request without a session draws from a per-client budget (`login.*` in `config.yaml`).
 2. **Unbounded bodies before auth.** *Closed in Phase 2.* The session is checked before any body is read, and every `/managed/*` body is capped at 64 KiB with unknown fields and trailing data rejected ([managed.go](../go-web-proxy/managed.go)); the sign-in forms share the cap.
 3. **Bootstrap admin.** *Closed in Phase 2.* No fixed password: the bootstrap admin takes `ADMIN_PASSWORD` / `ADMIN_PASSWORD_FILE` or a generated password logged once, and must change it at first sign-in before anything else is reachable ([store.go](../go-web-proxy/store.go), [pages.go](../go-web-proxy/pages.go)).
-4. **Site seed to every user.** `/managed/me` returns `siteSeed` to any authenticated user, including one with no entitlements at all. Direction: return it only to admins and to users entitled to at least one VPN.
+4. **Site seed to every user.** *Closed in Phase 3:* the site seed is gone. `/managed/me` names brokers and VPNs only, and the gateway keeps every credential in its encrypted store.
 5. **`/managed/reload` is open to any user.** *Closed in Phase 2:* the endpoint and the Refresh button's reload are gone; the gateway is the files' only writer and a hand edit needs a restart.
-6. **No shape check on stored secrets.** *Partly closed in Phase 2.* Passwords are hashed by the gateway, so a plaintext password can no longer be stored, and both files are validated strictly on load (unknown keys, duplicates, names, ports, hash format). Still open: a direct API caller with admin credentials can store a broker password that is not packed; Phase 3 moves that encryption server-side.
-7. **Queue entitlement is client-side only.** The server checks broker + VPN; queue globs are enforced only in the browser. Direction: decide whether the rework moves queue gating server-side, which only matters once the relay is gated too.
+6. **No shape check on stored secrets.** *Closed in Phases 2 and 3.* Passwords are hashed by the gateway, both files are validated strictly on load (unknown keys, duplicates, names, ports, hash format, a bare hostname, the ports a connection uses, no control characters in a credential), and both are sealed whole with the store key.
+7. **Queue entitlement is client-side only.** *Open, accepted for now.* Since Phase 3 the gateway gates SEMP and SMF per broker and VPN, but queue globs are still enforced only in the browser (see the threat model). Gateway-side queue filtering is out of the rework's scope.
 
 **Browser (`src/`)**
 
-8. **Plaintext outlives the dial.** In a managed session the unpacked broker password is written into `AppState.solaceConnection.pass` and `AppState.sempCredentials.pass` (the Managed panel's lifecycle hooks), kept in the panel's `lastSolaceAttempt`, and copied by Queue Copy into the disabled `#copy-source-sol-pass` / `#copy-source-semp-pass` inputs, where devtools can read it. Direction: keep the plaintext inside the `managedStore.connect` dial callback, and give Queue Copy a "provisioned source" path that needs no password field.
-9. **Permission upgrade on browse.** The Managed panel's `createQueueBrowser` wrap overwrites the SDK-private `_messageConsumer._permissions` with `READ_WRITE` for operate-entitled queues regardless of what the broker reported, so Delete can appear on a queue the broker says is read-only; it also depends on listener order on UP. Direction: downgrade-only (as Queue Copy's `effectiveSourceAccess` already is), without writing SDK-private state.
+8. **Plaintext outlives the dial.** *Closed in Phase 3:* no SEMP credential reaches the browser (relay), and the dialled SMF password goes straight to the SDK inside `managedProfile.dial`'s callback; `AppState` carries blank passwords, so Queue Copy's source mirror shows none.
+9. **Permission upgrade on browse.** *Closed in Phase 3:* the panel no longer writes `_messageConsumer._permissions`; Queue Browser's `updatePermissionUI` (`ui-table.ts`) makes a queue read-only when the broker says so **or** a managed read-only row covers it, never the other way.
 10. **Two session owners.** *Closed in Phase 2:* the gateway cookie is the one session; the Managed panel and `admin-login` both read it back (`GET /managed/me`) and sign out through `POST /managed/logout`, and `rbac:sign-out-requested` keeps its contract. (The panel's sign-out still disconnects SEMP unconditionally; with the Direct-connect interlock that only ever drops the managed connection's own SEMP.)
 11. **Self-demotion in `/solAdmin`.** *Closed in Phase 2:* a changed administrator flag ends that user's sessions at the gateway, and `user-management` signs the admin app out when it is the admin's own.
 12. **Generic admin errors and in-memory sessions.** *Closed in Phase 2:* the gateway answers `{"error": code}` and [managed-api.ts](../src/core/services/managed-api.ts) maps every code to a message (a rejected field shows the gateway's reason); the session is the cookie, so a page reload keeps it.
 
 **Also for the rework**
 
-- Stale text: the `src/core/encode.ts` and `scripts/module-registry-plugin.mjs` headers still say the transform stays out of builds that do not list the managed modules (it ships in every bundle now, see the threat model).
 - Queue Subscription Explorer and Queue Discovery are hidden in every managed session (admins included) because they read over unfiltered SEMP v1 RPC; `SubscriptionSource` exists as types only.
 - `src/css/main.css` still imports the stylesheets of modules the variant registry no longer bundles (queue-discovery everywhere; queue-copy and the subscription explorer in `min.html`).
 
-## YAML schemas (managed by the admin modules; never hand-edit in production)
+## YAML schemas (as sealed in the store files; edited only through the admin app)
 
 ```yaml
 # users.yaml
@@ -187,10 +215,10 @@ msg-utility-users:
 msg-utility-connections:
   - broker: broker-name
     hostname: www.example.com
-    semp:   { port: 1943, username: monitor, password: <obfuscated> }   # client-side, opaque to proxy
-    client: { port: 1443, msgVpns: [ { name: vpn-name, username: default, password: <obfuscated> } ] }
+    semp:   { port: 1943, username: monitor, password: <password> }   # added to relayed SEMP requests
+    client: { port: 1443, msgVpns: [ { name: vpn-name, username: default, password: <password> } ] }   # handed out by dial
 ```
 
 See [architecture.md](architecture.md) for the module/registry/RBAC mechanics and
-[deployment.md](deployment.md) for the environment variables, bootstrap, site-seed handling, and
-the operational security checklist.
+[deployment.md](deployment.md) for the environment variables, bootstrap, the store key, and the
+operational security checklist.

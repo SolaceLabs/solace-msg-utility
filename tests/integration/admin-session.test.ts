@@ -1,6 +1,6 @@
 /**
  * Integration — the /solAdmin session lifecycle: real admin-login +
- * user-management on one EventBus, AppState and managedStore.
+ * user-management on one EventBus and AppState.
  *
  * The unit suites stand in for the other side of `rbac:sign-out-requested`
  * (tests/modules/user-management/module.test.ts › "user-management — your own
@@ -8,12 +8,11 @@
  * requested by another module"); here both modules are real, so a change that
  * ended the session at the gateway must end on admin-login's signed-out view
  * rather than on a user list that cannot load. Only the network edges are
- * mocked (the managed and user services) plus the toast; `encode` and the
- * store stay real.
+ * mocked (the managed and user services) plus the toast.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createEventBus } from '../../src/core/event-bus';
-import { createManagedSessionStore } from '../../src/core/services/managed-session-store';
+import { createManagedProfile } from '../../src/core/services/managed-profile';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
 import type { AppContext, AppState } from '../../src/core/types';
 
@@ -35,7 +34,6 @@ vi.mock('../../src/core/toast', () => ({ showToast }));
 import { AdminLoginModule } from '../../src/modules/admin-login/module';
 import { UserManagementModule } from '../../src/modules/user-management/module';
 
-const SEED_B64 = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 const USERS = [
     { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null },
     { username: 'viewer', admin: false, operate: [], readOnly: [], modules: null },
@@ -48,12 +46,12 @@ const rowButton = (c: HTMLElement, i: number, cls: string) =>
     q(c, '#user-mgmt-rows').querySelectorAll('tr')[i].querySelector<HTMLButtonElement>(cls)!;
 
 /**
- * Both modules of the admin app, sharing one bus, AppState and store, opened
+ * Both modules of the admin app, sharing one bus and AppState, opened
  * with a live admin session at the gateway (admin-login restores it).
  */
 async function installAdminApp(list: unknown = { ok: true, data: { users: USERS, modules: CHOICES } }) {
     me.mockResolvedValue({ ok: true, data: {
-        username: 'admin', admin: true, siteSeed: SEED_B64,
+        username: 'admin', admin: true,
         operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], brokers: [], modules: [],
     } });
     umSvc.listUsers.mockResolvedValue(list);
@@ -62,9 +60,9 @@ async function installAdminApp(list: unknown = { ok: true, data: { users: USERS,
         activeModuleId: null, isConnected: false, isSempConnected: false,
         selectedVpn: null, solaceConnection: null, sempCredentials: null, managed: null,
     };
-    const managedStore = createManagedSessionStore();
+    const managedProfile = createManagedProfile();
     const ctxFor = (container: HTMLElement): AppContext => ({
-        container, appState, eventBus, managedStore,
+        container, appState, eventBus, managedProfile,
         setState: (k, v) => { (appState as any)[k] = v; eventBus.emit('app:state-change', { key: k, value: v }); },
         loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(), config: {},
     });
@@ -73,7 +71,7 @@ async function installAdminApp(list: unknown = { ok: true, data: { users: USERS,
     const loginCtx = ctxFor(login);
     await AdminLoginModule.install(loginCtx);
     await UserManagementModule.install(ctxFor(users));
-    return { appState, managedStore, login, users, loginCtx };
+    return { appState, login, users, loginCtx };
 }
 
 async function openAdminApp() {
@@ -84,10 +82,9 @@ async function openAdminApp() {
 
 /** The admin app is back at its signed-out view with nothing of the old session left. */
 function expectSignedOut(app: Awaited<ReturnType<typeof installAdminApp>>) {
-    const { appState, managedStore, login, users, loginCtx } = app;
+    const { appState, login, users, loginCtx } = app;
     expect(hidden(login, '#admin-login-view')).toBe(false);
     expect(appState.managed).toBeNull();
-    expect(managedStore.isActive()).toBe(false);
     expect(logout).toHaveBeenCalledTimes(1);
     expect(loginCtx.loadSelf).toHaveBeenCalledTimes(1);
     expect(hidden(users, '#user-mgmt-gate')).toBe(false);
@@ -162,7 +159,6 @@ describe('integration — admin app session lifecycle', () => {
 
         expect(hidden(app.login, '#admin-session-view')).toBe(false);
         expect(app.appState.managed!.username).toBe('admin');
-        expect(app.managedStore.isActive()).toBe(true);
         expect(app.loginCtx.loadSelf).not.toHaveBeenCalled();
         expect(logout).not.toHaveBeenCalled();
     });

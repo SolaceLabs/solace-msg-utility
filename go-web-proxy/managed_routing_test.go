@@ -24,7 +24,6 @@ func TestNewManagedRouting_Enabled(t *testing.T) {
 	cfg.hosted, cfg.managed, cfg.connModes = true, true, connBoth
 	cfg.usersFile = filepath.Join(dir, "users.yaml")
 	cfg.connectionsFile = filepath.Join(dir, "connections.yaml")
-	cfg.siteSeedFile = filepath.Join(dir, "site.seed")
 	cfg.storeKeyFile = filepath.Join(dir, "store.key")
 	t.Setenv(envAdminPassword, "")
 	t.Setenv(envAdminPasswordFile, "")
@@ -45,15 +44,16 @@ func TestBuildManagedRoutes_StoreErrorIsReturned(t *testing.T) {
 	f := newStoreFixture(t)
 	f.writeUsers(t, "msg-utility-users: [")
 	cfg := defaultConfig()
-	cfg.managed, cfg.usersFile, cfg.connectionsFile, cfg.siteSeedFile, cfg.storeKeyFile = true, f.usersPath, f.connsPath, f.seedPath, f.keyPath
+	cfg.managed, cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = true, f.usersPath, f.connsPath, f.keyPath
 	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, nil, quietLogger()); err == nil || !strings.Contains(err.Error(), f.usersPath) {
 		t.Fatalf("want the store error naming the file, got %v", err)
 	}
 }
 
-// Only connModes=managed gates the app bundle; /solAdmin is gated in every mode.
-// The settings page can change connModes, so the gate reads it live:
-// settings_test.go TestSettings_SaveAppliesLiveKeysAtOnce.
+// Only connModes=managed gates the app bundle and closes the Direct relay;
+// /solAdmin is gated in every mode. The settings page can change connModes, so
+// both gates read it live: settings_test.go
+// TestSettings_SaveAppliesLiveKeysAtOnce, and the flip below.
 func TestBuildManagedRoutes_GatesByMode(t *testing.T) {
 	for mode, gated := range map[string]bool{connDirect: false, connBoth: false, connManaged: true} {
 		e := newManagedEnv(t, func(c *config) { c.connModes = mode })
@@ -64,5 +64,21 @@ func TestBuildManagedRoutes_GatesByMode(t *testing.T) {
 		if rec := e.do("GET", "/solAdmin", "", nil); rec.Code != http.StatusSeeOther {
 			t.Errorf("%s: /solAdmin must need a session, got %d", mode, rec.Code)
 		}
+		for _, path := range []string{"/http/80/host/x", "/https/443/host/SEMP/v2/monitor", "/ws/80/host/", "/wss/443/host"} {
+			for _, c := range []*http.Cookie{nil, e.cookie("viewer", false)} {
+				rec := e.do("GET", path, "", c)
+				if closed := rec.Code == http.StatusNotFound && rec.Body.String() != "relay"; closed != gated {
+					t.Errorf("%s %s (cookie %v): Direct relay closed=%v, want %v (%d %q)", mode, path, c != nil, closed, gated, rec.Code, rec.Body.String())
+				}
+			}
+		}
+	}
+	// A settings change applies to the next request.
+	e := newManagedEnv(t, func(c *config) { c.connModes = connManaged })
+	next := e.cfg
+	next.connModes = connBoth
+	e.live.apply(next)
+	if got := e.do("GET", "/https/443/host/x", "", nil).Body.String(); got != "relay" {
+		t.Errorf("after switching to both: want the relay, got %q", got)
 	}
 }

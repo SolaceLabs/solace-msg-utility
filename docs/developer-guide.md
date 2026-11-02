@@ -30,7 +30,7 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 
 **The gates are `scripts/dev.sh` / `scripts/dev.ps1`, not the npm scripts.** The table above is the variant reference — reach for an individual `build:*` script when iterating on one variant. For anything you would call a gate, use the task: `./scripts/dev.sh all` (`build vet test`; CI runs `all scan`), `cov`, `scan`, `image`, or `full` for the pre-tag sweep. The tasks call the npm scripts above plus the Go halves, and they are the only place a build command lives — see [contributing.md](contributing.md#development-workflow) for the task table and [git.md](git.md) for how a tag turns into a release.
 
-The npm scripts the tasks wrap: `typecheck` (`tsc --noEmit`), `check:docs` (the credential-transform secrecy check: [scripts/check-docs-secrecy.mjs](../scripts/check-docs-secrecy.mjs) scans `docs/`, `README.md` and `CLAUDE.md`, and also fails if one of them is missing or no markdown is found), `audit:gate` (the npm half of `scan`: [scripts/npm-audit-gate.mjs](../scripts/npm-audit-gate.mjs) runs `npm audit` and fails only on fixable HIGH/CRITICAL advisories), `test` / `test:coverage`, and `build`. The `image` and `scan` tasks otherwise run their commands directly (`docker compose build`, `go tool govulncheck`, and the pinned Trivy container, see [git.md](git.md#keeping-the-workflow-pins-current)); there are deliberately no `image:*` / `scan:*` npm scripts, so each gate has one definition. `scan` runs `go tool govulncheck`, which resolves through the `tool` directive pinned in [go-web-proxy/go.mod](../go-web-proxy/go.mod) — never `go run pkg@version`, which runs module-less and ignores the toolchain pin.
+The npm scripts the tasks wrap: `typecheck` (`tsc --noEmit`), `check:bundles` (Release bundles carry no managed UI or gateway calls, and `managed.html` does: [scripts/check-bundles.mjs](../scripts/check-bundles.mjs), run by `build`), `audit:gate` (the npm half of `scan`: [scripts/npm-audit-gate.mjs](../scripts/npm-audit-gate.mjs) runs `npm audit` and fails only on fixable HIGH/CRITICAL advisories), `test` / `test:coverage`, and `build`. The `image` and `scan` tasks otherwise run their commands directly (`docker compose build`, `go tool govulncheck`, and the pinned Trivy container, see [git.md](git.md#keeping-the-workflow-pins-current)); there are deliberately no `image:*` / `scan:*` npm scripts, so each gate has one definition. `scan` runs `go tool govulncheck`, which resolves through the `tool` directive pinned in [go-web-proxy/go.mod](../go-web-proxy/go.mod) — never `go run pkg@version`, which runs module-less and ignores the toolchain pin.
 
 Custom variants are built via the `scripts/vite-build.mjs` wrapper, which surfaces `--variant=<name>`, `--out-filename=<name>`, and `--show-payload=<bool>` because Vite's CLI parser (CAC) rejects unknown flags. The wrapper forwards them to `vite.config.ts` via private env vars. Example: `node scripts/vite-build.mjs --variant=min --out-filename=min.html`. The dev server reads the same variant from the environment: `__VITE_VARIANT=managed npm run dev` serves the managed bundle (Managed tab included; it needs a managed gateway behind `/hosted` and `/managed/*` to sign in).
 
@@ -83,20 +83,18 @@ src/
     hosted.ts          # /hosted probe + buildBrokerUrl — the single gateway-rewrite point
     constants.ts       # App-wide constants
     rbac.ts            # Stateless RBAC matchers — matchGlob, isModuleVisible, isVpnVisible, isQueueVisible, canOperate
-    encode.ts          # Credential transform (site-seed pack/unpack). Algorithm is code-only —
-                       # never describe it in docs (scripts/check-docs-secrecy.mjs enforces this)
     managed-semp-filter.ts # filterSempFetch — scopes SEMP discovery to entitled VPNs/queues (managed)
     services/                  # Pure broker-side factories — no AppContext, no UI.
       solace-client.ts         # createServiceSolace(hooks) → Solace session lifecycle
       solace-publisher.ts      # createSolacePublisher(session) → publish/ACK tracking
-      semp-client.ts           # createServiceSemp(hooks) → SEMP cred validation; returns SempContext
+      semp-client.ts           # createServiceSemp(hooks) → SEMP cred validation (or the gateway relay); returns SempContext
       semp-discovery.ts        # createSempDiscovery(sempCtx) → paginated VPN + queue fetchers
       sempContext.ts           # unfilteredPrimarySempContext(ctx) → SempContext from primary AppState.
                                # Named for what it does NOT do: only two SEMP v2 list shapes are filtered
       queue-source.ts          # QueueSource + typed Access/scope — the discovery seam components consume
-      managed-session-store.ts # Owns the provisioned profile + site seed; dials targets on request
+      managed-profile.ts       # Provisioned broker/VPN names; dial(target, {connect}): relay config or a dialled SMF credential
       managed-api.ts           # managedRequest() — /managed/* on the gateway session cookie; error codes → text
-      managed-service.ts       # createManagedService() → GET /managed/me, POST /managed/logout
+      managed-service.ts       # createManagedService() → /managed/me, /managed/logout, /managed/dial, the relay base
     connections/               # Connection-domain library (types only — no orchestration here).
       types.ts                 # SolaceConfig, SempConfig, ConnectionConfig, ConnectionCredentials, SempContext
       defaults.ts              # DEFAULT_CONFIG + validateConfig (data-shape validator)
@@ -182,7 +180,7 @@ tests/
   helpers/             # loadModuleDOM, resetQueueBrowserState
   core/                # Kernel, EventBus, toast, utils tests (dom.ts is exercised transitively by module tests)
   modules/             # Per-module test files
-  build/               # scripts/*.mjs tests — module-registry-plugin (manifest → virtual:module-registry, entry overrides), check-bundles, npm-audit-gate, check-docs-secrecy
+  build/               # scripts/*.mjs tests — module-registry-plugin (manifest → virtual:module-registry, entry overrides), check-bundles, npm-audit-gate
   variants.test.ts     # Every variant manifest resolves and keeps its shape invariants
   registry.test.ts     # Registry resolution + kernel integration
   main.test.ts         # Bootstrap
@@ -225,8 +223,8 @@ interface AppContext {
     eventBus: EventBus;          // Typed pub/sub
     setState(key, value): void;  // Update global state + emit event
     loadSelf(): void;            // Navigate to this module's view
-    sempFetch(url, opts): Promise<Response>;  // SEMP with auto-injected auth
-    managedStore: ManagedStore;  // Provisioned profile + site seed; dials targets on request
+    sempFetch(url, opts): Promise<Response>;  // SEMP with auto-injected auth (managed: the gateway relay)
+    managedProfile: ManagedProfileStore;  // Provisioned names; dials targets on request
     copyToClipboard(text, btn?): Promise<void>;  // Clipboard + feedback
     config: Record<string, any>;
 }
@@ -286,7 +284,7 @@ export interface SolaceConnectionHooks {
 export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient;
 ```
 
-The connections module owns the **primary** connection: `installDirect` in its `module.ts` (shared by the Release and managed entries) defines `solaceHooks`/`sempHooks` that bridge factory events to `ctx.setState` + `eventBus.emit('client:connected'…)` + the connections form's UI updates. Other modules subscribe to those bus events as they always have. queue-copy is the secondary-connection caller: it defines different hooks that target module-scoped state instead of global state — same factory, different bridging. When its destination uses provisioned credentials it asks `ctx.managedStore` to dial the target and creates the client inside that callback, so the credential never leaves core.
+The connections module owns the **primary** connection: `installDirect` in its `module.ts` (shared by the Release and managed entries) defines `solaceHooks`/`sempHooks` that bridge factory events to `ctx.setState` + `eventBus.emit('client:connected'…)` + the connections form's UI updates. Other modules subscribe to those bus events as they always have. queue-copy is the secondary-connection caller: it defines different hooks that target module-scoped state instead of global state — same factory, different bridging. When its destination is provisioned it asks `ctx.managedProfile.dial(target, { connect })` and creates the client inside that callback: SEMP gets the gateway's relay base (`SempConfig.relayBase`, no credential at all), and SMF gets the VPN's dialled password and socket path (`SolaceConfig.smfPath`), which go straight to the SDK and are never stored.
 
 The same shape applies to SEMP: `createServiceSemp(hooks)` and the discovery generator `createSempDiscovery(sempCtx)` (from `src/core/services/semp-discovery.ts`) which is parameterized by a `SempContext` — a `{ fetch, baseUrl }` pair scoped to a specific broker. Build a primary SempContext via `unfilteredPrimarySempContext(ctx)` from `src/core/services/sempContext.ts` — read its docstring before adding a consumer, because only two SEMP v2 list shapes are entitlement-filtered. For discovery, prefer `queueSourceFrom(ctx, scope)` from `src/core/services/queue-source.ts`; components take a `QueueSource` and never run their own SEMP calls.
 

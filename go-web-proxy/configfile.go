@@ -22,13 +22,11 @@ import (
 // seed it on first start only (see resolveConfig); afterwards the file wins and
 // a differing env var is reported, never applied. Some values are deliberately
 // environment-only and never written to the file: CONFIG_FILE (where the file
-// is), SITE_SEED_FILE and STORE_KEY_FILE (where the deployment secrets are), so
-// an admin-editable settings file can never point the gateway at a different
-// secret.
+// is) and STORE_KEY_FILE (where the store key is), so an admin-editable
+// settings file can never point the gateway at a different secret.
 const (
 	configVersion       = 1
 	defaultConfigFile   = "/managed/config.yaml"
-	defaultSiteSeedFile = "/managed/site.seed"
 	defaultStoreKeyFile = "/managed/store.key"
 )
 
@@ -36,8 +34,8 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # Environment variables seed this file on first start only, when it does not
 # exist. Afterwards the file wins; a changed env var is ignored and logged.
 # Edit this file and restart the gateway, or delete it to re-seed from env.
-# CONFIG_FILE (this file), SITE_SEED_FILE and STORE_KEY_FILE (the deployment
-# secrets) are environment-only and never appear here.
+# CONFIG_FILE (this file) and STORE_KEY_FILE (the store key) are
+# environment-only and never appear here.
 # access.*, session.*, login.* and modules.* have no env var: edit them here.
 # An empty allow list admits every client; trustedProxies lists the reverse
 # proxies whose X-Forwarded-For is believed. session.*, login.* and modules.*
@@ -205,15 +203,11 @@ func configPath() string { return envOr("CONFIG_FILE", defaultConfigFile) }
 // secretPaths are the environment-only locations of the gateway's secrets.
 // toConfig takes them from its caller, never from the file.
 type secretPaths struct {
-	siteSeed string // SITE_SEED_FILE
 	storeKey string // STORE_KEY_FILE
 }
 
 func secretPathsFromEnv() secretPaths {
-	return secretPaths{
-		siteSeed: envOr("SITE_SEED_FILE", defaultSiteSeedFile),
-		storeKey: envOr("STORE_KEY_FILE", defaultStoreKeyFile),
-	}
+	return secretPaths{storeKey: envOr("STORE_KEY_FILE", defaultStoreKeyFile)}
 }
 
 func defaultFileConfig() fileConfig { return fileConfigFromConfig(defaultConfig()) }
@@ -302,7 +296,6 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 		managed:            fc.Managed,
 		usersFile:          fc.UsersFile,
 		connectionsFile:    fc.ConnectionsFile,
-		siteSeedFile:       secrets.siteSeed,
 		storeKeyFile:       secrets.storeKey,
 		connModes:          strings.ToLower(fc.ConnModes),
 		defaultConn:        strings.ToLower(fc.DefaultConn),

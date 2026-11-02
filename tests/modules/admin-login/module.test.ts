@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createEventBus } from '../../../src/core/event-bus';
-import { createManagedSessionStore } from '../../../src/core/services/managed-session-store';
+import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import type { AppContext, AppState, EventBus } from '../../../src/core/types';
 
@@ -16,12 +16,9 @@ vi.mock('../../../src/core/services/managed-service', () => ({
 
 import { AdminLoginModule } from '../../../src/modules/admin-login/module';
 
-const SEED_B64 = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
-
 const ADMIN_PROFILE = {
     username: 'admin',
     admin: true,
-    siteSeed: SEED_B64,
     operate: [{ brokers: '*', msgVpns: '*', queues: '*' }],
     readOnly: [],
     brokers: [],
@@ -47,7 +44,7 @@ async function install(meResult: unknown = { ok: true, data: ADMIN_PROFILE }, on
         setState: vi.fn((k, v) => { (appState as any)[k] = v; }),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
-        managedStore: createManagedSessionStore(),
+        managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: {},
     };
@@ -74,7 +71,9 @@ describe('admin-login — restoring the gateway session', () => {
             admin: true, username: 'admin', broker: '', vpns: [],
             operate: ADMIN_PROFILE.operate, readOnly: [], modules: [],
         });
-        expect(ctx.managedStore.isActive()).toBe(true);
+        // The admin app opens no broker connection, so it adopts nothing into
+        // the provisioned-connection profile.
+        expect(ctx.managedProfile.isActive()).toBe(false);
         expect(rbac).toHaveBeenCalledTimes(1);
         expect(el<HTMLAnchorElement>('#admin-change-password').getAttribute('href')).toBe('/login/password?next=/solAdmin');
     });
@@ -111,30 +110,21 @@ describe('admin-login — restoring the gateway session', () => {
         expect(el('#admin-login-error').textContent).toBe('The gateway could not be reached.');
     });
 
-    it('refuses a non-admin profile, adopting nothing', async () => {
+    it('refuses a non-admin profile, publishing nothing', async () => {
         const { el, hidden } = await install({ ok: true, data: { ...ADMIN_PROFILE, username: 'viewer', admin: false } });
         expect(el('#admin-login-error').textContent).toBe('This account is not an administrator.');
         expect(hidden('#admin-session-view')).toBe(true);
-        expect(appState.managed).toBeNull();
-        expect(ctx.managedStore.isActive()).toBe(false);
-    });
-
-    it('surfaces a profile the store cannot adopt', async () => {
-        const { el, hidden } = await install({ ok: true, data: { ...ADMIN_PROFILE, siteSeed: '!!not-base64!!' } });
-        expect(hidden('#admin-login-error')).toBe(false);
-        expect(el('#admin-login-error').textContent).not.toBe('');
         expect(appState.managed).toBeNull();
     });
 });
 
 describe('admin-login — sign out', () => {
-    it('ends the gateway session, clears the store and the session, then emits', async () => {
+    it('ends the gateway session, clears the session, then emits', async () => {
         const { el, hidden } = await install();
         const rbac = vi.fn();
         eventBus.on('rbac:changed', rbac);
         el<HTMLButtonElement>('#btn-admin-logout').click();
         expect(logout).toHaveBeenCalledTimes(1);
-        expect(ctx.managedStore.isActive()).toBe(false);
         expect(appState.managed).toBeNull();
         expect(rbac).toHaveBeenCalledTimes(1);
         expect(hidden('#admin-login-view')).toBe(false);

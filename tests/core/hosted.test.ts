@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isHosted, setHosted, probeHosted, probeDeployment, buildBrokerUrl } from '../../src/core/hosted';
+import { isHosted, setHosted, probeHosted, probeDeployment, buildBrokerUrl, gatewayWsUrl } from '../../src/core/hosted';
 import { DEFAULT_CONN_CONFIG } from '../../src/core/connections/conn-modes';
 
 // Reset the singleton between tests so a leftover flag from one test can't
@@ -184,6 +184,19 @@ describe('core/hosted — buildBrokerUrl', () => {
                 expect(buildBrokerUrl('https', 'broker.example.com', '1943', '/api', false))
                     .toBe('https://gateway:9443/https/1943/broker.example.com/api');
             });
+
+            it('gatewayWsUrl is a wss URL on the page host', () => {
+                expect(gatewayWsUrl('/managed/smf/b1/v1')).toBe('wss://gateway:9443/managed/smf/b1/v1');
+            });
         });
+    });
+});
+
+// A managed SMF socket is a gateway path on the page's own origin, so the
+// gateway's Origin check sees itself.
+describe('core/hosted — gatewayWsUrl', () => {
+    it('is plain ws on an http page', () => {
+        // jsdom's default location is http://localhost:3000/.
+        expect(gatewayWsUrl('/managed/smf/b1/v1')).toBe('ws://localhost:3000/managed/smf/b1/v1');
     });
 });

@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createEventBus } from '../../src/core/event-bus';
-import { createManagedSessionStore } from '../../src/core/services/managed-session-store';
+import { createManagedProfile } from '../../src/core/services/managed-profile';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
 import type { AppContext, AppState } from '../../src/core/types';
 
@@ -94,7 +94,7 @@ function makeCtx(overrides: Partial<AppContext> = {}): AppContext {
         }),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
-        managedStore: createManagedSessionStore(),
+        managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: { useMocks: false },
         ...overrides

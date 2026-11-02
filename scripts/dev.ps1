@@ -210,8 +210,6 @@ function Task-vet {
   # The build strips types without checking them, so tsc --noEmit is the only
   # thing that catches a type error.
   $c = Invoke-Logged 'vet' 'npm' @('run','typecheck'); if ($c -ne 0) { return $c }
-  # Guards against a doc that starts explaining the credential transform.
-  $c = Invoke-Logged 'vet' 'npm' @('run','check:docs'); if ($c -ne 0) { return $c }
   # Both ways: the RBAC backend is behind the `managed` tag, so an untagged run
   # never compiles it at all.
   $c = Invoke-Logged 'vet' 'go' @('-C',$GoDir,'vet','./...'); if ($c -ne 0) { return $c }

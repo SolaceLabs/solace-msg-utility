@@ -51,7 +51,6 @@ type config struct {
 	managed         bool
 	usersFile       string
 	connectionsFile string
-	siteSeedFile    string
 	storeKeyFile    string // encrypts usersFile and connectionsFile (keyfile.go)
 	// Connection-mode config surfaced to the SPA through /hosted. connModes is
 	// one of direct|managed|both; defaultConn (direct|managed) picks the tab
@@ -76,6 +75,7 @@ type managedRoutes struct {
 	pages     http.Handler                    // /login, /login/password
 	gateApp   func(http.Handler) http.Handler // the PWA; a session under connModes=managed
 	gateAdmin func(http.Handler) http.Handler // /solAdmin; an admin session, every mode
+	gateRelay func(http.Handler) http.Handler // the Direct relay; 404 under connModes=managed
 }
 
 // robotsTxt asks every crawler to stay out; X-Robots-Tag on each response says
@@ -86,7 +86,7 @@ const robotsTxt = "User-agent: *\nDisallow: /\n"
 // falls through to the SPA: without managed routing it is a plain 404.
 func newRootHandler(hosted, admin, app, relay http.Handler, mr *managedRoutes) http.Handler {
 	if mr != nil {
-		app, admin = mr.gateApp(app), mr.gateAdmin(admin)
+		app, admin, relay = mr.gateApp(app), mr.gateAdmin(admin), mr.gateRelay(relay)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Robots-Tag", "noindex, nofollow")
@@ -126,7 +126,6 @@ func defaultConfig() config {
 		logLevel:        slog.LevelWarn,
 		usersFile:       "/managed/users.yaml",
 		connectionsFile: "/managed/connections.yaml",
-		siteSeedFile:    defaultSiteSeedFile,
 		storeKeyFile:    defaultStoreKeyFile,
 		connModes:       connDirect,
 		defaultConn:     connDirect,
@@ -161,7 +160,6 @@ func loadConfig() (config, error) {
 		managed:            os.Getenv("MANAGED") == "true",
 		usersFile:          envOr("USERS_FILE", d.usersFile),
 		connectionsFile:    envOr("CONNECTIONS_FILE", d.connectionsFile),
-		siteSeedFile:       envOr("SITE_SEED_FILE", d.siteSeedFile),
 		storeKeyFile:       envOr("STORE_KEY_FILE", d.storeKeyFile),
 		connModes:          strings.ToLower(envOr("CONN_MODES", d.connModes)),
 		defaultConn:        strings.ToLower(envOr("DEFAULT_CONN", d.defaultConn)),

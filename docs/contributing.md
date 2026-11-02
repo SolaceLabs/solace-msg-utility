@@ -27,7 +27,7 @@ npm install && npm test
 | Task | What it runs |
 | --- | --- |
 | `build` | `npm run build` (every variant), `npm run check:bundles` (no Release bundle carries managed UI), plus both gateway binaries, version-stamped, into `dist/` |
-| `vet` | `npm run typecheck`, `npm run check:docs`, `go vet ./...` **and** `go vet -tags managed ./...` |
+| `vet` | `npm run typecheck`, `go vet ./...` **and** `go vet -tags managed ./...` |
 | `test` | `npm test`, `go test ./...` **and** `go test -tags managed ./...` |
 | `cov` | `npm run test:coverage` plus a Go coverage profile; prints both totals |
 | `scan` | `npm run audit:gate` (`npm audit`, fatal on fixable HIGH/CRITICAL advisories, warns on unfixable ones), `go tool govulncheck -tags=managed ./...`, then a Trivy scan of both freshly-built images with the pinned Trivy container (never a `trivy` on PATH; see [git.md](git.md#keeping-the-workflow-pins-current)) |
@@ -287,7 +287,7 @@ The `--pool=threads --maxWorkers=12` flags are included in the npm scripts the t
 - [ ] SDK/exception text goes through `solaceErrorText(e, fallback)` (core/utils.ts) — the SDK splits the reason across `.message` (QueueBrowser `OperationError`) and `.infoStr` (Session events); reading one loses it
 - [ ] Cross-module communication uses EventBus (no direct imports)
 - [ ] v8 ignores have explanatory comments
-- [ ] Managed/RBAC (if touched): module gating goes through `MODULE_REQUIREMENTS` (rbac.ts); credential-bearing state stays in `managedStore`, never `AppState`; the credential-transform algorithm stays out of the docs (`npm run check:docs`)
+- [ ] Managed/RBAC (if touched): module gating goes through `MODULE_REQUIREMENTS` (rbac.ts); the managed profile stays in `managedProfile` (names only), never `AppState`; a dialled password goes straight to the SDK inside the `dial` callback and is never stored; the gateway endpoint paths (`/managed/dial`, `/managed/relay/`) stay in managed-only files (`npm run check:bundles`)
 - [ ] Commit message describes the change clearly
 
 ---

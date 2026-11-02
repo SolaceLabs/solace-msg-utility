@@ -251,7 +251,9 @@ export interface PrimarySnapshot {
 /**
  * Populate the read-only Source cards with the live primary connection values,
  * including passwords. Passwords come from AppState (solaceConnection.pass +
- * sempCredentials.pass), which the connections module publishes on connect.
+ * sempCredentials.pass), which the connections module publishes on connect;
+ * a managed session publishes them blank, since its credentials stay with the
+ * gateway, and its broker name in place of a host.
  */
 export function applySourceReadonly(els: CopyUiElements, primary: PrimarySnapshot | null): void {
     const v = (x: string | undefined) => x ?? '';

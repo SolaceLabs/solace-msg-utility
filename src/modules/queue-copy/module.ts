@@ -48,6 +48,8 @@ import { createGate } from '../../core/components/module-gate';
 import { logger } from '../../core/logger';
 import { isQueueVisible, canOperate } from '../../core/rbac';
 import { errMessage } from '../../core/utils';
+import { isSessionEnded } from '../../core/services/managed-profile';
+import { managedErrorMessage } from '../../core/services/managed-api';
 import type { AppContext, SempConfig, SolaceConfig } from '../../core/types';
 
 export const QueueCopyModule = {
@@ -194,6 +196,13 @@ export const QueueCopyModule = {
             },
             onAuthFailed: () => {
                 setDestSempStatus(els, 'disconnected');
+                if (state.destForm.credMode === 'provisioned') {
+                    // The gateway's relay answers 401 only when its session has
+                    // ended: ask the session owner to sign out.
+                    setDestSempError(els, managedErrorMessage({ ok: false, status: 401, code: 'unauthenticated' }));
+                    eventBus.emit('rbac:sign-out-requested');
+                    return;
+                }
                 setDestSempError(els, 'SEMP authentication failed (401).');
             },
             onError: ({ message }) => {
@@ -210,12 +219,12 @@ export const QueueCopyModule = {
             setDestSempStatus(els, 'connecting');
             setDestSempError(els, null);
             if (f.credMode === 'provisioned') {
-                // The core store owns the credential: it unpacks just-in-time and
-                // dials with a password this module never sees. Effects still land
+                // The core profile hands back the gateway's SEMP relay for the
+                // broker: no credential reaches this module. Effects still land
                 // only in module-local state via destSempHooks (Anchor 4).
-                void app.managedStore
-                    .connect({ broker: f.provisioned.broker, kind: 'semp' }, {
-                        connect: async (c) => { await destSempClient.connect(c.cfg, c.host, c.pass); },
+                void app.managedProfile
+                    .dial({ broker: f.provisioned.broker, kind: 'semp' }, {
+                        connect: async (c) => { await destSempClient.connect(c.cfg, c.broker, ''); },
                     })
                     .catch((e) => {
                         setDestSempStatus(els, 'disconnected');
@@ -238,15 +247,17 @@ export const QueueCopyModule = {
                 destSolClient.init();
                 setDestSolStatus(els, 'connecting');
                 setDestSolError(els, null);
-                // The store also owns connection identity here, so the clientName
-                // it composes always matches the clientNameId inside its cfg.
-                void app.managedStore
-                    .connect({ broker: f.provisioned.broker, vpn: f.provisioned.vpn, kind: 'solace' }, {
-                        connect: (c) => { destSolClient.connect(c.cfg, c.host, c.pass, c.clientName); },
+                // The profile dials the gateway for the VPN's credential, which
+                // goes straight to the SDK; it also owns connection identity, so
+                // the clientName always matches the clientNameId inside its cfg.
+                void app.managedProfile
+                    .dial({ broker: f.provisioned.broker, vpn: f.provisioned.vpn, kind: 'solace' }, {
+                        connect: (c) => { destSolClient.connect(c.cfg, c.broker, c.pass, c.clientName); },
                     })
                     .catch((e) => {
                         setDestSolStatus(els, 'disconnected');
                         setDestSolError(els, errMessage(e));
+                        if (isSessionEnded(e)) eventBus.emit('rbac:sign-out-requested');
                     });
                 return;
             }
@@ -392,7 +403,7 @@ export const QueueCopyModule = {
             const broker = session?.broker ?? '';
 
             const destProvisioned = state.destForm.credMode === 'provisioned';
-            const destStillProvisioned = !destProvisioned || app.managedStore
+            const destStillProvisioned = !destProvisioned || app.managedProfile
                 .vpnsFor(state.destForm.provisioned.broker)
                 .includes(state.destForm.provisioned.vpn);
 

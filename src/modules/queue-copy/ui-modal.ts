@@ -418,12 +418,19 @@ export function cancelCopyModal(els: CopyUiElements, state: QueueCopyState): voi
     els.modal.close();
 }
 
-function buildSourceSummary(ctx: AppContext, queueName: string): SourceSummary {
+/**
+ * The primary broker as the user knows it: the structured host/port fields the
+ * connections module captured at Connect time, not the gateway-prefixed wire
+ * URL in hosted mode; for a managed session (relay), the provisioned name.
+ */
+function primaryBrokerLabel(ctx: AppContext): string {
     const sempCreds = ctx.appState.sempCredentials;
-    // Use the structured host/port fields the connections module captured at
-    // Connect time so the displayed broker matches what the user typed —
-    // not the gateway-prefixed wire URL in hosted mode.
-    const broker = sempCreds ? `${sempCreds.host}:${sempCreds.port}` : '';
+    if (!sempCreds) return '';
+    return sempCreds.relay ? sempCreds.host : `${sempCreds.host}:${sempCreds.port}`;
+}
+
+function buildSourceSummary(ctx: AppContext, queueName: string): SourceSummary {
+    const broker = primaryBrokerLabel(ctx);
     return {
         broker: broker || '(primary broker)',
         vpn: ctx.appState.selectedVpn ?? '(primary VPN)',
@@ -435,8 +442,7 @@ function buildDestSummary(ctx: AppContext, state: QueueCopyState): DestSummary {
     const f = state.destForm;
     let broker: string;
     if (f.sameBroker) {
-        const sempCreds = ctx.appState.sempCredentials;
-        broker = sempCreds ? `${sempCreds.host}:${sempCreds.port}` : '(primary broker)';
+        broker = primaryBrokerLabel(ctx) || '(primary broker)';
     } else {
         broker = f.host || '(not set)';
     }

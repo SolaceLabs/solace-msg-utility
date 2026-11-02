@@ -3,18 +3,14 @@
  *
  * The gateway serves `/solAdmin` only to an administrator's session (sign-in
  * happens on its own `/login` page), so this module does not sign anyone in:
- * it reads the session back (`GET /managed/me`), adopts the profile, and shows
+ * it reads the session back (`GET /managed/me`), publishes it, and shows
  * who is signed in with Change password and Sign out. It never creates a
  * Solace or SEMP connection, so `AppState.isConnected` / `isSempConnected`
  * stay false for the app's whole lifetime.
  *
- * A non-admin profile is refused before anything is adopted (the gateway's
+ * A non-admin profile is refused before anything is published (the gateway's
  * gate makes that a race with a demotion, not a normal path), so no ordinary
  * user gets a signed-in shell with an empty sidebar.
- *
- * Adopting the profile into `ctx.managedStore` matters even with no broker in
- * play — `connection-management` seals credentials with the deployment's site
- * seed through `packSecret`, and the store is the only holder of that seed.
  *
  * It is the session's only owner in the admin app, so a sign-out another
  * module needs (user-management, after a change that ended the session, or a
@@ -25,7 +21,6 @@ import { required } from '../../core/dom';
 import { createManagedService } from '../../core/services/managed-service';
 import { managedErrorMessage } from '../../core/services/managed-api';
 import { logger } from '../../core/logger';
-import { errMessage } from '../../core/utils';
 import type { AppContext } from '../../core/types';
 
 const SIGN_IN = '/login?next=/solAdmin';
@@ -39,7 +34,6 @@ export const AdminLoginModule = {
     async install(app: AppContext) {
         const { container, eventBus } = app;
         const service = createManagedService();
-        const store = app.managedStore;
 
         const els = {
             loginView: required<HTMLElement>(container, '#admin-login-view'),
@@ -81,18 +75,10 @@ export const AdminLoginModule = {
             }
             const p = res.data;
             if (!p.admin) {
-                // Refuse before anything is adopted: no store, no AppState,
-                // no emit. The account is valid, just not for this app.
+                // Refuse before anything is published: no AppState, no emit.
+                // The account is valid, just not for this app.
                 logger.warn(`[AdminLogin] refused non-admin session for "${p.username}"`);
                 showSignedOut('This account is not an administrator.');
-                return;
-            }
-            try {
-                // Adopt the profile BEFORE publishing state or emitting, so no
-                // observer of `rbac:changed` can see a half-built session.
-                await store.setProfile(p);
-            } catch (e) {
-                showSignedOut(errMessage(e));
                 return;
             }
             app.setState('managed', {
@@ -109,7 +95,6 @@ export const AdminLoginModule = {
             // outcome, so the answer is not awaited.
             void service.logout();
             signedIn = false;
-            store.clear();
             app.setState('managed', null);
             eventBus.emit('rbac:changed');
             showSignedOut(null);
@@ -119,7 +104,7 @@ export const AdminLoginModule = {
         els.btnLogout.addEventListener('click', doLogout);
         // Another module ended the session: user-management after a change to
         // the admin's own account, or any admin module on a 401. Sign out
-        // exactly as the button does (store, AppState, rbac:changed, signed-out
+        // exactly as the button does (AppState, rbac:changed, signed-out
         // view, navigate here).
         eventBus.on('rbac:sign-out-requested', () => { if (signedIn) doLogout(); });
 

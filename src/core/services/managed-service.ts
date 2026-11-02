@@ -11,16 +11,14 @@ import { managedRequest, type ManagedResult } from './managed-api';
 /** A single Message VPN the user may connect to on a broker. */
 export interface ManagedVpn {
     name: string;
-    /** Client (SMF) connection details. `pass` is packed (decrypted client-side). */
-    client: { port: string; user: string; pass: string };
 }
 
-/** A broker connection the user is entitled to. */
+/**
+ * A broker the user is entitled to: names only. The gateway keeps the address
+ * and every credential; the SEMP relay and dial use them on the user's behalf.
+ */
 export interface ManagedConnection {
     broker: string;
-    hostname: string;
-    /** SEMP (management) details. `pass` is packed (decrypted client-side). */
-    semp: { port: string; user: string; pass: string };
     msgVpns: ManagedVpn[];
 }
 
@@ -28,14 +26,24 @@ export interface ManagedConnection {
 export interface ManagedProfile {
     username: string;
     admin: boolean;
-    /** Per-deployment seed bytes, base64. Imported NON-extractable to unpack creds. */
-    siteSeed: string;
     /** The user's raw permission rows (drive client-side queue filtering). */
     operate: QGlob[];
     readOnly: QGlob[];
     brokers: ManagedConnection[];
     /** App modules this user may open; drives module control (`rbac.ts`). */
     modules: string[];
+}
+
+/**
+ * The POST /managed/dial answer: the VPN's client username and password, and
+ * the gateway path of its SMF socket. The one broker credential the browser
+ * ever receives, used for the SDK login at once and never stored.
+ */
+export interface DialResponse {
+    smfPath: string;
+    vpn: string;
+    user: string;
+    pass: string;
 }
 
 export interface ManagedService {
@@ -46,11 +54,17 @@ export interface ManagedService {
     me(): Promise<ManagedResult<ManagedProfile>>;
     /** POST /managed/logout. Ends the gateway session; callers ignore the outcome. */
     logout(): Promise<ManagedResult<void>>;
+    /** POST /managed/dial: `not_found` alike for an unknown and a not-entitled VPN. */
+    dial(broker: string, vpn: string): Promise<ManagedResult<DialResponse>>;
+    /** The SEMP relay base for a broker: every SEMP path is appended to it. */
+    relayBase(broker: string): string;
 }
 
 export function createManagedService(): ManagedService {
     return {
         me: () => managedRequest<ManagedProfile>('GET', '/managed/me'),
         logout: () => managedRequest('POST', '/managed/logout'),
+        dial: (broker, vpn) => managedRequest<DialResponse>('POST', '/managed/dial', { broker, vpn }),
+        relayBase: broker => `/managed/relay/${encodeURIComponent(broker)}`,
     };
 }

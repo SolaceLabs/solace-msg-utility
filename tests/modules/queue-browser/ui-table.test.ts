@@ -7,7 +7,7 @@ import { state, setBrowser } from '../../../src/modules/queue-browser/state.js';
 import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
-import type { EventBus, AppContext } from '../../../src/core/types';
+import type { EventBus, AppContext, AppState } from '../../../src/core/types';
 
 function createBrowserDOM() {
     return loadModuleDOM('queue-browser');
@@ -307,6 +307,64 @@ describe('queue-browser/ui-table', () => {
             state.allMessages = [];
             ui.updatePermissionUI('nonexistent');
             expect(state.currentQueuePermissions).toBeNull();
+        });
+    });
+
+    // A managed session's read-only rows only ever downgrade what the broker
+    // grants; they never upgrade a queue the broker keeps read-only.
+    describe('updatePermissionUI() in a managed session', () => {
+        const managed = (rows: 'operate' | 'readOnly'): AppState => ({
+            activeModuleId: null, isConnected: true, selectedVpn: 'v1', solaceConnection: null, sempCredentials: null, isSempConnected: true,
+            managed: {
+                admin: false, username: 'u', broker: 'b1', vpns: ['v1'], modules: [],
+                operate: rows === 'operate' ? [{ brokers: '*', msgVpns: '*', queues: '*' }] : [],
+                readOnly: rows === 'readOnly' ? [{ brokers: '*', msgVpns: '*', queues: '*' }] : [],
+            },
+        });
+
+        it.each([
+            ['the broker allows writing, a read-only row', 'READ_WRITE', 'readOnly', true],
+            ['the broker keeps it read-only, an operate row', 'READ_ONLY', 'operate', true],
+            ['the broker allows writing, an operate row', 'READ_WRITE', 'operate', false],
+        ] as const)('%s: read-only %s', (_case, sdk, rows, readOnly) => {
+            initTable(eventBus, { appState: managed(rows) });
+            setBrowser('q1', { _messageConsumer: { _permissions: sdk } });
+            state.displayedMessages = [];
+            state.allMessages = [];
+
+            ui.updatePermissionUI('q1');
+
+            expect(state.currentQueuePermissions).toEqual({ READ_ONLY: readOnly });
+            expect(ui.getElements().hdrPermissions.textContent).toBe(readOnly ? 'Read-Only' : 'Read-Write');
+            expect(ui.getElements().btnBrowserDelete.classList.contains('hidden')).toBe(readOnly);
+        });
+
+        it('shows a read-only row even when the SDK exposes no permission, and with no VPN selected yet', () => {
+            const appState = managed('readOnly');
+            appState.selectedVpn = null;
+            initTable(eventBus, { appState });
+            setBrowser('q1', { _messageConsumer: null });
+            state.displayedMessages = [];
+            state.allMessages = [];
+
+            ui.updatePermissionUI('q1');
+
+            expect(ui.getElements().hdrPermissions.classList.contains('hidden')).toBe(false);
+            expect(ui.getElements().hdrPermissions.textContent).toBe('Read-Only');
+            expect(state.currentQueuePermissions).toEqual({ READ_ONLY: true });
+        });
+
+        it('a Direct session (no managed) is the broker\'s word alone', () => {
+            const appState = managed('readOnly');
+            appState.managed = null;
+            initTable(eventBus, { appState });
+            setBrowser('q1', { _messageConsumer: { _permissions: 'READ_WRITE' } });
+            state.displayedMessages = [];
+            state.allMessages = [];
+
+            ui.updatePermissionUI('q1');
+
+            expect(state.currentQueuePermissions).toEqual({ READ_ONLY: false });
         });
     });
 

@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -67,7 +66,7 @@ type usersDoc struct {
 type vpnRec struct {
 	Name     string `yaml:"name"`
 	Username string `yaml:"username"`
-	Password string `yaml:"password"` // packed (client-encrypted); stored opaque
+	Password string `yaml:"password"` // inside the sealed file; reaches a browser only through dial
 }
 
 type clientRec struct {
@@ -78,7 +77,7 @@ type clientRec struct {
 type sempRec struct {
 	Port     flexStr `yaml:"port"`
 	Username string  `yaml:"username"`
-	Password string  `yaml:"password"` // packed (client-encrypted); stored opaque
+	Password string  `yaml:"password"` // inside the sealed file; never reaches a browser
 }
 
 type connRec struct {
@@ -94,35 +93,24 @@ type connsDoc struct {
 
 // ----- /managed/me response shapes (JSON to the browser) ----------------------
 
+// The profile names brokers and VPNs only: no address, port, username or
+// password. The SEMP relay adds the SEMP account, and dial hands out a VPN's
+// credential when the browser connects.
 type respPerm struct {
 	Brokers string `json:"brokers"`
 	MsgVpns string `json:"msgVpns"`
 	Queues  string `json:"queues"`
 }
-type respClient struct {
-	Port string `json:"port"`
-	User string `json:"user"`
-	Pass string `json:"pass"` // still packed
-}
 type respVpn struct {
-	Name   string     `json:"name"`
-	Client respClient `json:"client"`
-}
-type respSemp struct {
-	Port string `json:"port"`
-	User string `json:"user"`
-	Pass string `json:"pass"` // still packed
+	Name string `json:"name"`
 }
 type respBroker struct {
-	Broker   string    `json:"broker"`
-	Hostname string    `json:"hostname"`
-	Semp     respSemp  `json:"semp"`
-	MsgVpns  []respVpn `json:"msgVpns"`
+	Broker  string    `json:"broker"`
+	MsgVpns []respVpn `json:"msgVpns"`
 }
 type profileResponse struct {
 	Username string       `json:"username"`
 	Admin    bool         `json:"admin"`
-	SiteSeed string       `json:"siteSeed"` // base64; client imports NON-extractable
 	Operate  []respPerm   `json:"operate"`
 	ReadOnly []respPerm   `json:"readOnly"`
 	Brokers  []respBroker `json:"brokers"`
@@ -131,7 +119,7 @@ type profileResponse struct {
 
 // ----- store ------------------------------------------------------------------
 
-// store holds the parsed users + connections + the site seed, guarded by an
+// store holds the parsed users and connections, guarded by an
 // RWMutex (reads under RLock, CRUD writes under Lock). The file paths are
 // retained so admin-CRUD mutations can persist back to the same files. Both
 // files are encrypted with the store key (storecrypt.go), so the gateway is
@@ -140,7 +128,6 @@ type store struct {
 	mu        sync.RWMutex
 	users     []userRec
 	conns     []connRec
-	siteSeed  string // base64 of the raw seed bytes
 	usersPath string // retained for CRUD persistence
 	connsPath string // retained for CRUD persistence
 	seal      *sealer
@@ -162,7 +149,7 @@ func (s *store) afterWrite(err *error) {
 }
 
 type storeOptions struct {
-	usersPath, connsPath, seedPath, keyPath string
+	usersPath, connsPath, keyPath string
 	hasher                                  *hasher
 	getenv                                  func(string) string // os.Getenv; injected for tests
 }
@@ -214,12 +201,6 @@ func loadStore(opts storeOptions, logger *slog.Logger) (*store, error) {
 		}
 		s.conns = doc.Connections
 	}
-
-	seed, err := loadOrGenerateSeed(opts.seedPath, logger)
-	if err != nil {
-		return nil, fmt.Errorf("site seed: %w", err)
-	}
-	s.siteSeed = seed
 	return s, nil
 }
 
@@ -381,7 +362,6 @@ func (s *store) profile(username string, ms moduleSettings) (*profileResponse, b
 	resp := &profileResponse{
 		Username: u.Username,
 		Admin:    u.Admin,
-		SiteSeed: s.siteSeed,
 		Operate:  toRespPerms(u.Operate),
 		ReadOnly: toRespPerms(u.ReadOnly),
 		Brokers:  []respBroker{},
@@ -390,18 +370,10 @@ func (s *store) profile(username string, ms moduleSettings) (*profileResponse, b
 	for _, c := range s.conns {
 		vpns := []respVpn{}
 		for _, v := range entitledVPNs(&u, c) {
-			vpns = append(vpns, respVpn{
-				Name:   v.Name,
-				Client: respClient{Port: string(c.Client.Port), User: v.Username, Pass: v.Password},
-			})
+			vpns = append(vpns, respVpn{Name: v.Name})
 		}
 		if len(vpns) > 0 {
-			resp.Brokers = append(resp.Brokers, respBroker{
-				Broker:   c.Broker,
-				Hostname: c.Hostname,
-				Semp:     respSemp{Port: string(c.Semp.Port), User: c.Semp.Username, Pass: c.Semp.Password},
-				MsgVpns:  vpns,
-			})
+			resp.Brokers = append(resp.Brokers, respBroker{Broker: c.Broker, MsgVpns: vpns})
 		}
 	}
 	return resp, true
@@ -645,7 +617,7 @@ func (s *store) deleteUser(username string) (found bool, err error) {
 
 // listConnections returns a deep copy of the stored connections — the nested
 // VPN slices are cloned so a caller can't mutate the live store through the
-// result. Callers strip the packed passwords before sending them to a client
+// result. Callers strip the passwords before sending them to a client
 // (see connToOutput).
 func (s *store) listConnections() []connRec {
 	s.mu.RLock()
@@ -658,7 +630,7 @@ func (s *store) listConnections() []connRec {
 }
 
 // upsertConnection replaces the connection with the same broker, or appends a
-// new one, then persists. Blank packed-password fields on an EXISTING broker
+// new one, then persists. Blank password fields on an EXISTING broker
 // keep the stored secrets (edit-without-changing-password) — see
 // mergeConnSecrets. Persist-then-commit, same as upsertUser.
 func (s *store) upsertConnection(c connRec) (err error) {
@@ -685,10 +657,10 @@ func (s *store) upsertConnection(c connRec) (err error) {
 	return nil
 }
 
-// mergeConnSecrets fills blank packed-password fields in `c` from the existing
+// mergeConnSecrets fills blank password fields in `c` from the existing
 // record `old` (keep-on-edit), matching VPNs by name. A blank with no matching
 // existing VPN stays blank — a renamed or brand-new VPN must carry its own
-// packed password.
+// password.
 func mergeConnSecrets(c *connRec, old connRec) {
 	if c.Semp.Password == "" {
 		c.Semp.Password = old.Semp.Password
@@ -730,7 +702,7 @@ func (s *store) deleteConnection(broker string) (found bool, err error) {
 	return true, nil
 }
 
-// ----- bootstrap + seed -------------------------------------------------------
+// ----- bootstrap ----------------------------------------------------------------
 
 // adminSeed returns the bootstrap admin password from ADMIN_PASSWORD or the
 // file named by ADMIN_PASSWORD_FILE (a Docker secret), and which variable gave
@@ -793,24 +765,4 @@ func bootstrapUsers(opts storeOptions, sl *sealer, logger *slog.Logger) (usersDo
 			"path", opts.usersPath, "username", bootstrapAdminName, "source", source)
 	}
 	return doc, nil
-}
-
-func loadOrGenerateSeed(path string, logger *slog.Logger) (string, error) {
-	data, err := os.ReadFile(path)
-	if err == nil {
-		return strings.TrimSpace(string(data)), nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	logger.Warn("site-seed file missing — generating a new one (back this up; losing it orphans stored creds)", "path", path)
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", err
-	}
-	b64 := base64.StdEncoding.EncodeToString(raw)
-	if err := writeFileAtomic(path, []byte(b64), 0o600); err != nil {
-		return "", err
-	}
-	return b64, nil
 }

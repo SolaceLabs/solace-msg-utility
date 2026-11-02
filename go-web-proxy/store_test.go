@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -50,28 +51,28 @@ const connsYAML = `msg-utility-connections:
     semp:
       port: 1943
       username: mon
-      password: PKD:semp-b1
+      password: semp-b1-pw
     client:
       port: 1443
       msgVpns:
         - name: v1
           username: u1
-          password: PKD:cli-b1v1
+          password: cli-b1v1-pw
         - name: v2
           username: u2
-          password: PKD:cli-b1v2
+          password: cli-b1v2-pw
   - broker: b2
     hostname: host2
     semp:
       port: 1943
       username: mon
-      password: PKD:semp-b2
+      password: semp-b2-pw
     client:
       port: 1443
       msgVpns:
         - name: v9
           username: u9
-          password: PKD:cli-b2v9
+          password: cli-b2v9-pw
 `
 
 func testHasher(t *testing.T) *hasher {
@@ -112,7 +113,7 @@ const testStoreKeyHex = "00112233445566778899aabbccddeeff102132435465768798a9bac
 // viewer) and connections (brokers b1, b2) fixtures, sealed as the gateway
 // writes them.
 type storeFixture struct {
-	usersPath, connsPath, seedPath, keyPath string
+	usersPath, connsPath, keyPath string
 	h                                       *hasher
 }
 
@@ -128,7 +129,7 @@ func newStoreFixture(t *testing.T) storeFixture {
 }
 
 func (f storeFixture) opts(getenv func(string) string) storeOptions {
-	return storeOptions{usersPath: f.usersPath, connsPath: f.connsPath, seedPath: f.seedPath, keyPath: f.keyPath, hasher: f.h, getenv: getenv}
+	return storeOptions{usersPath: f.usersPath, connsPath: f.connsPath, keyPath: f.keyPath, hasher: f.h, getenv: getenv}
 }
 
 // sealer opens and seals with the key in the fixture's key file, whether the
@@ -208,7 +209,6 @@ func bootstrapFixture(t *testing.T) storeFixture {
 	return storeFixture{
 		usersPath: filepath.Join(dir, "users.yaml"),
 		connsPath: filepath.Join(dir, "conns.yaml"),
-		seedPath:  filepath.Join(dir, "site.seed"),
 		keyPath:   filepath.Join(dir, "store.key"),
 		h:         testHasher(t),
 	}
@@ -239,9 +239,6 @@ func TestLoadStore_BootstrapGeneratedPasswordIsLoggedOnceAndMustChange(t *testin
 	}
 	if info, _ := os.Stat(f.usersPath); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("users file must be owner-only, got %v", info.Mode().Perm())
-	}
-	if s.siteSeed == "" {
-		t.Error("site seed should be generated")
 	}
 
 	buf.Reset()
@@ -431,7 +428,7 @@ func TestStore_FilesOnDiskAreEncrypted(t *testing.T) {
 		if !strings.HasPrefix(string(raw), storeMagic) {
 			t.Errorf("%s: want the store header, got %q", filepath.Base(path), raw[:min(len(raw), 8)])
 		}
-		for _, plain := range []string{"username", "admin", "mon3", "semp-secret-3", "host3", "PKD:"} {
+		for _, plain := range []string{"username", "admin", "mon3", "semp-secret-3", "host3", "cli-b1v1-pw"} {
 			if strings.Contains(string(raw), plain) {
 				t.Errorf("%s holds %q in the clear", filepath.Base(path), plain)
 			}
@@ -550,14 +547,6 @@ func TestValidateConn_HostPortsAndCredentials(t *testing.T) {
 	}
 }
 
-func TestLoadStore_SeedPersistsAcrossLoads(t *testing.T) {
-	f := newStoreFixture(t)
-	s1, s2 := f.load(t), f.load(t)
-	if s1.siteSeed == "" || s1.siteSeed != s2.siteSeed {
-		t.Errorf("seed should persist across loads: %q vs %q", s1.siteSeed, s2.siteSeed)
-	}
-}
-
 // ----- queries ------------------------------------------------------------------------
 
 func TestStore_ProfileAndEntitlement(t *testing.T) {
@@ -572,14 +561,18 @@ func TestStore_ProfileAndEntitlement(t *testing.T) {
 	if len(prof.Brokers) != 2 {
 		t.Fatalf("admin should see 2 brokers, got %d", len(prof.Brokers))
 	}
-	if prof.Brokers[0].Semp.Pass != "PKD:semp-b1" {
-		t.Errorf("packed semp pass should pass through opaque, got %q", prof.Brokers[0].Semp.Pass)
+	// Names only: no address, port, username or password reaches the browser.
+	raw, err := json.Marshal(prof)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if prof.Brokers[0].MsgVpns[0].Client.Port != "1443" {
-		t.Errorf("unquoted YAML port should become string, got %q", prof.Brokers[0].MsgVpns[0].Client.Port)
+	for _, leak := range []string{`"pass"`, `"user"`, `"hostname"`, `"port"`, `"semp"`, `"client"`, `"siteSeed"`, "host1", "1443", "1943", "-pw"} {
+		if strings.Contains(string(raw), leak) {
+			t.Errorf("the profile holds %s: %s", leak, raw)
+		}
 	}
-	if prof.SiteSeed == "" {
-		t.Error("siteSeed should be present")
+	if tg, ok := s.smfTarget("admin", "b1", "v1"); !ok || tg.port != "1443" || tg.pass != "cli-b1v1-pw" {
+		t.Errorf("an unquoted YAML port must become a string, the password opaque: %+v", tg)
 	}
 
 	vp, _ := s.profile("viewer", defaultConfig().modules)
@@ -886,9 +879,9 @@ func TestStore_UpsertConnection_MergeSecretsOnEdit(t *testing.T) {
 	s := newStoreWithFixtures(t)
 	edit := connRec{
 		Broker: "b1", Hostname: "host1-new",
-		Semp: sempRec{Port: "1943", Username: "mon", Password: ""}, // blank → keep PKD:semp-b1
+		Semp: sempRec{Port: "1943", Username: "mon", Password: ""}, // blank → keep semp-b1-pw
 		Client: clientRec{Port: "1443", MsgVpns: []vpnRec{
-			{Name: "v1", Username: "u1", Password: ""},           // blank + match → keep PKD:cli-b1v1
+			{Name: "v1", Username: "u1", Password: ""},           // blank + match → keep cli-b1v1-pw
 			{Name: "v2", Username: "u2", Password: "V1:changed"}, // non-blank → replace
 			{Name: "vX", Username: "ux", Password: ""},           // blank + no match → stays ""
 		}},
@@ -905,14 +898,14 @@ func TestStore_UpsertConnection_MergeSecretsOnEdit(t *testing.T) {
 	if b1.Hostname != "host1-new" {
 		t.Errorf("non-secret fields must update, hostname=%q", b1.Hostname)
 	}
-	if b1.Semp.Password != "PKD:semp-b1" {
+	if b1.Semp.Password != "semp-b1-pw" {
 		t.Errorf("blank semp password must be kept, got %q", b1.Semp.Password)
 	}
 	got := map[string]string{}
 	for _, v := range b1.Client.MsgVpns {
 		got[v.Name] = v.Password
 	}
-	if got["v1"] != "PKD:cli-b1v1" || got["v2"] != "V1:changed" || got["vX"] != "" {
+	if got["v1"] != "cli-b1v1-pw" || got["v2"] != "V1:changed" || got["vX"] != "" {
 		t.Errorf("VPN secrets: want keep/replace/blank, got %v", got)
 	}
 }

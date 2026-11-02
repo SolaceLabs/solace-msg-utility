@@ -520,5 +520,18 @@ describe('core/services/solace-client', () => {
 
             expect(document.querySelector('iframe[src^="https://"]')).toBeNull();
         });
+
+        // A managed session dials its VPN and connects to the gateway's SMF
+        // socket on the page's own host: port, urlPath and host are unused.
+        it('connects a managed session to its SMF socket path on the page host', () => {
+            setHosted(true);
+            const service = createServiceSolace(makeHooks());
+            service.init();
+            service.connect(baseCfg({ urlPath: '/solace', smfPath: '/managed/smf/b1/v1' }), 'b1', 'dialled-pw');
+
+            const propsObj = solaceMock.SessionProperties.mock.results[0].value;
+            expect(propsObj.url).toBe('ws://localhost:3000/managed/smf/b1/v1');
+            expect(propsObj.password).toBe('dialled-pw');
+        });
     });
 });

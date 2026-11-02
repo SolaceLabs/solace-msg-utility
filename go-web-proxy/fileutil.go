@@ -7,7 +7,7 @@ import (
 )
 
 // writeFileAtomic writes data via a same-directory temp file + fsync + rename so
-// a crash mid-write can't leave a truncated YAML/seed file. perm is applied to
+// a crash mid-write can't leave a truncated file. perm is applied to
 // the temp file before the rename: CreateTemp alone leaves 0600, which is right
 // for the store files but too tight for config.yaml, which operators read and
 // edit on the volume.

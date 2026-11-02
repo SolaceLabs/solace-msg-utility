@@ -3,7 +3,7 @@ import { createEventBus } from './event-bus';
 import { escapeHtml, normalizeUrlPath } from './utils';
 import { buildBrokerUrl } from './hosted';
 import { isModuleVisible } from './rbac';
-import { createManagedSessionStore, type ManagedStore } from './services/managed-session-store';
+import { createManagedProfile, type ManagedProfileStore } from './services/managed-profile';
 import { logger, setLogLevel, getLogLevel, readLogLevelFromUrl } from './logger';
 import { LogLevel } from './constants';
 
@@ -26,11 +26,11 @@ export class Kernel {
     private eventBus: EventBus;
     private state: AppState;
     /**
-     * Managed session store handed to every module via AppContext. Created once
-     * per kernel and inert until a managed login populates it, so non-managed
+     * Managed profile handed to every module via AppContext. Created once per
+     * kernel and inert until a managed login populates it, so non-managed
      * deployments are unaffected.
      */
-    private managedStore: ManagedStore = createManagedSessionStore();
+    private managedProfile: ManagedProfileStore = createManagedProfile();
     private config: Record<string, any> = (window as any).APP_CONFIG || { useMocks: false };
     private moduleContainer: HTMLElement | null = null;
     private sidebarNav: HTMLElement | null = null;
@@ -171,9 +171,9 @@ export class Kernel {
             setState: this.appSetState.bind(this),
             loadSelf: () => this.navigateTo(mod.id),
             sempFetch: this.sempFetch.bind(this),
-            // One store shared by every module: the module owning the managed
-            // login writes it, others read provisioned identities from it.
-            managedStore: this.managedStore,
+            // One profile shared by every module: the module owning the managed
+            // login writes it, others read provisioned names and dial through it.
+            managedProfile: this.managedProfile,
             copyToClipboard: this.copyToClipboard.bind(this),
             config: this.config
         };
@@ -298,13 +298,22 @@ export class Kernel {
      * routing is applied uniformly. Broker-emitted URLs (e.g. nextPageUri)
      * never reach the wire — callers extract pathname+search from them
      * before calling here. Basic auth is auto-injected.
+     *
+     * A managed session (`sempCredentials.relay`) goes to the gateway's SEMP
+     * relay instead, with no Authorization header: the gateway adds the
+     * broker's stored account. A 401 from the relay means the gateway session
+     * ended, so the session owner is also asked to sign out; the relay's own
+     * refusals (403 read_only, 502 upstream_*) leave the connection as it is.
      */
     private async sempFetch(path: string, options: RequestInit = {}): Promise<Response> {
         const defaults: RequestInit = { headers: {} };
+        const creds = this.state.sempCredentials;
 
         let url = path;
-        if (this.state.sempCredentials) {
-            const { user, pass, protocol, host, port, urlPath } = this.state.sempCredentials;
+        if (creds?.relay) {
+            url = creds.relay + path;
+        } else if (creds) {
+            const { user, pass, protocol, host, port, urlPath } = creds;
             const token = btoa(`${user}:${pass}`);
             (defaults.headers as Record<string, string>)['Authorization'] = `Basic ${token}`;
             const fullPath = normalizeUrlPath(urlPath) + path;
@@ -327,6 +336,7 @@ export class Kernel {
             this.appSetState('isSempConnected', false);
             this.appSetState('sempCredentials', null);
             this.eventBus.emit('semp:disconnected');
+            if (creds?.relay) this.eventBus.emit('rbac:sign-out-requested');
         }
         return response;
     }
