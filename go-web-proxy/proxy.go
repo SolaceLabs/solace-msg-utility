@@ -193,20 +193,30 @@ type reverseProxy struct {
 	logger *slog.Logger
 }
 
-func newReverseProxy(trustPool *x509.CertPool, insecure bool, logger *slog.Logger) *reverseProxy {
-	tlsCfg := &tls.Config{
-		RootCAs:            trustPool,
-		InsecureSkipVerify: insecure, // gated by SSL_INSECURE_SKIP_VERIFY=true
-	}
-	transport := &http.Transport{
-		TLSClientConfig:       tlsCfg,
+// upstreamDialTimeout bounds the TCP connect to a broker. Without it a
+// blackholed address held the request until the client gave up.
+const upstreamDialTimeout = 10 * time.Second
+
+// newUpstreamTransport is the one transport for every broker-bound request:
+// the Direct relay and, in the managed build, the SEMP relay. It trusts the
+// system roots plus SSL_TRUST_DIR, and never follows redirects (the
+// ReverseProxy calls RoundTrip directly).
+func newUpstreamTransport(trustPool *x509.CertPool, insecure bool) *http.Transport {
+	return &http.Transport{
+		DialContext: (&net.Dialer{Timeout: upstreamDialTimeout, KeepAlive: 30 * time.Second}).DialContext,
+		TLSClientConfig: &tls.Config{
+			RootCAs:            trustPool,
+			InsecureSkipVerify: insecure, // gated by SSL_INSECURE_SKIP_VERIFY=true
+		},
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 	}
+}
 
+func newReverseProxy(transport http.RoundTripper, logger *slog.Logger) *reverseProxy {
 	p := &reverseProxy{logger: logger}
 
 	p.rp = &httputil.ReverseProxy{

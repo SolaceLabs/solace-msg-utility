@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -31,13 +32,14 @@ type managedHandler struct {
 	throttle *throttle
 	live     *live
 	settings *settingsFile
+	relay    http.Handler // /managed/relay/*, dispatched before the mux (relay.go)
 	cop      *http.CrossOriginProtection
 	logger   *slog.Logger
 	mux      *http.ServeMux
 }
 
-func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *settingsFile, logger *slog.Logger) *managedHandler {
-	h := &managedHandler{store: st, sessions: ss, throttle: th, live: lv, settings: sf, cop: http.NewCrossOriginProtection(), logger: logger}
+func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *settingsFile, relay http.Handler, logger *slog.Logger) *managedHandler {
+	h := &managedHandler{store: st, sessions: ss, throttle: th, live: lv, settings: sf, relay: relay, cop: http.NewCrossOriginProtection(), logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /managed/me", h.me)
 	mux.HandleFunc("POST /managed/logout", h.logout)
@@ -78,7 +80,14 @@ func (h *managedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "password_change_required")
 		return
 	}
-	h.mux.ServeHTTP(w, r.WithContext(withSession(r.Context(), as)))
+	r = r.WithContext(withSession(r.Context(), as))
+	// The relay parses its own escaped path: the mux would clean it, and
+	// redirect, before the relay could refuse what it must not forward.
+	if strings.HasPrefix(r.URL.Path, relayPrefix) {
+		h.relay.ServeHTTP(w, r)
+		return
+	}
+	h.mux.ServeHTTP(w, r)
 }
 
 // adminOnly reads the admin flag from the store on every call, so a demotion

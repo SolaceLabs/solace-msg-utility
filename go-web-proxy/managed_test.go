@@ -35,6 +35,13 @@ func named(name string) http.Handler {
 
 func newManagedEnv(t *testing.T, mutate func(*config)) *managedEnv {
 	t.Helper()
+	return newManagedEnvWith(t, mutate, nil)
+}
+
+// newManagedEnvWith takes the broker transport the SEMP relay uses (nil: the
+// default transport, for tests that never reach a broker).
+func newManagedEnvWith(t *testing.T, mutate func(*config), upstream http.RoundTripper) *managedEnv {
+	t.Helper()
 	f := newStoreFixture(t)
 	cfg := defaultConfig()
 	cfg.hosted, cfg.managed, cfg.connModes = true, true, connBoth
@@ -52,7 +59,7 @@ func newManagedEnv(t *testing.T, mutate func(*config)) *managedEnv {
 	}
 	lv := newLive(cfg)
 	logger := newCapturingLogger(log)
-	routes, err := buildManagedRoutes(cfg, lv, configSource{path: cfgPath, sum: sum}, f.h, noEnv, clock.now, logger)
+	routes, err := buildManagedRoutes(cfg, lv, configSource{path: cfgPath, sum: sum}, f.h, noEnv, clock.now, upstream, logger)
 	if err != nil {
 		t.Fatalf("buildManagedRoutes: %v", err)
 	}
@@ -123,6 +130,7 @@ func TestManagedAPI_UnauthenticatedIsUniform(t *testing.T) {
 		for _, rq := range [][2]string{
 			{"GET", "/managed/me"}, {"GET", "/managed/users"}, {"POST", "/managed/logout"},
 			{"GET", "/managed/nope"}, {"PUT", "/managed/users/x"}, {"DELETE", "/managed/connections/b1"},
+			{"GET", "/managed/relay/b1/SEMP/v2/monitor/msgVpns"}, {"POST", "/managed/relay/b1/SEMP"},
 		} {
 			rec := e.do(rq[0], rq[1], `{"a":1}`, c)
 			expect(t, rec, http.StatusUnauthorized, "unauthenticated")

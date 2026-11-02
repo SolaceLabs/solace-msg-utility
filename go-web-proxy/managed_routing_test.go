@@ -11,7 +11,7 @@ import (
 )
 
 func TestNewManagedRouting_DisabledIsNil(t *testing.T) {
-	routes, err := newManagedRouting(defaultConfig(), liveWith(nil), configSource{}, quietLogger())
+	routes, err := newManagedRouting(defaultConfig(), liveWith(nil), configSource{}, nil, quietLogger())
 	if routes != nil || err != nil {
 		t.Fatalf("managed false: want nil, nil; got %v, %v", routes, err)
 	}
@@ -29,7 +29,7 @@ func TestNewManagedRouting_Enabled(t *testing.T) {
 	t.Setenv(envAdminPassword, "")
 	t.Setenv(envAdminPasswordFile, "")
 	var buf strings.Builder
-	routes, err := newManagedRouting(cfg, newLive(cfg), configSource{path: filepath.Join(dir, "config.yaml")}, newCapturingLogger(&buf))
+	routes, err := newManagedRouting(cfg, newLive(cfg), configSource{path: filepath.Join(dir, "config.yaml")}, nil, newCapturingLogger(&buf))
 	if err != nil || routes == nil {
 		t.Fatalf("want routes, got %v %v", routes, err)
 	}
@@ -46,7 +46,7 @@ func TestBuildManagedRoutes_StoreErrorIsReturned(t *testing.T) {
 	f.writeUsers(t, "msg-utility-users: [")
 	cfg := defaultConfig()
 	cfg.managed, cfg.usersFile, cfg.connectionsFile, cfg.siteSeedFile, cfg.storeKeyFile = true, f.usersPath, f.connsPath, f.seedPath, f.keyPath
-	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, quietLogger()); err == nil || !strings.Contains(err.Error(), f.usersPath) {
+	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, nil, quietLogger()); err == nil || !strings.Contains(err.Error(), f.usersPath) {
 		t.Fatalf("want the store error naming the file, got %v", err)
 	}
 }

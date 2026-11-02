@@ -305,14 +305,15 @@ func serve() {
 
 	hh := newHostedHandler(cfg.hosted, lv)
 	pwa := newPWAHandler(cfg.appDir, logger)
-	rp := newReverseProxy(trustPool, cfg.insecureSkipVerify, logger)
+	upstream := newUpstreamTransport(trustPool, cfg.insecureSkipVerify)
+	rp := newReverseProxy(upstream, logger)
 
 	// Managed sign-in and the /managed/* API are compiled in only with
 	// `-tags managed`; the stdlib-only hosted binary links a stub that returns
 	// nil. A load failure is fatal (misconfiguration shouldn't silently fall
 	// back to an unauthenticated app). When disabled or absent, mr is nil and
 	// /managed/* is a 404.
-	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, sum: load.sum}, logger)
+	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, sum: load.sum}, upstream, logger)
 	if err != nil {
 		logger.Error("managed store load failed", "err", err)
 		os.Exit(1)

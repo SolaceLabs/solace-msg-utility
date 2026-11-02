@@ -375,13 +375,11 @@ func (s *store) profile(username string, ms moduleSettings) (*profileResponse, b
 	}
 	for _, c := range s.conns {
 		vpns := []respVpn{}
-		for _, v := range c.Client.MsgVpns {
-			if entitled(&u, c.Broker, v.Name) {
-				vpns = append(vpns, respVpn{
-					Name:   v.Name,
-					Client: respClient{Port: string(c.Client.Port), User: v.Username, Pass: v.Password},
-				})
-			}
+		for _, v := range entitledVPNs(&u, c) {
+			vpns = append(vpns, respVpn{
+				Name:   v.Name,
+				Client: respClient{Port: string(c.Client.Port), User: v.Username, Pass: v.Password},
+			})
 		}
 		if len(vpns) > 0 {
 			resp.Brokers = append(resp.Brokers, respBroker{
@@ -393,6 +391,45 @@ func (s *store) profile(username string, ms moduleSettings) (*profileResponse, b
 		}
 	}
 	return resp, true
+}
+
+// entitledVPNs lists the VPNs of c the user may connect to. The profile and
+// the relay share it, so what the browser is shown and what the gateway lets
+// through cannot drift apart.
+func entitledVPNs(u *userRec, c connRec) []vpnRec {
+	var out []vpnRec
+	for _, v := range c.Client.MsgVpns {
+		if entitled(u, c.Broker, v.Name) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// sempTarget is where the SEMP relay sends a broker's requests, with the
+// credential it adds. A copy: the store may change while a request runs.
+type sempTarget struct {
+	host, port, user, pass string
+}
+
+// sempTarget returns the broker's SEMP address and credential when the user
+// is entitled to at least one of its VPNs (the condition under which the
+// profile lists the broker) and a SEMP port is set. An unknown user, an
+// unknown broker, no entitlement and no SEMP all return false, and the relay
+// answers them alike. Read per request, so an edit applies to the next call.
+func (s *store) sempTarget(username, broker string) (sempTarget, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	u, ok := s.findUser(username)
+	if !ok {
+		return sempTarget{}, false
+	}
+	for _, c := range s.conns {
+		if c.Broker == broker && c.Semp.Port != "" && len(entitledVPNs(&u, c)) > 0 {
+			return sempTarget{host: c.Hostname, port: string(c.Semp.Port), user: c.Semp.Username, pass: c.Semp.Password}, true
+		}
+	}
+	return sempTarget{}, false
 }
 
 // isAdmin reports the user's current admin flag; exists is false for a user

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ----- isProxyPath / firstSegment ----------------------------------------------
@@ -383,7 +384,7 @@ func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
 	defer upstream.Close()
 
 	upURL, _ := url.Parse(upstream.URL)
-	rp := newReverseProxy(x509.NewCertPool(), false, quietLogger())
+	rp := newReverseProxy(newUpstreamTransport(x509.NewCertPool(), false), quietLogger())
 
 	// Build /http/{port}/{host}/some/path?x=1 against the test server.
 	gw := httptest.NewServer(rp)
@@ -417,6 +418,22 @@ func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
 	// X-Forwarded-For must NOT be set — transparent passthrough.
 	if v := captured.Header.Get("X-Forwarded-For"); v != "" {
 		t.Errorf("X-Forwarded-For leaked: %q (must be empty per spec)", v)
+	}
+}
+
+// One transport serves the Direct relay and the SEMP relay: the trust pool and
+// skip-verify flag reach TLS, and a connect has its own bound.
+func TestNewUpstreamTransport(t *testing.T) {
+	pool := x509.NewCertPool()
+	tr := newUpstreamTransport(pool, true)
+	if tr.TLSClientConfig.RootCAs != pool || !tr.TLSClientConfig.InsecureSkipVerify {
+		t.Errorf("TLS config: %+v", tr.TLSClientConfig)
+	}
+	if tr.DialContext == nil || tr.ResponseHeaderTimeout != 30*time.Second || tr.TLSHandshakeTimeout != 10*time.Second {
+		t.Error("the transport must bound the connect, the handshake and the wait for headers")
+	}
+	if newUpstreamTransport(pool, false).TLSClientConfig.InsecureSkipVerify {
+		t.Error("skip-verify must follow the flag")
 	}
 }
 
@@ -454,7 +471,7 @@ func TestReverseProxy_NeverForwardsTheSessionCookie(t *testing.T) {
 	}))
 	defer upstream.Close()
 	upURL, _ := url.Parse(upstream.URL)
-	gw := httptest.NewServer(newReverseProxy(x509.NewCertPool(), false, quietLogger()))
+	gw := httptest.NewServer(newReverseProxy(newUpstreamTransport(x509.NewCertPool(), false), quietLogger()))
 	defer gw.Close()
 
 	req, _ := http.NewRequest("GET", gw.URL+"/http/"+upURL.Port()+"/"+upURL.Hostname()+"/SEMP", nil)
@@ -475,7 +492,7 @@ func TestReverseProxy_NeverForwardsTheSessionCookie(t *testing.T) {
 }
 
 func TestReverseProxy_BadPathReturns400(t *testing.T) {
-	rp := newReverseProxy(x509.NewCertPool(), false, quietLogger())
+	rp := newReverseProxy(newUpstreamTransport(x509.NewCertPool(), false), quietLogger())
 	gw := httptest.NewServer(rp)
 	defer gw.Close()
 
@@ -490,7 +507,7 @@ func TestReverseProxy_BadPathReturns400(t *testing.T) {
 }
 
 func TestReverseProxy_UpstreamDown_502(t *testing.T) {
-	rp := newReverseProxy(x509.NewCertPool(), false, quietLogger())
+	rp := newReverseProxy(newUpstreamTransport(x509.NewCertPool(), false), quietLogger())
 	gw := httptest.NewServer(rp)
 	defer gw.Close()
 

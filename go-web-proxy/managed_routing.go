@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"runtime"
 	"time"
@@ -17,8 +18,9 @@ import (
 // the caller then serves /managed/* as a plain 404.
 //
 // lv is the live settings every piece reads per request; src is config.yaml,
-// which the settings endpoint rewrites.
-func newManagedRouting(cfg config, lv *live, src configSource, logger *slog.Logger) (*managedRoutes, error) {
+// which the settings endpoint rewrites; upstream is the broker transport the
+// Direct relay uses too (newUpstreamTransport).
+func newManagedRouting(cfg config, lv *live, src configSource, upstream http.RoundTripper, logger *slog.Logger) (*managedRoutes, error) {
 	if !cfg.managed {
 		return nil, nil
 	}
@@ -26,12 +28,12 @@ func newManagedRouting(cfg config, lv *live, src configSource, logger *slog.Logg
 	if err != nil {
 		return nil, fmt.Errorf("password hasher: %w", err)
 	}
-	return buildManagedRoutes(cfg, lv, src, h, os.Getenv, time.Now, logger)
+	return buildManagedRoutes(cfg, lv, src, h, os.Getenv, time.Now, upstream, logger)
 }
 
 // buildManagedRoutes wires the pieces; split from newManagedRouting so tests
 // can supply a cheap hasher, an environment and a clock.
-func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, getenv func(string) string, now func() time.Time, logger *slog.Logger) (*managedRoutes, error) {
+func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, getenv func(string) string, now func() time.Time, upstream http.RoundTripper, logger *slog.Logger) (*managedRoutes, error) {
 	st, err := loadStore(storeOptions{
 		usersPath: cfg.usersFile, connsPath: cfg.connectionsFile, seedPath: cfg.siteSeedFile, keyPath: cfg.storeKeyFile,
 		hasher: h, getenv: getenv,
@@ -48,7 +50,7 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	// gateApp passes everything through unless connModes is managed, which
 	// it reads per request: the settings page can change it.
 	routes := &managedRoutes{
-		api:       newManagedHandler(st, ss, th, lv, newSettingsFile(src, cfg, lv, logger), logger),
+		api:       newManagedHandler(st, ss, th, lv, newSettingsFile(src, cfg, lv, logger), newSEMPRelay(st, upstream, logger), logger),
 		pages:     pages,
 		gateApp:   pages.gateApp,
 		gateAdmin: pages.gateAdmin,
