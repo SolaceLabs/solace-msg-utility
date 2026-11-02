@@ -19,7 +19,8 @@ import (
 //
 // lv is the live settings every piece reads per request; src is config.yaml,
 // which the settings endpoint rewrites; upstream is the broker transport the
-// Direct relay uses too (newUpstreamTransport).
+// Direct relay uses too (newUpstreamTransport), for the SEMP relay and the
+// SMF gate.
 func newManagedRouting(cfg config, lv *live, src configSource, upstream http.RoundTripper, logger *slog.Logger) (*managedRoutes, error) {
 	if !cfg.managed {
 		return nil, nil
@@ -43,6 +44,15 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	}
 	ss := newSessions(lv.sessionLimits, now)
 	th := newThrottle(lv.loginLimits, now, logger)
+	// Revocation: open SMF sockets close when their session is ended, their
+	// user changes, or a store edit takes their VPN away (sockets.go).
+	sockets := newSocketRegistry(func(user, broker, vpn string) bool {
+		_, ok := st.smfTarget(user, broker, vpn)
+		return ok
+	}, logger)
+	ss.onDrop, ss.onDropUser = sockets.closeSession, sockets.closeUser
+	st.onChange = sockets.recheck
+	connects := newRateWindow(connectsPerWindow, connectWindow, now)
 	pages, err := newAuthPages(st, ss, th, lv, logger)
 	if err != nil {
 		return nil, fmt.Errorf("sign-in page template: %w", err)
@@ -50,7 +60,11 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	// gateApp passes everything through unless connModes is managed, which
 	// it reads per request: the settings page can change it.
 	routes := &managedRoutes{
-		api:       newManagedHandler(st, ss, th, lv, newSettingsFile(src, cfg, lv, logger), newSEMPRelay(st, upstream, logger), logger),
+		api: newManagedHandler(st, ss, th, lv, newSettingsFile(src, cfg, lv, logger), managedEndpoints{
+			relay: newSEMPRelay(st, upstream, logger),
+			smf:   newSMFGate(st, ss, sockets, connects, upstream, logger),
+			dial:  newDialer(st, connects, logger),
+		}, logger),
 		pages:     pages,
 		gateApp:   pages.gateApp,
 		gateAdmin: pages.gateAdmin,

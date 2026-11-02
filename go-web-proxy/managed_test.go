@@ -131,6 +131,7 @@ func TestManagedAPI_UnauthenticatedIsUniform(t *testing.T) {
 			{"GET", "/managed/me"}, {"GET", "/managed/users"}, {"POST", "/managed/logout"},
 			{"GET", "/managed/nope"}, {"PUT", "/managed/users/x"}, {"DELETE", "/managed/connections/b1"},
 			{"GET", "/managed/relay/b1/SEMP/v2/monitor/msgVpns"}, {"POST", "/managed/relay/b1/SEMP"},
+			{"POST", "/managed/dial"}, {"GET", "/managed/smf/b1/v1"},
 		} {
 			rec := e.do(rq[0], rq[1], `{"a":1}`, c)
 			expect(t, rec, http.StatusUnauthorized, "unauthenticated")

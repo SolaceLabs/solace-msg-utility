@@ -748,6 +748,43 @@ func TestStore_PersistErrorLeavesMemoryUnchanged(t *testing.T) {
 	}
 }
 
+// onChange runs after each committed edit that can change entitlement, outside
+// the store's lock (it reads the store here, which would deadlock inside),
+// and not after a refused or failed one.
+func TestStore_OnChangeFiresAfterACommittedEdit(t *testing.T) {
+	s := newStoreWithFixtures(t)
+	n := 0
+	s.onChange = func() {
+		n++
+		_ = s.listConnections()
+	}
+	ctx := context.Background()
+	b3 := connRec{Broker: "b3", Hostname: "host3"}
+	for i, edit := range []func() error{
+		func() error { _, err := s.upsertUser(ctx, userRec{Username: "bob"}, "bob-password-1"); return err },
+		func() error { _, err := s.deleteUser("bob"); return err },
+		func() error { return s.upsertConnection(b3) },
+		func() error { _, err := s.deleteConnection("b3"); return err },
+	} {
+		if err := edit(); err != nil {
+			t.Fatal(err)
+		}
+		if n != i+1 {
+			t.Fatalf("edit %d: onChange ran %d times", i, n)
+		}
+	}
+	if _, err := s.deleteUser("admin"); !errors.Is(err, errLastAdmin) {
+		t.Fatalf("want errLastAdmin, got %v", err)
+	}
+	blockWrites(t, &s.connsPath)
+	if err := s.upsertConnection(b3); err == nil {
+		t.Fatal("expected a persist error")
+	}
+	if n != 4 {
+		t.Errorf("a refused or failed edit must not run onChange (%d runs)", n)
+	}
+}
+
 func TestStore_SetPassword(t *testing.T) {
 	f := newStoreFixture(t)
 	s := f.load(t)

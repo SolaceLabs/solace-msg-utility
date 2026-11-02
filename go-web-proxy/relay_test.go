@@ -202,6 +202,7 @@ func TestRelay_PathRules(t *testing.T) {
 		"/managed/relay/b%201/SEMP/v2/monitor",
 		"/managed/relay/../users",
 		"/managed/relay/b1%2FSEMP/v2/monitor",
+		"/managed/relay%2Fb1/SEMP/v2/monitor",
 		"/managed/relay/b1/SEMP/v2/..;/..;/x",
 		"/managed/relay/b1/SEMP/v2/monitor;x=1",
 	} {

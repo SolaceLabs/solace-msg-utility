@@ -145,6 +145,20 @@ type store struct {
 	connsPath string // retained for CRUD persistence
 	seal      *sealer
 	hasher    *hasher
+
+	// onChange runs after every call to upsertUser, deleteUser,
+	// upsertConnection or deleteConnection that returns no error, outside mu
+	// (the SMF sockets re-check their access, sockets.go). Set once before
+	// serving.
+	onChange func()
+}
+
+// afterWrite is deferred first by each mutator that can change entitlement,
+// so it runs after the mutator's own deferred unlock.
+func (s *store) afterWrite(err *error) {
+	if *err == nil && s.onChange != nil {
+		s.onChange()
+	}
 }
 
 type storeOptions struct {
@@ -406,9 +420,9 @@ func entitledVPNs(u *userRec, c connRec) []vpnRec {
 	return out
 }
 
-// sempTarget is where the SEMP relay sends a broker's requests, with the
-// credential it adds. A copy: the store may change while a request runs.
-type sempTarget struct {
+// brokerTarget is a broker address and the credential the gateway uses or
+// hands out there. A copy: the store may change while a request runs.
+type brokerTarget struct {
 	host, port, user, pass string
 }
 
@@ -417,19 +431,43 @@ type sempTarget struct {
 // profile lists the broker) and a SEMP port is set. An unknown user, an
 // unknown broker, no entitlement and no SEMP all return false, and the relay
 // answers them alike. Read per request, so an edit applies to the next call.
-func (s *store) sempTarget(username, broker string) (sempTarget, bool) {
+func (s *store) sempTarget(username, broker string) (brokerTarget, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	u, ok := s.findUser(username)
 	if !ok {
-		return sempTarget{}, false
+		return brokerTarget{}, false
 	}
 	for _, c := range s.conns {
 		if c.Broker == broker && c.Semp.Port != "" && len(entitledVPNs(&u, c)) > 0 {
-			return sempTarget{host: c.Hostname, port: string(c.Semp.Port), user: c.Semp.Username, pass: c.Semp.Password}, true
+			return brokerTarget{host: c.Hostname, port: string(c.Semp.Port), user: c.Semp.Username, pass: c.Semp.Password}, true
 		}
 	}
-	return sempTarget{}, false
+	return brokerTarget{}, false
+}
+
+// smfTarget returns the broker's SMF address and the VPN's client credential
+// when the user is entitled to that VPN: what dial hands out and where the
+// SMF gate connects. validateConn guarantees client.port wherever a VPN is
+// listed. Read per call, so a socket re-check sees the latest edit.
+func (s *store) smfTarget(username, broker, vpn string) (brokerTarget, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	u, ok := s.findUser(username)
+	if !ok {
+		return brokerTarget{}, false
+	}
+	for _, c := range s.conns {
+		if c.Broker != broker {
+			continue
+		}
+		for _, v := range entitledVPNs(&u, c) {
+			if v.Name == vpn {
+				return brokerTarget{host: c.Hostname, port: string(c.Client.Port), user: v.Username, pass: v.Password}, true
+			}
+		}
+	}
+	return brokerTarget{}, false
 }
 
 // isAdmin reports the user's current admin flag; exists is false for a user
@@ -513,6 +551,7 @@ func (s *store) listUsers() []userRec {
 // flag. Persist-then-commit: the in-memory slice is swapped only after the file
 // write succeeds, so a failed write leaves the store unchanged.
 func (s *store) upsertUser(ctx context.Context, u userRec, password string) (dropSessions bool, err error) {
+	defer s.afterWrite(&err)
 	if password != "" {
 		if u.Password, err = s.hasher.hash(ctx, password); err != nil {
 			return false, err
@@ -579,7 +618,8 @@ func (s *store) setPassword(ctx context.Context, username, password string) erro
 // deleteUser removes the named user and persists. Returns found=false (and no
 // error, no write) when there is no such user, or errLastAdmin when the target
 // is the only remaining admin.
-func (s *store) deleteUser(username string) (bool, error) {
+func (s *store) deleteUser(username string) (found bool, err error) {
+	defer s.afterWrite(&err)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	idx := -1
@@ -621,7 +661,8 @@ func (s *store) listConnections() []connRec {
 // new one, then persists. Blank packed-password fields on an EXISTING broker
 // keep the stored secrets (edit-without-changing-password) — see
 // mergeConnSecrets. Persist-then-commit, same as upsertUser.
-func (s *store) upsertConnection(c connRec) error {
+func (s *store) upsertConnection(c connRec) (err error) {
+	defer s.afterWrite(&err)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := append([]connRec(nil), s.conns...)
@@ -667,7 +708,8 @@ func mergeConnSecrets(c *connRec, old connRec) {
 
 // deleteConnection removes the named broker and persists. Returns found=false
 // (no error, no write) when there is no such broker.
-func (s *store) deleteConnection(broker string) (bool, error) {
+func (s *store) deleteConnection(broker string) (found bool, err error) {
+	defer s.afterWrite(&err)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	idx := -1

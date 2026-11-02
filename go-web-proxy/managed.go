@@ -33,16 +33,29 @@ type managedHandler struct {
 	live     *live
 	settings *settingsFile
 	relay    http.Handler // /managed/relay/*, dispatched before the mux (relay.go)
+	smf      http.Handler // /managed/smf/*, dispatched before the mux (smf.go)
+	dial     http.Handler // POST /managed/dial (dial.go)
 	cop      *http.CrossOriginProtection
 	logger   *slog.Logger
 	mux      *http.ServeMux
 }
 
-func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *settingsFile, relay http.Handler, logger *slog.Logger) *managedHandler {
-	h := &managedHandler{store: st, sessions: ss, throttle: th, live: lv, settings: sf, relay: relay, cop: http.NewCrossOriginProtection(), logger: logger}
+// managedEndpoints are the broker-facing handlers managedHandler serves
+// behind its gates.
+type managedEndpoints struct {
+	relay, smf, dial http.Handler
+}
+
+func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *settingsFile, ep managedEndpoints, logger *slog.Logger) *managedHandler {
+	h := &managedHandler{
+		store: st, sessions: ss, throttle: th, live: lv, settings: sf,
+		relay: ep.relay, smf: ep.smf, dial: ep.dial,
+		cop: http.NewCrossOriginProtection(), logger: logger,
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /managed/me", h.me)
 	mux.HandleFunc("POST /managed/logout", h.logout)
+	mux.Handle("POST /managed/dial", h.dial)
 	mux.HandleFunc("GET /managed/users", h.adminOnly(h.listUsers))
 	mux.HandleFunc("PUT /managed/users/{name}", h.adminOnly(h.saveUser))
 	mux.HandleFunc("DELETE /managed/users/{name}", h.adminOnly(h.deleteUser))
@@ -81,13 +94,17 @@ func (h *managedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r = r.WithContext(withSession(r.Context(), as))
-	// The relay parses its own escaped path: the mux would clean it, and
-	// redirect, before the relay could refuse what it must not forward.
-	if strings.HasPrefix(r.URL.Path, relayPrefix) {
+	// The relay and the SMF gate parse their own escaped paths: the mux would
+	// clean them, and redirect, before they could refuse what they must not
+	// forward.
+	switch {
+	case strings.HasPrefix(r.URL.Path, relayPrefix):
 		h.relay.ServeHTTP(w, r)
-		return
+	case strings.HasPrefix(r.URL.Path, smfPrefix):
+		h.smf.ServeHTTP(w, r)
+	default:
+		h.mux.ServeHTTP(w, r)
 	}
-	h.mux.ServeHTTP(w, r)
 }
 
 // adminOnly reads the admin flag from the store on every call, so a demotion

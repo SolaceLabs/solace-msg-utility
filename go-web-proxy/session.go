@@ -30,6 +30,13 @@ type sessions struct {
 	byID   map[string]*session
 	limits func() sessionLimits
 	now    func() time.Time
+
+	// Revocation hooks (sockets.go): set once before serving, called outside
+	// mu. drop calls onDrop with the id, dropUser calls onDropUser with the
+	// user. Expiry and the sweep call neither: an SMF socket ends only on
+	// revocation, never because its session timed out.
+	onDrop     func(id string)
+	onDropUser func(user string)
 }
 
 func newSessions(limits func() sessionLimits, now func() time.Time) *sessions {
@@ -76,22 +83,39 @@ func (s *sessions) lookup(id string) (session, bool) {
 	return *ss, true
 }
 
+// drop ends one session: a sign-out, or a sign-in replacing it.
 func (s *sessions) drop(id string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.byID, id)
+	s.mu.Unlock()
+	if s.onDrop != nil {
+		s.onDrop(id)
+	}
 }
 
 // dropUser ends every session of one user: their password, admin flag or
-// account changed.
+// account changed. onDropUser fires even when no session was left, so a
+// socket that outlived its session is still closed.
 func (s *sessions) dropUser(user string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for k, ss := range s.byID {
 		if ss.user == user {
 			delete(s.byID, k)
 		}
 	}
+	s.mu.Unlock()
+	if s.onDropUser != nil {
+		s.onDropUser(user)
+	}
+}
+
+// has reports whether id is still in the table, without marking it used or
+// expiring it: the SMF gate's check after it registers a socket.
+func (s *sessions) has(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.byID[id]
+	return ok
 }
 
 // activeSession is a looked-up session plus its id, as handlers see it.

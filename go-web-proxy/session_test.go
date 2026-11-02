@@ -156,3 +156,44 @@ func TestSessionOf_ContextRoundTrip(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 }
+
+// Ending a session on purpose fires a revocation hook (open SMF sockets
+// close, sockets.go); expiry does not, by design: a socket outlives its
+// session's limits. has never marks a session used.
+func TestSessions_RevocationHooksFireOnlyOnPurpose(t *testing.T) {
+	clock := newFakeClock()
+	s := newSessions(fixed(testSessionLimits), clock.now)
+	var dropped, droppedUsers []string
+	s.onDrop = func(id string) { dropped = append(dropped, id) }
+	s.onDropUser = func(user string) { droppedUsers = append(droppedUsers, user) }
+
+	a, b := s.create("alice", false), s.create("bob", false)
+	s.drop(a)
+	if s.has(a) || !s.has(b) || len(dropped) != 1 || dropped[0] != a {
+		t.Fatalf("drop: has(a)=%v has(b)=%v hooks=%q", s.has(a), s.has(b), dropped)
+	}
+	s.dropUser("bob")
+	s.dropUser("nobody") // no session left, but a socket may have outlived it
+	if s.has(b) || len(droppedUsers) != 2 || droppedUsers[0] != "bob" || droppedUsers[1] != "nobody" {
+		t.Fatalf("dropUser: has(b)=%v hooks=%q", s.has(b), droppedUsers)
+	}
+
+	c := s.create("carol", false)
+	clock.advance(testSessionLimits.idle - time.Minute)
+	if !s.has(c) {
+		t.Fatal("a live session must be present")
+	}
+	clock.advance(2 * time.Minute)
+	if _, ok := s.lookup(c); ok {
+		t.Fatal("has must not count as use: the session should have gone idle")
+	}
+	d := s.create("dave", false)
+	clock.advance(testSessionLimits.absolute)
+	s.create("erin", false) // the sweep removes dave's expired session
+	if s.has(d) {
+		t.Fatal("the sweep must remove an expired session")
+	}
+	if len(dropped) != 1 || len(droppedUsers) != 2 {
+		t.Errorf("expiry fired a revocation hook: %q %q", dropped, droppedUsers)
+	}
+}
