@@ -26,7 +26,7 @@ hardening items" section of [rbac-variant-plan.md](rbac-variant-plan.md) when ad
 | SMF dial | `POST /managed/dial {broker, vpn}` returns `{smfPath, vpn, user, pass}` to an entitled user, read-only users included. Stateless: no ticket | A ticket would break the SDK's own reconnects, which re-use the session properties. "One-shot" means the password comes only from `dial` and the browser keeps it only inside the dial callback; a reconnect after a sign-in dials again. Dials and socket upgrades share 20 per minute per user. |
 | SMF socket | `GET /managed/smf/{broker}/{vpn}` upgraded behind the session, an `Origin` equal to the gateway's own `https` address and the entitlement; joined to the broker's SMF port over TLS with only the `Sec-WebSocket-*` headers passed. Closed only on revocation (decided 2026-11-01): sign-out, password change, user deleted or administrator flag changed, entitlement or VPN removed, broker deleted | No idle or absolute timer: the SMF API's keep-alive owns the connection's lifetime, so a socket can outlive its session. A Host-rewriting proxy in front fails the `Origin` check; an allowed-origins setting is out of scope. |
 | Bundle delivery | New `managed` variant builds `dist/managed.html`; the managed image copies it over `index.html`. The Release uploads an explicit list (`index`, `min`, `no-payload`, `no-queue-copy`, `mock`), never `solAdmin.html` or `managed.html` | Build-time registry, nothing loads at runtime. Release bundles lose the managed code; `tag.yml` stops uploading `dist/*`. |
-| `CONN_MODES=both` | Kept in the managed image; Direct stays a per-deployment switch (decided 2026-11-01) | Under `both` the Direct relay stays present and its exposure is handled by the client access list below; under `managed` it answers `404`, read live. The gateway's sign-in cookie is never forwarded by it in any mode. |
+| `CONN_MODES=both` | Kept in the managed image; Direct stays a per-deployment switch (decided 2026-11-01) | Under `both` the Direct relay stays present and its exposure is handled by the client access list below; under `managed` it answers `404`, read live. The gateway's sign-in cookie is never forwarded by it in any mode, and an upstream `Set-Cookie` naming it is dropped. |
 | Relay exposure | The Direct relay stays open to any host under `direct` and `both` (closed under `managed`). New client access list, CIDR-based, default allow-all | Applies to every route, not only the relay. Behind a reverse proxy the client IP comes from `X-Forwarded-For` only when the proxy is listed as trusted. |
 | Docs-secrecy policy | Retired in Phase 3 (step 3E), with the browser transform | `CLAUDE.md` section, `check-docs-secrecy.mjs`, its test and `check:docs` removed; docs name the store format and primitive. |
 | Managed demo | A separate one-time mini app that mimics managed behaviour; not shared code | Phase 4. `mock.html` stays a Direct-only demo. |
@@ -173,7 +173,11 @@ no Authorization header; a relay `401` signs out) and SMF through dial and the g
 destination does the same; connection-management sends passwords as typed; Queue Browser's
 read-only rows became downgrade-only (`ui-table.ts`), replacing the `_permissions` write;
 `check-bundles` gained the `/managed/dial` and `/managed/relay/` markers; the docs-secrecy policy
-is retired and the docs name the store format. Phase 3 is complete except the end-to-end run
+is retired and the docs name the store format. The Phase 3 review then fixed: the Direct relay
+drops an upstream `Set-Cookie` naming the gateway's sign-in cookie; a relay `401` on any later
+SEMP call of queue-copy's provisioned destination signs out (`semp-client.ts`); a refused dial
+during a Managed VPN switch ends the switch; a signed port such as `+8080` is refused at save;
+and the lines Phase 3 added are plain ASCII. Phase 3 is complete except the end-to-end run
 against a local Docker broker (step 3F).
 - Key file generated on first run; `users.yaml` and `connections.yaml` encrypted whole; refuse to
   start on an encrypted store without its key; `/managed/relay/{broker}` with credential

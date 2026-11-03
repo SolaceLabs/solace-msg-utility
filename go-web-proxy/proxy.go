@@ -233,6 +233,11 @@ func newReverseProxy(transport http.RoundTripper, logger *slog.Logger) *reverseP
 			dropSessionCookie(pr.Out.Header)
 			// Intentionally NOT calling pr.SetXForwarded() — transparent passthrough.
 		},
+		// Runs for a 101 upgrade answer too, before its headers are copied.
+		ModifyResponse: func(res *http.Response) error {
+			dropSessionSetCookie(res.Header)
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			logger.Warn("upstream proxy error",
 				"path", r.URL.Path,
@@ -273,6 +278,26 @@ func dropSessionCookie(h http.Header) {
 		}
 		if len(kept) > 0 {
 			h.Add("Cookie", strings.Join(kept, "; "))
+		}
+	}
+}
+
+// dropSessionSetCookie removes every Set-Cookie line naming the gateway's
+// sign-in cookie from a Direct upstream's answer. That answer is served on the
+// gateway's own origin, so without this any host a user connects to could
+// replace the cookie (signing the user in to an account of the host's
+// choosing) or expire it. Other cookies pass as sent.
+func dropSessionSetCookie(h http.Header) {
+	lines := h.Values("Set-Cookie")
+	if len(lines) == 0 {
+		return
+	}
+	h.Del("Set-Cookie")
+	for _, line := range lines {
+		pair, _, _ := strings.Cut(line, ";")
+		name, _, _ := strings.Cut(pair, "=")
+		if strings.TrimSpace(name) != sessionCookie {
+			h.Add("Set-Cookie", line)
 		}
 	}
 }

@@ -44,7 +44,7 @@ export interface QGlob {
  * (including every Direct-mode session), where RBAC helpers degrade to allow-all.
  *
  * This carries only **matcher inputs**. The provisioned broker and VPN names
- * live in `AppContext.managedProfile` — see
+ * live in `AppContext.managedProfile` -- see
  * `src/core/services/managed-profile.ts` for the ownership split. No broker
  * credential is held in the browser for a managed session.
  */
@@ -251,7 +251,7 @@ export interface AppContext {
     /**
      * The managed session's provisioned profile, owned by core so any module
      * can open a provisioned connection (`dial`) without reaching into the
-     * module that owns the login. Inert — and `isActive() === false` — outside
+     * module that owns the login. Inert -- and `isActive() === false` -- outside
      * a managed session.
      */
     managedProfile: ManagedProfileStore;

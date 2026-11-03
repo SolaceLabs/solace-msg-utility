@@ -102,6 +102,17 @@ describe('core/services/semp-client', () => {
             expect(lastCall[0]).toBe('https://broker.test:8080/api/SEMP/v2/monitor/msgVpns?cursor=xyz');
         });
 
+        it("a broker's 401 on a later call is the caller's answer, not onAuthFailed", async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            let capturedFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
+            const hooks = makeHooks({ onConnected: vi.fn((sempCtx) => { capturedFetch = sempCtx.fetch; }) });
+            await createServiceSemp(hooks).connect(baseCfg(), 'broker.test', 'pw');
+
+            (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, status: 401 });
+            await expect(capturedFetch!('/SEMP/v2/monitor/msgVpns')).resolves.toMatchObject({ status: 401 });
+            expect(hooks.onAuthFailed).not.toHaveBeenCalled();
+        });
+
         it('fires onAuthFailed on 401', async () => {
             (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' });
 
@@ -320,6 +331,33 @@ describe('core/services/semp-client', () => {
             await createServiceSemp(hooks).connect(relayCfg(), 'b1', '');
             expect(hooks.onAuthFailed).toHaveBeenCalled();
             expect(hooks.onError).not.toHaveBeenCalled();
+        });
+
+        it('a relay 401 on a later call is onAuthFailed too; other answers are not', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            let ctxFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
+            const hooks = makeHooks({ onConnected: vi.fn((c) => { ctxFetch = c.fetch; }) });
+            await createServiceSemp(hooks).connect(relayCfg(), 'b1', '');
+
+            await ctxFetch!('/SEMP/v2/monitor/msgVpns/v1/queues');
+            (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, status: 403 });
+            await ctxFetch!('/SEMP/v2/monitor/msgVpns/v1/queues');
+            expect(hooks.onAuthFailed).not.toHaveBeenCalled();
+
+            const ended = { ok: false, status: 401 };
+            (globalThis.fetch as any).mockResolvedValueOnce(ended);
+            // The caller still gets the answer to settle its own request.
+            await expect(ctxFetch!('/SEMP/v2/monitor/msgVpns/v1/queues')).resolves.toBe(ended);
+            expect(hooks.onAuthFailed).toHaveBeenCalledTimes(1);
+        });
+
+        it('a later relay 401 with no onAuthFailed hook still answers the caller', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            let ctxFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
+            await createServiceSemp(makeHooks({ onAuthFailed: undefined, onConnected: vi.fn((c) => { ctxFetch = c.fetch; }) }))
+                .connect(relayCfg(), 'b1', '');
+            (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, status: 401 });
+            await expect(ctxFetch!('/SEMP/v2/monitor/msgVpns')).resolves.toMatchObject({ status: 401 });
         });
 
         it.each([

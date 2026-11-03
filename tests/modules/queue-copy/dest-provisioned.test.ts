@@ -247,7 +247,7 @@ describe('queue-copy — provisioned destination: credential-source control', ()
     });
 });
 
-describe('queue-copy — provisioned destination: connecting through the profile', () => {
+describe('queue-copy -- provisioned destination: connecting through the profile', () => {
     it('connects dest SEMP through the gateway relay, with no credential and no dial', async () => {
         const { el } = await setupProvisioned();
         needSecondary(el);

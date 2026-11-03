@@ -306,6 +306,12 @@ func TestSMF_RefusalsNeverReachTheBroker(t *testing.T) {
 			expect(t, s.do(tc.method, tc.path, "", tc.cookie, wsHeaders(origin, tc.over...)...), tc.status, tc.code)
 		})
 	}
+	// A throttled upgrade is refused before the broker is dialled. Dials
+	// share the window and never reach the broker, so they spend it here.
+	for range connectsPerWindow {
+		expect(t, s.do("POST", "/managed/dial", dialBody("b1", "v1"), viewer), http.StatusOK, "")
+	}
+	expect(t, s.do("GET", "/managed/smf/b1/v1", "", viewer, wsHeaders(origin)...), http.StatusTooManyRequests, "rate_limited")
 	if n := s.broker.hits(); n != 0 {
 		t.Errorf("a refused socket must never reach the broker (%d calls)", n)
 	}
@@ -406,6 +412,11 @@ func TestSMF_ClosesOnRevocation(t *testing.T) {
 	}{
 		{"sign-out", "viewer", func(t *testing.T, s *smfEnv, own, _ *http.Cookie) {
 			expect(t, s.do("POST", "/managed/logout", "", own), http.StatusNoContent, "")
+		}},
+		{"signed in again in the same browser", "viewer", func(t *testing.T, s *smfEnv, own, _ *http.Cookie) {
+			if rec := s.form("/login", signInForm("viewer", viewerPW, ""), own); rec.Code != http.StatusSeeOther {
+				t.Fatalf("sign-in: %d %s", rec.Code, rec.Body.String())
+			}
 		}},
 		{"own password change", "viewer", func(t *testing.T, s *smfEnv, own, _ *http.Cookie) {
 			if rec := s.form("/login/password", passwordForm(viewerPW, "viewer-new-pw-1", "viewer-new-pw-1"), own); rec.Code != http.StatusSeeOther {

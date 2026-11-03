@@ -22,14 +22,6 @@ cd "$REPO_ROOT"
 
 export NO_COLOR=1
 
-# Toolchain parity with CI: go.mod carries the `toolchain` directive and
-# GOTOOLCHAIN makes any go binary honour it exactly. Set only when unset, so an
-# exported value wins. Note the module lives in go-web-proxy/, not the root.
-if [ -z "${GOTOOLCHAIN:-}" ] && [ -f "$GO_DIR/go.mod" ]; then
-  t="$(sed -n 's/^toolchain //p' "$GO_DIR/go.mod")"
-  [ -n "$t" ] && export GOTOOLCHAIN="$t"
-fi
-
 # --- version ----------------------------------------------------------------
 # The git tag is the single source of version truth. CI exports VERSION from
 # the tag ref, so the release path never depends on `git describe` seeing
@@ -101,10 +93,11 @@ BIN_SUFFIX="-$T_OS-$T_ARCH"
 [ "$T_OS" = "windows" ] && BIN_SUFFIX="$BIN_SUFFIX.exe"
 
 # --- shared helpers ---------------------------------------------------------
-# npm ci when node_modules is absent or the lockfile has moved on.
+# npm ci when node_modules is absent or the lockfile has moved on. A stamp as
+# new as the lockfile is current, the same test dev.ps1 makes.
 ensure_deps() {
   local task=$1 stamp="$REPO_ROOT/node_modules/.package-lock.json"
-  if [ -f "$stamp" ] && [ "$stamp" -nt "$REPO_ROOT/package-lock.json" ]; then
+  if [ -f "$stamp" ] && ! [ "$REPO_ROOT/package-lock.json" -nt "$stamp" ]; then
     return 0
   fi
   run "$task" npm ci --no-audit --no-fund --no-progress
@@ -180,7 +173,13 @@ task_vet() {
 
 task_test() {
   ensure_deps test || return $?
-  run test npm test || return $?
+  # `cov` runs the same web suite with coverage on, so when it is queued in this
+  # invocation the suite runs once, there; a failure in it still fails the run.
+  if [ -n "${COV_QUEUED:-}" ]; then
+    note test "web suite: skipped here, cov runs it in this invocation"
+  else
+    run test npm test || return $?
+  fi
   run test go -C "$GO_DIR" test -count=1 ./... || return $?
   run test go -C "$GO_DIR" test -tags managed -count=1 ./... || return $?
 }
@@ -292,20 +291,35 @@ case "${1:-}" in -h|--help|help) usage; exit 0 ;; esac
 TASKS=""
 for a in "$@"; do TASKS="$TASKS $(expand "$a")"; done
 
-FAILED=0
+# Every name is checked before anything runs, so a typo late in the list fails
+# at once rather than after the tasks ahead of it.
+COUNT=0
+COV_QUEUED=""
 for task in $TASKS; do
   type "task_$task" >/dev/null 2>&1 || die "unknown task: $task"
+  COUNT=$((COUNT + 1))
+  if [ "$task" = cov ]; then COV_QUEUED=1; fi
+done
+
+FAILED=0
+TIMES=""
+for task in $TASKS; do
   step "$task"
   log_begin "$task"
   start=$SECONDS
   code=0
   "task_$task" || code=$?
-  finish "$task" "$code" "$((SECONDS - start))"
+  secs=$((SECONDS - start))
+  finish "$task" "$code" "$secs"
   if [ "$code" -ne 0 ]; then
     FAILED=1
+    TIMES="${TIMES:+$TIMES | }$task ${secs}s FAILED"
     warn "$task failed; stopping"
     break   # build/vet/test/scan are all fatal
   fi
+  TIMES="${TIMES:+$TIMES | }$task ${secs}s"
   ok "$task"
 done
+# Console only: where a multi-task run spent its time, on one line.
+if [ "$COUNT" -gt 1 ]; then step "timing: $TIMES"; fi
 exit "$FAILED"

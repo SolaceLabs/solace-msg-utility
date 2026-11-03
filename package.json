@@ -17,9 +17,9 @@
     "typecheck": "tsc --noEmit",
     "check:bundles": "node scripts/check-bundles.mjs",
     "audit:gate": "node scripts/npm-audit-gate.mjs",
-    "test": "vitest run --pool=threads --maxWorkers=12",
-    "test:watch": "vitest --pool=threads --maxWorkers=12",
-    "test:coverage": "vitest run --pool=threads --maxWorkers=12 --coverage"
+    "test": "vitest run --pool=threads",
+    "test:watch": "vitest --pool=threads",
+    "test:coverage": "vitest run --pool=threads --coverage"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

@@ -194,7 +194,7 @@ describe('core/hosted — buildBrokerUrl', () => {
 
 // A managed SMF socket is a gateway path on the page's own origin, so the
 // gateway's Origin check sees itself.
-describe('core/hosted — gatewayWsUrl', () => {
+describe('core/hosted -- gatewayWsUrl', () => {
     it('is plain ws on an http page', () => {
         // jsdom's default location is http://localhost:3000/.
         expect(gatewayWsUrl('/managed/smf/b1/v1')).toBe('ws://localhost:3000/managed/smf/b1/v1');

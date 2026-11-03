@@ -28,33 +28,33 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
 
 ```text
  Browser (managed.html, served by go-web-proxy in managed mode)
-   /login (gateway page) ── password → session cookie (HttpOnly, SameSite=Lax)
-   connections ── Managed tab: GET /managed/me on the cookie
-        └─ profile (broker + VPN NAMES only) → core managed profile; on Connect:
-             SEMP ── /managed/relay/{broker}/SEMP/...   (no Authorization header)
-             SMF  ── POST /managed/dial {broker, vpn} → {smfPath, user, pass}
-                     → SDK opens wss://{page host}/managed/smf/{broker}/{vpn}
-   queue-browser ── entitlement-filtered queue-picker; read-only rows downgrade Delete
-   queue-copy ── source filtered as above; destination may use a provisioned broker + VPN
+   /login (gateway page) -- password -> session cookie (HttpOnly, SameSite=Lax)
+   connections -- Managed tab: GET /managed/me on the cookie
+        +- profile (broker + VPN NAMES only) -> core managed profile; on Connect:
+             SEMP -- /managed/relay/{broker}/SEMP/...   (no Authorization header)
+             SMF  -- POST /managed/dial {broker, vpn} -> {smfPath, user, pass}
+                     -> SDK opens wss://{page host}/managed/smf/{broker}/{vpn}
+   queue-browser -- entitlement-filtered queue-picker; read-only rows downgrade Delete
+   queue-copy -- source filtered as above; destination may use a provisioned broker + VPN
    (administration is a SEPARATE app at /solAdmin: admin-login + user-management +
     connection-management, on /managed/{users,connections,settings}. Served only to an
     admin session; it opens NO broker connection.)
-        │ every request → same origin, same session cookie
-        ▼
+        | every request -> same origin, same session cookie
+        v
  go-web-proxy (MANAGED mode)
    /hosted {hosted, connModes, defaultConn}, SPA
-   Direct relay /{scheme}/{port}/{host}/... ── 404 under CONN_MODES=managed (open under both)
+   Direct relay /{scheme}/{port}/{host}/... -- 404 under CONN_MODES=managed (open under both)
    + users.yaml + connections.yaml sealed whole with the store key (STORE_KEY_FILE),
      loaded strictly; bootstraps an admin who must change the password if absent
-   + /login, /login/password → slow per-user password hash, throttle, session cookie
-   + GET /managed/me → entitled broker/VPN names + queue globs + modules; POST /managed/logout
-   + /managed/relay/{broker}/SEMP... → reads only; adds the stored SEMP account
-   + POST /managed/dial → one VPN's client credential to an entitled user
-   + /managed/smf/{broker}/{vpn} → own-origin WebSocket joined to the broker's SMF port (TLS);
+   + /login, /login/password -> slow per-user password hash, throttle, session cookie
+   + GET /managed/me -> entitled broker/VPN names + queue globs + modules; POST /managed/logout
+   + /managed/relay/{broker}/SEMP... -> reads only; adds the stored SEMP account
+   + POST /managed/dial -> one VPN's client credential to an entitled user
+   + /managed/smf/{broker}/{vpn} -> own-origin WebSocket joined to the broker's SMF port (TLS);
      closed on revocation
    + /managed/{users,connections,settings} (admin-only, on the session cookie)
-        ▼
- Solace broker (SEMP + SMF/WebSocket) — use a READ-ONLY / least-privilege SEMP account
+        v
+ Solace broker (SEMP + SMF/WebSocket) -- use a READ-ONLY / least-privilege SEMP account
 ```
 
 ## Locked decisions
@@ -174,7 +174,7 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
 
 ## Open hardening items (input to the connections rework)
 
-Found in the October 2026 branch review and parked here for the Managed connections / Connections module rework ([rbac-rework-plan.md](rbac-rework-plan.md) § 5 gives each item's phase). Phase 2 closed items 1, 2, 3, 5, 10, 11 and 12 and part of 6; Phase 3 closed 4, 6, 8 and 9. Each says what shipped. Items the threat model above already accepts are not repeated.
+Found in the October 2026 branch review and parked here for the Managed connections / Connections module rework ([rbac-rework-plan.md](rbac-rework-plan.md) section 5 gives each item's phase). Phase 2 closed items 1, 2, 3, 5, 10, 11 and 12 and part of 6; Phase 3 closed 4, 6, 8 and 9. Each says what shipped. Items the threat model above already accepts are not repeated.
 
 **Gateway (`go-web-proxy/`)**
 

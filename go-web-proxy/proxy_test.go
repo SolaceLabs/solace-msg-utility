@@ -491,6 +491,54 @@ func TestReverseProxy_NeverForwardsTheSessionCookie(t *testing.T) {
 	}
 }
 
+func TestDropSessionSetCookie(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"no Set-Cookie", nil, nil},
+		{"a replacement session", []string{"__Host-smu-session=theirs; Secure; Path=/; HttpOnly"}, nil},
+		{"an expiry", []string{"__Host-smu-session=; Max-Age=0; Secure; Path=/"}, nil},
+		{"spaces around the name", []string{" __Host-smu-session =x; Secure; Path=/"}, nil},
+		{"others kept in order", []string{"a=1; Path=/", "__Host-smu-session=x; Secure; Path=/", "b=2"}, []string{"a=1; Path=/", "b=2"}},
+		{"look-alike name kept", []string{"__Host-smu-session2=x; Secure; Path=/"}, []string{"__Host-smu-session2=x; Secure; Path=/"}},
+		{"name only in the value kept", []string{"a=__Host-smu-session; Path=/"}, []string{"a=__Host-smu-session; Path=/"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := http.Header{}
+			for _, v := range c.in {
+				h.Add("Set-Cookie", v)
+			}
+			dropSessionSetCookie(h)
+			if got := h.Values("Set-Cookie"); !slices.Equal(got, c.want) {
+				t.Errorf("Set-Cookie: want %q, got %q", c.want, got)
+			}
+		})
+	}
+}
+
+func TestReverseProxy_UpstreamCannotSetTheSessionCookie(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "__Host-smu-session=attacker-session; Secure; Path=/; HttpOnly")
+		w.Header().Add("Set-Cookie", "theirs=1; Path=/")
+	}))
+	defer upstream.Close()
+	upURL, _ := url.Parse(upstream.URL)
+	gw := httptest.NewServer(newReverseProxy(newUpstreamTransport(x509.NewCertPool(), false), quietLogger()))
+	defer gw.Close()
+
+	resp, err := http.Get(gw.URL + "/http/" + upURL.Port() + "/" + upURL.Hostname() + "/SEMP")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Values("Set-Cookie"); !slices.Equal(got, []string{"theirs=1; Path=/"}) {
+		t.Errorf("Set-Cookie to the browser: want only theirs=1, got %q", got)
+	}
+}
+
 func TestReverseProxy_BadPathReturns400(t *testing.T) {
 	rp := newReverseProxy(newUpstreamTransport(x509.NewCertPool(), false), quietLogger())
 	gw := httptest.NewServer(rp)

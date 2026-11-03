@@ -23,15 +23,6 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Set-Location $RepoRoot
 $env:NO_COLOR = '1'
 
-# Toolchain parity with CI: go.mod carries the `toolchain` directive and
-# GOTOOLCHAIN makes any go binary honour it exactly. Set only when unset, so an
-# exported value wins. Note the module lives in go-web-proxy/, not the root.
-$goMod = Join-Path $GoDir 'go.mod'
-if (-not $env:GOTOOLCHAIN -and (Test-Path $goMod)) {
-  $m = Select-String -Path $goMod -Pattern '^toolchain (\S+)' | Select-Object -First 1
-  if ($m) { $env:GOTOOLCHAIN = $m.Matches[0].Groups[1].Value }
-}
-
 # --- version ----------------------------------------------------------------
 # The git tag is the single source of version truth. CI exports VERSION from
 # the tag ref, so the release path never depends on `git describe` seeing
@@ -113,12 +104,27 @@ function Write-Note {
 }
 
 # --- target resolution ------------------------------------------------------
+# CI sets TARGET_OS/TARGET_ARCH; unset means host, named as dev.sh names it.
+# $IsWindows/$IsMacOS exist only from PowerShell 6, so the Desktop edition
+# (Windows PowerShell 5.1) is Windows by definition.
+function Get-HostOs {
+  if ($PSVersionTable.PSEdition -ne 'Core' -or $IsWindows) { 'windows' }
+  elseif ($IsMacOS) { 'darwin' }
+  else { 'linux' }
+}
+# PROCESSOR_ARCHITECTURE is Windows-only, and a 32-bit PowerShell on 64-bit
+# Windows sees x86 there with the host's own value in PROCESSOR_ARCHITEW6432;
+# elsewhere .NET reports it. An unknown value passes through, as in dev.sh, so
+# go rejects it by name instead of a silent amd64.
 function Get-HostArch {
-  switch ($env:PROCESSOR_ARCHITECTURE) {
-    'AMD64' { 'amd64' } 'ARM64' { 'arm64' } default { 'amd64' }
+  $a = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 }
+       elseif ($env:PROCESSOR_ARCHITECTURE) { $env:PROCESSOR_ARCHITECTURE }
+       else { "$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)" }
+  switch ($a) {
+    'AMD64' { 'amd64' } 'X64' { 'amd64' } 'ARM64' { 'arm64' } default { $a.ToLower() }
   }
 }
-$TOs   = if ($env:TARGET_OS)   { $env:TARGET_OS }   else { 'windows' }
+$TOs   = if ($env:TARGET_OS)   { $env:TARGET_OS }   else { Get-HostOs }
 $TArch = if ($env:TARGET_ARCH) { $env:TARGET_ARCH } else { Get-HostArch }
 # The literal gateway name, never the repo directory name: the local clone and
 # the CI checkout differ, and the release job merges every leg into one
@@ -218,7 +224,13 @@ function Task-vet {
 
 function Task-test {
   $c = Install-Deps 'test'; if ($c -ne 0) { return $c }
-  $c = Invoke-Logged 'test' 'npm' @('test'); if ($c -ne 0) { return $c }
+  # `cov` runs the same web suite with coverage on, so when it is queued in this
+  # invocation the suite runs once, there; a failure in it still fails the run.
+  if ($CovQueued) {
+    Write-Note 'test' 'web suite: skipped here, cov runs it in this invocation'
+  } else {
+    $c = Invoke-Logged 'test' 'npm' @('test'); if ($c -ne 0) { return $c }
+  }
   $c = Invoke-Logged 'test' 'go' @('-C',$GoDir,'test','-count=1','./...'); if ($c -ne 0) { return $c }
   return (Invoke-Logged 'test' 'go' @('-C',$GoDir,'test','-tags','managed','-count=1','./...'))
 }
@@ -337,9 +349,16 @@ foreach ($t in $Tasks) {
   switch ($t) { 'all' { $queue += $All } 'full' { $queue += $Full } default { $queue += $t } }
 }
 
-$failed = 0
+# Every name is checked before anything runs, so a typo late in the list fails
+# at once rather than after the tasks ahead of it.
 foreach ($task in $queue) {
   if (-not (Get-Command "Task-$task" -ErrorAction SilentlyContinue)) { Die "unknown task: $task" }
+}
+$CovQueued = $queue -contains 'cov'
+
+$failed = 0
+$times = @()
+foreach ($task in $queue) {
   Step $task
   Start-TaskLog $task
   $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -347,8 +366,15 @@ foreach ($task in $queue) {
   try { $code = & "Task-$task" } catch { $code = 1 }
   if ($null -eq $code) { $code = 0 }
   $sw.Stop()
-  Write-Finish -Task $task -Code $code -Seconds ([int]$sw.Elapsed.TotalSeconds)
-  if ($code -ne 0) { $failed = 1; Warn "$task failed; stopping"; break }
+  $secs = [int]$sw.Elapsed.TotalSeconds
+  Write-Finish -Task $task -Code $code -Seconds $secs
+  if ($code -ne 0) {
+    $times += "$task ${secs}s FAILED"
+    $failed = 1; Warn "$task failed; stopping"; break
+  }
+  $times += "$task ${secs}s"
   Ok $task
 }
+# Console only: where a multi-task run spent its time, on one line.
+if ($queue.Count -gt 1) { Step ('timing: ' + ($times -join ' | ')) }
 exit $failed

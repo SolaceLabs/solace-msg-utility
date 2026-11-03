@@ -24,7 +24,9 @@ export interface SempConnectionHooks {
     onDisconnected: () => void;
     /**
      * Fires on HTTP 401 from the validation probe: the broker refused the
-     * credential, or in relay mode the gateway session has ended.
+     * credential, or in relay mode the gateway session has ended. In relay
+     * mode it also fires on a 401 from any later request through the returned
+     * `SempContext`, since the session can end at any time.
      */
     onAuthFailed?: () => void;
     /**
@@ -116,10 +118,16 @@ export function createServiceSemp(hooks: SempConnectionHooks): SempClient {
                 // is applied uniformly and broker-emitted URLs (nextPageUri,
                 // etc.) are never used as request targets — callers extract
                 // pathname+search from them before calling fetch().
-                const sempFetch = (path: string, opts: RequestInit = {}) => send(
-                    relay ? relay + path : buildBrokerUrl(cfg.protocol, host, cfg.port, normalizeUrlPath(cfg.urlPath) + path, false),
-                    opts,
-                );
+                const sempFetch = async (path: string, opts: RequestInit = {}) => {
+                    const later = await send(
+                        relay ? relay + path : buildBrokerUrl(cfg.protocol, host, cfg.port, normalizeUrlPath(cfg.urlPath) + path, false),
+                        opts,
+                    );
+                    // Through the relay a 401 always means the gateway session
+                    // ended; a broker's own 401 reaches the caller as an answer.
+                    if (relay && later.status === 401) hooks.onAuthFailed?.();
+                    return later;
+                };
 
                 hooks.onConnected({ fetch: sempFetch, baseUrl }, relay ? { user: '', pass: '' } : { user: cfg.user, pass });
 

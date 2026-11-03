@@ -33,7 +33,7 @@ function signedIn(d: ManagedDialer = dialer()) {
     return p;
 }
 
-describe('core/services/managed-profile — names', () => {
+describe('core/services/managed-profile -- names', () => {
     it('is inert until a profile is set, and again after clear()', () => {
         const p = createManagedProfile();
         expect(p.isActive()).toBe(false);
@@ -55,7 +55,7 @@ describe('core/services/managed-profile — names', () => {
     });
 });
 
-describe('core/services/managed-profile — dial', () => {
+describe('core/services/managed-profile -- dial', () => {
     it('SEMP: hands back the relay config for the broker, with no credential and no gateway call', async () => {
         const d = dialer();
         const connect = vi.fn();
@@ -144,7 +144,7 @@ describe('core/services/managed-profile — dial', () => {
     });
 });
 
-describe('core/services/managed-profile — isSessionEnded', () => {
+describe('core/services/managed-profile -- isSessionEnded', () => {
     it('is true only for a refusal coded unauthenticated', () => {
         expect(isSessionEnded(Object.assign(new Error('x'), { code: 'unauthenticated' }))).toBe(true);
         expect(isSessionEnded(new Error('x'))).toBe(false);

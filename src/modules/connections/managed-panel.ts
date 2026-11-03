@@ -14,8 +14,8 @@
  * Like the Direct panel, this bridges the pure core service factories
  * (`createServiceSolace` / `createServiceSemp`) to global AppState + bus events.
  * The provisioned names live in `ctx.managedProfile` (see
- * `src/core/services/managed-profile.ts`); this panel is its writer — it owns
- * the managed login — and attaches the gateway calls it dials through. SEMP
+ * `src/core/services/managed-profile.ts`); this panel is its writer -- it owns
+ * the managed login -- and attaches the gateway calls it dials through. SEMP
  * goes through the gateway's relay, which adds the broker's account; the SMF
  * password comes from dial at each connect and reaches only the SDK, never
  * AppState, so a reconnect after a VPN switch dials again.
@@ -98,7 +98,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     const service = createManagedService();
     const profile = app.managedProfile;
     profile.attachDialer(service);
-    /** Signed in ⇔ the profile is set. No second copy of that truth here. */
+    /** Signed in <=> the profile is set. No second copy of that truth here. */
     const signedIn = (): boolean => profile.isActive();
 
     // --- panel state ---
@@ -221,7 +221,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
 
     // Inject the managed guardrail into the SDK session WITHOUT touching
     // queue-browser: monkey-patch createQueueBrowser so binding a non-entitled
-    // queue throws — queue-browser's createBrowser try/catch surfaces it via
+    // queue throws -- queue-browser's createBrowser try/catch surfaces it via
     // showBindError. Read-only rows are applied by queue-browser itself
     // (ui-table.ts reads `appState.managed`), and only ever downgrade what the
     // broker allows.
@@ -423,8 +423,8 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
 
         // Wait for the next client:connected (→ finish) or client:disconnected
         // (→ give up). 30s timeout so listeners can't leak. Clears opInProgress
-        // on every exit path.
-        function waitForConnect(): void {
+        // on every exit path; the returned cleanup ends the wait early.
+        function waitForConnect(): () => void {
             let onSuccess: () => void;
             let onFail: () => void;
             const cleanup = () => {
@@ -438,6 +438,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             const timer = setTimeout(cleanup, 30_000);
             eventBus.on('client:connected', onSuccess);
             eventBus.on('client:disconnected', onFail);
+            return cleanup;
         }
 
         if (!appState.isConnected) {
@@ -458,11 +459,15 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         const onDisconnected = () => {
             clearTimeout(disconnectTimer);
             eventBus.off('client:disconnected', onDisconnected);
-            waitForConnect();
+            const stopWaiting = waitForConnect();
             // The profile rejects an unprovisioned target, and the gateway may
-            // refuse the dial — surface either rather than leaving an
-            // unhandled rejection.
-            void connectSolace(brokerName, targetVpn).catch(connectFailed);
+            // refuse the dial -- surface either rather than leaving an
+            // unhandled rejection. Either ends the switch: a later connect is
+            // not this switch's, so it must not finish it.
+            void connectSolace(brokerName, targetVpn).catch((e) => {
+                stopWaiting();
+                connectFailed(e);
+            });
         };
         eventBus.on('client:disconnected', onDisconnected);
         disconnectTimer = setTimeout(() => {

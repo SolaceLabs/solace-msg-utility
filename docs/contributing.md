@@ -28,7 +28,7 @@ npm install && npm test
 | --- | --- |
 | `build` | `npm run build` (every variant), `npm run check:bundles` (no Release bundle carries managed UI), plus both gateway binaries, version-stamped, into `dist/` |
 | `vet` | `npm run typecheck`, `go vet ./...` **and** `go vet -tags managed ./...` |
-| `test` | `npm test`, `go test ./...` **and** `go test -tags managed ./...` |
+| `test` | `npm test`, `go test ./...` **and** `go test -tags managed ./...`. When `cov` is in the same invocation (`full`, `all cov`), the web suite runs once, in `cov`, and `test.log` says so |
 | `cov` | `npm run test:coverage` plus a Go coverage profile; prints both totals |
 | `scan` | `npm run audit:gate` (`npm audit`, fatal on fixable HIGH/CRITICAL advisories, warns on unfixable ones), `go tool govulncheck -tags=managed ./...`, then a Trivy scan of both freshly-built images with the pinned Trivy container (never a `trivy` on PATH; see [git.md](git.md#keeping-the-workflow-pins-current)) |
 | `image` | Builds both container images via `docker/docker-compose.yaml` |
@@ -39,7 +39,7 @@ npm install && npm test
 
 The Go gates run **both** ways because the RBAC backend is behind the `managed` build tag; an untagged run does not compile it at all.
 
-Each task writes `scripts/logs/<task>.log` with a timestamped footer. `logs/cov.log` holds the previous coverage totals, which are the local floor — CI is a fresh checkout with no prior log, so it cannot catch a coverage regression.
+Every task name is checked before any task runs, so a typo fails at once. Each task writes `scripts/logs/<task>.log` with a timestamped footer, and a run of more than one task ends with a console-only `timing:` line giving each task's seconds. `logs/cov.log` holds the previous coverage totals, which are the local floor — CI is a fresh checkout with no prior log, so it cannot catch a coverage regression.
 
 The image half of `image` and `scan` warn-skips when Docker is absent or running Windows containers, since a Linux image cannot be built there. The `ubuntu-24.04` CI leg still enforces it.
 
@@ -271,7 +271,7 @@ Use `/* v8 ignore start */` / `/* v8 ignore stop */` **only** for code that is a
 npm run test:watch     # Watch mode — the one case where the npm script is the right entry point
 ```
 
-The `--pool=threads --maxWorkers=12` flags are included in the npm scripts the tasks call.
+The `--pool=threads` flag is included in the npm scripts the tasks call; the worker count is left to Vitest.
 
 ---
 

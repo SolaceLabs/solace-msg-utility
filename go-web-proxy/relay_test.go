@@ -154,6 +154,28 @@ func TestRelay_UpstreamAnswers(t *testing.T) {
 	}
 }
 
+// A 101 the relay never asked for would hand the browser a raw broker
+// connection; it is refused like a redirect, and no upgrade header passes.
+func TestRelay_UnaskedUpgradeIsA502(t *testing.T) {
+	e, _ := newRelayEnv(t, func(w http.ResponseWriter, _ *http.Request) {
+		conn, buf, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		defer conn.Close()
+		_, _ = buf.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+		_ = buf.Flush()
+	})
+	rec := e.do("GET", "/managed/relay/b1/SEMP/v2/monitor/about", "", e.cookie("viewer", false))
+	expect(t, rec, http.StatusBadGateway, "upstream_unavailable")
+	for _, k := range []string{"Upgrade", "Connection"} {
+		if rec.Header().Get(k) != "" {
+			t.Errorf("the broker's %s header must never reach the browser", k)
+		}
+	}
+}
+
 func TestRelay_UnreachableBrokerIsAGeneric502(t *testing.T) {
 	e, fb := newRelayEnv(t, answerJSON)
 	addr := fb.srv.Listener.Addr().String()

@@ -108,7 +108,7 @@ function makeCtx(container: HTMLElement): AppContext {
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
         // The REAL profile (over the mocked gateway calls above): this panel is
-        // its writer, so the suite covers login → setProfile → dial end to end.
+        // its writer, so the suite covers login -> setProfile -> dial end to end.
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: {},
@@ -683,7 +683,7 @@ describe('managed-connections — connection:check-connection', () => {
         expect(copy).toHaveBeenCalledWith({ vpn: 'vpn1', queue: 'qX' });
     });
 
-    it('switches VPN: disconnect → dial again → reconnect → finish', async () => {
+    it('switches VPN: disconnect -> dial again -> reconnect -> finish', async () => {
         const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container, ctx);
         const browse = vi.fn();
@@ -744,6 +744,27 @@ describe('managed-connections — connection:check-connection', () => {
         ctx.eventBus.emit('client:disconnected');
         await vi.waitFor(() => expect(ctx.appState.managed).toBeNull());
         expect(hidden(container, '#managed-login-view')).toBe(false);
+    });
+
+    it('a refused switch dial ends the switch: a later connect does not finish it, and the next request runs', async () => {
+        const { container, ctx } = await signedIn();
+        await connectToB1Vpn1(container, ctx);
+        (globalThis.confirm as any).mockReturnValue(true);
+        const browse = vi.fn();
+        ctx.eventBus.on('browser:browse-queue', browse);
+        svcMock.dial.mockResolvedValueOnce({ ok: false, status: 429, code: 'rate_limited' });
+
+        ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
+        ctx.eventBus.emit('client:disconnected');
+        await vi.waitFor(() => expect(el(container, '#managed-connect-error').textContent).toMatch(/Too many requests/));
+
+        // The user connects again by hand: that is not the abandoned switch.
+        ctx.eventBus.emit('client:connected', { session: {} });
+        expect(browse).not.toHaveBeenCalled();
+
+        solaceMock.disconnect.mockClear();
+        ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
+        expect(solaceMock.disconnect).toHaveBeenCalled();
     });
 
     it('clears the in-progress flag if the reconnect never completes (30s timeout)', async () => {

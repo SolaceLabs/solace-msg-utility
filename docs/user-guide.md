@@ -274,7 +274,7 @@ When Same-VPN is enabled, the destination uses the primary Solace session direct
 
 When the destination is *not* just the primary connection, a **Credentials** choice appears on the Destination Broker card:
 
-- **Provisioned** — pick a **Broker** and **Message VPN** from the ones you are entitled to. There are no password fields: the gateway connects you with the credentials your administrator provisioned, exactly as it does for the primary connection.
+- **Provisioned** -- pick a **Broker** and **Message VPN** from the ones you are entitled to. There are no password fields: the gateway connects you with the credentials your administrator provisioned, exactly as it does for the primary connection.
 - **Manual** — type the host and credentials yourself, as before.
 
 Which options you get follows the deployment: a managed-only deployment offers **Provisioned** alone, a direct one offers **Manual** alone, and a deployment offering both connection modes lets you choose. Switching between them clears the destination target, since it was picked against a different broker.
@@ -481,7 +481,7 @@ It appears as a second tab in the **Connections** module — **Direct** (type yo
 
 1. **Sign in.** On a deployment that offers only Managed, opening the app takes you straight to the sign-in page. Otherwise open **Connections**, choose the **Managed** tab and click **Sign in**. Enter the username and password your administrator gave you; you return to the app with the **Managed** tab open.
 2. **First sign-in of a new deployment:** the bootstrap `admin` account is asked to choose a new password (12 to 128 characters) before anything else.
-3. Pick a **Broker** and **Message VPN** from the dropdowns — these list only what you're entitled to, by name. The gateway keeps the broker's address and credentials and connects you through itself, so you never see or type them.
+3. Pick a **Broker** and **Message VPN** from the dropdowns -- these list only what you're entitled to, by name. The gateway keeps the broker's address and credentials and connects you through itself, so you never see or type them.
 4. Click **Connect**. From here the **Queue Browser** and **Queue Copy** work exactly as usual, but scoped to your entitlements.
 5. **Refresh** re-fetches your entitlements and brokers without signing out (useful right after an admin grants you access). **Change password** opens the gateway's password page. **Sign out** ends your session.
 
@@ -504,7 +504,7 @@ If your entitlements change while you are working (you or an admin hit Refresh, 
 
 **Messages from the gateway.** *The gateway relays SEMP reads only; this request would change the broker.* means something asked the broker for a change, which a managed session never makes. *The broker refused the credential the gateway holds for it* and *The gateway could not reach the broker...* mean the connection needs your administrator. If the gateway takes your access away while you are connected (you signed out in another tab, your password or administrator flag changed, or an administrator removed your access to that VPN or broker), the connection closes; when your session itself has ended, the app's next request to the gateway returns the Managed tab to **Sign in**.
 
-> The gateway connects you only to the brokers and Message VPNs you are entitled to, and its management (SEMP) connection is **read-only**: the app only reads through it. The queue-level limits above are guardrails in the app, on top of least-privilege broker accounts. If your deployment offers **both** tabs, note that the Direct tab is outside this model entirely — see [deployment.md](deployment.md#managed-mode-rbac).
+> The gateway connects you only to the brokers and Message VPNs you are entitled to, and its management (SEMP) connection is **read-only**: the app only reads through it. The queue-level limits above are guardrails in the app, on top of least-privilege broker accounts. If your deployment offers **both** tabs, note that the Direct tab is outside this model entirely -- see [deployment.md](deployment.md#managed-mode-rbac).
 
 ### Administration (`/solAdmin`)
 

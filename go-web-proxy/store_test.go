@@ -377,6 +377,7 @@ func TestLoadStore_RejectsInvalidConnectionsFile(t *testing.T) {
 		{"duplicate broker", "msg-utility-connections:\n" + conn("b1", "") + conn("b1", ""), `broker "b1" appears more than once`},
 		{"semp port", "msg-utility-connections:\n" + conn("b1", "    semp:\n      port: 99999\n"), `semp.port "99999" is not a port`},
 		{"client port", "msg-utility-connections:\n" + conn("b1", "    client:\n      port: tcp\n"), `client.port "tcp" is not a port`},
+		{"signed port", "msg-utility-connections:\n" + conn("b1", "    semp:\n      port: '+8080'\n"), `semp.port "+8080" is not a port`},
 		{"vpn without name", "msg-utility-connections:\n" + conn("b1", vpns("")), "a message VPN has no name"},
 		{"duplicate vpn", "msg-utility-connections:\n" + conn("b1", vpns("v1", "v1")), `message VPN "v1" appears more than once`},
 		{"bad hostname", "msg-utility-connections:\n  - broker: b1\n    hostname: 'https://h'\n", `hostname "https://h" must be a host name`},
@@ -879,9 +880,9 @@ func TestStore_UpsertConnection_MergeSecretsOnEdit(t *testing.T) {
 	s := newStoreWithFixtures(t)
 	edit := connRec{
 		Broker: "b1", Hostname: "host1-new",
-		Semp: sempRec{Port: "1943", Username: "mon", Password: ""}, // blank → keep semp-b1-pw
+		Semp: sempRec{Port: "1943", Username: "mon", Password: ""}, // blank -> keep semp-b1-pw
 		Client: clientRec{Port: "1443", MsgVpns: []vpnRec{
-			{Name: "v1", Username: "u1", Password: ""},           // blank + match → keep cli-b1v1-pw
+			{Name: "v1", Username: "u1", Password: ""},           // blank + match -> keep cli-b1v1-pw
 			{Name: "v2", Username: "u2", Password: "V1:changed"}, // non-blank → replace
 			{Name: "vX", Username: "ux", Password: ""},           // blank + no match → stays ""
 		}},

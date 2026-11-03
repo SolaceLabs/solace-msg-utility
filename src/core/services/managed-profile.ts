@@ -1,5 +1,5 @@
 /**
- * Managed profile — the signed-in user's provisioned brokers and VPNs, and the
+ * Managed profile -- the signed-in user's provisioned brokers and VPNs, and the
  * one way to open a provisioned connection.
  *
  * Why it exists: more than one module opens a provisioned connection (the
@@ -32,9 +32,9 @@ import type { DialResponse, ManagedProfile } from './managed-service';
 // which re-exports these and also imports this file's `ManagedProfileStore`.
 import type { SolaceConfig, SempConfig } from '../connections/types';
 
-/** Target of a Solace (SMF) dial — a provisioned broker + VPN. */
+/** Target of a Solace (SMF) dial -- a provisioned broker + VPN. */
 export interface SolaceTarget { broker: string; vpn: string; kind: 'solace' }
-/** Target of a SEMP dial — provisioned per broker, so no VPN. */
+/** Target of a SEMP dial -- provisioned per broker, so no VPN. */
 export interface SempTarget { broker: string; kind: 'semp' }
 
 /**

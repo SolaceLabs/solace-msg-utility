@@ -332,7 +332,8 @@ func validatePort(p string) error {
 	if p == "" {
 		return nil
 	}
-	if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+	// Digits only: Atoi alone takes "+80", which no dialer accepts.
+	if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 || strings.Trim(p, "0123456789") != "" {
 		return fmt.Errorf("%q is not a port (1 to 65535)", p)
 	}
 	return nil
