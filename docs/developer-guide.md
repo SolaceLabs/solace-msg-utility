@@ -23,7 +23,8 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 | `npm run build:all` | `all-test.html` (kitchen-sink QA build — every module, including the admin ones) |
 | `npm run build:admin` | `solAdmin.html` (the standalone administration app — see [architecture.md -> The admin app](architecture.md#the-admin-app-soladmin)) |
 | `npm run build:managed` | `managed.html` (standard plus the Managed sign-in; the managed image serves it as its `index.html`) |
-| `npm run build` | `mock.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, `solAdmin.html` AND `managed.html` in one pass |
+| `npm run build:managed-demo` | `managed-demo.html` (mock mode, variant `managed-demo`: the managed modules and the three admin editors against the demo's fake gateway and broker; see [architecture.md -> The demo broker](architecture.md#the-demo-broker-mockhtml)) |
+| `npm run build` | `mock.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, `solAdmin.html`, `managed.html` AND `managed-demo.html` in one pass |
 | `npm run check:bundles` | Checks `dist/`: no Release bundle carries managed UI, `managed.html` does. The `build` task runs it after `npm run build` |
 
 `dist/` is git-ignored build output; nothing in it is committed. Tagged Releases publish the Direct-only bundles and the gateway binaries, never `solAdmin.html` or `managed.html`, which ship only inside the managed image (see [git.md -> Release assets](git.md#release-assets)). For local runs, drop `solclient.js` / `jszip.min.js` in beside the bundles (see [deployment.md -> External Runtime Dependencies](deployment.md#external-runtime-dependencies)).

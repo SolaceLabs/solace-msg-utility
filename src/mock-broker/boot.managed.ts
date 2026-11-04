@@ -23,6 +23,7 @@
 import './controls/styles.css';
 import { installMockServer } from './server';
 import { mountControlPanel } from './controls/panel';
+import { managedSections } from './controls/managed';
 import { dumpStore, loadStore, seed, type StoreSnapshot } from './broker/store';
 import { dumpScenario, loadScenario, setBrokers, type ScenarioSnapshot } from './fixtures';
 import { installSdk, removeVendorBanner, whenReady } from './shell';
@@ -122,15 +123,14 @@ export function boot(opts: { reload?: () => void } = {}): ManagedDemo {
         if (!keep) return;
         writeSnapshot({ v: 1, gateway: gateway.snapshot(), broker: dumpStore(), scenario: dumpScenario(), page: pages.current() });
     };
-    const pages = createPages({
-        gateway,
-        navigate: (page) => {
-            pages.hide();
-            writeSnapshot({ v: 1, gateway: gateway.snapshot(), broker: dumpStore(), scenario: dumpScenario(), page });
-            keep = false;   // the pagehide of this reload must not overwrite it
-            reload();
-        },
-    });
+    /** Land on `page` through a reload, as a sign-in does: what the demo holds rides across. */
+    const navigate = (page: Page) => {
+        pages.hide();
+        writeSnapshot({ v: 1, gateway: gateway.snapshot(), broker: dumpStore(), scenario: dumpScenario(), page });
+        keep = false;   // the pagehide of this reload must not overwrite it
+        reload();
+    };
+    const pages = createPages({ gateway, navigate });
 
     // Where the browser lands: the page it was on, or, while connModes is
     // managed, the sign-in (or the forced change) the gateway sends a load
@@ -142,9 +142,15 @@ export function boot(opts: { reload?: () => void } = {}): ManagedDemo {
     }
 
     let undoNav = () => { /* until the document is ready */ };
+    const reset = () => {
+        keep = false;
+        clearSnapshot();
+        reload();
+    };
+
     whenReady(() => {
         removeVendorBanner();
-        mountControlPanel();
+        mountControlPanel({ sections: managedSections({ gateway, navigate }), reset });
         undoNav = pages.installNav();
         pages.show(page);
         window.addEventListener('pagehide', save);
@@ -154,11 +160,7 @@ export function boot(opts: { reload?: () => void } = {}): ManagedDemo {
         gateway,
         pages,
         save,
-        reset() {
-            keep = false;
-            clearSnapshot();
-            reload();
-        },
+        reset,
         dispose() {
             undoNav();
             window.removeEventListener('pagehide', save);

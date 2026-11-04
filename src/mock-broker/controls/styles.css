@@ -145,3 +145,17 @@
     line-height: 1.35;
     color: #8b949e;
 }
+
+/* Managed demo: one row per demo account. */
+.mockctl-account {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    align-items: center;
+    margin: 0.4rem 0;
+}
+
+.mockctl-account .mockctl-hint {
+    flex-basis: 100%;
+    margin: 0;
+}

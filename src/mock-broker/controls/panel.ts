@@ -5,16 +5,19 @@
  * mock-broker tree, which production never imports, so this UI cannot leak into
  * a shipped bundle — no build flag and no dead code to tree-shake.
  *
+ * The managed demo mounts it with `PanelOptions`: its own sections in place of
+ * the Direct connection reference (`managed.ts`), and a Reset that reloads.
+ *
  * Mock-only.
  */
 import {
-    FAULT, MOCK_HOST, QUEUE_STATE, VPNS, resetScenario, scenario,
+    BROKERS, DIRECT_BROKER, FAULT, MOCK_HOST, QUEUE_STATE, VPNS, resetScenario, scenario,
     type Fault, type QueueState,
 } from '../fixtures';
 import { seed } from '../broker/store';
 import { dropAllSessions } from '../sdk';
 
-function el<K extends keyof HTMLElementTagNameMap>(
+export function el<K extends keyof HTMLElementTagNameMap>(
     tag: K, className?: string, text?: string,
 ): HTMLElementTagNameMap[K] {
     const node = document.createElement(tag);
@@ -23,13 +26,13 @@ function el<K extends keyof HTMLElementTagNameMap>(
     return node;
 }
 
-function section(title: string): HTMLElement {
+export function section(title: string): HTMLElement {
     const wrap = el('div', 'mockctl-section');
     wrap.appendChild(el('h4', 'mockctl-title', title));
     return wrap;
 }
 
-function select(options: { value: string; label: string }[], onChange: (v: string) => void): HTMLSelectElement {
+export function select(options: { value: string; label: string }[], onChange: (v: string) => void): HTMLSelectElement {
     const sel = el('select', 'mockctl-select');
     options.forEach(o => {
         const opt = document.createElement('option');
@@ -41,19 +44,19 @@ function select(options: { value: string; label: string }[], onChange: (v: strin
     return sel;
 }
 
-function button(label: string, onClick: () => void): HTMLButtonElement {
+export function button(label: string, onClick: () => void): HTMLButtonElement {
     const btn = el('button', 'mockctl-btn', label);
     btn.type = 'button';
     btn.addEventListener('click', onClick);
     return btn;
 }
 
-/** Every `vpn/queue` pair, for the per-queue state control. */
+/** Every `vpn/queue` pair on every broker, for the per-queue state control. */
 function queueOptions(): { value: string; label: string }[] {
-    return VPNS.flatMap(v => v.queues.map(q => ({
+    return Array.from(BROKERS).flatMap(([broker, vpns]) => vpns.flatMap(v => v.queues.map(q => ({
         value: `${v.name}/${q.name}`,
-        label: `${v.name} / ${q.name}`,
-    })));
+        label: broker === DIRECT_BROKER ? `${v.name} / ${q.name}` : `${broker} / ${v.name} / ${q.name}`,
+    }))));
 }
 
 /**
@@ -61,7 +64,7 @@ function queueOptions(): { value: string; label: string }[] {
  * to know `broker.solace.com` is the magic host is to read the source or the
  * user guide — which is exactly the friction a demo should not have.
  */
-function copyable(value: string): HTMLElement {
+export function copyable(value: string): HTMLElement {
     const code = el('code', 'mockctl-copy', value);
     code.title = 'Click to copy';
     code.addEventListener('click', () => {
@@ -78,7 +81,7 @@ function copyable(value: string): HTMLElement {
 }
 
 /** One `label: value(s)` row in the connection reference. */
-function kv(label: string, values: string[]): HTMLElement {
+export function kv(label: string, values: string[]): HTMLElement {
     const row = el('div', 'mockctl-kv');
     row.appendChild(el('span', 'mockctl-key', label));
     const vals = el('span', 'mockctl-vals');
@@ -106,7 +109,14 @@ function connectionReference(): HTMLElement {
     return wrap;
 }
 
-export function mountControlPanel(): void {
+export interface PanelOptions {
+    /** Sections in place of the Direct connection reference. */
+    sections?: HTMLElement[];
+    /** What Reset demo data does, in place of reseeding where it stands. */
+    reset?: () => void;
+}
+
+export function mountControlPanel(opts: PanelOptions = {}): void {
     const root = el('div', 'mockctl-root');
     root.id = 'mock-controls';
 
@@ -167,6 +177,10 @@ export function mountControlPanel(): void {
 
     tuneSection.append(latency, latencyLabel, volumePick,
         button('Reset demo data', () => {
+            if (opts.reset) {
+                opts.reset();
+                return;
+            }
             resetScenario();
             seed();
             latency.value = String(scenario.latencyMs);
@@ -176,7 +190,7 @@ export function mountControlPanel(): void {
             statePick.value = scenario.queueState.get(selectedQueue) ?? QUEUE_STATE.NORMAL;
         }));
 
-    body.append(connectionReference(), queueSection, faultSection, tuneSection);
+    body.append(...(opts.sections ?? [connectionReference()]), queueSection, faultSection, tuneSection);
     root.append(header, body);
     document.body.appendChild(root);
 }

@@ -138,6 +138,18 @@ describe('mock-broker/boot.managed -- the sign-in and the reloads', () => {
         expect(start().gateway.session()).toBeNull();
     });
 
+    it('mounts the managed panel, whose Reset demo data is the boot\'s', () => {
+        const demo = start();
+        demo.gateway.signIn('viewer', 'demo-viewer-0001');
+        demo.save();
+        expect(document.querySelector('#mock-controls .mockctl-title')!.textContent).toBe('Demo accounts');
+
+        Array.from(document.querySelectorAll<HTMLButtonElement>('#mock-controls .mockctl-btn'))
+            .find(b => b.textContent === 'Reset demo data')!.click();
+        expect(reloads).toBe(1);
+        expect(sessionStorage.getItem(SNAPSHOT_KEY)).toBeNull();
+    });
+
     it('starts from the seed when the storage refuses or holds something else', () => {
         sessionStorage.setItem(SNAPSHOT_KEY, '{"v":0}');
         expect(start().gateway.session()).toBeNull();

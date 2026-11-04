@@ -101,6 +101,16 @@
   - `boot.managed.test.ts` rewritten: the network block, the sign-in at boot, a sign-in's reload carrying the session and the queues, the forced change after it, `pagehide`, Reset, and refused storage;
   - `broker/store.test.ts` gained the snapshot round trip.
 > - **Dev scripts: a `mock` task (November 2026):** `./scripts/dev.sh mock` (and `dev.ps1 mock`) runs `tests/mock-broker/` through the new `npm run test:mock`, and is part of `all` and `full`, so CI's `all scan` runs it. `test`'s web half moved to `npm run test:app`, the suite without `tests/mock-broker/`, so `all` runs no suite twice. Under `cov` both are skipped, and `cov` runs the whole suite once. `npm test` still runs everything.
+> - **Phase 4, step 6: the managed-demo variant and the demo panel (November 2026):**
+  - [`src/variants/managed-demo.ts`](../src/variants/managed-demo.ts) carries the managed variant's messaging modules and the three admin editors, on the connections module's managed entry. It has no `admin-login`, because the Managed panel owns the session.
+  - `npm run build:managed-demo` builds it in mock mode into `dist/managed-demo.html`, and `npm run build` now includes it.
+  - `cssVariantRedirect` gives it the admin stylesheets (`ADMIN_CSS_VARIANTS`).
+  - The control panel takes `PanelOptions` (sections in place of the Direct connection reference, and a Reset). Its queue-state lever lists every broker's queues.
+  - The managed sections are in [`controls/managed.ts`](../src/mock-broker/controls/managed.ts):
+    - the demo accounts, click to copy or sign in as one, and sign-out;
+    - gateway events: end or expire my session, revoke my VPN access, clear the lockout, and the relay, dial and config.yaml faults.
+
+  Tests: new `tests/mock-broker/controls/managed.test.ts`. `tests/variants.test.ts` gained the managed demo's manifest, with the admin-modules rule naming it as the exception; `tests/build/module-registry-plugin.test.ts` its entry override; `boot.managed.test.ts` the panel's Reset.
 >
 > The v8 ignore categories table further down has been trimmed to reflect which of the old justifications still apply.
 
@@ -809,7 +819,7 @@ Current files in the test tree:
 - **connection-management/** (admin-only) — `module.test.ts`, `service.test.ts`
 - **gateway-settings/** (admin-only) — `module.test.ts`, `service.test.ts`
 - **build/** -- `module-registry-plugin.test.ts` (manifest -> `virtual:module-registry` emission, `MODULE_ENTRIES` overrides, entry-template composition), `check-bundles.test.ts` (Release bundles without managed markers, `managed.html` with all of them, the `tag.yml` Release list kept equal), `npm-audit-gate.test.ts` (fixable vs unfixable advisory split, npm audit error reports, name/range validation before any `npm view`), `e2e-lib.test.ts` (the end-to-end run's helpers: certificates a TLS client trusting only the run's CA accepts, reading the broker CA file, the broker details file and each detail's check, the session-cookie rules, the sealed-store header, secret masking and the response sweep)
-- **mock-broker/** -- `boot.test.ts`, `boot.managed.test.ts` (the managed demo's boot: nothing reaches a network), `panel.test.ts`, `sdk.test.ts`, `server.test.ts` (demo-broker fidelity contracts, the passthrough and routes options, SEMP per broker), `broker/store.test.ts` (brokers beside Direct: scoped listings, lookups and publishes, unique VPN names), `gateway/contract.test.ts` (the fake gateway answers every case of `go-web-proxy/testdata/contract/` as the real one does), `gateway/relay.test.ts`, `gateway/gateway.test.ts`, `gateway/sockets.test.ts`, `gateway/pages.test.ts`, `gateway/seed.test.ts`
+- **mock-broker/** -- `boot.test.ts`, `boot.managed.test.ts` (the managed demo's boot: nothing reaches a network), `panel.test.ts`, `sdk.test.ts`, `server.test.ts` (demo-broker fidelity contracts, the passthrough and routes options, SEMP per broker), `broker/store.test.ts` (brokers beside Direct: scoped listings, lookups and publishes, unique VPN names), `gateway/contract.test.ts` (the fake gateway answers every case of `go-web-proxy/testdata/contract/` as the real one does), `gateway/relay.test.ts`, `gateway/gateway.test.ts`, `gateway/sockets.test.ts`, `gateway/pages.test.ts`, `gateway/seed.test.ts`, `controls/managed.test.ts`
 - **integration/** — `full-flow.test.ts`, `module-events.test.ts`, `message-pipeline.test.ts`, `admin-session.test.ts`
 - **(root)** — `main.test.ts`, `registry.test.ts`, `variants.test.ts` (every variant manifest's shape; the `managed` variant is standard plus the connections managed entry, no Release variant overrides an entry, and the gateway's `moduleCatalog()` equals the managed variant's module-controlled modules)
 
