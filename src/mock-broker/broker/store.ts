@@ -15,9 +15,10 @@
  * listing, a by-name lookup or a publish can see, defaulting to the Direct
  * broker.
  *
- * Mock-only. Reseeded on every page load; nothing is persisted.
+ * Mock-only. mock.html reseeds on every page load; the managed demo carries
+ * the store across its sign-in reloads with `dumpStore` / `loadStore`.
  */
-import { createDestination, createMessage, type MockMessage } from '../sdk/message';
+import { createDestination, createMessage, type MessageFields, type MockDestination, type MockMessage } from '../sdk/message';
 import { DestinationType } from '../sdk/enums';
 import { BROKERS, DIRECT_BROKER, brokerVpns, scenario, queueStateOf, QUEUE_STATE } from '../fixtures';
 
@@ -171,6 +172,52 @@ export function publish(destName: string, destType: number, msg: MockMessage, br
         q.messages.push({ id, msg: stored, sizeBytes: (stored._fields.payload ?? '').length + 120 });
     }
     return targets.length;
+}
+
+/** The store as plain data: a message's destinations become `{ name, type }`. */
+export interface StoreSnapshot {
+    nextId: number;
+    queues: (Omit<MockQueue, 'messages'> & { messages: { id: number; sizeBytes: number; fields: Record<string, unknown> }[] })[];
+}
+
+const DESTINATION_FIELDS = ['destination', 'replyTo'] as const;
+
+export function dumpStore(): StoreSnapshot {
+    return {
+        nextId,
+        queues: Array.from(queues.values(), q => ({
+            ...q,
+            subscriptions: [...q.subscriptions],
+            messages: q.messages.map(m => {
+                const fields: Record<string, unknown> = { ...m.msg._fields };
+                for (const k of DESTINATION_FIELDS) {
+                    const d = m.msg._fields[k];
+                    if (d) fields[k] = { name: d.getName(), type: d.getType() };
+                }
+                return { id: m.id, sizeBytes: m.sizeBytes, fields };
+            }),
+        })),
+    };
+}
+
+/** Replace the store with a snapshot `dumpStore` made. */
+export function loadStore(s: StoreSnapshot): void {
+    queues.clear();
+    nextId = s.nextId;
+    for (const q of s.queues) {
+        queues.set(key(q.vpn, q.name), {
+            ...q,
+            subscriptions: [...q.subscriptions],
+            messages: q.messages.map(m => {
+                const fields = { ...m.fields } as MessageFields;
+                for (const k of DESTINATION_FIELDS) {
+                    const d = m.fields[k] as { name: string; type: number } | undefined;
+                    if (d) fields[k] = createDestination(d.name, d.type) as MockDestination;
+                }
+                return { id: m.id, sizeBytes: m.sizeBytes, msg: createMessage(fields) };
+            }),
+        });
+    }
 }
 
 /**

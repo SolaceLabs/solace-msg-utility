@@ -225,15 +225,28 @@ function Task-vet {
 
 function Task-test {
   $c = Install-Deps 'test'; if ($c -ne 0) { return $c }
-  # `cov` runs the same web suite with coverage on, so when it is queued in this
-  # invocation the suite runs once, there; a failure in it still fails the run.
+  # The web suite without tests/mock-broker/, which `mock` runs. `cov` runs the
+  # whole suite with coverage on, so when it is queued in this invocation the
+  # suite runs once, there; a failure in it still fails the run.
   if ($CovQueued) {
     Write-Note 'test' 'web suite: skipped here, cov runs it in this invocation'
   } else {
-    $c = Invoke-Logged 'test' 'npm' @('test'); if ($c -ne 0) { return $c }
+    $c = Invoke-Logged 'test' 'npm' @('run','test:app'); if ($c -ne 0) { return $c }
   }
   $c = Invoke-Logged 'test' 'go' @('-C',$GoDir,'test','-count=1','./...'); if ($c -ne 0) { return $c }
   return (Invoke-Logged 'test' 'go' @('-C',$GoDir,'test','-tags','managed','-count=1','./...'))
+}
+
+# The demo broker and the managed demo's fake gateway (tests/mock-broker/): the
+# suites behind mock.html and managed-demo.html, the gateway contract included.
+# Skipped, like test's web suite, when cov runs them in this invocation.
+function Task-mock {
+  $c = Install-Deps 'mock'; if ($c -ne 0) { return $c }
+  if ($CovQueued) {
+    Write-Note 'mock' 'mock suite: skipped here, cov runs it in this invocation'
+    return 0
+  }
+  return (Invoke-Logged 'mock' 'npm' @('run','test:mock'))
 }
 
 function Task-cov {
@@ -353,16 +366,17 @@ function Task-e2e {
 }
 
 # --- dispatch ---------------------------------------------------------------
-$All  = @('build','vet','test')
-$Full = @('build','vet','test','cov','image','scan','graphify')
+$All  = @('build','vet','test','mock')
+$Full = @('build','vet','test','mock','cov','image','scan','graphify')
 
 function Show-Usage {
   @"
 usage: dev.ps1 <task>...
 
-  build vet test cov scan image up down graphify e2e
-  all   = $($All -join ' ')            (what CI runs, as: all scan)
-  full  = $($Full -join ' ')           (pre-tag sweep)
+  build vet test mock cov scan image up down graphify e2e
+  all   = $($All -join ' ')       (what CI runs, as: all scan)
+  full  = $($Full -join ' ')      (pre-tag sweep)
+  mock  = the demo broker and fake-gateway suites (tests/mock-broker/)
   e2e   = the managed gateway against an existing broker (local only, standalone)
 "@ | Write-Host
 }

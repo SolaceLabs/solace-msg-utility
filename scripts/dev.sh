@@ -174,15 +174,28 @@ task_vet() {
 
 task_test() {
   ensure_deps test || return $?
-  # `cov` runs the same web suite with coverage on, so when it is queued in this
-  # invocation the suite runs once, there; a failure in it still fails the run.
+  # The web suite without tests/mock-broker/, which `mock` runs. `cov` runs the
+  # whole suite with coverage on, so when it is queued in this invocation the
+  # suite runs once, there; a failure in it still fails the run.
   if [ -n "${COV_QUEUED:-}" ]; then
     note test "web suite: skipped here, cov runs it in this invocation"
   else
-    run test npm test || return $?
+    run test npm run test:app || return $?
   fi
   run test go -C "$GO_DIR" test -count=1 ./... || return $?
   run test go -C "$GO_DIR" test -tags managed -count=1 ./... || return $?
+}
+
+# The demo broker and the managed demo's fake gateway (tests/mock-broker/): the
+# suites behind mock.html and managed-demo.html, the gateway contract included.
+# Skipped, like test's web suite, when cov runs them in this invocation.
+task_mock() {
+  ensure_deps mock || return $?
+  if [ -n "${COV_QUEUED:-}" ]; then
+    note mock "mock suite: skipped here, cov runs it in this invocation"
+    return 0
+  fi
+  run mock npm run test:mock
 }
 
 task_cov() {
@@ -281,16 +294,17 @@ task_e2e() {
 }
 
 # --- dispatch ---------------------------------------------------------------
-ALL="build vet test"
-FULL="build vet test cov image scan graphify"
+ALL="build vet test mock"
+FULL="build vet test mock cov image scan graphify"
 
 usage() {
   cat <<EOF
 usage: $(basename "$0") <task>...
 
-  build vet test cov scan image up down graphify e2e
-  all   = $ALL            (what CI runs, as: all scan)
-  full  = $FULL           (pre-tag sweep)
+  build vet test mock cov scan image up down graphify e2e
+  all   = $ALL       (what CI runs, as: all scan)
+  full  = $FULL      (pre-tag sweep)
+  mock  = the demo broker and fake-gateway suites (tests/mock-broker/)
   e2e   = the managed gateway against an existing broker (local only, standalone)
 EOF
 }

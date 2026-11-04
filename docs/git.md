@@ -31,7 +31,7 @@ There is **no** `develop`, `release/*`, or long-lived staging branch. The tag wo
 `scripts/dev.sh` (and its behaviourally identical `scripts/dev.ps1`) is the only place that knows how to build, test, lint or scan this repo. CI calls the same task names, so a clean local run is the strongest possible signal that the tag will pass.
 
 ```bash
-./scripts/dev.sh full     # build vet test cov image scan graphify
+./scripts/dev.sh full     # build vet test mock cov image scan graphify
 ```
 
 ```powershell
@@ -49,7 +49,7 @@ git describe --tags --always --dirty          # e.g. v3.4.0
 
 A binary reporting `dev` means the `-ldflags` injection is not reaching the build, and the release would ship a wrongly-labelled artifact.
 
-Individual tasks are available when you only need one: `build`, `vet`, `test`, `cov`, `scan`, `image`, `up`, `down`, `graphify`. `all` (= `build vet test`) is the fast inner loop and what CI runs, as `all scan`.
+Individual tasks are available when you only need one: `build`, `vet`, `test`, `mock`, `cov`, `scan`, `image`, `up`, `down`, `graphify`, `e2e`. `all` (= `build vet test mock`) is the fast inner loop and what CI runs, as `all scan`.
 
 Each task truncates `scripts/logs/<task>.log`, tees everything into it, and closes with a footer line:
 

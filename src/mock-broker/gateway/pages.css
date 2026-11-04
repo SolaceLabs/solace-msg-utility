@@ -1,0 +1,31 @@
+/*
+ * The fake gateway's sign-in and password pages: go-web-proxy/pages/login.html's
+ * look, as a full-viewport layer over the app (below the demo controls, so the
+ * demo accounts stay in reach). Mock-only.
+ */
+.mgw-page {
+    --mgw-green: #00C895; --mgw-green-hover: #00a87d; --mgw-navy: #03213B; --mgw-text: #334155;
+    --mgw-muted: #64748b; --mgw-error: #b91c1c;
+    position: fixed; inset: 0; z-index: 9990; overflow: auto;
+    display: flex; align-items: center; justify-content: center;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f8f9fa; color: var(--mgw-text);
+}
+.mgw-page * { box-sizing: border-box; }
+.mgw-page main { width: 100%; max-width: 380px; margin: 16px; background: #fff; border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.12); overflow: hidden; }
+.mgw-page header { background: var(--mgw-navy); color: #fff; padding: 16px 24px; font-weight: 600; }
+.mgw-page header span { color: var(--mgw-green); }
+.mgw-page form { padding: 24px; }
+.mgw-page h1 { font-size: 1.15rem; margin: 0 0 16px; }
+.mgw-page label { display: block; font-size: .85rem; color: var(--mgw-muted); margin: 12px 0 4px; }
+.mgw-page input { width: 100%; padding: 8px 10px; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 4px; background: #f1f5f9; }
+.mgw-page input:focus { outline: 2px solid var(--mgw-green); background: #fff; }
+.mgw-page button { margin-top: 20px; width: 100%; padding: 10px; font-size: 1rem; font-weight: 600; color: #fff;
+    background: var(--mgw-green); border: 0; border-radius: 4px; cursor: pointer; }
+.mgw-page button:hover { background: var(--mgw-green-hover); }
+.mgw-page .mgw-error { color: var(--mgw-error); background: #fef2f2; border: 1px solid #fecaca; border-radius: 4px;
+    padding: 8px 10px; font-size: .9rem; }
+.mgw-page .mgw-note { color: var(--mgw-muted); font-size: .85rem; margin: 8px 0 0; }
+.mgw-page .mgw-links { margin-top: 16px; font-size: .9rem; text-align: center; }
+.mgw-page a { color: #009193; }
+.mgw-page .mgw-demo { margin: 0; padding: 10px 24px 16px; border-top: 1px dashed #cbd5e1; color: var(--mgw-muted); font-size: .8rem; }

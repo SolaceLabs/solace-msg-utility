@@ -214,6 +214,25 @@ export function resetScenario(): void {
     scenario.volume = fresh.volume;
 }
 
+/** The scenario as plain data, for the managed demo's reloads. */
+export interface ScenarioSnapshot {
+    queueState: [string, QueueState][];
+    fault: Fault;
+    latencyMs: number;
+    volume: number;
+}
+
+export function dumpScenario(): ScenarioSnapshot {
+    return { queueState: Array.from(scenario.queueState), fault: scenario.fault, latencyMs: scenario.latencyMs, volume: scenario.volume };
+}
+
+export function loadScenario(s: ScenarioSnapshot): void {
+    scenario.queueState = new Map(s.queueState);
+    scenario.fault = s.fault;
+    scenario.latencyMs = s.latencyMs;
+    scenario.volume = s.volume;
+}
+
 /** Behaviour currently configured for a queue; NORMAL for anything unknown. */
 export function queueStateOf(vpn: string, queue: string): QueueState {
     return scenario.queueState.get(`${vpn}/${queue}`) ?? QUEUE_STATE.NORMAL;

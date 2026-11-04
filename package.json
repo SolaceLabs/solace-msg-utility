@@ -18,6 +18,8 @@
     "check:bundles": "node scripts/check-bundles.mjs",
     "audit:gate": "node scripts/npm-audit-gate.mjs",
     "test": "vitest run --pool=threads",
+    "test:app": "vitest run --pool=threads --exclude \"tests/mock-broker/**\"",
+    "test:mock": "vitest run --pool=threads tests/mock-broker",
     "test:watch": "vitest --pool=threads",
     "test:coverage": "vitest run --pool=threads --coverage"
   },

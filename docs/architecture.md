@@ -778,6 +778,12 @@ enforcement of a saved access list).
 SMF sockets are the SDK emulator's sessions: one opened on a `/managed/smf/{broker}/{vpn}` URL goes through the
 socket gate the managed demo's boot sets (`setSocketGate`), which checks the page's session, the entitlement and the
 dialled login, and closes it on the same revocations as `sockets.go`.
+The gateway's own pages, `/login` and `/login/password`, are layers over the app with the same copy and flow
+(`gateway/pages.ts`); a capture-phase listener catches the app's sign-in links. A sign-in reloads the page, as the
+gateway's redirect does, so [boot.managed.ts](../src/mock-broker/boot.managed.ts) carries the gateway, the cookie,
+the queues and the scenario across in sessionStorage (a new tab starts from the seed in `gateway/seed.ts`). The
+demo cannot reach a network: its `fetch` passthrough refuses, and `WebSocket`, `EventSource`,
+`XMLHttpRequest.open` and `sendBeacon` throw.
 
 Fidelity details that are load-bearing rather than decorative, each covered by a test in `tests/mock-broker/`:
 the session's `createQueueBrowser` is a **reassignable own property** and the event emitter is **synchronous and

@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
-    allQueues, findQueueAnyVpn, getQueue, listQueues, listVpns, publish, seed, vpnOn,
+    allQueues, dumpStore, findQueueAnyVpn, getQueue, listQueues, listVpns, loadStore, publish, seed, vpnOn,
 } from '../../../src/mock-broker/broker/store';
 import {
     BROKERS, DIRECT_BROKER, QUEUE_STATE, VPNS, queueStateOf, resetScenario, scenario, setBrokers,
 } from '../../../src/mock-broker/fixtures';
-import { createMessage } from '../../../src/mock-broker/sdk/message';
+import { createMessage, createTopicDestination } from '../../../src/mock-broker/sdk/message';
 import { DestinationType } from '../../../src/mock-broker/sdk/enums';
 
 /**
@@ -86,6 +86,26 @@ describe('mock-broker/store -- brokers', () => {
     it('reserves the Direct broker name', () => {
         expect(() => setBrokers({ [DIRECT_BROKER]: [] }))
             .toThrow(`demo broker name "${DIRECT_BROKER}" is reserved for Direct sessions`);
+    });
+
+    it('round-trips through a snapshot, destinations and ids included', () => {
+        const msg = createMessage({ payload: 'kept' });
+        msg.setDestination(createTopicDestination('orders/created'));
+        publish('orders/created', DestinationType.TOPIC, msg, 'east');
+        const snap = JSON.parse(JSON.stringify(dumpStore()));
+
+        seed();   // anything else in between
+        loadStore(snap);
+
+        const q = getQueue('orders', 'orders.new')!;
+        const last = q.messages[q.messages.length - 1];
+        expect(q.messages).toHaveLength(4);
+        expect(last.msg._fields.payload).toBe('kept');
+        expect(last.msg._fields.destination!.getName()).toBe('orders/created');
+        expect(last.msg._fields.destination!.getType()).toBe(DestinationType.TOPIC);
+        // The next id continues past the restored ones.
+        publish('orders/created', DestinationType.TOPIC, createMessage({ payload: 'next' }), 'east');
+        expect(q.messages[q.messages.length - 1].id).toBe(last.id + 1);
     });
 
     it('drops the added brokers on setBrokers({})', () => {

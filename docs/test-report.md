@@ -84,7 +84,23 @@
   - A socket closes only on revocation, through `sessions.onDrop` / `onDropUser` and the store's change listener; an expired session leaves it open.
   - With no gate set (mock.html), a socket path is just an unknown host.
 
-  Tests: new `tests/mock-broker/gateway/sockets.test.ts`. It covers opening on any page host, each refusal, the broker's refusal of a wrong login, publishing on the socket's broker, seven revocations, an edit that keeps access, an expiry that does not close, a password change after expiry that does, and the app's own disconnect.
+  Tests: new `tests/mock-broker/gateway/sockets.test.ts`. It covers opening on any page host, each refusal, the broker's refusal of a wrong login, publishing on the socket's broker, seven revocations, an edit that keeps access, an expiry that does not close, a password change after expiry that does, and the app's own disconnect. Totals: web 84 files / 2006 tests, 100% on all four metrics; Go 93.5% of statements (floor was 93.5%).
+> - **Phase 4, step 5: the sign-in pages and the managed boot (November 2026):**
+  - [`gateway/pages.ts`](../src/mock-broker/gateway/pages.ts) shows the gateway's `/login` and `/login/password` as layers over the app, with `pages/login.html`'s copy and `pages.go`'s flow and messages. The forms have no action, and their submit is answered in the page. One capture-phase listener catches the app's sign-in links: plain, modified and middle clicks.
+  - [`gateway/throttle.ts`](../src/mock-broker/gateway/throttle.ts) holds the sign-in lockout, doubling up to the limit.
+  - `signIn` and `changePassword` on the gateway follow `submitLogin` and `submitPassword`.
+  - [`gateway/seed.ts`](../src/mock-broker/gateway/seed.ts) has the demo's brokers, queues and four accounts.
+  - [`boot.managed.ts`](../src/mock-broker/boot.managed.ts) wires it all:
+    - the fake gateway, the socket gate and the network block (`WebSocket`, `EventSource`, `XMLHttpRequest.open` and `sendBeacon` throw);
+    - the sign-in at boot while connModes is managed;
+    - a sessionStorage snapshot across the reload a sign-in causes, using the store's `dumpStore` / `loadStore` and the fixtures' `dumpScenario` / `loadScenario`.
+
+  Tests:
+  - new `tests/mock-broker/gateway/pages.test.ts`: the form, every refusal, the lockout and its countdown and doubling, where a submit lands, the forced change, Cancel, and the link capture;
+  - new `tests/mock-broker/gateway/seed.test.ts`: the seed is valid by the gateway's rules, in step with the demo broker, and shows the roles apart;
+  - `boot.managed.test.ts` rewritten: the network block, the sign-in at boot, a sign-in's reload carrying the session and the queues, the forced change after it, `pagehide`, Reset, and refused storage;
+  - `broker/store.test.ts` gained the snapshot round trip.
+> - **Dev scripts: a `mock` task (November 2026):** `./scripts/dev.sh mock` (and `dev.ps1 mock`) runs `tests/mock-broker/` through the new `npm run test:mock`, and is part of `all` and `full`, so CI's `all scan` runs it. `test`'s web half moved to `npm run test:app`, the suite without `tests/mock-broker/`, so `all` runs no suite twice. Under `cov` both are skipped, and `cov` runs the whole suite once. `npm test` still runs everything.
 >
 > The v8 ignore categories table further down has been trimmed to reflect which of the old justifications still apply.
 
@@ -793,7 +809,7 @@ Current files in the test tree:
 - **connection-management/** (admin-only) — `module.test.ts`, `service.test.ts`
 - **gateway-settings/** (admin-only) — `module.test.ts`, `service.test.ts`
 - **build/** -- `module-registry-plugin.test.ts` (manifest -> `virtual:module-registry` emission, `MODULE_ENTRIES` overrides, entry-template composition), `check-bundles.test.ts` (Release bundles without managed markers, `managed.html` with all of them, the `tag.yml` Release list kept equal), `npm-audit-gate.test.ts` (fixable vs unfixable advisory split, npm audit error reports, name/range validation before any `npm view`), `e2e-lib.test.ts` (the end-to-end run's helpers: certificates a TLS client trusting only the run's CA accepts, reading the broker CA file, the broker details file and each detail's check, the session-cookie rules, the sealed-store header, secret masking and the response sweep)
-- **mock-broker/** -- `boot.test.ts`, `boot.managed.test.ts` (the managed demo's boot: nothing reaches a network), `panel.test.ts`, `sdk.test.ts`, `server.test.ts` (demo-broker fidelity contracts, the passthrough and routes options, SEMP per broker), `broker/store.test.ts` (brokers beside Direct: scoped listings, lookups and publishes, unique VPN names), `gateway/contract.test.ts` (the fake gateway answers every case of `go-web-proxy/testdata/contract/` as the real one does), `gateway/relay.test.ts`, `gateway/gateway.test.ts`, `gateway/sockets.test.ts`
+- **mock-broker/** -- `boot.test.ts`, `boot.managed.test.ts` (the managed demo's boot: nothing reaches a network), `panel.test.ts`, `sdk.test.ts`, `server.test.ts` (demo-broker fidelity contracts, the passthrough and routes options, SEMP per broker), `broker/store.test.ts` (brokers beside Direct: scoped listings, lookups and publishes, unique VPN names), `gateway/contract.test.ts` (the fake gateway answers every case of `go-web-proxy/testdata/contract/` as the real one does), `gateway/relay.test.ts`, `gateway/gateway.test.ts`, `gateway/sockets.test.ts`, `gateway/pages.test.ts`, `gateway/seed.test.ts`
 - **integration/** — `full-flow.test.ts`, `module-events.test.ts`, `message-pipeline.test.ts`, `admin-session.test.ts`
 - **(root)** — `main.test.ts`, `registry.test.ts`, `variants.test.ts` (every variant manifest's shape; the `managed` variant is standard plus the connections managed entry, no Release variant overrides an entry, and the gateway's `moduleCatalog()` equals the managed variant's module-controlled modules)
 

@@ -17,7 +17,7 @@ npm install && npm test
 1. Create a branch for your change
 2. Make your changes in `src/`
 3. Write or update tests in `tests/`
-4. Run `./scripts/dev.sh all` (or `./scripts/dev.ps1 all` on Windows) — `build vet test`, the fast inner loop (CI runs `all scan`)
+4. Run `./scripts/dev.sh all` (or `./scripts/dev.ps1 all` on Windows) — `build vet test mock`, the fast inner loop (CI runs `all scan`)
 5. Run `./scripts/dev.sh cov` — coverage must not regress; target is 100% on all four metrics, and `vitest.config.ts` fails the run below that
 6. Run `./scripts/dev.sh scan` before opening the PR if you touched a dependency, the Dockerfile, or `go-web-proxy/`
 7. Open a pull request with a clear description
@@ -28,14 +28,15 @@ npm install && npm test
 | --- | --- |
 | `build` | `npm run build` (every variant), `npm run check:bundles` (no Release bundle carries managed UI), plus both gateway binaries, version-stamped, into `dist/` |
 | `vet` | `npm run typecheck`, `go vet ./...` **and** `go vet -tags managed ./...` |
-| `test` | `npm test`, `go test ./...` **and** `go test -tags managed ./...`. When `cov` is in the same invocation (`full`, `all cov`), the web suite runs once, in `cov`, and `test.log` says so |
+| `test` | `npm run test:app` (the web suite without `tests/mock-broker/`), `go test ./...` **and** `go test -tags managed ./...`. When `cov` is in the same invocation (`full`, `all cov`), the web suite runs once, in `cov`, and `test.log` says so |
+| `mock` | `npm run test:mock`: `tests/mock-broker/`, the suites behind `mock.html` and the managed demo, the gateway contract included. Skipped, like `test`'s web suite, when `cov` is in the same invocation |
 | `cov` | `npm run test:coverage` plus a Go coverage profile; prints both totals |
 | `scan` | `npm run audit:gate` (`npm audit`, fatal on fixable HIGH/CRITICAL advisories, warns on unfixable ones), `go tool govulncheck -tags=managed ./...`, then a Trivy scan of both freshly-built images with the pinned Trivy container (never a `trivy` on PATH; see [git.md](git.md#keeping-the-workflow-pins-current)) |
 | `image` | Builds both container images via `docker/docker-compose.yaml` |
 | `up` / `down` | Brings the compose stack up or down |
 | `graphify` | Refreshes the knowledge graph (local only — skipped when `CI` is set) |
 | `e2e` | The managed gateway against an existing Solace broker: builds both images, then runs `node scripts/e2e.mjs` over `docker/docker-compose.e2e.yaml`, which asks only for the broker details that `docker/e2e-broker.env` and the `E2E_*` variables do not give (see [End-to-end run](#end-to-end-run)). Local only and standalone: skipped when `CI` is set or without a Linux-container Docker, and never part of `all` or `full` |
-| `all` | `build vet test` |
+| `all` | `build vet test mock` |
 | `full` | `all` + `cov image scan graphify` — the pre-tag sweep |
 
 The Go gates run **both** ways because the RBAC backend is behind the `managed` build tag; an untagged run does not compile it at all.
@@ -339,7 +340,7 @@ The `--pool=threads` flag is included in the npm scripts the tasks call; the wor
 
 ## Pull Request Checklist
 
-- [ ] `./scripts/dev.sh all` is green (build, vet, test — both the web and Go halves)
+- [ ] `./scripts/dev.sh all` is green (build, vet, test — both the web and Go halves — and mock)
 - [ ] New code has corresponding tests
 - [ ] Coverage does not regress (`./scripts/dev.sh cov`); targets 100% per `vitest.config.ts` thresholds
 - [ ] Type-check passes — `vet` runs it, because the build uses esbuild and does **not** type-check, so `tsc --noEmit` is a separate gate
