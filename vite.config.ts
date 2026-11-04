@@ -114,32 +114,45 @@ interface MockRedirect {
     importerContains?: string;
 }
 
-const MOCK_REDIRECTS: MockRedirect[] = [
-    // ONE entry. `src/core/boot.ts` is a no-op seam that `src/main.ts` calls
-    // before starting the kernel; in mock mode it resolves to the in-browser
-    // broker instead, which installs `window.solace`, intercepts `fetch` for
-    // SEMP / /hosted / /managed, and mounts the demo control panel.
-    //
-    // Everything downstream then runs the REAL code: solace-client, semp-client,
-    // solace-publisher, semp-discovery, queue-copy's verify + copy engines and
-    // the subscription parser all talk to the emulator exactly as they talk to a
-    // broker. That is deliberate — the seven canned `*-mock` files this replaced
-    // could each drift from the code they stood in for, and two of them had.
-    { from: './core/boot', to: './mock-broker/boot' },
-];
+/**
+ * The demo boot each variant gets in mock mode; any other variant gets
+ * `./mock-broker/boot` (mock.html). The managed demo has its own so that its
+ * fake gateway and network block never reach mock.html, and mock.html's
+ * fall-through to the real `fetch` never reaches the managed demo.
+ */
+const DEMO_BOOTS: Record<string, string> = {
+    'managed-demo': './mock-broker/boot.managed',
+};
+
+function mockRedirects(variant: string | undefined): MockRedirect[] {
+    return [
+        // ONE entry. `src/core/boot.ts` is a no-op seam that `src/main.ts` calls
+        // before starting the kernel; in mock mode it resolves to the in-browser
+        // broker instead, which installs `window.solace`, intercepts `fetch` for
+        // SEMP and /hosted (and, in the managed demo, the gateway), and mounts
+        // the demo control panel.
+        //
+        // Everything downstream then runs the REAL code: solace-client, semp-client,
+        // solace-publisher, semp-discovery, queue-copy's verify + copy engines and
+        // the subscription parser all talk to the emulator exactly as they talk to a
+        // broker. That is deliberate — the seven canned `*-mock` files this replaced
+        // could each drift from the code they stood in for, and two of them had.
+        { from: './core/boot', to: (variant && DEMO_BOOTS[variant]) || './mock-broker/boot' },
+    ];
+}
 
 /**
- * In mock mode, redirect production service imports to their *-mock siblings.
- * Applied only when `mode === 'mock'`. Module source files stay untouched.
+ * In mock mode, redirect the boot seam to the demo's. Applied only when
+ * `mode === 'mock'`. Module source files stay untouched.
  */
-function serviceMockRedirect(): PluginOption {
+function serviceMockRedirect(redirects: MockRedirect[]): PluginOption {
     return {
         name: 'service-mock-redirect',
         enforce: 'pre',
         resolveId(source, importer) {
             if (!importer) return null;
             const clean = source.replace(/\.js$/, '');
-            const match = MOCK_REDIRECTS.find(r =>
+            const match = redirects.find(r =>
                 r.from === clean &&
                 (!r.importerContains || importer.includes(r.importerContains))
             );
@@ -207,7 +220,7 @@ export default defineConfig(({ mode }) => {
             variantRedirect(variant),
             moduleRegistryPlugin({ root: __dirname, variant }) as PluginOption,
             cssVariantRedirect(variant),
-            isMock && serviceMockRedirect(),
+            isMock && serviceMockRedirect(mockRedirects(variant)),
             injectModuleTemplates(variant),
             viteSingleFile(),
             outputName && renameHtmlAsset('index.html', outputName)

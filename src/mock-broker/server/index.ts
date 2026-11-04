@@ -6,12 +6,11 @@
  * `service-verify` and `hosted.ts` can all run unmodified in the demo, URL
  * building and pagination included.
  *
- * The demo is Direct-only: `mock.html` is a Release asset, and Release bundles
- * carry no managed sign-in (that ships only in the managed image's bundle), so
- * there is no `/managed/*` surface to mock.
- *
- * Anything the router does not recognise falls through to the real `fetch`, so
- * an unrelated request from the page is unaffected.
+ * The caller decides the rest (`MockServerOptions`): `routes` answers ahead of
+ * the broker (the managed demo's fake gateway), and `passthrough` takes what
+ * nobody answers. mock.html passes the real `fetch`, so an unrelated request
+ * from the page is unaffected; the managed demo passes one that refuses, so it
+ * cannot reach a network. This module never touches the original `fetch`.
  *
  * Mock-only.
  */
@@ -92,14 +91,25 @@ async function handleSemp(path: string, url: URL, init?: RequestInit): Promise<R
     return json(handleSempV2(url) ?? { data: [], meta: {} });
 }
 
-export function installMockServer(): void {
-    const realFetch = window.fetch.bind(window);
+/** A route ahead of the broker's: a Response, or null to let the next one try. */
+export type MockRoute = (path: string, url: URL, init?: RequestInit) => Promise<Response | null>;
 
+export interface MockServerOptions {
+    /** Where a request nobody answers goes. */
+    passthrough: typeof window.fetch;
+    /** Tried first, before `/hosted` and SEMP. */
+    routes?: MockRoute;
+}
+
+export function installMockServer({ passthrough, routes }: MockServerOptions): void {
     window.fetch = async function mockFetch(input: any, init?: RequestInit): Promise<Response> {
         const raw = typeof input === 'string' ? input : (input?.url ?? String(input));
         // Parsed against a fixed base, never the page origin — see ROUTE_BASE.
         const url = new URL(raw, ROUTE_BASE);
         const path = routePath(url);
+
+        const routed = routes ? await routes(path, url, init) : null;
+        if (routed) return routed;
 
         if (path === '/hosted') {
             await delay();
@@ -109,6 +119,6 @@ export function installMockServer(): void {
         const semp = await handleSemp(path, url, init);
         if (semp) return semp;
 
-        return realFetch(input, init);
+        return passthrough(input, init);
     } as typeof window.fetch;
 }

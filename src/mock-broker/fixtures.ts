@@ -125,6 +125,51 @@ export const VPNS: VpnFixture[] = [
 ];
 
 /* ------------------------------------------------------------------ */
+/*  Brokers                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The broker a Direct session reaches: the only one in mock.html, and the
+ * Direct tab of the managed demo, whose provisioned brokers `setBrokers` adds.
+ */
+export const DIRECT_BROKER = 'direct';
+
+/**
+ * Broker -> its VPNs. A VPN name is unique across the demo (`setBrokers`
+ * refuses a repeat), so queues stay keyed `vpn/queue` and a VPN names its
+ * broker.
+ */
+export const BROKERS = new Map<string, VpnFixture[]>([[DIRECT_BROKER, VPNS]]);
+
+/** The VPNs of a broker; none for an unknown one. */
+export function brokerVpns(broker: string): VpnFixture[] {
+    return BROKERS.get(broker) ?? [];
+}
+
+/**
+ * Replace the brokers beside the Direct one. Call before `seed()`: every
+ * queue's behaviour goes back to its declared state.
+ */
+export function setBrokers(extra: Record<string, VpnFixture[]>): void {
+    const seen = new Set(VPNS.map(v => v.name));
+    for (const [broker, vpns] of Object.entries(extra)) {
+        if (broker === DIRECT_BROKER) {
+            throw new Error(`demo broker name "${DIRECT_BROKER}" is reserved for Direct sessions`);
+        }
+        for (const v of vpns) {
+            if (seen.has(v.name)) {
+                throw new Error(`demo VPN "${v.name}" (broker "${broker}") is already defined; VPN names must be unique across the demo`);
+            }
+            seen.add(v.name);
+        }
+    }
+    BROKERS.clear();
+    BROKERS.set(DIRECT_BROKER, VPNS);
+    for (const [broker, vpns] of Object.entries(extra)) BROKERS.set(broker, vpns);
+    scenario.queueState = seedState().queueState;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Live scenario state                                                */
 /* ------------------------------------------------------------------ */
 
@@ -141,7 +186,9 @@ export interface ScenarioState {
 
 function seedState(): ScenarioState {
     const queueState = new Map<string, QueueState>();
-    VPNS.forEach(v => v.queues.forEach(q => queueState.set(`${v.name}/${q.name}`, q.state)));
+    for (const vpns of BROKERS.values()) {
+        vpns.forEach(v => v.queues.forEach(q => queueState.set(`${v.name}/${q.name}`, q.state)));
+    }
     return {
         queueState,
         fault: FAULT.NONE,
@@ -152,9 +199,9 @@ function seedState(): ScenarioState {
 
 /**
  * The live state object. Mutated by the control panel, read by the broker and
- * the HTTP router. Module-level because the demo is a single page with a single
- * broker — the production no-global-state rule governs `src/` proper, and this
- * tree never enters a production bundle.
+ * the HTTP router. Module-level because the demo is a single page — the
+ * production no-global-state rule governs `src/` proper, and this tree never
+ * enters a production bundle.
  */
 export const scenario: ScenarioState = seedState();
 

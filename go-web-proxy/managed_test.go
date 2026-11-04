@@ -42,7 +42,13 @@ func newManagedEnv(t *testing.T, mutate func(*config)) *managedEnv {
 // default transport, for tests that never reach a broker).
 func newManagedEnvWith(t *testing.T, mutate func(*config), upstream http.RoundTripper) *managedEnv {
 	t.Helper()
-	f := newStoreFixture(t)
+	return newManagedEnvFrom(t, newStoreFixture(t), mutate, upstream)
+}
+
+// newManagedEnvFrom mounts the gateway over the store files in f (the
+// contract test writes its own seed there).
+func newManagedEnvFrom(t *testing.T, f storeFixture, mutate func(*config), upstream http.RoundTripper) *managedEnv {
+	t.Helper()
 	cfg := defaultConfig()
 	cfg.hosted, cfg.managed, cfg.connModes = true, true, connBoth
 	cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = f.usersPath, f.connsPath, f.keyPath

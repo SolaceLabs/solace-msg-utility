@@ -273,6 +273,23 @@ Two fidelity guards help catch production bugs early:
 - **`session.on` / `browser.on` validate the event code.** Both mocks call `validateEventCode` against the relevant enum (`SessionEventCode` / `QueueBrowserEventName`) on the current `window.solace` object and throw with a diagnostic message if an unknown code is registered. A production bug like `browser.on('UP_NOTICE', …)` (the browser's correct code is `'UP'`) will fail fast in tests instead of silently passing.
 - **Message setters return `this` for chaining.** All `createMessageMock()` setters use `.mockReturnThis()`, so `msg.setDestination(x).setBinaryAttachment(y)` works in tests the same way it works against the real SDK. Keeps future refactors safe.
 
+### Gateway Contract
+
+[go-web-proxy/testdata/contract/](../go-web-proxy/testdata/contract) is what the managed demo's fake gateway is held to:
+- `seed.json`: users, connections, the settings the gateway starts with, and the client address.
+- `cases.json`: request steps, each with the status and body the real gateway answers.
+- `validation.json`: vectors for the checks behind a `422`.
+
+[`contract_test.go`](../go-web-proxy/contract_test.go) (`-tags managed`) proves that the real gateway gives exactly those answers. A gateway change that alters one fails it.
+
+When the change is deliberate, rewrite the answers from the real gateway and review the diff:
+
+```bash
+cd go-web-proxy && go test -tags managed -run Contract -update .
+```
+
+Each case runs on a fresh gateway over the seed. A case's sessions are opened before its first step, so a step after a revocation still uses the cookie the user held. Usage: put `as` (a username) on a step to send it signed in, `mustChange: true` for a session held at the password page, `body` for JSON and `raw` for an XML body. Store paths in a settings body read `<path>`.
+
 ### Stubbing Globals
 
 Prefer `vi.spyOn(target, 'prop').mockReturnValue(...)` / `.mockImplementation(...)` over direct reassignment (`target.prop = vi.fn(...)`). The spy form is auto-restored by `vi.restoreAllMocks()` in the global `afterEach` in [tests/setup.ts](../tests/setup.ts), so a test body that throws before a manual restore line runs cannot leak the stub into the next test.

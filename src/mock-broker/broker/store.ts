@@ -10,11 +10,16 @@
  * Messages are held in spool-ID order, because the copy engine's drift
  * detection and max-consumed logic assume the broker delivers them that way.
  *
+ * Every broker in `fixtures.BROKERS` lives here. VPN names are unique across
+ * them, so a queue is keyed `vpn/queue`; the broker argument scopes what a
+ * listing, a by-name lookup or a publish can see, defaulting to the Direct
+ * broker.
+ *
  * Mock-only. Reseeded on every page load; nothing is persisted.
  */
 import { createDestination, createMessage, type MockMessage } from '../sdk/message';
 import { DestinationType } from '../sdk/enums';
-import { VPNS, scenario, queueStateOf, QUEUE_STATE } from '../fixtures';
+import { BROKERS, DIRECT_BROKER, brokerVpns, scenario, queueStateOf, QUEUE_STATE } from '../fixtures';
 
 export interface SpooledMessage {
     /** Monotonic spool id; also the guaranteed message id. */
@@ -85,7 +90,7 @@ function buildMessage(vpn: string, queueName: string, n: number): SpooledMessage
 export function seed(): void {
     queues.clear();
     nextId = 1;
-    for (const vpn of VPNS) {
+    for (const vpn of Array.from(BROKERS.values()).flat()) {
         for (const q of vpn.queues) {
             const state = queueStateOf(vpn.name, q.name);
             const count = state === QUEUE_STATE.EMPTY ? 0 : Math.round(q.seed * scenario.volume);
@@ -104,12 +109,17 @@ export function seed(): void {
     }
 }
 
-export function listVpns(): string[] {
-    return VPNS.map(v => v.name);
+export function listVpns(broker: string = DIRECT_BROKER): string[] {
+    return brokerVpns(broker).map(v => v.name);
 }
 
-export function listQueues(vpn: string): string[] {
-    return VPNS.find(v => v.name === vpn)?.queues.map(q => q.name) ?? [];
+export function listQueues(vpn: string, broker: string = DIRECT_BROKER): string[] {
+    return brokerVpns(broker).find(v => v.name === vpn)?.queues.map(q => q.name) ?? [];
+}
+
+/** Whether the VPN is one of the broker's. */
+export function vpnOn(broker: string, vpn: string): boolean {
+    return brokerVpns(broker).some(v => v.name === vpn);
 }
 
 export function getQueue(vpn: string, queue: string): MockQueue | undefined {
@@ -120,13 +130,13 @@ export function getQueue(vpn: string, queue: string): MockQueue | undefined {
  * Find a queue by name across every VPN — the SEMP v1 detail RPC is called with
  * `vpn-name` of `*` when the caller does not know which VPN owns the queue.
  */
-export function findQueueAnyVpn(queue: string): MockQueue | undefined {
-    for (const q of queues.values()) if (q.name === queue) return q;
-    return undefined;
+export function findQueueAnyVpn(queue: string, broker: string = DIRECT_BROKER): MockQueue | undefined {
+    return allQueues(broker).find(q => q.name === queue);
 }
 
-export function allQueues(): MockQueue[] {
-    return Array.from(queues.values());
+/** The broker's queues. */
+export function allQueues(broker: string = DIRECT_BROKER): MockQueue[] {
+    return Array.from(queues.values()).filter(q => vpnOn(broker, q.vpn));
 }
 
 export function spoolUsage(q: MockQueue): number {
@@ -145,13 +155,13 @@ export function removeMessage(vpn: string, queue: string, id: string): boolean {
 
 /**
  * Publish into a queue (direct enqueue) or to a topic (fan out to every queue
- * whose subscriptions match). Returns the number of queues that accepted it,
+ * on the broker whose subscriptions match). Returns the number of queues that accepted it,
  * so the publisher can report a topic with no subscribers honestly.
  */
-export function publish(destName: string, destType: number, msg: MockMessage): number {
+export function publish(destName: string, destType: number, msg: MockMessage, broker: string = DIRECT_BROKER): number {
     const targets = destType === DestinationType.QUEUE
-        ? allQueues().filter(q => q.name === destName)
-        : allQueues().filter(q => q.subscriptions.some(sub => topicMatches(sub, destName)));
+        ? allQueues(broker).filter(q => q.name === destName)
+        : allQueues(broker).filter(q => q.subscriptions.some(sub => topicMatches(sub, destName)));
 
     for (const q of targets) {
         const id = nextId++;

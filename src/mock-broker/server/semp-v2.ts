@@ -9,6 +9,7 @@
  * Mock-only.
  */
 import { listQueues, listVpns } from '../broker/store';
+import { DIRECT_BROKER } from '../fixtures';
 
 const PAGE_SIZE = 3;
 
@@ -37,21 +38,21 @@ function paginate(all: string[], field: string, origin: string, basePath: string
 }
 
 /**
- * Answer a `/SEMP/v2/monitor/...` GET. Returns null when the path is not one
- * the demo serves, so the router can fall through.
+ * Answer a `/SEMP/v2/monitor/...` GET on a broker. Returns null when the path
+ * is not one the demo serves, so the router can fall through.
  */
-export function handleSempV2(url: URL): Page | null {
+export function handleSempV2(url: URL, broker: string = DIRECT_BROKER): Page | null {
     const path = url.pathname;
     const cursor = Number(url.searchParams.get('cursor') ?? '0') || 0;
 
     if (/\/SEMP\/v2\/monitor\/msgVpns\/?$/.test(path)) {
-        return paginate(listVpns(), 'msgVpnName', url.origin, path, cursor);
+        return paginate(listVpns(broker), 'msgVpnName', url.origin, path, cursor);
     }
 
     const queueList = /\/SEMP\/v2\/monitor\/msgVpns\/([^/]+)\/queues\/?$/.exec(path);
     if (queueList) {
         const vpn = decodeURIComponent(queueList[1]);
-        return paginate(listQueues(vpn), 'queueName', url.origin, path, cursor);
+        return paginate(listQueues(vpn, broker), 'queueName', url.origin, path, cursor);
     }
 
     return null;

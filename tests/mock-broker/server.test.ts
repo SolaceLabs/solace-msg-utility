@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { installMockServer } from '../../src/mock-broker/server';
+import { handleSempV1 } from '../../src/mock-broker/server/semp-v1';
+import { handleSempV2 } from '../../src/mock-broker/server/semp-v2';
 import { seed, getQueue, listQueues } from '../../src/mock-broker/broker/store';
 import { createSempDiscovery } from '../../src/core/services/semp-discovery';
 import { probeDeployment } from '../../src/core/hosted';
 import { resolveConnTabs } from '../../src/core/connections/conn-modes';
 import {
-    FAULT, VPNS, resetScenario, scenario,
+    FAULT, QUEUE_STATE, VPNS, resetScenario, scenario, setBrokers,
 } from '../../src/mock-broker/fixtures';
 
 /**
@@ -20,11 +22,12 @@ beforeEach(() => {
     resetScenario();
     scenario.latencyMs = 0;
     seed();
-    installMockServer();
+    installMockServer({ passthrough: realFetch });
 });
 
 afterEach(() => {
     window.fetch = realFetch;
+    setBrokers({});
 });
 
 const text = (r: Response) => r.text();
@@ -50,8 +53,9 @@ describe('mock-broker/server — /hosted', () => {
         // a file:// origin. /hosted is mocked outright: reaching the real fetch
         // would mean attempting a filesystem load that cannot succeed.
         let delegated = 0;
-        window.fetch = (() => { delegated++; return Promise.resolve(new Response('nope')); }) as typeof window.fetch;
-        installMockServer();
+        installMockServer({
+            passthrough: (() => { delegated++; return Promise.resolve(new Response('nope')); }) as typeof window.fetch,
+        });
 
         expect((await fetch('/hosted')).ok).toBe(true);
         expect(delegated).toBe(0);
@@ -207,16 +211,85 @@ describe('mock-broker/server — SEMP v1 RPC', () => {
 });
 
 describe('mock-broker/server — fall-through', () => {
-    it('passes an unrecognised request to the real fetch', async () => {
+    it('passes an unrecognised request to the passthrough its boot gave', async () => {
         let calledWith: any = null;
-        window.fetch = ((input: any) => {
-            calledWith = input;
-            return Promise.resolve(new Response('real'));
-        }) as typeof window.fetch;
-        installMockServer();
+        installMockServer({
+            passthrough: ((input: any) => {
+                calledWith = input;
+                return Promise.resolve(new Response('real'));
+            }) as typeof window.fetch,
+        });
 
         await fetch('https://example.com/not-ours');
 
         expect(calledWith).toBe('https://example.com/not-ours');
+    });
+
+    it('never calls the fetch it replaced: only the passthrough sees a miss', async () => {
+        // The managed demo passes a refusal; a server that kept the original
+        // fetch could still reach a network behind it.
+        let replaced = 0;
+        window.fetch = (() => { replaced++; return Promise.resolve(new Response('real')); }) as typeof window.fetch;
+        installMockServer({ passthrough: () => Promise.reject(new TypeError('refused')) });
+
+        await expect(fetch('https://example.com/not-ours')).rejects.toThrow('refused');
+        expect(replaced).toBe(0);
+    });
+});
+
+describe('mock-broker/server — routes ahead of the broker', () => {
+    it('answers from routes before /hosted and SEMP', async () => {
+        const seen: string[] = [];
+        installMockServer({
+            passthrough: realFetch,
+            routes: async (path) => {
+                seen.push(path);
+                return path === '/hosted' ? new Response('{"hosted":false}') : null;
+            },
+        });
+
+        expect((await (await fetch('/hosted')).json()).hosted).toBe(false);
+        // null lets the broker answer, as before.
+        const page: any = await (await fetch('/SEMP/v2/monitor/msgVpns')).json();
+        expect(page.data.length).toBeGreaterThan(0);
+        expect(seen).toEqual(['/hosted', '/SEMP/v2/monitor/msgVpns']);
+    });
+});
+
+describe('mock-broker/server — per broker', () => {
+    const EAST = [
+        { name: 'orders', queues: [{ name: 'orders.new', seed: 2, subscriptions: ['orders/>'], state: QUEUE_STATE.NORMAL }] },
+    ];
+
+    beforeEach(() => {
+        setBrokers({ east: EAST });
+        seed();
+    });
+
+    const url = (path: string) => new URL(`https://gw.invalid${path}`);
+
+    it('lists only the named broker\'s VPNs and queues', () => {
+        expect(handleSempV2(url('/SEMP/v2/monitor/msgVpns'), 'east')?.data).toEqual([{ msgVpnName: 'orders' }]);
+        expect(handleSempV2(url('/SEMP/v2/monitor/msgVpns/orders/queues'), 'east')?.data).toEqual([{ queueName: 'orders.new' }]);
+        // Another broker's VPN is not this broker's, whoever asks.
+        expect(handleSempV2(url('/SEMP/v2/monitor/msgVpns/vpn-prod/queues'), 'east')?.data).toEqual([]);
+        // Direct, the default, does not see the added broker's VPN.
+        expect(handleSempV2(url('/SEMP/v2/monitor/msgVpns/orders/queues'))?.data).toEqual([]);
+    });
+
+    it('resolves v1 RPCs on the named broker only', () => {
+        const detail = (name: string, vpn: string) =>
+            `<rpc><show><queue><name>${name}</name><vpn-name>${vpn}</vpn-name><detail/></queue></show></rpc>`;
+
+        expect(handleSempV1(detail('orders.new', 'orders'), 'east')).toContain('<message-vpn>orders</message-vpn>');
+        expect(handleSempV1(detail('orders.new', '*'), 'east')).toContain('<message-vpn>orders</message-vpn>');
+        expect(handleSempV1(detail('payments-Q', 'vpn-finance'), 'east')).toContain('code="fail"');
+        expect(handleSempV1(detail('payments-Q', '*'), 'east')).toContain('code="fail"');
+        expect(handleSempV1(detail('orders.new', 'orders'))).toContain('code="fail"');
+
+        const subs = handleSempV1(
+            '<rpc><show><queue><name>*</name><vpn-name>*</vpn-name><subscriptions/></queue></show></rpc>', 'east');
+        expect(subs).toContain('<name>orders.new</name>');
+        expect(subs).not.toContain('test-queue-1');
     });
 });

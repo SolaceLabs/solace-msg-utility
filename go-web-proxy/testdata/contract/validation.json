@@ -1,0 +1,26 @@
+{
+  "username": {
+    "valid": ["admin", "a", "ops.team", "first_last", "user@example.org", "a-b", "x.", ".x"],
+    "invalid": ["", ".", "..", "...", "a b", "a/b", "a:b", "caf\u00e9", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+  },
+  "broker": {
+    "valid": ["b1", "east-prod", "west.dr", "lab_2"],
+    "invalid": ["", ".", "..", "a b", "a@b", "a/b", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+  },
+  "host": {
+    "valid": ["host1", "broker.example.org", "east-prod.demo.invalid", "10.0.0.1", "::1", "fe80::1", "_srv"],
+    "invalid": ["", "bad host", "https://host", "host:1943", "host/path", "user@host", "-lead", "trail-", "fe80::1%eth0"]
+  },
+  "port": {
+    "valid": ["", "1", "1443", "65535"],
+    "invalid": ["0", "65536", "+80", "-1", "80a", " 80", "1e3"]
+  },
+  "password": {
+    "valid": ["twelve-chars", "a-much-longer-password-than-needed", "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"],
+    "invalid": ["", "short", "eleven-char"]
+  },
+  "modules": {
+    "valid": [[], ["queue-browser"], ["queue-copy", "queue-browser"]],
+    "invalid": [["bogus"], ["queue-browser", "queue-browser"], ["Queue-Browser"]]
+  }
+}

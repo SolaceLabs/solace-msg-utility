@@ -737,13 +737,17 @@ The demo build does not stub the app's services. It stands up an **in-browser br
 and lets the real code run against it.
 
 `src/main.ts` calls `boot()` from [src/core/boot.ts](../src/core/boot.ts), a no-op seam. In mock mode the single
-`MOCK_REDIRECTS` entry resolves that import to [src/mock-broker/boot.ts](../src/mock-broker/boot.ts) instead,
-which installs three things before any module installs:
+entry `mockRedirects(variant)` returns resolves that import to [src/mock-broker/boot.ts](../src/mock-broker/boot.ts)
+instead (the `managed-demo` variant gets [boot.managed.ts](../src/mock-broker/boot.managed.ts), so neither boot's
+code reaches the other's bundle; what both do to the shell is in [shell.ts](../src/mock-broker/shell.ts)), which
+installs three things before any module installs:
 
 1. **`window.solace`** — a full SDK emulation (factory, constructors, enums, session, queue browser, message).
 2. **A `window.fetch` interceptor** answering `/hosted` (hosted, Direct only), the SEMP v2 monitor endpoints and
-   SEMP v1 RPCs, falling through to the real `fetch` for anything else. The demo is a Release bundle, so it has
-   no Managed tab and no `/managed/*` surface.
+   SEMP v1 RPCs. What it does not answer goes to the `passthrough` its boot passes to `installMockServer`: the
+   real `fetch` in mock.html, a refusal in the managed demo, so the server module itself never references the
+   original `fetch`. A `routes` option answers ahead of the broker. mock.html is a Release bundle, so it has no
+   Managed tab and no `/managed/*` surface.
 3. **The demo control panel**, which drives queue state, connection faults, and latency/volume.
 
 Because both seams present the real contract, `solace-client`, `semp-client`, `solace-publisher`,
@@ -759,6 +763,9 @@ never parses it. The control-panel UI lives inside that tree for the same reason
 **Statefulness is the feature.** The broker holds queues and messages, so actions compose: deleting drops the
 depth, a copy run really moves messages, and a topic publish fans out to subscribed queues. The SEMP layer reports
 depth and spool usage by reading the same store, so verify's numbers always agree with what browsing shows.
+`fixtures.BROKERS` maps each broker to its VPNs: mock.html has only `direct`, and `setBrokers` adds the managed
+demo's. A VPN name is unique across the demo, so queues stay keyed `vpn/queue`; the SEMP handlers, the by-name
+lookups and a publish take a broker (default `direct`) and see only its queues.
 
 Fidelity details that are load-bearing rather than decorative, each covered by a test in `tests/mock-broker/`:
 the session's `createQueueBrowser` is a **reassignable own property** and the event emitter is **synchronous and

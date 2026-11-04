@@ -1,0 +1,84 @@
+{
+  "msg-utility-users": [
+    {
+      "username": "admin",
+      "password": "admin-password-1",
+      "admin": true,
+      "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }],
+      "read-only": []
+    },
+    {
+      "username": "viewer",
+      "password": "viewer-password-1",
+      "admin": false,
+      "operate": [],
+      "read-only": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }],
+      "modules": ["queue-browser"]
+    },
+    {
+      "username": "operator",
+      "password": "operator-password-1",
+      "admin": false,
+      "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
+      "read-only": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }]
+    }
+  ],
+  "msg-utility-connections": [
+    {
+      "broker": "b1",
+      "hostname": "host1",
+      "semp": { "port": "1943", "username": "mon", "password": "semp-b1-pw" },
+      "client": {
+        "port": "1443",
+        "msgVpns": [
+          { "name": "v1", "username": "u1", "password": "cli-b1v1-pw" },
+          { "name": "v2", "username": "u2", "password": "cli-b1v2-pw" }
+        ]
+      }
+    },
+    {
+      "broker": "b2",
+      "hostname": "host2",
+      "semp": { "port": "1943", "username": "mon", "password": "semp-b2-pw" },
+      "client": {
+        "port": "1443",
+        "msgVpns": [{ "name": "v9", "username": "u9", "password": "cli-b2v9-pw" }]
+      }
+    },
+    {
+      "broker": "b3",
+      "hostname": "host3",
+      "semp": { "port": "", "username": "", "password": "" },
+      "client": {
+        "port": "1443",
+        "msgVpns": [{ "name": "v3", "username": "u3", "password": "cli-b3v3-pw" }]
+      }
+    }
+  ],
+  "settings": {
+    "hosted": true,
+    "managed": true,
+    "connModes": "both",
+    "defaultConn": "direct",
+    "appDir": "/SolaceMsgUtility",
+    "tls": {
+      "certFile": "/tls/tls.crt",
+      "keyFile": "/tls/tls.key",
+      "trustDir": "/tls/trust",
+      "insecureSkipVerify": false
+    },
+    "logLevel": "warn",
+    "usersFile": "<path>",
+    "connectionsFile": "<path>",
+    "access": { "allow": [], "trustedProxies": [] },
+    "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
+    "login": {
+      "maxFailures": 5,
+      "backoffSeconds": 30,
+      "maxBackoffSeconds": 900,
+      "unauthenticatedPerMinute": 1000
+    },
+    "modules": { "offered": ["queue-browser", "queue-copy"], "userDefault": "all" }
+  },
+  "client": "192.0.2.10"
+}

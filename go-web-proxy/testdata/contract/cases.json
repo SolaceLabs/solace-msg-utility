@@ -1,0 +1,502 @@
+{
+  "cases": [
+    {
+      "name": "me: an admin sees every broker and the offered modules",
+      "steps": [
+        {
+          "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "admin", "admin": true,
+            "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }],
+            "readOnly": [],
+            "brokers": [
+              { "broker": "b1", "msgVpns": [{ "name": "v1" }, { "name": "v2" }] },
+              { "broker": "b2", "msgVpns": [{ "name": "v9" }] },
+              { "broker": "b3", "msgVpns": [{ "name": "v3" }] }
+            ],
+            "modules": ["queue-browser", "queue-copy"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "me: a read-only user sees only the VPN a row names, and their own modules",
+      "steps": [
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "viewer", "admin": false,
+            "operate": [],
+            "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }],
+            "brokers": [{ "broker": "b1", "msgVpns": [{ "name": "v1" }] }],
+            "modules": ["queue-browser"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "me: operate and read-only rows both entitle; no list means the deployment default",
+      "steps": [
+        {
+          "as": "operator", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "operator", "admin": false,
+            "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
+            "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }],
+            "brokers": [
+              { "broker": "b1", "msgVpns": [{ "name": "v2" }] },
+              { "broker": "b2", "msgVpns": [{ "name": "v9" }] }
+            ],
+            "modules": ["queue-browser", "queue-copy"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "gate: no session is the same 401 on every path",
+      "steps": [
+        { "method": "GET", "path": "/managed/me", "status": 401, "response": { "error": "unauthenticated" } },
+        { "method": "GET", "path": "/managed/users", "status": 401, "response": { "error": "unauthenticated" } },
+        { "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 401, "response": { "error": "unauthenticated" } },
+        { "method": "GET", "path": "/managed/nope", "status": 401, "response": { "error": "unauthenticated" } }
+      ]
+    },
+    {
+      "name": "gate: a forced password change allows only logout",
+      "steps": [
+        { "as": "viewer", "mustChange": true, "method": "GET", "path": "/managed/me", "status": 403, "response": { "error": "password_change_required" } },
+        { "as": "viewer", "mustChange": true, "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 403, "response": { "error": "password_change_required" } },
+        { "as": "viewer", "mustChange": true, "method": "POST", "path": "/managed/logout", "status": 204, "response": null }
+      ]
+    },
+    {
+      "name": "gate: an unknown path or a wrong method is 404, never 405",
+      "steps": [
+        { "as": "viewer", "method": "GET", "path": "/managed/nope", "status": 404, "response": { "error": "not_found" } },
+        { "as": "viewer", "method": "DELETE", "path": "/managed/me", "status": 404, "response": { "error": "not_found" } },
+        { "as": "viewer", "method": "GET", "path": "/managed/dial", "status": 404, "response": { "error": "not_found" } }
+      ]
+    },
+    {
+      "name": "gate: admin routes refuse a non-admin",
+      "steps": [
+        { "as": "viewer", "method": "GET", "path": "/managed/users", "status": 403, "response": { "error": "forbidden" } },
+        { "as": "viewer", "method": "GET", "path": "/managed/connections", "status": 403, "response": { "error": "forbidden" } },
+        { "as": "viewer", "method": "GET", "path": "/managed/settings", "status": 403, "response": { "error": "forbidden" } }
+      ]
+    },
+    {
+      "name": "logout: ends the session",
+      "steps": [
+        { "as": "viewer", "method": "POST", "path": "/managed/logout", "status": 204, "response": null },
+        { "as": "viewer", "method": "GET", "path": "/managed/me", "status": 401, "response": { "error": "unauthenticated" } }
+      ]
+    },
+    {
+      "name": "dial: an entitled VPN returns its client credential and socket path",
+      "steps": [
+        {
+          "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 200,
+          "response": { "smfPath": "/managed/smf/b1/v1", "vpn": "v1", "user": "u1", "pass": "cli-b1v1-pw" }
+        },
+        {
+          "as": "operator", "method": "POST", "path": "/managed/dial", "body": { "broker": "b2", "vpn": "v9" }, "status": 200,
+          "response": { "smfPath": "/managed/smf/b2/v9", "vpn": "v9", "user": "u9", "pass": "cli-b2v9-pw" }
+        }
+      ]
+    },
+    {
+      "name": "dial: not entitled, unknown and missing targets get the same 404",
+      "steps": [
+        { "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v2" }, "status": 404, "response": { "error": "not_found" } },
+        { "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "nope", "vpn": "v1" }, "status": 404, "response": { "error": "not_found" } },
+        { "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b1" }, "status": 404, "response": { "error": "not_found" } }
+      ]
+    },
+    {
+      "name": "dial: an unknown field is a bad request",
+      "steps": [
+        { "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1", "x": 1 }, "status": 400, "response": { "error": "bad_request" } }
+      ]
+    },
+    {
+      "name": "relay: writes are refused before the broker is looked up",
+      "steps": [
+        { "as": "viewer", "method": "PATCH", "path": "/managed/relay/b1/SEMP/v2/config/msgVpns/v1", "body": {}, "status": 403, "response": { "error": "read_only" } },
+        { "as": "viewer", "method": "POST", "path": "/managed/relay/b1/SEMP/v2/monitor/msgVpns", "body": {}, "status": 403, "response": { "error": "read_only" } },
+        { "as": "viewer", "method": "POST", "path": "/managed/relay/b1/SEMP", "raw": "<rpc><admin><reload/></admin></rpc>", "status": 403, "response": { "error": "read_only" } },
+        { "as": "viewer", "method": "POST", "path": "/managed/relay/b1/SEMP", "raw": "<rpc><show><queue/></show><show><client/></show></rpc>", "status": 403, "response": { "error": "read_only" } }
+      ]
+    },
+    {
+      "name": "relay: a broker not entitled, without SEMP, or a path outside SEMP is 404",
+      "steps": [
+        { "as": "viewer", "method": "GET", "path": "/managed/relay/b2/SEMP/v2/monitor/msgVpns", "status": 404, "response": { "error": "not_found" } },
+        { "as": "admin", "method": "GET", "path": "/managed/relay/b3/SEMP/v2/monitor/msgVpns", "status": 404, "response": { "error": "not_found" } },
+        { "as": "viewer", "method": "GET", "path": "/managed/relay/b1/other", "status": 404, "response": { "error": "not_found" } },
+        { "as": "viewer", "method": "GET", "path": "/managed/relay/b1/SEMP/v1/x", "status": 404, "response": { "error": "not_found" } }
+      ]
+    },
+    {
+      "name": "users: the list carries no password, and the module choices",
+      "steps": [
+        {
+          "as": "admin", "method": "GET", "path": "/managed/users", "status": 200,
+          "response": {
+            "users": [
+              {
+                "username": "admin", "admin": true, "mustChangePassword": false,
+                "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }], "readOnly": [], "modules": null
+              },
+              {
+                "username": "viewer", "admin": false, "mustChangePassword": false,
+                "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"]
+              },
+              {
+                "username": "operator", "admin": false, "mustChangePassword": false,
+                "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
+                "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }], "modules": null
+              }
+            ],
+            "modules": { "catalog": ["queue-browser", "queue-copy"], "offered": ["queue-browser", "queue-copy"], "userDefault": "all" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "users: each refusal names its field and reason",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
+          "body": { "password": "", "admin": false, "operate": [], "readOnly": [], "modules": null },
+          "status": 422, "response": { "error": "invalid", "field": "password", "reason": "A new user needs a password." }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/bad%20name",
+          "body": { "password": "a-long-password-1", "admin": false, "operate": [], "readOnly": [] },
+          "status": 422, "response": { "error": "invalid", "field": "username", "reason": "Username must be 1 to 64 characters from A-Z a-z 0-9 . _ @ -, not only dots." }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
+          "body": { "password": "short", "admin": false, "operate": [], "readOnly": [] },
+          "status": 422, "response": { "error": "invalid", "field": "password", "reason": "Password must be 12 to 128 characters." }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
+          "body": { "password": "a-long-password-1", "admin": false, "operate": [], "readOnly": [], "modules": ["bogus"] },
+          "status": 422, "response": { "error": "invalid", "field": "modules", "reason": "key \"modules[0]\" has invalid value \"bogus\": must be one of queue-browser, queue-copy" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
+          "body": { "password": "a-long-password-1", "admin": false, "operate": [], "readOnly": [], "modules": ["queue-copy", "queue-copy"] },
+          "status": 422, "response": { "error": "invalid", "field": "modules", "reason": "key \"modules[1]\" has invalid value \"queue-copy\": listed twice" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
+          "body": { "pass": "a-long-password-1" },
+          "status": 400, "response": { "error": "bad_request" }
+        }
+      ]
+    },
+    {
+      "name": "users: the last admin can be neither demoted nor deleted",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/admin",
+          "body": { "password": "", "admin": false, "operate": [], "readOnly": [] },
+          "status": 409, "response": { "error": "last_admin" }
+        },
+        { "as": "admin", "method": "DELETE", "path": "/managed/users/admin", "status": 409, "response": { "error": "last_admin" } },
+        { "as": "admin", "method": "DELETE", "path": "/managed/users/ghost", "status": 404, "response": { "error": "not_found" } }
+      ]
+    },
+    {
+      "name": "users: a new user is listed with their own modules",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
+          "body": { "password": "newbie-password-1", "admin": false, "operate": [], "readOnly": [{ "brokers": "b2", "msgVpns": "v9", "queues": "q.*" }], "modules": [] },
+          "status": 204, "response": null
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/users", "status": 200,
+          "response": {
+            "users": [
+              {
+                "username": "admin", "admin": true, "mustChangePassword": false,
+                "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }], "readOnly": [], "modules": null
+              },
+              {
+                "username": "viewer", "admin": false, "mustChangePassword": false,
+                "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"]
+              },
+              {
+                "username": "operator", "admin": false, "mustChangePassword": false,
+                "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
+                "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }], "modules": null
+              },
+              {
+                "username": "newbie", "admin": false, "mustChangePassword": false,
+                "operate": [], "readOnly": [{ "brokers": "b2", "msgVpns": "v9", "queues": "q.*" }], "modules": []
+              }
+            ],
+            "modules": { "catalog": ["queue-browser", "queue-copy"], "offered": ["queue-browser", "queue-copy"], "userDefault": "all" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "users: an edit without a password keeps the session and applies at once",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v2", "queues": "*" }], "modules": ["queue-browser"] },
+          "status": 204, "response": null
+        },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "viewer", "admin": false,
+            "operate": [],
+            "readOnly": [{ "brokers": "b1", "msgVpns": "v2", "queues": "*" }],
+            "brokers": [{ "broker": "b1", "msgVpns": [{ "name": "v2" }] }],
+            "modules": ["queue-browser"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "users: a new password ends that user's sessions",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "viewer-password-2", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"] },
+          "status": 204, "response": null
+        },
+        { "as": "viewer", "method": "GET", "path": "/managed/me", "status": 401, "response": { "error": "unauthenticated" } }
+      ]
+    },
+    {
+      "name": "users: a changed admin flag ends that user's sessions",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "", "admin": true, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"] },
+          "status": 204, "response": null
+        },
+        { "as": "viewer", "method": "GET", "path": "/managed/me", "status": 401, "response": { "error": "unauthenticated" } }
+      ]
+    },
+    {
+      "name": "users: a deleted user's session is refused",
+      "steps": [
+        { "as": "admin", "method": "DELETE", "path": "/managed/users/viewer", "status": 204, "response": null },
+        { "as": "viewer", "method": "GET", "path": "/managed/me", "status": 401, "response": { "error": "unauthenticated" } }
+      ]
+    },
+    {
+      "name": "connections: the list carries no password",
+      "steps": [
+        {
+          "as": "admin", "method": "GET", "path": "/managed/connections", "status": 200,
+          "response": {
+            "connections": [
+              {
+                "broker": "b1", "hostname": "host1",
+                "semp": { "port": "1943", "user": "mon", "pass": "" },
+                "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }
+              },
+              {
+                "broker": "b2", "hostname": "host2",
+                "semp": { "port": "1943", "user": "mon", "pass": "" },
+                "client": { "port": "1443", "msgVpns": [{ "name": "v9", "user": "u9", "pass": "" }] }
+              },
+              {
+                "broker": "b3", "hostname": "host3",
+                "semp": { "port": "", "user": "", "pass": "" },
+                "client": { "port": "1443", "msgVpns": [{ "name": "v3", "user": "u3", "pass": "" }] }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "connections: each refusal names the connection and why",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "hostname": "bad host", "semp": { "port": "1943", "user": "mon", "pass": "p" }, "client": { "port": "1443", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": hostname \"bad host\" must be a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "hostname": "host4", "semp": { "port": "+80", "user": "mon", "pass": "p" }, "client": { "port": "1443", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": semp.port \"+80\" is not a port (1 to 65535)" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [{ "name": "v1", "user": "u", "pass": "p" }] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": client.port is required when message VPNs are listed" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "hostname": "host4", "semp": { "port": "", "user": "mon", "pass": "" }, "client": { "port": "", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": semp.port is required when a SEMP username is set" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "hostname": "host4", "semp": { "port": "1943", "user": "a:b", "pass": "p" }, "client": { "port": "", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": the SEMP username and password must not contain control characters, and the username no ':'" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u", "pass": "p" }, { "name": "v1", "user": "u", "pass": "p" }] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": message VPN \"v1\" appears more than once" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/bad%20broker",
+          "body": { "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"bad broker\" must be 1 to 64 characters from A-Z a-z 0-9 . _ -, not only dots" }
+        },
+        { "as": "admin", "method": "DELETE", "path": "/managed/connections/ghost", "status": 404, "response": { "error": "not_found" } }
+      ]
+    },
+    {
+      "name": "connections: a blank password keeps the stored one",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b1",
+          "body": { "hostname": "host1", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] } },
+          "status": 204, "response": null
+        },
+        {
+          "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 200,
+          "response": { "smfPath": "/managed/smf/b1/v1", "vpn": "v1", "user": "u1", "pass": "cli-b1v1-pw" }
+        }
+      ]
+    },
+    {
+      "name": "connections: a removed VPN leaves the profile and dial at once",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b1",
+          "body": { "hostname": "host1", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v2", "user": "u2", "pass": "" }] } },
+          "status": 204, "response": null
+        },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "viewer", "admin": false,
+            "operate": [],
+            "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }],
+            "brokers": [],
+            "modules": ["queue-browser"]
+          }
+        },
+        { "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 404, "response": { "error": "not_found" } }
+      ]
+    },
+    {
+      "name": "connections: a deleted broker leaves the profile",
+      "steps": [
+        { "as": "admin", "method": "DELETE", "path": "/managed/connections/b2", "status": 204, "response": null },
+        {
+          "as": "operator", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "operator", "admin": false,
+            "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
+            "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }],
+            "brokers": [{ "broker": "b1", "msgVpns": [{ "name": "v2" }] }],
+            "modules": ["queue-browser", "queue-copy"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "settings: the file, its restart-only and host-only keys, and the catalog",
+      "steps": [
+        {
+          "as": "admin", "method": "GET", "path": "/managed/settings", "status": 200,
+          "response": {
+            "settings": {
+              "hosted": true, "managed": true, "connModes": "both", "defaultConn": "direct",
+              "appDir": "/SolaceMsgUtility",
+              "tls": { "certFile": "/tls/tls.crt", "keyFile": "/tls/tls.key", "trustDir": "/tls/trust", "insecureSkipVerify": false },
+              "logLevel": "warn", "usersFile": "<path>", "connectionsFile": "<path>",
+              "access": { "allow": [], "trustedProxies": [] },
+              "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
+              "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
+              "modules": { "offered": ["queue-browser", "queue-copy"], "userDefault": "all" }
+            },
+            "restartOnly": ["hosted", "managed", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"],
+            "hostOnly": ["appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "usersFile", "connectionsFile"],
+            "pendingRestart": [],
+            "changedOnDisk": false,
+            "catalog": ["queue-browser", "queue-copy"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "settings: each refusal names its field and reason",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "usersFile": "/elsewhere/users.yaml" },
+          "status": 422, "response": { "error": "invalid", "field": "usersFile", "reason": "usersFile is a path, so it changes only in config.yaml on the gateway host, followed by a restart." }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "session": { "absoluteMinutes": 0 } },
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"session.absoluteMinutes\" has invalid value \"0\": must be 1 to 1440" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "connModes": "bogus" },
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "connModes=\"bogus\" (config.yaml; seeded by CONN_MODES) must be one of \"direct\", \"managed\", \"both\"" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "modules": { "userDefault": "some" } },
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"modules.userDefault\" has invalid value \"some\": must be \"all\" or \"none\"" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "access": { "allow": ["10.0.0.0/8"] } },
+          "status": 409, "response": { "error": "would_lock_out", "field": "access.allow", "reason": "This allow list would deny your own address (192.0.2.10). Add it, or a range that contains it." }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "nope": true },
+          "status": 400, "response": { "error": "bad_request" }
+        }
+      ]
+    },
+    {
+      "name": "settings: a live key applies to the next profile",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "modules": { "userDefault": "none" } },
+          "status": 200, "response": { "restartRequired": [] }
+        },
+        {
+          "as": "operator", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "operator", "admin": false,
+            "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
+            "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }],
+            "brokers": [
+              { "broker": "b1", "msgVpns": [{ "name": "v2" }] },
+              { "broker": "b2", "msgVpns": [{ "name": "v9" }] }
+            ],
+            "modules": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "settings: a saved restart-only key is reported as pending",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "tls": { "insecureSkipVerify": true } },
+          "status": 200, "response": { "restartRequired": ["tls.insecureSkipVerify"] }
+        }
+      ]
+    }
+  ]
+}
