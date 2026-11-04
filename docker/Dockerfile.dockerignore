@@ -20,6 +20,13 @@ docs/
 .env
 .env.*
 
+# The dev-script logs (the e2e run's throwaway keys and passwords sit under
+# scripts/logs/e2e/ while it runs, and stay there if it is killed) and the e2e
+# broker details, which may hold broker passwords. COPY scripts/ would
+# otherwise carry the first into a build layer.
+scripts/logs/
+docker/e2e-broker.env
+
 # Editor scratch.
 *.swp
 *.swo

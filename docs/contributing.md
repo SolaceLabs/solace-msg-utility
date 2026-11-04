@@ -34,6 +34,7 @@ npm install && npm test
 | `image` | Builds both container images via `docker/docker-compose.yaml` |
 | `up` / `down` | Brings the compose stack up or down |
 | `graphify` | Refreshes the knowledge graph (local only — skipped when `CI` is set) |
+| `e2e` | The managed gateway against an existing Solace broker: builds both images, then runs `node scripts/e2e.mjs` over `docker/docker-compose.e2e.yaml`, which asks only for the broker details that `docker/e2e-broker.env` and the `E2E_*` variables do not give (see [End-to-end run](#end-to-end-run)). Local only and standalone: skipped when `CI` is set or without a Linux-container Docker, and never part of `all` or `full` |
 | `all` | `build vet test` |
 | `full` | `all` + `cov image scan graphify` — the pre-tag sweep |
 
@@ -42,6 +43,50 @@ The Go gates run **both** ways because the RBAC backend is behind the `managed` 
 Every task name is checked before any task runs, so a typo fails at once. Each task writes `scripts/logs/<task>.log` with a timestamped footer, and a run of more than one task ends with a console-only `timing:` line giving each task's seconds. `logs/cov.log` holds the previous coverage totals, which are the local floor — CI is a fresh checkout with no prior log, so it cannot catch a coverage regression.
 
 The image half of `image` and `scan` warn-skips when Docker is absent or running Windows containers, since a Linux image cannot be built there. The `ubuntu-24.04` CI leg still enforces it.
+
+### End-to-end run
+
+`./scripts/dev.sh e2e` (or `./scripts/dev.ps1 e2e`) checks the managed gateway the way a browser uses it, against an existing Solace broker you name. It builds both images (as `scan` does), then [`scripts/e2e.mjs`](../scripts/e2e.mjs) starts [`docker/docker-compose.e2e.yaml`](../docker/docker-compose.e2e.yaml): the managed image alone, with the hardened posture (non-root, read-only root, every capability dropped, no new privileges). Run it before a tag that touches the gateway; it takes about a minute.
+
+**Nothing on the broker is created or changed.** The run reads it through the gateway's read-only relay and browses an existing queue, which consumes nothing. The one write it sends, the `PATCH` of check 4, must be refused by the gateway; were it to get through, it names a queue that does not exist, so the broker would refuse it too.
+
+Needs: a Linux-container Docker; `dist/solclient.js` (the SDK the SMF check logs in with; see [deployment.md](deployment.md#external-runtime-dependencies)); the loopback port `39443` free (the gateway's, bound to `127.0.0.1`); and a broker the gateway container can reach over TLS, with SEMP over TLS and secured web transport (wss) enabled.
+
+**Broker details.** Each comes from its `E2E_*` environment variable, else from `docker/e2e-broker.env`, a `KEY=value` file that is git-ignored and kept out of the image build context (`docker/Dockerfile.dockerignore`, with `scripts/logs/`): never commit it. The harness asks only for what neither gives, on the terminal, then writes those answers to the file (creating it at mode `600` with a header), so the next run asks nothing. It never writes a password there: add `E2E_SEMP_PASSWORD` and `E2E_CLIENT_PASSWORD` yourself to skip those prompts, and keep the file private (the harness warns when other users can read a file holding one). Without a terminal, a missing detail fails the run, naming the variables to set. An unknown key, a repeated key, or a value the gateway would refuse fails it too, naming the line.
+
+| Key | Default | What |
+|-----|---------|------|
+| `E2E_BROKER_HOST` | | The host the gateway container dials. It must match a name in the broker's TLS certificate. A broker on this machine is `host.docker.internal`. |
+| `E2E_BROKER_CA` | | A PEM file with the CA that signed the broker's certificate, or that certificate itself. Required: the image has no system roots, so this is the gateway's whole trust (no skip-verify). Only its certificates are used. |
+| `E2E_SEMP_PORT` | `1943` | SEMP over TLS. |
+| `E2E_SEMP_USER` | `admin` | Read-only access is enough. |
+| `E2E_SEMP_PASSWORD` | | Asked without echo. |
+| `E2E_SMF_PORT` | `1443` | Secured web transport. |
+| `E2E_VPN` | `default` | Like the queue name, it must pass the relay's path-segment rule: no `\`, `%` or `;`. |
+| `E2E_CLIENT_USER` | | A client username in that VPN. |
+| `E2E_CLIENT_PASSWORD` | | Asked without echo. |
+| `E2E_QUEUE` | | An existing queue in that VPN the client username may browse. A `/` is fine; `\`, `%`, `;` and an empty, `.` or `..` part between slashes are not, since the relay refuses them. |
+
+The harness generates the gateway's TLS material, its store key and every gateway password, writes them only under `scripts/logs/e2e/`, and masks them in all it prints; it masks the broker passwords at any length. A broker password shorter than 8 characters cannot be looked for by checks 2, 10, 11 and 14 without matching ordinary text, and the run says so. It always ends with `docker compose down -v` and deletes that directory; the task runs `down -v` again as a backstop. The task runs the harness on the real terminal rather than through the log capture, so that it can ask; the harness appends its own masked output to `scripts/logs/e2e.log`. The SMF check uses the real SDK under Node through a loopback bridge, which adds the session cookie and a same-origin `Origin` the way a browser would; the bytes reach the gateway's `/managed/smf` socket unchanged.
+
+Each check prints `PASS n.` or `FAIL n.` and any failure exits 1, followed by the tail of the gateway log:
+
+1. A wrong password is refused, and sign-in issues `__Host-smu-session` as `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, with no `Domain` and no lifetime.
+2. `/managed/me` names the entitled broker and VPN only, with no address, port or credential.
+3. A relayed SEMP v2 `GET` returns the queue you named; a forged `Authorization` header is not used.
+4. A SEMP v1 `<show>` passes the relay; a v2 `PATCH` gets `403 read_only`.
+5. `dial` returns the SMF path and the VPN credential, with `Cache-Control: no-store`.
+6. A real SMF login through `/managed/smf` binds a queue browser to that queue.
+7. The socket refuses a foreign `Origin`, a missing `Origin`, and a request without a session.
+8. A broker the user is not entitled to is a `404` on relay, dial and socket, the same as an unknown one.
+9. Signing out closes the open SMF session, and the old cookie gets `401`.
+10. No gateway response carries a credential, except the body of the `dial` answer.
+11. Both stores are sealed at rest (`SMUS` header, no plaintext).
+12. After a restart the stores still open: old sessions are gone, and the administrator signs in again.
+13. A missing key file beside an existing store refuses to start, naming both files.
+14. The gateway log (at `debug`) holds no password, store key or session cookie.
+
+The pure helpers (certificate issuing and reading, the broker details and their file, the cookie rules, the sealed-store header, masking and the secret sweep) live in [`scripts/e2e-lib.mjs`](../scripts/e2e-lib.mjs) and are covered by `tests/build/e2e-lib.test.ts`, which runs in the ordinary suite without Docker.
 
 ---
 

@@ -10,6 +10,7 @@ DIST="$REPO_ROOT/dist"
 GO_DIR="$REPO_ROOT/go-web-proxy"
 COV_DIR="$REPO_ROOT/coverage"
 COMPOSE_FILE="$REPO_ROOT/docker/docker-compose.yaml"
+E2E_COMPOSE="$REPO_ROOT/docker/docker-compose.e2e.yaml"
 IMAGE_REPO="ghcr.io/solacelabs/solace-msg-utility"
 # The image scanner is pinned like any other dependency: a newer trivy can turn
 # the same image red on its own. The digest is the multi-arch index. Bump the
@@ -263,6 +264,22 @@ task_graphify() {
   run graphify graphify update .
 }
 
+# Local only, and standalone: not in `all` or `full`. The managed image against
+# an existing broker, driven by scripts/e2e.mjs, which owns the stack's lifetime;
+# the down -v here is the backstop for a run that died before its own.
+task_e2e() {
+  [ -n "${CI:-}" ] && { warn "e2e is local-only; skipping in CI"; return 0; }
+  has_linux_docker || { warn "no linux-container docker daemon; skipping e2e"; return 0; }
+  local code=0
+  # Never against a stale image, as in scan.
+  build_image e2e || return $?
+  # Not through run: the harness may ask for the broker's details, so it needs
+  # the real terminal, and it appends its own (masked) output to the log.
+  E2E_LOG="$LOG_DIR/e2e.log" node scripts/e2e.mjs || code=$?
+  run e2e docker compose -f "$E2E_COMPOSE" down -v --remove-orphans || true
+  return $code
+}
+
 # --- dispatch ---------------------------------------------------------------
 ALL="build vet test"
 FULL="build vet test cov image scan graphify"
@@ -271,9 +288,10 @@ usage() {
   cat <<EOF
 usage: $(basename "$0") <task>...
 
-  build vet test cov scan image up down graphify
+  build vet test cov scan image up down graphify e2e
   all   = $ALL            (what CI runs, as: all scan)
   full  = $FULL           (pre-tag sweep)
+  e2e   = the managed gateway against an existing broker (local only, standalone)
 EOF
 }
 

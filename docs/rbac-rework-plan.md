@@ -177,8 +177,10 @@ is retired and the docs name the store format. The Phase 3 review then fixed: th
 drops an upstream `Set-Cookie` naming the gateway's sign-in cookie; a relay `401` on any later
 SEMP call of queue-copy's provisioned destination signs out (`semp-client.ts`); a refused dial
 during a Managed VPN switch ends the switch; a signed port such as `+8080` is refused at save;
-and the lines Phase 3 added are plain ASCII. Phase 3 is complete except the end-to-end run
-against a local Docker broker (step 3F).
+and the lines Phase 3 added are plain ASCII. Step 3F is the end-to-end run: `./scripts/dev.sh e2e`
+(`docker/docker-compose.e2e.yaml`, `scripts/e2e.mjs`, fourteen numbered checks; see
+contributing.md, "End-to-end run"). Its first version passed all fourteen against a local Docker
+broker; it now runs against an existing broker, read-only, and Phase 3 closes when that run passes.
 - Key file generated on first run; `users.yaml` and `connections.yaml` encrypted whole; refuse to
   start on an encrypted store without its key; `/managed/relay/{broker}` with credential
   injection; `dial` endpoint; WebSocket upgrade gating.
@@ -197,8 +199,8 @@ state, factories); tests and docs in the same change; no `v*` tag from this bran
 ## 9. Risks
 
 - Gateway tests run without a broker: credential injection and WebSocket gating are tested against
-  `httptest` fakes. The first real check is a scripted run against a local Docker broker at the
-  end of Phase 3 (compose file, one provisioned user, one queue).
+  `httptest` fakes. The first real check is a scripted, read-only run (`./scripts/dev.sh e2e`)
+  against an existing broker at the end of Phase 3.
 - One Go process holds all sessions; a restart signs everyone out. Acceptable for this tool.
 - With SEMP unparsed by the gateway, the threat-model line "guardrails are UX, not a boundary"
   stays true for queues. Document it; do not imply otherwise.

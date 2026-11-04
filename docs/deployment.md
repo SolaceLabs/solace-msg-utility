@@ -202,6 +202,8 @@ Managed mode keeps broker credentials in the gateway: SEMP goes through a read-o
 - **A reverse proxy must keep `Host`.** The SMF gate compares `Origin` with the request's `Host`; a proxy that rewrites `Host` makes every socket fail with `403 cross_origin`.
 - **Use a read-only SEMP account.** The relay refuses every write, but a least-privilege account is still the second line.
 
+**Checking a build end to end.** `./scripts/dev.sh e2e` runs the managed image against an existing broker you name, changing nothing on it, and checks the points above that a client can observe: the session cookie's flags, a `/managed/me` with no secret, the read-only relay, `dial`, the SMF gate and its revocation on sign-out, no credential in any other response or in the log, and the sealed stores and the key file refusal. See [contributing.md -> End-to-end run](contributing.md#end-to-end-run).
+
 ### Self-host the static files
 
 The simplest deployment without Docker. `index.html` is attached to every [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) the tag pipeline creates (alongside the other bundle variants, the `go-web-proxy` binaries and a `SHA256SUMS.txt` to verify them); releases up to v3.3.4 predate the pipeline and carry no assets. The newest is always at a stable URL, so a script can fetch it directly — keep `-f`, so a failed download is an error instead of a saved error page:

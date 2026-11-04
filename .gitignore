@@ -53,3 +53,6 @@ graphify-out/cache
 */graphify-out/cache/
 **/cache/last_query_stamp
 graphify-out/*.sig
+
+# End-to-end broker details (scripts/e2e.mjs): may hold broker passwords
+docker/e2e-broker.env

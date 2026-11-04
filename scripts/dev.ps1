@@ -12,6 +12,7 @@ $Dist        = Join-Path $RepoRoot 'dist'
 $GoDir       = Join-Path $RepoRoot 'go-web-proxy'
 $CovDir      = Join-Path $RepoRoot 'coverage'
 $ComposeFile = Join-Path $RepoRoot 'docker/docker-compose.yaml'
+$E2eCompose  = Join-Path $RepoRoot 'docker/docker-compose.e2e.yaml'
 $ImageRepo   = 'ghcr.io/solacelabs/solace-msg-utility'
 # The image scanner is pinned like any other dependency: a newer trivy can turn
 # the same image red on its own. The digest is the multi-arch index. Bump the
@@ -328,6 +329,29 @@ function Task-graphify {
   return (Invoke-Logged 'graphify' 'graphify' @('update','.'))
 }
 
+# Local only, and standalone: not in `all` or `full`. The managed image against
+# an existing broker, driven by scripts/e2e.mjs, which owns the stack's lifetime;
+# the down -v here is the backstop for a run that died before its own.
+function Task-e2e {
+  if ($env:CI) { Warn 'e2e is local-only; skipping in CI'; return 0 }
+  if (-not (Test-LinuxDocker)) {
+    Warn 'no linux-container docker daemon; skipping e2e'; return 0
+  }
+  # Never against a stale image, as in scan.
+  $c = Build-Image 'e2e'; if ($c -ne 0) { return $c }
+  # Not through Invoke-Logged: the harness may ask for the broker's details, so
+  # it needs the real console, and it appends its own (masked) output to the
+  # log. Start-Process, because `& node` inside a task would have its output
+  # captured into the task's return value.
+  $env:E2E_LOG = Get-Log 'e2e'
+  try {
+    $p = Start-Process -FilePath 'node' -ArgumentList 'scripts/e2e.mjs' -WorkingDirectory $RepoRoot -NoNewWindow -Wait -PassThru
+    $code = $p.ExitCode
+  } finally { Remove-Item Env:E2E_LOG -ErrorAction SilentlyContinue }
+  $null = Invoke-Logged 'e2e' 'docker' @('compose','-f',$E2eCompose,'down','-v','--remove-orphans')
+  return $code
+}
+
 # --- dispatch ---------------------------------------------------------------
 $All  = @('build','vet','test')
 $Full = @('build','vet','test','cov','image','scan','graphify')
@@ -336,9 +360,10 @@ function Show-Usage {
   @"
 usage: dev.ps1 <task>...
 
-  build vet test cov scan image up down graphify
+  build vet test cov scan image up down graphify e2e
   all   = $($All -join ' ')            (what CI runs, as: all scan)
   full  = $($Full -join ' ')           (pre-tag sweep)
+  e2e   = the managed gateway against an existing broker (local only, standalone)
 "@ | Write-Host
 }
 

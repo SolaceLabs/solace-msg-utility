@@ -1,0 +1,49 @@
+# End-to-end stack for scripts/e2e.mjs: the managed gateway image that
+# `./scripts/dev.sh image` builds, pointed at an existing Solace broker whose
+# details the harness reads from docker/e2e-broker.env (git-ignored) or asks
+# for. Run it through `./scripts/dev.sh e2e` (or dev.ps1), not by hand: the
+# harness writes the TLS material, the store key and the bootstrap password
+# into scripts/logs/e2e/ (git-ignored) before `up`, and runs `down -v` at the
+# end.
+#
+# The only host port is the gateway's, bound to 127.0.0.1:39443. The gateway
+# reaches the broker over TLS only and verifies it against the CA file the
+# harness was given; a broker on this machine is host.docker.internal.
+name: smu-e2e
+services:
+  gateway:
+    image: ghcr.io/solacelabs/solace-msg-utility:managed-latest
+    # The image `dev.sh image` just built, never a published one.
+    pull_policy: never
+    user: "65532:65532"
+    privileged: false
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CONN_MODES: managed
+      LOG_LEVEL: debug
+      ADMIN_PASSWORD_FILE: /run/secrets/admin-password
+      STORE_KEY_FILE: /run/secrets/store.key
+      # The broker's certificate is verified against the CA file given to the
+      # harness: no SSL_INSECURE_SKIP_VERIFY here. The image has no system
+      # roots, so that file is the whole trust.
+      SSL_TRUST_DIR: /tls/trust
+    # Docker Desktop provides this name itself; on Linux it needs the entry.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - managed:/managed
+      - ../scripts/logs/e2e/gateway.crt:/tls/tls.crt:ro
+      - ../scripts/logs/e2e/gateway.key:/tls/tls.key:ro
+      - ../scripts/logs/e2e/trust:/tls/trust:ro
+      - ../scripts/logs/e2e/admin-password:/run/secrets/admin-password:ro
+      - ../scripts/logs/e2e/store.key:/run/secrets/store.key:ro
+    ports:
+      - "127.0.0.1:39443:9443"
+    restart: "no"
+
+volumes:
+  managed:
