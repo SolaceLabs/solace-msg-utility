@@ -64,7 +64,16 @@
   - `fixtures.BROKERS` and `setBrokers` add brokers beside `direct`, with VPN names unique across the demo. The store's listings, by-name lookups and publishes, and both SEMP handlers, take a broker (default `direct`).
   - mock.html behaves as before.
 
-  Tests: new `tests/mock-broker/boot.managed.test.ts` and `tests/mock-broker/broker/store.test.ts`; `server.test.ts` covers the options and SEMP per broker. The demo tree is outside `coverage.include`.
+  Tests: new `tests/mock-broker/boot.managed.test.ts` and `tests/mock-broker/broker/store.test.ts`; `server.test.ts` covers the options and SEMP per broker. The demo tree is outside `coverage.include`. Totals: web 80 files / 1891 tests, 100% on all four metrics; Go 93.5% of statements (floor was 93.5%).
+> - **Phase 4, step 3: the fake gateway (November 2026):** [`src/mock-broker/gateway/`](../src/mock-broker/gateway) answers `/hosted` and `/managed/*` in the browser, behind the gateway's gates and in their order. This step folds the plan's steps 3 and 4 together, because the contract cases span every endpoint.
+  - It covers `/me`, logout, dial, the read-only relay onto the demo broker, and the users, connections and settings endpoints, with the gateway's refusal order and reasons. The pieces are `store.ts`, `sessions.ts`, `settings.ts`, `relay.ts`, `router.ts`, `validate.ts` and `strict.ts`; `index.ts` is the fetch route with the page's cookie.
+  - Entitlement is `matchGlob` from `rbac.ts`, and the answers are typed with the app's own interfaces.
+  - Not simulated, and stated in each file: the cross-site checks, the body caps, the unauthenticated throttle, the relay's in-flight cap and the enforcement of a saved access list.
+  - Tests:
+    - new `tests/mock-broker/gateway/contract.test.ts` runs every case in `go-web-proxy/testdata/contract/cases.json` and the validation vectors against the fake;
+    - `relay.test.ts` covers the path table, the show check and relayed SEMP from the demo broker, with its fault mapping;
+    - `gateway.test.ts` covers the page's fetch route (the app's own `createManagedService`, the cookie, the marker header, `/hosted` from live settings), dial's escaping and `429`, the admin gate for a deleted user, strict bodies, the settings normalisation and refusals, and the session and store listeners;
+    - `helpers.ts` is the shared contract seed and broker topology.
 >
 > The v8 ignore categories table further down has been trimmed to reflect which of the old justifications still apply.
 
@@ -773,7 +782,7 @@ Current files in the test tree:
 - **connection-management/** (admin-only) — `module.test.ts`, `service.test.ts`
 - **gateway-settings/** (admin-only) — `module.test.ts`, `service.test.ts`
 - **build/** -- `module-registry-plugin.test.ts` (manifest -> `virtual:module-registry` emission, `MODULE_ENTRIES` overrides, entry-template composition), `check-bundles.test.ts` (Release bundles without managed markers, `managed.html` with all of them, the `tag.yml` Release list kept equal), `npm-audit-gate.test.ts` (fixable vs unfixable advisory split, npm audit error reports, name/range validation before any `npm view`), `e2e-lib.test.ts` (the end-to-end run's helpers: certificates a TLS client trusting only the run's CA accepts, reading the broker CA file, the broker details file and each detail's check, the session-cookie rules, the sealed-store header, secret masking and the response sweep)
-- **mock-broker/** -- `boot.test.ts`, `boot.managed.test.ts` (the managed demo's boot: nothing reaches a network), `panel.test.ts`, `sdk.test.ts`, `server.test.ts` (demo-broker fidelity contracts, the passthrough and routes options, SEMP per broker), `broker/store.test.ts` (brokers beside Direct: scoped listings, lookups and publishes, unique VPN names)
+- **mock-broker/** -- `boot.test.ts`, `boot.managed.test.ts` (the managed demo's boot: nothing reaches a network), `panel.test.ts`, `sdk.test.ts`, `server.test.ts` (demo-broker fidelity contracts, the passthrough and routes options, SEMP per broker), `broker/store.test.ts` (brokers beside Direct: scoped listings, lookups and publishes, unique VPN names), `gateway/contract.test.ts` (the fake gateway answers every case of `go-web-proxy/testdata/contract/` as the real one does), `gateway/relay.test.ts`, `gateway/gateway.test.ts`
 - **integration/** — `full-flow.test.ts`, `module-events.test.ts`, `message-pipeline.test.ts`, `admin-session.test.ts`
 - **(root)** — `main.test.ts`, `registry.test.ts`, `variants.test.ts` (every variant manifest's shape; the `managed` variant is standard plus the connections managed entry, no Release variant overrides an entry, and the gateway's `moduleCatalog()` equals the managed variant's module-controlled modules)
 

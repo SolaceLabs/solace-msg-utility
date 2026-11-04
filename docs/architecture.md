@@ -767,6 +767,15 @@ depth and spool usage by reading the same store, so verify's numbers always agre
 demo's. A VPN name is unique across the demo, so queues stay keyed `vpn/queue`; the SEMP handlers, the by-name
 lookups and a publish take a broker (default `direct`) and see only its queues.
 
+**The fake gateway** ([src/mock-broker/gateway/](../src/mock-broker/gateway)) is what the managed demo adds: `/hosted`
+and `/managed/*` answered in the browser over fake users, connections and settings, behind the gateway's gates in
+their order, with the relay answered by the demo broker. It is held to the gateway's contract: the cases in
+[go-web-proxy/testdata/contract/](../go-web-proxy/testdata/contract) are proved against the real gateway by
+`contract_test.go` and against the fake by `tests/mock-broker/gateway/contract.test.ts`, so a change to one that the
+other does not follow fails a test. Entitlement is `matchGlob` from `rbac.ts`, and every answer is typed with the
+app's own interfaces. Each file states what it does not simulate (cross-site checks, body caps, throttles, the
+enforcement of a saved access list).
+
 Fidelity details that are load-bearing rather than decorative, each covered by a test in `tests/mock-broker/`:
 the session's `createQueueBrowser` is a **reassignable own property** and the event emitter is **synchronous and
 FIFO**, as in the real SDK (the managed panel in `managed.html` patches the method and needs its `UP` handler to run
