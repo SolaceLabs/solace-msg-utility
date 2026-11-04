@@ -4,7 +4,9 @@
  *
  * A drop (sign-out, a replaced session, a password change, a changed
  * administrator flag, a deleted user) tells the listeners, which close that
- * session's SMF sockets; an expiry does not, as in the gateway.
+ * session's SMF sockets; an expiry does not, as in the gateway. A user-wide
+ * drop also says so on its own (`onDropUser`), so a socket whose session had
+ * already expired still closes, as `sessions.onDropUser` does in the gateway.
  *
  * Mock-only.
  */
@@ -20,6 +22,7 @@ function newId(): string {
 export function createSessions() {
     const byId = new Map<string, Session>();
     const onDrop: ((id: string, s: Session) => void)[] = [];
+    const onDropUser: ((user: string) => void)[] = [];
 
     function drop(id: string): void {
         const s = byId.get(id);
@@ -40,6 +43,7 @@ export function createSessions() {
         drop,
         dropUser(user: string): void {
             for (const [id, s] of Array.from(byId)) if (s.user === user) drop(id);
+            onDropUser.forEach(fn => fn(user));
         },
         /** Gone without telling anyone, as an idle or absolute expiry is. */
         expire(id: string): void {
@@ -47,6 +51,9 @@ export function createSessions() {
         },
         onDrop(fn: (id: string, s: Session) => void): void {
             onDrop.push(fn);
+        },
+        onDropUser(fn: (user: string) => void): void {
+            onDropUser.push(fn);
         },
         dump(): [string, Session][] {
             return Array.from(byId, ([id, s]) => [id, { ...s }]);

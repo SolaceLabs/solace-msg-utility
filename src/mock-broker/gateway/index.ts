@@ -9,7 +9,9 @@
  * that go-web-proxy/contract_test.go runs against the gateway.
  *
  * The page's session cookie is the gateway's own state here (`cookie`): the
- * real one is `HttpOnly`, so no app code reads it either way.
+ * real one is `HttpOnly`, so no app code reads it either way. SMF sockets are
+ * the SDK emulator's sessions, admitted by `sockets.gate` (which the managed
+ * demo's boot hands to `setSocketGate`) and closed on revocation.
  *
  * Mock-only.
  */
@@ -18,6 +20,7 @@ import type { MockRoute } from '../server';
 import { createRouter, type RouterFaults } from './router';
 import { createSessions } from './sessions';
 import { createSettings, type SettingsFaults } from './settings';
+import { createSockets } from './sockets';
 import { createStore } from './store';
 import type { GatewayRequest, GatewayResponse, GatewaySeed } from './types';
 
@@ -51,6 +54,8 @@ export function createGateway({ seed }: { seed: GatewaySeed }) {
     const settings = createSettings(seed.settings, seed.client, () => faults);
     const router = createRouter({ store, sessions, settings, faults: () => faults });
     let cookie: string | null = null;
+    const sockets = createSockets(store, sessions, () => cookie);
+    changeListeners.push(() => sockets.recheck());
 
     /** `/hosted`, with the live connection modes. */
     function hosted(): GatewayResponse {
@@ -82,6 +87,7 @@ export function createGateway({ seed }: { seed: GatewaySeed }) {
         store,
         sessions,
         settings,
+        sockets,
         faults,
         /** Open a session, as a sign-in does; the caller decides whether the page holds it. */
         openSession: (user: string, mustChange: boolean): string => sessions.create(user, mustChange),

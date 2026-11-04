@@ -775,6 +775,9 @@ their order, with the relay answered by the demo broker. It is held to the gatew
 other does not follow fails a test. Entitlement is `matchGlob` from `rbac.ts`, and every answer is typed with the
 app's own interfaces. Each file states what it does not simulate (cross-site checks, body caps, throttles, the
 enforcement of a saved access list).
+SMF sockets are the SDK emulator's sessions: one opened on a `/managed/smf/{broker}/{vpn}` URL goes through the
+socket gate the managed demo's boot sets (`setSocketGate`), which checks the page's session, the entitlement and the
+dialled login, and closes it on the same revocations as `sockets.go`.
 
 Fidelity details that are load-bearing rather than decorative, each covered by a test in `tests/mock-broker/`:
 the session's `createQueueBrowser` is a **reassignable own property** and the event emitter is **synchronous and
