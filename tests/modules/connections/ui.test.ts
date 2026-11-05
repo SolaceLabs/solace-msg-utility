@@ -195,6 +195,7 @@ describe('connections/ui', () => {
             expect(els.elSolProtocol.disabled).toBe(true);
             expect(els.elSolPort.disabled).toBe(true);
             expect(els.elSolUrlPath.disabled).toBe(true);
+            expect([els.btnSolUrlPathAdd.disabled, els.btnSolUrlPathClear.disabled]).toEqual([true, true]);
             expect(els.elSolVpn.disabled).toBe(true);
             expect(els.elSolUser.disabled).toBe(true);
             expect(els.elSolPass.disabled).toBe(true);
@@ -240,6 +241,7 @@ describe('connections/ui', () => {
             expect(els.elSempProtocol.disabled).toBe(true);
             expect(els.elSempPort.disabled).toBe(true);
             expect(els.elSempUrlPath.disabled).toBe(true);
+            expect([els.btnSempUrlPathAdd.disabled, els.btnSempUrlPathClear.disabled]).toEqual([true, true]);
         });
 
         it('enables all when disconnected', () => {
@@ -248,6 +250,7 @@ describe('connections/ui', () => {
             expect(els.elHost.disabled).toBe(false);
             expect(els.elSolPort.disabled).toBe(false);
             expect(els.elSempUser.disabled).toBe(false);
+            expect([els.btnSolUrlPathAdd.disabled, els.btnSempUrlPathClear.disabled]).toEqual([false, false]);
         });
     });
 

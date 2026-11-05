@@ -457,9 +457,12 @@ describe('ConnectionsModule', () => {
 
         // Pre-populate URL Paths so we can prove the reset reaches both —
         // the fields default to empty in the template, so a no-op reset would
-        // pass the assertion vacuously.
+        // pass the assertion vacuously. Opened as a user would, so the reset
+        // must also close them.
         const solUrlPath = container.querySelector('#solace-url-path') as HTMLInputElement;
         const sempUrlPath = container.querySelector('#semp-url-path') as HTMLInputElement;
+        (container.querySelector('#btn-solace-url-path-add') as HTMLButtonElement).click();
+        (container.querySelector('#btn-semp-url-path-add') as HTMLButtonElement).click();
         solUrlPath.value = '/solace';
         sempUrlPath.value = '/api';
 
@@ -472,7 +475,14 @@ describe('ConnectionsModule', () => {
         expect(vpn.value).toBe('');
         expect(solUrlPath.value).toBe('');
         expect(sempUrlPath.value).toBe('');
+        expect(urlPathOpen()).toEqual({ solace: false, semp: false });
         vi.useRealTimers();
+    });
+
+    /** Whether each card's URL Path field is open (optional-field.ts). */
+    const urlPathOpen = () => ({
+        solace: container.querySelector('#solace-url-path-field')!.classList.contains('is-open'),
+        semp: container.querySelector('#semp-url-path-field')!.classList.contains('is-open'),
     });
 
     // URL Path round-trip: save persists what the user typed, applyConfig
@@ -518,6 +528,8 @@ describe('ConnectionsModule', () => {
             const sempUrlPath = container.querySelector('#semp-url-path') as HTMLInputElement;
             expect(solUrlPath.value).toBe('/solace');
             expect(sempUrlPath.value).toBe('/api');
+            // A path in use is never hidden behind "+ URL path".
+            expect(urlPathOpen()).toEqual({ solace: true, semp: true });
         });
 
         it('applyConfig preserves an empty saved urlPath without overwriting an in-DOM value', async () => {
@@ -540,6 +552,19 @@ describe('ConnectionsModule', () => {
             const sempUrlPath = container.querySelector('#semp-url-path') as HTMLInputElement;
             expect(solUrlPath.value).toBe('');
             expect(sempUrlPath.value).toBe('');
+            expect(urlPathOpen()).toEqual({ solace: false, semp: false });
+        });
+
+        it('Load All Config closes a field the user opened when the saved config has no path', async () => {
+            const load = vi.spyOn(config, 'load').mockReturnValue(null as any);
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            (container.querySelector('#btn-semp-url-path-add') as HTMLButtonElement).click();
+            expect(urlPathOpen().semp).toBe(true);
+
+            load.mockReturnValue({ host: 'broker.test', semp: { urlPath: '' } });
+            (container.querySelector('#btn-load-config') as HTMLButtonElement).click();
+            expect(urlPathOpen()).toEqual({ solace: false, semp: false });
         });
     });
 

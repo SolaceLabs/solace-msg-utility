@@ -131,6 +131,12 @@
   The demo markers are the fake gateway's `X-Demo-Gateway` value and the demo's network refusal. The Dockerfile and dev-script build comments say so.
 
   Tests: `check-bundles.test.ts` gained the demo marker cases for `mock.html` and `managed.html`, every demo-bundle failure, `strayHosts`, and a check that the demo markers equal `DEMO_GATEWAY_MARKER` and `NETWORK_DISABLED`. The new `tests/build/no-network-apis.test.ts` scans `src/` outside `src/mock-broker/` for XHR, `sendBeacon`, `EventSource`, `new WebSocket`, `window.open` and scripted navigation, so the demo's fetch interceptor and shims stay sufficient.
+> - **URL Path on demand (November 2026):** the Direct form's two URL Path fields, in the SEMP and the Messaging cards, are hidden while empty, behind a "+ URL path" button the size of an input. A clear button empties the field and hides it again.
+  - The new module-local [`connections/optional-field.ts`](../src/modules/connections/optional-field.ts) (`createOptionalField`) holds the open state as `is-open` on the column, and `sync()` opens it for a value and closes it for none.
+  - `module.ts` syncs both fields after `applyConfig` (the saved config at start, and Load All Config) and after Reset Form, so a field is closed only while it is empty and a path in use is always shown.
+  - `ui.updateInputState` disables the two buttons with the input while connected. The saved config and the URL are unchanged.
+
+  Tests: new `tests/modules/connections/optional-field.test.ts` (closed when empty and open over a value, add focuses the input, clear empties and closes, `sync()`). The connections module suite checks that a saved path opens the field, that an empty or missing one keeps it closed, that Reset closes a field the user opened, and that Load closes it for a config with no path. `ui.test.ts` covers the buttons' disabled state.
 >
 > The v8 ignore categories table further down has been trimmed to reflect which of the old justifications still apply.
 

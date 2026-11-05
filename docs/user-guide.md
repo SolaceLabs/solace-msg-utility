@@ -36,7 +36,7 @@ This connection uses the Solace Web Messaging protocol (WebSocket) to communicat
 | Broker Host | IP address or hostname of your broker | `my-broker.solace.cloud`, `192.168.0.10` |
 | Protocol | `ws://` (unencrypted) or `wss://` (TLS) | `wss://` (recommended) |
 | Port | WebSocket port | `8008` (ws) or `1443` (wss) |
-| URL Path | Optional path appended after the port (e.g. when the broker sits behind a reverse proxy). Leave blank for a direct broker URL. | `/solace`, `/ws` |
+| URL Path | Optional path appended after the port (e.g. when the broker sits behind a reverse proxy). Hidden until you click **+ URL path**; the **x** in the field clears it and hides it again. A saved or loaded path always shows the field. Leave it out for a direct broker URL. | `/solace`, `/ws` |
 | Message VPN | The Solace VPN to connect to | `default` |
 | Username | Client username | `default` |
 | Password | Client password or OAuth2 token | |
@@ -80,7 +80,7 @@ This connection uses the SEMP v2 REST API for management operations (discovering
 | --- | --- | --- |
 | Protocol | `http://` or `https://` | `https://` |
 | Port | SEMP port | `8080` (http) or `1943` (https) |
-| URL Path | Optional path appended after the port and before `/SEMP/v2/...` (e.g. when SEMP is exposed behind a reverse proxy). Leave blank for a direct SEMP URL. | `/api`, `/management` |
+| URL Path | Optional path appended after the port and before `/SEMP/v2/...` (e.g. when SEMP is exposed behind a reverse proxy). Hidden until you click **+ URL path**, as in the Messaging card. Leave it out for a direct SEMP URL. | `/api`, `/management` |
 | Username | SEMP admin username | `admin` |
 | Password | SEMP admin password | |
 

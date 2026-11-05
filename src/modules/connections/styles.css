@@ -11,6 +11,59 @@
     margin: 2rem auto;
 }
 
+/* The URL Path columns (optional-field.ts). Closed (no `is-open`): the label
+ * keeps its height so the row does not shift, the input and its clear button
+ * are gone, and the add button sits where the input would, the same size. */
+.conn-optional:not(.is-open) > label {
+    visibility: hidden;
+}
+
+.conn-optional:not(.is-open) > .conn-optional-input,
+.conn-optional.is-open > .conn-optional-add {
+    display: none;
+}
+
+.conn-optional-input {
+    position: relative;
+}
+
+.conn-optional-input > .form-control {
+    padding-right: 1.75rem;
+}
+
+.conn-optional-clear {
+    position: absolute;
+    top: 50%;
+    right: 0.25rem;
+    transform: translateY(-50%);
+    font-size: 0.75rem;
+    line-height: 1;
+}
+
+/* The input's box (.form-control padding, border and font size), dashed. */
+.conn-optional-add {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    font-size: 0.95rem;
+    text-align: left;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+}
+
+.conn-optional-add:hover:not(:disabled) {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.conn-optional-add:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* The managed account control, a row of the sidebar footer above the status
  * lights (account.ts): the user on the left; the admin tag, when shown, and the
  * two actions on the right. The name takes the free width, so the tag sits

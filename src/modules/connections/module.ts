@@ -26,6 +26,7 @@ import { showToast } from '../../core/toast';
 import { INPUT_DEBOUNCE_MS } from '../../core/timing';
 import { logger } from '../../core/logger';
 import { normalizeUrlPath, generateUuid } from '../../core/utils';
+import { createOptionalField } from './optional-field';
 import { isHosted, probeDeployment, setHosted } from '../../core/hosted';
 import { DEFAULT_CONN_CONFIG } from '../../core/connections/conn-modes';
 import type { AppContext, BusEvents, ConnectionConfig, SolaceConfig, SempConfig } from '../../core/types';
@@ -66,6 +67,13 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
     ui.cacheElements(container);
     ui.initEvents();
     const els = ui.getElements();
+
+    // The URL Path fields open on demand; sync() after any write in code.
+    const urlPaths = [
+        createOptionalField({ wrap: els.elSolUrlPathField, input: els.elSolUrlPath, add: els.btnSolUrlPathAdd, clear: els.btnSolUrlPathClear }),
+        createOptionalField({ wrap: els.elSempUrlPathField, input: els.elSempUrlPath, add: els.btnSempUrlPathAdd, clear: els.btnSempUrlPathClear }),
+    ];
+    const syncUrlPaths = () => urlPaths.forEach(f => f.sync());
 
     // 2. Build broker-side service clients with bridging hooks.
     //    These hooks ARE the primary-specific behavior: writes to global
@@ -226,6 +234,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
             if (cfg.semp.urlPath !== undefined) els.elSempUrlPath.value = cfg.semp.urlPath;
             if (cfg.semp.user) els.elSempUser.value = cfg.semp.user;
         }
+        syncUrlPaths();
     }
 
     // 4. Load Saved Settings
@@ -408,6 +417,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         els.elSempUrlPath.value = '';
         els.elSempUser.value = '';
         els.elSempPass.value = '';
+        syncUrlPaths();
 
         [els.elHost, els.elSolPort, els.elSolVpn, els.elSolUser, els.elSempPort, els.elSempUser, els.elSempPass]
             .forEach((el: any) => ui.showError(el, false));

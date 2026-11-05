@@ -27,9 +27,16 @@
             <input type="text" id="semp-port" class="form-control">
             <div class="invalid-feedback">Invalid port.</div>
         </div>
-        <div style="width: 150px;">
-            <label>URL Path</label>
-            <input type="text" id="semp-url-path" class="form-control">
+        <!-- Optional: hidden while empty, behind "+ URL path" (optional-field.ts). -->
+        <div id="semp-url-path-field" class="conn-optional" style="width: 150px;">
+            <label for="semp-url-path">URL Path</label>
+            <div class="conn-optional-input">
+                <input type="text" id="semp-url-path" class="form-control">
+                <button type="button" id="btn-semp-url-path-clear" class="btn-icon conn-optional-clear"
+                    title="Remove the URL path" aria-label="Remove the URL path">&#x2715;</button>
+            </div>
+            <button type="button" id="btn-semp-url-path-add" class="conn-optional-add"
+                title="Add a path after the port, before /SEMP (e.g. behind a reverse proxy)">+ URL path</button>
         </div>
         <div class="w-full"></div> <!-- Spacer -->
     </div>
@@ -89,9 +96,16 @@
             <input type="text" id="solace-port" class="form-control">
             <div class="invalid-feedback">Invalid port.</div>
         </div>
-        <div style="width: 150px;">
-            <label>URL Path</label>
-            <input type="text" id="solace-url-path" class="form-control">
+        <!-- Optional: hidden while empty, behind "+ URL path" (optional-field.ts). -->
+        <div id="solace-url-path-field" class="conn-optional" style="width: 150px;">
+            <label for="solace-url-path">URL Path</label>
+            <div class="conn-optional-input">
+                <input type="text" id="solace-url-path" class="form-control">
+                <button type="button" id="btn-solace-url-path-clear" class="btn-icon conn-optional-clear"
+                    title="Remove the URL path" aria-label="Remove the URL path">&#x2715;</button>
+            </div>
+            <button type="button" id="btn-solace-url-path-add" class="conn-optional-add"
+                title="Add a path after the port (e.g. behind a reverse proxy)">+ URL path</button>
         </div>
         <div class="w-full">
             <label>Message VPN</label>
