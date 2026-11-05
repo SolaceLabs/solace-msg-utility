@@ -57,6 +57,12 @@
             <button id="btn-user-mgmt-add-readonly" class="btn btn-secondary btn-sm">+ Add</button>
         </div>
         <div id="user-mgmt-readonly-rows" class="flex-col"></div>
+        <p class="user-mgmt-hint text-secondary">
+            Each row names brokers, Message VPNs and queues; <code>*</code> matches any run of characters.
+            A user reaches a broker's Message VPN when any row, operate or read-only, matches both, and sees
+            the queues those rows' queue patterns match. The Administrator flag gives no broker access by itself.
+            The gateway enforces brokers and Message VPNs; queue patterns are applied by this app.
+        </p>
     </div>
     <div class="flex-row gap-4 mt-2">
         <button id="btn-user-mgmt-save" class="btn btn-primary">Save</button>

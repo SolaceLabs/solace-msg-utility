@@ -102,7 +102,11 @@ describe('moduleRegistryPlugin — activeModuleEntries', () => {
         expect(activeModuleEntries(root, 'managed')).toEqual({ connections: 'managed' });
     });
 
-    it('overrides nothing for the variants a Release ships', () => {
+    it('reads the managed demo\'s override, the same as managed.html\'s', () => {
+        expect(activeModuleEntries(root, 'managed-demo')).toEqual({ connections: 'managed' });
+    });
+
+    it('overrides nothing for the Direct variants a Release ships', () => {
         for (const variant of ['standard', 'min', 'no-queue-copy']) {
             expect(activeModuleEntries(root, variant)).toEqual({});
         }

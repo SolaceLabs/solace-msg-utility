@@ -11,6 +11,11 @@
     text-align: left;
 }
 
+.user-mgmt-hint {
+    font-size: 0.85rem;
+    margin: 0.25rem 0 0;
+}
+
 .user-mgmt-actions-col {
     width: 1%;
     white-space: nowrap;

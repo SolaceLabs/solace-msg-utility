@@ -30,6 +30,7 @@
  * own "gateway required" gate.
  */
 import { required } from '../../core/dom';
+import { createAccountControl } from './account';
 import { createServiceSolace, type SolaceConnectionHooks } from '../../core/services/solace-client';
 import { createServiceSemp, type SempConnectionHooks } from '../../core/services/semp-client';
 import { createManagedService, type ManagedProfile } from '../../core/services/managed-service';
@@ -88,7 +89,6 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         btnConnect: required<HTMLButtonElement>(container, '#btn-managed-connect'),
         connectError: required<HTMLElement>(container, '#managed-connect-error'),
         btnRefresh: required<HTMLButtonElement>(container, '#btn-managed-refresh'),
-        btnLogout: required<HTMLButtonElement>(container, '#btn-managed-logout'),
 
         connectedView: required<HTMLElement>(container, '#managed-connected-view'),
         connectedSummary: required<HTMLElement>(container, '#managed-connected-summary'),
@@ -97,6 +97,10 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
 
     const service = createManagedService();
     const profile = app.managedProfile;
+    // Change password and Sign out live in the sidebar footer, on every page
+    // and through a connection; this panel keeps Refresh.
+    const account = createAccountControl(() => doLogout());
+    app.mountSidebarAccount(account.element);
     profile.attachDialer(service);
     /** Signed in <=> the profile is set. No second copy of that truth here. */
     const signedIn = (): boolean => profile.isActive();
@@ -289,6 +293,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
      */
     function adopt(p: ManagedProfile): void {
         profile.setProfile(p);
+        account.show({ username: p.username, admin: p.admin });
         const broker = appState.managed?.broker ?? '';
         app.setState('managed', {
             admin: p.admin, username: p.username, operate: p.operate, readOnly: p.readOnly,
@@ -315,6 +320,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         serviceSolace.disconnect();
         void serviceSemp.disconnect();
         profile.clear();
+        account.show(null);
         app.setState('managed', null);
         eventBus.emit('rbac:changed');
         setError(els.connectError, null);
@@ -392,7 +398,6 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     els.vpnSelect.addEventListener('change', updateConnectEnabled);
     els.btnConnect.addEventListener('click', () => void doConnect());
     els.btnDisconnect.addEventListener('click', () => { serviceSolace.disconnect(); void serviceSemp.disconnect(); });
-    els.btnLogout.addEventListener('click', doLogout);
     els.btnRefresh.addEventListener('click', () => void doRefresh());
 
     // --- cross-module handlers (routed here by the module shell while a

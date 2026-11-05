@@ -13,7 +13,7 @@ vi.mock('../../../src/modules/connection-management/service', () => ({
     }),
 }));
 
-import { ConnectionManagementModule } from '../../../src/modules/connection-management/module';
+import { ConnectionManagementModule, NO_VPNS } from '../../../src/modules/connection-management/module';
 
 const ADMIN: ManagedSession = {
     admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
@@ -225,6 +225,19 @@ describe('connection-management — create / edit form', () => {
             .querySelector<HTMLButtonElement>('.btn-secondary')!.click();
         expect(hidden(container, '#conn-mgmt-form-view')).toBe(false);
         expect(el(container, '#conn-mgmt-vpn-rows').querySelectorAll('.row-list-row').length).toBe(0);
+    });
+
+    it('says what an empty VPN list means, and names the columns once a VPN is added', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        const vpns = el(container, '#conn-mgmt-vpn-rows');
+        expect(vpns.querySelector('.row-list-empty')!.textContent).toBe(NO_VPNS);
+        expect(vpns.querySelector('.row-list-head')!.classList.contains('hidden')).toBe(true);
+
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn').click();
+        expect(vpns.querySelector('.row-list-empty')!.classList.contains('hidden')).toBe(true);
+        expect(Array.from(vpns.querySelectorAll('.row-list-label'), n => n.textContent))
+            .toEqual(['Message VPN', 'Client username', 'Client password']);
     });
 
     it('Cancel returns to the list', async () => {

@@ -8,9 +8,13 @@
  * shape is parameterised by `fields`, so the same factory serves all three.
  *
  * Function API (anchor #9): the caller passes the container it owns; this owns
- * the rows' DOM and the remove-button wiring. The DOM is the source of truth —
- * there is no parallel array to keep in sync. Layout uses the shared utility
- * classes (`flex-row`, `gap-2`, `btn-icon`), so no module-scoped CSS is needed.
+ * its content: the rows, their remove-button wiring, a header naming the
+ * columns (from each field's `label`; the placeholders vanish once a row is
+ * filled, so they cannot label it) and, with `RowListOptions.empty`, a note
+ * saying what an empty list means. The header shows while there are rows, the
+ * note while there are none. The DOM is the source of truth -- there is no
+ * parallel array to keep in sync. Layout uses the shared utility classes
+ * (`flex-row`, `gap-2`, `btn-icon`) plus this component's `styles.css`.
  */
 import { required } from '../../dom';
 
@@ -19,6 +23,8 @@ export interface RowField {
     key: string;
     /** Placeholder text for the empty input. */
     placeholder: string;
+    /** The column's name in the header. */
+    label?: string;
     /** Input type — `password` masks the value (e.g. broker credentials). */
     type?: 'text' | 'password';
 }
@@ -34,9 +40,51 @@ export interface RowList {
     count(): number;
 }
 
-const ROW_CLASS = 'row-list-row';
+export interface RowListOptions {
+    /** Shown in place of the rows while there are none: what an empty list means. */
+    empty?: string;
+}
 
-export function createRowList(container: HTMLElement, fields: RowField[]): RowList {
+const ROW_CLASS = 'row-list-row';
+const REMOVE_GLYPH = '\u2715';
+
+export function createRowList(container: HTMLElement, fields: RowField[], opts: RowListOptions = {}): RowList {
+    let head: HTMLElement | null = null;
+    if (fields.some(f => f.label)) {
+        head = document.createElement('div');
+        head.className = 'flex-row gap-2 row-list-head';
+        fields.forEach(f => {
+            const label = document.createElement('span');
+            label.className = 'row-list-label';
+            label.textContent = f.label ?? '';
+            head!.appendChild(label);
+        });
+        // Holds the remove button's width, so the labels line up with the inputs.
+        const spacer = document.createElement('span');
+        spacer.className = 'btn-icon row-list-spacer';
+        spacer.setAttribute('aria-hidden', 'true');
+        spacer.textContent = REMOVE_GLYPH;
+        head.appendChild(spacer);
+        container.appendChild(head);
+    }
+    let empty: HTMLElement | null = null;
+    if (opts.empty) {
+        empty = document.createElement('p');
+        empty.className = 'row-list-empty';
+        empty.textContent = opts.empty;
+        container.appendChild(empty);
+    }
+
+    function count(): number {
+        return container.querySelectorAll(`.${ROW_CLASS}`).length;
+    }
+
+    function sync(): void {
+        const n = count();
+        head?.classList.toggle('hidden', n === 0);
+        empty?.classList.toggle('hidden', n > 0);
+    }
+
     function addRow(values: Record<string, string> = {}): void {
         const row = document.createElement('div');
         row.className = `flex-row gap-2 mb-2 ${ROW_CLASS}`;
@@ -55,11 +103,15 @@ export function createRowList(container: HTMLElement, fields: RowField[]): RowLi
         remove.type = 'button';
         remove.className = 'btn-icon row-list-remove';
         remove.title = 'Remove row';
-        remove.textContent = '✕';
-        remove.addEventListener('click', () => row.remove());
+        remove.textContent = REMOVE_GLYPH;
+        remove.addEventListener('click', () => {
+            row.remove();
+            sync();
+        });
         row.appendChild(remove);
 
         container.appendChild(row);
+        sync();
     }
 
     function readRows(): Record<string, string>[] {
@@ -80,12 +132,10 @@ export function createRowList(container: HTMLElement, fields: RowField[]): RowLi
     }
 
     function clear(): void {
-        container.innerHTML = '';
+        container.querySelectorAll(`.${ROW_CLASS}`).forEach(row => row.remove());
+        sync();
     }
 
-    function count(): number {
-        return container.querySelectorAll(`.${ROW_CLASS}`).length;
-    }
-
+    sync();
     return { addRow, readRows, clear, count };
 }

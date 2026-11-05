@@ -9,6 +9,7 @@ import { ACTIVE_MODULES as NO_QUEUE_COPY_VARIANT } from '../src/variants/no-queu
 import { ACTIVE_MODULES as ADMIN_VARIANT } from '../src/variants/admin';
 import { ACTIVE_MODULES as ALL_VARIANT, MODULE_ENTRIES as ALL_ENTRIES } from '../src/variants/all-for-testing-only';
 import { ACTIVE_MODULES as MANAGED_VARIANT, MODULE_ENTRIES as MANAGED_ENTRIES } from '../src/variants/managed';
+import { ACTIVE_MODULES as DEMO_VARIANT, MODULE_ENTRIES as DEMO_ENTRIES } from '../src/variants/managed-demo';
 import { ACTIVE_MODULES as ACTIVE_VARIANT } from '../src/variants/_active';
 import * as standardManifest from '../src/variants/standard';
 import * as minManifest from '../src/variants/min';
@@ -58,7 +59,8 @@ describe('variants', () => {
 
     it('no shipping variant carries the admin modules — they live at /solAdmin', () => {
         // The entitlement editors moved to their own app, so an everyday bundle
-        // must not carry them even hidden: the surface should not exist.
+        // must not carry them even hidden: the surface should not exist. The
+        // managed demo is the one exception, below.
         [STANDARD_VARIANT, MIN_VARIANT, NO_QUEUE_COPY_VARIANT, MANAGED_VARIANT].forEach((v) => {
             expect(Object.keys(v)).not.toContain('user-management');
             expect(Object.keys(v)).not.toContain('connection-management');
@@ -130,6 +132,19 @@ describe('variants', () => {
             expect(m).not.toHaveProperty('MODULE_ENTRIES');
             expect(Object.keys(m.ACTIVE_MODULES)).not.toContain('managed-connections');
         });
+    });
+
+    it('managed demo ships the managed variant\'s messaging modules and the three editors, on the managed entry', () => {
+        // The one shipped bundle with the admin editors: a demo, against a fake
+        // gateway. No admin-login (the Managed panel owns the session) and no
+        // queue-subscription-explorer (hidden in every managed session).
+        const editors = ['connection-management', 'gateway-settings', 'user-management'];
+        const messaging = Object.keys(MANAGED_VARIANT).filter(id => id !== 'queue-subscription-explorer');
+        expect(Object.keys(DEMO_VARIANT).sort()).toEqual([...messaging, ...editors].sort());
+        expect(DEMO_VARIANT).not.toHaveProperty('admin-login');
+        for (const id of messaging) expect(DEMO_VARIANT[id]).toBe(MANAGED_VARIANT[id]);
+        for (const id of editors) expect(DEMO_VARIANT[id]).toBe(ADMIN_VARIANT[id]);
+        expect(DEMO_ENTRIES).toEqual({ connections: 'managed' });
     });
 
     it('_active re-exports a populated manifest', () => {

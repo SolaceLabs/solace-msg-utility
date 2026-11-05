@@ -35,6 +35,7 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; appState:
         sempFetch: vi.fn(),
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
+        mountSidebarAccount: vi.fn(),
         config: { useMocks: false },
     };
     return { ctx, appState };

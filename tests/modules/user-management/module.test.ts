@@ -15,7 +15,7 @@ vi.mock('../../../src/modules/user-management/service', () => ({
 }));
 
 // Import AFTER the mocks are registered.
-import { UserManagementModule } from '../../../src/modules/user-management/module';
+import { NO_OPERATE, NO_READ_ONLY, UserManagementModule } from '../../../src/modules/user-management/module';
 
 const ADMIN: ManagedSession = {
     admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
@@ -283,6 +283,24 @@ describe('user-management — create / edit form', () => {
         el<HTMLButtonElement>(container, '#btn-user-mgmt-cancel').click();
         expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
         expect(hidden(container, '#user-mgmt-form-view')).toBe(true);
+    });
+
+    it('says what each empty entitlement list means, and names the columns once a row is added', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        const operate = el(container, '#user-mgmt-operate-rows');
+        const shown = (sel: string, root: HTMLElement) => !root.querySelector(sel)!.classList.contains('hidden');
+
+        expect(operate.querySelector('.row-list-empty')!.textContent).toBe(NO_OPERATE);
+        expect(el(container, '#user-mgmt-readonly-rows').querySelector('.row-list-empty')!.textContent).toBe(NO_READ_ONLY);
+        expect(shown('.row-list-head', operate)).toBe(false);
+        // The hint under both lists: what a row grants, and that the Administrator flag grants no broker.
+        expect(el(container, '.user-mgmt-hint').textContent).toContain('The Administrator flag gives no broker access by itself.');
+
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add-operate').click();
+        expect(shown('.row-list-empty', operate)).toBe(false);
+        expect(shown('.row-list-head', operate)).toBe(true);
+        expect(Array.from(operate.querySelectorAll('.row-list-label'), n => n.textContent)).toEqual(['Brokers', 'Message VPNs', 'Queues']);
     });
 
     it('Add read-only row button appends a row', async () => {

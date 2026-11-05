@@ -155,6 +155,37 @@ describe('Kernel', () => {
             expect(sidebar.classList.contains('collapsed')).toBe(false);
         });
 
+        it('mounts a module\'s account control in the sidebar footer slot, one at a time', async () => {
+            let capturedCtx: AppContext | null = null;
+            const mod = createMockModule({
+                id: 'test-module',
+                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
+            });
+            setupDOM(['test-module']);
+            document.body.insertAdjacentHTML('beforeend', '<div id="sidebar-account"></div>');
+            const kernel = new Kernel([reg(mod)]);
+            await kernel.start();
+
+            const first = document.createElement('span');
+            const second = document.createElement('span');
+            capturedCtx!.mountSidebarAccount(first);
+            capturedCtx!.mountSidebarAccount(second);
+            expect(Array.from(document.getElementById('sidebar-account')!.children)).toEqual([second]);
+        });
+
+        it('leaves an account control unplaced when the shell has no slot', async () => {
+            let capturedCtx: AppContext | null = null;
+            const mod = createMockModule({
+                id: 'test-module',
+                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
+            });
+            setupDOM(['test-module']);
+            await new Kernel([reg(mod)]).start();
+            const el = document.createElement('span');
+            expect(() => capturedCtx!.mountSidebarAccount(el)).not.toThrow();
+            expect(el.isConnected).toBe(false);
+        });
+
         it('bridges jszip:loaded window event to EventBus', async () => {
             let capturedCtx: AppContext | null = null;
             const mod = createMockModule({

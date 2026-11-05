@@ -33,10 +33,14 @@ import { createUserMgmtService, type ManagedUser, type ModuleChoices, type UserP
 import type { AppContext, QGlob } from '../../core/types';
 
 const GLOB_FIELDS = [
-    { key: 'brokers', placeholder: 'brokers (e.g. *)' },
-    { key: 'msgVpns', placeholder: 'msgVpns (e.g. *)' },
-    { key: 'queues', placeholder: 'queues (e.g. *)' },
+    { key: 'brokers', placeholder: 'brokers (e.g. *)', label: 'Brokers' },
+    { key: 'msgVpns', placeholder: 'msgVpns (e.g. *)', label: 'Message VPNs' },
+    { key: 'queues', placeholder: 'queues (e.g. *)', label: 'Queues' },
 ];
+
+/** What an empty entitlement list means, shown in its place. */
+export const NO_OPERATE = 'None: this user changes no queue (no delete, no copy into one). Read-only rows still let them browse.';
+export const NO_READ_ONLY = 'None. With no operate rows either, this user can sign in but reaches no broker.';
 
 export const UserManagementModule = {
     name: 'User Mgmt.',
@@ -72,8 +76,8 @@ export const UserManagementModule = {
         };
 
         const service = createUserMgmtService();
-        const operateList = createRowList(els.operateRows, GLOB_FIELDS);
-        const readonlyList = createRowList(els.readonlyRows, GLOB_FIELDS);
+        const operateList = createRowList(els.operateRows, GLOB_FIELDS, { empty: NO_OPERATE });
+        const readonlyList = createRowList(els.readonlyRows, GLOB_FIELDS, { empty: NO_READ_ONLY });
         const gate = createGate(container, {
             id: 'user-mgmt-gate',
             title: 'Administrator Sign-in Required',

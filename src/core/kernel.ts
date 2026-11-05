@@ -175,6 +175,7 @@ export class Kernel {
             // login writes it, others read provisioned names and dial through it.
             managedProfile: this.managedProfile,
             copyToClipboard: this.copyToClipboard.bind(this),
+            mountSidebarAccount: this.mountSidebarAccount.bind(this),
             config: this.config
         };
 
@@ -362,6 +363,11 @@ export class Kernel {
         } catch (err) {
             logger.error('[Kernel] Failed to copy to clipboard:', err);
         }
+    }
+
+    /** The shell's account slot above the status lights (AppContext.mountSidebarAccount). */
+    private mountSidebarAccount(el: HTMLElement): void {
+        document.getElementById('sidebar-account')?.replaceChildren(el);
     }
 
     /**

@@ -96,7 +96,13 @@ function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
 }
 const hidden = (c: HTMLElement, sel: string) => el(c, sel).classList.contains('hidden');
 
+/** The sidebar footer slot the panel mounts its account control into. */
+let sidebar: HTMLElement;
+const account = () => sidebar.querySelector<HTMLElement>('.conn-account')!;
+const signOut = () => account().querySelector<HTMLButtonElement>('.conn-account-signout')!.click();
+
 function makeCtx(container: HTMLElement): AppContext {
+    sidebar = document.createElement('div');
     const eventBus = createEventBus();
     const appState: AppState = {
         activeModuleId: null, isConnected: false, selectedVpn: null,
@@ -111,6 +117,7 @@ function makeCtx(container: HTMLElement): AppContext {
         // its writer, so the suite covers login -> setProfile -> dial end to end.
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
+        mountSidebarAccount: (node: HTMLElement) => { sidebar.replaceChildren(node); },
         config: {},
     } as AppContext;
 }
@@ -196,7 +203,25 @@ describe('connections/managed panel — restoring the gateway session', () => {
         expect([...el<HTMLSelectElement>(container, '#managed-broker-select').options].map(o => o.value)).toEqual(['b1', 'b2']);
         expect([...el<HTMLSelectElement>(container, '#managed-vpn-select').options].map(o => o.value)).toEqual(['vpn1', 'vpn2']);
         expect(el<HTMLButtonElement>(container, '#btn-managed-connect').disabled).toBe(false);
-        expect(el<HTMLAnchorElement>(container, '#managed-change-password').getAttribute('href')).toBe('/login/password');
+        // The account control in the sidebar footer: who, and the two actions.
+        expect(account().classList.contains('hidden')).toBe(false);
+        expect(account().querySelector('.conn-account-name')!.textContent).toBe('admin');
+        expect(account().querySelector('.conn-account-password')!.getAttribute('href')).toBe('/login/password');
+    });
+
+    it('keeps the account control in the sidebar through a connection, and signs out from there', async () => {
+        const { container, ctx } = await signedIn();
+        await connectToB1Vpn1(container, ctx);
+        expect(hidden(container, '#managed-connected-view')).toBe(false);
+        expect(account().classList.contains('hidden')).toBe(false);
+
+        const before = [solaceMock.disconnect.mock.calls.length, sempMock.disconnect.mock.calls.length];
+        signOut();
+        // Signing out while connected disconnects first, then ends the session.
+        expect([solaceMock.disconnect.mock.calls.length, sempMock.disconnect.mock.calls.length])
+            .toEqual([before[0] + 1, before[1] + 1]);
+        expect(svcMock.logout).toHaveBeenCalledTimes(1);
+        expect(account().classList.contains('hidden')).toBe(true);
     });
 
     it('a session opens the Managed tab even when Direct is the default', async () => {
@@ -411,7 +436,7 @@ describe('managed-connections — disconnect / logout', () => {
         const { container, ctx } = await signedIn();
         const rbac = vi.fn();
         ctx.eventBus.on('rbac:changed', rbac);
-        el<HTMLButtonElement>(container, '#btn-managed-logout').click();
+        signOut();
         expect(svcMock.logout).toHaveBeenCalledTimes(1);
         expect(ctx.appState.managed).toBeNull();
         expect(ctx.managedProfile.isActive()).toBe(false);
@@ -549,7 +574,7 @@ describe('managed-connections — provisioned VPN publishing', () => {
 describe('managed-connections — defensive paths', () => {
     it('Solace onDisconnected after logout leaves the login view (no profile)', async () => {
         const { container, ctx } = await signedIn();
-        el<HTMLButtonElement>(container, '#btn-managed-logout').click();
+        signOut();
         // A late SDK disconnect callback with the session already torn down.
         solaceMock.hooks.onDisconnected();
         expect(hidden(container, '#managed-login-view')).toBe(false);

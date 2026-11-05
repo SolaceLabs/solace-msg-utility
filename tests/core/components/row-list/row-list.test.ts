@@ -62,6 +62,64 @@ describe('core/components/row-list', () => {
         expect(rl.readRows()).toEqual([]);
     });
 
+    it('adds nothing but rows when no field is labelled and no empty note is given', () => {
+        const c = container();
+        createRowList(c, FIELDS).addRow();
+        expect(c.children.length).toBe(1);
+        expect(c.querySelector('.row-list-head, .row-list-empty')).toBeNull();
+    });
+
+    describe('column labels', () => {
+        const LABELLED = [{ key: 'a', placeholder: 'a (e.g. *)', label: 'Alpha' }, { key: 'b', placeholder: 'B' }];
+        const labels = (c: HTMLElement) => Array.from(c.querySelectorAll('.row-list-label'), n => n.textContent);
+        const headShown = (c: HTMLElement) => !c.querySelector('.row-list-head')!.classList.contains('hidden');
+
+        it('names each column, an unlabelled one blank, with a spacer where the remove button sits', () => {
+            const c = container();
+            createRowList(c, LABELLED);
+            expect(labels(c)).toEqual(['Alpha', '']);
+            const spacer = c.querySelector('.row-list-head .row-list-spacer')!;
+            expect(spacer.getAttribute('aria-hidden')).toBe('true');
+            // The remove button's glyph, so it takes the same width.
+            expect(spacer.textContent).toBe('\u2715');
+        });
+
+        it('shows the labels only while there are rows: they stay put once a row is filled', () => {
+            const c = container();
+            const rl = createRowList(c, LABELLED);
+            expect(headShown(c)).toBe(false);
+            rl.addRow({ a: 'x', b: 'y' });
+            expect(headShown(c)).toBe(true);
+            c.querySelector<HTMLButtonElement>('.row-list-remove')!.click();
+            expect(headShown(c)).toBe(false);
+            rl.addRow();
+            rl.clear();
+            expect(headShown(c)).toBe(false);
+            // clear takes the rows only; the header stays for the next row.
+            rl.addRow();
+            expect(headShown(c)).toBe(true);
+        });
+    });
+
+    describe('empty note', () => {
+        const shown = (c: HTMLElement) => !c.querySelector('.row-list-empty')!.classList.contains('hidden');
+
+        it('says what an empty list means while there are no rows, and only then', () => {
+            const c = container();
+            const rl = createRowList(c, FIELDS, { empty: 'None: nothing is granted.' });
+            expect(c.querySelector('.row-list-empty')!.textContent).toBe('None: nothing is granted.');
+            expect(shown(c)).toBe(true);
+            rl.addRow();
+            expect(shown(c)).toBe(false);
+            c.querySelector<HTMLButtonElement>('.row-list-remove')!.click();
+            expect(shown(c)).toBe(true);
+            rl.addRow();
+            rl.clear();
+            expect(shown(c)).toBe(true);
+            expect(rl.readRows()).toEqual([]);
+        });
+    });
+
     it('honours a password field type', () => {
         const c = container();
         const rl = createRowList(c, [{ key: 'p', placeholder: 'P', type: 'password' }]);

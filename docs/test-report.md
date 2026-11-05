@@ -111,6 +111,18 @@
     - gateway events: end or expire my session, revoke my VPN access, clear the lockout, and the relay, dial and config.yaml faults.
 
   Tests: new `tests/mock-broker/controls/managed.test.ts`. `tests/variants.test.ts` gained the managed demo's manifest, with the admin-modules rule naming it as the exception; `tests/build/module-registry-plugin.test.ts` its entry override; `boot.managed.test.ts` the panel's Reset.
+> - **Row-list column labels and empty notes (November 2026):** the entitlement and VPN rows in User Management and Connection Management lost their column names once a row was filled, because the names were only placeholders, and an empty list said nothing about what it meant.
+  - [`row-list`](../src/core/components/row-list/index.ts) takes a `label` per field and shows a header while there are rows. It takes `RowListOptions.empty`, a note shown while there are none, and `clear()` now removes rows only. Its new `styles.css` lines the labels up with the inputs and is imported by `main-admin.css`.
+  - User Management names *Brokers / Message VPNs / Queues* and says what no Operate and no Read-only rows mean (`NO_OPERATE`, `NO_READ_ONLY`). A hint under both lists says how rows grant access, that the Administrator flag grants no broker, and that queue patterns are applied by the app.
+  - Connection Management names *Message VPN / Client username / Client password* and says that a broker with no VPN is unreachable (`NO_VPNS`).
+
+  Tests: `row-list.test.ts` gained the labels (an unlabelled column, the spacer, shown only with rows, kept across `clear`) and the empty note; the user- and connection-management suites gained the notes and labels.
+> - **The account control moved to the sidebar footer (November 2026):** Change password and Sign out sat in the Managed panel's "Connect to a broker" card, so they vanished once connected and were never seen from another page.
+  - New [`connections/account.ts`](../src/modules/connections/account.ts), managed entry only, shows the user (tagged admin), Change password (a plain link to `/login/password`) and Sign out. It is a row above the Client and SEMP lights in the sidebar footer, on every page and through a connection; icons only when the sidebar is collapsed.
+  - It is mounted through the new `AppContext.mountSidebarAccount`, which fills the shell's empty `#sidebar-account` slot; the footer stacks that slot over the status lights.
+  - `#managed-change-password` and `#btn-managed-logout` left `index.managed.html`; Refresh stays in the card.
+
+  Tests: new `tests/modules/connections/account.test.ts`. `managed-panel.test.ts` signs out from the sidebar and keeps the control through a connection (disconnecting first). `kernel.test.ts` covers the slot, replaced on a second mount and left alone when absent.
 >
 > The v8 ignore categories table further down has been trimmed to reflect which of the old justifications still apply.
 

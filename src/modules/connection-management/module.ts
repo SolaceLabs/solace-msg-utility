@@ -22,10 +22,13 @@ import { createConnMgmtService, type ManagedConnRecord } from './service';
 import type { AppContext } from '../../core/types';
 
 const VPN_FIELDS = [
-    { key: 'name', placeholder: 'vpn name' },
-    { key: 'user', placeholder: 'username' },
-    { key: 'pass', placeholder: 'password (blank = keep)', type: 'password' as const },
+    { key: 'name', placeholder: 'vpn name', label: 'Message VPN' },
+    { key: 'user', placeholder: 'username', label: 'Client username' },
+    { key: 'pass', placeholder: 'password (blank = keep)', type: 'password' as const, label: 'Client password' },
 ];
+
+/** What an empty VPN list means, shown in its place. */
+export const NO_VPNS = 'None: no user can reach this broker until it lists a Message VPN.';
 
 export const ConnectionManagementModule = {
     name: 'Conn. Mgmt',
@@ -59,7 +62,7 @@ export const ConnectionManagementModule = {
         };
 
         const service = createConnMgmtService();
-        const vpnList = createRowList(els.vpnRows, VPN_FIELDS);
+        const vpnList = createRowList(els.vpnRows, VPN_FIELDS, { empty: NO_VPNS });
         const gate = createGate(container, {
             id: 'conn-mgmt-gate',
             title: 'Administrator Sign-in Required',

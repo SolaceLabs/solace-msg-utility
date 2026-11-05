@@ -10,3 +10,36 @@
     max-width: 520px;
     margin: 2rem auto;
 }
+
+/* The managed account control, a row of the sidebar footer above the status
+ * lights (account.ts): user, optional admin tag, then the two actions. */
+.conn-account .btn-icon {
+    padding: 2px;
+}
+
+.conn-account-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.conn-account-role {
+    padding: 0 0.3rem;
+    font-size: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+}
+
+.conn-account-password {
+    margin-left: auto;
+}
+
+.sidebar.collapsed .conn-account {
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.sidebar.collapsed .conn-account-password {
+    margin-left: 0;
+}
