@@ -291,6 +291,11 @@ cd go-web-proxy && go test -tags managed -run Contract -update .
 
 Each case runs on a fresh gateway over the seed. A case's sessions are opened before its first step, so a step after a revocation still uses the cookie the user held. Usage: put `as` (a username) on a step to send it signed in, `mustChange: true` for a session held at the password page, `body` for JSON and `raw` for an XML body. Store paths in a settings body read `<path>`.
 
+Three suites hold the managed demo to the app as well:
+- `tests/mock-broker/gateway/routes.test.ts`: a new gateway route needs a row that calls it through its service. A `/managed/<name>` in `src/` with no row fails.
+- `tests/mock-broker/gateway/error-codes.test.ts`: a new error code in `managed-api.ts` needs a place. It is a contract golden, a fault the demo panel arms, a code the app makes itself, or a code the demo does not simulate.
+- `tests/mock-broker/demo-flow.test.ts`: whole sessions through the real Kernel, the `managed-demo` variant's modules and the demo's boot.
+
 ### Stubbing Globals
 
 Prefer `vi.spyOn(target, 'prop').mockReturnValue(...)` / `.mockImplementation(...)` over direct reassignment (`target.prop = vi.fn(...)`). The spy form is auto-restored by `vi.restoreAllMocks()` in the global `afterEach` in [tests/setup.ts](../tests/setup.ts), so a test body that throws before a manual restore line runs cannot leak the stub into the next test.

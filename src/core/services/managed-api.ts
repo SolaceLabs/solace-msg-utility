@@ -81,6 +81,15 @@ const MESSAGES: Record<string, string> = {
 };
 
 /**
+ * Every code with a stock message: the gateway's error codes plus `network`
+ * and `bad_response`, which managedRequest makes itself.
+ * tests/mock-broker/gateway/error-codes.test.ts holds the managed demo to
+ * this list: each code is sent by the fake gateway or named as one it does
+ * not simulate.
+ */
+export const MANAGED_ERROR_CODES: readonly string[] = Object.keys(MESSAGES);
+
+/**
  * Text for a failed call. A reason from the gateway (sent with `invalid` and
  * `would_lock_out`, always fit to show an admin) wins over the stock line.
  */

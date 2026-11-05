@@ -389,7 +389,7 @@ The project builds several HTML variants. The ones below are attached to each [G
 | `no-payload.html` | **No-payload** | Same as Standard, except the Queue Browser never shows or exports the message **body**. The Content Preview, Show Raw Content, Copy Content, Download Content, Download Full, and Body-Content filter are all removed; Forward, Delete, all metadata, and the other filters remain. Use where message bodies must not be visible to the operator. |
 | `no-queue-copy.html` | **No Queue Copy** | Same as Standard, minus the Queue Copy module. For deployments where operators should browse and forward but never bulk-copy between queues. |
 | `mock.html` | Standard + demo broker | Interactive demo (see [Demo Mode](#demo-mode-mockhtml)) |
-| `managed-demo.html` | Managed + admin pages + demo gateway | Managed mode without a gateway or a broker: sign in with one of the demo accounts its control panel lists. It makes no network request |
+| `managed-demo.html` | Managed + admin pages + demo gateway | Managed mode without a gateway or a broker (see [Managed demo](#managed-demo-managed-demohtml)). It makes no network request |
 
 Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately**:
 
@@ -423,14 +423,14 @@ other export works without it.)
 required.
 
 (For developers building from source, `npm run build:mock` produces `dist/mock.html`; `npm run build` produces
-every variant in one pass, including the image-only `managed.html` and `solAdmin.html`. See [developer-guide.md](developer-guide.md) for the full build workflow.)
+every variant in one pass, including `managed-demo.html` and the image-only `managed.html` and `solAdmin.html`. See [developer-guide.md](developer-guide.md) for the full build workflow.)
 
 ### Connecting
 
 Use host **`broker.solace.com`** with any non-empty credentials. Any other hostname surfaces a connection failure,
 and a hostname containing `untrust.com` simulates an untrusted certificate, so the error paths are demoable too.
 
-The demo is Direct-only, like every Release bundle: the Managed sign-in ships only in the managed container image.
+`mock.html` is Direct-only. To try the Managed sign-in without a gateway, open [`managed-demo.html`](#managed-demo-managed-demohtml).
 
 ### The demo topology
 
@@ -467,8 +467,76 @@ Nothing is persisted: reloading the page reseeds the broker, so a reload is alwa
 
 ### What is not in the demo
 
-Managed sign-in and the `/solAdmin` administration app are not part of the demo build — both need the real
-gateway and ship only in the managed container image. Everything else is exercisable offline.
+The Managed sign-in and the administration pages are not part of `mock.html`. The
+[managed demo](#managed-demo-managed-demohtml) runs both offline against a fake gateway. Everything else is
+exercisable in `mock.html`.
+
+---
+
+## Managed demo (`managed-demo.html`)
+
+`managed-demo.html` is managed mode without a gateway or a broker. It is the real Managed sign-in, Connections, Queue
+Browser, Queue Copy and the three administration pages, running against a fake gateway and the demo broker inside the
+page. It makes no network request: anything it does not answer itself fails as if the network were down. Like
+`mock.html`, it needs no `solclient.js` (`jszip.min.js` is still needed for the ZIP download).
+
+It is attached to every GitHub Release; open it from disk. It starts on the gateway's sign-in page.
+(`npm run build:managed-demo` builds `dist/managed-demo.html`.)
+
+### Demo accounts
+
+| Account | Password | What it shows |
+| --- | --- | --- |
+| `admin` | `demo-admin-0001` | An administrator: every broker, and the administration pages in the sidebar |
+| `operator` | `demo-operator-01` | Operates `orders.*` on `east-prod` / `orders`, reads the rest of `east-prod` and `lab`, never sees `west-dr`; Queue Browser and Queue Copy |
+| `viewer` | `demo-viewer-0001` | Reads `east-prod` / `orders` only; no Queue Copy |
+| `newadmin` | `demo-change-me-01` | An administrator who must change the password before anything else |
+
+The passwords are fake. The **Demo controls** panel lists them too: click one to copy it, or use **Sign in as**.
+
+### The demo brokers
+
+| Broker | Message VPN | Queues |
+| --- | --- | --- |
+| `east-prod` | `orders` | `orders.new`, `orders.process`, `orders.archive` (empty), `audit.orders` (read-only on the broker), `scratch.orders` |
+| `east-prod` | `payments` | `payments.settled`, `payments.reversal`, `audit.payments` |
+| `west-dr` | `orders-dr` | `orders.new`, `orders.replay` (empty) |
+| `lab` | `sandbox` | `sandbox.scratch`, `sandbox.bulk` (300 messages) |
+
+Their hosts end in `.demo.invalid`, a name that never resolves.
+
+### How it differs from a real gateway
+
+- **Administration is in the sidebar.** The product serves the three administration pages at `/solAdmin`; here an
+  administrator finds them as sidebar entries.
+- **Sign-in reloads the page,** as the gateway's redirect does. The users, connections, settings, sessions, queues and
+  panel settings carry over in this tab. A new tab starts from the seed, and **Reset demo data** starts over.
+- **Changes apply at once,** to the signed-in user too. Change your own password or Administrator flag, or delete
+  your account, and you are signed out. Revoke a user's access and that user's broker connection closes.
+- **Not simulated:**
+  - the cross-site request check;
+  - the request size limit;
+  - the sign-in limit for clients without a session (the per-account lockout after five wrong passwords is
+    simulated);
+  - the limit on concurrent requests.
+- **The client access list** is saved and checked against the demo's own address, `192.0.2.10`, so a list that would
+  lock you out is refused. A saved list is never enforced.
+
+### Demo controls
+
+The panel is the one in `mock.html`, with the Direct connection values replaced by two sections:
+
+- **Demo accounts:** every account and password (click to copy), **Sign in as** each, and **Sign out**.
+- **Gateway events:**
+  - **End my session** closes its broker connections, as a sign-out does; **Expire my session** does not, as an
+    expiry does not.
+  - **Revoke my VPN access** removes every row of the signed-in user.
+  - **Clear the sign-in lockout.**
+  - The relay (the broker unreachable: `502`), the dial (rate limited: `429`) and `config.yaml` (edited on the host,
+    or unreadable).
+
+**Queue state**, **Connection faults** and **Latency and volume** work as in `mock.html`, across every broker. A SEMP
+`401` there reaches the app as the relay's `502 upstream_auth`, as a broker refusing the gateway's account does.
 
 ---
 

@@ -571,7 +571,7 @@ The first flavor is the queue-browser **no-payload** build. [src/modules/queue-b
 
 ## Managed Connections (RBAC)
 
-**Managed** is a connection *mode* that only one bundle carries. Every Release bundle installs the Direct-only connections entry; the login-gated (**Managed**) path ships only in `dist/managed.html` (the `managed` variant, [module.managed.ts](../src/modules/connections/module.managed.ts)), which the managed container image serves as its `index.html`. Within that bundle, which of the two modes the app offers is resolved at runtime from the gateway. Managed abstracts broker credentials away from the user: they sign in with an app account, and the deployment holds the broker credentials and grants each account a scoped set of brokers, VPNs and queues. It runs only behind the [go-web-proxy](../go-web-proxy) in `MANAGED=true HOSTED=true` mode. The user-facing design, locked decisions, and **threat model** live in [rbac-variant-plan.md](rbac-variant-plan.md); operations in [deployment.md](deployment.md). This section is the *how*.
+**Managed** is a connection *mode* that only one product bundle carries. Every Direct Release bundle installs the Direct-only connections entry; the login-gated (**Managed**) path ships in `dist/managed.html` (the `managed` variant, [module.managed.ts](../src/modules/connections/module.managed.ts)), which the managed container image serves as its `index.html`, and in the offline `managed-demo.html` (against a fake gateway, see The demo broker). Within that bundle, which of the two modes the app offers is resolved at runtime from the gateway. Managed abstracts broker credentials away from the user: they sign in with an app account, and the deployment holds the broker credentials and grants each account a scoped set of brokers, VPNs and queues. It runs only behind the [go-web-proxy](../go-web-proxy) in `MANAGED=true HOSTED=true` mode. The user-facing design, locked decisions, and **threat model** live in [rbac-variant-plan.md](rbac-variant-plan.md); operations in [deployment.md](deployment.md). This section is the *how*.
 
 On the gateway side the RBAC store + `/managed/*` handler are gated behind the `managed` **Go build tag** (`store.go`, `managed.go`, `rbac.go` carry `//go:build managed`; `main.go` reaches them through `newManagedRouting`, with a `//go:build !managed` stub for the default build). So the gateway ships as **two binaries**: the standard/hosted image's binary omits the RBAC files (both binaries link `gopkg.in/yaml.v3`, which the `config.yaml` loader needs), and the managed image builds the gateway with `-tags managed` (the `GO_TAGS=managed` Docker build arg). Running the stdlib-only binary with `MANAGED=true` logs a "built without managed support" warning and leaves `/managed/*` falling through to the SPA.
 
@@ -733,7 +733,7 @@ The entitlement editors and the settings page do not ship in the everyday bundle
 
 **Session lifecycle.** `admin-login` is the only writer of the session in this app. Its Sign out button and `rbac:sign-out-requested` (from `user-management` after a change to the admin's own account, or from either admin module on a `401`) run the same sign-out: `POST /managed/logout`, clear `AppState.managed`, emit `rbac:changed`, show the signed-out view and `loadSelf()`. The kernel does not navigate by itself here: with `managed` null every module is visible. `admin-login` answers the request only while it holds the session (a closure flag, not `appState.managed`), because in the kitchen-sink build the Connections Managed tab may own the session instead and answers through the connections router.
 
-### The demo broker (`mock.html`)
+### The demo broker (`mock.html`, `managed-demo.html`)
 
 The demo build does not stub the app's services. It stands up an **in-browser broker** at the transport boundary
 and lets the real code run against it.
@@ -787,10 +787,23 @@ the queues and the scenario across in sessionStorage (a new tab starts from the 
 demo cannot reach a network: its `fetch` passthrough refuses, and `WebSocket`, `EventSource`,
 `XMLHttpRequest.open` and `sendBeacon` throw.
 
+**What ships, and what keeps it honest.** `managed-demo.html` (variant
+[managed-demo.ts](../src/variants/managed-demo.ts)) is the managed variant's messaging modules plus the three admin
+editors, which an administrator finds in the sidebar instead of at `/solAdmin`. It has no `admin-login`, because the
+Managed panel owns the session. It is a Release asset, so [check-bundles.mjs](../scripts/check-bundles.mjs) proves on
+every build that it carries the managed and the demo markers and nothing that reaches past the page: no captured
+`fetch`, no other network API, no form action, no URL to a real host. `tests/build/no-network-apis.test.ts` keeps
+the app's source on `fetch`, which the interceptor answers. Past the contract:
+- `tests/mock-broker/gateway/routes.test.ts` calls every gateway route through the service that ships, and fails on a
+  `/managed/<name>` in `src/` with no row;
+- `error-codes.test.ts` places every error code in `managed-api.ts` (`MANAGED_ERROR_CODES`): a contract golden, a
+  panel fault, made by the app itself, or not simulated;
+- `tests/mock-broker/demo-flow.test.ts` runs whole sessions through the real Kernel and the variant's modules.
+
 Fidelity details that are load-bearing rather than decorative, each covered by a test in `tests/mock-broker/`:
 the session's `createQueueBrowser` is a **reassignable own property** and the event emitter is **synchronous and
 FIFO**, as in the real SDK (the managed panel in `managed.html` patches the method and needs its `UP` handler to run
-before queue-browser's; the Direct-only demo keeps the emulation faithful rather than guarding a live patch); publish acks round-trip through
+before queue-browser's, and the managed demo runs that patch against the emulation); publish acks round-trip through
 `ACKNOWLEDGED_MESSAGE` with the correlation key nested exactly where the publisher looks; the queue browser
 delivers in **spool-ID order** and its `stop()`/`start()` genuinely suspend delivery (the copy engine's drift
 detection and backpressure depend on both). The SEMP v1 detail response even reproduces the broker bug the product

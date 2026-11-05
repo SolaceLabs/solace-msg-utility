@@ -18,11 +18,11 @@ fetched (`POST /managed/dial`) at the moment the SDK logs in. Two admin-only mod
 (`user-management`, `connection-management`) manage the entitlement data.
 
 **It ships only in the managed image's bundle.** `managed.html` (the `managed` variant) carries both
-paths and is served as that image's `index.html`; every Release bundle is Direct-only. Within
+paths and is served as that image's `index.html`; every Release bundle but the offline `managed-demo.html` is Direct-only. Within
 `managed.html`, which tabs the app offers is decided by the gateway's `/hosted` response (`CONN_MODES` / `DEFAULT_CONN` — see
 [deployment.md](deployment.md)). With no gateway there is no `/hosted`, so Managed never appears.
 Managed mode only works behind the [go-web-proxy](../go-web-proxy) in `MANAGED=true HOSTED=true`
-mode, and only in the managed image, which serves the `managed` variant (`managed.html`) as its `index.html`; the standard bundle and every Release bundle are Direct-only. The entitlement editors live in their own `admin` variant, served at `/solAdmin` (see [architecture.md](architecture.md) — The admin app).
+mode, and only in the managed image, which serves the `managed` variant (`managed.html`) as its `index.html`; the standard bundle and every Release bundle but the offline demo (`managed-demo.html`, against a fake gateway in the page) are Direct-only. The entitlement editors live in their own `admin` variant, served at `/solAdmin` (see [architecture.md](architecture.md) — The admin app).
 
 ## Topology
 

@@ -7,7 +7,9 @@ hardening items" section of [rbac-variant-plan.md](rbac-variant-plan.md) when ad
 ## 1. Goal
 
 - Managed code ships only in the managed container image. The Release HTML (`index.html`,
-  `min.html`, ...) carries none of it.
+  `min.html`, ...) carries none of it, with one stated exception: `managed-demo.html` runs the real
+  managed modules against a demo-only fake gateway and the in-browser broker. It holds no gateway
+  or broker address and cannot open a network request; `check-bundles` proves both on every build.
 - Credentials, the password check and the session live in the Go gateway. The browser keeps two
   jobs: the SMF dial (the SDK must log in to the broker itself) and SEMP response filtering.
 - Managed image stays `FROM scratch`, CGO off, stdlib plus `yaml.v3`, under 20 MB (today 12.7 MB).
@@ -25,11 +27,11 @@ hardening items" section of [rbac-variant-plan.md](rbac-variant-plan.md) when ad
 | SEMP relay | Gateway injects the credential and forwards **reads only** (decided 2026-11-01): `GET`/`HEAD` under `/SEMP/v2/`, and `POST /SEMP` only for a single `<rpc><show>`; everything else under `/SEMP` is `403 read_only`, any other path `404`. Paths are checked per decoded segment, because the router leaves encoded dot segments in place | VPN/queue filtering stays in the PWA (`managed-semp-filter.ts`), so queue globs remain a UI filter on both planes. Protection is credential custody plus a session-bound relay keyed by broker name: an entitled user can read any VPN/queue on a provisioned broker, not other brokers, and the stored SEMP account can never write through the gateway. |
 | SMF dial | `POST /managed/dial {broker, vpn}` returns `{smfPath, vpn, user, pass}` to an entitled user, read-only users included. Stateless: no ticket | A ticket would break the SDK's own reconnects, which re-use the session properties. "One-shot" means the password comes only from `dial` and the browser keeps it only inside the dial callback; a reconnect after a sign-in dials again. Dials and socket upgrades share 20 per minute per user. |
 | SMF socket | `GET /managed/smf/{broker}/{vpn}` upgraded behind the session, an `Origin` equal to the gateway's own `https` address and the entitlement; joined to the broker's SMF port over TLS with only the `Sec-WebSocket-*` headers passed. Closed only on revocation (decided 2026-11-01): sign-out, password change, user deleted or administrator flag changed, entitlement or VPN removed, broker deleted | No idle or absolute timer: the SMF API's keep-alive owns the connection's lifetime, so a socket can outlive its session. A Host-rewriting proxy in front fails the `Origin` check; an allowed-origins setting is out of scope. |
-| Bundle delivery | New `managed` variant builds `dist/managed.html`; the managed image copies it over `index.html`. The Release uploads an explicit list (`index`, `min`, `no-payload`, `no-queue-copy`, `mock`), never `solAdmin.html` or `managed.html` | Build-time registry, nothing loads at runtime. Release bundles lose the managed code; `tag.yml` stops uploading `dist/*`. |
+| Bundle delivery | New `managed` variant builds `dist/managed.html`; the managed image copies it over `index.html`. The Release uploads an explicit list (`index`, `min`, `no-payload`, `no-queue-copy`, `mock`, and from Phase 4 `managed-demo`), never `solAdmin.html` or `managed.html` | Build-time registry, nothing loads at runtime. Release bundles lose the managed code; `tag.yml` stops uploading `dist/*`. |
 | `CONN_MODES=both` | Kept in the managed image; Direct stays a per-deployment switch (decided 2026-11-01) | Under `both` the Direct relay stays present and its exposure is handled by the client access list below; under `managed` it answers `404`, read live. The gateway's sign-in cookie is never forwarded by it in any mode, and an upstream `Set-Cookie` naming it is dropped. |
 | Relay exposure | The Direct relay stays open to any host under `direct` and `both` (closed under `managed`). New client access list, CIDR-based, default allow-all | Applies to every route, not only the relay. Behind a reverse proxy the client IP comes from `X-Forwarded-For` only when the proxy is listed as trusted. |
 | Docs-secrecy policy | Retired in Phase 3 (step 3E), with the browser transform | `CLAUDE.md` section, `check-docs-secrecy.mjs`, its test and `check:docs` removed; docs name the store format and primitive. |
-| Managed demo | A separate one-time mini app that mimics managed behaviour; not shared code | Phase 4. `mock.html` stays a Direct-only demo. |
+| Managed demo | The real managed modules against a demo-only fake gateway and the in-browser broker, shipped as the Release asset `managed-demo.html` (decided 2026-11-04, replacing the separate mini app) | Phase 4. `mock.html` stays a Direct-only demo. The fake follows the gateway through shared contract files that both are tested against. |
 | SEMP v1 RPC | Checked only for its shape: one `<rpc>` with one `<show>` command (follows from the read-only relay) | Which modules a managed session sees is decided by module control, below. |
 | Module control | Deployment ceiling in `config.yaml` (modules the image offers) plus a per-user `modules` list in `users.yaml` within it, editable in `/solAdmin`; `/managed/me` returns the result. A user without a list gets the deployment default, itself a `config.yaml` setting (`all` or `none`, default `all`). Admin-only modules still require `admin` | Replaces "every other module is visible" in `src/core/rbac.ts`. The SEMP v1 modules stay out of the catalog and hidden in every managed session (decided 2026-11-01: what a managed user sees must follow the admin's queue rows, which those modules cannot honour). |
 | Module scope | Show/hide only. Read-only vs operate stays per queue | A read-only queue admits no operate action in any module, e.g. `queue-copy` cannot copy into it. No per-module level. |
@@ -188,7 +190,33 @@ broker; it now runs against an existing broker, read-only, and Phase 3 closes wh
   `managed-semp-filter.ts` stays. `queue-copy` provisioned destination uses `dial`.
 - Docs-secrecy policy retired; `rbac-variant-plan.md` rewritten.
 
-**Phase 4:** separate managed demo mini app; anything deferred from section 3.
+**Phase 4: the managed demo.** Code on `feature/rbac` 2026-11-05, design per Decision "Managed
+demo" (the real modules, not a mini app).
+- Contract: `go-web-proxy/testdata/contract/` (seed, request cases with the real answers, validation
+  vectors), proved against the real gateway by `contract_test.go` (`-update` rewrites the answers)
+  and against the fake by `tests/mock-broker/gateway/contract.test.ts`.
+- Boot: `mockRedirects(variant)` gives the `managed-demo` variant its own boot,
+  `src/mock-broker/boot.managed.ts`. The demo broker serves several brokers (`fixtures.BROKERS`,
+  `direct` for mock.html).
+- Fake gateway, `src/mock-broker/gateway/`:
+  - the router in the gateway's gate order;
+  - `/hosted`, `me`, `logout`, `dial`, the relay, `users`, `connections` and `settings`;
+  - sessions, the sign-in throttle and the SMF socket gate with its revocations;
+  - the sign-in and password pages as layers.
+
+  Not simulated: the cross-site check, the body cap, the unauthenticated throttle, the in-flight
+  cap, and enforcement of a saved access list. Sign-ins reload the page; the state rides in
+  sessionStorage. The page's other network APIs throw.
+- Variant `managed-demo`: no `admin-login`; the admin editors are sidebar entries. Built by
+  `npm run build:managed-demo`. The demo panel gains the demo accounts and the gateway events.
+- Ship: `RELEASE_BUNDLES` gains `managed-demo.html`, and `check-bundles` gains a third category
+  (both marker sets, no network). `tests/build/no-network-apis.test.ts` keeps the app source on
+  `fetch`.
+- Drift: `routes.test.ts` (every route through its shipping service), `error-codes.test.ts` (every
+  error code placed), and `demo-flow.test.ts` (whole sessions through the real Kernel).
+- Alongside: User Management and Connection Management lists gained column labels and empty
+  notes. The managed account control moved to the sidebar footer. The sidebar shows the Solace
+  Message Utility logo, and the Direct form's URL Path fields appear on demand.
 
 ## 8. Constraints that stay
 
@@ -208,5 +236,5 @@ state, factories); tests and docs in the same change; no `v*` tag from this bran
 
 ## 10. Next step
 
-Detailed Phase 0 and Phase 1 plans. Before Phase 2 and 3 code: an adversarial design review
-(ultracode) of the auth, settings-writer and relay designs.
+Phases 0 to 4 are code-complete on `feature/rbac`. Phase 3 closes when the end-to-end run against an
+existing broker (`./scripts/dev.sh e2e`) passes; that run comes before any managed release tag.

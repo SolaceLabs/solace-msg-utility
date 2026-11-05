@@ -27,7 +27,7 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 | `npm run build` | `mock.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, `solAdmin.html`, `managed.html` AND `managed-demo.html` in one pass |
 | `npm run check:bundles` | Checks `dist/`: no Direct bundle carries managed UI or the fake gateway, `managed.html` carries the managed UI only, and `managed-demo.html` carries both with no way out to a network. The `build` task runs it after `npm run build` |
 
-`dist/` is git-ignored build output; nothing in it is committed. Tagged Releases publish the Direct-only bundles and the gateway binaries, never `solAdmin.html` or `managed.html`, which ship only inside the managed image (see [git.md -> Release assets](git.md#release-assets)). For local runs, drop `solclient.js` / `jszip.min.js` in beside the bundles (see [deployment.md -> External Runtime Dependencies](deployment.md#external-runtime-dependencies)).
+`dist/` is git-ignored build output; nothing in it is committed. Tagged Releases publish the Direct-only bundles, the offline managed demo (`managed-demo.html`) and the gateway binaries, never `solAdmin.html` or `managed.html`, which ship only inside the managed image (see [git.md -> Release assets](git.md#release-assets)). For local runs, drop `solclient.js` / `jszip.min.js` in beside the bundles (see [deployment.md -> External Runtime Dependencies](deployment.md#external-runtime-dependencies)).
 
 **The gates are `scripts/dev.sh` / `scripts/dev.ps1`, not the npm scripts.** The table above is the variant reference — reach for an individual `build:*` script when iterating on one variant. For anything you would call a gate, use the task: `./scripts/dev.sh all` (`build vet test mock`; CI runs `all scan`), `cov`, `scan`, `image`, or `full` for the pre-tag sweep. The tasks call the npm scripts above plus the Go halves, and they are the only place a build command lives — see [contributing.md](contributing.md#development-workflow) for the task table and [git.md](git.md) for how a tag turns into a release.
 
@@ -178,7 +178,7 @@ src/
   index.html           # App shell with <!-- @module-templates --> marker
 tests/
   setup.ts             # Global mocks (Solace SDK, browser APIs)
-  helpers/             # loadModuleDOM, resetQueueBrowserState
+  helpers/             # loadModuleDOM, resetQueueBrowserState, sources (the app source files, for scans)
   core/                # Kernel, EventBus, toast, utils tests (dom.ts is exercised transitively by module tests)
   modules/             # Per-module test files
   build/               # scripts/*.mjs tests -- module-registry-plugin (manifest -> virtual:module-registry, entry overrides), check-bundles, npm-audit-gate

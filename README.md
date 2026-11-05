@@ -28,7 +28,7 @@ Then open <https://localhost:9443/>. The container ships a built-in HTTPS gatewa
 
 Take `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) and the two vendor libraries `solclient.js`, `jszip.min.js` from the `dist` branch. Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, …). See [deployment.md → Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
 
-> **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials — every module, message browsing included, runs against an in-browser mock broker. See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details.
+> **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials — every module, message browsing included, runs against an in-browser mock broker. See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details. To try managed mode the same way, open `managed-demo.html` and sign in with a demo account: see [Managed demo](docs/user-guide.md#managed-demo-managed-demohtml).
 
 ## Connecting to a broker
 
@@ -95,6 +95,7 @@ Once the app is loaded:
 - **Toasts** for every success / failure.
 - **Self-contained HTML** — `index.html` includes all app code; the two vendor scripts `solclient.js` and `jszip.min.js` sit alongside it (see [deployment.md](docs/deployment.md#external-runtime-dependencies)).
 - **Demo bundle** (`mock.html`) — every module exercised against mock data, no broker required.
+- **Managed demo** (`managed-demo.html`) -- the Managed sign-in, entitlements and administration pages against a fake gateway in the page; no gateway, no broker, no network request.
 - **Containerised gateway** — optional single-binary Go HTTPS gateway serves the PWA, exposes a `/hosted` probe, and reverse-proxies SEMP/SMF traffic so browsers only need to trust one cert. Distroless image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#containerised-gateway).
 
 ## Documentation

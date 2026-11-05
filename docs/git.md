@@ -4,7 +4,7 @@ This project ships in four forms:
 
 1. A **container image** at `ghcr.io/solacelabs/solace-msg-utility` (produced by [docker/Dockerfile](../docker/Dockerfile)), in a standard and a `managed-` prefixed variant.
 2. A **public PWA** hosted on GitHub Pages at `https://solacelabs.github.io/solace-msg-utility/`.
-3. The **PWA bundles** (`index.html` and its Direct-only variants) attached to the GitHub Release. The managed sign-in ships only inside the `managed-` image.
+3. The **PWA bundles** (`index.html` and its Direct-only variants, plus the offline `managed-demo.html`) attached to the GitHub Release. The managed sign-in ships inside the `managed-` image; the demo runs it against a fake gateway in the page.
 4. The **gateway binaries** (`go-web-proxy`), cross-compiled and attached to the same Release.
 
 All four are produced by [`.github/workflows/tag.yml`](../.github/workflows/tag.yml), which fires when you **push a `v*` tag**. Nothing is built or pushed on an ordinary branch push or pull request (the only automatic runs are listed under [Day-to-day branching](#day-to-day-branching): the narrow CI trigger and the SCA scan).
@@ -150,7 +150,7 @@ Pages is fed from the **`dist` branch**, not from a workflow-uploaded Pages arti
 
 - `https://solacelabs.github.io/solace-msg-utility/` → `index.html` (production bundle)
 
-The other Direct-only variants are built and attached to the Release but **not** deployed to Pages. Managed deployments use the `managed-` prefixed container image, which serves `managed.html` (the only bundle with the Managed sign-in) as its `index.html` and also carries `solAdmin.html`, which the gateway serves at `/solAdmin`.
+The other Direct-only variants and `managed-demo.html` are built and attached to the Release but **not** deployed to Pages. Managed deployments use the `managed-` prefixed container image, which serves `managed.html` (the only bundle with the Managed sign-in) as its `index.html` and also carries `solAdmin.html`, which the gateway serves at `/solAdmin`.
 
 Pages is gateway-less, so it is Direct-connection-only by design.
 

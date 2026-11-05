@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
-import { repoRoot } from '../../scripts/check-bundles.mjs';
+import { productSources, readSource } from '../helpers/sources';
 
 /**
  * The app reaches the network through `fetch` and the Solace SDK only. That is
@@ -15,8 +13,6 @@ import { repoRoot } from '../../scripts/check-bundles.mjs';
  * tests/build/check-bundles.test.ts > "fails a demo that holds %s" is the same
  * guard on the built managed-demo.html.
  */
-const SCANNED = /\.(ts|mjs|js|html)$/;
-
 const FORBIDDEN: { api: string; re: RegExp }[] = [
     { api: 'XMLHttpRequest', re: /\bXMLHttpRequest\b/ },
     { api: 'navigator.sendBeacon', re: /\bsendBeacon\b/ },
@@ -26,15 +22,6 @@ const FORBIDDEN: { api: string; re: RegExp }[] = [
     { api: 'location.assign / replace', re: /\blocation\.(?:assign|replace)\s*\(/ },
     { api: 'location.href assignment', re: /\blocation\.href\s*=(?!=)/ },
 ];
-
-/** Every scanned file under `src/`, outside `src/mock-broker/`, repo-relative. */
-function productSources(): string[] {
-    const src = path.join(repoRoot(), 'src');
-    return fs.readdirSync(src, { recursive: true, encoding: 'utf-8' })
-        .map(rel => rel.split(path.sep).join('/'))
-        .filter(rel => SCANNED.test(rel) && !rel.startsWith('mock-broker/'))
-        .map(rel => `src/${rel}`);
-}
 
 /** `file:line: api` for each line of `text` that uses a forbidden API. */
 function uses(file: string, text: string): string[] {
@@ -51,7 +38,7 @@ describe('no network API but fetch in the app source', () => {
     });
 
     it('finds no XHR, beacon, event stream, socket, window.open or scripted navigation', () => {
-        const hits = productSources().flatMap(f => uses(f, fs.readFileSync(path.join(repoRoot(), f), 'utf-8')));
+        const hits = productSources().flatMap(f => uses(f, readSource(f)));
         expect(hits, 'route the request through fetch, which the demo intercepts, or add a shim to boot.managed.ts').toEqual([]);
     });
 
