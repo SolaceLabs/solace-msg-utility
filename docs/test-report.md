@@ -146,6 +146,7 @@
     - a revoked VPN closing the live connection;
     - an administrator signed out at once after changing their own flag or password, or deleting their own account.
   - New shared helper [`tests/helpers/sources.ts`](../tests/helpers/sources.ts) (`productSources`, `readSource`), also used by `no-network-apis.test.ts`.
+  - Totals at the end of Phase 4: web 93 files / 2119 tests, 100% on all four metrics; Go 93.5% of statements (floor was 93.5%).
   - Docs: the user guide's Managed demo section (accounts, brokers, the differences from a gateway, the panel), README, `architecture.md`, `contributing.md`, and `rbac-rework-plan.md` (Goal 1's stated exception, the Managed demo decision, Phase 4 as shipped). The remaining "Direct-only" statements in `deployment.md`, `git.md`, `rbac-variant-plan.md` and `CLAUDE.md` now name the exception.
 
 >
@@ -169,7 +170,7 @@
 
 The SolaceMessageUtility PWA is a modular web application for managing Solace PubSub+ Event Broker message queues. It is built on a custom micro-kernel architecture with eight modules — four shipped in the everyday bundles (connections, queue-browser, queue-copy, queue-subscription-explorer), two admin-only ones in the standalone `/solAdmin` app (user-management, connection-management) plus its `admin-login` entry point, and the vestigial queue-discovery — a typed event bus, and dependency injection via an `AppContext` object.
 
-The test suite consists of **79 test files** (run `./scripts/dev.sh test` for the current test count) covering every source file in scope (broadly one-to-one with source modules, plus dedicated tests for shared core helpers and for each variant manifest). Coverage thresholds in `vitest.config.ts` are set to **100%** across all four metrics (Statements, Branches, Functions, Lines); as of the May 2026 sweep the target is met across the board. Tests are split between dedicated unit tests per source file and four integration test files: `full-flow.test.ts` (Kernel mechanics with stub modules), `module-events.test.ts` (real cross-module event flows), `message-pipeline.test.ts` (end-to-end `onMessage → ingest → filter → DOM`), and `admin-session.test.ts` (the `/solAdmin` session lifecycle: real admin-login + user-management).
+The test suite consists of **93 test files** (run `./scripts/dev.sh test` for the current test count) covering every source file in scope (broadly one-to-one with source modules, plus dedicated tests for shared core helpers and for each variant manifest). Coverage thresholds in `vitest.config.ts` are set to **100%** across all four metrics (Statements, Branches, Functions, Lines); as of the May 2026 sweep the target is met across the board. Tests are split between dedicated unit tests per source file and four integration test files: `full-flow.test.ts` (Kernel mechanics with stub modules), `module-events.test.ts` (real cross-module event flows), `message-pipeline.test.ts` (end-to-end `onMessage → ingest → filter → DOM`), and `admin-session.test.ts` (the `/solAdmin` session lifecycle: real admin-login + user-management).
 
 **Coverage summary (last measured run, post the August 2026 managed-connections merge):**
 
