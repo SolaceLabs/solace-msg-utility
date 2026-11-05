@@ -380,7 +380,7 @@ The loaded subscription list is held in memory for the session. Subsequent filte
 
 ## Shipped Variants
 
-The project builds several HTML variants. The Direct-only ones below are attached to each [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases); `index.html` is also what GitHub Pages and the standard container image serve. The managed container image serves its own bundle (`managed.html`, standard plus the Managed sign-in) as `index.html`, and `solAdmin.html` at `/solAdmin`; neither is a Release download.
+The project builds several HTML variants. The ones below are attached to each [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases), all Direct-only except `managed-demo.html`; `index.html` is also what GitHub Pages and the standard container image serve. The managed container image serves its own bundle (`managed.html`, standard plus the Managed sign-in) as `index.html`, and `solAdmin.html` at `/solAdmin`; neither is a Release download.
 
 | File | Variant | Use |
 | --- | --- | --- |
@@ -389,6 +389,7 @@ The project builds several HTML variants. The Direct-only ones below are attache
 | `no-payload.html` | **No-payload** | Same as Standard, except the Queue Browser never shows or exports the message **body**. The Content Preview, Show Raw Content, Copy Content, Download Content, Download Full, and Body-Content filter are all removed; Forward, Delete, all metadata, and the other filters remain. Use where message bodies must not be visible to the operator. |
 | `no-queue-copy.html` | **No Queue Copy** | Same as Standard, minus the Queue Copy module. For deployments where operators should browse and forward but never bulk-copy between queues. |
 | `mock.html` | Standard + demo broker | Interactive demo (see [Demo Mode](#demo-mode-mockhtml)) |
+| `managed-demo.html` | Managed + admin pages + demo gateway | Managed mode without a gateway or a broker: sign in with one of the demo accounts its control panel lists. It makes no network request |
 
 Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately**:
 

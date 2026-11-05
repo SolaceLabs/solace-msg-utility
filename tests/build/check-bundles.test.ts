@@ -4,18 +4,35 @@ import os from 'node:os';
 import path from 'node:path';
 import {
     RELEASE_BUNDLES,
+    DIRECT_BUNDLES,
+    DEMO_BUNDLE,
     MANAGED_BUNDLE,
     MANAGED_MARKERS,
+    DEMO_MARKERS,
+    DEMO_FORBIDDEN,
     findMarkers,
+    strayHosts,
     checkBundles,
     main,
     repoRoot,
 } from '../../scripts/check-bundles.mjs';
+import { DEMO_GATEWAY_MARKER } from '../../src/mock-broker/gateway';
+import { NETWORK_DISABLED } from '../../src/mock-broker/boot.managed';
 
 /**
- * A fake project root whose dist/ holds a clean build: Direct-only Release
- * bundles and a managed.html carrying every marker. `overrides` replaces a
- * file's content, or omits it with `null`.
+ * What a clean managed-demo.html holds: both marker sets, a form that submits
+ * in-process, and only the inert URL literals the real build carries (the SVG
+ * namespace, the mock server's `.invalid` route base, a URL built from a
+ * variable).
+ */
+const DEMO_CLEAN = `<html>${[...MANAGED_MARKERS, ...DEMO_MARKERS].join(' ')}` +
+    '<form class="login-form"></form><svg xmlns="http://www.w3.org/2000/svg"></svg>' +
+    '<script>const b="https://mock.invalid/";const u=`https://${a.host}:${a.port}`;</script></html>';
+
+/**
+ * A fake project root whose dist/ holds a clean build: Direct-only bundles, a
+ * managed.html carrying every managed marker, and a clean managed-demo.html.
+ * `overrides` replaces a file's content, or omits it with `null`.
  */
 const roots: string[] = [];
 function fakeBuild(overrides: Record<string, string | null> = {}): string {
@@ -24,8 +41,9 @@ function fakeBuild(overrides: Record<string, string | null> = {}): string {
     const dist = path.join(root, 'dist');
     fs.mkdirSync(dist);
     const files: Record<string, string | null> = {
-        ...Object.fromEntries(RELEASE_BUNDLES.map((f: string) => [f, '<html><div id="conn-host"></div></html>'])),
+        ...Object.fromEntries(DIRECT_BUNDLES.map((f: string) => [f, '<html><div id="conn-host"></div></html>'])),
         [MANAGED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')}</html>`,
+        [DEMO_BUNDLE]: DEMO_CLEAN,
         ...overrides,
     };
     for (const [name, content] of Object.entries(files)) {
@@ -38,11 +56,11 @@ afterEach(() => {
 });
 
 describe('check-bundles — checkBundles', () => {
-    it('passes a clean build: Release bundles without markers, managed.html with all of them', () => {
+    it('passes a clean build: Direct bundles without markers, managed.html with the managed ones, the demo with both', () => {
         expect(checkBundles(path.join(fakeBuild(), 'dist'))).toEqual([]);
     });
 
-    it('fails a Release bundle that carries a managed marker, naming the file and the marker', () => {
+    it('fails a Direct bundle that carries a managed marker, naming the file and the marker', () => {
         const root = fakeBuild({ 'mock.html': '<html>fetch("/managed/logout")</html>' });
         const problems = checkBundles(path.join(root, 'dist'));
         expect(problems).toHaveLength(1);
@@ -50,9 +68,9 @@ describe('check-bundles — checkBundles', () => {
         expect(problems[0]).toContain('module.ts');
     });
 
-    // The broker-facing calls are managed-only too: a Release bundle that could
+    // The broker-facing calls are managed-only too: a Direct bundle that could
     // dial or reach the SEMP relay has imported the managed entry.
-    it.each(['/managed/dial', '/managed/relay/'])('fails a Release bundle that carries %s', (marker) => {
+    it.each(['/managed/dial', '/managed/relay/'])('fails a Direct bundle that carries %s', (marker) => {
         const problems = checkBundles(path.join(fakeBuild({ 'index.html': `<html>fetch("${marker}b1")</html>` }), 'dist'));
         expect(problems).toEqual([expect.stringContaining(`index.html: contains the managed marker "${marker}"`)]);
     });
@@ -72,6 +90,74 @@ describe('check-bundles — checkBundles', () => {
         const problems = checkBundles(path.join(root, 'dist'));
         expect(problems).toEqual([expect.stringContaining(`lacks the managed marker "${MANAGED_MARKERS[0]}"`)]);
     });
+
+    // mock.html is the other mock-mode build: the one most likely to pull in
+    // the fake gateway by a wrong redirect.
+    it.each(DEMO_MARKERS)('fails a Direct bundle that carries the demo marker %s', (marker) => {
+        const problems = checkBundles(path.join(fakeBuild({ 'mock.html': `<html>${marker}</html>` }), 'dist'));
+        expect(problems).toEqual([expect.stringMatching(new RegExp(`^mock\\.html: contains the demo marker "${marker}".*mockRedirects`))]);
+    });
+
+    it('fails managed.html when it carries the fake gateway', () => {
+        const root = fakeBuild({ [MANAGED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')} ${DEMO_MARKERS[0]}</html>` });
+        expect(checkBundles(path.join(root, 'dist'))).toEqual([
+            expect.stringContaining(`managed.html: contains the demo marker "${DEMO_MARKERS[0]}"`),
+        ]);
+    });
+});
+
+describe('check-bundles -- the managed demo', () => {
+    const demoProblems = (text: string | null) => checkBundles(path.join(fakeBuild({ [DEMO_BUNDLE]: text }), 'dist'));
+
+    it('fails when managed-demo.html is missing', () => {
+        expect(demoProblems(null)).toEqual([expect.stringMatching(/^managed-demo\.html: missing.*--variant=managed-demo/)]);
+    });
+
+    it('fails when the demo lacks a managed marker: the connections entry override did not apply', () => {
+        expect(demoProblems(DEMO_CLEAN.replace(MANAGED_MARKERS[0], ''))).toEqual([
+            expect.stringMatching(new RegExp(`lacks the managed marker "${MANAGED_MARKERS[0]}".*managed-demo variant`)),
+        ]);
+    });
+
+    it.each(DEMO_MARKERS)('fails when the demo lacks the demo marker %s: built without the managed boot', (marker) => {
+        expect(demoProblems(DEMO_CLEAN.replace(marker, ''))).toEqual([
+            expect.stringMatching(new RegExp(`lacks the demo marker "${marker}".*--mode mock`)),
+        ]);
+    });
+
+    it.each(DEMO_FORBIDDEN)('fails a demo that holds %s', (call) => {
+        expect(demoProblems(`${DEMO_CLEAN}<script>${call}x)</script>`)).toEqual([
+            expect.stringContaining(`managed-demo.html: contains "${call}". The managed demo must not reach a network`),
+        ]);
+    });
+
+    it('fails a demo with a form that submits somewhere', () => {
+        expect(demoProblems(`${DEMO_CLEAN}<FORM method="post" action="/login">`)).toEqual([
+            expect.stringContaining('contains a <form> with an action'),
+        ]);
+    });
+
+    it('fails a demo that names a real host, once per host', () => {
+        const text = `${DEMO_CLEAN}"wss://broker.example.com:443" "https://broker.example.com/SEMP"`;
+        expect(demoProblems(text)).toEqual([expect.stringContaining('names the host "broker.example.com" in a URL')]);
+    });
+});
+
+describe('check-bundles -- strayHosts', () => {
+    it('keeps only literal hosts outside the allow-list, each once', () => {
+        expect(strayHosts('http://www.w3.org/2000/svg https://east-prod.demo.invalid ws://10.0.0.1:8008 ws://10.0.0.1 https://${h} https://'))
+            .toEqual(['10.0.0.1']);
+    });
+
+    it('does not take a look-alike for the namespace host', () => {
+        expect(strayHosts('http://www.w3.org.example.com/x')).toEqual(['www.w3.org.example.com']);
+    });
+});
+
+describe('check-bundles -- the demo markers', () => {
+    it('are the fake gateway\'s header value and the demo\'s refusal, as their sources define them', () => {
+        expect(DEMO_MARKERS).toEqual([DEMO_GATEWAY_MARKER, NETWORK_DISABLED]);
+    });
 });
 
 describe('check-bundles — findMarkers', () => {
@@ -85,7 +171,7 @@ describe('check-bundles — main', () => {
     it('returns 0 and says so for a clean build', () => {
         const log = vi.spyOn(console, 'log').mockImplementation(() => {});
         expect(main(fakeBuild())).toBe(0);
-        expect(log).toHaveBeenCalledWith(expect.stringContaining('Bundle check passed'));
+        expect(log).toHaveBeenCalledWith(expect.stringMatching(/^Bundle check passed \(5 Direct bundles .*managed-demo\.html runs it/));
     });
 
     it('returns 1 and lists every problem', () => {
@@ -113,5 +199,9 @@ describe('check-bundles — the Release upload list', () => {
     it('never lists the image-only bundles', () => {
         expect(RELEASE_BUNDLES).not.toContain(MANAGED_BUNDLE);
         expect(RELEASE_BUNDLES).not.toContain('solAdmin.html');
+    });
+
+    it('is the Direct bundles plus the managed demo', () => {
+        expect(RELEASE_BUNDLES).toEqual([...DIRECT_BUNDLES, DEMO_BUNDLE]);
     });
 });

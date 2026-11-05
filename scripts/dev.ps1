@@ -183,8 +183,9 @@ function Task-build {
   # The PWA bundles are target-independent, so every cross-compile leg emits an
   # identical copy; merge-multiple in the release job collapses them.
   $c = Invoke-Logged 'build' 'npm' @('run','build'); if ($c -ne 0) { return $c }
-  # Release bundles carry no managed UI and managed.html does -- proven on the
-  # output just built, so a wrong import fails the gate, not a review.
+  # Direct bundles carry no managed UI, managed.html does, and managed-demo.html
+  # carries it with no network -- proven on the output just built, so a wrong
+  # import fails the gate, not a review.
   $c = Invoke-Logged 'build' 'npm' @('run','check:bundles'); if ($c -ne 0) { return $c }
 
   # Both gateway variants: the hosted binary and the managed one (RBAC store +

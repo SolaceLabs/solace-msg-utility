@@ -26,7 +26,7 @@ npm install && npm test
 
 | Task | What it runs |
 | --- | --- |
-| `build` | `npm run build` (every variant), `npm run check:bundles` (no Release bundle carries managed UI), plus both gateway binaries, version-stamped, into `dist/` |
+| `build` | `npm run build` (every variant), `npm run check:bundles` (no Direct bundle carries managed UI; the managed demo has no way out to a network), plus both gateway binaries, version-stamped, into `dist/` |
 | `vet` | `npm run typecheck`, `go vet ./...` **and** `go vet -tags managed ./...` |
 | `test` | `npm run test:app` (the web suite without `tests/mock-broker/`), `go test ./...` **and** `go test -tags managed ./...`. When `cov` is in the same invocation (`full`, `all cov`), the web suite runs once, in `cov`, and `test.log` says so |
 | `mock` | `npm run test:mock`: `tests/mock-broker/`, the suites behind `mock.html` and the managed demo, the gateway contract included. Skipped, like `test`'s web suite, when `cov` is in the same invocation |

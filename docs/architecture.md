@@ -555,7 +555,7 @@ The `inject-module-templates` Vite plugin takes the active variant's module ids 
 
 **To add a new module**: create `src/modules/<id>/` with `module.ts` and `index.html`, then add a line to whichever variant should ship it. The build plugin and the registry pick it up automatically.
 
-**To ship a build variant**: drop a new `src/variants/<name>.ts` listing the desired subset, then `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>.html` (and add it to the `build` npm script if every release should carry it; a bundle the Release uploads must also join `RELEASE_BUNDLES` in `scripts/check-bundles.mjs` and the `release` step of `tag.yml`, which a test keeps equal). The dev server takes a variant the same way: `__VITE_VARIANT=managed npm run dev` serves the managed bundle.
+**To ship a build variant**: drop a new `src/variants/<name>.ts` listing the desired subset, then `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>.html` (and add it to the `build` npm script if every release should carry it; a bundle the Release uploads must also join `RELEASE_BUNDLES` in `scripts/check-bundles.mjs` -- through `DIRECT_BUNDLES`, which must carry no managed UI, unless it is the managed demo -- and the `release` step of `tag.yml`, which a test keeps equal). The dev server takes a variant the same way: `__VITE_VARIANT=managed npm run dev` serves the managed bundle.
 
 ### Build flavors vs variants
 

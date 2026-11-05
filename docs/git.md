@@ -124,7 +124,7 @@ Within each leg all four tags point to the same digest: the one `image` pushed a
 
 ### Release assets
 
-- `index.html`, `min.html`, `mock.html`, `no-payload.html`, `no-queue-copy.html` (the `RELEASE_BUNDLES` list in the `release` step, kept equal to `scripts/check-bundles.mjs` by a test)
+- `index.html`, `min.html`, `mock.html`, `no-payload.html`, `no-queue-copy.html`, `managed-demo.html` (the `RELEASE_BUNDLES` list in the `release` step, kept equal to `scripts/check-bundles.mjs` by a test). `managed-demo.html` is the only one with managed UI: it runs against an in-browser fake gateway and holds no gateway or broker address.
 - `go-web-proxy-<os>-<arch>[.exe]` and `go-web-proxy-managed-<os>-<arch>[.exe]`, one pair per `BUILD_TARGETS` entry
 - `SHA256SUMS.txt` over all of the above
 

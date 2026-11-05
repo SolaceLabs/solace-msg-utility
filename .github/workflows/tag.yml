@@ -51,8 +51,10 @@ name: Tag
 #      pointed at the failing image.
 #   8. `release` uploads an explicit list (RELEASE_BUNDLES plus the gateway
 #      binaries), not dist/*. The build also emits managed.html and
-#      solAdmin.html, which exist only inside the managed image; a Release
-#      carries no managed UI.
+#      solAdmin.html, which exist only inside the managed image. The one
+#      managed UI a Release carries is managed-demo.html, which runs it
+#      against an in-browser fake gateway and holds no gateway or broker
+#      address (scripts/check-bundles.mjs proves both on the build).
 #
 # Repo variables (Settings > Secrets and variables > Actions > Variables):
 #   BUILD_TARGETS  JSON array, e.g. [{"os":"linux","arch":"amd64"}]
@@ -516,10 +518,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           # Deviation 8: the PWA bundles a Release carries -- never solAdmin.html
-          # or managed.html. Same list as RELEASE_BUNDLES in
-          # scripts/check-bundles.mjs; tests/build/check-bundles.test.ts fails
-          # if the two drift.
-          RELEASE_BUNDLES: "index.html min.html no-payload.html no-queue-copy.html mock.html"
+          # or managed.html; managed-demo.html is the offline managed demo.
+          # Same list as RELEASE_BUNDLES in scripts/check-bundles.mjs;
+          # tests/build/check-bundles.test.ts fails if the two drift.
+          RELEASE_BUNDLES: "index.html min.html no-payload.html no-queue-copy.html mock.html managed-demo.html"
         run: |
           set -euo pipefail
 

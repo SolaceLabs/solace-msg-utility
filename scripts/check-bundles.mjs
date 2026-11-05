@@ -1,23 +1,34 @@
 /**
- * Bundle isolation check: Release bundles carry no managed UI, and the managed
- * bundle does.
+ * Bundle isolation check: the Direct bundles carry no managed UI, the managed
+ * bundle does, and the managed demo carries it with no way out to a network.
  *
  * The managed sign-in (the Managed tab, its panel and its `/managed/*` client)
- * ships only in `dist/managed.html`, which the managed container image serves
- * as its index. Every bundle a GitHub Release publishes installs the Direct-only
- * connections entry (`src/modules/connections/module.ts`), which never imports
- * the managed files. This check proves both halves on the built output:
+ * ships in `dist/managed.html`, which the managed container image serves as its
+ * index, and in `dist/managed-demo.html`, the Release asset that runs it against
+ * the in-browser fake gateway (`src/mock-broker/gateway/`). Every other bundle
+ * a GitHub Release publishes installs the Direct-only connections entry
+ * (`src/modules/connections/module.ts`), which never imports the managed files.
+ * This check proves it on the built output:
  *
- *   - each RELEASE_BUNDLES file exists and contains none of MANAGED_MARKERS
- *     (a hit means a Release entry imported a managed file);
- *   - MANAGED_BUNDLE exists and contains every marker (a miss means the
+ *   - each DIRECT_BUNDLES file exists and contains none of MANAGED_MARKERS
+ *     (a hit means a Direct entry imported a managed file) and none of
+ *     DEMO_MARKERS (a hit means a Direct build pulled in the fake gateway);
+ *   - MANAGED_BUNDLE exists, contains every managed marker (a miss means the
  *     `managed` variant's MODULE_ENTRIES override did not apply, or a marker
- *     went stale after a rename -- either way the first half proved nothing).
+ *     went stale after a rename -- either way the first half proved nothing)
+ *     and no demo marker (the product would answer from the fake gateway);
+ *   - DEMO_BUNDLE exists, contains every managed and every demo marker, and
+ *     holds nothing that reaches past the page: no DEMO_FORBIDDEN call, no
+ *     `<form action=...>`, and no URL literal whose host is not in
+ *     ALLOWED_HOSTS.
  *
- * The markers are DOM ids from `index.managed.html` and endpoint paths from
- * `managed-service.ts` (sign-in, sign-out, dial and the SEMP relay): strings
- * minification keeps verbatim. The core managed profile ships everywhere and
- * carries none of them: the managed entry attaches the gateway calls to it.
+ * The managed markers are DOM ids from `index.managed.html` and endpoint paths
+ * from `managed-service.ts` (sign-in, sign-out, dial and the SEMP relay):
+ * strings minification keeps verbatim. The core managed profile ships
+ * everywhere and carries none of them: the managed entry attaches the gateway
+ * calls to it. The demo markers are the fake gateway's response header value
+ * and the demo's network refusal, both kept equal to their sources by
+ * tests/build/check-bundles.test.ts.
  *
  * RELEASE_BUNDLES is also the Release upload list: `.github/workflows/tag.yml`
  * repeats it in its `release` step, and tests/build/check-bundles.test.ts
@@ -32,14 +43,48 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** The Release bundles that install the Direct-only connections entry. */
+export const DIRECT_BUNDLES = ['index.html', 'min.html', 'no-payload.html', 'no-queue-copy.html', 'mock.html'];
+
+/** The managed demo: the managed modules against the in-browser fake gateway. */
+export const DEMO_BUNDLE = 'managed-demo.html';
+
 /** The bundles a GitHub Release uploads. Never solAdmin.html or managed.html. */
-export const RELEASE_BUNDLES = ['index.html', 'min.html', 'no-payload.html', 'no-queue-copy.html', 'mock.html'];
+export const RELEASE_BUNDLES = [...DIRECT_BUNDLES, DEMO_BUNDLE];
 
 /** The managed image's bundle, served as its index.html. */
 export const MANAGED_BUNDLE = 'managed.html';
 
 /** Strings only the managed connections entry puts into a bundle. */
 export const MANAGED_MARKERS = ['conn-panel-managed', 'btn-managed-login', '/managed/me', '/managed/logout', '/managed/dial', '/managed/relay/'];
+
+/**
+ * Strings only the managed demo puts into a bundle: the fake gateway's
+ * `X-Demo-Gateway` value (`DEMO_GATEWAY_MARKER`, src/mock-broker/gateway) and
+ * the refusal its passthrough rejects with (`NETWORK_DISABLED`,
+ * src/mock-broker/boot.managed.ts).
+ */
+export const DEMO_MARKERS = ['smu-demo-gateway/1', 'demo: network disabled'];
+
+/**
+ * Calls the demo bundle must not hold: a captured real `fetch` (mock.html's
+ * passthrough) and the network APIs its shims refuse. A tripwire on the built
+ * text; tests/build/no-network-apis.test.ts keeps them out of the app's source.
+ */
+export const DEMO_FORBIDDEN = ['fetch.bind(', 'new WebSocket(', 'new EventSource(', 'new XMLHttpRequest('];
+
+/**
+ * The hosts a URL literal in the demo bundle may name, all of them inert: the
+ * SVG and XML namespace host, and the reserved `.invalid` TLD (RFC 2606), which
+ * never resolves -- the mock server's route base and the demo brokers.
+ */
+export const ALLOWED_HOSTS = [/^www\.w3\.org$/, /\.invalid$/];
+
+/** A scheme with a literal host; a bare `https://` or `https://${host}` is not one. */
+const URL_LITERAL = /\b(?:https?|wss?):\/\/([A-Za-z0-9][A-Za-z0-9.-]*)/g;
+
+/** A `<form>` that would submit somewhere: the demo's forms submit in-process. */
+const FORM_ACTION = /<form\b[^>]*\baction\s*=/i;
 
 /** The repo root: this file lives in `<root>/scripts/`. */
 export function repoRoot() {
@@ -58,6 +103,18 @@ export function findMarkers(text, markers = MANAGED_MARKERS) {
 }
 
 /**
+ * The hosts of the URL literals in a bundle's text that ALLOWED_HOSTS does not
+ * cover, each once.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function strayHosts(text) {
+    const hosts = [...text.matchAll(URL_LITERAL)].map(m => m[1]);
+    return [...new Set(hosts)].filter(h => !ALLOWED_HOSTS.some(re => re.test(h)));
+}
+
+/**
  * Check the built bundles in `distDir`. One message per problem, empty when
  * clean.
  *
@@ -70,7 +127,25 @@ export function checkBundles(distDir) {
         const file = path.join(distDir, name);
         return existsSync(file) ? readFileSync(file, 'utf-8') : null;
     };
-    for (const name of RELEASE_BUNDLES) {
+    const noDemo = (name, text) => {
+        for (const marker of findMarkers(text, DEMO_MARKERS)) {
+            problems.push(
+                `${name}: contains the demo marker "${marker}". Only managed-demo.html may carry the fake ` +
+                'gateway; check that the build ran this variant in production mode, or that mockRedirects in ' +
+                'vite.config.ts sends only the managed-demo variant to ./mock-broker/boot.managed.',
+            );
+        }
+    };
+    const lacks = (name, text, markers, why) => {
+        const found = findMarkers(text, markers);
+        for (const marker of markers.filter(m => !found.includes(m))) {
+            problems.push(`${name}: lacks the ${why[0]} marker "${marker}". ${why[1]}`);
+        }
+    };
+    const stale = list => `or the marker was renamed; update ${list} in scripts/check-bundles.mjs to a string ` +
+        'the build still emits.';
+
+    for (const name of DIRECT_BUNDLES) {
         const text = read(name);
         if (text === null) {
             problems.push(`${name}: missing from ${distDir}. Run \`npm run build\` (or the dev script's build task) first.`);
@@ -78,22 +153,44 @@ export function checkBundles(distDir) {
         }
         for (const marker of findMarkers(text)) {
             problems.push(
-                `${name}: contains the managed marker "${marker}". A Release bundle must install the ` +
+                `${name}: contains the managed marker "${marker}". A Direct bundle must install the ` +
                 'Direct-only connections entry; check that src/modules/connections/module.ts (and anything it ' +
                 'imports) does not import module.managed.ts or managed-panel.ts.',
             );
         }
+        noDemo(name, text);
     }
+
     const managed = read(MANAGED_BUNDLE);
     if (managed === null) {
         problems.push(`${MANAGED_BUNDLE}: missing from ${distDir}. The build must emit it with --variant=managed.`);
     } else {
-        const found = findMarkers(managed);
-        for (const marker of MANAGED_MARKERS.filter(m => !found.includes(m))) {
+        lacks(MANAGED_BUNDLE, managed, MANAGED_MARKERS, ['managed',
+            `Either the managed variant's MODULE_ENTRIES override did not apply, ${stale('MANAGED_MARKERS')}`]);
+        noDemo(MANAGED_BUNDLE, managed);
+    }
+
+    const demo = read(DEMO_BUNDLE);
+    if (demo === null) {
+        problems.push(`${DEMO_BUNDLE}: missing from ${distDir}. The build must emit it with --mode mock --variant=managed-demo.`);
+    } else {
+        lacks(DEMO_BUNDLE, demo, MANAGED_MARKERS, ['managed',
+            `Either the managed-demo variant lost its MODULE_ENTRIES override, ${stale('MANAGED_MARKERS')}`]);
+        lacks(DEMO_BUNDLE, demo, DEMO_MARKERS, ['demo',
+            `Either it was built without --mode mock or without ./mock-broker/boot.managed, ${stale('DEMO_MARKERS')}`]);
+        for (const call of findMarkers(demo, DEMO_FORBIDDEN)) {
             problems.push(
-                `${MANAGED_BUNDLE}: lacks the managed marker "${marker}". Either the managed variant's ` +
-                'MODULE_ENTRIES override did not apply, or the marker was renamed; update MANAGED_MARKERS ' +
-                'in scripts/check-bundles.mjs to a string the managed entry still emits.',
+                `${DEMO_BUNDLE}: contains "${call}". The managed demo must not reach a network: answer the ` +
+                'request from src/mock-broker/ (the fake gateway or the mock server) instead.',
+            );
+        }
+        if (FORM_ACTION.test(demo)) {
+            problems.push(`${DEMO_BUNDLE}: contains a <form> with an action. The demo's forms submit to the fake gateway in-process.`);
+        }
+        for (const host of strayHosts(demo)) {
+            problems.push(
+                `${DEMO_BUNDLE}: names the host "${host}" in a URL. The managed demo holds no real address; use a ` +
+                '.invalid host, or add an inert one to ALLOWED_HOSTS in scripts/check-bundles.mjs.',
             );
         }
     }
@@ -113,7 +210,10 @@ export function main(root = repoRoot()) {
         problems.forEach(p => console.error(`  ${p}`));
         return 1;
     }
-    console.log(`Bundle check passed (${RELEASE_BUNDLES.length} Release bundles carry no managed UI; ${MANAGED_BUNDLE} does).`);
+    console.log(
+        `Bundle check passed (${DIRECT_BUNDLES.length} Direct bundles carry no managed UI; ${MANAGED_BUNDLE} does; ` +
+        `${DEMO_BUNDLE} runs it against the demo gateway with no network).`,
+    );
     return 0;
 }
 

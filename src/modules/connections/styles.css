@@ -12,34 +12,31 @@
 }
 
 /* The managed account control, a row of the sidebar footer above the status
- * lights (account.ts): user, optional admin tag, then the two actions. */
+ * lights (account.ts): the user on the left; the admin tag, when shown, and the
+ * two actions on the right. The name takes the free width, so the tag sits
+ * with the actions whether or not it is shown. */
 .conn-account .btn-icon {
     padding: 2px;
 }
 
 .conn-account-name {
+    flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
+/* A small tag a shade lighter than the sidebar it sits on. */
 .conn-account-role {
-    padding: 0 0.3rem;
-    font-size: 0.75rem;
-    border: 1px solid var(--border-color);
+    padding: 0 0.25rem;
+    font-size: 0.65rem;
+    line-height: 1.4;
+    background-color: rgba(255, 255, 255, 0.1);
     border-radius: 3px;
-}
-
-.conn-account-password {
-    margin-left: auto;
 }
 
 .sidebar.collapsed .conn-account {
     flex-direction: column;
     gap: 0.5rem;
-}
-
-.sidebar.collapsed .conn-account-password {
-    margin-left: 0;
 }

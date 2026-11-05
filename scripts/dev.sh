@@ -135,8 +135,9 @@ task_build() {
   # The PWA bundles are target-independent, so every cross-compile leg emits an
   # identical copy; merge-multiple in the release job collapses them.
   run build npm run build || return $?
-  # Release bundles carry no managed UI and managed.html does -- proven on the
-  # output just built, so a wrong import fails the gate, not a review.
+  # Direct bundles carry no managed UI, managed.html does, and managed-demo.html
+  # carries it with no network -- proven on the output just built, so a wrong
+  # import fails the gate, not a review.
   run build npm run check:bundles || return $?
 
   # Both gateway variants: the hosted binary and the managed one (RBAC store +
