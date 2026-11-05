@@ -30,7 +30,6 @@
 
 /* Hide Text/Full elements when collapsed */
 .sidebar.collapsed .logo-full,
-.sidebar.collapsed .logo-text,
 .sidebar.collapsed .nav-text {
     display: none !important;
 }
@@ -50,21 +49,28 @@
     height: var(--header-height);
     display: flex;
     align-items: center;
-    padding: 0 1.5rem;
+    padding: 0 1.25rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     white-space: nowrap;
     overflow: hidden;
 }
 
 .logo {
-    font-size: 1.15rem;
-    font-weight: 600;
-    color: white;
-    letter-spacing: -0.2px;
     display: flex;
     align-items: center;
-    gap: 0.75rem;
     width: 100%;
+}
+
+/* The wordmark and badge (904 x 100) span the expanded header, padding to
+ * padding: 220 x 24 at the 260px sidebar, ending 8px short of the toggle
+ * handle's inner half. The width is pinned to --sidebar-width rather than the
+ * header, so the logo is clipped, not rescaled, while the sidebar animates. */
+.logo-full {
+    display: block;
+    flex-shrink: 0;
+    width: calc(var(--sidebar-width) - 2.5rem);
+    height: auto;
+    aspect-ratio: 904 / 100;
 }
 
 .sidebar-nav {
