@@ -151,6 +151,7 @@ export function mountControlPanel(opts: PanelOptions = {}): void {
         { value: FAULT.SEMP_UNAUTHORIZED, label: 'SEMP 401 unauthorized' },
         { value: FAULT.SEMP_ERROR, label: 'SEMP 500 error' },
     ], v => { scenario.fault = v as Fault; });
+    faultPick.value = scenario.fault;   // the managed demo restores an armed fault across its reload
     faultSection.append(faultPick, button('Drop session now', () => dropAllSessions()));
     faultSection.appendChild(el('p', 'mockctl-hint',
         'Connect failure is one-shot; SEMP faults stay armed until cleared.'));
@@ -173,7 +174,7 @@ export function mountControlPanel(opts: PanelOptions = {}): void {
         { value: '1', label: 'Normal' },
         { value: '5', label: 'Large (5× seed)' },
     ], v => { scenario.volume = Number(v); seed(); });
-    volumePick.value = '1';
+    volumePick.value = String(scenario.volume);
 
     tuneSection.append(latency, latencyLabel, volumePick,
         button('Reset demo data', () => {
@@ -186,7 +187,7 @@ export function mountControlPanel(opts: PanelOptions = {}): void {
             latency.value = String(scenario.latencyMs);
             latencyLabel.textContent = `${scenario.latencyMs} ms`;
             faultPick.value = scenario.fault;
-            volumePick.value = '1';
+            volumePick.value = String(scenario.volume);
             statePick.value = scenario.queueState.get(selectedQueue) ?? QUEUE_STATE.NORMAL;
         }));
 

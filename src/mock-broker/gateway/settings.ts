@@ -12,7 +12,7 @@
  *
  * Mock-only.
  */
-import { BadRequest } from './strict';
+import { BadRequest, fieldOf } from './strict';
 import { CATALOG, moduleIdsProblem, quote } from './validate';
 import type { GatewaySettings, SettingsView } from './types';
 
@@ -49,9 +49,10 @@ const clone = (s: GatewaySettings): GatewaySettings => JSON.parse(JSON.stringify
 function merge(target: Record<string, any>, patch: unknown, schema: Schema): void {
     if (patch === null) return;
     if (typeof patch !== 'object' || Array.isArray(patch)) throw new BadRequest('want an object');
-    for (const [k, v] of Object.entries(patch)) {
+    for (const [key, v] of Object.entries(patch)) {
+        const k = fieldOf(key, Object.keys(schema));
+        if (k === undefined) throw new BadRequest(`unknown field ${key}`);
         const kind = schema[k];
-        if (kind === undefined) throw new BadRequest(`unknown field ${k}`);
         if (typeof kind === 'object') {
             merge(target[k], v, kind);
             continue;
@@ -74,29 +75,89 @@ function parseLogLevel(s: string): string | null {
     return ['debug', 'info', 'warn', 'error'].includes(l) ? l : null;
 }
 
-/** An IPv4 or IPv6 prefix, masked as netip.Prefix.Masked() prints it (IPv6 left as written). */
+/** The eight 16-bit groups of an IPv6 address; null when it is not one. */
+function ipv6Groups(addr: string): number[] | null {
+    const dot = addr.indexOf('.');
+    if (dot >= 0 && addr.lastIndexOf(':') > dot) return null;   // a dotted quad only at the end
+    const halves = addr.split('::');
+    if (halves.length > 2) return null;
+    const part = (h: string): number[] | null => {
+        const out: number[] = [];
+        for (const g of h === '' ? [] : h.split(':')) {
+            if (g.includes('.')) {
+                const q = g.split('.');
+                if (q.length !== 4 || !q.every(p => /^(0|[1-9][0-9]{0,2})$/.test(p) && Number(p) <= 255)) return null;
+                out.push(Number(q[0]) * 256 + Number(q[1]), Number(q[2]) * 256 + Number(q[3]));
+            } else if (/^[0-9A-Fa-f]{1,4}$/.test(g)) {
+                out.push(parseInt(g, 16));
+            } else {
+                return null;
+            }
+        }
+        return out;
+    };
+    const head = part(halves[0]);
+    const tail = halves.length === 2 ? part(halves[1]) : [];
+    if (!head || !tail) return null;
+    const width = head.length + tail.length;
+    if (halves.length === 1) return width === 8 ? head : null;
+    return width <= 7 ? [...head, ...Array<number>(8 - width).fill(0), ...tail] : null;
+}
+
+/** Addr.String() for IPv6: lower-case hex, the first longest run of two or more zero groups as `::`. */
+function ipv6String(g: number[]): string {
+    let zs = -1;
+    let ze = -1;
+    for (let i = 0; i < 8; i++) {
+        let j = i;
+        while (j < 8 && g[j] === 0) j++;
+        if (j - i >= 2 && j - i > ze - zs) [zs, ze] = [i, j];
+    }
+    let out = '';
+    for (let i = 0; i < 8; i++) {
+        if (i === zs) {
+            out += '::';
+            i = ze;
+            if (i >= 8) break;
+        } else if (i > 0) {
+            out += ':';
+        }
+        out += g[i].toString(16);
+    }
+    return out;
+}
+
+/**
+ * netip.ParsePrefix, then Masked(), in its order: the address, then the bits
+ * (no sign, no leading zero), then the range. A malformed address is refused
+ * with one generic reason where ParseAddr names the exact fault.
+ */
 function parseCidr(s: string): { ok: true; value: string } | { ok: false; reason: string } {
     const t = s.trim();
-    const slash = t.indexOf('/');
+    const slash = t.lastIndexOf('/');
     const bad = (why: string) => ({ ok: false as const, reason: why });
     if (slash < 0) return bad(`no '/'`);
     const addr = t.slice(0, slash);
     const bits = t.slice(slash + 1);
-    if (!/^[0-9]{1,3}$/.test(bits)) return bad(`bad bits after slash: ${quote(bits)}`);
-    const n = Number(bits);
     const v4 = addr.split('.');
-    if (v4.length === 4 && v4.every(p => /^(0|[1-9][0-9]{0,2})$/.test(p) && Number(p) <= 255)) {
-        if (n > 32) return bad(`prefix length out of range`);
-        const num = v4.reduce((a, p) => a * 256 + Number(p), 0);
-        const masked = n === 0 ? 0 : Math.floor(num / 2 ** (32 - n)) * 2 ** (32 - n);
-        const out = [24, 16, 8, 0].map(sh => Math.floor(masked / 2 ** sh) % 256).join('.');
-        return { ok: true, value: `${out}/${n}` };
+    const isV4 = v4.length === 4 && v4.every(p => /^(0|[1-9][0-9]{0,2})$/.test(p) && Number(p) <= 255);
+    const v6 = isV4 ? null : ipv6Groups(addr);
+    if (!isV4 && !v6) return bad(`ParseAddr(${quote(addr)}): unable to parse IP`);
+    if (!/^(0|[1-9][0-9]{0,17})$/.test(bits)) return bad(`bad bits after slash: ${quote(bits)}`);
+    const n = Number(bits);
+    if (n > (isV4 ? 32 : 128)) return bad(`prefix length out of range`);
+    if (v6) {
+        if (v6.slice(0, 5).every(x => x === 0) && v6[5] === 0xffff) return { ok: false, reason: 'use the IPv4 form' };
+        const masked = v6.map((x, i) => {
+            const keep = Math.min(Math.max(n - 16 * i, 0), 16);
+            return keep === 0 ? 0 : x & (0xffff << (16 - keep)) & 0xffff;
+        });
+        return { ok: true, value: `${ipv6String(masked)}/${n}` };
     }
-    if (addr.includes(':') && /^[0-9A-Fa-f:.]+$/.test(addr) && n <= 128) {
-        if (/^::ffff:[0-9.]+$/i.test(addr)) return { ok: false, reason: 'use the IPv4 form' };
-        return { ok: true, value: `${addr.toLowerCase()}/${n}` };
-    }
-    return bad(`ParseAddr(${quote(addr)}): unable to parse IP`);
+    const num = v4.reduce((a, p) => a * 256 + Number(p), 0);
+    const masked = n === 0 ? 0 : Math.floor(num / 2 ** (32 - n)) * 2 ** (32 - n);
+    const out = [24, 16, 8, 0].map(sh => Math.floor(masked / 2 ** sh) % 256).join('.');
+    return { ok: true, value: `${out}/${n}` };
 }
 
 function cidrList(key: string, list: string[]): { ok: true; value: string[] } | { ok: false; reason: string } {

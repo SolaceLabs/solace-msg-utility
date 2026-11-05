@@ -150,8 +150,9 @@ describe('mock-broker/boot.managed -- the sign-in and the reloads', () => {
         expect(sessionStorage.getItem(SNAPSHOT_KEY)).toBeNull();
     });
 
-    it('starts from the seed when the storage refuses or holds something else', () => {
-        sessionStorage.setItem(SNAPSHOT_KEY, '{"v":0}');
+    it('starts from the seed when the storage refuses or holds an older snapshot', () => {
+        // v1 kept one throttle counter; its shape cannot be loaded.
+        sessionStorage.setItem(SNAPSHOT_KEY, '{"v":1,"gateway":{"throttle":{"count":5,"blockedUntil":0}}}');
         expect(start().gateway.session()).toBeNull();
 
         vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });

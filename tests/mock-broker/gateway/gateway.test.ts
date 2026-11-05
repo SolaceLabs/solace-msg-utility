@@ -113,6 +113,13 @@ describe('mock-broker/gateway -- admin routes', () => {
         expect((await gw.handle({ method: 'POST', path: '/managed/dial', query: '', body: '', session: gw.openSession('admin', false) })).status).toBe(400);
     });
 
+    it('matches a field name without regard to case, as encoding/json does', async () => {
+        expect(await call('POST', '/managed/dial', { Broker: 'zz', VPN: 'v1' })).toEqual({ status: 404, json: { error: 'not_found' } });
+        expect((await call('PUT', '/managed/settings', { LogLevel: 'debug', \u017fession: { IdleMinutes: 20 } })).status).toBe(200);
+        expect([gw.settings.current().logLevel, gw.settings.current().session.idleMinutes]).toEqual(['debug', 20]);
+        expect((await call('POST', '/managed/dial', { Brokers: 'b1' })).status).toBe(400);
+    });
+
     it('refuses an empty name segment', async () => {
         expect(await call('DELETE', '/managed/users/')).toEqual({ status: 404, json: { error: 'not_found' } });
     });
@@ -122,6 +129,24 @@ describe('mock-broker/gateway -- settings', () => {
     it('saves an allow list that admits the client, masked as the gateway prints it', async () => {
         expect(await call('PUT', '/managed/settings', { access: { allow: [' 192.0.2.77/24 '] } })).toEqual({ status: 200, json: { restartRequired: [] } });
         expect(gw.settings.current().access.allow).toEqual(['192.0.2.0/24']);
+    });
+
+    it('reads a prefix as netip.ParsePrefix does: IPv6 masked and printed short, no leading zero in the bits', async () => {
+        const list = ['192.0.2.0/24', '2001:0DB8:0:0:8:800:200C:417A/64', '2001:db8::1/32', 'fe80::1:0:0:1/128', '::/0'];
+        expect((await call('PUT', '/managed/settings', { access: { allow: list } })).status).toBe(200);
+        expect(gw.settings.current().access.allow).toEqual(['192.0.2.0/24', '2001:db8::/64', '2001:db8::/32', 'fe80::1:0:0:1/128', '::/0']);
+        for (const [v, why] of [
+            ['10.0.0.0/08', 'bad bits after slash: "08"'],
+            ['10.0.0.0/+8', 'bad bits after slash: "+8"'],
+            ['10.0.0.0/33', 'prefix length out of range'],
+            ['2001:db8::/129', 'prefix length out of range'],
+            ['2001:db8:/32', 'ParseAddr("2001:db8:"): unable to parse IP'],
+            ['1:2:3:4:5:6:7::8/64', 'ParseAddr("1:2:3:4:5:6:7::8"): unable to parse IP'],
+            ['1.2.3.4::/64', 'ParseAddr("1.2.3.4::"): unable to parse IP'],
+        ]) {
+            const res: any = (await call('PUT', '/managed/settings', { access: { trustedProxies: [v] } })).json;
+            expect(res.reason).toBe(`key "access.trustedProxies[0]" has invalid value "${v}": want CIDR such as 10.0.0.0/8 or 192.0.2.7/32 (netip.ParsePrefix("${v}"): ${why})`);
+        }
     });
 
     it('refuses a value that is not a CIDR, and an IPv4-mapped one', async () => {

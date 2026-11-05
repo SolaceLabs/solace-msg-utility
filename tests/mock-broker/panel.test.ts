@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountControlPanel } from '../../src/mock-broker/controls/panel';
 import { seed, getQueue } from '../../src/mock-broker/broker/store';
 import {
-    MOCK_HOST, QUEUE_STATE, VPNS, resetScenario, scenario,
+    FAULT, MOCK_HOST, QUEUE_STATE, VPNS, resetScenario, scenario,
 } from '../../src/mock-broker/fixtures';
 
 /**
@@ -76,6 +76,22 @@ describe('mock-broker/panel — levers', () => {
         volumePick.dispatchEvent(new Event('change'));
 
         expect(getQueue('vpn-prod', 'Q/ORDER/NEW')!.messages.length).toBeGreaterThan(before);
+    });
+
+    it('shows the levers a restored scenario holds, so an armed fault can be cleared', () => {
+        // The managed demo restores the scenario across its sign-in reload,
+        // before the panel mounts (src/mock-broker/boot.managed.ts).
+        document.body.innerHTML = '';
+        scenario.fault = FAULT.SEMP_ERROR;
+        scenario.volume = 5;
+        mountControlPanel();
+        const faultPick = selects().find(s => s.querySelector(`option[value="${FAULT.SEMP_ERROR}"]`))!;
+        const volumePick = selects().find(s => s.querySelector('option[value="5"]'))!;
+        expect([faultPick.value, volumePick.value]).toEqual([FAULT.SEMP_ERROR, '5']);
+
+        faultPick.value = FAULT.NONE;
+        faultPick.dispatchEvent(new Event('change'));
+        expect(scenario.fault).toBe(FAULT.NONE);
     });
 
     it('Reset restores every lever and rebuilds the data', () => {

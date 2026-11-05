@@ -31,19 +31,33 @@ function safeSegment(d: string): boolean {
     return d.split('/').every(p => p !== '' && p !== '.' && p !== '..');
 }
 
+/** A `%` not followed by two hex digits: the only escape url.PathUnescape and url.ParseQuery refuse. */
+const BAD_ESCAPE = /%(?![0-9A-Fa-f]{2})/;
+
+/**
+ * url.PathUnescape. Go keeps bytes that are not UTF-8; here each such byte
+ * becomes U+FFFD, which every check after it treats as Go treats the byte.
+ */
+function pathUnescape(s: string): string | null {
+    if (BAD_ESCAPE.test(s)) return null;
+    try {
+        return decodeURIComponent(s);
+    } catch {
+        return s.replace(/%([0-9A-Fa-f]{2})/g, (_, h: string) => {
+            const b = parseInt(h, 16);
+            return b < 0x80 ? String.fromCharCode(b) : '\uFFFD';
+        });
+    }
+}
+
 /** parseRelayPath: the broker, then exactly `SEMP` or `SEMP/v2/...`. */
 export function parseRelayPath(escaped: string): RelayPath | null {
     if (!escaped.startsWith(RELAY_PREFIX)) return null;
     const segs = escaped.slice(RELAY_PREFIX.length).split('/');
     const decoded: string[] = [];
     for (const s of segs) {
-        let d: string;
-        try {
-            d = decodeURIComponent(s);
-        } catch {
-            return null;
-        }
-        if (!safeSegment(d)) return null;
+        const d = pathUnescape(s);
+        if (d === null || !safeSegment(d)) return null;
         decoded.push(d);
     }
     if (!validBroker(decoded[0]) || decoded.length < 2 || decoded[1] !== 'SEMP') return null;
@@ -55,18 +69,29 @@ export function parseRelayPath(escaped: string): RelayPath | null {
 
 /** url.ParseQuery's refusals: a `;` separator or a bad escape. */
 function queryOk(q: string): boolean {
-    if (q.includes(';')) return false;
-    try {
-        q.split('&').forEach(p => decodeURIComponent(p.replace(/\+/g, ' ')));
-        return true;
-    } catch {
-        return false;
-    }
+    return !q.includes(';') && !BAD_ESCAPE.test(q);
 }
 
-/** isShowRPC: one `<rpc>` root holding exactly one `<show>`, no namespace, no stray text. */
+/** The `<?xml ...?>` declaration encoding/xml refuses: a version but 1.0, an encoding but UTF-8 (no CharsetReader). */
+function declRefused(body: string): boolean {
+    for (const m of body.matchAll(/<\?xml(\s[^?]*)?\?>/g)) {
+        const attr = (name: string) => new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`).exec(m[1] ?? '')?.[2];
+        const ver = attr('version');
+        const enc = attr('encoding');
+        if ((ver !== undefined && ver !== '1.0') || (enc !== undefined && enc.toLowerCase() !== 'utf-8')) return true;
+    }
+    return false;
+}
+
+/**
+ * isShowRPC: one `<rpc>` root holding exactly one `<show>`, no namespace, no
+ * text outside `<show>` (CDATA is text, as encoding/xml reads it). Not
+ * mirrored: a repeated attribute, which DOMParser refuses and encoding/xml
+ * lets through.
+ */
 export function isShowRpc(body: string): boolean {
-    if (/<!/.test(body.replace(/<!--[\s\S]*?-->/g, ''))) return false;   // a directive (DOCTYPE, CDATA)
+    if (/<!(?!\[CDATA\[)/.test(body.replace(/<!--[\s\S]*?-->/g, ''))) return false;   // a directive (DOCTYPE)
+    if (declRefused(body)) return false;
     const doc = new DOMParser().parseFromString(body, 'application/xml');
     if (doc.getElementsByTagName('parsererror').length > 0) return false;
     const root = doc.documentElement;
@@ -76,7 +101,7 @@ export function isShowRpc(body: string): boolean {
         if (n.nodeType === Node.ELEMENT_NODE) {
             if ((n as Element).localName !== 'show') return false;
             commands++;
-        } else if (n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim() !== '') {
+        } else if ((n.nodeType === Node.TEXT_NODE || n.nodeType === Node.CDATA_SECTION_NODE) && (n.textContent ?? '').trim() !== '') {
             return false;
         }
     }

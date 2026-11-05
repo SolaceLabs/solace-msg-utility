@@ -41,9 +41,11 @@ export function refuseNetwork(): Promise<Response> {
 }
 
 export const SNAPSHOT_KEY = 'smu-managed-demo';
+/** Bumped when the snapshot's shape changes: an older one is ignored, and the tab starts from the seed. */
+const SNAPSHOT_VERSION = 2;
 
 interface DemoSnapshot {
-    v: 1;
+    v: typeof SNAPSHOT_VERSION;
     gateway: GatewaySnapshot;
     broker: StoreSnapshot;
     scenario: ScenarioSnapshot;
@@ -54,7 +56,7 @@ function readSnapshot(): DemoSnapshot | null {
     try {
         const raw = sessionStorage.getItem(SNAPSHOT_KEY);
         const s = raw ? JSON.parse(raw) : null;
-        return s?.v === 1 ? s : null;
+        return s?.v === SNAPSHOT_VERSION ? s : null;
     } catch {
         return null;   // storage refused or a damaged entry: start from the seed
     }
@@ -121,12 +123,12 @@ export function boot(opts: { reload?: () => void } = {}): ManagedDemo {
     let keep = true;
     const save = () => {
         if (!keep) return;
-        writeSnapshot({ v: 1, gateway: gateway.snapshot(), broker: dumpStore(), scenario: dumpScenario(), page: pages.current() });
+        writeSnapshot({ v: SNAPSHOT_VERSION, gateway: gateway.snapshot(), broker: dumpStore(), scenario: dumpScenario(), page: pages.current() });
     };
     /** Land on `page` through a reload, as a sign-in does: what the demo holds rides across. */
     const navigate = (page: Page) => {
         pages.hide();
-        writeSnapshot({ v: 1, gateway: gateway.snapshot(), broker: dumpStore(), scenario: dumpScenario(), page });
+        writeSnapshot({ v: SNAPSHOT_VERSION, gateway: gateway.snapshot(), broker: dumpStore(), scenario: dumpScenario(), page });
         keep = false;   // the pagehide of this reload must not overwrite it
         reload();
     };

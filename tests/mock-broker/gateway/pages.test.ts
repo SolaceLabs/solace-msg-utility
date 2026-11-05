@@ -108,7 +108,7 @@ describe('mock-broker/gateway/pages -- sign-in', () => {
     it('doubles the lockout with each failure past the limit', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-11-05T10:00:00Z'));
-        for (let i = 0; i < 6; i++) gw.throttle.failed();
+        for (let i = 0; i < 6; i++) gw.throttle.failed('admin');
         expect(gw.signIn('admin', 'demo-admin-0001')).toEqual({ ok: false, error: 'Too many attempts. Try again in 60 seconds.' });
         gw.throttle.clear();
         expect(gw.signIn('admin', 'demo-admin-0001').ok).toBe(true);
@@ -194,6 +194,12 @@ describe('mock-broker/gateway/pages -- the app\'s sign-in links', () => {
             expect(ev.defaultPrevented).toBe(true);
             expect(pages.current()).toBe('login');
         }
+    });
+
+    it('leaves a right click to the browser\'s menu', () => {
+        const ev = new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 2 });
+        link('/login').dispatchEvent(ev);
+        expect([ev.defaultPrevented, pages.current()]).toEqual([false, 'app']);
     });
 
     it('follows the link the Managed panel rewrote, query and all', () => {

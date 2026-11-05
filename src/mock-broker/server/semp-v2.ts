@@ -51,7 +51,12 @@ export function handleSempV2(url: URL, broker: string = DIRECT_BROKER): Page | n
 
     const queueList = /\/SEMP\/v2\/monitor\/msgVpns\/([^/]+)\/queues\/?$/.exec(path);
     if (queueList) {
-        const vpn = decodeURIComponent(queueList[1]);
+        let vpn: string;
+        try {
+            vpn = decodeURIComponent(queueList[1]);
+        } catch {
+            return null;   // an escape that is not UTF-8 names no VPN
+        }
         return paginate(listQueues(vpn, broker), 'queueName', url.origin, path, cursor);
     }
 

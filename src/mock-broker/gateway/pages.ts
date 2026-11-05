@@ -137,6 +137,7 @@ export function createPages({ gateway, navigate }: PagesDeps) {
     }
 
     function onLinkClick(e: MouseEvent): void {
+        if (e.type === 'auxclick' && e.button !== 1) return;   // only a middle click opens a link; a right click opens the menu
         const a = (e.target as Element | null)?.closest?.('a[href]');
         const path = (a?.getAttribute('href') ?? '').split(/[?#]/)[0];
         if (!LOGIN_PATHS.has(path)) return;

@@ -17,6 +17,8 @@ describe('mock-broker/gateway/relay -- the path', () => {
         expect(ok('b1/SEMP/v2/monitor/msgVpns')).toEqual({ broker: 'b1', rawTail: '/SEMP/v2/monitor/msgVpns', v1: false });
         // An encoded slash inside a segment is one name, kept escaped for the broker.
         expect(ok('b1/SEMP/v2/monitor/msgVpns/v1/queues/a%2Fb')?.rawTail).toBe('/SEMP/v2/monitor/msgVpns/v1/queues/a%2Fb');
+        // An escape that is not UTF-8 is a byte to url.PathUnescape, not a refusal.
+        expect(ok('b1/SEMP/v2/monitor/msgVpns/v1/queues/q%FF')?.rawTail).toBe('/SEMP/v2/monitor/msgVpns/v1/queues/q%FF');
     });
 
     it.each([
@@ -37,6 +39,8 @@ describe('mock-broker/gateway/relay -- the show check', () => {
         ['<rpc><show><queue><name>*</name></queue></show></rpc>'],
         ['<?xml version="1.0"?>\n<rpc>\n  <show><queue/></show>\n</rpc>'],
         ['<rpc><!-- a note --><show><client/></show></rpc>'],
+        ['<rpc><show><queue><name><![CDATA[q1]]></name></queue></show></rpc>'],
+        ['<?xml version="1.0" encoding="UTF-8"?><rpc><show/></rpc>'],
     ])('passes %s', (body) => {
         expect(isShowRpc(body)).toBe(true);
     });
@@ -45,6 +49,8 @@ describe('mock-broker/gateway/relay -- the show check', () => {
         [''], ['<rpc/>'], ['<rpc><admin/></rpc>'], ['<rpc><show/><show/></rpc>'], ['<rpc>text<show/></rpc>'],
         ['<x:rpc xmlns:x="urn:x"><show/></x:rpc>'], ['<rpc><show><x:q xmlns:x="urn:x"/></show></rpc>'],
         ['<!DOCTYPE rpc><rpc><show/></rpc>'], ['<rpc><show></rpc>'], ['<show/>'],
+        ['<rpc><![CDATA[x]]><show/></rpc>'],
+        ['<?xml version="1.0" encoding="ISO-8859-1"?><rpc><show/></rpc>'], ['<?xml version="1.1"?><rpc><show/></rpc>'],
     ])('refuses %s', (body) => {
         expect(isShowRpc(body)).toBe(false);
     });
@@ -95,6 +101,13 @@ describe('mock-broker/gateway/relay -- through to the demo broker', () => {
     it('refuses a query the gateway cannot parse', async () => {
         expect((await get('/SEMP/v2/monitor/msgVpns', 'a=1;b=2')).status).toBe(400);
         expect((await get('/SEMP/v2/monitor/msgVpns', 'a=%zz')).status).toBe(400);
+        expect((await get('/SEMP/v2/monitor/msgVpns', 'a=%')).status).toBe(400);
+        // url.ParseQuery takes an escape that is not UTF-8.
+        expect((await get('/SEMP/v2/monitor/msgVpns', 'where=x%FF')).status).toBe(200);
+    });
+
+    it('forwards a path escape that is not UTF-8, which names nothing the broker holds', async () => {
+        expect(await get('/SEMP/v2/monitor/msgVpns/v%FF/queues')).toEqual({ status: 200, json: { data: [], meta: {} } });
     });
 
     it('maps the broker\'s refusal of the stored credential to 502, never 401', async () => {

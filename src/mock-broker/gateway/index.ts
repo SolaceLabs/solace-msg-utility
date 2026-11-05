@@ -79,14 +79,14 @@ export function createGateway({ seed }: { seed: GatewaySeed }) {
      * message for every failure, and a previous session in this browser ended.
      */
     function signIn(username: string, password: string): PageResult {
-        const wait = throttle.wait();
+        const wait = throttle.wait(username);
         if (wait > 0) return { ok: false, error: throttledText(wait) };
         const u = store.findUser(username);
         if (!u || u.password !== password) {
-            throttle.failed();
+            throttle.failed(username);
             return { ok: false, error: 'Sign-in failed. Check the username and password.' };
         }
-        throttle.clear();
+        throttle.succeeded(username);
         if (cookie) sessions.drop(cookie);
         cookie = sessions.create(u.username, u.mustChangePassword);
         return { ok: true, mustChange: u.mustChangePassword };
@@ -100,17 +100,17 @@ export function createGateway({ seed }: { seed: GatewaySeed }) {
     function changePassword(current: string, next: string, confirm: string): PageResult {
         const s = sessions.get(cookie);
         if (!s) return { ok: false, error: '', signedOut: true };
-        const wait = throttle.wait();
+        const wait = throttle.wait(s.user);
         if (wait > 0) return { ok: false, error: throttledText(wait) };
         if (store.findUser(s.user)?.password !== current) {
-            throttle.failed();
+            throttle.failed(s.user);
             return { ok: false, error: 'The current password is not correct.' };
         }
         if (next !== confirm) return { ok: false, error: 'The new passwords do not match.' };
         if (!passwordOk(next)) return { ok: false, error: `The new password must be ${PASSWORD_MIN} to ${PASSWORD_MAX} characters.` };
         if (next === current) return { ok: false, error: 'The new password must differ from the current one.' };
         store.setPassword(s.user, next);
-        throttle.clear();
+        throttle.succeeded(s.user);
         sessions.dropUser(s.user);
         cookie = sessions.create(s.user, false);
         return { ok: true, mustChange: false };

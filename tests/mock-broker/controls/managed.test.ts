@@ -57,7 +57,7 @@ describe('mock-broker/controls/managed -- accounts', () => {
     });
 
     it('shows the lockout instead of signing in', () => {
-        for (let i = 0; i < 5; i++) gw.throttle.failed();
+        for (let i = 0; i < 5; i++) gw.throttle.failed('admin');
         btn('Sign in as admin').click();
         expect(who()).toMatch(/^Too many attempts\. Try again in \d+ seconds\.$/);
         expect(landed).toEqual([]);
