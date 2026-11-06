@@ -130,6 +130,30 @@ export function pemCertificates(text) {
     });
 }
 
+/** Go's Linux root bundles (crypto/x509/root_linux.go), in its order; the last is also macOS's. */
+export const HOST_ROOT_FILES = [
+    '/etc/ssl/certs/ca-certificates.crt',
+    '/etc/pki/tls/certs/ca-bundle.crt',
+    '/etc/ssl/ca-bundle.pem',
+    '/etc/pki/tls/cacert.pem',
+    '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem',
+    '/etc/ssl/cert.pem',
+];
+
+/**
+ * The host's standard root bundle, as Go on the host would load it: the first
+ * of HOST_ROOT_FILES that `read` returns text for (null when it cannot), kept
+ * verbatim. A host with none of them (Windows) gets `fallback`, Node's bundled
+ * Mozilla roots. `count` is the number of certificates, for the run's output.
+ */
+export function hostRootBundle(read, fallback) {
+    for (const from of HOST_ROOT_FILES) {
+        const text = read(from);
+        if (text != null) return { from, text, count: (text.match(/-----BEGIN CERTIFICATE-----/g) ?? []).length };
+    }
+    return { from: "Node's bundled Mozilla roots (no system bundle on this host)", text: `${fallback.join('\n')}\n`, count: fallback.length };
+}
+
 // --- broker details ----------------------------------------------------------
 // The run uses an existing broker and changes nothing on it. Its details come
 // from E2E_* environment variables, then the details file, then a prompt.

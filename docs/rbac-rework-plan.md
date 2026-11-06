@@ -42,6 +42,7 @@ hardening items" section of [rbac-variant-plan.md](rbac-variant-plan.md) when ad
 | Reload | `/managed/reload` dropped | Item 5. The gateway is the only writer and applies every change at once; a hand edit on the volume needs a restart. The Reload button and the reload call in `managed-service.ts` go. |
 | Stored shapes | Gateway is the only writer and validates every file on load. Fixed store path on the `/managed` volume, no hidden or random location | Item 6. Persistence across upgrades needs a mountable path; protection comes from the store encryption above, not from where the files sit. |
 | Browser namespacing | Plaintext stays inside the dial callback, never in `AppState` or form fields | Raises effort, is not a boundary. Item 8. |
+| Distribution | Container images only (decided 2026-11-06): the Release stops attaching the gateway binaries | Phase 5. Trust stays explicit: the image ships no root CAs and trusts only `SSL_TRUST_DIR`, where a deployment puts its brokers' CAs, a public root included. |
 
 ## 3. Still open
 
@@ -182,7 +183,9 @@ during a Managed VPN switch ends the switch; a signed port such as `+8080` is re
 and the lines Phase 3 added are plain ASCII. Step 3F is the end-to-end run: `./scripts/dev.sh e2e`
 (`docker/docker-compose.e2e.yaml`, `scripts/e2e.mjs`, fourteen numbered checks; see
 contributing.md, "End-to-end run"). Its first version passed all fourteen against a local Docker
-broker; it now runs against an existing broker, read-only, and Phase 3 closes when that run passes.
+broker; against an existing broker, read-only, it passed all fourteen on 2026-11-06, which closed
+Phase 3. The image ships no root CAs, so the run mounts the host's standard root bundle beside the
+broker CA (that broker's SEMP port presents a chain ending in a standard root).
 - Key file generated on first run; `users.yaml` and `connections.yaml` encrypted whole; refuse to
   start on an encrypted store without its key; `/managed/relay/{broker}` with credential
   injection; `dial` endpoint; WebSocket upgrade gating.
@@ -218,6 +221,23 @@ demo" (the real modules, not a mini app).
   notes. The managed account control moved to the sidebar footer. The sidebar shows the Solace
   Message Utility logo, and the Direct form's URL Path fields appear on demand.
 
+**Phase 5: Container-only distribution** (decided 2026-11-06). The standard and managed images are
+the only way to run the gateway; the Release stops attaching `go-web-proxy[-managed]-<os>-<arch>`.
+- `tag.yml`: the `binaries` job also emits the HTML bundles the Release uploads (no `bin-*`
+  artifact means no assets at all), so it stays, as one leg. `BUILD_TARGETS` becomes
+  `[{"os":"linux","arch":"amd64"}]` (a repository variable, set by the user), and the `release`
+  job uploads `RELEASE_BUNDLES` and `SHA256SUMS.txt` only, without `dist/go-web-proxy-*`. Deviation
+  8 and the job comments say why the job keeps its name.
+- `dev.sh`/`dev.ps1` `build` still compiles both gateways for the host, as a compile check; the
+  images build their own in `docker/Dockerfile`.
+- `tests/build/check-bundles.test.ts`: the Release step uploads no `go-web-proxy-*`.
+- `SSL_CERT_FILE`: Go on Linux also reads it to find its root bundle, so a gateway started with it
+  set ignores any system bundle. With no binaries shipped this only bites a container that sets it
+  and mounts a bundle at Go's path; the `SSL_CERT_FILE` row in deployment.md says so.
+- Docs: git.md (the Release contents, the `binaries` row, `BUILD_TARGETS`, the "binary reports
+  `dev`" row), deployment.md ("Self-host the static files" lists the Release assets), the
+  `CLAUDE.md` Build Modes (the gate's binaries are a compile check, not shipped).
+
 ## 8. Constraints that stay
 
 `FROM scratch`, CGO off, stdlib plus `yaml.v3`; 100% web coverage and the Go floor; mirrored
@@ -228,7 +248,7 @@ state, factories); tests and docs in the same change; no `v*` tag from this bran
 
 - Gateway tests run without a broker: credential injection and WebSocket gating are tested against
   `httptest` fakes. The first real check is a scripted, read-only run (`./scripts/dev.sh e2e`)
-  against an existing broker at the end of Phase 3.
+  against an existing broker at the end of Phase 3; it passed on 2026-11-06.
 - One Go process holds all sessions; a restart signs everyone out. Acceptable for this tool.
 - With SEMP unparsed by the gateway, the threat-model line "guardrails are UX, not a boundary"
   stays true for queues. Document it; do not imply otherwise.
@@ -236,5 +256,6 @@ state, factories); tests and docs in the same change; no `v*` tag from this bran
 
 ## 10. Next step
 
-Phases 0 to 4 are code-complete on `feature/rbac`. Phase 3 closes when the end-to-end run against an
-existing broker (`./scripts/dev.sh e2e`) passes; that run comes before any managed release tag.
+Phases 0 to 4 are complete on `feature/rbac`; the end-to-end run against an existing broker
+(`./scripts/dev.sh e2e`) passed on 2026-11-06. Phase 5 (container-only distribution) comes next,
+then the pull request to `main` and the first managed release tag.

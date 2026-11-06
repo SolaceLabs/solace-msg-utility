@@ -30,10 +30,11 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
+import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import {
-    MIN_MASKED, SESSION_COOKIE, createCookieJar, detailsFileText, findTokens, issueCert, jsonFindings, makeCA,
-    maskSecrets, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails, sealedHeaderProblem,
+    MIN_MASKED, SESSION_COOKIE, createCookieJar, detailsFileText, findTokens, hostRootBundle, issueCert, jsonFindings,
+    makeCA, maskSecrets, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails, sealedHeaderProblem,
     sessionCookieProblems, sweepSecrets,
 } from './e2e-lib.mjs';
 
@@ -215,7 +216,7 @@ function compose(args, { quiet = false } = {}) {
 
 let caPem = '';
 
-function writeMaterial(brokerCerts) {
+function writeMaterial(brokerCerts, roots) {
     fs.rmSync(WORK, { recursive: true, force: true });
     fs.mkdirSync(path.join(WORK, 'trust'), { recursive: true });
     const ca = makeCA('smu-e2e CA');
@@ -233,6 +234,9 @@ function writeMaterial(brokerCerts) {
     };
     // Only the certificates from the CA file, whatever else it holds.
     put('trust/broker-ca.crt', brokerCerts.map((c) => c.toString()).join(''));
+    // The host's standard roots, mounted where Go looks for the system bundle:
+    // the image ships none, and a broker port may present a public chain.
+    put('system-roots.crt', roots.text);
     put('gateway.crt', gateway.certPem);
     put('gateway.key', gateway.keyPem);
     put('admin-password', `${secrets.bootstrapPassword}\n`);
@@ -685,9 +689,13 @@ async function main() {
         brokerSecrets.clientPassword = broker.clientPassword;
         const certs = readBrokerCA(broker.caFile);
         describeBroker(certs);
+        const roots = hostRootBundle((file) => {
+            try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
+        }, tls.rootCertificates);
+        say(`trusting ${roots.count} standard roots from ${roots.from}`);
         process.on('SIGINT', () => { say('interrupted; tearing the gateway down'); teardown(); process.exit(130); });
         started = true;
-        writeMaterial(certs);
+        writeMaterial(certs, roots);
         await stackUp();
         const admin = await configureGateway();
         await runChecks(admin);

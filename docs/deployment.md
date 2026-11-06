@@ -56,7 +56,7 @@ Then open <https://localhost:9443/>. The `/managed` volume holds the gateway's `
 | `APP_DIR` | `/SolaceMsgUtility` | Directory containing `index.html` + assets. May be read-only. |
 | `SSL_CERT_FILE` | `/tls/tls.crt` | TLS server certificate (PEM). |
 | `SSL_KEY_FILE` | `/tls/tls.key` | TLS private key (PEM). |
-| `SSL_TRUST_DIR` | `/tls/trust` | Directory of additional CA bundles (`*.crt`, `*.pem`, non-recursive). Added to the system pool for upstream verification. |
+| `SSL_TRUST_DIR` | `/tls/trust` | Directory of additional CA bundles (`*.crt`, `*.pem`, non-recursive), trusted for upstream verification beside the system roots. The image ships no system roots, so there this directory is the whole trust: a broker with a public certificate needs its root CA here too. |
 | `SSL_INSECURE_SKIP_VERIFY` | `false` | When `"true"`, the gateway does NOT verify upstream broker certificates. Logged as a warning at startup. Lab use only. |
 | `LOG_LEVEL` | `warn` | `debug` \| `info` \| `warn` \| `error`. Anything else fails startup. |
 

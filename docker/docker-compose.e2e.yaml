@@ -8,7 +8,8 @@
 #
 # The only host port is the gateway's, bound to 127.0.0.1:39443. The gateway
 # reaches the broker over TLS only and verifies it against the CA file the
-# harness was given; a broker on this machine is host.docker.internal.
+# harness was given and the host's standard roots; a broker on this machine
+# is host.docker.internal.
 name: smu-e2e
 services:
   gateway:
@@ -28,8 +29,10 @@ services:
       ADMIN_PASSWORD_FILE: /run/secrets/admin-password
       STORE_KEY_FILE: /run/secrets/store.key
       # The broker's certificate is verified against the CA file given to the
-      # harness: no SSL_INSECURE_SKIP_VERIFY here. The image has no system
-      # roots, so that file is the whole trust.
+      # harness and the host's standard roots: no SSL_INSECURE_SKIP_VERIFY
+      # here. The image ships no roots (trust stays explicit in production),
+      # so the harness copies the host's bundle in and it is mounted below
+      # where Go looks for the system bundle.
       SSL_TRUST_DIR: /tls/trust
     # Docker Desktop provides this name itself; on Linux it needs the entry.
     extra_hosts:
@@ -39,6 +42,7 @@ services:
       - ../scripts/logs/e2e/gateway.crt:/tls/tls.crt:ro
       - ../scripts/logs/e2e/gateway.key:/tls/tls.key:ro
       - ../scripts/logs/e2e/trust:/tls/trust:ro
+      - ../scripts/logs/e2e/system-roots.crt:/etc/ssl/certs/ca-certificates.crt:ro
       - ../scripts/logs/e2e/admin-password:/run/secrets/admin-password:ro
       - ../scripts/logs/e2e/store.key:/run/secrets/store.key:ro
     ports:

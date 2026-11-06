@@ -3,9 +3,9 @@ import { X509Certificate } from 'node:crypto';
 import tls from 'node:tls';
 import type { AddressInfo } from 'node:net';
 import {
-    BROKER_FIELDS, SESSION_COOKIE, createCookieJar, detailsFileText, findTokens, issueCert, jsonFindings, makeCA,
-    maskSecrets, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails, sealedHeaderProblem,
-    sessionCookieProblems, sweepSecrets,
+    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, createCookieJar, detailsFileText, findTokens, hostRootBundle,
+    issueCert, jsonFindings, makeCA, maskSecrets, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails,
+    sealedHeaderProblem, sessionCookieProblems, sweepSecrets,
 } from '../../scripts/e2e-lib.mjs';
 
 // The gateway's own Set-Cookie for a sign-in (go-web-proxy/session.go).
@@ -88,6 +88,24 @@ describe('e2e-lib -- TLS material', () => {
         expect(() => pemCertificates(leaf.keyPem)).toThrow('holds no PEM certificate');
         expect(() => pemCertificates('-----BEGIN CERTIFICATE-----\nbm90IGRlcg==\n-----END CERTIFICATE-----'))
             .toThrow(/^certificate 1 does not parse: /);
+    });
+});
+
+describe('e2e-lib -- host roots', () => {
+    const roots = tls.rootCertificates.slice(0, 3);
+
+    it('takes the first bundle Go would load on the host, verbatim, and counts its certificates', () => {
+        const rhel = `# RHEL's extracted bundle\n${roots.join('\n')}\n`;
+        const bundles: Record<string, string> = { [HOST_ROOT_FILES[1]]: rhel, [HOST_ROOT_FILES[5]]: roots[0] };
+        expect(hostRootBundle((file: string) => bundles[file] ?? null, tls.rootCertificates))
+            .toEqual({ from: '/etc/pki/tls/certs/ca-bundle.crt', text: rhel, count: 3 });
+    });
+
+    it("falls back to Node's bundled roots on a host with no bundle, as on Windows", () => {
+        const got = hostRootBundle(() => null, roots);
+        expect(got.from).toMatch(/^Node's bundled Mozilla roots/);
+        expect(pemCertificates(got.text).map((c) => c.subject)).toEqual(roots.map((r) => new X509Certificate(r).subject));
+        expect(got.count).toBe(3);
     });
 });
 

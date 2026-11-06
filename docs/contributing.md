@@ -58,7 +58,7 @@ Needs: a Linux-container Docker; `dist/solclient.js` (the SDK the SMF check logs
 | Key | Default | What |
 |-----|---------|------|
 | `E2E_BROKER_HOST` | | The host the gateway container dials. It must match a name in the broker's TLS certificate. A broker on this machine is `host.docker.internal`. |
-| `E2E_BROKER_CA` | | A PEM file with the CA that signed the broker's certificate, or that certificate itself. Required: the image has no system roots, so this is the gateway's whole trust (no skip-verify). Only its certificates are used. |
+| `E2E_BROKER_CA` | | A PEM file with the CA that signed the broker's certificate, or that certificate itself. Required; only its certificates are used. The image ships no system roots, so the harness also mounts the host's standard root bundle where Go looks for one (the first of Go's Linux bundle paths, else Node's bundled roots, as on Windows), and prints which. The gateway verifies each broker port against both, never with skip-verify: a port that presents a public chain, such as SEMP behind a proxy, needs nothing in this file. |
 | `E2E_SEMP_PORT` | `1943` | SEMP over TLS. |
 | `E2E_SEMP_USER` | `admin` | Read-only access is enough. |
 | `E2E_SEMP_PASSWORD` | | Asked without echo. |
