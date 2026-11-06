@@ -19,190 +19,144 @@ If your broker uses a self-signed certificate, the app's SSL Trust dialog walks 
 
 ### Containerised Gateway
 
-The published image at `ghcr.io/solacelabs/solace-msg-utility:latest` ships the PWA together with a single-binary Go HTTPS gateway that:
+The gateway image serves the app over HTTPS and connects to your brokers for it: browsers reach and trust only the gateway, never the brokers. It listens on `:9443` and runs as UID `65532`.
 
-1. Serves the PWA bundle.
-2. Reverse-proxies `/{http|https|ws|wss}/{port}/{host}/{rest...}` to broker SEMP/SMF endpoints — so the browser only needs to trust the gateway's certificate, not every broker.
-3. Exposes `/hosted` as an in-memory probe returning `200` with JSON `{hosted, connModes, defaultConn}` when `HOSTED=true` (the PWA uses this to detect that it is running behind the gateway **and** to learn which connection modes the deployment offers).
+#### Choosing an image
 
-The image ships `FROM scratch` — only the static Go binary and the PWA assets, no shell, no libc, no `/etc/passwd`. The gateway listens on **`:9443`** (an unprivileged port) and runs as **UID `65532`** (the conventional non-root UID used by distroless).
+| | Standard | Managed |
+| --- | --- | --- |
+| Image | `ghcr.io/solacelabs/solace-msg-utility:<tag>` | `ghcr.io/solacelabs/solace-msg-utility:managed-<tag>` |
+| Connecting | Users type the broker's details (Direct) | Users sign in and pick from the brokers and Message VPNs an administrator granted ([Managed Mode](#managed-mode-rbac)) |
+| Administration | None: settings live in `config.yaml` | Users, connections and settings in the admin app at `/solAdmin` |
+| Kept on `/managed` | `config.yaml` | `config.yaml`, the users and connections stores, the store key |
 
-**Run with `docker run`:**
+**Tags.** Every release publishes `:<major>.<minor>.<patch>`, `:<major>.<minor>`, `:<major>` and `:latest`, and the managed image the same with a `managed-` prefix, for `linux/amd64` and `linux/arm64`. Pin a full version in production. The Release notes quote each image's digest, and a tag only ever moves to an image that passed the vulnerability scan.
+
+#### Running the gateway
+
+The app's two vendor scripts are not in the image: mount `solclient.js` and `jszip.min.js` next to it (see [External Runtime Dependencies](#external-runtime-dependencies)).
 
 ```bash
 docker run --rm -p 9443:9443 \
   -e HOSTED=true \
   -v solace-tls:/tls \
   -v solace-config:/managed \
+  -v ./solclient.js:/SolaceMsgUtility/solclient.js:ro \
+  -v ./jszip.min.js:/SolaceMsgUtility/jszip.min.js:ro \
   ghcr.io/solacelabs/solace-msg-utility:latest
 ```
 
-Then open <https://localhost:9443/>. The `/managed` volume holds the gateway's `config.yaml` (see below); without it the file is re-seeded from the environment whenever the container is recreated.
-
-`/tls` is baked into the image as an empty directory owned by UID `65532`, so a **named volume** (`solace-tls` above) inherits that ownership and works out of the box. A **bind mount** does NOT inherit image ownership — the host directory must already be owned by UID `65532`, or pre-populated with `tls.crt` / `tls.key` so the gateway never needs to write.
-
-**Image tags:** `ghcr.io/solacelabs/solace-msg-utility` is published multi-arch (`linux/amd64`, `linux/arm64`) with `:latest`, `:<major>`, `:<major>.<minor>`, and `:<major>.<minor>.<patch>` tags on every release; the Release notes quote the exact digest, and a tag only ever moves to a digest that passed the Trivy gate on both architectures. Pin to a specific tag for production. The same release also publishes a [managed](#managed-mode-rbac) image under the `managed-` prefixed tags (`:managed-latest`, `:managed-<major>`, `:managed-<major>.<minor>`, `:managed-<version>`).
-
-**Configuration file.** The gateway keeps every setting in `config.yaml` (default `/managed/config.yaml`; the path comes from the environment-only `CONFIG_FILE`). On the first start, when the file does not exist, the gateway writes it from the variables below and refuses to start if it cannot; the error names the path and the fix (a writable `/managed`, or `CONFIG_FILE` pointing somewhere writable). From then on the file is authoritative: a changed variable is not applied, and each start logs one warning per variable that disagrees with the file. Edit the file and restart, or delete it to re-seed. Unknown keys and invalid values fail startup with the key and value named. The keys that have no variable, the client access list, are described under [Gateway configuration file](#gateway-configuration-file).
-
-**Seed variables** (all optional; read on the first start only, as described above):
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `CONFIG_FILE` | `/managed/config.yaml` | Where `config.yaml` lives. Environment-only: read on every start and never stored in the file. |
-| `HOSTED` | unset | When `"true"`, `/hosted` returns `200` + the JSON config below; otherwise it returns `404`. |
-| `CONN_MODES` | `direct` | Which connection tabs the app offers: `direct` \| `managed` \| `both`. Anything else fails startup. |
-| `DEFAULT_CONN` | `direct` | Which tab opens first when `CONN_MODES=both`: `direct` \| `managed`. |
-| `APP_DIR` | `/SolaceMsgUtility` | Directory containing `index.html` + assets. May be read-only. |
-| `SSL_CERT_FILE` | `/tls/tls.crt` | TLS server certificate (PEM). |
-| `SSL_KEY_FILE` | `/tls/tls.key` | TLS private key (PEM). |
-| `SSL_TRUST_DIR` | `/tls/trust` | Directory of additional CA bundles (`*.crt`, `*.pem`, non-recursive), trusted for upstream verification beside the system roots. The image ships no system roots, so there this directory is the whole trust: a broker with a public certificate needs its root CA here too. |
-| `SSL_INSECURE_SKIP_VERIFY` | `false` | When `"true"`, the gateway does NOT verify upstream broker certificates. Logged as a warning at startup. Lab use only. |
-| `LOG_LEVEL` | `warn` | `debug` \| `info` \| `warn` \| `error`. Anything else fails startup. |
-
-**TLS material:** if `SSL_CERT_FILE` and `SSL_KEY_FILE` both exist, the gateway loads them and refuses to start if either fails to parse (so it never silently overwrites a user-supplied keypair). If either is missing, it generates a self-signed ECDSA P-256 keypair valid for 365 days with `CN=localhost` and SANs `DNS:localhost, IP:::1, IP:127.0.0.1`, writing the cert (`0644`) and key (`0600`) at the configured paths. The SHA-256 fingerprint of the generated cert is logged at startup so operators can pin it.
-
-**Proxy paths:** the gateway parses `/{scheme}/{port}/{host}/{rest...}` from the URL and forwards the request transparently. `{host}` accepts hostnames, IPv4, IPv6 (bare `::1` or bracketed `[::1]`), and FQDNs. `ws` / `wss` paths handle the WebSocket upgrade end-to-end. No `X-Forwarded-*` headers are added, and headers pass through verbatim with one exception: the gateway's own sign-in cookie (`__Host-smu-session`) is removed from the request, and any `Set-Cookie` naming it is removed from the answer, so a Direct connection never hands its target host a gateway session and the host can never replace or expire one.
-
-**Routes:**
-
-| Path | Behaviour |
-| --- | --- |
-| `/hosted` | `200` + `{"hosted":true,"connModes":"…","defaultConn":"…"}` (`application/json`, `Cache-Control: no-store`) when `HOSTED=true`; else `404`. Skipped from access logs. |
-| `/robots.txt` | Disallows every crawler. Every response also carries `X-Robots-Tag: noindex, nofollow`. |
-| `/solAdmin` | The administration app (`solAdmin.html`, `no-store`) when the gateway is **hosted AND managed**, to an administrator's session only (otherwise a redirect to `/login`, or `403` for a non-admin); else `404` -- indistinguishable from a wrong URL. The plain file `/solAdmin.html` is never served (`404`), so this route and its checks are the only way in. |
-| `/login`, `/login/password` | Managed sign-in and password change, served by the gateway itself (see [Managed Mode](#managed-mode-rbac)). Only on a managed gateway; elsewhere they are ordinary SPA routes. |
-| `/managed/*` | The managed JSON API on the session cookie when `MANAGED=true` on a gateway built with the `managed` tag: `GET me`, `POST logout`, and for administrators `GET users`, `PUT`/`DELETE users/{name}`, `GET connections`, `PUT`/`DELETE connections/{broker}`; for every signed-in user also the SEMP relay (`/managed/relay/{broker}/SEMP...`), `POST dial` and the SMF socket gate (`/managed/smf/{broker}/{vpn}`), below. Errors are `{"error": code}`. Without a session every path answers the same `401`. On any other gateway `/managed/*` answers `404`; it never falls through to the SPA. |
-| `/{http\|https}/{port}/{host}/{rest...}` | Reverse-proxy to `http(s)://{host}:{port}/{rest}` with the query string preserved. On a managed gateway under `CONN_MODES=managed` this Direct relay answers `404` (read live, so a settings change applies to the next request), whatever the session. |
-| `/{ws\|wss}/{port}/{host}/{rest...}` | WebSocket reverse-proxy to `ws(s)://{host}:{port}/{rest}`; `404` under `CONN_MODES=managed`, as above. |
-| anything else | Served from `APP_DIR`; SPA history-mode fallback to `/index.html` when the path has no file extension. Under `CONN_MODES=managed` only with a session (else a redirect to `/login`, or `401` for an asset). |
+Then open <https://localhost:9443/>. For the managed image, see [Managed Mode](#managed-mode-rbac).
 
 **Mounts:**
 
-| Path | Purpose |
+| Path | What |
 | --- | --- |
-| `/tls` | TLS material: `tls.crt`, `tls.key`, and `trust/*.{crt,pem}` for upstream CA validation. Baked into the image as an empty directory owned by UID `65532`. Named volumes inherit that ownership automatically; bind mounts must already be owned by UID `65532` (or pre-populated with the keypair so no writes are needed). |
-| `/SolaceMsgUtility` (or override via `APP_DIR`) | PWA bundle. Baked into the image by default; mount to override at runtime. |
-| `/managed` | Writable gateway store: `config.yaml` on every image, plus `users.yaml`, `connections.yaml` and `store.key` in [managed mode](#managed-mode-rbac) (`MANAGED=true`). Baked as an empty directory owned by UID `65532`, so a named volume inherits write access automatically; bind mounts must already be owned by UID `65532`. With no mount the store lives in the container's writable layer: it survives a restart but is lost when the container is recreated, and `config.yaml` is then re-seeded from the environment. |
+| `/tls` | `tls.crt` and `tls.key`, the gateway's own certificate, and `trust/`, the CAs it trusts for broker connections. |
+| `/managed` | Writable: `config.yaml`, and on the managed image the stores and the store key. Without a volume they are lost when the container is recreated. |
+| `/SolaceMsgUtility` | The app, baked in. Mount over it only to serve your own build (`APP_DIR` moves it). |
 
-**Shutdown:** `SIGINT` / `SIGTERM` triggers graceful shutdown with a 10-second drain.
+Use named volumes: they take the image's UID `65532` ownership. A bind-mounted directory must already be owned by UID `65532`, or hold its files ready so the gateway never needs to write.
 
-> **Building the image locally** (for developers iterating on the gateway): `docker compose -f docker/docker-compose.yaml up --build` rebuilds from source. Note it starts **both** services — `gateway` on host port `19443` and `gateway-managed` on `29443` — since no profile restricts the default `up`; pass a service name (`up --build gateway`) to start just one. Production users should pull the published image above. See [developer-guide.md](developer-guide.md) for the full build workflow.
+#### TLS and trusted CAs
 
-**Vendor scripts in compose:** both compose services bind-mount `../dist/solclient.js` and `../dist/jszip.min.js` read-only into `/SolaceMsgUtility/`, so those two files must exist in your local `dist/` before `docker compose up` — they are deliberately not baked into the image (see [External Runtime Dependencies](#external-runtime-dependencies)). `dist/` is git-ignored, so a fresh clone has none: create it and drop both files in before the first `up`. A missing file makes Docker create an empty directory in its place (root-owned on a Linux engine, and the same goes for `dist/` itself, which then makes the next build fail to write) — delete it and retry.
+- **The gateway's certificate:** put yours at `/tls/tls.crt` and `/tls/tls.key`. With neither, the gateway generates a self-signed one (`CN=localhost`, valid 365 days) on its first start and logs its SHA-256 fingerprint. A pair that does not load stops the start.
+- **Brokers' certificates:** the gateway verifies every broker it connects to, and the image ships no root CAs. Put each CA your brokers' certificates chain to, a public root included, in `/tls/trust/` as a `*.crt` or `*.pem` file (`SSL_TRUST_DIR`). They are read at start, so restart after adding one. `SSL_INSECURE_SKIP_VERIFY=true` turns verification off: lab use only.
 
-**No `HEALTHCHECK`:** the `scratch` image has no shell or `curl`, so the image deliberately declares none. Use an external check (a Kubernetes liveness probe, a swarm healthcheck, a monitoring agent) against `https://<host>:9443/hosted` with the certificate pinned or verification disabled.
+#### Settings
 
-### Managed Mode (RBAC)
-
-**Managed mode** abstracts broker credentials from users: instead of typing SMF/SEMP credentials, users log in and pick from the brokers/VPNs they are entitled to. It ships **only in the managed image**: that image serves `managed.html`, the one bundle with the Managed sign-in, as its `index.html`, and the gateway decides which connection paths it offers. Every Release bundle (`index.html` and its variants) is Direct-only, whatever the gateway advertises, except `managed-demo.html`, an offline demo that runs the Managed sign-in against a fake gateway in the page and never talks to a real one. It **only runs behind the gateway** with managed mode enabled, because it relies on the gateway both to relay broker traffic *and* to serve the `/managed/*` RBAC endpoints. For the design and threat model see [rbac-variant-plan.md](rbac-variant-plan.md); for the internals see [architecture.md](architecture.md) § Managed Connections.
-
-The managed image's gateway binary is compiled with the RBAC store + `/managed/*` handler built in (`-tags managed`); the standard image's gateway binary has no `/managed/*` support, and the standard image serves the Direct-only bundle. Use the `managed-` tagged image for managed deployments — setting `MANAGED=true` on the standard image only logs a "built without managed support" warning.
-
-**Deploying it (prebuilt image — recommended):** pull `ghcr.io/solacelabs/solace-msg-utility:managed-latest` (or a pinned `:managed-<version>`). This image bakes `MANAGED=true`, `HOSTED=true` and `CONN_MODES=managed` as defaults, so it runs as a managed deployment out of the box — just mount a writable `/managed` volume (and `/tls`).
-
-#### Choosing which connection modes to offer
-
-`CONN_MODES` decides what the Connections module shows, and it is the **only** control that makes the entitlement model binding:
-
-| `CONN_MODES` | Connections module | Queue Copy destination credentials | Entitlements are… |
-| --- | --- | --- | --- |
-| `direct` (default) | Direct tab only | typed by the user | not in play — no managed session exists |
-| `managed` | Managed tab only | **provisioned only** (pick a broker/VPN you are entitled to) | **binding** — this is the lockdown setting |
-| `both` | both tabs, `DEFAULT_CONN` first | user chooses provisioned **or** typed | **advisory** — see the warning below |
-
-> **`CONN_MODES=both` is a documented bypass.** A user can switch to the Direct tab and connect with any credentials they happen to know, entirely outside their entitlements — and a typed-credential Queue Copy destination is likewise ungated. Offer `both` only where that is acceptable (mixed audiences, migration periods). **If the entitlement model must hold, set `CONN_MODES=managed`.**
-
-The gateway **fails to start** if `CONN_MODES` advertises managed without `HOSTED=true`, `MANAGED=true`, and a binary built with the `managed` tag — a half-configured deployment stops at boot instead of showing a tab that cannot work. With `MANAGED` unset the gateway behaves exactly as the standard gateway above and `/managed/*` answers `404` (it never falls through to the SPA). With no gateway at all (static hosting) there is no `/hosted`, so the app is Direct-only and the Managed tab never appears.
-
-**Managed-mode environment variables** (in addition to the seed variables above; they too seed `config.yaml` on the first start only, except `STORE_KEY_FILE`, which is environment-only and never written to the file):
+The gateway keeps its settings in `config.yaml` on the `/managed` volume. The variables below seed it on the first start, when the file does not exist; from then on the file wins, and each start logs a warning for every variable that differs from it. Edit the file and restart, or delete it to seed it again. A value the gateway cannot use stops the start, naming the key and the value. The keys with no variable are under [Gateway configuration file](#gateway-configuration-file).
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MANAGED` | unset | When `"true"`, the gateway loads the RBAC store and serves the sign-in pages and `/managed/*`. Otherwise none of the managed code path runs. |
-| `USERS_FILE` | `/managed/users.yaml` | User + entitlement store, encrypted with the store key. Created with a default admin if missing (see below). |
-| `CONNECTIONS_FILE` | `/managed/connections.yaml` | Broker connection store, encrypted with the store key. The broker passwords in it reach no browser, except a Message VPN's client password through `POST /managed/dial`. |
-| `STORE_KEY_FILE` | `/managed/store.key` | The key that encrypts `USERS_FILE` and `CONNECTIONS_FILE`. **Critical persistent state** -- see below. Environment-only: read on every start, never stored in `config.yaml`, so the settings file can never point the gateway at a different key. |
-| `ADMIN_PASSWORD` | unset | Password of the bootstrap admin, read only when `USERS_FILE` does not exist yet. 12 to 128 characters. Environment-only; never logged or written to `config.yaml`. |
-| `ADMIN_PASSWORD_FILE` | unset | Path of a file holding that password (a Docker or Kubernetes secret); a trailing newline is ignored. Set this or `ADMIN_PASSWORD`, not both. |
+| `CONFIG_FILE` | `/managed/config.yaml` | Where `config.yaml` lives. Read on every start, never stored in the file. |
+| `HOSTED` | unset | `true` sends the app's broker connections through the gateway. Set it on the standard image; the managed image sets it. |
+| `CONN_MODES` | `direct` | Which connection tabs the app offers: `direct`, `managed` or `both` (see [Managed Mode](#managed-mode-rbac)). |
+| `DEFAULT_CONN` | `direct` | Which tab opens first under `both`: `direct` or `managed`. |
+| `APP_DIR` | `/SolaceMsgUtility` | Where the app's files are. May be read-only. |
+| `SSL_CERT_FILE` | `/tls/tls.crt` | The gateway's TLS certificate (PEM). |
+| `SSL_KEY_FILE` | `/tls/tls.key` | Its private key (PEM). |
+| `SSL_TRUST_DIR` | `/tls/trust` | The CAs trusted for broker connections (`*.crt`, `*.pem`); see [TLS and trusted CAs](#tls-and-trusted-cas). |
+| `SSL_INSECURE_SKIP_VERIFY` | `false` | `true` skips verifying brokers' certificates, with a warning at start. Lab use only. |
+| `LOG_LEVEL` | `warn` | `debug`, `info`, `warn` or `error`. |
 
-The default paths put all four files (`config.yaml`, `users.yaml`, `connections.yaml`, `store.key`) under **`/managed/`**, so mount a **writable** volume there (the gateway writes the bootstrap admin and the store key on first run). Using the prebuilt managed image, `MANAGED` / `HOSTED` / `CONN_MODES` are already baked in:
+#### In production
+
+- **Health check:** the image has no shell, so it declares no `HEALTHCHECK`. Probe `https://<host>:9443/hosted` from outside (`200` while `HOSTED=true`), with the certificate pinned or verification off. A client access list must allow the prober.
+- **Behind a reverse proxy:** pass the original `Host` header through, allow WebSocket upgrades, and list the proxy in `access.trustedProxies` so the gateway sees each client's own address.
+- **Network:** browsers need to reach only the gateway; the gateway needs the brokers' SEMP and secured web messaging (`wss`) ports.
+- **Stopping:** on `SIGTERM` the gateway finishes requests in flight for up to 10 seconds. A restart signs every managed user out.
+
+### Managed Mode (RBAC)
+
+Managed mode signs users in and gives them only the brokers and Message VPNs an administrator granted; they never see or type a broker's address or credentials. It runs only on the managed image. Every Release HTML file is Direct-only, except `managed-demo.html`, an offline demo with nothing to deploy.
+
+The managed image already sets `HOSTED=true`, `MANAGED=true` and `CONN_MODES=managed`. Mount a writable `/managed` volume, and `/tls`:
 
 ```bash
 docker run --rm -p 9443:9443 \
   -v solace-tls:/tls \
   -v solace-managed:/managed \
+  -v ./solclient.js:/SolaceMsgUtility/solclient.js:ro \
+  -v ./jszip.min.js:/SolaceMsgUtility/jszip.min.js:ro \
   ghcr.io/solacelabs/solace-msg-utility:managed-latest
 ```
 
-**First-run bootstrap:** if `USERS_FILE` is missing, the gateway writes one administrator, username `admin`, with **no** broker access. Its password is `ADMIN_PASSWORD` (or the content of `ADMIN_PASSWORD_FILE`); with neither set, the gateway generates one and prints it **once**, in a warning line of its log (`docker compose logs gateway-managed`). Either way the first sign-in leads straight to a password change, and nothing else is reachable until it is done: a value that sits in an environment file or `docker inspect` output stops working at once. If you lose the generated password before signing in, delete `users.yaml` and restart to bootstrap again. On later starts the two variables are ignored, with a warning to remove them. A variable that is set but invalid (both set, too short, unreadable file) stops the first start with the variable named, never its value.
+#### Choosing which connection modes to offer
 
-The two store files are encrypted with the store key, so they cannot be edited by hand: the gateway is their only writer, and the admin modules are the way to change them. Both files are checked strictly on load: an unknown key, a duplicate user or broker, a username or broker name outside `A-Z a-z 0-9 . _ - (@ for users)` or made only of dots, a port outside 1 to 65535, a hostname that is not a bare host name or IP address (no scheme, port or path), a missing SEMP port when a SEMP username is set or a missing client port when message VPNs are listed, a SEMP username with `:`, a control character in any credential, a module id the catalog does not know, a password that is not a stored hash, or a users file with no administrator stops the start with the file and the entry named. The same rules refuse a save from Connection Management with `422`. A users file from a build before gateway sign-in (passwords stored as `S1:` tokens) is refused the same way; delete it to bootstrap again.
+`CONN_MODES` decides what the Connections module shows, and it is the **only** control that makes the entitlement model binding:
 
-**Sign-in and sessions:** users sign in on the gateway's own page, `/login` (a plain form, no script), and change their password on `/login/password`. A successful sign-in sets an `HttpOnly`, `Secure`, `SameSite=Lax` session cookie (`__Host-smu-session`); passwords are stored as a slow, per-user password hash and never leave the gateway. A session ends after `session.idleMinutes` without a request to the gateway or `session.absoluteMinutes` after sign-in (defaults 10 and 30), on Sign out, on a gateway restart, and whenever an administrator sets the user's password, changes their administrator flag or deletes them. Under `CONN_MODES=managed` the app itself is served only with a session: `/` redirects to `/login`. Under `both` the app loads without one (for the Direct tab) and its Managed tab links to `/login`. Every `/managed/*` request without a session gets the same `401`, whatever the path. **Until Phase 3 of the [rework](rbac-rework-plan.md)** the broker relay and the SMF WebSocket do not check the session, so a session that has expired is noticed at the user's next Refresh or page load, not while they browse.
+| `CONN_MODES` | Connections module | Queue Copy destination credentials | Entitlements are... |
+| --- | --- | --- | --- |
+| `direct` (default) | Direct tab only | typed by the user | not in play: no managed session exists |
+| `managed` | Managed tab only | **provisioned only** (pick a broker/VPN you are entitled to) | **binding**: this is the lockdown setting |
+| `both` | both tabs, `DEFAULT_CONN` first | user chooses provisioned **or** typed | **advisory**: see the warning below |
 
-**Sign-in throttling:** after `login.maxFailures` failed sign-ins (or wrong current passwords) for one username, or from one client address (an IPv6 client by its /64), further attempts are refused with `429` for `login.backoffSeconds`, doubling with each further failure up to `login.maxBackoffSeconds`; a blocked attempt is refused without the password being checked, and the first block logs one warning. Every request without a session (the sign-in pages, `/managed/*`, and the app under `CONN_MODES=managed`) also draws from a per-client budget of `login.unauthenticatedPerMinute`. A known username can be locked out by someone guessing at it for up to `login.maxBackoffSeconds`; the access list below, or a VPN in front, is the answer to that.
+> **`CONN_MODES=both` is a documented bypass.** A user can switch to the Direct tab and connect with any credentials they happen to know, entirely outside their entitlements, and a typed-credential Queue Copy destination is likewise ungated. Offer `both` only where that is acceptable (mixed audiences, migration periods). **If the entitlement model must hold, set `CONN_MODES=managed`.**
 
-**SEMP relay:** the gateway relays a signed-in user's SEMP requests to a provisioned broker at `/managed/relay/{broker}/SEMP...`, adding the broker's stored SEMP account, which never reaches the browser. It relays **reads only**: `GET`/`HEAD` under `/SEMP/v2/`, and a SEMP v1 `POST /SEMP` only when it is a single `<show>`; any other method or command is refused with `403 read_only`, so the stored account cannot change a broker through the gateway even when it is an administrator. A broker is relayed to a user who is entitled to at least one of its Message VPNs. The check stops there: through the relay such a user can read every Message VPN on that broker that the stored SEMP account can, and queue-level rules and read-only rows remain a filter in the app, not a gateway check. Provision brokers per audience, and give each a SEMP account scoped to what its users may see. A broker that rejects the stored account (`401`), redirects, or cannot be reached answers `502` (`upstream_auth` or `upstream_unavailable`; the cause is in the gateway log). Use a read-only SEMP account all the same.
+The gateway refuses to start when `CONN_MODES` offers managed sign-in on the standard image, or with `HOSTED` or `MANAGED` off.
 
-**SMF sockets:** `POST /managed/dial` gives a signed-in user the client username and password of a Message VPN they are entitled to, with a gateway path, `/managed/smf/{broker}/{vpn}`, on which the gateway opens the broker's SMF port over TLS for them. It is the one place a broker credential reaches the browser; the SEMP account never does. The password works against the broker from anywhere that can reach it, so give each Message VPN a client username scoped to what its users may do. The gateway refuses a socket whose `Origin` is not its own `https://` address: behind a reverse proxy, pass the original `Host` through and allow WebSocket upgrades on `/managed/smf/`, or every socket is refused (`403 cross_origin`; the gateway's warning shows the origin and the host it saw). An open socket has no gateway timeout: it lasts as long as the SMF session keeps it alive, past the sign-in session's own limits, and the gateway closes it when access is taken away: sign-out, a password change, the user deleted or their administrator flag changed, an entitlement or the Message VPN removed, or the broker deleted. Dials and socket upgrades together are limited to 20 per minute per user (`429`).
+**Managed variables** (they seed `config.yaml` on the first start like the ones above, except `STORE_KEY_FILE` and the two admin password variables, which are never written to it):
 
-**Module control:** an administrator decides which app modules each managed user sees. `config.yaml` sets the ceiling, `modules.offered` (default: Queue Browser and Queue Copy), and what a user without a list of their own gets, `modules.userDefault` (`all` or `none`, default `all`). User Management can give a user their own list; a module outside `modules.offered` is never shown, whatever the list says. Connections is always shown. Queue Subscription Explorer and Queue Discovery cannot be granted at all: they read the broker over SEMP v1, which the entitlement filter does not cover, so the gateway's module catalog leaves them out and the app hides them in every managed session. A change to a user's modules shows at their next Refresh or page load.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MANAGED` | unset | `true` turns managed mode on. The managed image sets it. |
+| `USERS_FILE` | `/managed/users.yaml` | The users store, encrypted with the store key. |
+| `CONNECTIONS_FILE` | `/managed/connections.yaml` | The broker connections store, encrypted with the store key. |
+| `STORE_KEY_FILE` | `/managed/store.key` | The key for both stores. Read on every start. |
+| `ADMIN_PASSWORD` | unset | The first administrator's password, 12 to 128 characters. Read only on the first start; never logged. |
+| `ADMIN_PASSWORD_FILE` | unset | A file holding that password (a Docker or Kubernetes secret). Set this or `ADMIN_PASSWORD`, not both. |
 
-**Store key:** on a fresh volume, when the key file and both store files are all absent, the gateway generates `STORE_KEY_FILE` (64 hex characters, owner-only) and logs a warning with its path. It never generates one beside an existing store. **Back it up and treat it as a secret**: without it the users and connections files cannot be read, and there is no recovery; deleting both store files and the key starts over (a new bootstrap admin, every connection entered again). By default the key sits on the same `/managed` volume as the stores, which protects a leaked copy of a store file but not a copy of the whole volume; for more, point `STORE_KEY_FILE` at a separate mount or a Docker secret (a read-only key is fine: it is only written when generated). The gateway refuses to start, naming the file and the fix, when:
+**First start:** the gateway creates one administrator, `admin`, with no broker access. Its password is `ADMIN_PASSWORD` (or the file's content); with neither, a generated one is printed **once** in the log. The first sign-in must change it, and nothing else works until then. Lost the generated one before signing in? Delete `users.yaml` and restart. Afterwards remove the variable; later starts warn while it is still set.
+
+**Store key:** on a fresh `/managed` volume the gateway generates `store.key` and logs its path. **Back it up and keep it secret**: without it the users and connections cannot be read, and there is no recovery. The default puts it on the same volume as the stores; for more, point `STORE_KEY_FILE` at a separate mount or a secret (it may be read-only). The stores change only through the admin app. The gateway refuses to start, saying which file and why, when:
 
 | Condition | Fix |
-|---|---|
-| The key file is missing but a store file exists | Restore the key file, or delete the store files to start over. |
-| The key file is unreadable, or does not hold exactly 64 hex characters (a trailing newline is fine) | Make one with `head -c 32 /dev/urandom \| xxd -p -c 64`, or restore the right file. An `EACCES` error means the file or its directory is not readable or writable by UID `65532`. |
-| A store file is not encrypted (a volume from a build before Phase 3 of the [rework](rbac-rework-plan.md)) | There is no migration: `docker compose down -v`, or delete `users.yaml` and `connections.yaml` (and a leftover `site.seed`). |
-| A store file cannot be decrypted, is empty, or is the other store's file | The key file is the wrong one or the store is damaged: restore the matching pair from a backup. |
+| --- | --- |
+| The key is missing beside an existing store | Restore the key, or delete both store files to start over. |
+| The key is unreadable, or not 64 hex characters | Restore the right file. On a fresh volume, make one with `head -c 32 /dev/urandom \| xxd -p -c 64`. `EACCES` means UID `65532` cannot read it. |
+| A store is unencrypted, from an earlier release | Stores are not migrated: start on a fresh `/managed` volume and enter the users and connections again. |
+| A store cannot be decrypted, or is damaged | The wrong key, or a damaged store: restore the matching pair from a backup. |
 
-A key file readable by other users (mode beyond `0600`) is only warned about, because Docker secrets are mounted `0444`.
-
-**Site seed (retired):** builds before Phase 3 of the [rework](rbac-rework-plan.md) kept a `site.seed` file (`SITE_SEED_FILE`) and sent it to every signed-in browser. The gateway no longer reads either; delete a leftover `/managed/site.seed`. The store key above replaces it, and no broker credential reaches the browser except a dialled Message VPN password.
+A key file other users can read is only warned about, because Docker secrets are mounted `0444`.
 
 #### Administration app (`/solAdmin`)
 
-User Management, Connection Management and Gateway Settings are **not in the everyday bundles**. They ship as a separate app at `https://<gateway>:9443/solAdmin`, served only when the gateway is hosted **and** managed, and only to an administrator's session: without one `/solAdmin` redirects to the sign-in page, and a signed-in non-admin gets `403`. The admin app opens no broker connection at all — it exists to edit `users.yaml`, `connections.yaml` and `config.yaml` through the gateway.
+Administrators manage users, broker connections and the gateway's settings at `https://<host>:9443/solAdmin`; other accounts are refused. Most settings apply at once; `hosted`, `managed` and `tls.insecureSkipVerify` apply at the next restart. The file paths change only by editing `config.yaml` on the host and restarting, and after any hand edit, restart before saving from the page.
 
-**Gateway Settings** shows every `config.yaml` key. A save is checked exactly as at startup, written with the usual header, and applies at once for `connModes`, `defaultConn`, `logLevel`, `access.*`, `session.*`, `login.*` and `modules.*` (a shorter session limit ends older sessions at their next request). `hosted`, `managed` and `tls.insecureSkipVerify` are saved, tagged "restart" on the page and listed in a banner until the gateway restarts with them. The path keys (`appDir`, `tls.certFile`, `tls.keyFile`, `tls.trustDir`, `usersFile`, `connectionsFile`) are shown read-only, tagged "edit on host": a path an administrator could point anywhere would let the gateway serve its own secrets (an `appDir` of `/managed` publishes the seed and the stores) or overwrite a store at the next start, so they change only by editing `config.yaml` on the host and restarting. The gateway refuses these saves:
-
-- a change to a path key (`422`, naming the key);
-
-- an access list that would deny the administrator's own address, as resolved with the new trusted proxies (`409`, with the address);
-- `connModes` offering managed sign-in while the running gateway is not hosted: save `hosted: true`, restart, then change `connModes`;
-- any save after `config.yaml` was edited on the host since the gateway loaded it (`409`): restart to load the hand edit first. The page shows a banner and disables Save until then;
-- any save, and the page itself, while the gateway cannot read `config.yaml` (`500`, with the cause): a deleted file is written again from the seed variables at the next start.
-
-Every save logs one warning with the administrator's name. Saving `managed: false` removes sign-in, the admin app and this page at the next restart; to undo it, edit `config.yaml` on the host.
-
-The managed image ships `solAdmin.html` alongside the main bundle. If you assemble `APP_DIR` yourself, use `managed.html` (built by `npm run build:managed`) as `index.html` and copy `solAdmin.html` too: a Release `index.html` has no Managed tab, and without `solAdmin.html` `/solAdmin` will 404 (the gateway logs "admin app requested but not deployed" so the cause is visible). Neither file is a Release asset.
+To serve your own build of the managed app, put `managed.html` (as `index.html`) and `solAdmin.html` in `APP_DIR`. Neither is a Release asset.
 
 #### Managed-mode security checklist
 
-Managed mode keeps broker credentials in the gateway: SEMP goes through a read-only relay that adds the stored account, and SMF through a socket gate, both behind the session and the user's entitlement. Some limits remain (residual risks below), so treat it as fit for **trusted-internal** use. Before exposing it:
+Managed mode is fit for **trusted-internal** use. Before exposing it:
 
-- **Set `CONN_MODES=managed`** unless you have a specific reason to offer Direct alongside it. Under `both` the open Direct relay stays reachable, so none of the entitlement guarantees hold; under `managed` it answers `404`.
-- **Use a read-only / least-privilege SEMP account** for each broker connection (never broker-admin) so a captured credential's blast radius is bounded.
-- **Sign in as `admin` right after the first start** and set the password you will keep; until then the bootstrap password (in the log, or in your environment) is all that protects the deployment. Remove `ADMIN_PASSWORD` from the environment afterwards.
-- **Protect the store files** (`USERS_FILE`, `CONNECTIONS_FILE`, `STORE_KEY_FILE`) with filesystem permissions -- the store key opens both stores; keep it on a separate mount or secret where you can.
-- **Always serve over TLS** (the gateway does by default) -- passwords at sign-in and in the admin app, the session cookie and dialled Message VPN passwords traverse the wire.
-- **Restrict who can reach the gateway** with `access.allow` in `config.yaml` (a CIDR list; empty means everyone). Behind a reverse proxy, list the proxy in `access.trustedProxies` so the client address is taken from `X-Forwarded-For`; from any other peer that header is ignored and the peer itself is judged. See [Gateway configuration file](#gateway-configuration-file).
-- **Treat `/solAdmin` as privileged.** It is the only surface that edits entitlements. It is served only to an administrator's session, so its protection is the administrator passwords and the sign-in throttle — use network controls if you need more.
-- **Crawlers are told to stay out:** the gateway serves a `robots.txt` that disallows everything and sends `X-Robots-Tag: noindex, nofollow` on every response. That keeps it out of search indexes, nothing more.
-- **Expect two modules to be missing.** Queue Subscription Explorer and Queue Discovery are hidden in every managed session (including for admins) and cannot be granted, because they read over a SEMP path that cannot be entitlement-filtered. That is deliberate; see [rbac-variant-plan.md](rbac-variant-plan.md) § Threat model.
-- **Review Gateway Settings like any other privileged change.** It can widen the access list, lengthen sessions or turn managed sign-in off; each save leaves a warning line naming the administrator.
-
-**Residual risks** (by design, documented in [rbac-variant-plan.md](rbac-variant-plan.md)):
-
-- **A dialled password works outside the app.** `POST /managed/dial` hands an entitled user their Message VPN's client password, and the SDK needs it in the browser. Anyone holding it can use it against the broker from anywhere that reaches the broker directly; scope each VPN's client username to what its users may do, and keep the broker's own ports off networks users can reach.
-- **Queue rules are a filter in the app.** A user entitled to one Message VPN on a broker can read every VPN the broker's SEMP account can see through the relay, and the queue and read-only rows narrow what the app shows and lets them do, not what the SMF session itself could do. Provision per audience and scope the SEMP account.
-- **An open socket outlives its sign-in session.** It closes on revocation (sign-out, password change, user deleted or demoted, entitlement or Message VPN removed, broker deleted), not when the session's idle or absolute limit passes.
-- **A reverse proxy must keep `Host`.** The SMF gate compares `Origin` with the request's `Host`; a proxy that rewrites `Host` makes every socket fail with `403 cross_origin`.
-- **Use a read-only SEMP account.** The relay refuses every write, but a least-privilege account is still the second line.
-
-**Checking a build end to end.** `./scripts/dev.sh e2e` runs the managed image against an existing broker you name, changing nothing on it, and checks the points above that a client can observe: the session cookie's flags, a `/managed/me` with no secret, the read-only relay, `dial`, the SMF gate and its revocation on sign-out, no credential in any other response or in the log, and the sealed stores and the key file refusal. See [contributing.md -> End-to-end run](contributing.md#end-to-end-run).
+- **Set `CONN_MODES=managed`** unless you need Direct alongside it (see above).
+- **Give each broker a read-only SEMP account** scoped to what its users may see: a user entitled to one Message VPN on a broker can read whatever that account can.
+- **Give each Message VPN a client username** scoped to what its users may do: an entitled user's browser receives its password to connect, and it works outside the app too. Keep the brokers' own ports off networks users can reach.
+- **Change the `admin` password right after the first start**, and remove `ADMIN_PASSWORD` from the environment.
+- **Protect the stores and the store key** with filesystem permissions, and keep the key on a separate mount or secret where you can.
+- **Restrict who can reach the gateway** with `access.allow`, and behind a reverse proxy set `access.trustedProxies` (see [Gateway configuration file](#gateway-configuration-file)). Someone guessing at a known username can lock it out for up to `login.maxBackoffSeconds`; the access list or a VPN in front is the answer.
+- **Treat administrator accounts as privileged.** They edit entitlements, the access list and sign-in itself; each settings save logs a warning naming the administrator.
 
 ### Self-host the static files
 
@@ -301,11 +255,11 @@ The application makes the following network connections from the user's browser:
 | Solace Client | WebSocket (`ws://` or `wss://`) | 8008 (ws), 1443 (wss) | Message operations |
 | SEMP API | HTTP/HTTPS | 8080 (http), 1943 (https) | Management operations |
 
-In the Hosted PWA and Self-host paths, both connections go directly from the browser to the broker — there is no backend server. In the Containerised Gateway path, both connections go through the gateway's reverse proxy on `:9443`.
+In the Hosted PWA and Self-host paths, both connections go directly from the browser to the broker. Behind the [gateway](#containerised-gateway), the browser connects only to the gateway on `:9443`, and the gateway to the broker.
 
 ### CORS
 
-If the Solace broker and the web app are served from different origins, the broker must allow CORS for SEMP requests. WebSocket connections are not subject to CORS restrictions. The Containerised Gateway sidesteps this entirely by proxying SEMP through the same origin as the PWA.
+If the Solace broker and the web app are served from different origins, the broker must allow CORS for SEMP requests. WebSocket connections are not subject to CORS restrictions. Behind the gateway, the broker needs no CORS setting.
 
 ### TLS/SSL
 
@@ -321,22 +275,22 @@ Connection profiles are stored in the browser's `localStorage`. They persist acr
 
 ### Gateway configuration file
 
-`config.yaml` (default `/managed/config.yaml`) holds every gateway setting. It is written once, on the first start without a file, from the seed variables listed under [Containerised Gateway](#containerised-gateway); afterwards the file wins and the environment is only compared against it (one warning per differing variable at each start, with both values). The header the gateway writes maps every key to the variable that seeds it. Keys that have no variable:
+`config.yaml` (default `/managed/config.yaml`) holds every gateway setting. The variables under [Settings](#settings) seed it on the first start; the header it is written with maps every key to its variable. Keys that have no variable:
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `access.allow` | `[]` | CIDR list of clients allowed to reach the gateway, on every route including the broker relay and its WebSocket upgrades. Empty means everyone. A denied client gets `403` with an empty body; the gateway logs one warning with the client address, method and path, and the access log records the 403. |
-| `access.trustedProxies` | `[]` | CIDR list of reverse proxies whose `X-Forwarded-For` is believed. The header is walked right to left and the first address that is not itself a trusted proxy is the client. From any other peer the header is ignored. An address that does not parse is denied. The same client address drives the sign-in throttle. |
+| `access.allow` | `[]` | CIDR list of clients allowed to reach the gateway at all. Empty means everyone. A denied client gets `403`, and the log names its address. |
+| `access.trustedProxies` | `[]` | CIDR list of your reverse proxies. From one of them the client's address is taken from `X-Forwarded-For`; from any other peer that header is ignored. |
 | `session.idleMinutes` | `10` | Managed sign-in: a session ends after this long without a request to the gateway. 1 to `session.absoluteMinutes`. |
 | `session.absoluteMinutes` | `30` | Managed sign-in: a session ends this long after sign-in, however busy. 1 to 1440. |
 | `login.maxFailures` | `5` | Failed sign-ins per username, and per client, before the back-off starts. 1 to 1000. |
 | `login.backoffSeconds` | `30` | First back-off; it doubles with each further failure. 1 to `login.maxBackoffSeconds`. |
 | `login.maxBackoffSeconds` | `900` | Longest back-off. 1 to 86400. |
-| `login.unauthenticatedPerMinute` | `60` | Requests without a session that one client may make per minute (sign-in pages, `/managed/*`, the app under `CONN_MODES=managed`). 1 to 10000. |
-| `modules.offered` | `[queue-browser, queue-copy]` | Managed: the app modules a managed user may be given. Only those two exist; an unknown id (Queue Subscription Explorer included) fails startup. `[]` offers none, leaving Connections alone. |
+| `login.unauthenticatedPerMinute` | `60` | Requests without a session that one client may make per minute. 1 to 10000. |
+| `modules.offered` | `[queue-browser, queue-copy]` | Managed: the app modules a managed user may be given; only those two can be. Queue Subscription Explorer and Queue Discovery are hidden in every managed session. `[]` offers none, leaving Connections alone. |
 | `modules.userDefault` | `all` | Managed: what a user without a `modules` list of their own in `users.yaml` gets, `all` (every offered module) or `none`. |
 
-`session.*`, `login.*` and `modules.*` are read only when `managed` is true. On a managed gateway the admin app's Gateway Settings page edits this file too (see [Administration app](#administration-app-soladmin)); it refuses to save over a hand edit it has not loaded, so after editing the file on the host, restart before using the page. Rules: unknown keys, an empty file, a missing `version: 1` and invalid values (a CIDR without a prefix length, an IPv4-mapped IPv6 prefix, an unknown log level or connection mode, a number out of its range) fail startup with the key and value named. Missing keys take the built-in defaults, never an environment value. Two values never live in the file and are read from the environment on every start: `CONFIG_FILE` and `STORE_KEY_FILE`. The managed image bakes `MANAGED`, `HOSTED` and `CONN_MODES` into its environment; once those keys are changed in the file, every start reports the baked values as ignored, which is expected. The file is written `0644` (it holds no secret); the managed store files stay `0600`.
+`session.*`, `login.*` and `modules.*` apply only to a managed gateway, where the admin app's Gateway Settings page edits this file too (see [Administration app](#administration-app-soladmin)). Missing keys take the built-in defaults, never an environment value; an unknown key, an empty file, a missing `version: 1` or a value out of range stops the start, naming the key and the value. `CONFIG_FILE` and `STORE_KEY_FILE` are never in the file. The managed image sets `MANAGED`, `HOSTED` and `CONN_MODES` in its environment, so once those keys are changed in the file, each start reports the image's values as ignored, which is expected.
 
 ---
 

@@ -22,7 +22,7 @@ docker run --rm -p 9443:9443 -e HOSTED=true -v solace-tls:/tls \
   ghcr.io/solacelabs/solace-msg-utility:latest
 ```
 
-Then open <https://localhost:9443/>. The container ships a built-in HTTPS gateway that also reverse-proxies SEMP/SMF to your broker, so the browser only needs to trust one cert. See [deployment.md → Containerised Gateway](docs/deployment.md#containerised-gateway) for the full env-var list.
+Then open <https://localhost:9443/>. The container connects to your broker for the app, so the browser needs to reach and trust only the container. See [deployment.md -> Containerised Gateway](docs/deployment.md#containerised-gateway) for the images and their settings.
 
 ### Option 3 — Self-host the static files
 
@@ -96,7 +96,7 @@ Once the app is loaded:
 - **Self-contained HTML** — `index.html` includes all app code; the two vendor scripts `solclient.js` and `jszip.min.js` sit alongside it (see [deployment.md](docs/deployment.md#external-runtime-dependencies)).
 - **Demo bundle** (`mock.html`) — every module exercised against mock data, no broker required.
 - **Managed demo** (`managed-demo.html`) -- the Managed sign-in, entitlements and administration pages against a fake gateway in the page; no gateway, no broker, no network request.
-- **Containerised gateway** — optional single-binary Go HTTPS gateway serves the PWA, exposes a `/hosted` probe, and reverse-proxies SEMP/SMF traffic so browsers only need to trust one cert. Distroless image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#containerised-gateway).
+- **Containerised gateway** -- serves the app over HTTPS and connects to your brokers for it, so browsers reach and trust only the container; the managed image adds sign-in and administration. Image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#containerised-gateway).
 
 ## Documentation
 

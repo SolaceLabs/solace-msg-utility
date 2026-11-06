@@ -63,6 +63,8 @@ A **flavor** is a build-time toggle of *how a module behaves*, orthogonal to whi
 
 The two vendor scripts (`solclient.js`, `jszip.min.js`) are intentionally **not** bundled — they're loaded at runtime from sibling locations. The demo build is the exception: it installs its own SDK, so `mock.html` needs no `solclient.js` (only `jszip.min.js`, for ZIP export). See [deployment.md → External Runtime Dependencies](deployment.md#external-runtime-dependencies) for the placement rules the shell expects.
 
+`./scripts/dev.sh image up` builds both images from source and starts them with [docker/docker-compose.yaml](../docker/docker-compose.yaml): the standard gateway on host port `19443`, the managed one on `29443` (`docker compose -f docker/docker-compose.yaml up --build gateway` starts one). Both bind-mount `dist/solclient.js` and `dist/jszip.min.js`, so put those in `dist/` first: a missing file makes Docker create an empty, root-owned directory in its place, which then breaks the next build. Delete it and retry.
+
 ---
 
 ## Project Structure

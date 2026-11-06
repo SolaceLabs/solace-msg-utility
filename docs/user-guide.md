@@ -274,7 +274,7 @@ When Same-VPN is enabled, the destination uses the primary Solace session direct
 
 When the destination is *not* just the primary connection, a **Credentials** choice appears on the Destination Broker card:
 
-- **Provisioned** -- pick a **Broker** and **Message VPN** from the ones you are entitled to. There are no password fields: the gateway connects you with the credentials your administrator provisioned, exactly as it does for the primary connection.
+- **Provisioned** -- pick a **Broker** and **Message VPN** from the ones you are entitled to. There are no password fields: your administrator provisioned the credentials, exactly as for the primary connection.
 - **Manual** — type the host and credentials yourself, as before.
 
 Which options you get follows the deployment: a managed-only deployment offers **Provisioned** alone, a direct one offers **Manual** alone, and a deployment offering both connection modes lets you choose. Switching between them clears the destination target, since it was picked against a different broker.
@@ -374,7 +374,7 @@ The loaded subscription list is held in memory for the session. Subsequent filte
 
 - **Verbose troubleshooting logs**: append `?logLevel=DEBUG` to the URL (e.g. `dist/index.html?logLevel=DEBUG`) to surface fine-grained flow logs in DevTools. Accepted values are `DEBUG`, `INFO` (default), `WARN`, `ERROR`, and `SILENT` (mutes everything). Invalid values fall back to the default.
 
-- **Hosted (gateway) deployment**: when the bundle is served by the optional Go reverse-proxy in `go-web-proxy/`, the broker is internal to the gateway and unreachable from the browser. All broker URLs are automatically tunnelled through the gateway — you still enter the broker's protocol/host/port/path as if connecting directly, and the page displays those same values; the rewrite to the gateway URL is transparent. The PWA detects the mode at startup by probing the gateway-only `/hosted` endpoint, so a standalone deployment (no gateway) keeps working unchanged.
+- **Gateway deployment**: when the app is served by the gateway container, the gateway connects to the broker for you, so the broker need not be reachable from your browser. You still enter the broker's protocol, host, port and path as if connecting directly, and the page shows those same values.
 
 ---
 
@@ -550,7 +550,7 @@ It appears as a second tab in the **Connections** module — **Direct** (type yo
 
 1. **Sign in.** On a deployment that offers only Managed, opening the app takes you straight to the sign-in page. Otherwise open **Connections**, choose the **Managed** tab and click **Sign in**. Enter the username and password your administrator gave you; you return to the app with the **Managed** tab open.
 2. **First sign-in of a new deployment:** the bootstrap `admin` account is asked to choose a new password (12 to 128 characters) before anything else.
-3. Pick a **Broker** and **Message VPN** from the dropdowns -- these list only what you're entitled to, by name. The gateway keeps the broker's address and credentials and connects you through itself, so you never see or type them.
+3. Pick a **Broker** and **Message VPN** from the dropdowns -- these list only what you're entitled to, by name. You never see or type the broker's address or credentials.
 4. Click **Connect**. From here the **Queue Browser** and **Queue Copy** work exactly as usual, but scoped to your entitlements.
 5. **Refresh** re-fetches your entitlements and brokers without signing out (useful right after an admin grants you access). While you are signed in, the sidebar footer shows your username (tagged *admin* for an administrator) above the Client and SEMP lights, with **Change password** (the key icon: the gateway's password page) and **Sign out** (the exit icon). They stay there on every page and while you are connected; signing out while connected disconnects first. In a collapsed sidebar only the icons show.
 
