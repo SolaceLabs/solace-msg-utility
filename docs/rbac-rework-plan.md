@@ -42,7 +42,7 @@ hardening items" section of [rbac-variant-plan.md](rbac-variant-plan.md) when ad
 | Reload | `/managed/reload` dropped | Item 5. The gateway is the only writer and applies every change at once; a hand edit on the volume needs a restart. The Reload button and the reload call in `managed-service.ts` go. |
 | Stored shapes | Gateway is the only writer and validates every file on load. Fixed store path on the `/managed` volume, no hidden or random location | Item 6. Persistence across upgrades needs a mountable path; protection comes from the store encryption above, not from where the files sit. |
 | Browser namespacing | Plaintext stays inside the dial callback, never in `AppState` or form fields | Raises effort, is not a boundary. Item 8. |
-| Distribution | Container images only (decided 2026-11-06): the Release stops attaching the gateway binaries | Phase 5. Trust stays explicit: the image ships no root CAs and trusts only `SSL_TRUST_DIR`, where a deployment puts its brokers' CAs, a public root included. |
+| Distribution | Container images only (decided 2026-11-06): the Release stops attaching the gateway binaries, and the images ship `solclient.js` and `jszip.min.js` from exact-pinned npm packages | Phase 5. Trust stays explicit: the image ships no root CAs and trusts only `SSL_TRUST_DIR`, where a deployment puts its brokers' CAs, a public root included. |
 
 ## 3. Still open
 
@@ -231,6 +231,24 @@ the only way to run the gateway; the Release stops attaching `go-web-proxy[-mana
 - `dev.sh`/`dev.ps1` `build` still compiles both gateways for the host, as a compile check; the
   images build their own in `docker/Dockerfile`.
 - `tests/build/check-bundles.test.ts`: the Release step uploads no `go-web-proxy-*`.
+- The images ship the two vendor scripts (decided 2026-11-06), so no deployment mounts them.
+  `solclientjs` and `jszip` become exact-version dependencies (`npm install --save-exact
+  solclientjs@10.18.3 jszip@3.10.2`, run by the user): the lockfile holds their hashes and `scan`
+  audits them. The `pwa-builder` stage of `docker/Dockerfile` copies
+  `node_modules/solclientjs/lib-browser/solclient.js` and `node_modules/jszip/dist/jszip.min.js`
+  next to `index.html`, and their licence files into `licenses/`: the SDK's `LICENSE.txt`,
+  `licenses.txt` and `COPYRIGHT.txt` (its API licence asks that every notice travel with it), and
+  JSZip's `LICENSE.markdown` (taken under MIT). A missing file fails the image build. The Release
+  HTML files are unchanged, since nothing imports either package, and the `dist` branch keeps its
+  copies for Pages.
+  - `docker/docker-compose.yaml` drops its vendor mounts; `scripts/e2e.mjs` logs in with the
+    pinned SDK instead of `dist/solclient.js`.
+  - New `tests/build/vendor-scripts.test.ts`: each pin is one exact version at or above the
+    shell's `MIN_VERSION` (`src/index.html`), and each file the Dockerfile copies exists in the
+    installed package.
+  - Docs: deployment.md (no vendor mounts, and the SDK's browser build is `lib-browser/`, not
+    `lib/`), README's `docker run`, developer-guide's `image up` note, contributing's e2e
+    prerequisites, the user guide's vendor note.
 - `SSL_CERT_FILE`: Go on Linux also reads it to find its root bundle, so a gateway started with it
   set ignores any system bundle. With no binaries shipped this only bites a container that sets it
   and mounts a bundle at Go's path; the `SSL_CERT_FILE` row in deployment.md says so.
