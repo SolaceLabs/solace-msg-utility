@@ -35,5 +35,9 @@
   },
   "allowScripts": {
     "esbuild@0.25.12": true
+  },
+  "dependencies": {
+    "jszip": "3.10.2",
+    "solclientjs": "10.18.3"
   }
 }

@@ -168,6 +168,7 @@ const plain = (v) => (v === '' ? 'is empty' : CONTROL.test(v) ? 'holds a control
 // An IPv6 zone (fe80::1%eth0) passes net.isIP but not the gateway's net.ParseIP.
 const hostRule = (v) => plain(v)
     || ((net.isIP(v) && !v.includes('%')) || HOST_NAME.test(v) ? '' : `is not a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port: ${v}`);
+const ipRule = (v) => (net.isIP(v) && !v.includes('%') ? '' : `is not an IP address: ${v}`);
 const portRule = (v) => (/^\d{1,5}$/.test(v) && Number(v) >= 1 && Number(v) <= 65535 ? '' : `is not a port number (1-65535): ${v}`);
 const sempUserRule = (v) => plain(v) || (v.includes(':') ? 'holds a ":", which a SEMP username cannot' : '');
 // A VPN or queue name travels as one relay path segment, so it must pass the
@@ -176,15 +177,19 @@ const sempUserRule = (v) => plain(v) || (v.includes(':') ? 'holds a ":", which a
 const segmentRule = (v) => plain(v)
     || (/[\\%;]/.test(v) || v.split('/').some((p) => p === '' || p === '.' || p === '..')
         ? `cannot go through the gateway's relay (no \\ % or ;, and no empty, . or .. part between slashes): ${v}` : '');
+const flagRule = (v) => (v === '0' || v === '1' ? '' : `is not 0 or 1: ${v}`);
 
 /**
  * What the run needs to know about the broker, in prompt order. A `secret` is
  * read without echo, masked in all output and never written to the details
- * file by the harness; `fallback` is the answer a prompt offers.
+ * file by the harness; `fallback` is the answer a prompt offers. An
+ * `optional` detail is never asked for: unset, it takes its fallback.
  */
 export const BROKER_FIELDS = [
     { key: 'host', env: 'E2E_BROKER_HOST', check: hostRule,
         label: "broker host the gateway container dials; it must match the broker's TLS certificate (a broker on this machine: host.docker.internal)" },
+    { key: 'brokerIp', env: 'E2E_BROKER_IP', fallback: '', optional: true, check: ipRule,
+        label: 'address the gateway container maps E2E_BROKER_HOST to (a host alias), for a name it cannot resolve' },
     { key: 'caFile', env: 'E2E_BROKER_CA', check: plain,
         label: "PEM file with the CA that signed the broker's TLS certificate, or that certificate itself" },
     { key: 'sempPort', env: 'E2E_SEMP_PORT', fallback: '1943', check: portRule, label: 'SEMP over TLS port' },
@@ -196,6 +201,8 @@ export const BROKER_FIELDS = [
     { key: 'clientPassword', env: 'E2E_CLIENT_PASSWORD', secret: true, check: plain, label: 'client password' },
     { key: 'queue', env: 'E2E_QUEUE', check: segmentRule,
         label: 'existing queue in that VPN the client username may browse (nothing is consumed)' },
+    { key: 'insecure', env: 'E2E_INSECURE', fallback: '0', optional: true, check: flagRule,
+        label: "1: the gateway skips verifying the broker's TLS certificate (SSL_INSECURE_SKIP_VERIFY, the e2e stack only)" },
 ];
 
 /**
@@ -227,7 +234,8 @@ export function parseDetailsFile(text, name) {
 /**
  * Each broker detail from the environment, else the parsed details file:
  * { values, missing, errors }. `values` is keyed by field key; `missing`
- * lists the fields neither gives, each with the answer to offer; `errors`
+ * lists the fields neither gives, each with the answer to offer (an optional
+ * one takes its fallback instead); `errors`
  * names where each refused value came from.
  */
 export function resolveDetails(env, file = { values: {}, lines: {} }, fileName = 'the details file') {
@@ -238,7 +246,8 @@ export function resolveDetails(env, file = { values: {}, lines: {} }, fileName =
         const fromEnv = env[f.env] ?? '';
         const raw = fromEnv || (file.values[f.env] ?? '');
         if (!raw) {
-            missing.push({ ...f, offer: f.fallback ?? '' });
+            if (f.optional) values[f.key] = f.fallback;
+            else missing.push({ ...f, offer: f.fallback ?? '' });
             continue;
         }
         const problem = f.check(raw);
@@ -246,6 +255,25 @@ export function resolveDetails(env, file = { values: {}, lines: {} }, fileName =
         else values[f.key] = raw;
     }
     return { values, missing, errors };
+}
+
+/**
+ * Why E2E_BROKER_IP cannot alias this host, or '': an alias maps a name, so
+ * the host must be one (the name in the broker's certificate), not an address.
+ */
+export function hostAliasProblem(host, ip) {
+    return ip && net.isIP(host)
+        ? `E2E_BROKER_IP needs E2E_BROKER_HOST to be a name in the broker's certificate, not an address: ${host}` : '';
+}
+
+/**
+ * The compose override that maps `host` to `ip` inside the gateway container,
+ * as docker/docker-compose.e2e.yaml's extra_hosts does for
+ * host.docker.internal. JSON is YAML; both values have passed their rules, so
+ * neither holds a quote, a colon in the name, or a line break.
+ */
+export function hostAliasOverride(host, ip) {
+    return `${JSON.stringify({ services: { gateway: { extra_hosts: [`${host}:${ip}`] } } }, null, 2)}\n`;
 }
 
 const DETAILS_FILE_HEADER = [

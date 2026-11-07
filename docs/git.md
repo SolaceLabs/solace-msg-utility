@@ -1,15 +1,14 @@
 # Git Workflow & Release Process
 
-This project ships in four forms:
+This project ships in three forms:
 
 1. A **container image** at `ghcr.io/solacelabs/solace-msg-utility` (produced by [docker/Dockerfile](../docker/Dockerfile)), in a standard and a `managed-` prefixed variant.
 2. A **public PWA** hosted on GitHub Pages at `https://solacelabs.github.io/solace-msg-utility/`.
 3. The **PWA bundles** (`index.html` and its Direct-only variants, plus the offline `managed-demo.html`) attached to the GitHub Release. The managed sign-in ships inside the `managed-` image; the demo runs it against a fake gateway in the page.
-4. The **gateway binaries** (`go-web-proxy`), cross-compiled and attached to the same Release.
 
-All four are produced by [`.github/workflows/tag.yml`](../.github/workflows/tag.yml), which fires when you **push a `v*` tag**. Nothing is built or pushed on an ordinary branch push or pull request (the only automatic runs are listed under [Day-to-day branching](#day-to-day-branching): the narrow CI trigger and the SCA scan).
+All three are produced by [`.github/workflows/tag.yml`](../.github/workflows/tag.yml), which fires when you **push a `v*` tag**. Nothing is built or pushed on an ordinary branch push or pull request (the only automatic runs are listed under [Day-to-day branching](#day-to-day-branching): the narrow CI trigger and the SCA scan).
 
-The tag itself is the single source of version truth. There is no version field to bump: the binaries report the tag as-is (`v3.4.0`), the image tags and the PWA's `__APP_VERSION__` take it with the leading `v` stripped (`3.4.0`), and `package.json` carries the deliberately implausible placeholder `0.0.0-dev` so a build that lost the injection looks wrong rather than merely out of date.
+The tag itself is the single source of version truth. There is no version field to bump: the gateway reports the tag as-is (`v3.4.0`), the image tags and the PWA's `__APP_VERSION__` take it with the leading `v` stripped (`3.4.0`), and `package.json` carries the deliberately implausible placeholder `0.0.0-dev` so a build that lost the injection looks wrong rather than merely out of date.
 
 ---
 
@@ -47,7 +46,7 @@ git describe --tags --always --dirty          # e.g. v3.4.0
 ./dist/go-web-proxy-linux-amd64 --version     # must match
 ```
 
-A binary reporting `dev` means the `-ldflags` injection is not reaching the build, and the release would ship a wrongly-labelled artifact.
+A binary reporting `dev` means the `-ldflags` injection is not reaching the build, and the images would ship a wrongly-labelled gateway.
 
 Individual tasks are available when you only need one: `build`, `vet`, `test`, `mock`, `cov`, `scan`, `image`, `up`, `down`, `graphify`, `e2e`. `all` (= `build vet test mock`) is the fast inner loop and what CI runs, as `all scan`.
 
@@ -95,12 +94,12 @@ gh run watch
 | `plan` | — | Resolves the project shape once, loudly: is there a `docker/Dockerfile`, and is the `BUILD_TARGETS` repo variable valid JSON. | `BUILD_TARGETS` is malformed, or nothing at all would ship. |
 | `gates` | `plan` | Calls [`ci.yml`](../.github/workflows/ci.yml), which runs `./scripts/dev.sh all scan` on `ubuntu-24.04` and `./scripts/dev.ps1 all scan` on `windows-2025`, then uploads `scripts/logs/` as an artifact. | A build, type, test, `npm audit`, `govulncheck` or Trivy failure on either platform. |
 | `image` | `plan`, `gates` | A 2-leg matrix (`standard`, `managed`) builds multi-arch (`linux/amd64,linux/arm64`) with buildx and pushes to GHCR **by digest only** (no tag) with provenance and SBOM, then Trivy-scans each platform's manifest of that digest separately (Trivy on a multi-arch index scans only one platform). The legs serve different bundles: `standard` serves `index.html`; `managed` bakes `MANAGED`/`HOSTED`/`CONN_MODES`, serves `managed.html` as its `index.html` and adds `/solAdmin` (both via `MANAGED_UI`), and builds the gateway with `GO_TAGS=managed`. | Any HIGH/CRITICAL fixable OS or library vuln on either platform of either image, or a pushed platform with no Trivy step. Nothing is tagged yet, so `latest` and `managed-latest` stay where they were. |
-| `binaries` | `plan`, `gates` | Runs `./scripts/dev.sh build` once per `BUILD_TARGETS` entry. Each leg emits both gateway variants named `go-web-proxy[-managed]-<os>-<arch>[.exe]`, plus the PWA bundles. | A cross-compile failure. |
+| `binaries` | `plan`, `gates` | Runs `./scripts/dev.sh build` for the one `BUILD_TARGETS` entry and keeps the PWA bundles it emits for the Release. The gateway binaries it also compiles are not shipped: the gateway ships only inside the images. | A build failure. |
 | `publish` | `image`, `binaries` | Points every tag `docker/metadata-action` derived (see [Image tags](#image-tags)) at the digest its leg scanned, with `docker buildx imagetools create`. That re-pushes the index byte-for-byte, so the digest does not change; it then checks that each tag resolves to that digest. Runs only when both image legs and the binaries passed, one tag run at a time. | A registry error, or a tag that does not resolve to the scanned digest. |
 | `pages` | `plan`, `gates`, `image`, `binaries`, `publish` | Checks out the `dist` branch, copies *only* `index.html` into the branch root, commits, pushes. Pages auto-redeploys. | Only runs when everything upstream passed — a red scan no longer redeploys the site. |
 | `release` | `plan`, `gates`, `image`, `binaries`, `publish` | Merges every `bin-*` artifact into one `dist/`, writes `SHA256SUMS.txt`, generates notes, appends both image digests, and creates the Release with everything attached. | Never publishes unless at least one producer actually succeeded. |
 
-The `binaries` matrix runs `build` per target, so each leg emits its own identical copy of the PWA bundles; `merge-multiple` collapses them. The gateway binaries carry their target in the filename and survive the merge intact — which is why the naming is load-bearing, not cosmetic.
+`binaries` keeps its name from the standard template. Should `BUILD_TARGETS` ever list more than one target, each leg emits an identical copy of the bundles and `merge-multiple` collapses them.
 
 ### Repo variables
 
@@ -108,7 +107,7 @@ The `binaries` matrix runs `build` per target, so each leg emits its own identic
 
 | Variable | Value | Why |
 | --- | --- | --- |
-| `BUILD_TARGETS` | `[{"os":"linux","arch":"amd64"},{"os":"linux","arch":"arm64"},{"os":"windows","arch":"amd64"},{"os":"darwin","arch":"arm64"}]` | Drives the `binaries` matrix. Must be a non-empty JSON array of `{os, arch}`. |
+| `BUILD_TARGETS` | `[{"os":"linux","arch":"amd64"}]` | Drives the `binaries` job, which emits the PWA bundles; one target is enough. Must be a non-empty JSON array of `{os, arch}`. |
 | `SHIP_IMAGE` | *unset* | Unset means "is there a Dockerfile", which there is. Set `false` only if the image should stop being published. |
 
 ### Image tags
@@ -125,14 +124,13 @@ Within each leg all four tags point to the same digest: the one `image` pushed a
 ### Release assets
 
 - `index.html`, `min.html`, `mock.html`, `no-payload.html`, `no-queue-copy.html`, `managed-demo.html` (the `RELEASE_BUNDLES` list in the `release` step, kept equal to `scripts/check-bundles.mjs` by a test). `managed-demo.html` is the only one with managed UI: it runs against an in-browser fake gateway and holds no gateway or broker address.
-- `go-web-proxy-<os>-<arch>[.exe]` and `go-web-proxy-managed-<os>-<arch>[.exe]`, one pair per `BUILD_TARGETS` entry
 - `SHA256SUMS.txt` over all of the above
 
 The build also emits `solAdmin.html` and `managed.html`. The `release` step uploads an explicit list, never `dist/*`, so neither is a Release asset: both exist only inside the managed image.
 
-`dist/` is git-ignored on `main`. The bundles and binaries are build output, published by this Release (Pages also serves `index.html`; the standard image bakes in `index.html`, the managed image `managed.html` (as its `index.html`) and `solAdmin.html`). Never commit them: a tracked bundle is stale as soon as `src/` moves on, and because `build` rewrites it the tree turns dirty mid-sweep -- the binary is stamped before the build, `git describe --dirty` runs after it, and the version check under [Pre-release checklist](#pre-release-checklist-local) stops matching.
+`dist/` is git-ignored on `main`. The bundles are build output, published by this Release (Pages also serves `index.html`; the standard image bakes in `index.html`, the managed image `managed.html` (as its `index.html`) and `solAdmin.html`). Never commit them: a tracked bundle is stale as soon as `src/` moves on, and because `build` rewrites it the tree turns dirty mid-sweep -- the binary is stamped before the build, `git describe --dirty` runs after it, and the version check under [Pre-release checklist](#pre-release-checklist-local) stops matching.
 
-The two vendor JS files (`solclient.js`, `jszip.min.js`) are **not** release assets — they are not committed to `main`. Take them from the `dist` branch. See [deployment.md](deployment.md).
+The two vendor JS files (`solclient.js`, `jszip.min.js`) are **not** release assets — they are not committed to `main`. Take them from the `dist` branch; the images include both. See [deployment.md](deployment.md).
 
 ### Why scans block the release
 
@@ -229,7 +227,7 @@ Do **not** retag an existing version. Image consumers cache by digest, so retagg
 | `publish` is *Canceled* while waiting | Three or more tags were pushed at once; GitHub keeps one pending job per concurrency group and cancels the older one. | Re-run that run's failed jobs, then re-run the newest release's `publish` so `latest` ends on the newest. |
 | `image` or `publish` fails with `denied: permission_denied` | The tag was pushed to a fork, or `packages: write` is missing from repo settings. | Push tags on `SolaceLabs/solace-msg-utility`. Verify *Settings → Actions → Workflow permissions* allows `GITHUB_TOKEN` to write packages. |
 | The first GHCR push creates a **private** package | GHCR defaults new packages to private. | A one-time repo setting: *Packages → the package → Package settings → Change visibility*. |
-| A released binary reports `dev` instead of the tag | The `-ldflags` injection did not reach the build. | The injection is a linker flag — when it goes missing the binary silently reports its compiled-in default and the build stays green. Check `-X main.version=` in [scripts/dev.sh](../scripts/dev.sh) and the `APP_VERSION` build-arg in [docker/Dockerfile](../docker/Dockerfile). |
+| The gateway reports `dev` instead of the tag | The `-ldflags` injection did not reach the build. | The injection is a linker flag — when it goes missing the binary silently reports its compiled-in default and the build stays green. Check `-X main.version=` in [scripts/dev.sh](../scripts/dev.sh) and the `APP_VERSION` build-arg in [docker/Dockerfile](../docker/Dockerfile). |
 | `git describe` returns a bare SHA locally | A shallow clone, or a fetch without `--tags`. | `git fetch --tags`. The release path never depends on it — CI exports `VERSION` from the tag ref. |
 | `pages` fails on `Check out dist branch` with `Remote branch dist not found` | The `dist` branch hasn't been created yet. | Create it once locally with the vendor files + `.nojekyll` committed and push: `git push -u origin dist`. See the one-time setup note above. |
 | `pages` fails on `git push` with `Permission to ... denied` | Repo settings restrict `GITHUB_TOKEN` to read-only. | *Settings → Actions → General → Workflow permissions: Read and write permissions*. The job already declares `contents: write`. |

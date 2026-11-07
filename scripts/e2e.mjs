@@ -11,13 +11,25 @@
 // passwords. Nothing on the broker is created or changed: the run reads it
 // through the gateway's read-only relay and browses an existing queue.
 //
+// E2E_BROKER_IP maps E2E_BROKER_HOST to that address inside the gateway
+// container (a host alias, through a compose override under scripts/logs/e2e/),
+// so the host can be the name in the broker's certificate even where no DNS
+// resolves it.
+//
+// The gateway verifies the broker's certificate unless E2E_INSECURE=1, which
+// starts the e2e gateway with SSL_INSECURE_SKIP_VERIFY=true for a broker whose
+// certificate does not name the host it is dialled by. The run then says so
+// at the start and in its summary: checks 3, 4 and 6 pass without proving the
+// broker's TLS is trusted.
+//
 // Every check prints PASS or FAIL with its number. Any FAIL, or a setup step
 // that cannot complete, exits 1. The gateway's passwords, its store key and
 // its TLS material are generated per run, written only under scripts/logs/e2e/
 // (git-ignored, deleted at the end) and masked in everything printed here; so
 // are the broker's passwords.
 //
-// The SMF half uses the real SDK (dist/solclient.js) under Node. Node's
+// The SMF half uses the real SDK under Node: the browser build of the
+// solclientjs version package.json pins, the one the images ship. Node's
 // WebSocket cannot send the session cookie or an Origin, which a browser adds
 // on its own, so the SDK connects to a loopback bridge that adds both and
 // pipes the bytes to the gateway's /managed/smf socket unchanged.
@@ -34,7 +46,7 @@ import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import {
     MIN_MASKED, SESSION_COOKIE, createCookieJar, detailsFileText, findTokens, hostRootBundle, issueCert, jsonFindings,
-    makeCA, maskSecrets, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails, sealedHeaderProblem,
+    hostAliasOverride, hostAliasProblem, makeCA, maskSecrets, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails, sealedHeaderProblem,
     sessionCookieProblems, sweepSecrets,
 } from './e2e-lib.mjs';
 
@@ -43,7 +55,8 @@ const COMPOSE = path.join(REPO, 'docker', 'docker-compose.e2e.yaml');
 const DETAILS_NAME = 'docker/e2e-broker.env';
 const DETAILS_FILE = path.join(REPO, DETAILS_NAME);
 const WORK = path.join(REPO, 'scripts', 'logs', 'e2e');
-const SOLCLIENT = path.join(REPO, 'dist', 'solclient.js');
+const ALIAS = path.join(WORK, 'host-alias.yaml');
+const SOLCLIENT = path.join(REPO, 'node_modules', 'solclientjs', 'lib-browser', 'solclient.js');
 const LOG = process.env.E2E_LOG ?? '';
 
 // The gateway's host port, bound to 127.0.0.1 by docker/docker-compose.e2e.yaml.
@@ -151,7 +164,7 @@ async function collectDetails() {
     }
     const { values, missing, errors } = resolveDetails(process.env, file, DETAILS_NAME);
     expect(errors.length === 0, `broker details refused:\n  ${errors.join('\n  ')}`);
-    if (!missing.length) return values;
+    if (!missing.length) return checkedAlias(values);
 
     expect(process.stdin.isTTY && process.stdout.isTTY,
         `broker details missing: set ${missing.map((f) => f.env).join(', ')} in ${DETAILS_NAME} or the environment, or run in a terminal to be asked`);
@@ -174,6 +187,13 @@ async function collectDetails() {
         if (fileText === null) fs.chmodSync(DETAILS_FILE, 0o600);
         say(`saved ${Object.keys(additions).join(', ')} to ${DETAILS_NAME} (git-ignored); passwords are not saved`);
     }
+    return checkedAlias(values);
+}
+
+/** The details, once the host alias (if any) is known to name a host; checked after the prompts, which may supply the host. */
+function checkedAlias(values) {
+    const problem = hostAliasProblem(values.host, values.brokerIp);
+    expect(!problem, `broker details refused:\n  ${problem}`);
     return values;
 }
 
@@ -194,9 +214,11 @@ function readBrokerCA(file) {
 }
 
 function describeBroker(certs) {
-    say(`broker: ${broker.host}, SEMP port ${broker.sempPort} as ${broker.sempUser}, wss port ${broker.smfPort}, `
+    const alias = broker.brokerIp ? ` (${broker.brokerIp} in the gateway container)` : '';
+    say(`broker: ${broker.host}${alias}, SEMP port ${broker.sempPort} as ${broker.sempUser}, wss port ${broker.smfPort}, `
         + `VPN ${broker.vpn}, client username ${broker.clientUser}, queue ${broker.queue}`);
     for (const c of certs) say(`trusting ${c.subject.replace(/\n/g, ', ')} (valid until ${c.validTo}) from ${broker.caFile}`);
+    if (insecure()) say("warning: E2E_INSECURE=1: the gateway does not verify the broker's certificate (SSL_INSECURE_SKIP_VERIFY=true)");
     for (const [name, label] of [['sempPassword', 'the SEMP password'], ['clientPassword', 'the client password']]) {
         if (brokerSecrets[name].length < MIN_MASKED) {
             say(`note: ${label} is shorter than ${MIN_MASKED} characters: it is masked, but checks 2, 10, 11 and 14 cannot look for it without matching ordinary text`);
@@ -206,8 +228,14 @@ function describeBroker(certs) {
 
 // --- docker ------------------------------------------------------------------
 
+const insecure = () => broker.insecure === '1';
+
 function compose(args, { quiet = false } = {}) {
-    const r = spawnSync('docker', ['compose', '-f', COMPOSE, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    // Always set, so a value inherited from the shell never reaches the gateway.
+    const env = { ...process.env, E2E_GATEWAY_SKIP_VERIFY: insecure() ? 'true' : '' };
+    // The host alias override exists only from writeMaterial to teardown.
+    const files = ['-f', COMPOSE, ...(fs.existsSync(ALIAS) ? ['-f', ALIAS] : [])];
+    const r = spawnSync('docker', ['compose', ...files, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
     if (r.error) throw new Error(`docker compose ${args[0]}: ${r.error.message}`);
     const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
     if (!quiet && out.trim()) say(out.trimEnd());
@@ -241,6 +269,7 @@ function writeMaterial(brokerCerts, roots) {
     put('gateway.key', gateway.keyPem);
     put('admin-password', `${secrets.bootstrapPassword}\n`);
     put('store.key', `${secrets.storeKey}\n`);
+    if (broker.brokerIp) put(path.basename(ALIAS), hostAliasOverride(broker.host, broker.brokerIp));
     // The repo's package.json says "type": "module", so the SDK's UMD bundle
     // is loaded from a .cjs copy.
     fs.copyFileSync(SOLCLIENT, path.join(WORK, 'solclient.cjs'));
@@ -678,7 +707,7 @@ function teardown() {
 
 async function main() {
     if (!fs.existsSync(SOLCLIENT)) {
-        say(`error: ${SOLCLIENT} is missing. Copy the Solace JS SDK's solclient.js into dist/, as for a local run (docs/deployment.md, External Runtime Dependencies).`);
+        say(`error: ${SOLCLIENT} is missing. Run npm ci: package.json pins solclientjs.`);
         return 1;
     }
     let setupError = null;
@@ -711,7 +740,8 @@ async function main() {
         }
         teardown();
     }
-    say(`e2e: ${results.length - failed.length} passed, ${failed.length} failed${failed.length ? ` (${failed.join(', ')})` : ''}${setupError ? ', setup failed' : ''}`);
+    say(`e2e: ${results.length - failed.length} passed, ${failed.length} failed${failed.length ? ` (${failed.join(', ')})` : ''}${setupError ? ', setup failed' : ''}`
+        + `${insecure() ? "; the broker's certificate was not verified (E2E_INSECURE=1)" : ''}`);
     return setupError || failed.length ? 1 : 0;
 }
 

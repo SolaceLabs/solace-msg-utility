@@ -13,7 +13,7 @@
 #                  If tls.crt / tls.key are missing, the gateway generates a
 #                  self-signed pair on startup (writable mount required for that).
 #   /pwa         — PWA bundle (index.html, plus solAdmin.html on managed images,
-#                  plus any sibling assets such as solclient.js). The managed
+#                  plus solclient.js, jszip.min.js and licenses/). The managed
 #                  image's index.html is the managed build (managed.html).
 #                  Defaults to /SolaceMsgUtility inside the image; override
 #                  with APP_DIR.
@@ -132,6 +132,18 @@ RUN APP_VERSION="$APP_VERSION" npm run build
 # managed.html, the only bundle that carries the Managed sign-in, under the
 # same name, plus solAdmin.html. Which tabs managed.html offers is still a
 # runtime decision from CONN_MODES via /hosted.
+# The two vendor scripts the shell loads from beside index.html, from the exact
+# versions package.json pins (package-lock.json holds their hashes), with the
+# licence files their terms ask to travel with them: every notice the Solace
+# SDK ships, and JSZip's licence (taken under MIT). A missing file fails the
+# build. The Release HTML files never carry either: nothing in src/ imports
+# them. Before MANAGED_UI, so both image variants share the layer;
+# tests/build/vendor-scripts.test.ts checks each path exists in the package.
+RUN mkdir -p /staging/app/licenses/solclientjs /staging/app/licenses/jszip \
+ && cp node_modules/solclientjs/lib-browser/solclient.js node_modules/jszip/dist/jszip.min.js /staging/app/ \
+ && cp node_modules/solclientjs/LICENSE.txt node_modules/solclientjs/licenses.txt node_modules/solclientjs/COPYRIGHT.txt /staging/app/licenses/solclientjs/ \
+ && cp node_modules/jszip/LICENSE.markdown /staging/app/licenses/jszip/
+
 ARG MANAGED_UI=""
 RUN mkdir -p /staging/app \
  && if [ -n "$MANAGED_UI" ]; then \

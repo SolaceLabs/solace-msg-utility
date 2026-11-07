@@ -34,15 +34,13 @@ The gateway image serves the app over HTTPS and connects to your brokers for it:
 
 #### Running the gateway
 
-The app's two vendor scripts are not in the image: mount `solclient.js` and `jszip.min.js` next to it (see [External Runtime Dependencies](#external-runtime-dependencies)).
+Both images include the two scripts the app loads, `solclient.js` (Solace's JavaScript messaging API) and `jszip.min.js`, with their licences under `/SolaceMsgUtility/licenses/`.
 
 ```bash
 docker run --rm -p 9443:9443 \
   -e HOSTED=true \
   -v solace-tls:/tls \
   -v solace-config:/managed \
-  -v ./solclient.js:/SolaceMsgUtility/solclient.js:ro \
-  -v ./jszip.min.js:/SolaceMsgUtility/jszip.min.js:ro \
   ghcr.io/solacelabs/solace-msg-utility:latest
 ```
 
@@ -54,7 +52,7 @@ Then open <https://localhost:9443/>. For the managed image, see [Managed Mode](#
 | --- | --- |
 | `/tls` | `tls.crt` and `tls.key`, the gateway's own certificate, and `trust/`, the CAs it trusts for broker connections. |
 | `/managed` | Writable: `config.yaml`, and on the managed image the stores and the store key. Without a volume they are lost when the container is recreated. |
-| `/SolaceMsgUtility` | The app, baked in. Mount over it only to serve your own build (`APP_DIR` moves it). |
+| `/SolaceMsgUtility` | The app and its two vendor scripts, baked in. Mount over it only to serve your own build, with both scripts beside it (`APP_DIR` moves it). |
 
 Use named volumes: they take the image's UID `65532` ownership. A bind-mounted directory must already be owned by UID `65532`, or hold its files ready so the gateway never needs to write.
 
@@ -74,7 +72,7 @@ The gateway keeps its settings in `config.yaml` on the `/managed` volume. The va
 | `CONN_MODES` | `direct` | Which connection tabs the app offers: `direct`, `managed` or `both` (see [Managed Mode](#managed-mode-rbac)). |
 | `DEFAULT_CONN` | `direct` | Which tab opens first under `both`: `direct` or `managed`. |
 | `APP_DIR` | `/SolaceMsgUtility` | Where the app's files are. May be read-only. |
-| `SSL_CERT_FILE` | `/tls/tls.crt` | The gateway's TLS certificate (PEM). |
+| `SSL_CERT_FILE` | `/tls/tls.crt` | The gateway's TLS certificate (PEM). Go also reads this variable to find a system CA bundle, so a container that sets it ignores any bundle mounted at Go's default path: add CAs through `SSL_TRUST_DIR`. |
 | `SSL_KEY_FILE` | `/tls/tls.key` | Its private key (PEM). |
 | `SSL_TRUST_DIR` | `/tls/trust` | The CAs trusted for broker connections (`*.crt`, `*.pem`); see [TLS and trusted CAs](#tls-and-trusted-cas). |
 | `SSL_INSECURE_SKIP_VERIFY` | `false` | `true` skips verifying brokers' certificates, with a warning at start. Lab use only. |
@@ -97,8 +95,6 @@ The managed image already sets `HOSTED=true`, `MANAGED=true` and `CONN_MODES=man
 docker run --rm -p 9443:9443 \
   -v solace-tls:/tls \
   -v solace-managed:/managed \
-  -v ./solclient.js:/SolaceMsgUtility/solclient.js:ro \
-  -v ./jszip.min.js:/SolaceMsgUtility/jszip.min.js:ro \
   ghcr.io/solacelabs/solace-msg-utility:managed-latest
 ```
 
@@ -160,7 +156,7 @@ Managed mode is fit for **trusted-internal** use. Before exposing it:
 
 ### Self-host the static files
 
-The simplest deployment without Docker. `index.html` is attached to every [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) the tag pipeline creates (alongside the other bundle variants, the `go-web-proxy` binaries and a `SHA256SUMS.txt` to verify them); releases up to v3.3.4 predate the pipeline and carry no assets. The newest is always at a stable URL, so a script can fetch it directly — keep `-f`, so a failed download is an error instead of a saved error page:
+The simplest deployment without Docker. `index.html` is attached to every [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) the tag pipeline creates (alongside the other bundle variants and a `SHA256SUMS.txt` to verify them); releases up to v3.3.4 predate the pipeline and carry no assets. The newest is always at a stable URL, so a script can fetch it directly — keep `-f`, so a failed download is an error instead of a saved error page:
 
 ```bash
 curl -fLO https://github.com/SolaceLabs/solace-msg-utility/releases/latest/download/index.html
@@ -201,7 +197,7 @@ You can open `index.html` directly in a browser via `file:///…`, but **SEMP AP
 
 ## External Runtime Dependencies
 
-The PWA loads two external scripts via `<script>` tags. They are not bundled into the HTML and must be mounted alongside it at the deployment location. The same requirement applies to `min.html`, `mock.html`, `no-payload.html`, and `no-queue-copy.html`; every variant of the PWA expects the two vendor files next to it. `managed.html` (the managed image's `index.html`) needs them too. `solAdmin.html` uses none of what those files provide (it never opens a broker connection and has no ZIP export), but it is built from the same shell, so it still runs the vendor loader and will show the "not found" banner if they are absent. The managed image ships them alongside it.
+The PWA loads two external scripts via `<script>` tags. They are not bundled into the HTML: wherever you host an HTML file yourself, put both next to it. The container images already include both, from the exact versions `package.json` pins, with their licence files under `licenses/`. The same requirement applies to `min.html`, `mock.html`, `no-payload.html`, and `no-queue-copy.html`; every variant of the PWA expects the two vendor files next to it. `managed.html` (the managed image's `index.html`) needs them too. `solAdmin.html` uses none of what those files provide (it never opens a broker connection and has no ZIP export), but it is built from the same shell, so it still runs the vendor loader and will show the "not found" banner if they are absent.
 
 The shell tries each file in two locations, in order:
 
@@ -219,7 +215,7 @@ The first file that loads wins; if both 404 the shell shows a "vendor file not f
 - Download from the [Solace Developer Portal](https://solace.com/downloads/)
 - [Solace Customer Portal](https://products.solace.com/) > Products > APIs > Javascript
 - Or from the Solace PubSub+ broker's built-in web interface (typically at `http://<broker>:8080/`)
-- NPM: `npm install solclientjs` (then copy `node_modules/solclientjs/lib/solclient.js`)
+- NPM: `npm install solclientjs` (then copy `node_modules/solclientjs/lib-browser/solclient.js`, the browser build)
 
 **Version compatibility:** **10.18.3 or newer is enforced.** The shell reads `window.solace.Version.version` after load; below that floor it shows an "Outdated Library" banner and leaves `solaceLibLoaded` false, and the connection factory then refuses to open a session — Connect reports the version error on the connection card instead of failing obscurely deeper in the SDK. A build that reports **no** version at all cannot be checked, so it is allowed through with a console warning rather than blocked. The app accesses `window.solace` as a global.
 

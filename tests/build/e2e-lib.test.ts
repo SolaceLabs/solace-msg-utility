@@ -1,12 +1,16 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { X509Certificate } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import tls from 'node:tls';
 import type { AddressInfo } from 'node:net';
 import {
-    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, createCookieJar, detailsFileText, findTokens, hostRootBundle,
+    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, createCookieJar, detailsFileText, findTokens, hostAliasOverride,
+    hostAliasProblem, hostRootBundle,
     issueCert, jsonFindings, makeCA, maskSecrets, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails,
     sealedHeaderProblem, sessionCookieProblems, sweepSecrets,
 } from '../../scripts/e2e-lib.mjs';
+import { REPO_ROOT } from '../helpers/sources';
 
 // The gateway's own Set-Cookie for a sign-in (go-web-proxy/session.go).
 const GATEWAY_COOKIE = `${SESSION_COOKIE}=c2Vzc2lvbi12YWx1ZQ; Path=/; HttpOnly; Secure; SameSite=Lax`;
@@ -125,19 +129,30 @@ describe('e2e-lib -- broker details', () => {
         expect(values).toEqual({
             host: 'broker.example.com', caFile: 'certs/ca.pem', sempPort: '943', sempUser: 'monitor', sempPassword: 'semp-secret-1',
             smfPort: '443', vpn: 'prod-vpn', clientUser: 'app', clientPassword: 'client-secret-1', queue: 'orders/other',
+            brokerIp: '', insecure: '0',
         });
     });
 
     it('lists what neither gives, in prompt order, offering the defaults and no secret', () => {
         const file = parseDetailsFile('E2E_BROKER_HOST=broker.example.com\nE2E_SEMP_PASSWORD=\n', FILE);
         const { values, missing } = resolveDetails({}, file, FILE);
-        expect(values).toEqual({ host: 'broker.example.com' });
+        expect(values).toEqual({ host: 'broker.example.com', brokerIp: '', insecure: '0' });
         expect(missing.map((f) => [f.env, f.offer, !!f.secret])).toEqual([
             ['E2E_BROKER_CA', '', false], ['E2E_SEMP_PORT', '1943', false], ['E2E_SEMP_USER', 'admin', false],
             ['E2E_SEMP_PASSWORD', '', true], ['E2E_SMF_PORT', '1443', false], ['E2E_VPN', 'default', false],
             ['E2E_CLIENT_USER', '', false], ['E2E_CLIENT_PASSWORD', '', true], ['E2E_QUEUE', '', false],
         ]);
-        expect(resolveDetails({}).missing).toHaveLength(BROKER_FIELDS.length);
+        expect(resolveDetails({}).missing).toHaveLength(BROKER_FIELDS.filter((f) => !f.optional).length);
+    });
+
+    // The one optional detail: verification stays on unless asked off, and
+    // only 1 turns it off, so a "true" or "yes" fails loudly instead.
+    it('never asks for E2E_INSECURE: unset is 0, the environment overrides the file, and only 0 or 1 is taken', () => {
+        const file = parseDetailsFile('E2E_INSECURE=1\n', FILE);
+        expect(resolveDetails({}, file, FILE).values.insecure).toBe('1');
+        expect(resolveDetails({ E2E_INSECURE: '0' }, file, FILE).values.insecure).toBe('0');
+        expect(resolveDetails({}).missing.map((f) => f.env)).not.toContain('E2E_INSECURE');
+        expect(resolveDetails({ E2E_INSECURE: 'true' }).errors).toEqual(['E2E_INSECURE (environment) is not 0 or 1: true']);
     });
 
     it('names where each refused value came from, and never repeats a password', () => {
@@ -164,6 +179,21 @@ describe('e2e-lib -- broker details', () => {
         for (const ok of ['1', '943', '65535']) expect(check('E2E_SEMP_PORT', ok)).toBe('');
         for (const bad of ['0', '65536', '+943', '9 43', '']) expect(check('E2E_SMF_PORT', bad)).not.toBe('');
         expect(check('E2E_SEMP_PASSWORD', '')).toBe('is empty');
+        for (const ok of ['10.14.128.129', 'fd00::5']) expect(check('E2E_BROKER_IP', ok)).toBe('');
+        for (const bad of ['solxps.handy', '10.0.0.300', 'fe80::1%eth0']) expect(check('E2E_BROKER_IP', bad)).toBe(`is not an IP address: ${bad}`);
+    });
+
+    // The certificate names solxps.handy, which nothing resolves: the alias
+    // maps that name to the broker's address inside the gateway container.
+    it('aliases a host name to E2E_BROKER_IP, never an address', () => {
+        const file = parseDetailsFile('E2E_BROKER_HOST=solxps.handy\nE2E_BROKER_IP=10.14.128.129\n', FILE);
+        expect(resolveDetails({}, file, FILE).values).toMatchObject({ host: 'solxps.handy', brokerIp: '10.14.128.129' });
+        expect(hostAliasProblem('solxps.handy', '10.14.128.129')).toBe('');
+        expect(hostAliasProblem('10.14.128.129', '')).toBe('');
+        expect(hostAliasProblem('10.14.128.129', '10.14.128.130')).toBe(
+            "E2E_BROKER_IP needs E2E_BROKER_HOST to be a name in the broker's certificate, not an address: 10.14.128.129");
+        expect(JSON.parse(hostAliasOverride('solxps.handy', 'fd00::5')))
+            .toEqual({ services: { gateway: { extra_hosts: ['solxps.handy:fd00::5'] } } });
     });
 
     it('refuses a file line it cannot use, by line number and without its value', () => {
@@ -179,6 +209,22 @@ describe('e2e-lib -- broker details', () => {
         expect(parseDetailsFile(fresh, FILE).values).toEqual({ E2E_BROKER_HOST: 'broker', E2E_VPN: 'default' });
         const own = '# mine\r\nE2E_SEMP_PASSWORD=kept-by-hand\r\nE2E_QUEUE = \r\n';
         expect(detailsFileText(own, { E2E_QUEUE: 'q1', E2E_VPN: 'v' })).toBe('# mine\nE2E_SEMP_PASSWORD=kept-by-hand\nE2E_QUEUE=q1\nE2E_VPN=v\n');
+    });
+});
+
+// A hard-coded "true" left in the compose file would make every run skip
+// verification while the harness reports that it verified.
+describe('e2e stack -- broker verification', () => {
+    const read = (rel: string) => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf-8');
+
+    it('verifies the broker unless the harness passes E2E_INSECURE=1 through', () => {
+        expect(read('docker/docker-compose.e2e.yaml').match(/^[ \t]*SSL_INSECURE_SKIP_VERIFY:.*$/gm))
+            .toEqual(['      SSL_INSECURE_SKIP_VERIFY: ${E2E_GATEWAY_SKIP_VERIFY:-}']);
+        expect(read('scripts/e2e.mjs')).toContain("E2E_GATEWAY_SKIP_VERIFY: insecure() ? 'true' : ''");
+    });
+
+    it('has the gateway service the host alias override extends', () => {
+        expect(read('docker/docker-compose.e2e.yaml')).toMatch(/^services:\n(?:.*\n)*?  gateway:$/m);
     });
 });
 

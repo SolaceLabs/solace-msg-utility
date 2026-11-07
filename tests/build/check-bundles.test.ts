@@ -204,4 +204,9 @@ describe('check-bundles — the Release upload list', () => {
     it('is the Direct bundles plus the managed demo', () => {
         expect(RELEASE_BUNDLES).toEqual([...DIRECT_BUNDLES, DEMO_BUNDLE]);
     });
+
+    it('uploads no gateway binary: the gateway ships only inside the images', () => {
+        const yml = fs.readFileSync(path.join(repoRoot(), '.github/workflows/tag.yml'), 'utf-8');
+        expect(yml).not.toMatch(/dist\/go-web-proxy/);
+    });
 });

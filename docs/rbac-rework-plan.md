@@ -221,7 +221,7 @@ demo" (the real modules, not a mini app).
   notes. The managed account control moved to the sidebar footer. The sidebar shows the Solace
   Message Utility logo, and the Direct form's URL Path fields appear on demand.
 
-**Phase 5: Container-only distribution** (decided 2026-11-06). The standard and managed images are
+**Phase 5: Container-only distribution** (decided 2026-11-06; code on `feature/rbac` the same day). The standard and managed images are
 the only way to run the gateway; the Release stops attaching `go-web-proxy[-managed]-<os>-<arch>`.
 - `tag.yml`: the `binaries` job also emits the HTML bundles the Release uploads (no `bin-*`
   artifact means no assets at all), so it stays, as one leg. `BUILD_TARGETS` becomes
@@ -275,5 +275,6 @@ state, factories); tests and docs in the same change; no `v*` tag from this bran
 ## 10. Next step
 
 Phases 0 to 4 are complete on `feature/rbac`; the end-to-end run against an existing broker
-(`./scripts/dev.sh e2e`) passed on 2026-11-06. Phase 5 (container-only distribution) comes next,
-then the pull request to `main` and the first managed release tag.
+(`./scripts/dev.sh e2e`) passed on 2026-11-06. Phase 5 (container-only distribution) is code-complete;
+the pull request to `main` and the first managed release tag follow, once `BUILD_TARGETS` holds the
+one linux/amd64 entry.

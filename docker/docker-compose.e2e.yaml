@@ -29,11 +29,14 @@ services:
       ADMIN_PASSWORD_FILE: /run/secrets/admin-password
       STORE_KEY_FILE: /run/secrets/store.key
       # The broker's certificate is verified against the CA file given to the
-      # harness and the host's standard roots: no SSL_INSECURE_SKIP_VERIFY
-      # here. The image ships no roots (trust stays explicit in production),
-      # so the harness copies the host's bundle in and it is mounted below
-      # where Go looks for the system bundle.
+      # harness and the host's standard roots. The image ships no roots (trust
+      # stays explicit in production), so the harness copies the host's bundle
+      # in and it is mounted below where Go looks for the system bundle.
       SSL_TRUST_DIR: /tls/trust
+      # Empty, so the broker is verified, unless the harness runs with
+      # E2E_INSECURE=1 (then "true"). scripts/e2e.mjs always sets it from
+      # that, so a value in the shell never reaches the gateway.
+      SSL_INSECURE_SKIP_VERIFY: ${E2E_GATEWAY_SKIP_VERIFY:-}
     # Docker Desktop provides this name itself; on Linux it needs the entry.
     extra_hosts:
       - "host.docker.internal:host-gateway"

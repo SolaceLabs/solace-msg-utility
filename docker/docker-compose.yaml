@@ -19,7 +19,7 @@ services:
     build:
       # Build context is the project root (one level up from this compose file)
       # so the Dockerfile's COPYs can reach go-web-proxy/, src/, package.json,
-      # solclient.js, etc. Docker disallows COPY paths that escape the context.
+      # etc. Docker disallows COPY paths that escape the context.
       context: ..
       dockerfile: docker/Dockerfile
       args:
@@ -56,8 +56,6 @@ services:
       # Optional: bind-mount your own PWA bundle. Comment out to use the bundle
       # baked into the image at /SolaceMsgUtility.
       # - ../dist:/SolaceMsgUtility:ro
-      - ../dist/solclient.js:/SolaceMsgUtility/solclient.js:ro
-      - ../dist/jszip.min.js:/SolaceMsgUtility/jszip.min.js:ro
     # No HEALTHCHECK: the scratch image has no shell or curl. Use an external
     # check (k8s liveness probe, docker swarm, monitoring agent) hitting
     # https://<host>:9443/hosted with TLS verification disabled or pinned.
@@ -111,8 +109,6 @@ services:
       # a separate mount. `docker compose down -v` wipes it all (re-seeds the
       # config and forces a fresh bootstrap).
       - managed:/managed
-      - ../dist/solclient.js:/SolaceMsgUtility/solclient.js:ro
-      - ../dist/jszip.min.js:/SolaceMsgUtility/jszip.min.js:ro
 
 volumes:
   gateway-config:

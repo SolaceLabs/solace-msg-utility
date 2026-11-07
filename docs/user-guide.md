@@ -391,7 +391,7 @@ The project builds several HTML variants. The ones below are attached to each [G
 | `mock.html` | Standard + demo broker | Interactive demo (see [Demo Mode](#demo-mode-mockhtml)) |
 | `managed-demo.html` | Managed + admin pages + demo gateway | Managed mode without a gateway or a broker (see [Managed demo](#managed-demo-managed-demohtml)). It makes no network request |
 
-Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately**:
+Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately** (the container images include both):
 
 - **`solclient.js`** — Solace Web Messaging SDK, required for any broker connection. Get it from the [Solace Developer Portal](https://solace.com/downloads/), npm (`solclientjs`), or your broker's web UI (`http://<broker>:8080/`).
 - **`jszip.min.js`** — JSZip library, required for the Queue Browser's ZIP download feature. Get it from a CDN (`https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js`), npm (`jszip`), or [https://stuk.github.io/jszip/](https://stuk.github.io/jszip/).

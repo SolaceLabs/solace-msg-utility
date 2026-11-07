@@ -14,11 +14,10 @@ Open <https://solacelabs.github.io/solace-msg-utility/> in a browser. Done. (You
 
 ### Option 2 — Run as a container (one command)
 
-Download [solclient.js](https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md#1-solace-javascript-sdk-solclientjs) and start the container with `solclient.js` mounted:
+The image includes the Solace JavaScript API and JSZip, so nothing else is needed:
 
 ```bash
 docker run --rm -p 9443:9443 -e HOSTED=true -v solace-tls:/tls \
-  -v ./solclient.js:/SolaceMsgUtility/solclient.js:ro \
   ghcr.io/solacelabs/solace-msg-utility:latest
 ```
 
