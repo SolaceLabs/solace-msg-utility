@@ -5,11 +5,8 @@
  * the fake gateway (`./gateway`) over the demo's brokers and accounts, its
  * sign-in pages, and the SMF socket gate.
  *
- * It must not reach a network: a request nobody answers is refused, never
- * passed to the real `fetch`, which this file never references, and the other
- * ways a page could send something (WebSocket, XMLHttpRequest, sendBeacon,
- * EventSource) throw. The app uses none of them; the SDK emulator replaces
- * the one WebSocket user.
+ * It must not reach a network, like mock.html: `./network` refuses a request
+ * nobody answers and makes the other ways a page could send something throw.
  *
  * Sign-in and password changes reload the page, as the gateway's redirect
  * does. What the demo holds (the gateway's users, connections, settings and
@@ -28,19 +25,15 @@ import { dumpStore, loadStore, seed, type StoreSnapshot } from './broker/store';
 import { dumpScenario, loadScenario, setBrokers, type ScenarioSnapshot } from './fixtures';
 import { installSdk, removeVendorBanner, whenReady } from './shell';
 import { setSocketGate } from './sdk/session';
+import { blockNetworkApis, refuseNetwork } from './network';
 import { createGateway, type Gateway, type GatewaySnapshot } from './gateway';
 import { createPages, type GatewayPages, type Page } from './gateway/pages';
 import { DEMO_TOPOLOGY, demoSeed } from './gateway/seed';
 
-/** The refusal's message; `check-bundles.mjs` requires it in the demo bundle. */
-export const NETWORK_DISABLED = 'demo: network disabled';
-
-/** The passthrough: whatever the demo does not answer fails like a dead network. */
-export function refuseNetwork(): Promise<Response> {
-    return Promise.reject(new TypeError(NETWORK_DISABLED));
-}
-
 export const SNAPSHOT_KEY = 'smu-managed-demo';
+/** Set on the tab's first load, so the panel opens once; Reset demo data keeps it. */
+export const PANEL_SEEN_KEY = 'smu-managed-demo-panel-seen';
+const BANNER = 'Demo gateway and broker: nothing leaves this page, and no real gateway or broker is reached.';
 /** Bumped when the snapshot's shape changes: an older one is ignored, and the tab starts from the seed. */
 const SNAPSHOT_VERSION = 2;
 
@@ -76,18 +69,6 @@ function clearSnapshot(): void {
     } catch {
         // Nothing stored to clear.
     }
-}
-
-/** The page APIs that could send something, made to throw. */
-function blockNetworkApis(): void {
-    const refuse = function refused(): never {
-        throw new TypeError(NETWORK_DISABLED);
-    };
-    for (const name of ['WebSocket', 'EventSource'] as const) {
-        Object.defineProperty(window, name, { configurable: true, writable: true, value: refuse });
-    }
-    XMLHttpRequest.prototype.open = refuse;
-    Object.defineProperty(navigator, 'sendBeacon', { configurable: true, writable: true, value: refuse });
 }
 
 export interface ManagedDemo {
@@ -152,7 +133,7 @@ export function boot(opts: { reload?: () => void } = {}): ManagedDemo {
 
     whenReady(() => {
         removeVendorBanner();
-        mountControlPanel({ sections: managedSections({ gateway, navigate }), reset });
+        mountControlPanel({ sections: managedSections({ gateway, navigate }), reset, banner: BANNER, visitKey: PANEL_SEEN_KEY });
         undoNav = pages.installNav();
         pages.show(page);
         window.addEventListener('pagehide', save);

@@ -37,7 +37,8 @@
     content: ' ▾';
 }
 
-/* Collapsed by default so the panel never obscures the app in a screenshot. */
+/* Collapsed except on the tab's first load (firstVisit in panel.ts), so the
+ * panel never obscures the app in a later screenshot. */
 .mockctl-body {
     display: none;
     max-height: 60vh;
@@ -52,10 +53,6 @@
 .mockctl-section {
     padding: 0.6rem 0;
     border-top: 1px solid #30363d;
-}
-
-.mockctl-section:first-child {
-    border-top: 0;
 }
 
 .mockctl-title {
@@ -158,4 +155,14 @@
 .mockctl-account .mockctl-hint {
     flex-basis: 100%;
     margin: 0;
+}
+
+/* The no-network note at the top of the open panel. */
+.mockctl-banner {
+    margin: 0.6rem 0 0;
+    padding: 0.4rem 0.5rem;
+    color: #7ee787;
+    background: #0d1117;
+    border: 1px solid #238636;
+    border-radius: 6px;
 }

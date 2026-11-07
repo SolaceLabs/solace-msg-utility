@@ -6,7 +6,11 @@
  * a shipped bundle — no build flag and no dead code to tree-shake.
  *
  * The managed demo mounts it with `PanelOptions`: its own sections in place of
- * the Direct connection reference (`managed.ts`), and a Reset that reloads.
+ * the Direct connection reference (`managed.ts`), a Reset that reloads, and its
+ * own banner and first-visit key.
+ *
+ * Both demos open it on the tab's first load, so a newcomer finds the guidance
+ * without hunting for it, and say at its top that nothing leaves the page.
  *
  * Mock-only.
  */
@@ -16,6 +20,7 @@ import {
 } from '../fixtures';
 import { seed } from '../broker/store';
 import { dropAllSessions } from '../sdk';
+import { required } from '../../core/dom';
 
 export function el<K extends keyof HTMLElementTagNameMap>(
     tag: K, className?: string, text?: string,
@@ -90,6 +95,30 @@ export function kv(label: string, values: string[]): HTMLElement {
     return row;
 }
 
+/** The credentials "Fill the connection form" types; the emulator accepts any. */
+export const DEMO_CREDENTIALS = { username: 'demo', password: 'demo' };
+
+/**
+ * Type the demo's values into the Direct form, as a visitor would: the host,
+ * both cards' credentials and `vpn`. Each field gets the input and change
+ * events typing raises, so the form reacts as it does to the keyboard. Ports,
+ * protocols and URL paths keep what they hold; the emulator ignores them.
+ */
+export function fillDirectForm(vpn: string, root: ParentNode = document): void {
+    const type = (selector: string, value: string) => {
+        const input = required<HTMLInputElement>(root, selector);
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    type('#conn-host', MOCK_HOST.OK);
+    type('#semp-username', DEMO_CREDENTIALS.username);
+    type('#semp-password', DEMO_CREDENTIALS.password);
+    type('#solace-vpn', vpn);
+    type('#solace-username', DEMO_CREDENTIALS.username);
+    type('#solace-password', DEMO_CREDENTIALS.password);
+}
+
 /**
  * What the demo will actually accept. Only the host and the VPN are
  * constrained — the broker emulator ignores ports and credentials — so say that
@@ -100,13 +129,38 @@ function connectionReference(): HTMLElement {
     wrap.appendChild(kv('Host', [MOCK_HOST.OK]));
     wrap.appendChild(kv('Message VPNs', VPNS.map(v => v.name)));
     wrap.appendChild(kv('Cert error', [MOCK_HOST.UNTRUSTED]));
+    let fillVpn = VPNS[0].name;
+    const vpnPick = select(VPNS.map(v => ({ value: v.name, label: `VPN ${v.name}` })), v => { fillVpn = v; });
+    wrap.append(vpnPick, button('Fill the connection form', () => fillDirectForm(fillVpn)));
     wrap.appendChild(el('p', 'mockctl-hint',
-        'Username, password, ports and URL paths are all accepted as typed — only the host '
-        + 'is checked. Any other host reports a connection failure, and a host containing '
-        + 'the cert-error value simulates an untrusted certificate.'));
+        'Fill writes the host, that VPN and a demo username and password into the form; '
+        + 'then press Connect on each card.'));
+    wrap.appendChild(el('p', 'mockctl-hint',
+        'Username, password, ports and URL paths are all accepted as typed; only the host '
+        + 'is checked. Any other host is refused, never reached, and a host containing '
+        + 'the cert-error value simulates an untrusted certificate on the messaging connection.'));
     wrap.appendChild(el('p', 'mockctl-hint',
         'The VPN you connect with decides which queues the pickers list.'));
     return wrap;
+}
+
+/** The Direct demo's banner and first-visit key; the managed demo passes its own. */
+export const DIRECT_BANNER = 'Demo broker: nothing leaves this page, and a real broker is refused, never reached.';
+export const DIRECT_PANEL_SEEN_KEY = 'smu-mock-panel-seen';
+
+/**
+ * True on the tab's first load of this demo, which it then remembers. A
+ * browser that refuses the storage gets the panel open on every load: the
+ * guidance shows rather than hides.
+ */
+export function firstVisit(key: string): boolean {
+    try {
+        if (sessionStorage.getItem(key)) return false;
+        sessionStorage.setItem(key, '1');
+        return true;
+    } catch {
+        return true;
+    }
 }
 
 export interface PanelOptions {
@@ -114,6 +168,10 @@ export interface PanelOptions {
     sections?: HTMLElement[];
     /** What Reset demo data does, in place of reseeding where it stands. */
     reset?: () => void;
+    /** The note at the top of the panel, in place of the Direct demo's. */
+    banner?: string;
+    /** The sessionStorage key that marks the tab's first load, in place of the Direct demo's. */
+    visitKey?: string;
 }
 
 export function mountControlPanel(opts: PanelOptions = {}): void {
@@ -191,7 +249,9 @@ export function mountControlPanel(opts: PanelOptions = {}): void {
             statePick.value = scenario.queueState.get(selectedQueue) ?? QUEUE_STATE.NORMAL;
         }));
 
-    body.append(...(opts.sections ?? [connectionReference()]), queueSection, faultSection, tuneSection);
+    body.append(el('p', 'mockctl-banner', opts.banner ?? DIRECT_BANNER),
+        ...(opts.sections ?? [connectionReference()]), queueSection, faultSection, tuneSection);
     root.append(header, body);
+    if (firstVisit(opts.visitKey ?? DIRECT_PANEL_SEEN_KEY)) root.classList.add('mockctl-open');
     document.body.appendChild(root);
 }

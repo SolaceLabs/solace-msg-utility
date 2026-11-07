@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { installMockServer } from '../../src/mock-broker/server';
+import { installMockServer, sempHost } from '../../src/mock-broker/server';
 import { handleSempV1 } from '../../src/mock-broker/server/semp-v1';
 import { handleSempV2 } from '../../src/mock-broker/server/semp-v2';
 import { seed, getQueue, listQueues } from '../../src/mock-broker/broker/store';
@@ -7,7 +7,7 @@ import { createSempDiscovery } from '../../src/core/services/semp-discovery';
 import { probeDeployment } from '../../src/core/hosted';
 import { resolveConnTabs } from '../../src/core/connections/conn-modes';
 import {
-    FAULT, QUEUE_STATE, VPNS, resetScenario, scenario, setBrokers,
+    FAULT, MOCK_HOST, QUEUE_STATE, VPNS, resetScenario, scenario, setBrokers,
 } from '../../src/mock-broker/fixtures';
 
 /**
@@ -31,6 +31,8 @@ afterEach(() => {
 });
 
 const text = (r: Response) => r.text();
+/** The demo broker as an absolute URL; SEMP is answered for this host only. */
+const DEMO = 'https://broker.solace.com:1943';
 
 describe('mock-broker/server — /hosted', () => {
     it('advertises a hosted, Direct-only deployment, like every Release bundle', async () => {
@@ -139,7 +141,7 @@ describe('mock-broker/server — SEMP v2 discovery', () => {
     });
 
     it('emits an absolute nextPageUri, as a real broker does', async () => {
-        const page: any = await (await fetch('/SEMP/v2/monitor/msgVpns?count=3')).json();
+        const page: any = await (await fetch(`${DEMO}/SEMP/v2/monitor/msgVpns?count=3`)).json();
         // extractNextPath parses this with no base, so a relative value throws
         // and ends pagination.
         expect(() => new URL(page.meta.paging.nextPageUri)).not.toThrow();
@@ -147,9 +149,9 @@ describe('mock-broker/server — SEMP v2 discovery', () => {
 
     it('surfaces an armed SEMP fault as a real HTTP status', async () => {
         scenario.fault = FAULT.SEMP_UNAUTHORIZED;
-        expect((await fetch('/SEMP/v2/monitor/msgVpns')).status).toBe(401);
+        expect((await fetch(`${DEMO}/SEMP/v2/monitor/msgVpns`)).status).toBe(401);
         scenario.fault = FAULT.SEMP_ERROR;
-        expect((await fetch('/SEMP/v2/monitor/msgVpns')).status).toBe(500);
+        expect((await fetch(`${DEMO}/SEMP/v2/monitor/msgVpns`)).status).toBe(500);
     });
 });
 
@@ -237,6 +239,44 @@ describe('mock-broker/server — fall-through', () => {
     });
 });
 
+// The SDK emulator connects to the demo host only; SEMP must refuse the rest
+// the same way, or a real broker typed into the form would look reachable.
+describe('mock-broker/server -- the demo host only', () => {
+    const v2 = '/SEMP/v2/monitor/msgVpns';
+
+    it('reads the broker host from a hosted URL, on a served page and on file://, else from the URL', () => {
+        const host = (raw: string) => sempHost(raw, new URL(raw, 'https://mock.invalid/'));
+        expect(host(`https://smu.example.com/https/1943/broker.solace.com${v2}`)).toBe('broker.solace.com');
+        // buildBrokerUrl on a file:// page: no page host, so a parser takes "https" for the host.
+        expect(host(`http:///https/1943/broker.solace.com${v2}`)).toBe('broker.solace.com');
+        expect(host(`${DEMO}${v2}`)).toBe('broker.solace.com');
+        expect(host(v2)).toBe('mock.invalid');
+    });
+
+    it('answers SEMP for the demo host in every shape the app builds', async () => {
+        for (const url of [`http:///https/1943/broker.solace.com${v2}`, `https://smu.example.com/https/943/broker.solace.com${v2}`, `${DEMO}${v2}`]) {
+            expect((await fetch(url)).status).toBe(200);
+        }
+        const detail = '<rpc><show><queue><name>Q/ORDER/NEW</name><vpn-name>vpn-prod</vpn-name><detail/></queue></show></rpc>';
+        expect(await text(await fetch('http:///https/1943/broker.solace.com/SEMP', { method: 'POST', body: detail })))
+            .toContain('<execute-result code="ok"/>');
+    });
+
+    it('hands SEMP for any other host to the passthrough, which the demos refuse', async () => {
+        const missed: string[] = [];
+        installMockServer({ passthrough: ((input: any) => { missed.push(String(input)); return Promise.reject(new TypeError('refused')); }) as typeof window.fetch });
+        const others = [
+            `http:///https/1943/prod-broker.example.com${v2}`,
+            `https://prod-broker.example.com:943${v2}`,
+            `http:///https/1943/${MOCK_HOST.UNTRUSTED}${v2}`,
+            v2,
+        ];
+        for (const url of others) await expect(fetch(url)).rejects.toThrow('refused');
+        await expect(fetch('https://prod-broker.example.com/SEMP', { method: 'POST', body: '<rpc/>' })).rejects.toThrow('refused');
+        expect(missed).toEqual([...others, 'https://prod-broker.example.com/SEMP']);
+    });
+});
+
 describe('mock-broker/server — routes ahead of the broker', () => {
     it('answers from routes before /hosted and SEMP', async () => {
         const seen: string[] = [];
@@ -250,7 +290,7 @@ describe('mock-broker/server — routes ahead of the broker', () => {
 
         expect((await (await fetch('/hosted')).json()).hosted).toBe(false);
         // null lets the broker answer, as before.
-        const page: any = await (await fetch('/SEMP/v2/monitor/msgVpns')).json();
+        const page: any = await (await fetch(`${DEMO}/SEMP/v2/monitor/msgVpns`)).json();
         expect(page.data.length).toBeGreaterThan(0);
         expect(seen).toEqual(['/hosted', '/SEMP/v2/monitor/msgVpns']);
     });

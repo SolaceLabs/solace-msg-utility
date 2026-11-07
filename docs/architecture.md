@@ -746,11 +746,19 @@ installs three things before any module installs:
 
 1. **`window.solace`** — a full SDK emulation (factory, constructors, enums, session, queue browser, message).
 2. **A `window.fetch` interceptor** answering `/hosted` (hosted, Direct only), the SEMP v2 monitor endpoints and
-   SEMP v1 RPCs. What it does not answer goes to the `passthrough` its boot passes to `installMockServer`: the
-   real `fetch` in mock.html, a refusal in the managed demo, so the server module itself never references the
-   original `fetch`. A `routes` option answers ahead of the broker. mock.html is a Release bundle, so it has no
-   Managed tab and no `/managed/*` surface.
-3. **The demo control panel**, which drives queue state, connection faults, and latency/volume.
+   SEMP v1 RPCs, for the demo host `broker.solace.com` only (`sempHost` reads it from the hosted URL, `file://`
+   pages included), as the SDK emulator connects only to it. What it does not answer, SEMP for any other host
+   included, goes to the `passthrough` its boot passes to `installMockServer`: both demos pass `refuseNetwork`
+   ([network.ts](../src/mock-broker/network.ts)), so the server module never references the original `fetch` and
+   neither demo works with a real broker. A `routes` option answers ahead of the broker. mock.html is a Release
+   bundle, so it has no Managed tab and no `/managed/*` surface.
+3. **The demo control panel**, which drives queue state, connection faults, and latency/volume. It opens on the tab's
+   first load (a sessionStorage flag per demo), says at its top that nothing leaves the page, and in mock.html
+   offers **Fill the connection form**, which types the demo host, a chosen VPN and demo credentials into the Direct
+   form with the events typing raises.
+
+Both boots also call `blockNetworkApis`, which makes `WebSocket`, `EventSource`, `XMLHttpRequest.open` and
+`sendBeacon` throw: the app uses none of them, and the SDK emulator replaces the one WebSocket user.
 
 Because both seams present the real contract, `solace-client`, `semp-client`, `solace-publisher`,
 `semp-discovery`, queue-copy's verify and copy engines and the subscription parser all run **unmodified** in the
@@ -783,16 +791,17 @@ dialled login, and closes it on the same revocations as `sockets.go`.
 The gateway's own pages, `/login` and `/login/password`, are layers over the app with the same copy and flow
 (`gateway/pages.ts`); a capture-phase listener catches the app's sign-in links. A sign-in reloads the page, as the
 gateway's redirect does, so [boot.managed.ts](../src/mock-broker/boot.managed.ts) carries the gateway, the cookie,
-the queues and the scenario across in sessionStorage (a new tab starts from the seed in `gateway/seed.ts`). The
-demo cannot reach a network: its `fetch` passthrough refuses, and `WebSocket`, `EventSource`,
-`XMLHttpRequest.open` and `sendBeacon` throw.
+the queues and the scenario across in sessionStorage (a new tab starts from the seed in `gateway/seed.ts`). Like
+mock.html, it cannot reach a network (`network.ts`, above).
 
 **What ships, and what keeps it honest.** `managed-demo.html` (variant
 [managed-demo.ts](../src/variants/managed-demo.ts)) is the managed variant's messaging modules plus the three admin
 editors, which an administrator finds in the sidebar instead of at `/solAdmin`. It has no `admin-login`, because the
 Managed panel owns the session. It is a Release asset, so [check-bundles.mjs](../scripts/check-bundles.mjs) proves on
 every build that it carries the managed and the demo markers and nothing that reaches past the page: no captured
-`fetch`, no other network API, no form action, no URL to a real host. `tests/build/no-network-apis.test.ts` keeps
+`fetch`, no other network API, no form action, no URL to a real host. mock.html is held to the same no-network
+rules and must carry the network refusal, but neither the managed markers nor the fake gateway's; the four
+production Direct bundles carry no demo marker at all. `tests/build/no-network-apis.test.ts` keeps
 the app's source on `fetch`, which the interceptor answers. Past the contract:
 - `tests/mock-broker/gateway/routes.test.ts` calls every gateway route through the service that ships, and fails on a
   `/managed/<name>` in `src/` with no row;

@@ -106,7 +106,8 @@ describe('mock-broker/controls/managed -- gateway events', () => {
     });
 
     it('arms the relay, dial and config.yaml faults, starting from the gateway\'s', () => {
-        const selects = Array.from(panel().querySelectorAll<HTMLSelectElement>('.mockctl-section:nth-child(2) select'));
+        const events = Array.from(panel().querySelectorAll('.mockctl-section')).find(s => s.querySelector('.mockctl-title')!.textContent === 'Gateway events')!;
+        const selects = Array.from(events.querySelectorAll<HTMLSelectElement>('select'));
         expect(selects.map(s => s.value)).toEqual(['ok', 'ok', 'ok']);
         const set = (s: HTMLSelectElement, v: string) => { s.value = v; s.dispatchEvent(new Event('change')); };
 

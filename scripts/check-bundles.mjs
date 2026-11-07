@@ -1,6 +1,7 @@
 /**
  * Bundle isolation check: the Direct bundles carry no managed UI, the managed
- * bundle does, and the managed demo carries it with no way out to a network.
+ * bundle does, and the two demos (mock.html, the Direct demo, and the managed
+ * demo) run with no way out to a network.
  *
  * The managed sign-in (the Managed tab, its panel and its `/managed/*` client)
  * ships in `dist/managed.html`, which the managed container image serves as its
@@ -11,8 +12,12 @@
  * This check proves it on the built output:
  *
  *   - each DIRECT_BUNDLES file exists and contains none of MANAGED_MARKERS
- *     (a hit means a Direct entry imported a managed file) and none of
- *     DEMO_MARKERS (a hit means a Direct build pulled in the fake gateway);
+ *     (a hit means a Direct entry imported a managed file) and not
+ *     GATEWAY_MARKER (a hit means a Direct build pulled in the fake gateway);
+ *     the production ones (all but MOCK_BUNDLE) carry no NETWORK_MARKER
+ *     either (a hit means demo code reached a production build);
+ *   - MOCK_BUNDLE carries NETWORK_MARKER and holds nothing that reaches past
+ *     the page, as DEMO_BUNDLE (below);
  *   - MANAGED_BUNDLE exists, contains every managed marker (a miss means the
  *     `managed` variant's MODULE_ENTRIES override did not apply, or a marker
  *     went stale after a rename -- either way the first half proved nothing)
@@ -27,7 +32,7 @@
  * strings minification keeps verbatim. The core managed profile ships
  * everywhere and carries none of them: the managed entry attaches the gateway
  * calls to it. The demo markers are the fake gateway's response header value
- * and the demo's network refusal, both kept equal to their sources by
+ * and both demos' network refusal, kept equal to their sources by
  * tests/build/check-bundles.test.ts.
  *
  * RELEASE_BUNDLES is also the Release upload list: `.github/workflows/tag.yml`
@@ -46,6 +51,9 @@ import { fileURLToPath } from 'node:url';
 /** The Release bundles that install the Direct-only connections entry. */
 export const DIRECT_BUNDLES = ['index.html', 'min.html', 'no-payload.html', 'no-queue-copy.html', 'mock.html'];
 
+/** The Direct demo: a Direct bundle against the in-browser broker, with no network. */
+export const MOCK_BUNDLE = 'mock.html';
+
 /** The managed demo: the managed modules against the in-browser fake gateway. */
 export const DEMO_BUNDLE = 'managed-demo.html';
 
@@ -58,23 +66,25 @@ export const MANAGED_BUNDLE = 'managed.html';
 /** Strings only the managed connections entry puts into a bundle. */
 export const MANAGED_MARKERS = ['conn-panel-managed', 'btn-managed-login', '/managed/me', '/managed/logout', '/managed/dial', '/managed/relay/'];
 
-/**
- * Strings only the managed demo puts into a bundle: the fake gateway's
- * `X-Demo-Gateway` value (`DEMO_GATEWAY_MARKER`, src/mock-broker/gateway) and
- * the refusal its passthrough rejects with (`NETWORK_DISABLED`,
- * src/mock-broker/boot.managed.ts).
- */
-export const DEMO_MARKERS = ['smu-demo-gateway/1', 'demo: network disabled'];
+/** The fake gateway's `X-Demo-Gateway` value (`DEMO_GATEWAY_MARKER`, src/mock-broker/gateway): the managed demo only. */
+export const GATEWAY_MARKER = 'smu-demo-gateway/1';
+
+/** The refusal both demos' passthrough rejects with (`NETWORK_DISABLED`, src/mock-broker/network.ts). */
+export const NETWORK_MARKER = 'demo: network disabled';
+
+/** Strings demo code puts into a bundle; the managed demo carries both. */
+export const DEMO_MARKERS = [GATEWAY_MARKER, NETWORK_MARKER];
 
 /**
- * Calls the demo bundle must not hold: a captured real `fetch` (mock.html's
- * passthrough) and the network APIs its shims refuse. A tripwire on the built
- * text; tests/build/no-network-apis.test.ts keeps them out of the app's source.
+ * Calls a demo bundle must not hold: a captured real `fetch` (what mock.html's
+ * passthrough once was) and the network APIs the demos' shims refuse. A
+ * tripwire on the built text; tests/build/no-network-apis.test.ts keeps them
+ * out of the app's source.
  */
 export const DEMO_FORBIDDEN = ['fetch.bind(', 'new WebSocket(', 'new EventSource(', 'new XMLHttpRequest('];
 
 /**
- * The hosts a URL literal in the demo bundle may name, all of them inert: the
+ * The hosts a URL literal in a demo bundle may name, all of them inert: the
  * SVG and XML namespace host, and the reserved `.invalid` TLD (RFC 2606), which
  * never resolves -- the mock server's route base and the demo brokers.
  */
@@ -127,12 +137,31 @@ export function checkBundles(distDir) {
         const file = path.join(distDir, name);
         return existsSync(file) ? readFileSync(file, 'utf-8') : null;
     };
-    const noDemo = (name, text) => {
-        for (const marker of findMarkers(text, DEMO_MARKERS)) {
+    const noDemo = (name, text, markers = DEMO_MARKERS) => {
+        for (const marker of findMarkers(text, markers)) {
+            problems.push(marker === GATEWAY_MARKER
+                ? `${name}: contains the demo marker "${marker}". Only managed-demo.html may carry the fake ` +
+                    'gateway; check that mockRedirects in vite.config.ts sends only the managed-demo variant to ' +
+                    './mock-broker/boot.managed.'
+                : `${name}: contains the demo marker "${marker}". Only the demos (${MOCK_BUNDLE}, ${DEMO_BUNDLE}) ` +
+                    'may carry demo code; check that the build ran this variant in production mode.');
+        }
+    };
+    /** A demo bundle must hold nothing that reaches past the page. */
+    const offline = (name, text) => {
+        for (const call of findMarkers(text, DEMO_FORBIDDEN)) {
             problems.push(
-                `${name}: contains the demo marker "${marker}". Only managed-demo.html may carry the fake ` +
-                'gateway; check that the build ran this variant in production mode, or that mockRedirects in ' +
-                'vite.config.ts sends only the managed-demo variant to ./mock-broker/boot.managed.',
+                `${name}: contains "${call}". A demo must not reach a network: answer the request from ` +
+                'src/mock-broker/ (the mock server, or the fake gateway) instead.',
+            );
+        }
+        if (FORM_ACTION.test(text)) {
+            problems.push(`${name}: contains a <form> with an action. A demo's forms submit in-process.`);
+        }
+        for (const host of strayHosts(text)) {
+            problems.push(
+                `${name}: names the host "${host}" in a URL. A demo holds no real address; use a ` +
+                '.invalid host, or add an inert one to ALLOWED_HOSTS in scripts/check-bundles.mjs.',
             );
         }
     };
@@ -158,7 +187,14 @@ export function checkBundles(distDir) {
                 'imports) does not import module.managed.ts or managed-panel.ts.',
             );
         }
-        noDemo(name, text);
+        if (name !== MOCK_BUNDLE) {
+            noDemo(name, text);
+            continue;
+        }
+        noDemo(name, text, [GATEWAY_MARKER]);
+        lacks(name, text, [NETWORK_MARKER], ['demo',
+            `Either it was built without --mode mock, or ./mock-broker/boot no longer refuses the network, ${stale('NETWORK_MARKER')}`]);
+        offline(name, text);
     }
 
     const managed = read(MANAGED_BUNDLE);
@@ -178,21 +214,7 @@ export function checkBundles(distDir) {
             `Either the managed-demo variant lost its MODULE_ENTRIES override, ${stale('MANAGED_MARKERS')}`]);
         lacks(DEMO_BUNDLE, demo, DEMO_MARKERS, ['demo',
             `Either it was built without --mode mock or without ./mock-broker/boot.managed, ${stale('DEMO_MARKERS')}`]);
-        for (const call of findMarkers(demo, DEMO_FORBIDDEN)) {
-            problems.push(
-                `${DEMO_BUNDLE}: contains "${call}". The managed demo must not reach a network: answer the ` +
-                'request from src/mock-broker/ (the fake gateway or the mock server) instead.',
-            );
-        }
-        if (FORM_ACTION.test(demo)) {
-            problems.push(`${DEMO_BUNDLE}: contains a <form> with an action. The demo's forms submit to the fake gateway in-process.`);
-        }
-        for (const host of strayHosts(demo)) {
-            problems.push(
-                `${DEMO_BUNDLE}: names the host "${host}" in a URL. The managed demo holds no real address; use a ` +
-                '.invalid host, or add an inert one to ALLOWED_HOSTS in scripts/check-bundles.mjs.',
-            );
-        }
+        offline(DEMO_BUNDLE, demo);
     }
     return problems;
 }
@@ -212,7 +234,7 @@ export function main(root = repoRoot()) {
     }
     console.log(
         `Bundle check passed (${DIRECT_BUNDLES.length} Direct bundles carry no managed UI; ${MANAGED_BUNDLE} does; ` +
-        `${DEMO_BUNDLE} runs it against the demo gateway with no network).`,
+        `${DEMO_BUNDLE} runs it against the demo gateway; both demos have no network).`,
     );
     return 0;
 }

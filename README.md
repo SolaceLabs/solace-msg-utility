@@ -27,7 +27,7 @@ Then open <https://localhost:9443/>. The container connects to your broker for t
 
 Take `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) and the two vendor libraries `solclient.js`, `jszip.min.js` from the `dist` branch. Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, …). See [deployment.md → Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
 
-> **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials — every module, message browsing included, runs against an in-browser mock broker. See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details. To try managed mode the same way, open `managed-demo.html` and sign in with a demo account: see [Managed demo](docs/user-guide.md#managed-demo-managed-demohtml).
+> **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials, or **Fill the connection form** in its Demo controls panel: every module, message browsing included, runs against an in-browser mock broker, and nothing leaves the page. See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details. To try managed mode the same way, open `managed-demo.html` and sign in with a demo account: see [Managed demo](docs/user-guide.md#managed-demo-managed-demohtml).
 
 ## Connecting to a broker
 

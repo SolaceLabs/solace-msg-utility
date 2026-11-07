@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { boot, NETWORK_DISABLED, SNAPSHOT_KEY } from '../../src/mock-broker/boot.managed';
+import { boot, PANEL_SEEN_KEY, SNAPSHOT_KEY } from '../../src/mock-broker/boot.managed';
+import { NETWORK_DISABLED } from '../../src/mock-broker/network';
 import { getQueue, removeMessage } from '../../src/mock-broker/broker/store';
 import { BROKERS, resetScenario, scenario, setBrokers } from '../../src/mock-broker/fixtures';
 import { setSocketGate } from '../../src/mock-broker/sdk/session';
@@ -143,11 +144,22 @@ describe('mock-broker/boot.managed -- the sign-in and the reloads', () => {
         demo.gateway.signIn('viewer', 'demo-viewer-0001');
         demo.save();
         expect(document.querySelector('#mock-controls .mockctl-title')!.textContent).toBe('Demo accounts');
+        expect(document.querySelector('#mock-controls .mockctl-banner')!.textContent).toMatch(/^Demo gateway and broker: nothing leaves this page/);
 
         Array.from(document.querySelectorAll<HTMLButtonElement>('#mock-controls .mockctl-btn'))
             .find(b => b.textContent === 'Reset demo data')!.click();
         expect(reloads).toBe(1);
         expect(sessionStorage.getItem(SNAPSHOT_KEY)).toBeNull();
+    });
+
+    it('opens the panel on the tab\'s first load only, a sign-in\'s reload included', () => {
+        start();
+        const open = () => document.getElementById('mock-controls')!.classList.contains('mockctl-open');
+        expect([open(), sessionStorage.getItem(PANEL_SEEN_KEY)]).toEqual([true, '1']);
+
+        document.body.innerHTML = '';
+        start();   // the reload after a sign-in, in the same tab
+        expect(open()).toBe(false);
     });
 
     it('starts from the seed when the storage refuses or holds an older snapshot', () => {

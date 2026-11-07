@@ -417,6 +417,9 @@ It needs nothing alongside it. The demo installs its own Solace SDK, so unlike t
 need `solclient.js` next to the HTML. (`jszip.min.js` is still required for the Queue Browser's ZIP download; every
 other export works without it.)
 
+It never works with a real broker. It makes no network request: anything it does not answer itself fails as if the
+network were down, and only the demo host connects, so a real broker typed into the form is refused, never reached.
+
 ### Opening the demo
 
 `mock.html` is attached to every GitHub Release. Download it and open it directly in a browser -- no server
@@ -427,8 +430,9 @@ every variant in one pass, including `managed-demo.html` and the image-only `man
 
 ### Connecting
 
-Use host **`broker.solace.com`** with any non-empty credentials. Any other hostname surfaces a connection failure,
-and a hostname containing `untrust.com` simulates an untrusted certificate, so the error paths are demoable too.
+Use host **`broker.solace.com`** with any non-empty credentials, or let **Fill the connection form** in the Demo
+controls type them for you. Any other hostname is refused on both cards, and a hostname containing `untrust.com`
+simulates an untrusted certificate on the messaging connection, so the error paths are demoable too.
 
 `mock.html` is Direct-only. To try the Managed sign-in without a gateway, open [`managed-demo.html`](#managed-demo-managed-demohtml).
 
@@ -454,9 +458,9 @@ Queues carry topic subscriptions, so a forward to a topic really fans out: publi
 
 ### Demo controls
 
-A **Demo controls** panel sits at the bottom-right, collapsed by default. It both tells you what the demo accepts and drives the broker live:
+A **Demo controls** panel sits at the bottom-right. It opens on the first load in a browser tab and stays collapsed after that; click its header to open or close it. Its first line says that nothing leaves the page. It both tells you what the demo accepts and drives the broker live:
 
-- **Connection values** — the accepted host, every Message VPN, and the host that simulates a certificate error. Click any value to copy it. Usernames, passwords, ports and URL paths are accepted as typed — only the host is checked — and the list is generated from the broker's own topology, so it can never disagree with what the pickers show.
+- **Connection values** -- the accepted host, every Message VPN, and the host that simulates a certificate error. Click any value to copy it. Usernames, passwords, ports and URL paths are accepted as typed -- only the host is checked -- and the list is generated from the broker's own topology, so it can never disagree with what the pickers show. Pick a VPN and press **Fill the connection form** to type the host, that VPN and a demo username and password (`demo` / `demo`) into the form; then press **Connect** on each card.
 - **Queue state** — switch any queue between normal, read-only, bind-denied and empty. Applies on the next bind.
 - **Connection faults** — fail the next connect, simulate SEMP `401` or `500`, or drop a live session to show the
   disconnect path. The connect failure is one-shot; the SEMP faults stay armed until you clear them.
@@ -492,7 +496,8 @@ It is attached to every GitHub Release; open it from disk. It starts on the gate
 | `viewer` | `demo-viewer-0001` | Reads `east-prod` / `orders` only; no Queue Copy |
 | `newadmin` | `demo-change-me-01` | An administrator who must change the password before anything else |
 
-The passwords are fake. The **Demo controls** panel lists them too: click one to copy it, or use **Sign in as**.
+The passwords are fake. The **Demo controls** panel lists them too: click one to copy it, or use **Sign in as**. The
+panel opens on the first load in a browser tab, as in `mock.html`.
 
 ### The demo brokers
 

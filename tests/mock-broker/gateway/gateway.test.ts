@@ -67,7 +67,7 @@ describe('mock-broker/gateway -- the page\'s fetch route', () => {
     });
 
     it('leaves everything else to the next route', async () => {
-        expect((await fetch('/SEMP/v2/monitor/msgVpns')).status).toBe(200);
+        expect((await fetch('http:///https/1943/broker.solace.com/SEMP/v2/monitor/msgVpns')).status).toBe(200);
         await expect(fetch('https://example.com/elsewhere')).rejects.toThrow('refused');
     });
 });

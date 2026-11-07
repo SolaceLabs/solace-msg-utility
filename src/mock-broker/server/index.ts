@@ -8,13 +8,17 @@
  *
  * The caller decides the rest (`MockServerOptions`): `routes` answers ahead of
  * the broker (the managed demo's fake gateway), and `passthrough` takes what
- * nobody answers. mock.html passes the real `fetch`, so an unrelated request
- * from the page is unaffected; the managed demo passes one that refuses, so it
- * cannot reach a network. This module never touches the original `fetch`.
+ * nobody answers. Both demos pass `refuseNetwork` (`../network`), so neither
+ * can reach a network. This module never touches the original `fetch`.
+ *
+ * SEMP is answered for the demo host only (`MOCK_HOST.OK`), as the SDK
+ * emulator connects only to it: a request for any other host goes to the
+ * passthrough and is refused, so a real broker typed into the form is never
+ * reached and never looks reachable.
  *
  * Mock-only.
  */
-import { delay, FAULT, scenario } from '../fixtures';
+import { delay, FAULT, MOCK_HOST, scenario } from '../fixtures';
 import { handleSempV2 } from './semp-v2';
 import { handleSempV1 } from './semp-v1';
 
@@ -78,10 +82,26 @@ export function hostedResponse(): unknown {
     return { hosted: true, connModes: 'direct', defaultConn: 'direct' };
 }
 
-async function handleSemp(path: string, url: URL, init?: RequestInit): Promise<Response | null> {
+/** The hosted broker segments, `/{scheme}/{port}/{host}/` (buildBrokerUrl in src/core/hosted.ts). */
+const HOSTED_SEGMENTS = /\/(?:https?|wss?)\/\d+\/([^/?#]+)\//;
+
+/**
+ * The broker host a SEMP request names: the host segment of a hosted URL (the
+ * shape the demos' `/hosted` answer makes the app build), else the URL's own
+ * host. Read from the raw request, not the parsed URL: on a `file://` page the
+ * hosted URL is `http:///https/<port>/<host>/...`, which a URL parser reads as
+ * the host `https`. A path with neither names the route base's host, which is
+ * not the demo host either.
+ */
+export function sempHost(raw: string, url: URL): string {
+    return HOSTED_SEGMENTS.exec(raw)?.[1] ?? url.hostname;
+}
+
+async function handleSemp(path: string, url: URL, raw: string, init?: RequestInit): Promise<Response | null> {
     const isRpc = path.endsWith('/SEMP') && (init?.method ?? 'GET').toUpperCase() === 'POST';
     const isMonitor = path.includes('/SEMP/v2/monitor/');
     if (!isRpc && !isMonitor) return null;
+    if (sempHost(raw, url) !== MOCK_HOST.OK) return null;   // refused by the passthrough
 
     const fault = sempFault();
     if (fault) return fault;
@@ -116,7 +136,7 @@ export function installMockServer({ passthrough, routes }: MockServerOptions): v
             return json(hostedResponse());
         }
 
-        const semp = await handleSemp(path, url, init);
+        const semp = await handleSemp(path, url, raw, init);
         if (semp) return semp;
 
         return passthrough(input, init);

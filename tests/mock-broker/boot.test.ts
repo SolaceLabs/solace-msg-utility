@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { boot } from '../../src/mock-broker/boot';
+import { NETWORK_DISABLED } from '../../src/mock-broker/network';
+import { DIRECT_BANNER } from '../../src/mock-broker/controls/panel';
+import { scenario } from '../../src/mock-broker/fixtures';
 
 /**
  * Regression cover for the race that made the demo fail with the real SDK's
@@ -11,10 +14,16 @@ import { boot } from '../../src/mock-broker/boot';
  * factory it never initialised, because it had initialised ours.
  */
 let realFetch: typeof window.fetch;
+const saved = {
+    WebSocket: window.WebSocket,
+    EventSource: (window as any).EventSource,
+    open: XMLHttpRequest.prototype.open,
+};
 
 beforeEach(() => {
     realFetch = window.fetch;
     document.body.innerHTML = '';
+    sessionStorage.clear();
 });
 
 afterEach(() => {
@@ -22,6 +31,10 @@ afterEach(() => {
     // boot() defines `solace` as a configurable accessor; hand the global back to
     // the suite's own SDK mock so later tests are unaffected.
     delete (window as any).solace;
+    Object.defineProperty(window, 'WebSocket', { configurable: true, writable: true, value: saved.WebSocket });
+    Object.defineProperty(window, 'EventSource', { configurable: true, writable: true, value: saved.EventSource });
+    XMLHttpRequest.prototype.open = saved.open;
+    delete (navigator as any).sendBeacon;
 });
 
 describe('mock-broker/boot — the vendor race', () => {
@@ -80,8 +93,39 @@ describe('mock-broker/boot — the vendor race', () => {
         expect(body.hosted).toBe(true);
     });
 
-    it('mounts the demo control panel', () => {
+    it('mounts the demo control panel, open on the tab\'s first load and saying nothing leaves the page', () => {
         boot();
-        expect(document.getElementById('mock-controls')).not.toBeNull();
+        const panel = document.getElementById('mock-controls')!;
+        expect(panel.classList.contains('mockctl-open')).toBe(true);
+        expect(panel.querySelector('.mockctl-banner')!.textContent).toBe(DIRECT_BANNER);
+    });
+});
+
+// Like the managed demo (tests/mock-broker/boot.managed.test.ts), mock.html
+// must never reach a network, whatever host is typed into the Direct form.
+describe('mock-broker/boot -- no network', () => {
+    it('refuses a request the demo does not answer, without calling the fetch it replaced', async () => {
+        let replaced = 0;
+        window.fetch = (() => { replaced++; return Promise.resolve(new Response('real')); }) as typeof window.fetch;
+        boot();
+
+        await expect(fetch('https://example.com/anything')).rejects.toThrow(NETWORK_DISABLED);
+        expect(replaced).toBe(0);
+    });
+
+    it('refuses SEMP to a real broker, and answers the demo host', async () => {
+        boot();
+        scenario.latencyMs = 0;
+        const v2 = '/SEMP/v2/monitor/msgVpns';
+        await expect(fetch(`http:///https/943/prod-broker.example.com${v2}`)).rejects.toThrow(NETWORK_DISABLED);
+        expect((await fetch(`http:///https/943/broker.solace.com${v2}`)).status).toBe(200);
+    });
+
+    it('makes every other way to send something throw', () => {
+        boot();
+        expect(() => new (window as any).WebSocket('wss://example.com')).toThrow(NETWORK_DISABLED);
+        expect(() => new (window as any).EventSource('https://example.com')).toThrow(NETWORK_DISABLED);
+        expect(() => new XMLHttpRequest().open('GET', 'https://example.com')).toThrow(NETWORK_DISABLED);
+        expect(() => navigator.sendBeacon('https://example.com', 'x')).toThrow(NETWORK_DISABLED);
     });
 });
