@@ -205,8 +205,17 @@ describe('check-bundles — the Release upload list', () => {
         expect(RELEASE_BUNDLES).toEqual([...DIRECT_BUNDLES, DEMO_BUNDLE]);
     });
 
-    it('uploads no gateway binary: the gateway ships only inside the images', () => {
+    // The gateway ships only inside the images. On a public repo a workflow
+    // artifact is a download too, so uploading dist/ would ship the binaries
+    // (and the image-only bundles) after all.
+    it('lets no gateway binary leave the pipeline: the bundles artifact holds only the Release bundles', () => {
         const yml = fs.readFileSync(path.join(repoRoot(), '.github/workflows/tag.yml'), 'utf-8');
         expect(yml).not.toMatch(/dist\/go-web-proxy/);
+        const uploads = [...yml.matchAll(/uses: actions\/upload-artifact@.*\n(?:[ \t]+\S.*\n)*?[ \t]+path: *(.*)/g)].map((m) => m[1].trim());
+        expect(uploads).toContain('release-bundles/');
+        expect(uploads.filter((p) => /^\.?\/?dist\b/.test(p))).toEqual([]);
+        const stage = yml.slice(yml.indexOf('- name: Stage the Release bundles'), yml.indexOf('path: release-bundles/'));
+        expect(stage).toContain('for f in $RELEASE_BUNDLES; do');
+        expect(stage).toContain('cp "dist/$f" release-bundles/');
     });
 });

@@ -223,8 +223,10 @@ demo" (the real modules, not a mini app).
 
 **Phase 5: Container-only distribution** (decided 2026-11-06; code on `feature/rbac` the same day). The standard and managed images are
 the only way to run the gateway; the Release stops attaching `go-web-proxy[-managed]-<os>-<arch>`.
-- `tag.yml`: the `binaries` job also emits the HTML bundles the Release uploads (no `bin-*`
-  artifact means no assets at all), so it stays, as one leg. `BUILD_TARGETS` becomes
+- `tag.yml`: the `binaries` job also emits the HTML bundles the Release uploads (no `bundles-*`
+  artifact means no assets at all), so it stays, as one leg. Its artifact holds only
+  `RELEASE_BUNDLES` (one workflow-level list): on a public repository a workflow artifact is a
+  download too, so the binaries it compiles never leave the runner. `BUILD_TARGETS` becomes
   `[{"os":"linux","arch":"amd64"}]` (a repository variable, set by the user), and the `release`
   job uploads `RELEASE_BUNDLES` and `SHA256SUMS.txt` only, without `dist/go-web-proxy-*`. Deviation
   8 and the job comments say why the job keeps its name.
