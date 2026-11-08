@@ -1,12 +1,14 @@
 # End-to-end stack for scripts/e2e.mjs: the managed gateway image that
 # `./scripts/dev.sh image` builds, pointed at an existing Solace broker whose
 # details the harness reads from docker/e2e-broker.env (git-ignored) or asks
-# for. Run it through `./scripts/dev.sh e2e` (or dev.ps1), not by hand: the
-# harness writes the TLS material, the store key and the bootstrap password
-# into scripts/logs/e2e/ (git-ignored) before `up`, and runs `down -v` at the
-# end.
+# for, and a browser that uses the gateway's app. Run it through
+# `./scripts/dev.sh e2e` (or dev.ps1), not by hand: the harness writes the TLS
+# material, the store key and the bootstrap password into scripts/logs/e2e/
+# (git-ignored) before `up`, starts the services by name, and runs `down -v`
+# at the end.
 #
-# The only host port is the gateway's, bound to 127.0.0.1:39443. The gateway
+# The host ports are the gateway's, 127.0.0.1:39443, and the browser's
+# Playwright server, 127.0.0.1:39444; both are bound to loopback. The gateway
 # reaches the broker over TLS only and verifies it against the CA file the
 # harness was given and the host's standard roots; a broker on this machine
 # is host.docker.internal.
@@ -50,6 +52,42 @@ services:
       - ../scripts/logs/e2e/store.key:/run/secrets/store.key:ro
     ports:
       - "127.0.0.1:39443:9443"
+    restart: "no"
+
+  # The browser for checks B1-B8: Chromium in the official Playwright image,
+  # which the harness on the host drives over Playwright's run-server protocol.
+  # Started only when E2E_BROWSER is not 0. It runs the playwright-core that
+  # npm ci installed, mounted read-only, so the client and the server are the
+  # same files; the image tag must equal that version and the image is pinned
+  # by digest (tests/build/e2e-lib.test.ts). The browser visits only the
+  # gateway, as https://gateway:9443 on this project's network, and the harness
+  # aborts any other request. Chromium runs without its own sandbox
+  # (Playwright's default); this posture is the boundary. One client only: once
+  # the harness has connected, no other local process can.
+  browser:
+    image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+    # pwuser in the image.
+    user: "1001:1001"
+    privileged: false
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    # Chromium's shared memory; the default 64m crashes larger pages.
+    shm_size: 1gb
+    # Chromium's profile and the server's temporary files.
+    tmpfs:
+      - /tmp
+    environment:
+      HOME: /tmp
+    working_dir: /tmp
+    volumes:
+      - ../node_modules/playwright-core:/pw:ro
+    command: ["node", "/pw/cli.js", "run-server", "--port", "3000", "--host", "0.0.0.0", "--max-clients", "1"]
+    ports:
+      - "127.0.0.1:39444:3000"
     restart: "no"
 
 volumes:

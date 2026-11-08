@@ -203,6 +203,8 @@ export const BROKER_FIELDS = [
         label: 'existing queue in that VPN the client username may browse (nothing is consumed)' },
     { key: 'insecure', env: 'E2E_INSECURE', fallback: '0', optional: true, check: flagRule,
         label: "1: the gateway skips verifying the broker's TLS certificate (SSL_INSECURE_SKIP_VERIFY, the e2e stack only)" },
+    { key: 'browser', env: 'E2E_BROWSER', fallback: '1', optional: true, check: flagRule,
+        label: '0: skip the browser checks B1-B8 and do not start the browser container' },
 ];
 
 /**

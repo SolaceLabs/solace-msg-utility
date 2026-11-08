@@ -47,11 +47,11 @@ The image half of `image` and `scan` warn-skips when Docker is absent or running
 
 ### End-to-end run
 
-`./scripts/dev.sh e2e` (or `./scripts/dev.ps1 e2e`) checks the managed gateway the way a browser uses it, against an existing Solace broker you name. It builds both images (as `scan` does), then [`scripts/e2e.mjs`](../scripts/e2e.mjs) starts [`docker/docker-compose.e2e.yaml`](../docker/docker-compose.e2e.yaml): the managed image alone, with the hardened posture (non-root, read-only root, every capability dropped, no new privileges). Run it before a tag that touches the gateway; it takes about a minute.
+`./scripts/dev.sh e2e` (or `./scripts/dev.ps1 e2e`) checks the managed gateway the way a browser uses it, against an existing Solace broker you name. It builds both images (as `scan` does), then [`scripts/e2e.mjs`](../scripts/e2e.mjs) starts [`docker/docker-compose.e2e.yaml`](../docker/docker-compose.e2e.yaml): the managed image, and a Chromium browser in the official Playwright image, both with the hardened posture (non-root, read-only root, every capability dropped, no new privileges). Run it before a tag that touches the gateway or the managed app; it takes a minute or two.
 
 **Nothing on the broker is created or changed.** The run reads it through the gateway's read-only relay and browses an existing queue, which consumes nothing. The one write it sends, the `PATCH` of check 4, must be refused by the gateway; were it to get through, it names a queue that does not exist, so the broker would refuse it too.
 
-Needs: a Linux-container Docker; the npm packages installed (`npm ci`: the SMF check logs in with the pinned `solclientjs`, the SDK the images ship); the loopback port `39443` free (the gateway's, bound to `127.0.0.1`); and a broker the gateway container can reach over TLS, with SEMP over TLS and secured web transport (wss) enabled.
+Needs: a Linux-container Docker; the npm packages installed (`npm ci`: the SMF check logs in with the pinned `solclientjs`, the SDK the images ship, and the browser checks drive Chromium with the pinned `playwright-core`); the loopback ports `39443` and `39444` free (the gateway's and the browser's Playwright server, both bound to `127.0.0.1`); a one-time pull of the Playwright image, over 1 GB, which the first run does on its own; and a broker the gateway container can reach over TLS, with SEMP over TLS and secured web transport (wss) enabled.
 
 **Broker details.** Each comes from its `E2E_*` environment variable, else from `docker/e2e-broker.env`, a `KEY=value` file that is git-ignored and kept out of the image build context (`docker/Dockerfile.dockerignore`, with `scripts/logs/`): never commit it. The harness asks only for what neither gives, on the terminal, then writes those answers to the file (creating it at mode `600` with a header), so the next run asks nothing. It never writes a password there: add `E2E_SEMP_PASSWORD` and `E2E_CLIENT_PASSWORD` yourself to skip those prompts, and keep the file private (the harness warns when other users can read a file holding one). Without a terminal, a missing detail fails the run, naming the variables to set. An unknown key, a repeated key, or a value the gateway would refuse fails it too, naming the line.
 
@@ -69,8 +69,9 @@ Needs: a Linux-container Docker; the npm packages installed (`npm ci`: the SMF c
 | `E2E_CLIENT_PASSWORD` | | Asked without echo. |
 | `E2E_QUEUE` | | An existing queue in that VPN the client username may browse. A `/` is fine; `\`, `%`, `;` and an empty, `.` or `..` part between slashes are not, since the relay refuses them. |
 | `E2E_INSECURE` | `0` | `1` starts the e2e gateway with `SSL_INSECURE_SKIP_VERIFY=true`, for a broker whose certificate does not name the host it is dialled by. Never asked for; any value but `0` or `1` fails the run. The run warns at the start and its summary says the broker's certificate was not verified: checks 3, 4 and 6 then pass without proving that the broker's TLS is trusted, so do not rely on such a run before a tag. |
+| `E2E_BROWSER` | `1` | `0` skips the browser checks `B1`-`B8` and does not start the browser container, for a machine that cannot pull the Playwright image. Never asked for; any value but `0` or `1` fails the run. The summary says the browser checks were skipped. |
 
-The harness generates the gateway's TLS material, its store key and every gateway password, writes them only under `scripts/logs/e2e/`, and masks them in all it prints; it masks the broker passwords at any length. A broker password shorter than 8 characters cannot be looked for by checks 2, 10, 11 and 14 without matching ordinary text, and the run says so. It always ends with `docker compose down -v` and deletes that directory; the task runs `down -v` again as a backstop. The task runs the harness on the real terminal rather than through the log capture, so that it can ask; the harness appends its own masked output to `scripts/logs/e2e.log`. The SMF check uses the real SDK under Node through a loopback bridge, which adds the session cookie and a same-origin `Origin` the way a browser would; the bytes reach the gateway's `/managed/smf` socket unchanged.
+The harness generates the gateway's TLS material, its store key and every gateway password, writes them only under `scripts/logs/e2e/`, and masks them in all it prints; it masks the broker passwords at any length. A broker password shorter than 8 characters cannot be looked for by checks 2, 10, 11, 14 and `B5` without matching ordinary text, and the run says so. It always ends with `docker compose down -v` and deletes that directory; the task runs `down -v` again as a backstop. The task runs the harness on the real terminal rather than through the log capture, so that it can ask; the harness appends its own masked output to `scripts/logs/e2e.log`. The SMF check uses the real SDK under Node through a loopback bridge, which adds the session cookie and a same-origin `Origin` the way a browser would; the bytes reach the gateway's `/managed/smf` socket unchanged.
 
 Each check prints `PASS n.` or `FAIL n.` and any failure exits 1, followed by the tail of the gateway log:
 
@@ -83,11 +84,25 @@ Each check prints `PASS n.` or `FAIL n.` and any failure exits 1, followed by th
 7. The socket refuses a foreign `Origin`, a missing `Origin`, and a request without a session.
 8. A broker the user is not entitled to is a `404` on relay, dial and socket, the same as an unknown one.
 9. Signing out closes the open SMF session, and the old cookie gets `401`.
-10. No gateway response carries a credential, except the body of the `dial` answer.
+
+   The browser checks run here, before the sweep of check 10 and the restart of check 12. They use the app as a person does, in Chromium, at `https://gateway:9443` on the stack's network:
+
+   - `B1` signs in through the gateway's own pages (one wrong password first) and lands in the app. The session cookie passes the rules of check 1, the browser holds it `HttpOnly`, and `document.cookie` is empty.
+   - `B2` checks that the Managed panel offers only the entitled broker and VPN, and that the sidebar shows Connections, Queue Browser and Queue Copy.
+   - `B3` connects. The browser opens its own WebSocket to `/managed/smf/<broker>/<vpn>`, sending the cookie, `Origin` and `Sec-Fetch-Site` itself, and the page shows no broker address.
+   - `B4` binds the queue in Queue Browser. The queue is `Read-Only`, with no Delete.
+   - `B5` checks that browser storage holds no password, store key or session cookie.
+   - `B6` checks `/solAdmin`: it refuses the e2e user with the 403 page, and the administrator signs in there and sees both users and both connections.
+   - `B7` signs out from the sidebar. The browser's SMF socket closes, `/managed/me` gets `401`, and `/` goes to sign-in.
+   - `B8` checks that no request or socket went to another origin and that no page threw.
+
+10. No gateway response carries a credential, except the body of the `dial` answer. This includes every response the browser received.
 11. Both stores are sealed at rest (`SMUS` header, no plaintext).
 12. After a restart the stores still open: old sessions are gone, and the administrator signs in again.
 13. A missing key file beside an existing store refuses to start, naming both files.
-14. The gateway log (at `debug`) holds no password, store key or session cookie.
+14. The gateway log (at `debug`) holds no password, store key or session cookie, the browser's included.
+
+The browser trusts the gateway's throwaway certificate by ignoring certificate errors; the Node checks verify that certificate against the run's CA. The harness aborts any browser request to another origin, so nothing leaves the stack. Chromium runs without its own sandbox (Playwright's default in a container); the container's posture is the boundary, and its Playwright server takes one client, the harness. The server is the `playwright-core` that `npm ci` installed, mounted read-only, so the image's tag must equal that version, and the image is pinned by digest; `tests/build/e2e-lib.test.ts` holds both. To move to a new version, bump `playwright-core` and the image tag and digest together. A failed browser check saves a screenshot to `scripts/logs/e2e-<check>.png` (git-ignored); no page the run opens shows a password.
 
 The pure helpers (certificate issuing and reading, the broker details and their file, the cookie rules, the sealed-store header, masking and the secret sweep) live in [`scripts/e2e-lib.mjs`](../scripts/e2e-lib.mjs) and are covered by `tests/build/e2e-lib.test.ts`, which runs in the ordinary suite without Docker.
 

@@ -33,6 +33,16 @@
 // WebSocket cannot send the session cookie or an Origin, which a browser adds
 // on its own, so the SDK connects to a loopback bridge that adds both and
 // pipes the bytes to the gateway's /managed/smf socket unchanged.
+//
+// Checks B1-B8 then use the app as a person does: Chromium in the compose
+// file's `browser` container, driven through playwright-core (a devDependency
+// only), opens https://gateway:9443 on the stack's network, signs in through
+// the gateway's own pages, connects, browses the queue and signs out. That
+// browser sends the cookie and Origin itself. It trusts the gateway's
+// throwaway certificate by ignoring certificate errors; the Node checks verify
+// that certificate against the run's CA. Every response it receives joins the
+// sweep of check 10, and its session cookies are masked and swept for like the
+// others. E2E_BROWSER=0 skips them and the container.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
@@ -57,11 +67,16 @@ const DETAILS_FILE = path.join(REPO, DETAILS_NAME);
 const WORK = path.join(REPO, 'scripts', 'logs', 'e2e');
 const ALIAS = path.join(WORK, 'host-alias.yaml');
 const SOLCLIENT = path.join(REPO, 'node_modules', 'solclientjs', 'lib-browser', 'solclient.js');
+const LOGS = path.join(REPO, 'scripts', 'logs');
 const LOG = process.env.E2E_LOG ?? '';
 
 // The gateway's host port, bound to 127.0.0.1 by docker/docker-compose.e2e.yaml.
 const GATEWAY = { host: '127.0.0.1', port: 39443 };
 const ORIGIN = `https://${GATEWAY.host}:${GATEWAY.port}`;
+// The browser container's Playwright server on the host, and the gateway as
+// that browser reaches it on the stack's network.
+const BROWSER_SERVER = 'ws://127.0.0.1:39444/';
+const APP = 'https://gateway:9443';
 
 const BROKER = 'b1';            // the connection the user is entitled to
 const OTHER = 'b2';             // the same broker under a name the user is not entitled to
@@ -219,9 +234,12 @@ function describeBroker(certs) {
         + `VPN ${broker.vpn}, client username ${broker.clientUser}, queue ${broker.queue}`);
     for (const c of certs) say(`trusting ${c.subject.replace(/\n/g, ', ')} (valid until ${c.validTo}) from ${broker.caFile}`);
     if (insecure()) say("warning: E2E_INSECURE=1: the gateway does not verify the broker's certificate (SSL_INSECURE_SKIP_VERIFY=true)");
+    say(browserOn()
+        ? `browser: Chromium in the compose file's browser container, at ${APP} (the first run pulls the image)`
+        : 'note: E2E_BROWSER=0: the browser checks B1-B8 are skipped');
     for (const [name, label] of [['sempPassword', 'the SEMP password'], ['clientPassword', 'the client password']]) {
         if (brokerSecrets[name].length < MIN_MASKED) {
-            say(`note: ${label} is shorter than ${MIN_MASKED} characters: it is masked, but checks 2, 10, 11 and 14 cannot look for it without matching ordinary text`);
+            say(`note: ${label} is shorter than ${MIN_MASKED} characters: it is masked, but checks 2, 10, 11, 14 and B5 cannot look for it without matching ordinary text`);
         }
     }
 }
@@ -229,6 +247,7 @@ function describeBroker(certs) {
 // --- docker ------------------------------------------------------------------
 
 const insecure = () => broker.insecure === '1';
+const browserOn = () => broker.browser !== '0';
 
 function compose(args, { quiet = false } = {}) {
     // Always set, so a value inherited from the shell never reaches the gateway.
@@ -248,7 +267,8 @@ function writeMaterial(brokerCerts, roots) {
     fs.rmSync(WORK, { recursive: true, force: true });
     fs.mkdirSync(path.join(WORK, 'trust'), { recursive: true });
     const ca = makeCA('smu-e2e CA');
-    const gateway = issueCert(ca, { cn: 'localhost', dns: ['localhost'], ip: [GATEWAY.host] });
+    // `gateway` is the name the browser container reaches it by.
+    const gateway = issueCert(ca, { cn: 'localhost', dns: ['localhost', 'gateway'], ip: [GATEWAY.host] });
     caPem = ca.certPem;
     // Read by the gateway's own user (65532), so world-readable: throwaway
     // material for one run. The gateway warns that the store key is readable
@@ -471,8 +491,10 @@ function bindQueue(solace, session, queue) {
 
 async function stackUp() {
     compose(['down', '-v', '--remove-orphans'], { quiet: true });
-    const up = compose(['up', '-d']);
-    expect(up.code === 0, 'docker compose up failed (output above); the gateway uses the image `./scripts/dev.sh image` builds');
+    // By name: the browser only when its checks run.
+    const up = compose(['up', '-d', 'gateway', ...(browserOn() ? ['browser'] : [])]);
+    expect(up.code === 0, 'docker compose up failed (output above); the gateway uses the image `./scripts/dev.sh image` builds, '
+        + 'and the browser container pulls the Playwright image the compose file pins');
     await waitFor('the gateway', 60, async () => (await request('GET', '/hosted')).status === 200, 'gateway');
 }
 
@@ -637,6 +659,10 @@ async function runChecks(admin) {
             expect(stale.status === 401, `the signed-out cookie: want 401, got ${stale.status}`);
         });
 
+        // Before check 10, which then sweeps what the browser received too,
+        // and before the restart of check 12, which ends every session.
+        if (browserOn()) await runBrowserChecks();
+
         await check(10, 'no gateway response carries a credential except the dial answer\'s body', async () => {
             const sweep = sweepable();
             // By value: a SEMP password equal to the client password rightly
@@ -698,6 +724,290 @@ async function runChecks(admin) {
     }
 }
 
+// --- browser -----------------------------------------------------------------------
+
+/** playwright-core, loaded only when the browser checks run. */
+let playwright = null;
+
+async function loadPlaywright() {
+    try {
+        return await import('playwright-core');
+    } catch (e) {
+        throw new Error(`playwright-core cannot be loaded (${e.message}). Run npm ci: package.json pins it, at the browser image's version.`);
+    }
+}
+
+/** The browser container's Chromium, once its Playwright server answers. */
+async function connectBrowser() {
+    let browser = null;
+    let last = '';
+    try {
+        await waitFor('the browser', 60, async () => {
+            try {
+                browser = await playwright.chromium.connect(BROWSER_SERVER, { timeout: 5_000 });
+                return true;
+            } catch (e) {
+                last = String(e.message).split('\n')[0];
+                return false;
+            }
+        }, 'browser');
+    } catch (e) {
+        say('--- browser log (last 30 lines) ---');
+        compose(['logs', '--no-color', '--tail', '30', 'browser']);
+        throw new Error(`${e.message}; last attempt: ${last || 'none'}`);
+    }
+    return browser;
+}
+
+/** A gateway response the browser received, as a record for check 10; its session cookie is masked from then on. */
+async function recordResponse(res) {
+    const url = new URL(res.url());
+    if (url.origin !== APP) return;
+    const headers = await res.headersArray();
+    noteCookies(headers.filter((h) => h.name.toLowerCase() === 'set-cookie').map((h) => h.value));
+    let body = '';
+    try {
+        body = await res.text();
+    } catch { /* a redirect, or a page closed meanwhile, has no body to read */ }
+    records.push({
+        label: `${res.request().method()} ${url.pathname} -> ${res.status()}`,
+        headers: headers.reduce((s, h) => `${s}${h.name}: ${h.value}\r\n`, ''),
+        body,
+    });
+}
+
+/** A browser context on the gateway that notes what its pages do in `seen` (see runBrowserChecks). */
+async function openContext(browser, seen) {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: APP });
+    context.setDefaultTimeout(30_000);
+    // Anything but the gateway is aborted, so it never leaves the stack.
+    await context.route('**/*', (route) => {
+        const url = new URL(route.request().url());
+        if (url.origin === APP || !/^https?:$/.test(url.protocol)) return route.continue();
+        seen.foreign.push(url.href);
+        return route.abort('blockedbyclient');
+    });
+    // Caught at once: an unhandled rejection would end the run.
+    context.on('response', (res) => seen.pending.push(recordResponse(res).catch(() => { seen.unread += 1; })));
+    // Routes do not see WebSockets, so their URLs are noted apart.
+    context.on('page', (p) => {
+        p.on('websocket', (ws) => seen.sockets.push(ws.url()));
+        p.on('pageerror', (e) => seen.errors.push(e.message));
+    });
+    return context;
+}
+
+/** Signs in on the gateway's sign-in page, which `page` shows; resolves with the POST's response. */
+async function signInPage(page, username, password) {
+    await page.fill('#username', username);
+    await page.fill('#password', password);
+    const [res] = await Promise.all([
+        page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/login'),
+        page.click('form button[type=submit]'),
+    ]);
+    await page.waitForLoadState();
+    return res;
+}
+
+const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Checks B1-B8: the app in a real browser, as the e2e user and then the
+ * admin. A failure saves a screenshot to scripts/logs/e2e-<id>.png
+ * (git-ignored); no page the run opens shows a password.
+ */
+async function runBrowserChecks() {
+    const { vpn, queue } = broker;
+    const smfPath = `/managed/smf/${BROKER}/${vpn}`;
+    // What the pages did, for B8: response reads still running (check 10
+    // waits for them) and those that failed, requests to another origin
+    // (aborted), WebSocket URLs and uncaught errors.
+    const seen = { pending: [], unread: 0, foreign: [], sockets: [], errors: [] };
+    let browser = null;
+    let user = null;
+    let page = null;
+    let shown = null;
+    let socket = null;
+    // Every response read, also those that arrive meanwhile, so check 10 sweeps all of them.
+    const drain = async () => {
+        for (let n = 0; n !== seen.pending.length;) {
+            n = seen.pending.length;
+            await Promise.allSettled(seen.pending);
+        }
+    };
+
+    if (fs.existsSync(LOGS)) {
+        for (const f of fs.readdirSync(LOGS)) if (/^e2e-B\d\.png$/.test(f)) fs.rmSync(path.join(LOGS, f));
+    }
+    const bcheck = (id, title, fn) => check(id, title, async () => {
+        try {
+            return await fn();
+        } catch (e) {
+            const shot = path.join(LOGS, `e2e-${id}.png`);
+            if (shown && await shown.screenshot({ path: shot }).then(() => true, () => false)) e.message += ` (screenshot: scripts/logs/e2e-${id}.png)`;
+            throw e;
+        }
+    });
+
+    try {
+        await bcheck('B1', "a browser signs the e2e user in through the gateway's own pages and lands in the app, with an HttpOnly session cookie", async () => {
+            browser = await connectBrowser();
+            user = await openContext(browser, seen);
+            page = await user.newPage();
+            shown = page;
+            await page.goto('/');
+            expect(new URL(page.url()).pathname === '/login', `/ without a session: want /login, got ${page.url()}`);
+            const wrong = await signInPage(page, USER, 'not-the-password');
+            expect(wrong.status() === 401, `wrong password: want 401, got ${wrong.status()}`);
+            await page.locator('p.error[role=alert]').waitFor();
+            const ok = await signInPage(page, USER, secrets.userPassword);
+            const setCookie = (await ok.headersArray()).filter((h) => h.name.toLowerCase() === 'set-cookie').map((h) => h.value);
+            noteCookies(setCookie);
+            expect(ok.status() === 303, `sign-in: want 303, got ${ok.status()}`);
+            const problems = sessionCookieProblems(setCookie);
+            expect(problems.length === 0, problems.join('; '));
+            await page.waitForURL(`${APP}/`);
+            await page.locator('#managed-select-view').waitFor();
+            await page.locator('.conn-account-name').waitFor();
+            const name = (await page.locator('.conn-account-name').innerText()).trim();
+            expect(name === USER, `the sidebar names ${name || 'nobody'}`);
+            const held = (await user.cookies(APP)).find((c) => c.name === SESSION_COOKIE);
+            expect(held?.httpOnly && held.secure && held.sameSite === 'Lax',
+                `the browser holds ${held ? JSON.stringify({ ...held, value: '(masked)' }) : 'no session cookie'}`);
+            expect(await page.evaluate(() => document.cookie) === '', 'document.cookie shows the page a cookie');
+        });
+
+        await bcheck('B2', 'the Managed panel and the sidebar offer only what /managed/me grants', async () => {
+            expect(page, 'no signed-in page (B1)');
+            await page.waitForFunction(() => document.querySelector('#managed-vpn-select')?.options.length > 0);
+            const values = (sel) => page.locator(`${sel} option`).evaluateAll((os) => os.map((o) => o.value));
+            const brokers = await values('#managed-broker-select');
+            const vpns = await values('#managed-vpn-select');
+            expect(brokers.join() === BROKER && vpns.join() === vpn, `offered brokers [${brokers.join(', ')}], VPNs [${vpns.join(', ')}]`);
+            const nav = await page.locator('.nav-item[data-module-id]').evaluateAll((items) => items.map((i) => i.dataset.moduleId));
+            // Connections always; Queue Browser and Queue Copy as the default
+            // modules.userDefault=all grants them; never the subscription explorer.
+            expect(nav.join() === 'connections,queue-browser,queue-copy', `sidebar: ${nav.join(', ')}`);
+        });
+
+        await bcheck('B3', `Connect opens the browser's own WebSocket to ${smfPath}, and the page shows no broker address`, async () => {
+            expect(page, 'no signed-in page (B1)');
+            const opened = page.waitForEvent('websocket', {
+                timeout: 30_000, predicate: (ws) => decodeURIComponent(new URL(ws.url()).pathname) === smfPath,
+            });
+            opened.catch(() => {});
+            await page.click('#btn-managed-connect');
+            await page.locator('#managed-connected-view:visible, #managed-connect-error:visible').first().waitFor();
+            const failed = page.locator('#managed-connect-error');
+            if (await failed.isVisible()) throw new Error(await failed.innerText());
+            const summary = await page.locator('#managed-connected-summary').innerText();
+            expect(new RegExp(`Broker "${BROKER}".*VPN "${reEscape(vpn)}"`).test(summary), `summary: ${summary}`);
+            socket = await opened;
+            // Compared without case: innerText follows text-transform, so an
+            // address in an uppercased label would otherwise slip past.
+            const text = (await page.locator('body').innerText()).toLowerCase();
+            const named = [BROKER, OTHER, USER, vpn];
+            const found = findTokens(text, [broker.host, broker.brokerIp]
+                .filter((v) => v && v.length >= 4 && !named.includes(v)).map((v) => v.toLowerCase()));
+            expect(found.length === 0, `the page shows ${found.join(', ')}`);
+            return new URL(socket.url()).origin;
+        });
+
+        await bcheck('B4', `the Queue Browser binds ${queue} read-only, with no delete`, async () => {
+            expect(socket, 'no SMF session (B3)');
+            await page.click('.nav-item[data-module-id="queue-browser"]');
+            await page.locator('#browser-active-view').waitFor();
+            await page.fill('#browser-bind-input', queue);
+            await page.click('#btn-browser-bind');
+            const outcome = await page.waitForFunction((q) => {
+                const error = document.querySelector('#browser-bind-error')?.textContent?.trim();
+                if (error) return `error: ${error}`;
+                return [...document.querySelectorAll('#browser-bound-queues option')].some((o) => o.value === q) && 'bound';
+            }, queue);
+            const result = await outcome.jsonValue();
+            expect(result === 'bound', `bind: ${result}`);
+            await page.waitForFunction(() => document.querySelector('#browser-permissions')?.textContent === 'Read-Only').catch(() => {});
+            // textContent, not innerText: the badge is text-transform: uppercase,
+            // and innerText returns the rendered case.
+            const shownQueue = ((await page.locator('#browser-queue-name').textContent()) ?? '').trim();
+            const permissions = ((await page.locator('#browser-permissions').textContent()) ?? '').trim();
+            expect(shownQueue === queue && permissions === 'Read-Only', `shows queue ${shownQueue}, permissions ${permissions || '(none)'}`);
+            expect(await page.locator('#btn-browser-delete').isHidden(), 'the Delete button shows on a read-only queue');
+            return `total ${await page.locator('#count-total').innerText()}`;
+        });
+
+        await bcheck('B5', 'browser storage holds no password, store key or session cookie', async () => {
+            expect(page, 'no signed-in page (B1)');
+            const stored = await page.evaluate(() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage), document.cookie]));
+            const found = Object.entries({ ...sweepable(), ...cookies }).filter(([, v]) => stored.includes(v)).map(([n]) => n);
+            expect(found.length === 0, `holds ${found.join(', ')}`);
+        });
+
+        await bcheck('B6', '/solAdmin refuses the e2e user, and shows the admin both users and both connections', async () => {
+            expect(user, 'no browser (B1)');
+            const other = await user.newPage();
+            shown = other;
+            const refused = await other.goto('/solAdmin');
+            expect(refused?.status() === 403, `the e2e user: want 403, got ${refused?.status()}`);
+            const message = await other.locator('p.error').innerText();
+            expect(message.includes(`${USER}, which is not an administrator`), `403 page says: ${message}`);
+            await other.close();
+            // Its own context, left open so a failure can be screenshot; the
+            // browser closes it at the end.
+            const ap = await (await openContext(browser, seen)).newPage();
+            shown = ap;
+            await ap.goto('/solAdmin');
+            expect(new URL(ap.url()).pathname === '/login', `/solAdmin without a session: want /login, got ${ap.url()}`);
+            const s = await signInPage(ap, 'admin', secrets.adminPassword);
+            expect(s.status() === 303, `admin sign-in: want 303, got ${s.status()}`);
+            await ap.waitForURL(`${APP}/solAdmin`);
+            const rows = async (module, selector) => {
+                await ap.click(`.nav-item[data-module-id="${module}"]`);
+                await ap.locator(`${selector} tr`).first().waitFor();
+                return ap.locator(`${selector} tr`).evaluateAll((trs) => trs.map((tr) => [...tr.cells].slice(0, 2).map((td) => td.textContent.trim())));
+            };
+            const users = (await rows('user-management', '#user-mgmt-rows')).map(([n, role]) => `${n}/${role}`).sort();
+            expect(users.join() === ['admin/Admin', `${USER}/User`].sort().join(), `users: ${users.join(', ')}`);
+            const conns = (await rows('connection-management', '#conn-mgmt-rows')).map(([n]) => n).sort();
+            expect(conns.join() === [BROKER, OTHER].sort().join(), `connections: ${conns.join(', ')}`);
+        });
+
+        await bcheck('B7', 'Sign out in the sidebar ends the session and closes the browser\'s SMF socket', async () => {
+            shown = page;
+            expect(socket, 'no SMF session (B3)');
+            const closed = socket.isClosed() ? Promise.resolve() : socket.waitForEvent('close', { timeout: 15_000 });
+            closed.catch(() => {});
+            const logout = page.waitForResponse((r) => new URL(r.url()).pathname === '/managed/logout');
+            logout.catch(() => {});
+            await page.click('.conn-account-signout');
+            const out = await logout;
+            expect(out.status() === 204, `logout: want 204, got ${out.status()}`);
+            await closed;
+            await page.locator('.conn-account').waitFor({ state: 'hidden' });
+            const me = await page.evaluate(() => fetch('/managed/me').then((r) => r.status));
+            expect(me === 401, `/managed/me after sign-out: want 401, got ${me}`);
+            await page.goto('/');
+            expect(new URL(page.url()).pathname === '/login', `/ after sign-out: want /login, got ${page.url()}`);
+        });
+
+        await bcheck('B8', 'nothing in the browser reached another origin, and no page threw', async () => {
+            shown = null;
+            expect(user, 'no browser (B1)');
+            await drain();
+            const problems = [
+                ...seen.foreign.map((u) => `request to ${u}`),
+                ...seen.sockets.filter((u) => !u.startsWith('wss://gateway:9443/')).map((u) => `socket to ${u}`),
+                ...seen.errors.map((m) => `page error: ${m}`),
+            ];
+            expect(problems.length === 0, problems.join('; '));
+            return `${seen.sockets.length} socket(s)${seen.unread ? `; ${seen.unread} response(s) closed before they could be swept` : ''}`;
+        });
+    } finally {
+        await drain();
+        await browser?.close().catch(() => {});
+    }
+}
+
 // --- main ------------------------------------------------------------------------
 
 function teardown() {
@@ -718,6 +1028,7 @@ async function main() {
         brokerSecrets.clientPassword = broker.clientPassword;
         const certs = readBrokerCA(broker.caFile);
         describeBroker(certs);
+        if (browserOn()) playwright = await loadPlaywright();
         const roots = hostRootBundle((file) => {
             try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
         }, tls.rootCertificates);
@@ -741,7 +1052,8 @@ async function main() {
         teardown();
     }
     say(`e2e: ${results.length - failed.length} passed, ${failed.length} failed${failed.length ? ` (${failed.join(', ')})` : ''}${setupError ? ', setup failed' : ''}`
-        + `${insecure() ? "; the broker's certificate was not verified (E2E_INSECURE=1)" : ''}`);
+        + `${insecure() ? "; the broker's certificate was not verified (E2E_INSECURE=1)" : ''}`
+        + `${broker.browser === '0' ? '; the browser checks were skipped (E2E_BROWSER=0)' : ''}`);
     return setupError || failed.length ? 1 : 0;
 }
 

@@ -129,14 +129,14 @@ describe('e2e-lib -- broker details', () => {
         expect(values).toEqual({
             host: 'broker.example.com', caFile: 'certs/ca.pem', sempPort: '943', sempUser: 'monitor', sempPassword: 'semp-secret-1',
             smfPort: '443', vpn: 'prod-vpn', clientUser: 'app', clientPassword: 'client-secret-1', queue: 'orders/other',
-            brokerIp: '', insecure: '0',
+            brokerIp: '', insecure: '0', browser: '1',
         });
     });
 
     it('lists what neither gives, in prompt order, offering the defaults and no secret', () => {
         const file = parseDetailsFile('E2E_BROKER_HOST=broker.example.com\nE2E_SEMP_PASSWORD=\n', FILE);
         const { values, missing } = resolveDetails({}, file, FILE);
-        expect(values).toEqual({ host: 'broker.example.com', brokerIp: '', insecure: '0' });
+        expect(values).toEqual({ host: 'broker.example.com', brokerIp: '', insecure: '0', browser: '1' });
         expect(missing.map((f) => [f.env, f.offer, !!f.secret])).toEqual([
             ['E2E_BROKER_CA', '', false], ['E2E_SEMP_PORT', '1943', false], ['E2E_SEMP_USER', 'admin', false],
             ['E2E_SEMP_PASSWORD', '', true], ['E2E_SMF_PORT', '1443', false], ['E2E_VPN', 'default', false],
@@ -145,14 +145,23 @@ describe('e2e-lib -- broker details', () => {
         expect(resolveDetails({}).missing).toHaveLength(BROKER_FIELDS.filter((f) => !f.optional).length);
     });
 
-    // The one optional detail: verification stays on unless asked off, and
-    // only 1 turns it off, so a "true" or "yes" fails loudly instead.
+    // An optional flag: verification stays on unless asked off, and only 1
+    // turns it off, so a "true" or "yes" fails loudly instead.
     it('never asks for E2E_INSECURE: unset is 0, the environment overrides the file, and only 0 or 1 is taken', () => {
         const file = parseDetailsFile('E2E_INSECURE=1\n', FILE);
         expect(resolveDetails({}, file, FILE).values.insecure).toBe('1');
         expect(resolveDetails({ E2E_INSECURE: '0' }, file, FILE).values.insecure).toBe('0');
         expect(resolveDetails({}).missing.map((f) => f.env)).not.toContain('E2E_INSECURE');
         expect(resolveDetails({ E2E_INSECURE: 'true' }).errors).toEqual(['E2E_INSECURE (environment) is not 0 or 1: true']);
+    });
+
+    // The browser checks run unless asked off, and only 0 turns them off.
+    it('never asks for E2E_BROWSER: unset is 1, the environment overrides the file, and only 0 or 1 is taken', () => {
+        const file = parseDetailsFile('E2E_BROWSER=0\n', FILE);
+        expect(resolveDetails({}, file, FILE).values.browser).toBe('0');
+        expect(resolveDetails({ E2E_BROWSER: '1' }, file, FILE).values.browser).toBe('1');
+        expect(resolveDetails({}).missing.map((f) => f.env)).not.toContain('E2E_BROWSER');
+        expect(resolveDetails({ E2E_BROWSER: 'no' }).errors).toEqual(['E2E_BROWSER (environment) is not 0 or 1: no']);
     });
 
     it('names where each refused value came from, and never repeats a password', () => {
@@ -225,6 +234,47 @@ describe('e2e stack -- broker verification', () => {
 
     it('has the gateway service the host alias override extends', () => {
         expect(read('docker/docker-compose.e2e.yaml')).toMatch(/^services:\n(?:.*\n)*?  gateway:$/m);
+    });
+});
+
+// The browser for checks B1-B8 (scripts/e2e.mjs): a pulled image, so its
+// posture, its pin and its version are held here, where `test` runs without
+// Docker.
+describe('e2e stack -- browser', () => {
+    const read = (rel: string) => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf-8');
+    const block = read('docker/docker-compose.e2e.yaml').match(/^ {2}browser:\n((?: {4}.*\n|\n)*)/m)?.[1] ?? '';
+    const count = (text: string, part: string) => text.split(part).length - 1;
+
+    it('runs locked down: non-root, read-only, no capability or new privilege, one client, its port on loopback', () => {
+        expect(block, 'the browser service').not.toBe('');
+        for (const line of [
+            '    user: "1001:1001"', '    privileged: false', '    read_only: true', '    cap_drop:\n      - ALL',
+            '    security_opt:\n      - no-new-privileges:true', '    tmpfs:\n      - /tmp',
+            '      - ../node_modules/playwright-core:/pw:ro', '"--max-clients", "1"', '      - "127.0.0.1:39444:3000"',
+        ]) expect(count(block, line), line).toBe(1);
+        expect(block).not.toMatch(/^ {4}(?:ipc|pid|network_mode|cap_add|devices|privileged: true)\b/m);
+        expect(block).not.toContain('--unsafe');
+    });
+
+    it('pins the Playwright image by digest, at the playwright-core version npm installs', () => {
+        const pin: string = JSON.parse(read('package.json')).devDependencies?.['playwright-core'];
+        expect(pin, "package.json devDependencies['playwright-core']").toMatch(/^\d+\.\d+\.\d+$/);
+        const image = block.match(/^ {4}image: mcr\.microsoft\.com\/playwright:v(\d+\.\d+\.\d+)-noble@sha256:[0-9a-f]{64}$/m);
+        expect(image, 'the browser image, by tag and digest').not.toBeNull();
+        expect(image![1]).toBe(pin);
+        expect(JSON.parse(read('node_modules/playwright-core/package.json')).version, 'the installed playwright-core').toBe(pin);
+    });
+
+    // A bare `up` would start the browser even with E2E_BROWSER=0.
+    it('is started by name, and only when the browser checks run', () => {
+        expect(read('scripts/e2e.mjs')).toContain("compose(['up', '-d', 'gateway', ...(browserOn() ? ['browser'] : [])])");
+    });
+
+    it('never reaches the app: nothing under src/ names playwright', () => {
+        const files = fs.readdirSync(path.join(REPO_ROOT, 'src'), { recursive: true, encoding: 'utf-8' })
+            .filter((rel) => /\.(?:ts|mjs|js|html|css)$/.test(rel));
+        expect(files.length).toBeGreaterThan(0);
+        expect(files.filter((rel) => /playwright/i.test(read(path.join('src', rel))))).toEqual([]);
     });
 });
 
