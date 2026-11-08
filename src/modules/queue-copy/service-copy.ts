@@ -15,7 +15,7 @@ declare const solace: any;
  * Re-export from ./constants so test files importing these names from
  * `./service-copy` continue to work. The value definitions live in
  * [`./constants.ts`](./constants.ts) — single source of truth, kept in sync
- * with the mock build. Full semantic docstrings (idle behavior, backpressure
+ * with the demo build. Full semantic docstrings (idle behavior, backpressure
  * hysteresis rationale, SDK publish-window context) stay below at the use
  * sites where they're most relevant.
  */

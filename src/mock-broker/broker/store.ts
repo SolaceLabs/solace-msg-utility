@@ -15,7 +15,7 @@
  * listing, a by-name lookup or a publish can see, defaulting to the Direct
  * broker.
  *
- * Mock-only. mock.html reseeds on every page load; the managed demo carries
+ * Mock-only. demo.html reseeds on every page load; the managed demo carries
  * the store across its sign-in reloads with `dumpStore` / `loadStore`.
  */
 import { createDestination, createMessage, type MessageFields, type MockDestination, type MockMessage } from '../sdk/message';

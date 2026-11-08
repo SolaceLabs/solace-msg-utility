@@ -11,7 +11,7 @@ import { Kernel } from './core/kernel';
 import { modules } from './registry';
 import { logger } from './core/logger';
 
-// Pre-kernel seam. A no-op in shipped builds; the mock build redirects it to
+// Pre-kernel seam. A no-op in shipped builds; the demo build redirects it to
 // the in-browser broker so the SDK global and HTTP interceptor are in place
 // before any module installs.
 preBoot();
@@ -37,7 +37,7 @@ function boot(): void {
         if (script) {
             script.addEventListener('load', () => kernel.start());
         } else {
-            // No solclient.js found — boot without Solace (mock mode)
+            // No solclient.js found -- boot without Solace (demo mode)
             logger.warn('[Main] solclient.js not found, booting in limited mode');
             kernel.start();
         }

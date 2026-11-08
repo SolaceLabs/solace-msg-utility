@@ -5,8 +5,8 @@ import path from 'node:path';
 import {
     RELEASE_BUNDLES,
     DIRECT_BUNDLES,
+    MANAGED_DEMO_BUNDLE,
     DEMO_BUNDLE,
-    MOCK_BUNDLE,
     MANAGED_BUNDLE,
     MANAGED_MARKERS,
     DEMO_MARKERS,
@@ -28,16 +28,16 @@ import { NETWORK_DISABLED } from '../../src/mock-broker/network';
  * namespace, the mock server's `.invalid` route base, a URL built from a
  * variable).
  */
-const DEMO_CLEAN = `<html>${[...MANAGED_MARKERS, ...DEMO_MARKERS].join(' ')}` +
+const MANAGED_DEMO_CLEAN = `<html>${[...MANAGED_MARKERS, ...DEMO_MARKERS].join(' ')}` +
     '<form class="login-form"></form><svg xmlns="http://www.w3.org/2000/svg"></svg>' +
     '<script>const b="https://mock.invalid/";const u=`https://${a.host}:${a.port}`;</script></html>';
 
-/** What a clean mock.html holds: the network refusal, the Direct form and an inert namespace URL. */
-const MOCK_CLEAN = `<html>${NETWORK_MARKER}<div id="conn-host"></div><svg xmlns="http://www.w3.org/2000/svg"></svg></html>`;
+/** What a clean demo.html holds: the network refusal, the Direct form and an inert namespace URL. */
+const DEMO_CLEAN = `<html>${NETWORK_MARKER}<div id="conn-host"></div><svg xmlns="http://www.w3.org/2000/svg"></svg></html>`;
 
 /**
  * A fake project root whose dist/ holds a clean build: Direct-only bundles
- * (mock.html the offline demo), a managed.html carrying every managed marker,
+ * (demo.html the offline demo), a managed.html carrying every managed marker,
  * and a clean managed-demo.html.
  * `overrides` replaces a file's content, or omits it with `null`.
  */
@@ -49,9 +49,9 @@ function fakeBuild(overrides: Record<string, string | null> = {}): string {
     fs.mkdirSync(dist);
     const files: Record<string, string | null> = {
         ...Object.fromEntries(DIRECT_BUNDLES.map((f: string) => [f, '<html><div id="conn-host"></div></html>'])),
-        [MOCK_BUNDLE]: MOCK_CLEAN,
-        [MANAGED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')}</html>`,
         [DEMO_BUNDLE]: DEMO_CLEAN,
+        [MANAGED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')}</html>`,
+        [MANAGED_DEMO_BUNDLE]: MANAGED_DEMO_CLEAN,
         ...overrides,
     };
     for (const [name, content] of Object.entries(files)) {
@@ -113,72 +113,72 @@ describe('check-bundles — checkBundles', () => {
     });
 });
 
-// mock.html is the other mock-mode build: the one most likely to pull in the
+// demo.html is the other demo-mode build: the one most likely to pull in the
 // fake gateway by a wrong redirect, and, like the managed demo, it must not
 // reach a network.
 describe('check-bundles -- the Direct demo', () => {
-    const mockProblems = (text: string) => checkBundles(path.join(fakeBuild({ [MOCK_BUNDLE]: text }), 'dist'));
+    const demoProblems = (text: string) => checkBundles(path.join(fakeBuild({ [DEMO_BUNDLE]: text }), 'dist'));
 
-    it('fails when mock.html lacks the network refusal: its boot passes requests on again', () => {
-        expect(mockProblems(MOCK_CLEAN.replace(NETWORK_MARKER, ''))).toEqual([
-            expect.stringMatching(new RegExp(`^mock\\.html: lacks the demo marker "${NETWORK_MARKER}".*refuses the network`)),
+    it('fails when demo.html lacks the network refusal: its boot passes requests on again', () => {
+        expect(demoProblems(DEMO_CLEAN.replace(NETWORK_MARKER, ''))).toEqual([
+            expect.stringMatching(new RegExp(`^demo\\.html: lacks the demo marker "${NETWORK_MARKER}".*refuses the network`)),
         ]);
     });
 
-    it('fails mock.html when it carries the fake gateway', () => {
-        expect(mockProblems(`${MOCK_CLEAN}${GATEWAY_MARKER}`)).toEqual([
-            expect.stringMatching(new RegExp(`^mock\\.html: contains the demo marker "${GATEWAY_MARKER}".*mockRedirects`)),
+    it('fails demo.html when it carries the fake gateway', () => {
+        expect(demoProblems(`${DEMO_CLEAN}${GATEWAY_MARKER}`)).toEqual([
+            expect.stringMatching(new RegExp(`^demo\\.html: contains the demo marker "${GATEWAY_MARKER}".*demoRedirects`)),
         ]);
     });
 
-    it.each(DEMO_FORBIDDEN)('fails mock.html when it holds %s', (call) => {
-        expect(mockProblems(`${MOCK_CLEAN}<script>${call}x)</script>`)).toEqual([
-            expect.stringContaining(`mock.html: contains "${call}". A demo must not reach a network`),
+    it.each(DEMO_FORBIDDEN)('fails demo.html when it holds %s', (call) => {
+        expect(demoProblems(`${DEMO_CLEAN}<script>${call}x)</script>`)).toEqual([
+            expect.stringContaining(`demo.html: contains "${call}". A demo must not reach a network`),
         ]);
     });
 
-    it('fails mock.html with a form that submits somewhere, or a URL to a real host', () => {
-        expect(mockProblems(`${MOCK_CLEAN}<form action="/x">"https://broker.example.com/SEMP"`)).toEqual([
-            expect.stringContaining('mock.html: contains a <form> with an action'),
-            expect.stringContaining('mock.html: names the host "broker.example.com" in a URL'),
+    it('fails demo.html with a form that submits somewhere, or a URL to a real host', () => {
+        expect(demoProblems(`${DEMO_CLEAN}<form action="/x">"https://broker.example.com/SEMP"`)).toEqual([
+            expect.stringContaining('demo.html: contains a <form> with an action'),
+            expect.stringContaining('demo.html: names the host "broker.example.com" in a URL'),
         ]);
     });
 });
 
 describe('check-bundles -- the managed demo', () => {
-    const demoProblems = (text: string | null) => checkBundles(path.join(fakeBuild({ [DEMO_BUNDLE]: text }), 'dist'));
+    const managedDemoProblems = (text: string | null) => checkBundles(path.join(fakeBuild({ [MANAGED_DEMO_BUNDLE]: text }), 'dist'));
 
     it('fails when managed-demo.html is missing', () => {
-        expect(demoProblems(null)).toEqual([expect.stringMatching(/^managed-demo\.html: missing.*--variant=managed-demo/)]);
+        expect(managedDemoProblems(null)).toEqual([expect.stringMatching(/^managed-demo\.html: missing.*--variant=managed-demo/)]);
     });
 
     it('fails when the demo lacks a managed marker: the connections entry override did not apply', () => {
-        expect(demoProblems(DEMO_CLEAN.replace(MANAGED_MARKERS[0], ''))).toEqual([
+        expect(managedDemoProblems(MANAGED_DEMO_CLEAN.replace(MANAGED_MARKERS[0], ''))).toEqual([
             expect.stringMatching(new RegExp(`lacks the managed marker "${MANAGED_MARKERS[0]}".*managed-demo variant`)),
         ]);
     });
 
     it.each(DEMO_MARKERS)('fails when the demo lacks the demo marker %s: built without the managed boot', (marker) => {
-        expect(demoProblems(DEMO_CLEAN.replace(marker, ''))).toEqual([
-            expect.stringMatching(new RegExp(`lacks the demo marker "${marker}".*--mode mock`)),
+        expect(managedDemoProblems(MANAGED_DEMO_CLEAN.replace(marker, ''))).toEqual([
+            expect.stringMatching(new RegExp(`lacks the demo marker "${marker}".*--mode demo`)),
         ]);
     });
 
     it.each(DEMO_FORBIDDEN)('fails a demo that holds %s', (call) => {
-        expect(demoProblems(`${DEMO_CLEAN}<script>${call}x)</script>`)).toEqual([
+        expect(managedDemoProblems(`${MANAGED_DEMO_CLEAN}<script>${call}x)</script>`)).toEqual([
             expect.stringContaining(`managed-demo.html: contains "${call}". A demo must not reach a network`),
         ]);
     });
 
     it('fails a demo with a form that submits somewhere', () => {
-        expect(demoProblems(`${DEMO_CLEAN}<FORM method="post" action="/login">`)).toEqual([
+        expect(managedDemoProblems(`${MANAGED_DEMO_CLEAN}<FORM method="post" action="/login">`)).toEqual([
             expect.stringContaining('contains a <form> with an action'),
         ]);
     });
 
     it('fails a demo that names a real host, once per host', () => {
-        const text = `${DEMO_CLEAN}"wss://broker.example.com:443" "https://broker.example.com/SEMP"`;
-        expect(demoProblems(text)).toEqual([expect.stringContaining('names the host "broker.example.com" in a URL')]);
+        const text = `${MANAGED_DEMO_CLEAN}"wss://broker.example.com:443" "https://broker.example.com/SEMP"`;
+        expect(managedDemoProblems(text)).toEqual([expect.stringContaining('names the host "broker.example.com" in a URL')]);
     });
 });
 
@@ -242,7 +242,7 @@ describe('check-bundles — the Release upload list', () => {
     });
 
     it('is the Direct bundles plus the managed demo', () => {
-        expect(RELEASE_BUNDLES).toEqual([...DIRECT_BUNDLES, DEMO_BUNDLE]);
+        expect(RELEASE_BUNDLES).toEqual([...DIRECT_BUNDLES, MANAGED_DEMO_BUNDLE]);
     });
 
     // The gateway ships only inside the images. On a public repo a workflow

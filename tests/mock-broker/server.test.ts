@@ -80,7 +80,7 @@ describe('mock-broker/server — /hosted', () => {
         // the pathname exactly meant the demo silently fell back to non-hosted
         // URLs it does not answer. jsdom's http:// location hides this, so
         // assert the resolved shape directly.
-        expect(new URL('/hosted', 'file:///C:/demo/mock.html').pathname).toBe('/C:/hosted');
+        expect(new URL('/hosted', 'file:///C:/demo/demo.html').pathname).toBe('/C:/hosted');
 
         const body = await (await fetch('file:///C:/hosted')).json();
         expect(body.hosted).toBe(true);

@@ -179,6 +179,11 @@
 >   - **Tests.** `tests/build/e2e-lib.test.ts` gains "never asks for E2E_BROWSER: ..." and "e2e stack -- browser" (the posture, the image pinned by digest at the installed `playwright-core` version, the browser started by name, and nothing under `src/` naming playwright).
 >   - **Docs.** The e2e section of contributing.md.
 >   - **Totals.** Web 95 files / 2175 tests.
+> - **mock.html is demo.html (November 2026):**
+>   - **Renamed.** The offline Direct demo is now `dist/demo.html`, built by `npm run build:demo`. The Vite mode is `demo` (`--mode demo`, `mode === 'demo'`), with `demoRedirects`, `serviceDemoRedirect` and `DemoRedirect` in `vite.config.ts`. The Release asset changes name with it, through `RELEASE_BUNDLES` in `tag.yml`.
+>   - **Unchanged names.** The `src/mock-broker/` and `tests/mock-broker/` trees, the `mock` dev task, and `npm run test:mock`.
+>   - **check-bundles.** In `scripts/check-bundles.mjs`, `MOCK_BUNDLE` became `DEMO_BUNDLE` (`demo.html`), and the old `DEMO_BUNDLE` became `MANAGED_DEMO_BUNDLE` (`managed-demo.html`). `check-bundles.test.ts` renames its fixtures to match (`DEMO_CLEAN`, `MANAGED_DEMO_CLEAN`) and expects the new file names. The test count is unchanged.
+>   - **Docs.** Both demo sections moved from user-guide.md into the new [demo.md](demo.md). The user guide's variants table and the README link there, and both doc lists name it. The entries above keep the name mock.html, as it was then.
 >
 > The v8 ignore categories table further down has been trimmed to reflect which of the old justifications still apply.
 

@@ -39,7 +39,7 @@ function xml(body: string): Response {
  * Deliberately NOT `window.location.href`. Opened from disk the page origin is a
  * `file://` URL, and resolving `/hosted` against one is platform-dependent: on
  * Windows the URL spec preserves the drive letter, so
- * `new URL('/hosted', 'file:///C:/…/mock.html')` yields `file:///C:/hosted` and
+ * `new URL('/hosted', 'file:///C:/.../demo.html')` yields `file:///C:/hosted` and
  * a pathname of `/C:/hosted`. Routing on that made the demo miss `/hosted`
  * entirely and fall back to non-hosted URLs the demo does not answer.
  *

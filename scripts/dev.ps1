@@ -239,7 +239,7 @@ function Task-test {
 }
 
 # The demo broker and the managed demo's fake gateway (tests/mock-broker/): the
-# suites behind mock.html and managed-demo.html, the gateway contract included.
+# suites behind demo.html and managed-demo.html, the gateway contract included.
 # Skipped, like test's web suite, when cov runs them in this invocation.
 function Task-mock {
   $c = Install-Deps 'mock'; if ($c -ne 0) { return $c }

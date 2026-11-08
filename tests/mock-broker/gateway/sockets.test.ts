@@ -85,7 +85,7 @@ describe('mock-broker/gateway/sockets -- opening', () => {
         expect(events[0].info).toMatch(/^Login failure: 401 Unauthorized/);
     });
 
-    it('leaves a socket path an unknown host when no gate is set (mock.html)', async () => {
+    it('leaves a socket path an unknown host when no gate is set (demo.html)', async () => {
         setSocketGate(null);
         const { events } = await open();
         expect(events).toEqual([{ code: FAILED, info: 'Connection error: Unable to connect to ws:///managed/smf/b1/v1' }]);

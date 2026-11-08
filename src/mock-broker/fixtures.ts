@@ -9,7 +9,7 @@
  * `payments-Q`, so a queue you could pick was not a queue you could inspect.
  * Everything now reads from here, so that class of drift is structurally gone.
  *
- * Mock-only: reachable exclusively through the `mode === 'mock'` import
+ * Mock-only: reachable exclusively through the `mode === 'demo'` import
  * redirect, so no production bundle contains it.
  */
 
@@ -129,7 +129,7 @@ export const VPNS: VpnFixture[] = [
 /* ------------------------------------------------------------------ */
 
 /**
- * The broker a Direct session reaches: the only one in mock.html, and the
+ * The broker a Direct session reaches: the only one in demo.html, and the
  * Direct tab of the managed demo, whose provisioned brokers `setBrokers` adds.
  */
 export const DIRECT_BROKER = 'direct';

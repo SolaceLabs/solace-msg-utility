@@ -1,8 +1,8 @@
 /**
- * Demo entry point (`mock.html`, the Direct demo). Redirected in for
- * `src/core/boot.ts` when Vite builds with `--mode mock`, so production never
+ * Demo entry point (`demo.html`, the Direct demo). Redirected in for
+ * `src/core/boot.ts` when Vite builds with `--mode demo`, so production never
  * imports anything in this tree. The managed demo has its own
- * (`boot.managed.ts`; `mockRedirects` in vite.config.ts picks by variant).
+ * (`boot.managed.ts`; `demoRedirects` in vite.config.ts picks by variant).
  *
  * Installing the SDK ourselves means the demo no longer needs `solclient.js`
  * beside the HTML: we satisfy the shell's vendor loader directly, including the

@@ -8,7 +8,7 @@ import { scenario } from '../../src/mock-broker/fixtures';
  * Regression cover for the race that made the demo fail with the real SDK's
  * "Profile binding not initialized. Call solace.SolclientFactory.init".
  *
- * `dist/solclient.js` sits beside `mock.html`, so the shell's vendor loader
+ * `dist/solclient.js` sits beside `demo.html`, so the shell's vendor loader
  * fetches it. The bundle is a deferred module and normally runs first, then the
  * real SDK lands and reassigns `window.solace` — leaving the app driving a real
  * factory it never initialised, because it had initialised ours.
@@ -101,7 +101,7 @@ describe('mock-broker/boot — the vendor race', () => {
     });
 });
 
-// Like the managed demo (tests/mock-broker/boot.managed.test.ts), mock.html
+// Like the managed demo (tests/mock-broker/boot.managed.test.ts), demo.html
 // must never reach a network, whatever host is typed into the Direct form.
 describe('mock-broker/boot -- no network', () => {
     it('refuses a request the demo does not answer, without calling the fetch it replaced', async () => {

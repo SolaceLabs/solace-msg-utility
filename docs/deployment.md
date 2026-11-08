@@ -197,7 +197,7 @@ You can open `index.html` directly in a browser via `file:///…`, but **SEMP AP
 
 ## External Runtime Dependencies
 
-The PWA loads two external scripts via `<script>` tags. They are not bundled into the HTML: wherever you host an HTML file yourself, put both next to it. The container images already include both, from the exact versions `package.json` pins, with their licence files under `licenses/`. The same requirement applies to `min.html`, `mock.html`, `no-payload.html`, and `no-queue-copy.html`; every variant of the PWA expects the two vendor files next to it. `managed.html` (the managed image's `index.html`) needs them too. `solAdmin.html` uses none of what those files provide (it never opens a broker connection and has no ZIP export), but it is built from the same shell, so it still runs the vendor loader and will show the "not found" banner if they are absent.
+The PWA loads two external scripts via `<script>` tags. They are not bundled into the HTML: wherever you host an HTML file yourself, put both next to it. The container images already include both, from the exact versions `package.json` pins, with their licence files under `licenses/`. The same requirement applies to `min.html`, `demo.html`, `no-payload.html`, and `no-queue-copy.html`; every variant of the PWA expects the two vendor files next to it. `managed.html` (the managed image's `index.html`) needs them too. `solAdmin.html` uses none of what those files provide (it never opens a broker connection and has no ZIP export), but it is built from the same shell, so it still runs the vendor loader and will show the "not found" banner if they are absent.
 
 The shell tries each file in two locations, in order:
 

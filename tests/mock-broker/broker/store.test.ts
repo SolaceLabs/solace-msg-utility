@@ -9,7 +9,7 @@ import { createMessage, createTopicDestination } from '../../../src/mock-broker/
 import { DestinationType } from '../../../src/mock-broker/sdk/enums';
 
 /**
- * The store holds every broker the demo knows: Direct (mock.html's only one)
+ * The store holds every broker the demo knows: Direct (demo.html's only one)
  * and the managed demo's. A broker argument scopes what a listing, a by-name
  * lookup or a publish sees, so a managed session on one broker never reaches
  * another broker's queues.

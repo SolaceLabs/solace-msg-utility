@@ -27,11 +27,11 @@ hardening items" section of [rbac-variant-plan.md](rbac-variant-plan.md) when ad
 | SEMP relay | Gateway injects the credential and forwards **reads only** (decided 2026-11-01): `GET`/`HEAD` under `/SEMP/v2/`, and `POST /SEMP` only for a single `<rpc><show>`; everything else under `/SEMP` is `403 read_only`, any other path `404`. Paths are checked per decoded segment, because the router leaves encoded dot segments in place | VPN/queue filtering stays in the PWA (`managed-semp-filter.ts`), so queue globs remain a UI filter on both planes. Protection is credential custody plus a session-bound relay keyed by broker name: an entitled user can read any VPN/queue on a provisioned broker, not other brokers, and the stored SEMP account can never write through the gateway. |
 | SMF dial | `POST /managed/dial {broker, vpn}` returns `{smfPath, vpn, user, pass}` to an entitled user, read-only users included. Stateless: no ticket | A ticket would break the SDK's own reconnects, which re-use the session properties. "One-shot" means the password comes only from `dial` and the browser keeps it only inside the dial callback; a reconnect after a sign-in dials again. Dials and socket upgrades share 20 per minute per user. |
 | SMF socket | `GET /managed/smf/{broker}/{vpn}` upgraded behind the session, an `Origin` equal to the gateway's own `https` address and the entitlement; joined to the broker's SMF port over TLS with only the `Sec-WebSocket-*` headers passed. Closed only on revocation (decided 2026-11-01): sign-out, password change, user deleted or administrator flag changed, entitlement or VPN removed, broker deleted | No idle or absolute timer: the SMF API's keep-alive owns the connection's lifetime, so a socket can outlive its session. A Host-rewriting proxy in front fails the `Origin` check; an allowed-origins setting is out of scope. |
-| Bundle delivery | New `managed` variant builds `dist/managed.html`; the managed image copies it over `index.html`. The Release uploads an explicit list (`index`, `min`, `no-payload`, `no-queue-copy`, `mock`, and from Phase 4 `managed-demo`), never `solAdmin.html` or `managed.html` | Build-time registry, nothing loads at runtime. Release bundles lose the managed code; `tag.yml` stops uploading `dist/*`. |
+| Bundle delivery | New `managed` variant builds `dist/managed.html`; the managed image copies it over `index.html`. The Release uploads an explicit list (`index`, `min`, `no-payload`, `no-queue-copy`, `demo`, and from Phase 4 `managed-demo`), never `solAdmin.html` or `managed.html` | Build-time registry, nothing loads at runtime. Release bundles lose the managed code; `tag.yml` stops uploading `dist/*`. |
 | `CONN_MODES=both` | Kept in the managed image; Direct stays a per-deployment switch (decided 2026-11-01) | Under `both` the Direct relay stays present and its exposure is handled by the client access list below; under `managed` it answers `404`, read live. The gateway's sign-in cookie is never forwarded by it in any mode, and an upstream `Set-Cookie` naming it is dropped. |
 | Relay exposure | The Direct relay stays open to any host under `direct` and `both` (closed under `managed`). New client access list, CIDR-based, default allow-all | Applies to every route, not only the relay. Behind a reverse proxy the client IP comes from `X-Forwarded-For` only when the proxy is listed as trusted. |
 | Docs-secrecy policy | Retired in Phase 3 (step 3E), with the browser transform | `CLAUDE.md` section, `check-docs-secrecy.mjs`, its test and `check:docs` removed; docs name the store format and primitive. |
-| Managed demo | The real managed modules against a demo-only fake gateway and the in-browser broker, shipped as the Release asset `managed-demo.html` (decided 2026-11-04, replacing the separate mini app) | Phase 4. `mock.html` stays a Direct-only demo. The fake follows the gateway through shared contract files that both are tested against. |
+| Managed demo | The real managed modules against a demo-only fake gateway and the in-browser broker, shipped as the Release asset `managed-demo.html` (decided 2026-11-04, replacing the separate mini app) | Phase 4. `demo.html` stays a Direct-only demo. The fake follows the gateway through shared contract files that both are tested against. |
 | SEMP v1 RPC | Checked only for its shape: one `<rpc>` with one `<show>` command (follows from the read-only relay) | Which modules a managed session sees is decided by module control, below. |
 | Module control | Deployment ceiling in `config.yaml` (modules the image offers) plus a per-user `modules` list in `users.yaml` within it, editable in `/solAdmin`; `/managed/me` returns the result. A user without a list gets the deployment default, itself a `config.yaml` setting (`all` or `none`, default `all`). Admin-only modules still require `admin` | Replaces "every other module is visible" in `src/core/rbac.ts`. The SEMP v1 modules stay out of the catalog and hidden in every managed session (decided 2026-11-01: what a managed user sees must follow the admin's queue rows, which those modules cannot honour). |
 | Module scope | Show/hide only. Read-only vs operate stays per queue | A read-only queue admits no operate action in any module, e.g. `queue-copy` cannot copy into it. No per-module level. |
@@ -133,7 +133,7 @@ as one commit series straight on the branch (no sub-branches; CI by `workflow_di
 - `connections` split into two entries, `module.ts` (Direct; exports `installDirect`) and
   `module.managed.ts` (Direct + Managed), with `index.html` / `index.managed.html` (base spliced
   in at `<!-- @module-base -->`); the registry plugin, template injector and `loadModuleDOM` learn
-  the per-variant entry override (`MODULE_ENTRIES`). `mock.html` became Direct-only.
+  the per-variant entry override (`MODULE_ENTRIES`). `demo.html` became Direct-only.
 - `managed` variant, `dist/managed.html`, Dockerfile overwrite in the managed leg; `tag.yml`
   uploads an explicit Release list.
 - Build check (`scripts/check-bundles.mjs`, in the `build` task): Release bundles carry no
@@ -198,9 +198,9 @@ demo" (the real modules, not a mini app).
 - Contract: `go-web-proxy/testdata/contract/` (seed, request cases with the real answers, validation
   vectors), proved against the real gateway by `contract_test.go` (`-update` rewrites the answers)
   and against the fake by `tests/mock-broker/gateway/contract.test.ts`.
-- Boot: `mockRedirects(variant)` gives the `managed-demo` variant its own boot,
+- Boot: `demoRedirects(variant)` gives the `managed-demo` variant its own boot,
   `src/mock-broker/boot.managed.ts`. The demo broker serves several brokers (`fixtures.BROKERS`,
-  `direct` for mock.html).
+  `direct` for demo.html).
 - Fake gateway, `src/mock-broker/gateway/`:
   - the router in the gateway's gate order;
   - `/hosted`, `me`, `logout`, `dial`, the relay, `users`, `connections` and `settings`;

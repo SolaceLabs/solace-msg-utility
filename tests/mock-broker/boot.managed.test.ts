@@ -6,7 +6,7 @@ import { BROKERS, resetScenario, scenario, setBrokers } from '../../src/mock-bro
 import { setSocketGate } from '../../src/mock-broker/sdk/session';
 
 /**
- * The managed demo's boot. It shares the shell work with mock.html's boot
+ * The managed demo's boot. It shares the shell work with demo.html's boot
  * (tests/mock-broker/boot.test.ts covers the vendor race) but must never reach
  * a network, starts on the gateway's sign-in while connModes is managed, and
  * carries everything across the reloads a sign-in causes.

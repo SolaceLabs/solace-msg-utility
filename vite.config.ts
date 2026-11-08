@@ -106,7 +106,7 @@ function variantRedirect(variant: string | undefined): PluginOption {
     };
 }
 
-interface MockRedirect {
+interface DemoRedirect {
     from: string;
     to: string;
     /**
@@ -119,19 +119,19 @@ interface MockRedirect {
 }
 
 /**
- * The demo boot each variant gets in mock mode; any other variant gets
- * `./mock-broker/boot` (mock.html). The managed demo has its own so that its
- * fake gateway and network block never reach mock.html, and mock.html's
+ * The demo boot each variant gets in demo mode; any other variant gets
+ * `./mock-broker/boot` (demo.html). The managed demo has its own so that its
+ * fake gateway and network block never reach demo.html, and demo.html's
  * fall-through to the real `fetch` never reaches the managed demo.
  */
 const DEMO_BOOTS: Record<string, string> = {
     'managed-demo': './mock-broker/boot.managed',
 };
 
-function mockRedirects(variant: string | undefined): MockRedirect[] {
+function demoRedirects(variant: string | undefined): DemoRedirect[] {
     return [
         // ONE entry. `src/core/boot.ts` is a no-op seam that `src/main.ts` calls
-        // before starting the kernel; in mock mode it resolves to the in-browser
+        // before starting the kernel; in demo mode it resolves to the in-browser
         // broker instead, which installs `window.solace`, intercepts `fetch` for
         // SEMP and /hosted (and, in the managed demo, the gateway), and mounts
         // the demo control panel.
@@ -146,12 +146,12 @@ function mockRedirects(variant: string | undefined): MockRedirect[] {
 }
 
 /**
- * In mock mode, redirect the boot seam to the demo's. Applied only when
- * `mode === 'mock'`. Module source files stay untouched.
+ * In demo mode, redirect the boot seam to the demo's. Applied only when
+ * `mode === 'demo'`. Module source files stay untouched.
  */
-function serviceMockRedirect(redirects: MockRedirect[]): PluginOption {
+function serviceDemoRedirect(redirects: DemoRedirect[]): PluginOption {
     return {
-        name: 'service-mock-redirect',
+        name: 'service-demo-redirect',
         enforce: 'pre',
         resolveId(source, importer) {
             if (!importer) return null;
@@ -170,7 +170,7 @@ function serviceMockRedirect(redirects: MockRedirect[]): PluginOption {
 /**
  * Rename the emitted `index.html` asset to a custom filename inside the bundle
  * so Vite writes `dist/<to>` directly — no post-build fs rename. Used by mock
- * mode (`mock.html`) and by the `VITE_OUTPUT_NAME` override. `enforce: 'post'`
+ * mode (`demo.html`) and by the `VITE_OUTPUT_NAME` override. `enforce: 'post'`
  * is required so this runs after Vite's HTML plugin has added the asset.
  */
 function renameHtmlAsset(from: string, to: string): PluginOption {
@@ -201,14 +201,14 @@ function readBuildInput(envKey: string): string | undefined {
 }
 
 export default defineConfig(({ mode }) => {
-    const isMock = mode === 'mock';
+    const isDemo = mode === 'demo';
     // `--out-filename=<name>` overrides the emitted HTML filename. Bare name
     // (no extension) is allowed — `.html` is appended. Takes precedence over
-    // the mock-mode default of `mock.html`.
+    // the demo-mode default of `demo.html`.
     const rawOutputName = readBuildInput('__VITE_OUT_FILENAME');
     const outputName = rawOutputName
         ? (rawOutputName.endsWith('.html') ? rawOutputName : `${rawOutputName}.html`)
-        : (isMock ? 'mock.html' : null);
+        : (isDemo ? 'demo.html' : null);
     // `--variant=<name>` selects which manifest under `src/variants/` the
     // registry resolves at build time. Unset → the default re-export in
     // `_active.ts` wins (currently `./standard`).
@@ -224,7 +224,7 @@ export default defineConfig(({ mode }) => {
             variantRedirect(variant),
             moduleRegistryPlugin({ root: __dirname, variant }) as PluginOption,
             cssVariantRedirect(variant),
-            isMock && serviceMockRedirect(mockRedirects(variant)),
+            isDemo && serviceDemoRedirect(demoRedirects(variant)),
             injectModuleTemplates(variant),
             viteSingleFile(),
             outputName && renameHtmlAsset('index.html', outputName)

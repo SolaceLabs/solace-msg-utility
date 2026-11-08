@@ -123,7 +123,7 @@ Within each leg all four tags point to the same digest: the one `image` pushed a
 
 ### Release assets
 
-- `index.html`, `min.html`, `mock.html`, `no-payload.html`, `no-queue-copy.html`, `managed-demo.html` (the `RELEASE_BUNDLES` list in the `release` step, kept equal to `scripts/check-bundles.mjs` by a test). `managed-demo.html` is the only one with managed UI: it runs against an in-browser fake gateway and holds no gateway or broker address.
+- `index.html`, `min.html`, `demo.html`, `no-payload.html`, `no-queue-copy.html`, `managed-demo.html` (the `RELEASE_BUNDLES` list in the `release` step, kept equal to `scripts/check-bundles.mjs` by a test). `managed-demo.html` is the only one with managed UI: it runs against an in-browser fake gateway and holds no gateway or broker address.
 - `SHA256SUMS.txt` over all of the above
 
 The build also emits `solAdmin.html` and `managed.html`. The `release` step uploads an explicit list, never `dist/*`, so neither is a Release asset: both exist only inside the managed image.

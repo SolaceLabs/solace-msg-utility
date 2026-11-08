@@ -29,7 +29,7 @@ npm install && npm test
 | `build` | `npm run build` (every variant), `npm run check:bundles` (no Direct bundle carries managed UI; the managed demo has no way out to a network), plus both gateway binaries, version-stamped, into `dist/` |
 | `vet` | `npm run typecheck`, `go vet ./...` **and** `go vet -tags managed ./...` |
 | `test` | `npm run test:app` (the web suite without `tests/mock-broker/`), `go test ./...` **and** `go test -tags managed ./...`. When `cov` is in the same invocation (`full`, `all cov`), the web suite runs once, in `cov`, and `test.log` says so |
-| `mock` | `npm run test:mock`: `tests/mock-broker/`, the suites behind `mock.html` and the managed demo, the gateway contract included. Skipped, like `test`'s web suite, when `cov` is in the same invocation |
+| `mock` | `npm run test:mock`: `tests/mock-broker/`, the suites behind `demo.html` and the managed demo, the gateway contract included. Skipped, like `test`'s web suite, when `cov` is in the same invocation |
 | `cov` | `npm run test:coverage` plus a Go coverage profile; prints both totals |
 | `scan` | `npm run audit:gate` (`npm audit`, fatal on fixable HIGH/CRITICAL advisories, warns on unfixable ones), `go tool govulncheck -tags=managed ./...`, then a Trivy scan of both freshly-built images with the pinned Trivy container (never a `trivy` on PATH; see [git.md](git.md#keeping-the-workflow-pins-current)) |
 | `image` | Builds both container images via `docker/docker-compose.yaml` |
@@ -158,7 +158,7 @@ The pure helpers (certificate issuing and reading, the broker details and their 
 ### File Organization
 
 - One concern per file (not one class per file — there are no classes).
-- Services: `service.ts`, `service-*.ts`. Never add a `service-*-mock.ts` sibling: the mock build runs the real services against the in-browser broker, so new demo behaviour goes in `src/mock-broker/` and is covered in `tests/mock-broker/`.
+- Services: `service.ts`, `service-*.ts`. Never add a `service-*-mock.ts` sibling: the demo build runs the real services against the in-browser broker, so new demo behaviour goes in `src/mock-broker/` and is covered in `tests/mock-broker/`.
 - UI: `ui.js`, `ui-*.ts`, `ui-*.js`
 - State: `state.js`
 - Orchestrator: `module.ts`

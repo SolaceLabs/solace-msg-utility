@@ -11,7 +11,7 @@
  * A URL on the gateway's SMF socket path (`/managed/smf/{broker}/{vpn}`) goes
  * through the socket gate the managed demo's boot sets (`setSocketGate`): the
  * fake gateway checks the session, the entitlement and the login, and closes
- * the session on revocation. mock.html sets none, so such a URL is just an
+ * the session on revocation. demo.html sets none, so such a URL is just an
  * unknown host there.
  *
  * Publish acknowledgement round-trips through `ACKNOWLEDGED_MESSAGE` on the
@@ -45,7 +45,7 @@ export type SocketGate = (login: SocketLogin, close: () => void) =>
 
 let socketGate: SocketGate | null = null;
 
-/** Set by the managed demo's boot; null (mock.html) leaves every URL a broker host. */
+/** Set by the managed demo's boot; null (demo.html) leaves every URL a broker host. */
 export function setSocketGate(gate: SocketGate | null): void {
     socketGate = gate;
 }

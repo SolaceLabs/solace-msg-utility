@@ -1,7 +1,7 @@
 /**
  * What both demo boots do to the shell: install the SDK emulator where the
  * real SDK cannot undo it, and clear the missing-vendor banner. Shared here,
- * not in `boot.ts`, so the managed demo's boot never imports mock.html's (and
+ * not in `boot.ts`, so the managed demo's boot never imports demo.html's (and
  * its fall-through to the real `fetch`).
  *
  * Mock-only.

@@ -81,7 +81,7 @@ permissions:
 # RELEASE_BUNDLES in scripts/check-bundles.mjs;
 # tests/build/check-bundles.test.ts fails if the two drift.
 env:
-  RELEASE_BUNDLES: "index.html min.html no-payload.html no-queue-copy.html mock.html managed-demo.html"
+  RELEASE_BUNDLES: "index.html min.html no-payload.html no-queue-copy.html demo.html managed-demo.html"
 
 concurrency:
   group: tag-${{ github.ref_name }}

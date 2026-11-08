@@ -37,7 +37,7 @@ export default defineConfig({
                 'src/index.html',
                 'src/modules/queue-browser/constants.js',
                 // The in-browser demo broker. Mock-only: the redirect that reaches
-                // it is registered only when mode === 'mock', so it never enters a
+                // it is registered only when mode === 'demo', so it never enters a
                 // production bundle. Its fidelity contracts are covered by
                 // tests/mock-broker/ rather than held to the 100% gate.
                 'src/mock-broker/**'

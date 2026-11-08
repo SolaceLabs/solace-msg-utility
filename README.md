@@ -27,7 +27,7 @@ Then open <https://localhost:9443/>. The container connects to your broker for t
 
 Take `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) and the two vendor libraries `solclient.js`, `jszip.min.js` from the `dist` branch. Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, …). See [deployment.md → Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
 
-> **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials, or **Fill the connection form** in its Demo controls panel: every module, message browsing included, runs against an in-browser mock broker, and nothing leaves the page. See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details. To try managed mode the same way, open `managed-demo.html` and sign in with a demo account: see [Managed demo](docs/user-guide.md#managed-demo-managed-demohtml).
+> **Try it without a broker:** open `demo.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials, or **Fill the connection form** in its Demo controls panel: every module, message browsing included, runs against an in-browser mock broker, and nothing leaves the page. See [Demo Mode](docs/demo.md#direct-demo-demohtml) for details. To try managed mode the same way, open `managed-demo.html` and sign in with a demo account: see [Managed demo](docs/demo.md#managed-demo-managed-demohtml).
 
 ## Connecting to a broker
 
@@ -93,7 +93,7 @@ Once the app is loaded:
 - **SEMP queue picker** — used by Browser, Copy, and Subscriptions to select queues without leaving the current module.
 - **Toasts** for every success / failure.
 - **Self-contained HTML** — `index.html` includes all app code; the two vendor scripts `solclient.js` and `jszip.min.js` sit alongside it (see [deployment.md](docs/deployment.md#external-runtime-dependencies)).
-- **Demo bundle** (`mock.html`) — every module exercised against mock data, no broker required.
+- **Demo bundle** (`demo.html`) -- every module exercised against mock data, no broker required.
 - **Managed demo** (`managed-demo.html`) -- the Managed sign-in, entitlements and administration pages against a fake gateway in the page; no gateway, no broker, no network request.
 - **Containerised gateway** -- serves the app over HTTPS and connects to your brokers for it, so browsers reach and trust only the container; the managed image adds sign-in and administration. Image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#containerised-gateway).
 
@@ -102,6 +102,7 @@ Once the app is loaded:
 | Document | Description |
 | --- | --- |
 | [user-guide.md](docs/user-guide.md) | Full UI walkthrough, every field, every screen |
+| [demo.md](docs/demo.md) | The two offline demos, `demo.html` and `managed-demo.html`: what they hold and simulate |
 | [deployment.md](docs/deployment.md) | Hosting options, network requirements, TLS |
 | [developer-guide.md](docs/developer-guide.md) | Setup, build, testing, adding modules, code conventions |
 | [architecture.md](docs/architecture.md) | System diagrams, module structure (developers) |

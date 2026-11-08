@@ -188,7 +188,7 @@ task_test() {
 }
 
 # The demo broker and the managed demo's fake gateway (tests/mock-broker/): the
-# suites behind mock.html and managed-demo.html, the gateway contract included.
+# suites behind demo.html and managed-demo.html, the gateway contract included.
 # Skipped, like test's web suite, when cov runs them in this invocation.
 task_mock() {
   ensure_deps mock || return $?

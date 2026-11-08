@@ -1,7 +1,7 @@
 /**
  * Tunable constants for the queue-copy module.
  *
- * Single source of truth so production and mock builds stay aligned (an
+ * Single source of truth so production and demo builds stay aligned (an
  * earlier 30s/60s drift on `IDLE_TIMEOUT_MS` between `service-copy.ts` and
  * `service-copy-mock.ts` was the motivating bug for this file).
  *

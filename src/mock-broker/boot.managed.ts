@@ -1,11 +1,11 @@
 /**
  * The managed demo's entry point (`managed-demo.html`). Redirected in for
- * `src/core/boot.ts` by `mockRedirects` in vite.config.ts for the
- * `managed-demo` variant only, so mock.html never carries what this adds:
+ * `src/core/boot.ts` by `demoRedirects` in vite.config.ts for the
+ * `managed-demo` variant only, so demo.html never carries what this adds:
  * the fake gateway (`./gateway`) over the demo's brokers and accounts, its
  * sign-in pages, and the SMF socket gate.
  *
- * It must not reach a network, like mock.html: `./network` refuses a request
+ * It must not reach a network, like demo.html: `./network` refuses a request
  * nobody answers and makes the other ways a page could send something throw.
  *
  * Sign-in and password changes reload the page, as the gateway's redirect

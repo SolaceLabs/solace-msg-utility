@@ -83,7 +83,7 @@ src/modules/connection-management/        Module — admin-only broker-connectio
 Install order + sidebar order are set in [src/registry.ts](../src/registry.ts) — each registry entry is a `{ module, priority }` tuple, so the entire ordering decision lives in one file.
 ```
 
-There are no `*-mock` service siblings: the mock build (`vite build --mode mock`) runs these same modules against the in-browser broker -- see [The demo broker](#the-demo-broker-mockhtml) and the **Build Modes** section in [CLAUDE.md](../CLAUDE.md).
+There are no `*-mock` service siblings: the demo build (`vite build --mode demo`) runs these same modules against the in-browser broker -- see [The demo broker](#the-demo-broker-demohtml-managed-demohtml) and the **Build Modes** section in [CLAUDE.md](../CLAUDE.md).
 
 All module coordination goes through the EventBus — every module publishes and subscribes through the single shared bus instance, with no direct module-to-module references.
 
@@ -256,7 +256,7 @@ queue-browser/
        +--- constants.js         Module-scoped SVG icon strings (downloadContent, forward, delete, copy …)
 ```
 
-Queue-browser's production `service.ts` runs unmodified in both real and mock builds. In the demo, its SDK calls reach the `window.solace` emulation installed by the demo broker, and publish-with-ACK (delegated to the core `solace-publisher`) round-trips through the broker's acknowledgement events -- see [The demo broker](#the-demo-broker-mockhtml).
+Queue-browser's production `service.ts` runs unmodified in both real and demo builds. In the demo, its SDK calls reach the `window.solace` emulation installed by the demo broker, and publish-with-ACK (delegated to the core `solace-publisher`) round-trips through the broker's acknowledgement events -- see [The demo broker](#the-demo-broker-demohtml-managed-demohtml).
 
 ### Circular Dependency Resolution
 
@@ -365,9 +365,9 @@ for await (const page of source.listVpns()) {
 
 The user sees results populate progressively rather than waiting for every page. queue-browser builds its source with `queueSourceFrom(ctx)`; queue-copy uses `queueSourceFrom(ctx)` for the source / same-broker destination and `sempQueueSource(state.destSempCtx)` for a different-broker destination. The picker behaves identically in every variant — the connection's source decides where the names come from, and the picker never calls SEMP itself.
 
-### Mock mode
+### Demo mode
 
-There is no discovery mock: the real `semp-discovery` runs in the demo against the demo broker's SEMP v2 interceptor, so the same generator and consumer code paths are exercised -- see [The demo broker](#the-demo-broker-mockhtml).
+There is no discovery mock: the real `semp-discovery` runs in the demo against the demo broker's SEMP v2 interceptor, so the same generator and consumer code paths are exercised -- see [The demo broker](#the-demo-broker-demohtml-managed-demohtml).
 
 ---
 
@@ -733,13 +733,13 @@ The entitlement editors and the settings page do not ship in the everyday bundle
 
 **Session lifecycle.** `admin-login` is the only writer of the session in this app. Its Sign out button and `rbac:sign-out-requested` (from `user-management` after a change to the admin's own account, or from either admin module on a `401`) run the same sign-out: `POST /managed/logout`, clear `AppState.managed`, emit `rbac:changed`, show the signed-out view and `loadSelf()`. The kernel does not navigate by itself here: with `managed` null every module is visible. `admin-login` answers the request only while it holds the session (a closure flag, not `appState.managed`), because in the kitchen-sink build the Connections Managed tab may own the session instead and answers through the connections router.
 
-### The demo broker (`mock.html`, `managed-demo.html`)
+### The demo broker (`demo.html`, `managed-demo.html`)
 
 The demo build does not stub the app's services. It stands up an **in-browser broker** at the transport boundary
 and lets the real code run against it.
 
-`src/main.ts` calls `boot()` from [src/core/boot.ts](../src/core/boot.ts), a no-op seam. In mock mode the single
-entry `mockRedirects(variant)` returns resolves that import to [src/mock-broker/boot.ts](../src/mock-broker/boot.ts)
+`src/main.ts` calls `boot()` from [src/core/boot.ts](../src/core/boot.ts), a no-op seam. In demo mode the single
+entry `demoRedirects(variant)` returns resolves that import to [src/mock-broker/boot.ts](../src/mock-broker/boot.ts)
 instead (the `managed-demo` variant gets [boot.managed.ts](../src/mock-broker/boot.managed.ts), so neither boot's
 code reaches the other's bundle; what both do to the shell is in [shell.ts](../src/mock-broker/shell.ts)), which
 installs three things before any module installs:
@@ -750,10 +750,10 @@ installs three things before any module installs:
    pages included), as the SDK emulator connects only to it. What it does not answer, SEMP for any other host
    included, goes to the `passthrough` its boot passes to `installMockServer`: both demos pass `refuseNetwork`
    ([network.ts](../src/mock-broker/network.ts)), so the server module never references the original `fetch` and
-   neither demo works with a real broker. A `routes` option answers ahead of the broker. mock.html is a Release
+   neither demo works with a real broker. A `routes` option answers ahead of the broker. demo.html is a Release
    bundle, so it has no Managed tab and no `/managed/*` surface.
 3. **The demo control panel**, which drives queue state, connection faults, and latency/volume. It opens on the tab's
-   first load (a sessionStorage flag per demo), says at its top that nothing leaves the page, and in mock.html
+   first load (a sessionStorage flag per demo), says at its top that nothing leaves the page, and in demo.html
    offers **Fill the connection form**, which types the demo host, a chosen VPN and demo credentials into the Direct
    form with the events typing raises.
 
@@ -766,14 +766,14 @@ demo. That is the point of the design: the demo exercises shipping code paths, s
 replaced seven hand-written `*-mock` files, two of which had already drifted into disagreeing with each other
 about which queues exist.
 
-**Isolation** is structural, not tree-shaking: `serviceMockRedirect` is only registered when `mode === 'mock'`
+**Isolation** is structural, not tree-shaking: `serviceDemoRedirect` is only registered when `mode === 'demo'`
 ([vite.config.ts](../vite.config.ts)), so a production build has no import edge into `src/mock-broker/` and Rollup
 never parses it. The control-panel UI lives inside that tree for the same reason.
 
 **Statefulness is the feature.** The broker holds queues and messages, so actions compose: deleting drops the
 depth, a copy run really moves messages, and a topic publish fans out to subscribed queues. The SEMP layer reports
 depth and spool usage by reading the same store, so verify's numbers always agree with what browsing shows.
-`fixtures.BROKERS` maps each broker to its VPNs: mock.html has only `direct`, and `setBrokers` adds the managed
+`fixtures.BROKERS` maps each broker to its VPNs: demo.html has only `direct`, and `setBrokers` adds the managed
 demo's. A VPN name is unique across the demo, so queues stay keyed `vpn/queue`; the SEMP handlers, the by-name
 lookups and a publish take a broker (default `direct`) and see only its queues.
 
@@ -792,14 +792,14 @@ The gateway's own pages, `/login` and `/login/password`, are layers over the app
 (`gateway/pages.ts`); a capture-phase listener catches the app's sign-in links. A sign-in reloads the page, as the
 gateway's redirect does, so [boot.managed.ts](../src/mock-broker/boot.managed.ts) carries the gateway, the cookie,
 the queues and the scenario across in sessionStorage (a new tab starts from the seed in `gateway/seed.ts`). Like
-mock.html, it cannot reach a network (`network.ts`, above).
+demo.html, it cannot reach a network (`network.ts`, above).
 
 **What ships, and what keeps it honest.** `managed-demo.html` (variant
 [managed-demo.ts](../src/variants/managed-demo.ts)) is the managed variant's messaging modules plus the three admin
 editors, which an administrator finds in the sidebar instead of at `/solAdmin`. It has no `admin-login`, because the
 Managed panel owns the session. It is a Release asset, so [check-bundles.mjs](../scripts/check-bundles.mjs) proves on
 every build that it carries the managed and the demo markers and nothing that reaches past the page: no captured
-`fetch`, no other network API, no form action, no URL to a real host. mock.html is held to the same no-network
+`fetch`, no other network API, no form action, no URL to a real host. demo.html is held to the same no-network
 rules and must carry the network refusal, but neither the managed markers nor the fake gateway's; the four
 production Direct bundles carry no demo marker at all. `tests/build/no-network-apis.test.ts` keeps
 the app's source on `fetch`, which the interceptor answers. Past the contract:

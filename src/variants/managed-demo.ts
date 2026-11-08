@@ -1,10 +1,10 @@
 /**
  * Managed demo variant -- `dist/managed-demo.html`, a Release asset: the real
  * managed modules against the demo's fake gateway and in-browser broker
- * (`src/mock-broker/boot.managed.ts`, picked by `mockRedirects` in
+ * (`src/mock-broker/boot.managed.ts`, picked by `demoRedirects` in
  * vite.config.ts).
  *
- * Built via `node scripts/vite-build.mjs --mode mock --variant=managed-demo --out-filename=managed-demo.html`.
+ * Built via `node scripts/vite-build.mjs --mode demo --variant=managed-demo --out-filename=managed-demo.html`.
  *
  * The managed variant's messaging modules plus the three admin editors, which
  * the product serves at /solAdmin: here they are sidebar entries, shown to an

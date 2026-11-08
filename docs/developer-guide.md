@@ -17,14 +17,14 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 | Command | Outputs in `dist/` |
 | --- | --- |
 | `npm run build:prod` | `index.html` (production, standard variant) |
-| `npm run build:mock` | `mock.html` (interactive demo backed by the in-browser mock broker) |
+| `npm run build:demo` | `demo.html` (interactive demo backed by the in-browser mock broker) |
 | `npm run build:no-payload` | `no-payload.html` (queue-browser with the message body hidden — see Build-time feature flags) |
 | `npm run build:no-queue-copy` | `no-queue-copy.html` (standard variant minus the Queue Copy module) |
 | `npm run build:all` | `all-test.html` (kitchen-sink QA build — every module, including the admin ones) |
 | `npm run build:admin` | `solAdmin.html` (the standalone administration app — see [architecture.md -> The admin app](architecture.md#the-admin-app-soladmin)) |
 | `npm run build:managed` | `managed.html` (standard plus the Managed sign-in; the managed image serves it as its `index.html`) |
-| `npm run build:managed-demo` | `managed-demo.html` (mock mode, variant `managed-demo`: the managed modules and the three admin editors against the demo's fake gateway and broker; see [architecture.md -> The demo broker](architecture.md#the-demo-broker-mockhtml)) |
-| `npm run build` | `mock.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, `solAdmin.html`, `managed.html` AND `managed-demo.html` in one pass |
+| `npm run build:managed-demo` | `managed-demo.html` (demo mode, variant `managed-demo`: the managed modules and the three admin editors against the demo's fake gateway and broker; see [architecture.md -> The demo broker](architecture.md#the-demo-broker-demohtml-managed-demohtml)) |
+| `npm run build` | `demo.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, `solAdmin.html`, `managed.html` AND `managed-demo.html` in one pass |
 | `npm run check:bundles` | Checks `dist/`: no Direct bundle carries managed UI or the fake gateway, `managed.html` carries the managed UI only, and `managed-demo.html` carries both with no way out to a network. The `build` task runs it after `npm run build` |
 
 `dist/` is git-ignored build output; nothing in it is committed. Tagged Releases publish the Direct-only bundles, and the offline managed demo (`managed-demo.html`), never `solAdmin.html` or `managed.html`, which ship only inside the managed image (see [git.md -> Release assets](git.md#release-assets)). For local runs, drop `solclient.js` / `jszip.min.js` in beside the bundles (see [deployment.md -> External Runtime Dependencies](deployment.md#external-runtime-dependencies)).
@@ -61,7 +61,7 @@ A **flavor** is a build-time toggle of *how a module behaves*, orthogonal to whi
 - **Dynamic imports**: forced inline (`inlineDynamicImports: true`)
 - **emptyOutDir**: `false` — preserves pre-placed files in `dist/` (vendor scripts, prior variants) across builds.
 
-The two vendor scripts (`solclient.js`, `jszip.min.js`) are intentionally **not** bundled — they're loaded at runtime from sibling locations. The demo build is the exception: it installs its own SDK, so `mock.html` needs no `solclient.js` (only `jszip.min.js`, for ZIP export). See [deployment.md → External Runtime Dependencies](deployment.md#external-runtime-dependencies) for the placement rules the shell expects.
+The two vendor scripts (`solclient.js`, `jszip.min.js`) are intentionally **not** bundled -- they're loaded at runtime from sibling locations. The demo build is the exception: it installs its own SDK, so `demo.html` needs no `solclient.js` (only `jszip.min.js`, for ZIP export). See [deployment.md -> External Runtime Dependencies](deployment.md#external-runtime-dependencies) for the placement rules the shell expects.
 
 `./scripts/dev.sh image up` builds both images from source and starts them with [docker/docker-compose.yaml](../docker/docker-compose.yaml): the standard gateway on host port `19443`, the managed one on `29443` (`docker compose -f docker/docker-compose.yaml up --build gateway` starts one). The images take both vendor scripts from the npm packages `package.json` pins (`solclientjs`, `jszip`), so `up` needs nothing in `dist/`. Bump either with `npm install --save-exact`, at or above the shell's `MIN_VERSION` in `src/index.html`: [tests/build/vendor-scripts.test.ts](../tests/build/vendor-scripts.test.ts) holds both rules and checks the Dockerfile's copy paths.
 
@@ -166,7 +166,7 @@ src/
     managed.ts         # The managed image's bundle — standard + connections' managed entry (MODULE_ENTRIES)
     all-for-testing-only.ts  # Kitchen-sink QA build — every module, incl. the admin ones
     _active.ts         # One-line re-export from one variant (default ./standard)
-  mock-broker/         # DEMO ONLY — entered solely via the mock-mode import redirect,
+  mock-broker/         # DEMO ONLY -- entered solely via the demo-mode import redirect,
                        # so no production bundle contains it.
     boot.ts            # Installs window.solace, the fetch interceptor and the panel
     fixtures.ts        # THE demo dataset + scenario enums — single source of truth
