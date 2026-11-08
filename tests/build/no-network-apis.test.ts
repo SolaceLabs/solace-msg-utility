@@ -11,7 +11,7 @@ import { productSources, readSource } from '../helpers/sources';
  * purpose) and is not scanned.
  *
  * tests/build/check-bundles.test.ts > "fails a demo that holds %s" is the same
- * guard on the built managed-demo.html.
+ * guard on the built provisioned-demo.html.
  */
 const FORBIDDEN: { api: string; re: RegExp }[] = [
     { api: 'XMLHttpRequest', re: /\bXMLHttpRequest\b/ },

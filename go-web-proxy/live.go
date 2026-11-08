@@ -8,7 +8,7 @@ import (
 // live holds the config.yaml keys that take effect without a restart:
 // connModes, defaultConn, logLevel, access.*, session.*, login.* and
 // modules.*. serve() builds it from the loaded config and passes it to every
-// reader, which loads the current value per request. The managed settings
+// reader, which loads the current value per request. The settings
 // endpoint (settings.go) is the only writer. Every other key is read once at
 // startup (restartOnlyKeys) and applies at the next restart.
 type live struct {
@@ -61,7 +61,6 @@ var restartOnlyKeys = []struct {
 	value    func(fileConfig) any
 }{
 	{"hosted", false, func(f fileConfig) any { return f.Hosted }},
-	{"managed", false, func(f fileConfig) any { return f.Managed }},
 	{"appDir", true, func(f fileConfig) any { return f.AppDir }},
 	{"tls.certFile", true, func(f fileConfig) any { return f.TLS.CertFile }},
 	{"tls.keyFile", true, func(f fileConfig) any { return f.TLS.KeyFile }},

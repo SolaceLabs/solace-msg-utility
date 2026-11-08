@@ -4,6 +4,21 @@ Status: walked through end to end on 2026-10-29, all decisions settled. Branch `
 the plan: what was decided and the phases. Detailed per-phase plans follow. Supersedes the "Open
 hardening items" section of [rbac-variant-plan.md](rbac-variant-plan.md) when adopted.
 
+## Contents
+
+- [1. Goal](#1-goal)
+- [2. Decisions taken](#2-decisions-taken)
+- [3. Still open](#3-still-open)
+- [4. Shape after the rework](#4-shape-after-the-rework)
+- [5. Open items: disposition](#5-open-items-disposition)
+- [6. Surface hygiene (bots, scanners)](#6-surface-hygiene-bots-scanners)
+- [7. Phases](#7-phases)
+- [8. Constraints that stay](#8-constraints-that-stay)
+- [9. Risks](#9-risks)
+- [10. Next step](#10-next-step)
+
+---
+
 ## 1. Goal
 
 - Managed code ships only in the managed container image. The Release HTML (`index.html`,

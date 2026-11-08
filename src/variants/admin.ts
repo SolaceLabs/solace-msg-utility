@@ -2,9 +2,8 @@
  * Admin variant — the standalone administration app served at `/solAdmin`.
  *
  * Built via `node scripts/vite-build.mjs --variant=admin --out-filename=solAdmin.html`.
- * The gateway serves it only when it is running hosted AND managed, so the
- * entitlement editors are not reachable from a deployment that has no managed
- * user list to edit.
+ * The gateway serves it only in Provisioned mode, so the entitlement editors
+ * are not reachable from a deployment that has no user list to edit.
  *
  * It ships NO messaging modules: `admin-login` authenticates against the managed
  * user list and adopts the profile, but opens no broker connection, so there is

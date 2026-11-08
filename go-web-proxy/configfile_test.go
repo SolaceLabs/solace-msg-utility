@@ -28,9 +28,8 @@ func clearSeedEnv(t *testing.T) {
 
 const fullConfigYAML = `version: 1
 hosted: true
-managed: true
 connModes: both
-defaultConn: managed
+defaultConn: provisioned
 appDir: /pwa
 tls:
   certFile: /c/tls.crt
@@ -62,7 +61,7 @@ func TestDecodeConfigFile_Valid(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := fileConfig{
-		Version: 1, Hosted: true, Managed: true, ConnModes: "both", DefaultConn: "managed", AppDir: "/pwa",
+		Version: 1, Hosted: true, ConnModes: "both", DefaultConn: "provisioned", AppDir: "/pwa",
 		TLS:      fileTLS{CertFile: "/c/tls.crt", KeyFile: "/c/tls.key", TrustDir: "/c/trust", InsecureSkipVerify: true},
 		LogLevel: "debug", UsersFile: "/m/users.yaml", ConnectionsFile: "/m/connections.yaml",
 		Access:  fileAccess{Allow: []string{"10.0.0.0/8", "2001:db8::/32"}, TrustedProxies: []string{"10.0.0.1/32"}},
@@ -100,6 +99,7 @@ func TestDecodeConfigFile_UnknownFieldFails(t *testing.T) {
 		"version: 1\ntls:\n  nope: true\n":    "nope",
 		"version: 1\nsiteSeedFile: /x/seed\n": "siteSeedFile", // retired with the site seed
 		"version: 1\nstoreKeyFile: /x/key\n":  "storeKeyFile", // the store key path is env-only by design
+		"version: 1\nmanaged: true\n":         "managed",      // retired: connModes turns Provisioned mode on
 	}
 	for doc, field := range cases {
 		_, err := decodeConfigFile([]byte(doc), "/etc/gw/config.yaml")
@@ -142,7 +142,7 @@ func TestDecodeConfigFile_EmptyBadYAMLBadVersion(t *testing.T) {
 func TestToConfig_InvalidValues(t *testing.T) {
 	base := func() fileConfig {
 		fc := defaultFileConfig()
-		fc.Hosted, fc.Managed = true, true
+		fc.Hosted = true
 		return fc
 	}
 	cases := []struct {
@@ -188,7 +188,7 @@ func TestToConfig_InvalidValues(t *testing.T) {
 func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 	fc := defaultFileConfig()
 	fc.ConnModes = "Both" // a hand-edited file is lowercased like the env
-	fc.Managed = true
+	fc.Hosted = false // HOSTED=false: the files only, so no gateway for sign-in
 	if _, err := fc.toConfig(secretPaths{}); err == nil || !strings.Contains(err.Error(), "hosted is false") {
 		t.Fatalf("both without hosted must fail the cross check, got %v", err)
 	}
@@ -335,7 +335,6 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	clearSeedEnv(t)
 	path := filepath.Join(t.TempDir(), "cfg", "config.yaml")
 	t.Setenv("HOSTED", "true")
-	t.Setenv("MANAGED", "true")
 	t.Setenv("CONN_MODES", "both")
 	t.Setenv("LOG_LEVEL", "Info")
 	t.Setenv("STORE_KEY_FILE", "/x/store.key")
@@ -347,7 +346,7 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	if !load.seeded || len(load.overrides) != 0 {
 		t.Fatalf("first start: want seeded with no overrides, got seeded=%v overrides=%v", load.seeded, load.overrides)
 	}
-	if !load.cfg.hosted || !load.cfg.managed || load.cfg.connModes != connBoth || load.cfg.logLevel != slog.LevelInfo {
+	if !load.cfg.hosted || !load.cfg.provisioned() || load.cfg.connModes != connBoth || load.cfg.logLevel != slog.LevelInfo {
 		t.Errorf("seeded config does not reflect env: %+v", load.cfg)
 	}
 	if load.cfg.storeKeyFile != "/x/store.key" {
@@ -377,7 +376,7 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	if again.seeded || len(again.overrides) != 0 {
 		t.Errorf("second start: want file read with no overrides, got seeded=%v overrides=%v", again.seeded, again.overrides)
 	}
-	if again.cfg.connModes != connBoth || again.cfg.logLevel != slog.LevelInfo || !again.cfg.managed {
+	if again.cfg.connModes != connBoth || again.cfg.logLevel != slog.LevelInfo || !again.cfg.provisioned() {
 		t.Errorf("second start config: %+v", again.cfg)
 	}
 }
@@ -473,8 +472,8 @@ func TestResolveConfig_FileWinsAndReportsOverrides(t *testing.T) {
 	t.Setenv("CONN_MODES", "both")
 	t.Setenv("LOG_LEVEL", "debug")
 	t.Setenv("APP_DIR", "/other")
-	t.Setenv("HOSTED", "TRUE")                        // parses to false: agrees with the file
-	t.Setenv("USERS_FILE", "/managed/users.yaml")     // equal to the file: nothing to report
+	t.Setenv("HOSTED", "true")                         // the file's default: nothing to report
+	t.Setenv("USERS_FILE", "/data/users.yaml")         // equal to the file: nothing to report
 	t.Setenv("STORE_KEY_FILE", "/elsewhere/store.key") // env-only: applied, never compared
 
 	load, err := resolveConfig(path)
@@ -517,18 +516,27 @@ func TestResolveConfig_FileWinsAndReportsOverrides(t *testing.T) {
 func TestEnvOverrides_EveryVariableAndBoolParsing(t *testing.T) {
 	clearSeedEnv(t)
 	file := defaultConfig()
-	t.Setenv("HOSTED", "true")
-	if o := envOverrides(file); len(o) != 1 || o[0].Env != "HOSTED" || o[0].FileValue != "false" {
-		t.Errorf("HOSTED=true vs hosted:false: want one override, got %v", o)
+	t.Setenv("HOSTED", "false")
+	if o := envOverrides(file); len(o) != 1 || o[0].Env != "HOSTED" || o[0].FileValue != "true" {
+		t.Errorf("HOSTED=false vs hosted:true: want one override, got %v", o)
 	}
-	t.Setenv("HOSTED", "TRUE") // loadConfig reads this as false, so it agrees with the file
+	t.Setenv("HOSTED", "true") // agrees with the default file
 	if o := envOverrides(file); len(o) != 0 {
-		t.Errorf("HOSTED=TRUE must not be reported, got %v", o)
+		t.Errorf("HOSTED=true must not be reported, got %v", o)
+	}
+	t.Setenv("HOSTED", "TRUE") // not a value HOSTED takes: reported as typed
+	if o := envOverrides(file); len(o) != 1 || o[0].EnvValue != "TRUE" {
+		t.Errorf("HOSTED=TRUE: want it reported as typed, got %v", o)
 	}
 	t.Setenv("HOSTED", "")
+	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "TRUE") // loadConfig reads this as false, so it agrees with the file
+	if o := envOverrides(file); len(o) != 0 {
+		t.Errorf("SSL_INSECURE_SKIP_VERIFY=TRUE must not be reported, got %v", o)
+	}
+	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "")
 
 	differing := map[string]string{
-		"HOSTED": "true", "MANAGED": "true", "CONN_MODES": "both", "DEFAULT_CONN": "managed", "APP_DIR": "/x",
+		"HOSTED": "false", "CONN_MODES": "both", "DEFAULT_CONN": "provisioned", "APP_DIR": "/x",
 		"SSL_CERT_FILE": "/x", "SSL_KEY_FILE": "/x", "SSL_TRUST_DIR": "/x", "SSL_INSECURE_SKIP_VERIFY": "true",
 		"LOG_LEVEL": "debug", "USERS_FILE": "/x", "CONNECTIONS_FILE": "/x",
 	}

@@ -1,5 +1,3 @@
-//go:build managed
-
 package main
 
 import (
@@ -18,8 +16,8 @@ import (
 const maxBodyBytes = 64 << 10
 
 // managedHandler serves the /managed/* JSON API behind the session cookie. It
-// is only wired into the mux when managed is true and the binary carries the
-// managed tag; otherwise /managed/* is a plain 404.
+// is only wired into the mux in Provisioned mode; otherwise /managed/* is a
+// plain 404.
 //
 // Every request without a valid session gets the same 401, whatever the path,
 // so nothing about routes, users or brokers leaks to a client that has not

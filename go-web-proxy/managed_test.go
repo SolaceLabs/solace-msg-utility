@@ -1,5 +1,3 @@
-//go:build managed
-
 package main
 
 import (
@@ -50,7 +48,7 @@ func newManagedEnvWith(t *testing.T, mutate func(*config), upstream http.RoundTr
 func newManagedEnvFrom(t *testing.T, f storeFixture, mutate func(*config), upstream http.RoundTripper) *managedEnv {
 	t.Helper()
 	cfg := defaultConfig()
-	cfg.hosted, cfg.managed, cfg.connModes = true, true, connBoth
+	cfg.hosted, cfg.connModes = true, connBoth
 	cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = f.usersPath, f.connsPath, f.keyPath
 	cfg.login.unauthPerMinute = 1000
 	if mutate != nil {

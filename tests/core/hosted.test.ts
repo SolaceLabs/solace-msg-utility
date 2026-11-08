@@ -78,8 +78,8 @@ describe('core/hosted — probeDeployment', () => {
     const ok = (body: string) => ({ ok: true, text: () => Promise.resolve(body) });
 
     it('parses the JSON contract into hosted + connection config', async () => {
-        (globalThis.fetch as any).mockResolvedValue(ok(JSON.stringify({ hosted: true, connModes: 'both', defaultConn: 'managed' })));
-        await expect(probeDeployment()).resolves.toEqual({ hosted: true, conn: { connModes: 'both', defaultConn: 'managed' } });
+        (globalThis.fetch as any).mockResolvedValue(ok(JSON.stringify({ hosted: true, connModes: 'both', defaultConn: 'provisioned' })));
+        await expect(probeDeployment()).resolves.toEqual({ hosted: true, conn: { connModes: 'both', defaultConn: 'provisioned' } });
     });
 
     it('coerces invalid config fields to the Direct-only default', async () => {

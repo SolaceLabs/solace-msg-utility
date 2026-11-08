@@ -145,7 +145,7 @@ describe('admin-login — sign-out requested by another module', () => {
         expect(logout).toHaveBeenCalledTimes(1);
     });
 
-    it('ignores the request while it holds no session (the Connections Managed tab may own it)', async () => {
+    it('ignores the request while it holds no session (the Connections Provisioned tab may own it)', async () => {
         await install({ ok: false, status: 401, code: 'unauthenticated' });
         appState.managed = { admin: true, username: 'x', broker: 'b', vpns: [], operate: [], readOnly: [], modules: [] };
         eventBus.emit('rbac:sign-out-requested');

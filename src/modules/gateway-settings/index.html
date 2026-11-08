@@ -21,26 +21,21 @@
     <div id="gw-set-pending" class="gw-set-banner hidden"></div>
 
     <h3 class="gw-set-section">Connections</h3>
+    <!-- Provisioned mode is what serves this page, so neither choice here turns
+         it off: Direct alone (Gateway mode) is set in config.yaml on the host. -->
     <div class="form-group" data-key="connModes">
         <label for="gw-set-connModes">Connection modes the app offers</label>
         <select id="gw-set-connModes" class="form-control">
-            <option value="direct">Direct only</option>
-            <option value="managed">Managed only (the app needs a sign-in)</option>
-            <option value="both">Direct and Managed</option>
+            <option value="provisioned">Provisioned only (everyone signs in)</option>
+            <option value="both">Direct and Provisioned</option>
         </select>
     </div>
     <div class="form-group" data-key="defaultConn">
         <label for="gw-set-defaultConn">Tab shown first when both are offered</label>
         <select id="gw-set-defaultConn" class="form-control">
             <option value="direct">Direct</option>
-            <option value="managed">Managed</option>
+            <option value="provisioned">Provisioned</option>
         </select>
-    </div>
-    <div class="form-group" data-key="hosted">
-        <label class="flex-row items-center gap-2 m-0"><input type="checkbox" id="gw-set-hosted"> Hosted (the app can detect the gateway)</label>
-    </div>
-    <div class="form-group" data-key="managed">
-        <label class="flex-row items-center gap-2 m-0"><input type="checkbox" id="gw-set-managed"> Managed (sign-in, users, connections and this page)</label>
     </div>
 
     <h3 class="gw-set-section">Access</h3>
@@ -83,7 +78,7 @@
 
     <h3 class="gw-set-section">Modules</h3>
     <div class="form-group" data-key="modules.offered">
-        <label>Modules managed users may be given</label>
+        <label>Modules signed-in users may be given</label>
         <div id="gw-set-modules-offered" class="flex-col"></div>
     </div>
     <div class="form-group" data-key="modules.userDefault">

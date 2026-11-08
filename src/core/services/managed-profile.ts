@@ -102,7 +102,7 @@ export function createManagedProfile(): ManagedProfileStore {
     /** The dialer, once the target is known to be provisioned. */
     function provisioned(target: { broker: string; vpn?: string; kind: 'solace' | 'semp' }): ManagedDialer {
         if (!profile || !dialer) {
-            throw new Error('Connecting requires a managed session; none is active.');
+            throw new Error('Connecting requires a sign-in session; none is active.');
         }
         const conn = profile.brokers.find(b => b.broker === target.broker);
         if (!conn) {
@@ -156,7 +156,7 @@ export function createManagedProfile(): ManagedProfileStore {
             }
             // Signed out while the gateway answered: never connect after clear().
             if (!profile) {
-                throw new Error('The managed session ended while connecting.');
+                throw new Error('The sign-in session ended while connecting.');
             }
             if (!res.data.smfPath.startsWith(SMF_PREFIX)) {
                 throw new Error('The gateway named an unexpected socket path.');

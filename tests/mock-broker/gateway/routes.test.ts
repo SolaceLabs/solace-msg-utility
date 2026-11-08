@@ -13,7 +13,7 @@ import { contractSeed, seedContractBrokers } from './helpers';
 /**
  * Every gateway route the app calls, through the services that ship, answered
  * by the fake gateway the managed demo runs on. A service that changes a path,
- * a method or a body shape fails here before it fails in managed-demo.html.
+ * a method or a body shape fails here before it fails in provisioned-demo.html.
  * The scan below keeps the table whole: a `/managed/<name>` the app source
  * names with no row fails.
  *

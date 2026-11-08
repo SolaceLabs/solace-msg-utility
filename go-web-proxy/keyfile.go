@@ -1,5 +1,3 @@
-//go:build managed
-
 package main
 
 import (
@@ -84,11 +82,11 @@ func warnLooseKeyMode(path string, logger *slog.Logger) {
 	}
 }
 
-// ownershipHint adds the likely fix to a permission error: the managed image
-// runs as uid 65532, so a bind-mounted directory must be writable by it.
+// ownershipHint adds the likely fix to a permission error: the image runs as
+// uid 65532, so a bind-mounted directory must be writable by it.
 func ownershipHint(err error) string {
 	if errors.Is(err, fs.ErrPermission) {
-		return " (the gateway runs as uid 65532 in the managed image; check the owner of the file and its directory)"
+		return " (the gateway runs as uid 65532 in the image; check the owner of the file and its directory)"
 	}
 	return ""
 }

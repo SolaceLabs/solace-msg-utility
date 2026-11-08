@@ -87,7 +87,7 @@ describe('core/services/managed-profile -- dial', () => {
     });
 
     it.each([
-        ['no session', (p: ReturnType<typeof createManagedProfile>) => p.clear(), { broker: 'b1', vpn: 'v1' }, /requires a managed session/],
+        ['no session', (p: ReturnType<typeof createManagedProfile>) => p.clear(), { broker: 'b1', vpn: 'v1' }, /requires a sign-in session/],
         ['an unknown broker', () => {}, { broker: 'nope', vpn: 'v1' }, /Broker "nope" is not provisioned/],
         ['an unknown VPN', () => {}, { broker: 'b1', vpn: 'v9' }, /VPN "v9" is not provisioned on broker "b1"/],
     ])('refuses %s before calling the gateway', async (_what, arrange, target, message) => {
@@ -103,7 +103,7 @@ describe('core/services/managed-profile -- dial', () => {
     it('refuses with no gateway calls attached', async () => {
         const p = createManagedProfile();
         p.setProfile(PROFILE);
-        await expect(p.dial({ broker: 'b1', kind: 'semp' }, { connect: vi.fn() })).rejects.toThrow(/requires a managed session/);
+        await expect(p.dial({ broker: 'b1', kind: 'semp' }, { connect: vi.fn() })).rejects.toThrow(/requires a sign-in session/);
     });
 
     it("rejects with the gateway's refusal as text, carrying its code", async () => {

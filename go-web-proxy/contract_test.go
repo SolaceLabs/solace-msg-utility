@@ -1,5 +1,3 @@
-//go:build managed
-
 package main
 
 import (
@@ -27,7 +25,7 @@ import (
 // answers; tests/mock-broker/gateway/contract.test.ts proves the fake gives the
 // same ones from the same files. After a deliberate change to the gateway,
 //
-//	go test -tags managed -run Contract -update .
+//	go test -run Contract -update .
 //
 // rewrites the answers in cases.json from the real gateway; the fake must then
 // be brought in line.

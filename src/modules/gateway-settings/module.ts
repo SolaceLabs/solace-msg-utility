@@ -34,8 +34,6 @@ type Kind = 'text' | 'bool' | 'int' | 'lines';
 const FIELDS: ReadonlyArray<{ key: string; kind: Kind }> = [
     { key: 'connModes', kind: 'text' },
     { key: 'defaultConn', kind: 'text' },
-    { key: 'hosted', kind: 'bool' },
-    { key: 'managed', kind: 'bool' },
     { key: 'access.allow', kind: 'lines' },
     { key: 'access.trustedProxies', kind: 'lines' },
     { key: 'session.idleMinutes', kind: 'int' },

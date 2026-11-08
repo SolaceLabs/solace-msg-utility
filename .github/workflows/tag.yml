@@ -7,12 +7,11 @@ name: Tag
 #   git tag v1.2.3 && git push origin v1.2.3
 #     -> plan     resolve the project shape once
 #     -> gates    ci.yml's `all scan` (build vet test scan), ubuntu + windows
-#     -> image    multi-arch build of BOTH variants, pushed to GHCR by digest
+#     -> image    multi-arch build of the image, pushed to GHCR by digest
 #                 only, then a trivy gate on every platform -- no tag yet
 #     -> binaries `build` per BUILD_TARGETS (one linux/amd64 leg); uploads
 #                 only the Release bundles, never a gateway binary
-#     -> publish  point the tags (semver, latest, managed-*) at the scanned
-#                 digests
+#     -> publish  point the tags (semver, latest) at the scanned digest
 #     -> pages    sync dist/index.html into the `dist` branch
 #     -> release  created last, with the bundles, checksums, digests
 #
@@ -27,27 +26,26 @@ name: Tag
 #   1. DOCKERFILE is docker/Dockerfile, not the repo root, in `plan` and
 #      `image`. Without it the shape auto-detect finds no Dockerfile and no
 #      image ships.
-#   2. `image` is a 2-leg matrix (standard, managed). The managed leg bakes
-#      MANAGED/HOSTED/CONN_MODES, serves managed.html as its index.html and
-#      ships the /solAdmin app (MANAGED_UI), and builds the gateway with
-#      -tags managed. The stock single-image job would silently drop the
-#      managed image family.
-#   3. Both legs pass APP_VERSION so the tag reaches the Go binary's ldflags
+#   2. Retired. `image` was a 2-leg matrix (standard, managed) until one image
+#      came to serve every container mode (November 2026); it is a single
+#      job again, as in the template.
+#   3. The build passes APP_VERSION so the tag reaches the Go binary's ldflags
 #      and the PWA bundle's __APP_VERSION__. Git is not available inside the
 #      build, so it has to arrive as a build-arg.
 #   4. A `pages` job, carried over from the old release.yml, redeploys
 #      solacelabs.github.io/solace-msg-utility from the `dist` branch. Gated
 #      on everything else passing, so a red scan no longer redeploys the site.
-#   5. Image digests travel to `publish` and `release` as artifacts, not as a
-#      job output, together with the tags `publish` applies. Matrix legs
-#      overwrite each other's outputs nondeterministically, so a 2-leg matrix
-#      cannot use `outputs:` for a per-leg value.
+#   5. The image digest travels to `publish` and `release` as an artifact
+#      (imgref-image), not as a job output, together with the tags `publish`
+#      applies. Carried over from the 2-leg matrix, whose legs overwrote each
+#      other's outputs; `publish` and `release` read every imgref-* file, so
+#      the shape needs no change for one image.
 #   6. A setup-node step in `binaries`, reading .tool-versions -- Node has no
 #      self-honouring in-repo pin the way go.mod's `toolchain` directive does.
 #      ci.yml carries the same step for the same reason.
 #   7. `image` pushes by digest only and trivy-scans each platform of that
-#      digest; a separate `publish` job creates the tags, and only once both
-#      legs and `binaries` passed. The stock job pushed its tags and scanned
+#      digest; a separate `publish` job creates the tags, and only once the
+#      image and `binaries` passed. The stock job pushed its tags and scanned
 #      afterwards, so a red scan blocked the Release but `latest` already
 #      pointed at the failing image.
 #   8. Only the Release bundles leave the pipeline outside the images:
@@ -56,11 +54,11 @@ name: Tag
 #      inside the images (decided 2026-11-06), so the binaries `build` also
 #      compiles stay on the runner: a public repo's workflow artifacts can be
 #      downloaded by any signed-in user. `binaries` keeps its name and stays
-#      because it emits the bundles. The build also emits managed.html and
-#      solAdmin.html, which exist only inside the managed image. The one
-#      managed UI a Release carries is managed-demo.html, which runs it
-#      against an in-browser fake gateway and holds no gateway or broker
-#      address (scripts/check-bundles.mjs proves both on the build).
+#      because it emits the bundles. The build also emits provisioned.html and
+#      solAdmin.html, which exist only inside the image. The one Provisioned
+#      UI a Release carries is provisioned-demo.html, which runs it against an
+#      in-browser fake gateway and holds no gateway or broker address
+#      (scripts/check-bundles.mjs proves both on the build).
 #
 # Repo variables (Settings > Secrets and variables > Actions > Variables):
 #   BUILD_TARGETS  JSON array: [{"os":"linux","arch":"amd64"}]. One target is
@@ -76,12 +74,12 @@ permissions:
   contents: read
 
 # Deviation 8: the PWA bundles a Release carries -- never solAdmin.html or
-# managed.html; managed-demo.html is the offline managed demo. `binaries`
+# provisioned.html; provisioned-demo.html is the offline Provisioned demo. `binaries`
 # uploads exactly these and `release` attaches exactly these. Same list as
 # RELEASE_BUNDLES in scripts/check-bundles.mjs;
 # tests/build/check-bundles.test.ts fails if the two drift.
 env:
-  RELEASE_BUNDLES: "index.html min.html no-payload.html no-queue-copy.html demo.html managed-demo.html"
+  RELEASE_BUNDLES: "index.html min.html no-payload.html no-queue-copy.html demo.html provisioned-demo.html"
 
 concurrency:
   group: tag-${{ github.ref_name }}
@@ -143,51 +141,12 @@ jobs:
   image:
     needs: [plan, gates]
     if: needs.plan.outputs.ship_image == 'true'
-    name: image (${{ matrix.name }})
     runs-on: ubuntu-24.04 # pinned; see ci.yml
     permissions:
       contents: read
       packages: write # push to GHCR
-    strategy:
-      # Build and scan both variants even if one fails, so one red run shows
-      # both legs' findings. `publish` still tags neither unless both passed.
-      fail-fast: false
-      matrix:
-        # The legs serve DIFFERENT PWA bundles. standard serves index.html
-        # (Direct only, the file the Release carries). managed serves
-        # managed.html (Direct + the Managed sign-in) as its index.html, plus
-        # solAdmin.html -- MANAGED_UI selects both -- and a gateway built with
-        # the `managed` tag (RBAC store + /managed/* handler).
-        include:
-          - name: standard
-            managed: ""
-            hosted: ""
-            conn_modes: ""
-            managed_ui: ""
-            go_tags: ""
-            flavor: ""
-            tags: |
-              type=semver,pattern={{version}}
-              type=semver,pattern={{major}}.{{minor}}
-              type=semver,pattern={{major}}
-              type=raw,value=latest
-          - name: managed
-            managed: "true"
-            hosted: "true"
-            conn_modes: "managed"
-            managed_ui: "true"
-            go_tags: "managed"
-            # prefix=managed-,onlatest=true + latest=true turns the semver
-            # patterns into managed-X.Y.Z / managed-X.Y / managed-X and the
-            # latest tag into managed-latest. No bare `latest`, so no collision
-            # with the standard image.
-            flavor: |
-              latest=true
-              prefix=managed-,onlatest=true
-            tags: |
-              type=semver,pattern={{version}}
-              type=semver,pattern={{major}}.{{minor}}
-              type=semver,pattern={{major}}
+    # One image for every container mode: Gateway by default, Provisioned and
+    # files-only by CONN_MODES / HOSTED at run time (docker/Dockerfile).
     env:
       DOCKERFILE: docker/Dockerfile # deviation 1
       # One `Trivy gate (<platform>)` step per entry; "Resolve per-platform
@@ -216,8 +175,11 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ steps.name.outputs.image }}
-          flavor: ${{ matrix.flavor }}
-          tags: ${{ matrix.tags }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
 
       # The deliberate divergence from dev.sh: multi-arch buildx, a registry
       # push and the tag move in `publish` cannot run identically on a laptop.
@@ -238,16 +200,9 @@ jobs:
           outputs: type=image,name=${{ steps.name.outputs.image }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             APP_VERSION=${{ github.ref_name }}
-            MANAGED=${{ matrix.managed }}
-            HOSTED=${{ matrix.hosted }}
-            CONN_MODES=${{ matrix.conn_modes }}
-            MANAGED_UI=${{ matrix.managed_ui }}
-            GO_TAGS=${{ matrix.go_tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Per-variant cache scope so the two parallel legs don't race writing
-          # the gha cache.
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,mode=max,scope=image
           provenance: true
           sbom: true
 
@@ -310,13 +265,12 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
 
-      # Deviation 5: a per-leg value cannot travel through `outputs:` on a
-      # matrix job -- the legs overwrite each other in completion order. The
-      # .md line goes into the Release notes; the .json is what `publish`
-      # tags. Reached only when both platforms passed.
+      # Deviation 5: the digest travels as an artifact. The .md line goes into
+      # the Release notes; the .json is what `publish` tags. Reached only when
+      # both platforms passed.
       - name: Record the scanned digest
         env:
-          LEG: ${{ matrix.name }}
+          LEG: image
           IMAGE: ${{ steps.name.outputs.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
           META: ${{ steps.meta.outputs.json }}
@@ -328,10 +282,10 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: imgref-${{ matrix.name }}
+          name: imgref-image
           path: |
-            imgref-${{ matrix.name }}.md
-            imgref-${{ matrix.name }}.json
+            imgref-image.md
+            imgref-image.json
           if-no-files-found: error
           retention-days: 7
 
@@ -373,8 +327,8 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: ./scripts/dev.sh build
 
-      # Deviation 8: exactly the Release bundles, so the gateway binaries and
-      # the image-only managed.html and solAdmin.html never leave the runner.
+      # Deviation 8: exactly the Release bundles, so the gateway binary and
+      # the image-only provisioned.html and solAdmin.html never leave the runner.
       - name: Stage the Release bundles
         run: |
           set -euo pipefail
@@ -396,9 +350,8 @@ jobs:
           retention-days: 7
 
   # Deviation 7. The tags are the publication, so they move last: only once
-  # both image legs passed trivy on every platform AND the binaries built --
-  # a red gate, scan or build leaves `latest` and `managed-latest` where they
-  # were. A single-source `imagetools create` re-pushes the index bytes
+  # the image passed trivy on every platform AND the binaries built -- a red
+  # gate, scan or build leaves `latest` where it was. A single-source `imagetools create` re-pushes the index bytes
   # unchanged, so each tag names the exact digest trivy scanned; the loop
   # checks that rather than trusting it. Never add --annotation here: it
   # rewrites the index and changes the digest. No setup-buildx: imagetools

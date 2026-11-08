@@ -27,13 +27,13 @@ func TestLive_ApplySwapsEveryLiveKey(t *testing.T) {
 	}
 	before := lv.get()
 	cfg := defaultConfig()
-	cfg.connModes, cfg.defaultConn, cfg.logLevel = connBoth, connManaged, slog.LevelDebug
+	cfg.connModes, cfg.defaultConn, cfg.logLevel = connBoth, connProvisioned, slog.LevelDebug
 	cfg.session = sessionLimits{idle: time.Minute, absolute: 2 * time.Minute}
 	cfg.login.maxFailures = 9
 	cfg.modules = moduleSettings{offered: []string{"queue-copy"}, userDefault: modulesDefaultNone}
 	lv.apply(cfg)
 	got := lv.get()
-	if got.connModes != connBoth || got.defaultConn != connManaged || lv.level.Level() != slog.LevelDebug {
+	if got.connModes != connBoth || got.defaultConn != connProvisioned || lv.level.Level() != slog.LevelDebug {
 		t.Errorf("modes or level not applied: %+v, %v", got, lv.level.Level())
 	}
 	if lv.sessionLimits() != cfg.session || lv.loginLimits() != cfg.login || !reflect.DeepEqual(got.modules, cfg.modules) {
@@ -67,14 +67,13 @@ func TestPendingRestart(t *testing.T) {
 // Every restart-only key reads its own field: changing exactly that field
 // flags exactly that key.
 func TestRestartOnlyKeys_EachReadsItsField(t *testing.T) {
-	want := []string{"hosted", "managed", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"}
+	want := []string{"hosted", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"}
 	if got := restartOnlyKeyNames(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("restart-only keys: want %v, got %v", want, got)
 	}
 	running := defaultConfig()
 	edits := map[string]func(*fileConfig){
-		"hosted":                 func(f *fileConfig) { f.Hosted = true },
-		"managed":                func(f *fileConfig) { f.Managed = true },
+		"hosted":                 func(f *fileConfig) { f.Hosted = false },
 		"appDir":                 func(f *fileConfig) { f.AppDir = "/x" },
 		"tls.certFile":           func(f *fileConfig) { f.TLS.CertFile = "/x" },
 		"tls.keyFile":            func(f *fileConfig) { f.TLS.KeyFile = "/x" },

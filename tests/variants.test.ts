@@ -118,7 +118,7 @@ describe('variants', () => {
     });
 
     it('managed variant ships the standard modules, with connections on its managed entry', () => {
-        // managed.html is the managed image's index.html: the everyday app plus
+        // provisioned.html is what the gateway serves at / in Provisioned mode: the everyday app plus
         // the Managed sign-in, and nothing else. Same modules, same order.
         expect(MANAGED_VARIANT).toEqual(STANDARD_VARIANT);
         expect(MANAGED_ENTRIES).toEqual({ connections: 'managed' });

@@ -5,6 +5,17 @@
 > [deployment.md](deployment.md) (§ Managed mode). An earlier external-repo / capability-proxy
 > design was considered and rejected; this is the design that shipped.
 
+## Contents
+
+- [What it is](#what-it-is)
+- [Topology](#topology)
+- [Locked decisions](#locked-decisions)
+- [Threat model (honest, documented)](#threat-model-honest-documented)
+- [Open hardening items (input to the connections rework)](#open-hardening-items-input-to-the-connections-rework)
+- [YAML schemas (as sealed in the store files; edited only through the admin app)](#yaml-schemas-as-sealed-in-the-store-files-edited-only-through-the-admin-app)
+
+---
+
 ## What it is
 
 The default app is a pure browser tool: the user types broker SMF + SEMP credentials into the

@@ -21,7 +21,7 @@ type Schema = { [key: string]: Kind | Schema };
 
 /** fileConfig's JSON fields and their types. */
 const SCHEMA: Schema = {
-    hosted: 'bool', managed: 'bool', connModes: 'string', defaultConn: 'string', appDir: 'string',
+    hosted: 'bool', connModes: 'string', defaultConn: 'string', appDir: 'string',
     tls: { certFile: 'string', keyFile: 'string', trustDir: 'string', insecureSkipVerify: 'bool' },
     logLevel: 'string', usersFile: 'string', connectionsFile: 'string',
     access: { allow: 'strings', trustedProxies: 'strings' },
@@ -33,7 +33,6 @@ const SCHEMA: Schema = {
 /** restartOnlyKeys (live.go), in order; `host` marks the path keys. */
 const RESTART_ONLY: { key: string; host: boolean; value: (s: GatewaySettings) => unknown }[] = [
     { key: 'hosted', host: false, value: s => s.hosted },
-    { key: 'managed', host: false, value: s => s.managed },
     { key: 'appDir', host: true, value: s => s.appDir },
     { key: 'tls.certFile', host: true, value: s => s.tls.certFile },
     { key: 'tls.keyFile', host: true, value: s => s.tls.keyFile },
@@ -182,20 +181,16 @@ function range(key: string, v: number, lo: number, hi: number): string | null {
     return v < lo || v > hi ? `key ${quote(key)} has invalid value ${quote(String(v))}: must be ${lo} to ${hi}` : null;
 }
 
-/** validateConnModes (main.go), with the build-tag leg assumed present. */
-export function connModesProblem(s: { connModes: string; defaultConn: string; hosted: boolean; managed: boolean }): string | null {
-    if (!['direct', 'managed', 'both'].includes(s.connModes)) {
-        return `connModes=${quote(s.connModes)} (config.yaml; seeded by CONN_MODES) must be one of "direct", "managed", "both"`;
+/** validateConnModes (main.go). */
+export function connModesProblem(s: { connModes: string; defaultConn: string; hosted: boolean }): string | null {
+    if (!['direct', 'provisioned', 'both'].includes(s.connModes)) {
+        return `connModes=${quote(s.connModes)} (config.yaml; seeded by CONN_MODES) must be one of "direct", "provisioned", "both"`;
     }
-    if (!['direct', 'managed'].includes(s.defaultConn)) {
-        return `defaultConn=${quote(s.defaultConn)} (config.yaml; seeded by DEFAULT_CONN) must be one of "direct", "managed"`;
+    if (!['direct', 'provisioned'].includes(s.defaultConn)) {
+        return `defaultConn=${quote(s.defaultConn)} (config.yaml; seeded by DEFAULT_CONN) must be one of "direct", "provisioned"`;
     }
-    if (s.connModes === 'direct') return null;
-    if (!s.hosted) {
-        return `connModes=${quote(s.connModes)} offers managed sign-in but hosted is false (config.yaml; seeded by HOSTED), so the app cannot detect the gateway`;
-    }
-    if (!s.managed) {
-        return `connModes=${quote(s.connModes)} offers managed sign-in but managed is false (config.yaml; seeded by MANAGED), so /managed/* would not be served`;
+    if (s.connModes !== 'direct' && !s.hosted) {
+        return `connModes=${quote(s.connModes)} offers Provisioned sign-in but hosted is false (config.yaml; seeded by HOSTED), so the app cannot detect the gateway`;
     }
     return null;
 }
@@ -300,11 +295,13 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
             }
             const n = normalize(body);
             if (!n.ok) return { ok: false, status: 422, error: 'invalid', field: 'settings', reason: n.reason };
-            const runningProblem = connModesProblem({ ...running, connModes: n.value.connModes, defaultConn: n.value.defaultConn });
-            if (runningProblem) {
+            // saveSettings (settings.go): Direct alone would end Provisioned mode,
+            // and the console with it, at the next restart.
+            if (n.value.connModes === 'direct') {
                 return {
                     ok: false, status: 422, error: 'invalid', field: 'connModes',
-                    reason: `${runningProblem} in the running gateway; hosted applies at restart, so save it first and restart`,
+                    reason: 'connModes "direct" would turn Provisioned mode off at the next restart, and this console with it. '
+                        + 'To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart.',
                 };
             }
             if (n.value.access.allow.length > 0 && !allowListAdmits(n.value.access.allow, client)) {

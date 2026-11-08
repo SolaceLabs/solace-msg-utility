@@ -26,8 +26,8 @@ import (
 // settings file can never point the gateway at a different secret.
 const (
 	configVersion       = 1
-	defaultConfigFile   = "/managed/config.yaml"
-	defaultStoreKeyFile = "/managed/store.key"
+	defaultConfigFile   = "/data/config.yaml"
+	defaultStoreKeyFile = "/data/store.key"
 )
 
 const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
@@ -39,11 +39,12 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # access.*, session.*, login.* and modules.* have no env var: edit them here.
 # An empty allow list admits every client; trustedProxies lists the reverse
 # proxies whose X-Forwarded-For is believed. session.*, login.* and modules.*
-# apply only when managed is true: modules.offered lists the app modules a
-# managed user may be given, modules.userDefault (all|none) what a user without
-# a list of their own gets. On a managed gateway an administrator can also edit
-# this file from the admin app's Gateway Settings, where every key except
-# hosted, managed, appDir, tls.*, usersFile and connectionsFile applies at once.
+# apply only in Provisioned mode (connModes provisioned or both):
+# modules.offered lists the app modules a signed-in user may be given,
+# modules.userDefault (all|none) what a user without a list of their own gets.
+# In Provisioned mode an administrator can also edit this file from the admin
+# console's Gateway Settings, where every key except hosted, appDir, tls.*,
+# usersFile and connectionsFile applies at once.
 `
 
 // fileConfig is the on-disk shape. Field order is the order yaml.Marshal writes.
@@ -52,7 +53,6 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 type fileConfig struct {
 	Version         int         `yaml:"version" json:"-"`
 	Hosted          bool        `yaml:"hosted" json:"hosted"`
-	Managed         bool        `yaml:"managed" json:"managed"`
 	ConnModes       string      `yaml:"connModes" json:"connModes"`
 	DefaultConn     string      `yaml:"defaultConn" json:"defaultConn"`
 	AppDir          string      `yaml:"appDir" json:"appDir"`
@@ -104,7 +104,7 @@ func (fc fileConfig) clone() fileConfig {
 	return fc
 }
 
-// sessionLimits bound a managed sign-in session: idle is measured from the
+// sessionLimits bound a Provisioned sign-in session: idle is measured from the
 // last request, absolute from sign-in (session.go).
 type sessionLimits struct{ idle, absolute time.Duration }
 
@@ -118,11 +118,11 @@ type loginLimits struct {
 	unauthPerMinute int
 }
 
-// moduleCatalog is every app module an administrator can give a managed user.
+// moduleCatalog is every app module an administrator can give a signed-in user.
 // The sign-in module (connections) is always shown and the admin modules live
 // in the admin app, so neither is listed. Queue Subscription Explorer is left
 // out on purpose: it reads the broker over SEMP v1, which the entitlement
-// filter does not cover, so it stays hidden in every managed session
+// filter does not cover, so it stays hidden in every Provisioned session
 // (src/core/rbac.ts). tests/variants.test.ts parses this line and checks it
 // against the managed variant.
 func moduleCatalog() []string { return []string{"queue-browser", "queue-copy"} }
@@ -170,8 +170,8 @@ func checkModuleIDs(key string, ids []string) error {
 
 // seedVar maps one environment variable to its config.yaml key. fromEnv
 // normalises the raw env string the way loadConfig parses it, so the override
-// comparison is on effective values (HOSTED=TRUE parses to false and therefore
-// agrees with `hosted: false`).
+// comparison is on effective values (SSL_INSECURE_SKIP_VERIFY=TRUE parses to
+// false and therefore agrees with `insecureSkipVerify: false`).
 type seedVar struct {
 	env, key  string
 	fromEnv   func(raw string) string
@@ -179,8 +179,7 @@ type seedVar struct {
 }
 
 var seedVars = []seedVar{
-	{"HOSTED", "hosted", boolEnv, func(c config) string { return strconv.FormatBool(c.hosted) }},
-	{"MANAGED", "managed", boolEnv, func(c config) string { return strconv.FormatBool(c.managed) }},
+	{"HOSTED", "hosted", hostedEnv, func(c config) string { return strconv.FormatBool(c.hosted) }},
 	{"CONN_MODES", "connModes", strings.ToLower, func(c config) string { return c.connModes }},
 	{"DEFAULT_CONN", "defaultConn", strings.ToLower, func(c config) string { return c.defaultConn }},
 	{"APP_DIR", "appDir", identity, func(c config) string { return c.appDir }},
@@ -194,6 +193,16 @@ var seedVars = []seedVar{
 }
 
 func boolEnv(raw string) string { return strconv.FormatBool(raw == "true") }
+
+// hostedEnv mirrors parseHosted for the override comparison: unset or "true" is
+// true, "false" is false, and any other value stays as typed, so it is
+// reported as differing from the file.
+func hostedEnv(raw string) string {
+	if b, err := parseHosted(raw); err == nil {
+		return strconv.FormatBool(b)
+	}
+	return raw
+}
 func identity(raw string) string { return raw }
 
 // configPath is one of the environment-only settings (the others are the
@@ -216,7 +225,6 @@ func fileConfigFromConfig(c config) fileConfig {
 	return fileConfig{
 		Version:     configVersion,
 		Hosted:      c.hosted,
-		Managed:     c.managed,
 		ConnModes:   c.connModes,
 		DefaultConn: c.defaultConn,
 		AppDir:      c.appDir,
@@ -293,7 +301,6 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 		trustDir:           fc.TLS.TrustDir,
 		insecureSkipVerify: fc.TLS.InsecureSkipVerify,
 		logLevel:           level,
-		managed:            fc.Managed,
 		usersFile:          fc.UsersFile,
 		connectionsFile:    fc.ConnectionsFile,
 		storeKeyFile:       secrets.storeKey,
@@ -304,10 +311,8 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 		login:              login,
 		modules:            modules,
 	}
-	// Value and cross checks on the connection modes. Whether managed routing
-	// actually loaded is serve()'s knowledge, so the build-tag leg is assumed
-	// here and re-checked there with the real flag.
-	if err := validateConnModes(cfg, true); err != nil {
+	// Value and cross checks on the connection modes.
+	if err := validateConnModes(cfg); err != nil {
 		return config{}, err
 	}
 	return cfg, nil
@@ -503,7 +508,7 @@ func seedConfigFile(path string, cfg config) ([32]byte, error) {
 		return [32]byte{}, fmt.Errorf("cannot encode config file %q: %w", path, err)
 	}
 	if err := writeFileAtomic(path, data, 0o644); err != nil {
-		return [32]byte{}, fmt.Errorf("cannot write config file %q: %w. The gateway creates it on first start. Fix: make the directory writable by the gateway user (UID 65532), e.g. mount a writable volume at /managed, or set CONFIG_FILE to a writable path", path, err)
+		return [32]byte{}, fmt.Errorf("cannot write config file %q: %w. The gateway creates it on first start. Fix: make the directory writable by the gateway user (UID 65532), e.g. mount a writable volume at /data, or set CONFIG_FILE to a writable path", path, err)
 	}
 	return sha256.Sum256(data), nil
 }

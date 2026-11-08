@@ -14,7 +14,7 @@ import { loadModuleDOM } from '../helpers/loadModuleDOM';
 import type { AppContext, PwaModule } from '../../src/core/types';
 
 /**
- * managed-demo.html end to end, in process: the demo's boot, then the real
+ * provisioned-demo.html end to end, in process: the demo's boot, then the real
  * Kernel with the managed-demo variant's modules, each from its real template.
  * Only the reload a sign-in causes is simulated, by booting a second time over
  * what the first boot saved, as the browser would.
@@ -129,7 +129,7 @@ describe('managed demo end to end', () => {
         expect(Object.keys(MODULES).sort()).toEqual(Object.keys(ACTIVE_MODULES).sort());
     });
 
-    it('loads signed out under connModes both: no sign-in page, the Managed tab\'s Sign in, Direct offered', async () => {
+    it('loads signed out under connModes both: no sign-in page, the Provisioned tab\'s Sign in, Direct offered', async () => {
         await openDemo(async first => {
             const put = await first.gateway.handle({
                 method: 'PUT', path: '/managed/settings', query: '',

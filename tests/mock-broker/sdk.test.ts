@@ -19,7 +19,7 @@ beforeEach(() => {
 
 describe('mock-broker/emitter — dispatch order', () => {
     it('calls listeners synchronously, in registration order', () => {
-        // The real SDK dispatches this way, and the managed panel (managed.html)
+        // The real SDK dispatches this way, and the managed panel (provisioned.html)
         // registers its UP handler before queue-browser's and writes _permissions
         // from inside it. The emulation keeps that order.
         const emitter = createEmitter();
@@ -55,7 +55,7 @@ describe('mock-broker/sdk — session', () => {
     }
 
     it('exposes createQueueBrowser as a reassignable own property', () => {
-        // As in the real SDK: the managed panel (managed.html) replaces this
+        // As in the real SDK: the managed panel (provisioned.html) replaces this
         // method on the live session to wrap it with the entitlement check, which
         // a prototype/class method would make a silent no-op.
         const { session } = connectedSession();
@@ -168,7 +168,7 @@ describe('mock-broker/sdk — queue browser', () => {
     }
 
     it('exposes _messageConsumer._permissions before UP fires', async () => {
-        // queue-browser reads it at UP (and the managed panel in managed.html
+        // queue-browser reads it at UP (and the managed panel in provisioned.html
         // writes it there), so it must already exist — and the read-only fixture
         // must report it.
         const { sdk, browser } = browserFor('vpn-prod', 'Q/LOGS/AUDIT');

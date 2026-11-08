@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { createSettingsService, type GatewaySettings } from '../../../src/modules/gateway-settings/service';
 
 const SETTINGS: GatewaySettings = {
-    hosted: true, managed: true, connModes: 'both', defaultConn: 'direct', appDir: '/SolaceMsgUtility',
+    hosted: true, connModes: 'both', defaultConn: 'direct', appDir: '/SolaceMsgUtility',
     tls: { certFile: '/tls/tls.crt', keyFile: '/tls/tls.key', trustDir: '/tls/trust', insecureSkipVerify: false },
-    logLevel: 'warn', usersFile: '/managed/users.yaml', connectionsFile: '/managed/connections.yaml',
+    logLevel: 'warn', usersFile: '/data/users.yaml', connectionsFile: '/data/connections.yaml',
     access: { allow: [], trustedProxies: [] },
     session: { idleMinutes: 10, absoluteMinutes: 30 },
     login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60 },

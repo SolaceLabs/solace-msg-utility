@@ -1,5 +1,34 @@
 # Contributing
 
+## Contents
+
+- [Getting Started](#getting-started)
+- [Development Workflow](#development-workflow)
+  - [End-to-end run](#end-to-end-run)
+- [Code Standards](#code-standards)
+  - [TypeScript / JavaScript](#typescript--javascript)
+  - [DOM Access](#dom-access)
+  - [Modals](#modals)
+  - [Event Handling](#event-handling)
+  - [Error Handling](#error-handling)
+  - [File Organization](#file-organization)
+- [Testing Requirements](#testing-requirements)
+  - [Coverage Threshold](#coverage-threshold)
+  - [Writing Tests](#writing-tests)
+  - [Test Pattern](#test-pattern)
+  - [Defensive-Guard Tests](#defensive-guard-tests)
+  - [Cross-Module Integration Tests](#cross-module-integration-tests)
+  - [Test Isolation: Global Hooks](#test-isolation-global-hooks)
+  - [Solace Mock Behaviour](#solace-mock-behaviour)
+  - [Gateway Contract](#gateway-contract)
+  - [Stubbing Globals](#stubbing-globals)
+  - [v8 Coverage Ignores](#v8-coverage-ignores)
+  - [Running Tests](#running-tests)
+- [Pull Request Checklist](#pull-request-checklist)
+- [Architecture Notes](#architecture-notes)
+
+---
+
 ## Getting Started
 
 See [developer-guide.md](developer-guide.md) for full setup instructions (`npm install`, dev server, project structure).
@@ -26,20 +55,18 @@ npm install && npm test
 
 | Task | What it runs |
 | --- | --- |
-| `build` | `npm run build` (every variant), `npm run check:bundles` (no Direct bundle carries managed UI; the managed demo has no way out to a network), plus both gateway binaries, version-stamped, into `dist/` |
-| `vet` | `npm run typecheck`, `go vet ./...` **and** `go vet -tags managed ./...` |
-| `test` | `npm run test:app` (the web suite without `tests/mock-broker/`), `go test ./...` **and** `go test -tags managed ./...`. When `cov` is in the same invocation (`full`, `all cov`), the web suite runs once, in `cov`, and `test.log` says so |
-| `mock` | `npm run test:mock`: `tests/mock-broker/`, the suites behind `demo.html` and the managed demo, the gateway contract included. Skipped, like `test`'s web suite, when `cov` is in the same invocation |
+| `build` | `npm run build` (every variant), `npm run check:bundles` (no Direct bundle carries Provisioned UI; the Provisioned demo has no way out to a network), plus the gateway binary, version-stamped, into `dist/` (a compile check: it ships only inside the image) |
+| `vet` | `npm run typecheck`, `go vet ./...` |
+| `test` | `npm run test:app` (the web suite without `tests/mock-broker/`), `go test ./...`. When `cov` is in the same invocation (`full`, `all cov`), the web suite runs once, in `cov`, and `test.log` says so |
+| `mock` | `npm run test:mock`: `tests/mock-broker/`, the suites behind `demo.html` and the Provisioned demo, the gateway contract included. Skipped, like `test`'s web suite, when `cov` is in the same invocation |
 | `cov` | `npm run test:coverage` plus a Go coverage profile; prints both totals |
-| `scan` | `npm run audit:gate` (`npm audit`, fatal on fixable HIGH/CRITICAL advisories, warns on unfixable ones), `go tool govulncheck -tags=managed ./...`, then a Trivy scan of both freshly-built images with the pinned Trivy container (never a `trivy` on PATH; see [git.md](git.md#keeping-the-workflow-pins-current)) |
-| `image` | Builds both container images via `docker/docker-compose.yaml` |
+| `scan` | `npm run audit:gate` (`npm audit`, fatal on fixable HIGH/CRITICAL advisories, warns on unfixable ones), `go tool govulncheck ./...`, then a Trivy scan of the freshly-built image with the pinned Trivy container (never a `trivy` on PATH; see [git.md](git.md#keeping-the-workflow-pins-current)) |
+| `image` | Builds the container image via `docker/docker-compose.yaml` |
 | `up` / `down` | Brings the compose stack up or down |
 | `graphify` | Refreshes the knowledge graph (local only — skipped when `CI` is set) |
-| `e2e` | The managed gateway against an existing Solace broker: builds both images, then runs `node scripts/e2e.mjs` over `docker/docker-compose.e2e.yaml`, which asks only for the broker details that `docker/e2e-broker.env` and the `E2E_*` variables do not give (see [End-to-end run](#end-to-end-run)). Local only and standalone: skipped when `CI` is set or without a Linux-container Docker, and never part of `all` or `full` |
+| `e2e` | The gateway in Provisioned mode against an existing Solace broker: builds the image, then runs `node scripts/e2e.mjs` over `docker/docker-compose.e2e.yaml`, which asks only for the broker details that `docker/e2e-broker.env` and the `E2E_*` variables do not give (see [End-to-end run](#end-to-end-run)). Local only and standalone: skipped when `CI` is set or without a Linux-container Docker, and never part of `all` or `full` |
 | `all` | `build vet test mock` |
 | `full` | `all` + `cov image scan graphify` — the pre-tag sweep |
-
-The Go gates run **both** ways because the RBAC backend is behind the `managed` build tag; an untagged run does not compile it at all.
 
 Every task name is checked before any task runs, so a typo fails at once. Each task writes `scripts/logs/<task>.log` with a timestamped footer, and a run of more than one task ends with a console-only `timing:` line giving each task's seconds. `logs/cov.log` holds the previous coverage totals, which are the local floor — CI is a fresh checkout with no prior log, so it cannot catch a coverage regression.
 
@@ -47,11 +74,11 @@ The image half of `image` and `scan` warn-skips when Docker is absent or running
 
 ### End-to-end run
 
-`./scripts/dev.sh e2e` (or `./scripts/dev.ps1 e2e`) checks the managed gateway the way a browser uses it, against an existing Solace broker you name. It builds both images (as `scan` does), then [`scripts/e2e.mjs`](../scripts/e2e.mjs) starts [`docker/docker-compose.e2e.yaml`](../docker/docker-compose.e2e.yaml): the managed image, and a Chromium browser in the official Playwright image, both with the hardened posture (non-root, read-only root, every capability dropped, no new privileges). Run it before a tag that touches the gateway or the managed app; it takes a minute or two.
+`./scripts/dev.sh e2e` (or `./scripts/dev.ps1 e2e`) checks the gateway in Provisioned mode the way a browser uses it, against an existing Solace broker you name. It builds the image (as `scan` does), then [`scripts/e2e.mjs`](../scripts/e2e.mjs) starts [`docker/docker-compose.e2e.yaml`](../docker/docker-compose.e2e.yaml): the image with `CONN_MODES=provisioned`, and a Chromium browser in the official Playwright image, both with the hardened posture (non-root, read-only root, every capability dropped, no new privileges). Run it before a tag that touches the gateway or the Provisioned app; it takes a minute or two.
 
 **Nothing on the broker is created or changed.** The run reads it through the gateway's read-only relay and browses an existing queue, which consumes nothing. The one write it sends, the `PATCH` of check 4, must be refused by the gateway; were it to get through, it names a queue that does not exist, so the broker would refuse it too.
 
-Needs: a Linux-container Docker; the npm packages installed (`npm ci`: the SMF check logs in with the pinned `solclientjs`, the SDK the images ship, and the browser checks drive Chromium with the pinned `playwright-core`); the loopback ports `39443` and `39444` free (the gateway's and the browser's Playwright server, both bound to `127.0.0.1`); a one-time pull of the Playwright image, over 1 GB, which the first run does on its own; and a broker the gateway container can reach over TLS, with SEMP over TLS and secured web transport (wss) enabled.
+Needs: a Linux-container Docker; the npm packages installed (`npm ci`: the SMF check logs in with the pinned `solclientjs`, the SDK the image ships, and the browser checks drive Chromium with the pinned `playwright-core`); the loopback ports `39443` and `39444` free (the gateway's and the browser's Playwright server, both bound to `127.0.0.1`); a one-time pull of the Playwright image, over 1 GB, which the first run does on its own; and a broker the gateway container can reach over TLS, with SEMP over TLS and secured web transport (wss) enabled.
 
 **Broker details.** Each comes from its `E2E_*` environment variable, else from `docker/e2e-broker.env`, a `KEY=value` file that is git-ignored and kept out of the image build context (`docker/Dockerfile.dockerignore`, with `scripts/logs/`): never commit it. The harness asks only for what neither gives, on the terminal, then writes those answers to the file (creating it at mode `600` with a header), so the next run asks nothing. It never writes a password there: add `E2E_SEMP_PASSWORD` and `E2E_CLIENT_PASSWORD` yourself to skip those prompts, and keep the file private (the harness warns when other users can read a file holding one). Without a terminal, a missing detail fails the run, naming the variables to set. An unknown key, a repeated key, or a value the gateway would refuse fails it too, naming the line.
 
@@ -88,7 +115,7 @@ Each check prints `PASS n.` or `FAIL n.` and any failure exits 1, followed by th
    The browser checks run here, before the sweep of check 10 and the restart of check 12. They use the app as a person does, in Chromium, at `https://gateway:9443` on the stack's network:
 
    - `B1` signs in through the gateway's own pages (one wrong password first) and lands in the app. The session cookie passes the rules of check 1, the browser holds it `HttpOnly`, and `document.cookie` is empty.
-   - `B2` checks that the Managed panel offers only the entitled broker and VPN, and that the sidebar shows Connections, Queue Browser and Queue Copy.
+   - `B2` checks that the Provisioned panel offers only the entitled broker and VPN, and that the sidebar shows Connections, Queue Browser and Queue Copy.
    - `B3` connects. The browser opens its own WebSocket to `/managed/smf/<broker>/<vpn>`, sending the cookie, `Origin` and `Sec-Fetch-Site` itself, and the page shows no broker address.
    - `B4` binds the queue in Queue Browser. The queue is `Read-Only`, with no Delete.
    - `B5` checks that browser storage holds no password, store key or session cookie.
@@ -276,7 +303,7 @@ The pattern for the first two files:
 - **Reset the `state.js` singleton in `beforeEach`.** Call `resetQueueBrowserState()` from [tests/helpers/resetQueueBrowserState.ts](../tests/helpers/resetQueueBrowserState.ts) — it resets all nine fields on the singleton (`browserInstances`, `messageStore`, `currentQueue`, `currentQueuePermissions`, `allMessages`, `displayedMessages`, `forwardQueue`, `activeFilters`, `maxMessagesPerQueue`). Every queue-browser test file (unit + integration) uses this helper so partial-reset drift cannot leak mutations across files.
 - **Assert the far-end effect, not the event emission.** The integration value is proving the other module *reacted* — e.g. `mockCreateBrowser` was called with the queue name, `ui.updateForwardItemStatus` was called with the correlation value. Asserting only that the event was emitted duplicates unit-test coverage.
 
-### Test Isolation — Global Hooks
+### Test Isolation: Global Hooks
 
 [tests/setup.ts](../tests/setup.ts) installs global `beforeEach`/`afterEach` hooks that absorb several common isolation bugs so individual tests don't have to:
 
@@ -293,22 +320,22 @@ Two fidelity guards help catch production bugs early:
 
 ### Gateway Contract
 
-[go-web-proxy/testdata/contract/](../go-web-proxy/testdata/contract) is what the managed demo's fake gateway is held to:
+[go-web-proxy/testdata/contract/](../go-web-proxy/testdata/contract) is what the Provisioned demo's fake gateway is held to:
 - `seed.json`: users, connections, the settings the gateway starts with, and the client address.
 - `cases.json`: request steps, each with the status and body the real gateway answers.
 - `validation.json`: vectors for the checks behind a `422`.
 
-[`contract_test.go`](../go-web-proxy/contract_test.go) (`-tags managed`) proves that the real gateway gives exactly those answers. A gateway change that alters one fails it.
+[`contract_test.go`](../go-web-proxy/contract_test.go) proves that the real gateway gives exactly those answers. A gateway change that alters one fails it.
 
 When the change is deliberate, rewrite the answers from the real gateway and review the diff:
 
 ```bash
-cd go-web-proxy && go test -tags managed -run Contract -update .
+cd go-web-proxy && go test -run Contract -update .
 ```
 
 Each case runs on a fresh gateway over the seed. A case's sessions are opened before its first step, so a step after a revocation still uses the cookie the user held. Usage: put `as` (a username) on a step to send it signed in, `mustChange: true` for a session held at the password page, `body` for JSON and `raw` for an XML body. Store paths in a settings body read `<path>`.
 
-Three suites hold the managed demo to the app as well:
+Three suites hold the Provisioned demo to the app as well:
 - `tests/mock-broker/gateway/routes.test.ts`: a new gateway route needs a row that calls it through its service. A `/managed/<name>` in `src/` with no row fails.
 - `tests/mock-broker/gateway/error-codes.test.ts`: a new error code in `managed-api.ts` needs a place. It is a contract golden, a fault the demo panel arms, a code the app makes itself, or a code the demo does not simulate.
 - `tests/mock-broker/demo-flow.test.ts`: whole sessions through the real Kernel, the `managed-demo` variant's modules and the demo's boot.
@@ -372,7 +399,7 @@ The `--pool=threads` flag is included in the npm scripts the tasks call; the wor
 - [ ] SDK/exception text goes through `solaceErrorText(e, fallback)` (core/utils.ts) — the SDK splits the reason across `.message` (QueueBrowser `OperationError`) and `.infoStr` (Session events); reading one loses it
 - [ ] Cross-module communication uses EventBus (no direct imports)
 - [ ] v8 ignores have explanatory comments
-- [ ] Managed/RBAC (if touched): module gating goes through `MODULE_REQUIREMENTS` (rbac.ts); the managed profile stays in `managedProfile` (names only), never `AppState`; a dialled password goes straight to the SDK inside the `dial` callback and is never stored; the gateway endpoint paths (`/managed/dial`, `/managed/relay/`) stay in managed-only files (`npm run check:bundles`)
+- [ ] Provisioned mode / RBAC (if touched): module gating goes through `MODULE_REQUIREMENTS` (rbac.ts); the managed profile stays in `managedProfile` (names only), never `AppState`; a dialled password goes straight to the SDK inside the `dial` callback and is never stored; the gateway endpoint paths (`/managed/dial`, `/managed/relay/`) stay in Provisioned-only files (`npm run check:bundles`)
 - [ ] Commit message describes the change clearly
 
 ---

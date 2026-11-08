@@ -3,12 +3,29 @@
 Two downloads attached to every [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) run the
 app with no broker and no gateway:
 
-- [`demo.html`](#direct-demo-demohtml) -- the Direct connection form and every module, against a broker inside the page.
-- [`managed-demo.html`](#managed-demo-managed-demohtml) -- the Managed sign-in and the administration pages, against a
-  fake gateway inside the page.
+- [`demo.html`](#direct-demo-demohtml) -- Standalone and Gateway mode: the Direct connection form and every module,
+  against a broker inside the page.
+- [`provisioned-demo.html`](#provisioned-demo-provisioned-demohtml) -- Provisioned mode: the sign-in and the
+  administration pages, against a fake gateway inside the page.
 
 Open either straight from disk; no server is needed. Neither works with a real broker, and neither makes a network
 request. For what each module does, see the [User Guide](user-guide.md).
+
+---
+
+## Contents
+
+- [Direct demo (`demo.html`)](#direct-demo-demohtml)
+  - [Opening the demo](#opening-the-demo)
+  - [Connecting](#connecting)
+  - [The demo topology](#the-demo-topology)
+  - [Demo controls](#demo-controls)
+  - [What is not in the demo](#what-is-not-in-the-demo)
+- [Provisioned demo (`provisioned-demo.html`)](#provisioned-demo-provisioned-demohtml)
+  - [Demo accounts](#demo-accounts)
+  - [The demo brokers](#the-demo-brokers)
+  - [How it differs from a real gateway](#how-it-differs-from-a-real-gateway)
+  - [Demo controls](#demo-controls-1)
 
 ---
 
@@ -31,7 +48,7 @@ network were down, and only the demo host connects, so a real broker typed into 
 required.
 
 (For developers building from source, `npm run build:demo` produces `dist/demo.html`; `npm run build` produces
-every variant in one pass, including `managed-demo.html` and the image-only `managed.html` and `solAdmin.html`. See [developer-guide.md](developer-guide.md) for the full build workflow.)
+every variant in one pass, including `provisioned-demo.html` and the image-only `provisioned.html` and `solAdmin.html`. See [developer-guide.md](developer-guide.md) for the full build workflow.)
 
 ### Connecting
 
@@ -39,7 +56,7 @@ Use host **`broker.solace.com`** with any non-empty credentials, or let **Fill t
 controls type them for you. Any other hostname is refused on both cards, and a hostname containing `untrust.com`
 simulates an untrusted certificate on the messaging connection, so the error paths are demoable too.
 
-`demo.html` is Direct-only. To try the Managed sign-in without a gateway, open [`managed-demo.html`](#managed-demo-managed-demohtml).
+`demo.html` is Direct-only. To try the Provisioned sign-in without a gateway, open [`provisioned-demo.html`](#provisioned-demo-provisioned-demohtml).
 
 ### The demo topology
 
@@ -76,22 +93,22 @@ Nothing is persisted: reloading the page reseeds the broker, so a reload is alwa
 
 ### What is not in the demo
 
-The Managed sign-in and the administration pages are not part of `demo.html`. The
-[managed demo](#managed-demo-managed-demohtml) runs both offline against a fake gateway. Everything else is
+The Provisioned sign-in and the administration pages are not part of `demo.html`. The
+[Provisioned demo](#provisioned-demo-provisioned-demohtml) runs both offline against a fake gateway. Everything else is
 exercisable in `demo.html`.
 
 ---
 
-## Managed demo (`managed-demo.html`)
+## Provisioned demo (`provisioned-demo.html`)
 
-`managed-demo.html` is managed mode without a gateway or a broker. It is the real Managed sign-in, Connections, Queue
+`provisioned-demo.html` is Provisioned mode without a gateway or a broker. It is the real Provisioned sign-in, Connections, Queue
 Browser, Queue Copy and the three administration pages, running against a fake gateway and the demo broker inside the
 page. It makes no network request: anything it does not answer itself fails as if the network were down. Like
 `demo.html`, it needs no `solclient.js` (`jszip.min.js` is still needed for the ZIP download).
 
 It is attached to every GitHub Release; open it from disk. It starts on the gateway's sign-in page.
-(`npm run build:managed-demo` builds `dist/managed-demo.html`.) For managed mode itself, see
-[Managed Connections](user-guide.md#managed-connections).
+(`npm run build:provisioned-demo` builds `dist/provisioned-demo.html`.) For Provisioned mode itself, see
+[Provisioned Connections](user-guide.md#provisioned-connections) and [provisioned-mode.md](provisioned-mode.md).
 
 ### Demo accounts
 

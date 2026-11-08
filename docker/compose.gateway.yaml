@@ -1,0 +1,44 @@
+# Solace Message Utility -- Gateway mode, ready to deploy.
+#
+# The gateway serves the app over HTTPS and relays its broker connections:
+# browsers reach and trust only the gateway, and users type their broker's
+# details. See docs/deployment.md (Gateway mode).
+#
+#   SMU_VERSION=3.6.0 docker compose -f compose.gateway.yaml up -d
+#
+# Then open https://<host>:9443/. SMU_VERSION is required: pin a release, never
+# `latest`, so an upgrade is a deliberate change of this one value.
+#
+# Posture: non-root UID 65532, privileged off, every capability dropped, no new
+# privileges, read-only root filesystem, the default bridge network. The
+# gateway writes only /tls (a self-signed certificate on the first start, when
+# none is there) and /data (config.yaml), both named volumes.
+name: solace-msg-utility
+services:
+  gateway:
+    image: ghcr.io/solacelabs/solace-msg-utility:${SMU_VERSION:?set SMU_VERSION to a release, e.g. 3.6.0}
+    user: "65532:65532"
+    privileged: false
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    ports:
+      - "9443:9443"
+    environment:
+      # Seeds config.yaml on the first start only; afterwards edit the file in
+      # the data volume and restart. warn is quiet; info logs every request.
+      LOG_LEVEL: warn
+    volumes:
+      # The gateway's certificate (tls.crt, tls.key) and, under trust/, the CAs
+      # your brokers' certificates chain to. Put them here before the first
+      # start, or let the gateway generate a self-signed pair.
+      - tls:/tls
+      # config.yaml.
+      - data:/data
+
+volumes:
+  tls:
+  data:

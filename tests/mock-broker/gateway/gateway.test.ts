@@ -62,8 +62,8 @@ describe('mock-broker/gateway -- the page\'s fetch route', () => {
         expect(await (await fetch('/hosted')).json()).toEqual({ hosted: true, connModes: 'both', defaultConn: 'direct' });
 
         gw.setCookie(gw.openSession('admin', false));
-        await fetch('/managed/settings', { method: 'PUT', body: JSON.stringify({ connModes: 'managed', defaultConn: 'managed' }) });
-        expect(await (await fetch('/hosted')).json()).toEqual({ hosted: true, connModes: 'managed', defaultConn: 'managed' });
+        await fetch('/managed/settings', { method: 'PUT', body: JSON.stringify({ connModes: 'provisioned', defaultConn: 'provisioned' }) });
+        expect(await (await fetch('/hosted')).json()).toEqual({ hosted: true, connModes: 'provisioned', defaultConn: 'provisioned' });
     });
 
     it('leaves everything else to the next route', async () => {
@@ -164,22 +164,18 @@ describe('mock-broker/gateway -- settings', () => {
     });
 
     it('normalises the modes, the log level and the module order', async () => {
-        await call('PUT', '/managed/settings', { connModes: 'MANAGED', logLevel: 'DEBUG', modules: { offered: ['queue-copy', 'queue-browser'] } });
+        await call('PUT', '/managed/settings', { connModes: 'PROVISIONED', logLevel: 'DEBUG', modules: { offered: ['queue-copy', 'queue-browser'] } });
         const s = gw.settings.current();
-        expect([s.connModes, s.logLevel, s.modules.offered]).toEqual(['managed', 'debug', ['queue-browser', 'queue-copy']]);
+        expect([s.connModes, s.logLevel, s.modules.offered]).toEqual(['provisioned', 'debug', ['queue-browser', 'queue-copy']]);
     });
 
-    it('checks the modes against the running gateway, whose hosted flag applies only at restart', async () => {
-        const seed = contractSeed();
-        seed.settings.hosted = false;
-        seed.settings.connModes = 'direct';
-        const g = createGateway({ seed });
-        const res: any = await g.handle({
-            method: 'PUT', path: '/managed/settings', query: '', body: JSON.stringify({ hosted: true, connModes: 'both' }), session: g.openSession('admin', false),
-        });
+    it('refuses connModes direct, which would end Provisioned mode and the console with it', async () => {
+        const before = gw.settings.current().connModes;
+        const res: any = await call('PUT', '/managed/settings', { connModes: 'direct' });
         expect(res.status).toBe(422);
         expect(res.json.field).toBe('connModes');
-        expect(res.json.reason).toMatch(/hosted is false .* in the running gateway; hosted applies at restart, so save it first and restart$/);
+        expect(res.json.reason).toMatch(/set connModes: direct in config\.yaml on the gateway host and restart\.$/);
+        expect(gw.settings.current().connModes).toBe(before);
     });
 
     it('reports a hand edit and refuses to save over it', async () => {

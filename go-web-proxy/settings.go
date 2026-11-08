@@ -1,5 +1,3 @@
-//go:build managed
-
 package main
 
 import (
@@ -86,7 +84,7 @@ func (h *managedHandler) getSettings(w http.ResponseWriter, _ *http.Request) {
 // saveSettings validates and writes the whole file. A key missing from the
 // body keeps its saved value. Refusals, in order:
 //   - 422 invalid: a changed hostOnly path key; a value startup would reject;
-//     connModes offering managed sign-in while the running gateway is not hosted
+//     connModes direct, which would end Provisioned mode and this console
 //   - 409 would_lock_out: the new access list would deny this request's client
 //   - 500 config_unreadable: the file cannot be read to check for a hand edit
 //   - 409 config_changed_on_disk: a hand edit the gateway has not loaded
@@ -110,12 +108,11 @@ func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request) {
 		writeInvalid(w, "settings", err.Error())
 		return
 	}
-	// connModes applies now but hosted only at restart, so the pair must
-	// also hold for the running gateway.
-	running := sf.boot
-	running.connModes, running.defaultConn = cfg.connModes, cfg.defaultConn
-	if err := validateConnModes(running, true); err != nil {
-		writeInvalid(w, "connModes", err.Error()+" in the running gateway; hosted applies at restart, so save it first and restart")
+	// Direct alone would end Provisioned mode at the next restart, and this
+	// console with it, leaving no page to undo it from. That change is the
+	// host's to make.
+	if cfg.connModes == connDirect {
+		writeInvalid(w, "connModes", `connModes "direct" would turn Provisioned mode off at the next restart, and this console with it. To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart.`)
 		return
 	}
 	ip, ok := clientIP(r.RemoteAddr, r.Header.Values("X-Forwarded-For"), cfg.access.trustedProxies)

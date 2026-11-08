@@ -699,8 +699,8 @@ export const ConnectionsModule = {
         // that, so modules deriving their own connection choices (queue-copy's
         // destination) never offer a provisioned mode no session can back.
         if (conn.connModes !== 'direct') {
-            logger.warn(`[Connections] the gateway offers managed sign-in (connModes=${conn.connModes}), `
-                + 'but this bundle is Direct-only. Serve managed.html for managed sign-in (the managed image does).');
+            logger.warn(`[Connections] the gateway offers Provisioned sign-in (connModes=${conn.connModes}), `
+                + 'but this bundle is Direct-only. Serve provisioned.html for the sign-in (the gateway does in Provisioned mode).');
         }
         app.setState('connConfig', DEFAULT_CONN_CONFIG);
         logger.info(`[Connections] mode = ${hosted ? 'hosted' : 'browser'}`);

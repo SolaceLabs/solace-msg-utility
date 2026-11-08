@@ -1269,7 +1269,7 @@ describe('queue-copy/ui-modal — entitlement gates', () => {
 
         it('refuses a topic destination outright — entitlements are per queue', () => {
             expect(destinationRefusal(provisionedState('topic', 'some/topic'), mAccess()))
-                .toMatch(/Topic destinations are unavailable with managed credentials/);
+                .toMatch(/Topic destinations are unavailable with provisioned connections/);
         });
 
         it('allows a queue destination the user may write to', () => {

@@ -1,12 +1,12 @@
 /**
- * Bundle isolation check: the Direct bundles carry no managed UI, the managed
- * bundle does, and the two demos (demo.html, the Direct demo, and the managed
- * demo) run with no way out to a network.
+ * Bundle isolation check: the Direct bundles carry no Provisioned UI, the
+ * Provisioned bundle does, and the two demos (demo.html, the Direct demo, and
+ * the Provisioned demo) run with no way out to a network.
  *
- * The managed sign-in (the Managed tab, its panel and its `/managed/*` client)
- * ships in `dist/managed.html`, which the managed container image serves as its
- * index, and in `dist/managed-demo.html`, the Release asset that runs it against
- * the in-browser fake gateway (`src/mock-broker/gateway/`). Every other bundle
+ * The Provisioned sign-in (the Provisioned tab, its panel and its `/managed/*`
+ * client) ships in `dist/provisioned.html`, which the gateway serves at / in
+ * Provisioned mode, and in `dist/provisioned-demo.html`, the Release asset that
+ * runs it against the in-browser fake gateway (`src/mock-broker/gateway/`). Every other bundle
  * a GitHub Release publishes installs the Direct-only connections entry
  * (`src/modules/connections/module.ts`), which never imports the managed files.
  * This check proves it on the built output:
@@ -17,13 +17,13 @@
  *     the production ones (all but DEMO_BUNDLE) carry no NETWORK_MARKER
  *     either (a hit means demo code reached a production build);
  *   - DEMO_BUNDLE carries NETWORK_MARKER and holds nothing that reaches past
- *     the page, as MANAGED_DEMO_BUNDLE (below);
- *   - MANAGED_BUNDLE exists, contains every managed marker (a miss means the
+ *     the page, as PROVISIONED_DEMO_BUNDLE (below);
+ *   - PROVISIONED_BUNDLE exists, contains every managed marker (a miss means the
  *     `managed` variant's MODULE_ENTRIES override did not apply, or a marker
  *     went stale after a rename -- either way the first half proved nothing)
  *     and no demo marker (the product would answer from the fake gateway);
- *   - MANAGED_DEMO_BUNDLE exists, contains every managed and every demo marker, and
- *     holds nothing that reaches past the page: no DEMO_FORBIDDEN call, no
+ *   - PROVISIONED_DEMO_BUNDLE exists, contains every managed and every demo
+ *     marker, and holds nothing that reaches past the page: no DEMO_FORBIDDEN call, no
  *     `<form action=...>`, and no URL literal whose host is not in
  *     ALLOWED_HOSTS.
  *
@@ -54,19 +54,19 @@ export const DIRECT_BUNDLES = ['index.html', 'min.html', 'no-payload.html', 'no-
 /** The Direct demo: a Direct bundle against the in-browser broker, with no network. */
 export const DEMO_BUNDLE = 'demo.html';
 
-/** The managed demo: the managed modules against the in-browser fake gateway. */
-export const MANAGED_DEMO_BUNDLE = 'managed-demo.html';
+/** The Provisioned demo: the Provisioned modules against the in-browser fake gateway. */
+export const PROVISIONED_DEMO_BUNDLE = 'provisioned-demo.html';
 
-/** The bundles a GitHub Release uploads. Never solAdmin.html or managed.html. */
-export const RELEASE_BUNDLES = [...DIRECT_BUNDLES, MANAGED_DEMO_BUNDLE];
+/** The bundles a GitHub Release uploads. Never solAdmin.html or provisioned.html. */
+export const RELEASE_BUNDLES = [...DIRECT_BUNDLES, PROVISIONED_DEMO_BUNDLE];
 
-/** The managed image's bundle, served as its index.html. */
-export const MANAGED_BUNDLE = 'managed.html';
+/** The bundle the gateway serves at / in Provisioned mode. */
+export const PROVISIONED_BUNDLE = 'provisioned.html';
 
-/** Strings only the managed connections entry puts into a bundle. */
+/** Strings only the Provisioned connections entry (`module.managed.ts`) puts into a bundle. */
 export const MANAGED_MARKERS = ['conn-panel-managed', 'btn-managed-login', '/managed/me', '/managed/logout', '/managed/dial', '/managed/relay/'];
 
-/** The fake gateway's `X-Demo-Gateway` value (`DEMO_GATEWAY_MARKER`, src/mock-broker/gateway): the managed demo only. */
+/** The fake gateway's `X-Demo-Gateway` value (`DEMO_GATEWAY_MARKER`, src/mock-broker/gateway): the Provisioned demo only. */
 export const GATEWAY_MARKER = 'smu-demo-gateway/1';
 
 /** The refusal both demos' passthrough rejects with (`NETWORK_DISABLED`, src/mock-broker/network.ts). */
@@ -140,10 +140,10 @@ export function checkBundles(distDir) {
     const noDemo = (name, text, markers = DEMO_MARKERS) => {
         for (const marker of findMarkers(text, markers)) {
             problems.push(marker === GATEWAY_MARKER
-                ? `${name}: contains the demo marker "${marker}". Only managed-demo.html may carry the fake ` +
+                ? `${name}: contains the demo marker "${marker}". Only provisioned-demo.html may carry the fake ` +
                     'gateway; check that demoRedirects in vite.config.ts sends only the managed-demo variant to ' +
                     './mock-broker/boot.managed.'
-                : `${name}: contains the demo marker "${marker}". Only the demos (${DEMO_BUNDLE}, ${MANAGED_DEMO_BUNDLE}) ` +
+                : `${name}: contains the demo marker "${marker}". Only the demos (${DEMO_BUNDLE}, ${PROVISIONED_DEMO_BUNDLE}) ` +
                     'may carry demo code; check that the build ran this variant in production mode.');
         }
     };
@@ -197,24 +197,24 @@ export function checkBundles(distDir) {
         offline(name, text);
     }
 
-    const managed = read(MANAGED_BUNDLE);
+    const managed = read(PROVISIONED_BUNDLE);
     if (managed === null) {
-        problems.push(`${MANAGED_BUNDLE}: missing from ${distDir}. The build must emit it with --variant=managed.`);
+        problems.push(`${PROVISIONED_BUNDLE}: missing from ${distDir}. The build must emit it with --variant=managed.`);
     } else {
-        lacks(MANAGED_BUNDLE, managed, MANAGED_MARKERS, ['managed',
+        lacks(PROVISIONED_BUNDLE, managed, MANAGED_MARKERS, ['managed',
             `Either the managed variant's MODULE_ENTRIES override did not apply, ${stale('MANAGED_MARKERS')}`]);
-        noDemo(MANAGED_BUNDLE, managed);
+        noDemo(PROVISIONED_BUNDLE, managed);
     }
 
-    const demo = read(MANAGED_DEMO_BUNDLE);
+    const demo = read(PROVISIONED_DEMO_BUNDLE);
     if (demo === null) {
-        problems.push(`${MANAGED_DEMO_BUNDLE}: missing from ${distDir}. The build must emit it with --mode demo --variant=managed-demo.`);
+        problems.push(`${PROVISIONED_DEMO_BUNDLE}: missing from ${distDir}. The build must emit it with --mode demo --variant=managed-demo.`);
     } else {
-        lacks(MANAGED_DEMO_BUNDLE, demo, MANAGED_MARKERS, ['managed',
+        lacks(PROVISIONED_DEMO_BUNDLE, demo, MANAGED_MARKERS, ['managed',
             `Either the managed-demo variant lost its MODULE_ENTRIES override, ${stale('MANAGED_MARKERS')}`]);
-        lacks(MANAGED_DEMO_BUNDLE, demo, DEMO_MARKERS, ['demo',
+        lacks(PROVISIONED_DEMO_BUNDLE, demo, DEMO_MARKERS, ['demo',
             `Either it was built without --mode demo or without ./mock-broker/boot.managed, ${stale('DEMO_MARKERS')}`]);
-        offline(MANAGED_DEMO_BUNDLE, demo);
+        offline(PROVISIONED_DEMO_BUNDLE, demo);
     }
     return problems;
 }
@@ -233,8 +233,8 @@ export function main(root = repoRoot()) {
         return 1;
     }
     console.log(
-        `Bundle check passed (${DIRECT_BUNDLES.length} Direct bundles carry no managed UI; ${MANAGED_BUNDLE} does; ` +
-        `${MANAGED_DEMO_BUNDLE} runs it against the demo gateway; both demos have no network).`,
+        `Bundle check passed (${DIRECT_BUNDLES.length} Direct bundles carry no Provisioned UI; ${PROVISIONED_BUNDLE} does; ` +
+        `${PROVISIONED_DEMO_BUNDLE} runs it against the demo gateway; both demos have no network).`,
     );
     return 0;
 }

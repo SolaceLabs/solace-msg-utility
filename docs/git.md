@@ -2,13 +2,34 @@
 
 This project ships in three forms:
 
-1. A **container image** at `ghcr.io/solacelabs/solace-msg-utility` (produced by [docker/Dockerfile](../docker/Dockerfile)), in a standard and a `managed-` prefixed variant.
+1. A **container image** at `ghcr.io/solacelabs/solace-msg-utility` (produced by [docker/Dockerfile](../docker/Dockerfile)): one image for Gateway mode, the default, and Provisioned mode.
 2. A **public PWA** hosted on GitHub Pages at `https://solacelabs.github.io/solace-msg-utility/`.
-3. The **PWA bundles** (`index.html` and its Direct-only variants, plus the offline `managed-demo.html`) attached to the GitHub Release. The managed sign-in ships inside the `managed-` image; the demo runs it against a fake gateway in the page.
+3. The **PWA bundles** (`index.html` and its Direct-only variants, plus the offline `provisioned-demo.html`) attached to the GitHub Release. The Provisioned sign-in ships inside the image; the demo runs it against a fake gateway in the page.
 
 All three are produced by [`.github/workflows/tag.yml`](../.github/workflows/tag.yml), which fires when you **push a `v*` tag**. Nothing is built or pushed on an ordinary branch push or pull request (the only automatic runs are listed under [Day-to-day branching](#day-to-day-branching): the narrow CI trigger and the SCA scan).
 
 The tag itself is the single source of version truth. There is no version field to bump: the gateway reports the tag as-is (`v3.4.0`), the image tags and the PWA's `__APP_VERSION__` take it with the leading `v` stripped (`3.4.0`), and `package.json` carries the deliberately implausible placeholder `0.0.0-dev` so a build that lost the injection looks wrong rather than merely out of date.
+
+---
+
+## Contents
+
+- [Day-to-day branching](#day-to-day-branching)
+- [Pre-release checklist (local)](#pre-release-checklist-local)
+- [Cutting a release](#cutting-a-release)
+  - [1. Merge to `main`](#1-merge-to-main)
+  - [2. Tag and push](#2-tag-and-push)
+- [What the workflow does](#what-the-workflow-does)
+  - [Repo variables](#repo-variables)
+  - [Image tags](#image-tags)
+  - [Release assets](#release-assets)
+  - [Why scans block the release](#why-scans-block-the-release)
+  - [Pages deploy](#pages-deploy)
+- [Keeping the workflow pins current](#keeping-the-workflow-pins-current)
+- [Re-running a release](#re-running-a-release)
+- [Rollback](#rollback)
+- [Troubleshooting](#troubleshooting)
+- [Quick reference](#quick-reference)
 
 ---
 
@@ -93,11 +114,11 @@ gh run watch
 | --- | --- | --- | --- |
 | `plan` | — | Resolves the project shape once, loudly: is there a `docker/Dockerfile`, and is the `BUILD_TARGETS` repo variable valid JSON. | `BUILD_TARGETS` is malformed, or nothing at all would ship. |
 | `gates` | `plan` | Calls [`ci.yml`](../.github/workflows/ci.yml), which runs `./scripts/dev.sh all scan` on `ubuntu-24.04` and `./scripts/dev.ps1 all scan` on `windows-2025`, then uploads `scripts/logs/` as an artifact. | A build, type, test, `npm audit`, `govulncheck` or Trivy failure on either platform. |
-| `image` | `plan`, `gates` | A 2-leg matrix (`standard`, `managed`) builds multi-arch (`linux/amd64,linux/arm64`) with buildx and pushes to GHCR **by digest only** (no tag) with provenance and SBOM, then Trivy-scans each platform's manifest of that digest separately (Trivy on a multi-arch index scans only one platform). The legs serve different bundles: `standard` serves `index.html`; `managed` bakes `MANAGED`/`HOSTED`/`CONN_MODES`, serves `managed.html` as its `index.html` and adds `/solAdmin` (both via `MANAGED_UI`), and builds the gateway with `GO_TAGS=managed`. | Any HIGH/CRITICAL fixable OS or library vuln on either platform of either image, or a pushed platform with no Trivy step. Nothing is tagged yet, so `latest` and `managed-latest` stay where they were. |
-| `binaries` | `plan`, `gates` | Runs `./scripts/dev.sh build` for the one `BUILD_TARGETS` entry and uploads only the Release bundles (`RELEASE_BUNDLES`, set once at the top of `tag.yml`) as the `bundles-<os>-<arch>` artifact. The gateway binaries it also compiles, and the image-only `managed.html` and `solAdmin.html`, never leave the runner: the gateway ships only inside the images, and on a public repository a workflow artifact is a download too. | A build failure, or a Release bundle the build did not emit. |
-| `publish` | `image`, `binaries` | Points every tag `docker/metadata-action` derived (see [Image tags](#image-tags)) at the digest its leg scanned, with `docker buildx imagetools create`. That re-pushes the index byte-for-byte, so the digest does not change; it then checks that each tag resolves to that digest. Runs only when both image legs and the binaries passed, one tag run at a time. | A registry error, or a tag that does not resolve to the scanned digest. |
+| `image` | `plan`, `gates` | Builds the image multi-arch (`linux/amd64,linux/arm64`) with buildx and pushes to GHCR **by digest only** (no tag) with provenance and SBOM, then Trivy-scans each platform's manifest of that digest separately (Trivy on a multi-arch index scans only one platform). One image serves every container mode: it carries `index.html`, `provisioned.html` and `solAdmin.html`, and the gateway picks by `CONN_MODES` at run time. | Any HIGH/CRITICAL fixable OS or library vuln on either platform, or a pushed platform with no Trivy step. Nothing is tagged yet, so `latest` stays where it was. |
+| `binaries` | `plan`, `gates` | Runs `./scripts/dev.sh build` for the one `BUILD_TARGETS` entry and uploads only the Release bundles (`RELEASE_BUNDLES`, set once at the top of `tag.yml`) as the `bundles-<os>-<arch>` artifact. The gateway binary it also compiles, and the image-only `provisioned.html` and `solAdmin.html`, never leave the runner: the gateway ships only inside the image, and on a public repository a workflow artifact is a download too. | A build failure, or a Release bundle the build did not emit. |
+| `publish` | `image`, `binaries` | Points every tag `docker/metadata-action` derived (see [Image tags](#image-tags)) at the digest `image` scanned, with `docker buildx imagetools create`. That re-pushes the index byte-for-byte, so the digest does not change; it then checks that each tag resolves to that digest. Runs only when the image and the binaries passed, one tag run at a time. | A registry error, or a tag that does not resolve to the scanned digest. |
 | `pages` | `plan`, `gates`, `image`, `binaries`, `publish` | Checks out the `dist` branch, copies *only* `index.html` into the branch root, commits, pushes. Pages auto-redeploys. | Only runs when everything upstream passed — a red scan no longer redeploys the site. |
-| `release` | `plan`, `gates`, `image`, `binaries`, `publish` | Merges every `bundles-*` artifact into one `dist/`, writes `SHA256SUMS.txt`, generates notes, appends both image digests, and creates the Release with everything attached. | Never publishes unless at least one producer actually succeeded. |
+| `release` | `plan`, `gates`, `image`, `binaries`, `publish` | Merges every `bundles-*` artifact into one `dist/`, writes `SHA256SUMS.txt`, generates notes, appends the image digest, and creates the Release with everything attached. | Never publishes unless at least one producer actually succeeded. |
 
 `binaries` keeps its name from the standard template. Should `BUILD_TARGETS` ever list more than one target, each leg emits an identical copy of the bundles and `merge-multiple` collapses them.
 
@@ -112,25 +133,25 @@ gh run watch
 
 ### Image tags
 
-`docker/metadata-action` derives the following from a tag of `v3.4.0`. The `standard` leg produces the unprefixed tags; the `managed` leg applies `flavor: prefix=managed-,onlatest=true`:
+`docker/metadata-action` derives the following from a tag of `v3.4.0`:
 
-- `ghcr.io/solacelabs/solace-msg-utility:3.4.0` / `:managed-3.4.0`
-- `ghcr.io/solacelabs/solace-msg-utility:3.4` / `:managed-3.4`
-- `ghcr.io/solacelabs/solace-msg-utility:3` / `:managed-3`
-- `ghcr.io/solacelabs/solace-msg-utility:latest` / `:managed-latest`
+- `ghcr.io/solacelabs/solace-msg-utility:3.4.0`
+- `ghcr.io/solacelabs/solace-msg-utility:3.4`
+- `ghcr.io/solacelabs/solace-msg-utility:3`
+- `ghcr.io/solacelabs/solace-msg-utility:latest`
 
-Within each leg all four tags point to the same digest: the one `image` pushed and Trivy scanned on both platforms, which the Release notes quote in full. `publish` creates the tags only after both legs and the binaries passed, so a failed gate, scan or build moves no tag. `pages` and `release` run after the tags move; both are safe to re-run. The two legs run in parallel with separate gha cache scopes.
+All four point to the same digest: the one `image` pushed and Trivy scanned on both platforms, which the Release notes quote in full. `publish` creates the tags only after the image and the binaries passed, so a failed gate, scan or build moves no tag. `pages` and `release` run after the tags move; both are safe to re-run.
 
 ### Release assets
 
-- `index.html`, `min.html`, `demo.html`, `no-payload.html`, `no-queue-copy.html`, `managed-demo.html` (the `RELEASE_BUNDLES` list in the `release` step, kept equal to `scripts/check-bundles.mjs` by a test). `managed-demo.html` is the only one with managed UI: it runs against an in-browser fake gateway and holds no gateway or broker address.
+- `index.html`, `min.html`, `demo.html`, `no-payload.html`, `no-queue-copy.html`, `provisioned-demo.html` (the `RELEASE_BUNDLES` list in the `release` step, kept equal to `scripts/check-bundles.mjs` by a test). `provisioned-demo.html` is the only one with Provisioned UI: it runs against an in-browser fake gateway and holds no gateway or broker address.
 - `SHA256SUMS.txt` over all of the above
 
-The build also emits `solAdmin.html` and `managed.html`. The `release` step uploads an explicit list, never `dist/*`, so neither is a Release asset: both exist only inside the managed image.
+The build also emits `solAdmin.html` and `provisioned.html`. The `release` step uploads an explicit list, never `dist/*`, so neither is a Release asset: both exist only inside the image.
 
-`dist/` is git-ignored on `main`. The bundles are build output, published by this Release (Pages also serves `index.html`; the standard image bakes in `index.html`, the managed image `managed.html` (as its `index.html`) and `solAdmin.html`). Never commit them: a tracked bundle is stale as soon as `src/` moves on, and because `build` rewrites it the tree turns dirty mid-sweep -- the binary is stamped before the build, `git describe --dirty` runs after it, and the version check under [Pre-release checklist](#pre-release-checklist-local) stops matching.
+`dist/` is git-ignored on `main`. The bundles are build output, published by this Release (Pages also serves `index.html`; the image bakes in `index.html`, `provisioned.html` and `solAdmin.html`). Never commit them: a tracked bundle is stale as soon as `src/` moves on, and because `build` rewrites it the tree turns dirty mid-sweep -- the binary is stamped before the build, `git describe --dirty` runs after it, and the version check under [Pre-release checklist](#pre-release-checklist-local) stops matching.
 
-The two vendor JS files (`solclient.js`, `jszip.min.js`) are **not** release assets — they are not committed to `main`. Take them from the `dist` branch; the images include both. See [deployment.md](deployment.md).
+The two vendor JS files (`solclient.js`, `jszip.min.js`) are **not** release assets -- they are not committed to `main`. Take them from the `dist` branch; the image includes both. See [deployment.md](deployment.md).
 
 ### Why scans block the release
 
@@ -148,7 +169,7 @@ Pages is fed from the **`dist` branch**, not from a workflow-uploaded Pages arti
 
 - `https://solacelabs.github.io/solace-msg-utility/` → `index.html` (production bundle)
 
-The other Direct-only variants and `managed-demo.html` are built and attached to the Release but **not** deployed to Pages. Managed deployments use the `managed-` prefixed container image, which serves `managed.html` (the only bundle with the Managed sign-in) as its `index.html` and also carries `solAdmin.html`, which the gateway serves at `/solAdmin`.
+The other Direct-only variants and `provisioned-demo.html` are built and attached to the Release but **not** deployed to Pages. Provisioned deployments run the image with `CONN_MODES=provisioned`: the gateway then serves `provisioned.html` (the only bundle with the Provisioned sign-in) at `/` and `solAdmin.html` at `/solAdmin`.
 
 Pages is gateway-less, so it is Direct-connection-only by design.
 

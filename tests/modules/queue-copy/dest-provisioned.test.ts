@@ -192,7 +192,7 @@ describe('queue-copy — provisioned destination: credential-source control', ()
     });
 
     it('pins Provisioned with no control (and no Manual escape) in a managed-only deployment', async () => {
-        const { el, hidden } = await setupProvisioned({ connConfig: { connModes: 'managed', defaultConn: 'managed' } });
+        const { el, hidden } = await setupProvisioned({ connConfig: { connModes: 'provisioned', defaultConn: 'provisioned' } });
         needSecondary(el);
         expect(hidden('#copy-dest-cred-mode-row')).toBe(true);
         expect(hidden('#copy-dest-provisioned-block')).toBe(false);
@@ -227,7 +227,7 @@ describe('queue-copy — provisioned destination: credential-source control', ()
         // Filtering by "signed in" would leave nothing — and falling back to
         // Manual would hand out the very bypass this deployment forbids.
         const { el, hidden } = await setupProvisioned(
-            { connConfig: { connModes: 'managed', defaultConn: 'managed' }, managed: null }, false);
+            { connConfig: { connModes: 'provisioned', defaultConn: 'provisioned' }, managed: null }, false);
         needSecondary(el);
         expect(hidden('#copy-dest-provisioned-block')).toBe(false);
         expect(el<HTMLSelectElement>('#copy-dest-prov-broker').options.length).toBe(0);
@@ -316,7 +316,7 @@ describe('queue-copy -- provisioned destination: connecting through the profile'
 
         el<HTMLButtonElement>('#copy-btn-dest-semp-connect').click();
         await vi.waitFor(() =>
-            expect(el('#copy-dest-semp-error').textContent).toMatch(/requires a managed session/i));
+            expect(el('#copy-dest-semp-error').textContent).toMatch(/requires a sign-in session/i));
         expect(destSempConnect).not.toHaveBeenCalled();
     });
 
@@ -330,7 +330,7 @@ describe('queue-copy -- provisioned destination: connecting through the profile'
 
         el<HTMLButtonElement>('#copy-btn-dest-sol-connect').click();
         await vi.waitFor(() =>
-            expect(el('#copy-dest-sol-error').textContent).toMatch(/requires a managed session/i));
+            expect(el('#copy-dest-sol-error').textContent).toMatch(/requires a sign-in session/i));
         expect(destSolConnect).not.toHaveBeenCalled();
         expect(signOut).not.toHaveBeenCalled();
     });

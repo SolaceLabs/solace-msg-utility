@@ -1,5 +1,3 @@
-//go:build managed
-
 package main
 
 import (
@@ -13,7 +11,7 @@ import (
 func TestNewManagedRouting_DisabledIsNil(t *testing.T) {
 	routes, err := newManagedRouting(defaultConfig(), liveWith(nil), configSource{}, nil, quietLogger())
 	if routes != nil || err != nil {
-		t.Fatalf("managed false: want nil, nil; got %v, %v", routes, err)
+		t.Fatalf("Gateway mode (connModes direct): want nil, nil; got %v, %v", routes, err)
 	}
 }
 
@@ -21,7 +19,7 @@ func TestNewManagedRouting_DisabledIsNil(t *testing.T) {
 func TestNewManagedRouting_Enabled(t *testing.T) {
 	dir := t.TempDir()
 	cfg := defaultConfig()
-	cfg.hosted, cfg.managed, cfg.connModes = true, true, connBoth
+	cfg.hosted, cfg.connModes = true, connBoth
 	cfg.usersFile = filepath.Join(dir, "users.yaml")
 	cfg.connectionsFile = filepath.Join(dir, "connections.yaml")
 	cfg.storeKeyFile = filepath.Join(dir, "store.key")
@@ -32,7 +30,7 @@ func TestNewManagedRouting_Enabled(t *testing.T) {
 	if err != nil || routes == nil {
 		t.Fatalf("want routes, got %v %v", routes, err)
 	}
-	if !strings.Contains(buf.String(), "managed mode enabled") || !strings.Contains(buf.String(), "app_gated=false") {
+	if !strings.Contains(buf.String(), "provisioned mode enabled") || !strings.Contains(buf.String(), "app_gated=false") {
 		t.Errorf("startup log: %s", buf.String())
 	}
 	if !strings.Contains(routes.api.(*managedHandler).store.users[0].Password, "$600000$") {
@@ -44,18 +42,18 @@ func TestBuildManagedRoutes_StoreErrorIsReturned(t *testing.T) {
 	f := newStoreFixture(t)
 	f.writeUsers(t, "msg-utility-users: [")
 	cfg := defaultConfig()
-	cfg.managed, cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = true, f.usersPath, f.connsPath, f.keyPath
+	cfg.connModes, cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = connBoth, f.usersPath, f.connsPath, f.keyPath
 	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, nil, quietLogger()); err == nil || !strings.Contains(err.Error(), f.usersPath) {
 		t.Fatalf("want the store error naming the file, got %v", err)
 	}
 }
 
-// Only connModes=managed gates the app bundle and closes the Direct relay;
+// Only connModes=provisioned gates the app bundle and closes the Direct relay;
 // /solAdmin is gated in every mode. The settings page can change connModes, so
 // both gates read it live: settings_test.go
 // TestSettings_SaveAppliesLiveKeysAtOnce, and the flip below.
 func TestBuildManagedRoutes_GatesByMode(t *testing.T) {
-	for mode, gated := range map[string]bool{connDirect: false, connBoth: false, connManaged: true} {
+	for mode, gated := range map[string]bool{connDirect: false, connBoth: false, connProvisioned: true} {
 		e := newManagedEnv(t, func(c *config) { c.connModes = mode })
 		rec := e.do("GET", "/", "", nil)
 		if got := rec.Code == http.StatusSeeOther; got != gated {
@@ -74,7 +72,7 @@ func TestBuildManagedRoutes_GatesByMode(t *testing.T) {
 		}
 	}
 	// A settings change applies to the next request.
-	e := newManagedEnv(t, func(c *config) { c.connModes = connManaged })
+	e := newManagedEnv(t, func(c *config) { c.connModes = connProvisioned })
 	next := e.cfg
 	next.connModes = connBoth
 	e.live.apply(next)

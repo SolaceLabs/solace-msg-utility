@@ -307,7 +307,7 @@ export function destinationRefusal(state: QueueCopyState, access: SourceAccess):
     if (state.dest.type === 'topic') {
         // Entitlements are expressed per queue; a topic fans out to every queue
         // subscribed to it, so it cannot be checked. Blocked rather than guessed.
-        return 'Topic destinations are unavailable with managed credentials — entitlements are defined per queue.';
+        return 'Topic destinations are unavailable with provisioned connections -- entitlements are defined per queue.';
     }
     if (!canOperate(session, broker, vpn, state.dest.name)) {
         return `You are not entitled to write to queue "${state.dest.name}".`;

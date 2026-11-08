@@ -1,8 +1,11 @@
-# Solace Message Utility — single-binary HTTPS gateway.
+# Solace Message Utility -- the gateway image, built from this checkout, for
+# local runs (`./scripts/dev.sh image`, `up`, `down`). To deploy a published
+# release, use docker/compose.gateway.yaml or docker/compose.provisioned.yaml
+# instead; see docs/deployment.md.
 #
-# Brings up the go-web-proxy container that serves the PWA, exposes /hosted,
-# and reverse-proxies SEMP / SMF traffic. See docs/deployment.md for the full
-# environment reference.
+# One image, two services: `gateway` in Gateway mode (the default) and
+# `provisioned` in Provisioned mode (CONN_MODES=provisioned), on different host
+# ports so both can run at once.
 #
 # Usage:
 #   docker compose up --build       # build and run in foreground
@@ -10,9 +13,13 @@
 #   docker compose logs -f gateway  # follow logs
 #   docker compose down             # stop and remove containers (keeps the volumes)
 #   docker compose down -v          # also remove the volumes: config.yaml is re-seeded
-#                                   # from the environment, the managed store bootstraps again
+#                                   # from the environment, the Provisioned stores bootstrap again
 #
-# After it's up: open https://localhost:9443/
+# Posture, both services: non-root UID 65532, privileged off, every capability
+# dropped, no new privileges, read-only root filesystem, the default bridge
+# network. The gateway writes only /tls (a self-signed certificate on the first
+# start) and /data, both named volumes that inherit the image's UID-65532
+# ownership.
 name: sol-msg-util-svc
 services:
   gateway:
@@ -28,15 +35,20 @@ services:
         APP_VERSION: ${APP_VERSION:-0.0.0-dev}
     image: ghcr.io/solacelabs/solace-msg-utility:latest
     container_name: solace-message-utility
+    user: "65532:65532"
+    privileged: false
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     ports:
       - "19443:9443"
     environment:
       # These SEED config.yaml on the first start only. Afterwards the file in
-      # the gateway-config volume is authoritative: edit it and restart; a
+      # the gateway-data volume is authoritative: edit it and restart; a
       # changed value here is logged as ignored. See docs/deployment.md.
-      # Enables the /hosted probe so the PWA knows it's running behind the gateway.
-      HOSTED: "true"
       # Log level: debug | info | warn | error. Bump to info/debug while testing.
       LOG_LEVEL: warn
       # Set to "true" ONLY for lab use against brokers with untrusted certs.
@@ -44,56 +56,44 @@ services:
       # APP_DIR, SSL_CERT_FILE, SSL_KEY_FILE, SSL_TRUST_DIR all use their defaults.
       # Override here if you mount the PWA or TLS material at non-default paths.
     volumes:
-      # Named volume so the non-root UID (65532) inside the container can write
-      # the self-signed cert on first boot. To use your own cert/key, drop them
-      # into this volume (or replace with a bind mount whose host directory is
-      # owned by UID 65532) before first start.
-      #- tls:/tls
-      # config.yaml lives here. The named volume inherits the baked /managed
-      # dir's UID-65532 ownership so the gateway can write the file on the first
-      # start; without the volume it would be re-seeded on every recreate.
-      - gateway-config:/managed
-      # Optional: bind-mount your own PWA bundle. Comment out to use the bundle
+      # The self-signed certificate is written here on the first start. To use
+      # your own, put tls.crt and tls.key (and CAs under trust/) into this
+      # volume before the first start.
+      - gateway-tls:/tls
+      # config.yaml lives here; without the volume it would be re-seeded on
+      # every recreate.
+      - gateway-data:/data
+      # Optional: bind-mount your own PWA bundles. Comment out to use the ones
       # baked into the image at /SolaceMsgUtility.
       # - ../dist:/SolaceMsgUtility:ro
     # No HEALTHCHECK: the scratch image has no shell or curl. Use an external
     # check (k8s liveness probe, docker swarm, monitoring agent) hitting
     # https://<host>:9443/hosted with TLS verification disabled or pinned.
 
-  # Managed (RBAC) deployment: the managed bundle (managed.html, served as
-  # index.html) with MANAGED/HOSTED/CONN_MODES baked into the image (via the
-  # build args below) so it offers the Managed sign-in instead of the Direct form. Exposed on a
-  # different host port so it can run alongside the standard gateway. Open
-  # https://localhost:29443/ (it redirects to the gateway's sign-in page). The
-  # first start creates the user "admin" with ADMIN_PASSWORD, or with a
-  # generated password printed once in `docker compose logs gateway-managed`;
-  # either way it must be changed at first sign-in. Administration lives at
+  # Provisioned mode: the same image with CONN_MODES=provisioned. Open
+  # https://localhost:29443/ (it redirects to the sign-in page). The first start
+  # creates the user "admin" with ADMIN_PASSWORD, or with a generated password
+  # printed once in `docker compose logs provisioned`; either way it must be
+  # changed at the first sign-in. The admin console is at
   # https://localhost:29443/solAdmin.
-  gateway-managed:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-      args:
-        # Bake the runtime flags so the image is a self-contained managed
-        # deployment. GO_TAGS=managed compiles the RBAC store + /managed/*
-        # handler into the gateway binary (the standard gateway omits it).
-        # MANAGED_UI serves managed.html as index.html and ships solAdmin.html,
-        # which only a managed image has any use for.
-        MANAGED: "true"
-        HOSTED: "true"
-        CONN_MODES: managed
-        GO_TAGS: managed
-        MANAGED_UI: "true"
-        APP_VERSION: ${APP_VERSION:-0.0.0-dev}
-    image: ghcr.io/solacelabs/solace-msg-utility:managed-latest
-    container_name: solace-message-utility-managed
+  provisioned:
+    image: ghcr.io/solacelabs/solace-msg-utility:latest
+    # The image the gateway service builds, never a published one.
+    pull_policy: never
+    container_name: solace-message-utility-provisioned
+    user: "65532:65532"
+    privileged: false
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     ports:
       - "29443:9443"
     environment:
-      # MANAGED and HOSTED are baked into the image; only the operational knobs
-      # are set here. Like the baked values they seed config.yaml on the first
-      # start only; afterwards the file in the managed volume wins.
+      # Seeds config.yaml on the first start only, like the values above.
+      CONN_MODES: provisioned
       LOG_LEVEL: warn
       SSL_INSECURE_SKIP_VERIFY: "true"
       # Bootstrap admin password, read only when users.yaml does not exist yet
@@ -102,14 +102,15 @@ services:
       # set ADMIN_PASSWORD_FILE to its path instead.
       # ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     volumes:
-      # Writable gateway store. The named volume inherits the baked /managed
-      # dir's UID-65532 ownership, so the gateway can write config.yaml,
-      # users.yaml and store.key on first run. The store key encrypts
-      # users.yaml and connections.yaml: back it up, or set STORE_KEY_FILE to
-      # a separate mount. `docker compose down -v` wipes it all (re-seeds the
-      # config and forces a fresh bootstrap).
-      - managed:/managed
+      - provisioned-tls:/tls
+      # config.yaml, users.yaml, connections.yaml and store.key. The store key
+      # encrypts the two stores: back it up, or set STORE_KEY_FILE to a separate
+      # mount. `docker compose down -v` wipes it all (re-seeds the config and
+      # forces a fresh bootstrap).
+      - provisioned-data:/data
 
 volumes:
-  gateway-config:
-  managed:
+  gateway-tls:
+  gateway-data:
+  provisioned-tls:
+  provisioned-data:

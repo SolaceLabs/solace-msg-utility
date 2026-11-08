@@ -1,4 +1,4 @@
-# End-to-end stack for scripts/e2e.mjs: the managed gateway image that
+# End-to-end stack for scripts/e2e.mjs: the gateway image that
 # `./scripts/dev.sh image` builds, pointed at an existing Solace broker whose
 # details the harness reads from docker/e2e-broker.env (git-ignored) or asks
 # for, and a browser that uses the gateway's app. Run it through
@@ -15,7 +15,7 @@
 name: smu-e2e
 services:
   gateway:
-    image: ghcr.io/solacelabs/solace-msg-utility:managed-latest
+    image: ghcr.io/solacelabs/solace-msg-utility:latest
     # The image `dev.sh image` just built, never a published one.
     pull_policy: never
     user: "65532:65532"
@@ -26,7 +26,7 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
-      CONN_MODES: managed
+      CONN_MODES: provisioned
       LOG_LEVEL: debug
       ADMIN_PASSWORD_FILE: /run/secrets/admin-password
       STORE_KEY_FILE: /run/secrets/store.key
@@ -43,7 +43,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - managed:/managed
+      - data:/data
       - ../scripts/logs/e2e/gateway.crt:/tls/tls.crt:ro
       - ../scripts/logs/e2e/gateway.key:/tls/tls.key:ro
       - ../scripts/logs/e2e/trust:/tls/trust:ro
@@ -91,4 +91,4 @@ services:
     restart: "no"
 
 volumes:
-  managed:
+  data:

@@ -1,6 +1,6 @@
-// End-to-end run of the managed gateway against an existing Solace broker,
-// over docker/docker-compose.e2e.yaml (the gateway only). Run it through
-// `./scripts/dev.sh e2e` (or dev.ps1), which builds the managed image first;
+// End-to-end run of the gateway in Provisioned mode against an existing Solace
+// broker, over docker/docker-compose.e2e.yaml. Run it through
+// `./scripts/dev.sh e2e` (or dev.ps1), which builds the image first;
 // this file drives the gateway. It may have to ask for the broker's details
 // on the terminal, so the task runs it on the real console and it appends its
 // own output to the task log ($E2E_LOG).
@@ -678,7 +678,7 @@ async function runChecks(admin) {
             const names = [broker.host, broker.clientUser, USER].filter((t) => t.length >= 4);
             for (const [file, role] of [['users.yaml', 'users'], ['connections.yaml', 'connections']]) {
                 const dest = path.join(WORK, `at-rest-${file}`);
-                const cp = compose(['cp', `gateway:/managed/${file}`, dest], { quiet: true });
+                const cp = compose(['cp', `gateway:/data/${file}`, dest], { quiet: true });
                 expect(cp.code === 0, `docker compose cp ${file}: ${cp.out.trim()}`);
                 const buf = fs.readFileSync(dest);
                 const header = sealedHeaderProblem(buf, role);
@@ -707,7 +707,7 @@ async function runChecks(admin) {
             runOutput = run.out;
             expect(run.code !== 0, 'the gateway started without its key file');
             // slog quotes the error, so the inner quotes arrive escaped.
-            expect(/is missing but \\?"\/managed\/users\.yaml\\?" exists/.test(run.out), `exit ${run.code}; output: ${run.out.trim().slice(-400)}`);
+            expect(/is missing but \\?"\/data\/users\.yaml\\?" exists/.test(run.out), `exit ${run.code}; output: ${run.out.trim().slice(-400)}`);
             return `exit ${run.code}`;
         });
 
@@ -877,7 +877,7 @@ async function runBrowserChecks() {
             expect(await page.evaluate(() => document.cookie) === '', 'document.cookie shows the page a cookie');
         });
 
-        await bcheck('B2', 'the Managed panel and the sidebar offer only what /managed/me grants', async () => {
+        await bcheck('B2', 'the Provisioned panel and the sidebar offer only what /managed/me grants', async () => {
             expect(page, 'no signed-in page (B1)');
             await page.waitForFunction(() => document.querySelector('#managed-vpn-select')?.options.length > 0);
             const values = (sel) => page.locator(`${sel} option`).evaluateAll((os) => os.map((o) => o.value));

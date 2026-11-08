@@ -25,7 +25,7 @@ import (
 // hostedInfo is the /hosted response body. Beyond the hosted flag it carries the
 // deployment's connection-mode config (connModes / defaultConn), which is
 // the only channel the statically-served SPA has for reading container env — it
-// decides which connection tabs (Direct / Managed) the app offers.
+// decides which connection tabs (Direct / Provisioned) the app offers.
 type hostedInfo struct {
 	Hosted      bool   `json:"hosted"`
 	ConnModes   string `json:"connModes"`
@@ -64,11 +64,11 @@ func (h *hostedHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 // adminHandler serves the standalone administration app (the `admin` variant's
 // solAdmin.html). It is a dedicated route rather than a file the SPA tree serves
 // on its own for two reasons: the entitlement editors must not be reachable from
-// a deployment that has no managed user list to edit, and the SPA's history-mode
+// a deployment that has no user list to edit, and the SPA's history-mode
 // fallback would otherwise answer /solAdmin with the ordinary index.html.
 //
-// When the deployment is not hosted+managed the route 404s, which is also what a
-// wrong URL returns — a probe cannot tell an admin-capable deployment from any
+// Outside Provisioned mode the route 404s, which is also what a wrong URL
+// returns -- a probe cannot tell an admin-capable deployment from any
 // other. Authentication is still the app's job; this only decides whether the
 // surface exists at all.
 type adminHandler struct {
@@ -103,13 +103,23 @@ func (h *adminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type pwaHandler struct {
 	root   string
+	index  string // the bundle served at / and as the history-mode fallback
 	fs     http.Handler
 	logger *slog.Logger
 	usable bool
 }
 
-func newPWAHandler(appDir string, logger *slog.Logger) *pwaHandler {
-	h := &pwaHandler{root: appDir, logger: logger}
+// appIndexFile is the bundle the app is served from: the Direct-only one, or
+// in Provisioned mode the one that carries the sign-in.
+func appIndexFile(provisioned bool) string {
+	if provisioned {
+		return provisionedIndexFile
+	}
+	return directIndexFile
+}
+
+func newPWAHandler(appDir, index string, logger *slog.Logger) *pwaHandler {
+	h := &pwaHandler{root: appDir, index: index, logger: logger}
 	info, err := os.Stat(appDir)
 	if err != nil {
 		logger.Warn("APP_DIR missing; PWA handler will return 404", "app_dir", appDir, "err", err)
@@ -138,31 +148,36 @@ func (h *pwaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if clean == "." {
 		clean = "/"
 	}
-	// The managed image ships the admin bundle in this directory, but only the
-	// /solAdmin route may serve it, behind its admin gate. Case-insensitive for
-	// file systems that are.
-	if strings.EqualFold(clean, "/"+adminIndexFile) {
+	// The image ships the admin and the Provisioned bundles in this directory,
+	// but each has one way in: /solAdmin behind its admin gate, and / in
+	// Provisioned mode. Case-insensitive for file systems that are.
+	if strings.EqualFold(clean, "/"+adminIndexFile) || strings.EqualFold(clean, "/"+provisionedIndexFile) {
 		http.NotFound(w, r)
 		return
 	}
-	// SPA history-mode fallback: if the requested path doesn't resolve to a real
-	// file, serve the root index.html inline. Asset requests (anything with a
-	// file extension) skip the fallback so a missing asset still 404s loudly.
-	if clean != "/" && !fileResolvable(h.root, clean) {
+	// / is the mode's bundle. SPA history-mode fallback: a path that doesn't
+	// resolve to a real file gets the same bundle inline. Asset requests
+	// (anything with a file extension) skip the fallback so a missing asset
+	// still 404s loudly.
+	if clean == "/" {
+		serveIndex(w, h.root, h.index)
+		return
+	}
+	if !fileResolvable(h.root, clean) {
 		if hasExt(clean) {
 			http.NotFound(w, r)
 			return
 		}
-		serveIndex(w, h.root)
+		serveIndex(w, h.root, h.index)
 		return
 	}
 	h.fs.ServeHTTP(w, r)
 }
 
-func serveIndex(w http.ResponseWriter, root string) {
-	data, err := os.ReadFile(root + "/index.html")
+func serveIndex(w http.ResponseWriter, root, name string) {
+	data, err := os.ReadFile(root + "/" + name)
 	if err != nil {
-		http.Error(w, "index.html not found", http.StatusNotFound)
+		http.Error(w, name+" not found", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -250,10 +265,10 @@ func newReverseProxy(transport http.RoundTripper, logger *slog.Logger) *reverseP
 	return p
 }
 
-// sessionCookie carries the managed session id (session.go). The __Host-
-// prefix makes the browser insist on Secure, Path=/ and no Domain, so no
-// sibling host can set or read it. It is declared here, untagged, because the
-// Direct relay must strip it in both builds.
+// sessionCookie carries the Provisioned sign-in session id (session.go). The
+// __Host- prefix makes the browser insist on Secure, Path=/ and no Domain, so
+// no sibling host can set or read it. It is declared here, beside the Direct
+// relay, which must strip it in every mode.
 const sessionCookie = "__Host-smu-session"
 
 // dropSessionCookie removes the gateway's own sign-in cookie from a request

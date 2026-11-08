@@ -8,7 +8,6 @@ import { managedRequest, type ManagedResult } from '../../core/services/managed-
 /** config.yaml as the settings page edits it: the same keys, without the version. */
 export interface GatewaySettings {
     hosted: boolean;
-    managed: boolean;
     connModes: string;
     defaultConn: string;
     appDir: string;

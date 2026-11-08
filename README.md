@@ -4,30 +4,53 @@ A browser-based tool for managing Solace PubSub+ Event Brokers events/messages. 
 
 ![Queue Browser](images/browser.png)
 
+## Three ways to run it
+
+| Mode | What it is | Broker credentials | Start | Try it offline |
+| --- | --- | --- | --- | --- |
+| **Standalone** | The app as a single HTML file, from GitHub Pages or any web server. Your browser connects to the broker. | each user types them | open the page | `demo.html` |
+| **Gateway** | The app served by the gateway container, which connects to your brokers for it. Browsers reach and trust only the gateway. | each user types them | `docker compose -f compose.gateway.yaml up -d` | `demo.html` |
+| **Provisioned** | Gateway mode plus sign-in. An administrator stores the broker credentials and grants each user brokers, VPNs and queues. | stored on the gateway; users sign in | `docker compose -f compose.provisioned.yaml up -d` | `provisioned-demo.html` |
+
+Both container modes run the same image: Gateway mode by default, Provisioned mode with `CONN_MODES=provisioned`. [deployment.md](docs/deployment.md#choosing-a-mode) compares them; [provisioned-mode.md](docs/provisioned-mode.md) covers Provisioned mode in full.
+
+**Demos.** Both demos are attached to every Release and run from disk with nothing else: no broker, no gateway, no network request.
+
+- `demo.html` -- Standalone and Gateway mode: the Direct form and every module against a broker inside the page. Use Broker Host `broker.solace.com` and any non-empty credentials, or **Fill the connection form** in its Demo controls panel. See [demo.md](docs/demo.md#direct-demo-demohtml).
+- `provisioned-demo.html` -- Provisioned mode: sign in with a demo account, then browse, copy and administer against a fake gateway. See [demo.md](docs/demo.md#provisioned-demo-provisioned-demohtml).
+
 ## Quick Start
 
-Pick whichever path fits — none of them require a build toolchain.
+None of these need a build toolchain.
 
-### Option 1 — Use the hosted version (zero install)
+### Standalone -- the hosted page (zero install)
 
 Open <https://solacelabs.github.io/solace-msg-utility/> in a browser. Done. (You'll still need network reachability to your broker, and the broker must allow CORS for SEMP.)
 
-### Option 2 — Run as a container (one command)
+### Standalone -- self-host the static files
+
+Take `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) and the two vendor libraries `solclient.js`, `jszip.min.js` from the `dist` branch. Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, ...). See [deployment.md -> Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
+
+### Gateway -- one container
 
 The image includes the Solace JavaScript API and JSZip, so nothing else is needed:
 
 ```bash
-docker run --rm -p 9443:9443 -e HOSTED=true -v solace-tls:/tls \
+docker run --rm -p 9443:9443 -v solace-tls:/tls -v solace-data:/data \
   ghcr.io/solacelabs/solace-msg-utility:latest
 ```
 
-Then open <https://localhost:9443/>. The container connects to your broker for the app, so the browser needs to reach and trust only the container. See [deployment.md -> Containerised Gateway](docs/deployment.md#containerised-gateway) for the images and their settings.
+Then open <https://localhost:9443/>. The container connects to your broker for the app, so the browser needs to reach and trust only the container. For production, use [`docker/compose.gateway.yaml`](docker/compose.gateway.yaml) with a pinned release; see [deployment.md -> Gateway mode](docs/deployment.md#gateway-mode).
 
-### Option 3 — Self-host the static files
+### Provisioned -- sign-in and administration
 
-Take `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) and the two vendor libraries `solclient.js`, `jszip.min.js` from the `dist` branch. Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, …). See [deployment.md → Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
+Put the first administrator's password in a file named `admin-password`, then:
 
-> **Try it without a broker:** open `demo.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials, or **Fill the connection form** in its Demo controls panel: every module, message browsing included, runs against an in-browser mock broker, and nothing leaves the page. See [Demo Mode](docs/demo.md#direct-demo-demohtml) for details. To try managed mode the same way, open `managed-demo.html` and sign in with a demo account: see [Managed demo](docs/demo.md#managed-demo-managed-demohtml).
+```bash
+SMU_VERSION=<release> docker compose -f compose.provisioned.yaml up -d
+```
+
+Open `https://<host>:9443/`, sign in as `admin`, and add brokers and users at `/solAdmin`. The steps, settings and recommended values are in [provisioned-mode.md](docs/provisioned-mode.md).
 
 ## Connecting to a broker
 
@@ -40,7 +63,7 @@ Once the app is loaded:
 3. **Save All Config** — your settings persist in the browser for next time.
 4. **Use the sidebar** to switch between Queue Browser, Queue Copy, and Queue Subscriptions.
 
-> **Managed deployments:** the managed container image's Connections offers a second **Managed** tab — sign in with an account an administrator provisioned and pick from the brokers and VPNs you are entitled to, instead of typing credentials at all. See [Managed Connections](docs/user-guide.md#managed-connections).
+> **Provisioned mode:** Connections offers a **Provisioned** tab instead of (or beside) the form above -- sign in with an account an administrator created and pick from the brokers and VPNs you are entitled to, instead of typing credentials at all. See [Provisioned Connections](docs/user-guide.md#provisioned-connections).
 
 > **Self-signed TLS certificates:** if `wss://` connection is blocked, the app shows a helper dialog with one-click instructions to trust the broker certificate.
 
@@ -49,7 +72,7 @@ Once the app is loaded:
 ### Connections
 
 - Two independent connections (Solace Web Messaging + SEMP REST), shared broker host.
-- **Direct** or **Managed** tab in the managed container image, where the deployment offers both — Managed signs you in and hands you only the brokers/VPNs you are entitled to, with no credentials to type.
+- **Direct** or **Provisioned** tab in Provisioned mode, where the deployment offers both -- Provisioned signs you in and hands you only the brokers/VPNs you are entitled to, with no credentials to type.
 - **Basic** or **OAuth2** authentication for the Solace client.
 - **Save / Load / Reset** connection profiles (localStorage).
 - **Advanced settings** — connect/reconnect retries, timeouts, per-queue message cap (1–10 000).
@@ -74,7 +97,7 @@ Once the app is loaded:
 - Copy or **move** messages between queues, on the same broker or **across brokers**.
 - Two-column form — read-only Source mirror + editable Destination with **Same Broker** / **Same VPN** shortcuts.
 - Destination can be a **queue** (with SEMP-driven picker) or a **topic**.
-- Destination credentials are typed by hand, or — in a managed session — chosen from a provisioned broker/VPN you are entitled to, with no password to enter.
+- Destination credentials are typed by hand, or -- in a Provisioned session -- chosen from a provisioned broker/VPN you are entitled to, with no password to enter.
 - Bounded runs — snapshots the source before starting so the run has a defined end.
 - Pre-flight verification (count, size, quota, oldest/newest message ID) via SEMP, with QueueBrowser fallback if SEMP is unavailable.
 - Live progress with per-message ACK. The run is bounded to the snapshot taken at verify time, so messages arriving mid-run are left for the next run.
@@ -94,16 +117,17 @@ Once the app is loaded:
 - **Toasts** for every success / failure.
 - **Self-contained HTML** — `index.html` includes all app code; the two vendor scripts `solclient.js` and `jszip.min.js` sit alongside it (see [deployment.md](docs/deployment.md#external-runtime-dependencies)).
 - **Demo bundle** (`demo.html`) -- every module exercised against mock data, no broker required.
-- **Managed demo** (`managed-demo.html`) -- the Managed sign-in, entitlements and administration pages against a fake gateway in the page; no gateway, no broker, no network request.
-- **Containerised gateway** -- serves the app over HTTPS and connects to your brokers for it, so browsers reach and trust only the container; the managed image adds sign-in and administration. Image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#containerised-gateway).
+- **Provisioned demo** (`provisioned-demo.html`) -- the Provisioned sign-in, entitlements and administration pages against a fake gateway in the page; no gateway, no broker, no network request.
+- **Gateway image** -- serves the app over HTTPS and connects to your brokers for it, so browsers reach and trust only the container; Provisioned mode adds sign-in and administration. Image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#gateway-mode).
 
 ## Documentation
 
 | Document | Description |
 | --- | --- |
 | [user-guide.md](docs/user-guide.md) | Full UI walkthrough, every field, every screen |
-| [demo.md](docs/demo.md) | The two offline demos, `demo.html` and `managed-demo.html`: what they hold and simulate |
-| [deployment.md](docs/deployment.md) | Hosting options, network requirements, TLS |
+| [demo.md](docs/demo.md) | The two offline demos, `demo.html` and `provisioned-demo.html`: what they hold and simulate |
+| [deployment.md](docs/deployment.md) | The three modes, hosting options, network requirements, TLS |
+| [provisioned-mode.md](docs/provisioned-mode.md) | Provisioned mode: how it works, how to configure it, recommended values |
 | [developer-guide.md](docs/developer-guide.md) | Setup, build, testing, adding modules, code conventions |
 | [architecture.md](docs/architecture.md) | System diagrams, module structure (developers) |
 | [contributing.md](docs/contributing.md) | PR workflow, coding standards, test requirements |

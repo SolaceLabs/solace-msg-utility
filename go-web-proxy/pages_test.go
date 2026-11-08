@@ -1,5 +1,3 @@
-//go:build managed
-
 package main
 
 import (
@@ -258,7 +256,7 @@ func TestPasswordChange_ThrottledAndFailures(t *testing.T) {
 // ----- gates ------------------------------------------------------------------------------
 
 func TestGateApp_ManagedModeNeedsASession(t *testing.T) {
-	e := newManagedEnv(t, func(c *config) { c.connModes = connManaged })
+	e := newManagedEnv(t, func(c *config) { c.connModes = connProvisioned })
 	expectRedirect(t, e.do("GET", "/", "", nil), "/login")
 	expectRedirect(t, e.do("GET", "/some/route", "", nil), "/login")
 	if rec := e.do("GET", "/solclient.js", "", nil); rec.Code != http.StatusUnauthorized || rec.Body.Len() != 0 {
@@ -282,7 +280,7 @@ func TestGateApp_OtherModesServeTheBundleWithoutSession(t *testing.T) {
 }
 
 func TestGateApp_UnauthenticatedBudget(t *testing.T) {
-	e := newManagedEnv(t, func(c *config) { c.connModes = connManaged; c.login.unauthPerMinute = 1 })
+	e := newManagedEnv(t, func(c *config) { c.connModes = connProvisioned; c.login.unauthPerMinute = 1 })
 	e.do("GET", "/", "", nil)
 	expectPage(t, e.do("GET", "/", "", nil), http.StatusTooManyRequests, "Too many requests")
 }

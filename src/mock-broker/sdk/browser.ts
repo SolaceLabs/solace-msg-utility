@@ -41,7 +41,7 @@ export function createQueueBrowser(vpn: string, props: any): MockQueueBrowser {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     // Present from construction so it is populated well before UP, as in the
-    // real SDK (the managed panel in managed.html writes here inside its UP handler).
+    // real SDK (the managed panel in provisioned.html writes here inside its UP handler).
     const state = queueStateOf(vpn, queueName);
     const permissions = state === QUEUE_STATE.READ_ONLY ? 'READ_ONLY' : 'READ_WRITE';
 

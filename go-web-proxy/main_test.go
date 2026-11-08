@@ -53,8 +53,14 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.hosted {
-		t.Errorf("hosted: want false")
+	if !cfg.hosted {
+		t.Errorf("hosted: want true, Gateway mode is the default")
+	}
+	if cfg.connModes != connDirect || cfg.provisioned() {
+		t.Errorf("connModes: want direct, Provisioned mode off; got %q", cfg.connModes)
+	}
+	if cfg.usersFile != "/data/users.yaml" || cfg.connectionsFile != "/data/connections.yaml" || cfg.storeKeyFile != "/data/store.key" {
+		t.Errorf("stores: want them under /data, got %q %q %q", cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile)
 	}
 	if cfg.appDir != "/SolaceMsgUtility" {
 		t.Errorf("appDir: want /SolaceMsgUtility, got %q", cfg.appDir)
@@ -103,12 +109,20 @@ func TestLoadConfig_FromEnv(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_HostedRequiresExactTrue(t *testing.T) {
-	// HOSTED must be literally "true" — anything else is false.
-	for _, v := range []string{"1", "yes", "TRUE", "True", "y", ""} {
+func TestLoadConfig_HostedIsTrueUnlessFalse(t *testing.T) {
+	// Gateway mode is the image's purpose: unset is true, "false" opts out.
+	for v, want := range map[string]bool{"": true, "true": true, "false": false} {
 		t.Setenv("HOSTED", v)
-		if cfg, _ := loadConfig(); cfg.hosted {
-			t.Errorf("HOSTED=%q: want hosted=false", v)
+		cfg, err := loadConfig()
+		if err != nil || cfg.hosted != want {
+			t.Errorf("HOSTED=%q: want hosted=%v, got %v (%v)", v, want, cfg.hosted, err)
+		}
+	}
+	// Anything else is refused rather than guessed, naming the value.
+	for _, v := range []string{"1", "yes", "TRUE", "False", "y"} {
+		t.Setenv("HOSTED", v)
+		if _, err := loadConfig(); err == nil || !strings.Contains(err.Error(), `HOSTED="`+v+`"`) || !strings.Contains(err.Error(), `"true" or "false"`) {
+			t.Errorf("HOSTED=%q: want an error naming the value, got %v", v, err)
 		}
 	}
 }
@@ -185,7 +199,7 @@ func TestRootHandler_WithoutManagedRouting(t *testing.T) {
 		"/solAdmin/":               "admin",
 		"/https/943/broker/SEMP/x": "relay",
 		"/":                        "app",
-		"/login":                   "app", // no managed routing: an SPA route like any other
+		"/login":                   "app", // Gateway mode: an SPA route like any other
 	} {
 		if got := route(h, path).Body.String(); got != want {
 			t.Errorf("%s: want %s, got %q", path, want, got)
@@ -193,7 +207,7 @@ func TestRootHandler_WithoutManagedRouting(t *testing.T) {
 	}
 	// /managed/* never falls through to the SPA.
 	if rec := route(h, "/managed/me"); rec.Code != http.StatusNotFound || rec.Body.String() == "app" {
-		t.Errorf("/managed/me without managed routing: want 404, got %d %q", rec.Code, rec.Body.String())
+		t.Errorf("/managed/me in Gateway mode: want 404, got %d %q", rec.Code, rec.Body.String())
 	}
 }
 

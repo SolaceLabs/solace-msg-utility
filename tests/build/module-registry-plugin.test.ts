@@ -102,7 +102,7 @@ describe('moduleRegistryPlugin — activeModuleEntries', () => {
         expect(activeModuleEntries(root, 'managed')).toEqual({ connections: 'managed' });
     });
 
-    it('reads the managed demo\'s override, the same as managed.html\'s', () => {
+    it('reads the managed demo\'s override, the same as provisioned.html\'s', () => {
         expect(activeModuleEntries(root, 'managed-demo')).toEqual({ connections: 'managed' });
     });
 
@@ -140,7 +140,7 @@ describe('moduleRegistryPlugin — readModuleTemplate', () => {
         expect(host).toBeLessThan(panelManaged);
     });
 
-    it('keeps the Release base free of the tab bar and the Managed panel', () => {
+    it('keeps the Release base free of the tab bar and the Provisioned panel', () => {
         const html = connectionsBase();
         expect(html).not.toContain('conn-tabs');
         expect(html).not.toContain('conn-panel-managed');

@@ -184,20 +184,58 @@
 >   - **Unchanged names.** The `src/mock-broker/` and `tests/mock-broker/` trees, the `mock` dev task, and `npm run test:mock`.
 >   - **check-bundles.** In `scripts/check-bundles.mjs`, `MOCK_BUNDLE` became `DEMO_BUNDLE` (`demo.html`), and the old `DEMO_BUNDLE` became `MANAGED_DEMO_BUNDLE` (`managed-demo.html`). `check-bundles.test.ts` renames its fixtures to match (`DEMO_CLEAN`, `MANAGED_DEMO_CLEAN`) and expects the new file names. The test count is unchanged.
 >   - **Docs.** Both demo sections moved from user-guide.md into the new [demo.md](demo.md). The user guide's variants table and the README link there, and both doc lists name it. The entries above keep the name mock.html, as it was then.
+> - **Three modes, one image (November 2026):** the app runs in Standalone mode (the HTML files), Gateway mode (the image, the default) or Provisioned mode (the image with sign-in), and "managed" left every public name.
+>   - **Gateway.** One binary: the `managed` build tag and `managed_routing_stub.go` are gone, so `vet`, `test`, `cov` and govulncheck each run once. `MANAGED` and the `managed` config key are retired: `newManagedRouting` starts when the `connModes` at startup is `provisioned` or `both` (`config.provisioned()`). The values are `direct`, `provisioned` and `both`. `HOSTED` defaults to true (`parseHosted`: unset or `true`, `false`, anything else refused). The data directory is `/data`. `appIndexFile` serves `provisioned.html` at `/` in Provisioned mode and `index.html` otherwise, and neither `provisioned.html` nor `solAdmin.html` is served by name. The settings endpoint refuses `connModes: direct`, which would end Provisioned mode and the console with it.
+>   - **Image and CI.** One image and one tag set (no `managed-*`): the Dockerfile stages `index.html`, `provisioned.html` and `solAdmin.html` and takes no mode build args; `tag.yml`'s `image` job lost its matrix; the dev scripts build, tag and scan one image. New ready-made deployments [`docker/compose.gateway.yaml`](../docker/compose.gateway.yaml) and [`docker/compose.provisioned.yaml`](../docker/compose.provisioned.yaml) (pinned `SMU_VERSION`, the admin password from a secret file).
+>   - **App.** The tabs read Direct and Provisioned. `managed.html` and `managed-demo.html` became `provisioned.html` and `provisioned-demo.html` (`npm run build:provisioned[-demo]`; check-bundles' `PROVISIONED_BUNDLE`, `PROVISIONED_DEMO_BUNDLE`). Gateway Settings offers `provisioned` or `both` and no longer shows `hosted`. Internal names keep "managed": the variants, `module.managed.ts`, the `/managed/*` API, `managedProfile`.
+>   - **Tests.** Go: `TestLoadConfig_HostedIsTrueUnlessFalse`, `TestValidateConnModes` (rewritten, each refusal's text), `TestPWAHandler_ServesTheModesBundle`, `TestPWAHandler_NeverServesTheAdminOrProvisionedBundleByName`, `TestPWAHandler_MissingIndexNamesTheFile`, the `direct` and retired-`managed` refusals in `TestSettings_Refusals`, and a `managed:` key in `TestDecodeConfigFile_UnknownFieldFails`; `TestSettings_ConnModesNeedTheRunningGatewayHosted` went with the running-gateway check. Contract: the `direct` refusal in `cases.json`, so the fake gateway gives the same answer. Web: new `tests/build/compose-files.test.ts` (each compose service's posture, the release pin, the secret file) and `tests/build/docs-links.test.ts` (every anchor link resolves; every doc's Contents list equals its headings); `gateway.test.ts` "refuses connModes direct, ..."; `conn-modes.test.ts` falls back on the retired value.
+>   - **Docs.** README: the three modes and a demo per mode. deployment.md is ordered by mode; new [provisioned-mode.md](provisioned-mode.md) (how it works, setup, settings with recommended values, security checklist, troubleshooting). The user guide, demo.md, the developer docs and `CLAUDE.md` use the new names, and every doc in `docs/` opens with a Contents list.
+>   - **Totals.** Web 97 files / 2208 tests, 100% on all four metrics; Go 93.7% of statements (floor was 93.5%).
 >
 > The v8 ignore categories table further down has been trimmed to reflect which of the old justifications still apply.
 
-## Table of Contents
+## Contents
 
-1. [Executive Summary](#executive-summary)
-2. [Project Architecture Overview](#project-architecture-overview)
-3. [Testing Methodology](#testing-methodology)
-4. [Test Infrastructure and Configuration](#test-infrastructure-and-configuration)
-5. [Unit Testing — What Is Tested and How](#unit-testing--what-is-tested-and-how)
-6. [Integration Testing — How Cross-Module Flows Are Tested](#integration-testing--how-cross-module-flows-are-tested)
-7. [The v8 Coverage Ignore Strategy](#the-v8-coverage-ignore-strategy)
-8. [Coverage Results](#coverage-results)
-9. [Key Technical Challenges and Solutions](#key-technical-challenges-and-solutions)
+- [Executive Summary](#executive-summary)
+- [Project Architecture Overview](#project-architecture-overview)
+  - [Micro-Kernel with Dependency Injection](#micro-kernel-with-dependency-injection)
+  - [Internal Module Decomposition](#internal-module-decomposition)
+- [Testing Methodology](#testing-methodology)
+  - [Approach: Isolation-First with Shared Infrastructure](#approach-isolation-first-with-shared-infrastructure)
+  - [Core Philosophy: Mock the Platform, Test the Logic](#core-philosophy-mock-the-platform-test-the-logic)
+  - [Testing Stack](#testing-stack)
+- [Test Infrastructure and Configuration](#test-infrastructure-and-configuration)
+  - [vitest.config.ts](#vitestconfigts)
+  - [tests/setup.ts: The Global Test Environment](#testssetupts-the-global-test-environment)
+  - [Pool Configuration](#pool-configuration)
+- [Unit Testing: What Is Tested and How](#unit-testing-what-is-tested-and-how)
+  - [Pattern: DOM Container Construction + Module Installation](#pattern-dom-container-construction--module-installation)
+  - [Core Module Tests](#core-module-tests)
+  - [Queue Browser State Tests](#queue-browser-state-tests)
+  - [UI Handler Tests](#ui-handler-tests)
+- [Integration Testing: How Cross-Module Flows Are Tested](#integration-testing-how-cross-module-flows-are-tested)
+  - [`tests/integration/full-flow.test.ts`: Kernel mechanics](#testsintegrationfull-flowtestts-kernel-mechanics)
+  - [`tests/integration/module-events.test.ts`: Real cross-module flows](#testsintegrationmodule-eventstestts-real-cross-module-flows)
+  - [`tests/integration/message-pipeline.test.ts`: End-to-end message ingestion](#testsintegrationmessage-pipelinetestts-end-to-end-message-ingestion)
+  - [`tests/integration/admin-session.test.ts`: Admin app session lifecycle](#testsintegrationadmin-sessiontestts-admin-app-session-lifecycle)
+  - [What Is NOT Covered](#what-is-not-covered)
+  - [Why These Count As Integration Tests](#why-these-count-as-integration-tests)
+  - [What Integration Testing Does NOT Cover](#what-integration-testing-does-not-cover)
+- [The v8 Coverage Ignore Strategy](#the-v8-coverage-ignore-strategy)
+  - [Why 100% Coverage Requires Selective Exclusions](#why-100-coverage-requires-selective-exclusions)
+  - [The Key Technical Finding: `/* v8 ignore next */` vs `/* v8 ignore start/stop */`](#the-key-technical-finding--v8-ignore-next--vs--v8-ignore-startstop-)
+  - [Categories of Ignored Code](#categories-of-ignored-code)
+  - [Summary of v8 Ignore Philosophy](#summary-of-v8-ignore-philosophy)
+- [Coverage Results](#coverage-results)
+  - [Most Recent Run (post May 2026 sweep)](#most-recent-run-post-may-2026-sweep)
+  - [Test Counts by File](#test-counts-by-file)
+  - [Go proxy tests (separate suite)](#go-proxy-tests-separate-suite)
+  - [Type-check gate (separate from coverage)](#type-check-gate-separate-from-coverage)
+- [Key Technical Challenges and Solutions](#key-technical-challenges-and-solutions)
+  - [Challenge 1: Testing a Commercial SDK Without the SDK](#challenge-1-testing-a-commercial-sdk-without-the-sdk)
+  - [Challenge 2: Shared Singleton State Between Tests](#challenge-2-shared-singleton-state-between-tests)
+  - [Challenge 3: Worker Instability With 23 Parallel Test Files (Historical)](#challenge-3-worker-instability-with-23-parallel-test-files-historical)
+  - [Challenge 4: `/* v8 ignore next */` Not Suppressing Branch Coverage](#challenge-4--v8-ignore-next--not-suppressing-branch-coverage)
 
 ---
 
@@ -205,7 +243,7 @@
 
 The SolaceMessageUtility PWA is a modular web application for managing Solace PubSub+ Event Broker message queues. It is built on a custom micro-kernel architecture with eight modules — four shipped in the everyday bundles (connections, queue-browser, queue-copy, queue-subscription-explorer), two admin-only ones in the standalone `/solAdmin` app (user-management, connection-management) plus its `admin-login` entry point, and the vestigial queue-discovery — a typed event bus, and dependency injection via an `AppContext` object.
 
-The test suite consists of **95 test files** (run `./scripts/dev.sh test` for the current test count) covering every source file in scope (broadly one-to-one with source modules, plus dedicated tests for shared core helpers and for each variant manifest). Coverage thresholds in `vitest.config.ts` are set to **100%** across all four metrics (Statements, Branches, Functions, Lines); as of the May 2026 sweep the target is met across the board. Tests are split between dedicated unit tests per source file and four integration test files: `full-flow.test.ts` (Kernel mechanics with stub modules), `module-events.test.ts` (real cross-module event flows), `message-pipeline.test.ts` (end-to-end `onMessage → ingest → filter → DOM`), and `admin-session.test.ts` (the `/solAdmin` session lifecycle: real admin-login + user-management).
+The test suite consists of **97 test files** (run `./scripts/dev.sh test` for the current test count) covering every source file in scope (broadly one-to-one with source modules, plus dedicated tests for shared core helpers and for each variant manifest). Coverage thresholds in `vitest.config.ts` are set to **100%** across all four metrics (Statements, Branches, Functions, Lines); as of the May 2026 sweep the target is met across the board. Tests are split between dedicated unit tests per source file and four integration test files: `full-flow.test.ts` (Kernel mechanics with stub modules), `module-events.test.ts` (real cross-module event flows), `message-pipeline.test.ts` (end-to-end `onMessage -> ingest -> filter -> DOM`), and `admin-session.test.ts` (the `/solAdmin` session lifecycle: real admin-login + user-management).
 
 **Coverage summary (last measured run, post the August 2026 managed-connections merge):**
 
@@ -353,7 +391,7 @@ export default defineConfig({
 
 The `coverage.include` list is significant -- Vitest 4 has no `all` option, and reports every file matched by `include` even when no test imports it. Without it, a file with no test could be silently left out of coverage. Combined with 100% thresholds, any file missing from test coverage causes the build to fail.
 
-### tests/setup.ts — The Global Test Environment
+### tests/setup.ts: The Global Test Environment
 
 The setup file runs before every test file and establishes the simulated browser environment. It has three categories of responsibility:
 
@@ -462,7 +500,7 @@ The npm scripts run `vitest` with `--pool=threads` and leave the worker count to
 
 ---
 
-## Unit Testing — What Is Tested and How
+## Unit Testing: What Is Tested and How
 
 ### Pattern: DOM Container Construction + Module Installation
 
@@ -656,11 +694,11 @@ Every user-facing action is tested from both the "happy path" and the "cancelled
 
 ---
 
-## Integration Testing — How Cross-Module Flows Are Tested
+## Integration Testing: How Cross-Module Flows Are Tested
 
 Four files live under `tests/integration/`, with different scopes.
 
-### `tests/integration/full-flow.test.ts` — Kernel mechanics
+### `tests/integration/full-flow.test.ts`: Kernel mechanics
 
 Narrow and focused on one thing: **verifying that the Kernel plus two installed modules share EventBus identity and propagate state through it**. Uses lightweight stub modules (not the real `modules` array from `registry.ts`) and exercises 3 scenarios:
 
@@ -668,7 +706,7 @@ Narrow and focused on one thing: **verifying that the Kernel plus two installed 
 2. A `setState` call during `install()` reaches a same-module EventBus subscriber via the emitted `app:state-change` event.
 3. An event emitted on one module's `ctx.eventBus` is delivered to a handler registered on another module's `ctx.eventBus` (proving the bus is shared, not duplicated per module).
 
-### `tests/integration/module-events.test.ts` — Real cross-module flows
+### `tests/integration/module-events.test.ts`: Real cross-module flows
 
 Installs the real `ConnectionsModule` and `QueueBrowserModule` against `loadModuleDOM` containers with a shared `EventBus`, then drives cross-module event sequences. Service factories (`queue-browser/service` and the lifted `core/services/solace-client` + `core/services/semp-client`) are mocked at the top of the file via `vi.mock` so tests are deterministic and free of broker/network I/O. Scenarios:
 
@@ -676,7 +714,7 @@ Installs the real `ConnectionsModule` and `QueueBrowserModule` against `loadModu
 2. **`config:max-messages-changed` propagation.** Emit the event with `{ value: 5 }`; asserts `state.maxMessagesPerQueue = 5` and that six subsequent `ingestMessage()` calls leave only five messages (oldest shifted).
 3. **Disconnect wiring.** Emit `client:disconnected` with `forwardQueue` seeded with SENDING + QUEUED + DONE items; asserts `service.disconnectAll` fires once and `ui.updateForwardItemStatus` is called for SENDING and QUEUED only (DONE left alone).
 
-### `tests/integration/message-pipeline.test.ts` — End-to-end message ingestion
+### `tests/integration/message-pipeline.test.ts`: End-to-end message ingestion
 
 Installs `QueueBrowserModule` with real services and fires broker-shaped Solace messages through `service-events.onMessage`. No module mocking — the full pipeline runs: `onMessage` unwraps payload → `ingestMessage` enforces moving-window cap → `shouldShowMessage` evaluates active filters → `ui.addMessageRow` renders a DOM row. Four scenarios:
 
@@ -685,7 +723,7 @@ Installs `QueueBrowserModule` with real services and fires broker-shaped Solace 
 3. **Messages for a non-current queue ingest but don't touch the DOM.** `state.currentQueue` gates DOM updates.
 4. **Destination-type filter uses `window.solace.DestinationType`.** Locks in the S3 cleanup that removed the `if (window.solace)` guard.
 
-### `tests/integration/admin-session.test.ts` — Admin app session lifecycle
+### `tests/integration/admin-session.test.ts`: Admin app session lifecycle
 
 Installs the real `AdminLoginModule` and `UserManagementModule` on one `EventBus` and `AppState` (the gateway calls, `/hosted` and the toast are mocked), signs in as an administrator, then:
 
@@ -891,7 +929,7 @@ Current files in the test tree:
 - **user-management/** (admin-only) — `module.test.ts`, `service.test.ts`
 - **connection-management/** (admin-only) — `module.test.ts`, `service.test.ts`
 - **gateway-settings/** (admin-only) — `module.test.ts`, `service.test.ts`
-- **build/** -- `module-registry-plugin.test.ts` (manifest -> `virtual:module-registry` emission, `MODULE_ENTRIES` overrides, entry-template composition), `check-bundles.test.ts` (Direct bundles without managed or demo markers, `managed.html` with the managed ones only, `managed-demo.html` with both and nothing that reaches a network, the `tag.yml` Release list kept equal and free of gateway binaries), `no-network-apis.test.ts` (no network API but `fetch` in `src/` outside the demo tree), `npm-audit-gate.test.ts` (fixable vs unfixable advisory split, npm audit error reports, name/range validation before any `npm view`), `e2e-lib.test.ts` (the end-to-end run's helpers: certificates a TLS client trusting only the run's CA accepts, reading the broker CA file and the host's root bundle, the broker details file and each detail's check, the session-cookie rules, the sealed-store header, secret masking and the response sweep; the browser service's posture, its digest pin at the installed `playwright-core` version, and no `src/` file naming playwright), `vendor-scripts.test.ts` (the images' exact vendor pins against the shell's floors, and the Dockerfile's copy paths and licence files)
+- **build/** -- `module-registry-plugin.test.ts` (manifest -> `virtual:module-registry` emission, `MODULE_ENTRIES` overrides, entry-template composition), `check-bundles.test.ts` (Direct bundles without Provisioned or demo markers, `provisioned.html` with the Provisioned ones only, `provisioned-demo.html` with both and nothing that reaches a network, the `tag.yml` Release list kept equal and free of gateway binaries), `no-network-apis.test.ts` (no network API but `fetch` in `src/` outside the demo tree), `npm-audit-gate.test.ts` (fixable vs unfixable advisory split, npm audit error reports, name/range validation before any `npm view`), `e2e-lib.test.ts` (the end-to-end run's helpers: certificates a TLS client trusting only the run's CA accepts, reading the broker CA file and the host's root bundle, the broker details file and each detail's check, the session-cookie rules, the sealed-store header, secret masking and the response sweep; the browser service's posture, its digest pin at the installed `playwright-core` version, and no `src/` file naming playwright), `vendor-scripts.test.ts` (the image's exact vendor pins against the shell's floors, and the Dockerfile's copy paths and licence files), `compose-files.test.ts` (each compose service's container posture, the deployments' release pin and the admin password secret), `docs-links.test.ts` (README and docs anchor links resolve; each doc's Contents list equals its headings)
 - **mock-broker/** -- `boot.test.ts`, `boot.managed.test.ts` (the managed demo's boot: nothing reaches a network), `panel.test.ts`, `sdk.test.ts`, `server.test.ts` (demo-broker fidelity contracts, the passthrough and routes options, SEMP per broker), `broker/store.test.ts` (brokers beside Direct: scoped listings, lookups and publishes, unique VPN names), `gateway/contract.test.ts` (the fake gateway answers every case of `go-web-proxy/testdata/contract/` as the real one does), `gateway/relay.test.ts`, `gateway/gateway.test.ts`, `gateway/sockets.test.ts`, `gateway/pages.test.ts`, `gateway/throttle.test.ts` (per-user and client counts, the quiet-period reset), `gateway/seed.test.ts`, `gateway/routes.test.ts` (every gateway route through the service that ships; a `/managed/<name>` in `src/` with no row fails), `gateway/error-codes.test.ts` (every code in `MANAGED_ERROR_CODES` placed: golden, panel fault, made by the app, or not simulated), `controls/managed.test.ts`, `demo-flow.test.ts` (whole sessions through the real Kernel and the `managed-demo` modules)
 - **integration/** — `full-flow.test.ts`, `module-events.test.ts`, `message-pipeline.test.ts`, `admin-session.test.ts`
 - **(root)** — `main.test.ts`, `registry.test.ts`, `variants.test.ts` (every variant manifest's shape; the `managed` variant is standard plus the connections managed entry, no Release variant overrides an entry, and the gateway's `moduleCatalog()` equals the managed variant's module-controlled modules)
@@ -900,7 +938,7 @@ Per-file counts shift with every audit pass (tests added for coverage, tests del
 
 ### Go proxy tests (separate suite)
 
-The managed backend lives in [go-web-proxy/](../go-web-proxy) and has its own Go test suite. The gateway ships as two binaries (stdlib-only hosted vs `-tags managed`; see [architecture.md](architecture.md) § Managed Connections), so the RBAC-only files carry `//go:build managed` — run `go test -tags managed ./...` from that directory to include them (use `CGO_ENABLED=1` for `-race`). A bare `go test ./...` runs only the untagged tests (`main_test.go`, `proxy_test.go`, `tls_test.go`, `configfile_test.go` for `config.yaml` seeding, strict decoding and env-override reporting, `access_test.go` for the client access list, `X-Forwarded-For` trust and hijack pass-through, `fileutil_test.go` for the atomic writer, `live_test.go` for the live settings and restart-only keys) and skips the RBAC suite. Tagged files: `contract_test.go` (the managed demo's contract in `testdata/contract/`: every case answered as `cases.json` says, the seed's settings equal to the gateway's, the validation vectors; `-update` rewrites the answers), `store_test.go` (strict YAML load, every bootstrap source and refusal, the admin-CRUD mutators, keep-on-blank merge, last-admin guard on delete and demotion, deep-copy isolation, a writer race test), `managed_test.go` (the `/managed/*` API behind its session gate — uniform 401, every error code, body cap, cross-origin refusal, session drops, no-secret-leak), `pages_test.go` (`/login`, `/login/password` and the app and `/solAdmin` gates), `settings_test.go` (`/managed/settings`: live apply, restart-only keys, lock-out, hand-edit refusal), `password_test.go`, `session_test.go`, `throttle_test.go`, `managed_routing_test.go`, `rbac_test.go` (glob + entitlement + the TS↔Go conformance vector). This suite is **not** part of the vitest coverage scope; the 100% gate applies to the frontend.
+The gateway lives in [go-web-proxy/](../go-web-proxy) and has its own Go test suite: one binary for every container mode, so `go test ./...` from that directory runs all of it (use `CGO_ENABLED=1` for `-race`): `main_test.go`, `proxy_test.go` (including which bundle `/` serves per mode), `tls_test.go`, `configfile_test.go` for `config.yaml` seeding, strict decoding and env-override reporting, `access_test.go` for the client access list, `X-Forwarded-For` trust and hijack pass-through, `fileutil_test.go` for the atomic writer, `live_test.go` for the live settings and restart-only keys, and for Provisioned mode: `contract_test.go` (the Provisioned demo's contract in `testdata/contract/`: every case answered as `cases.json` says, the seed's settings equal to the gateway's, the validation vectors; `-update` rewrites the answers), `store_test.go` (strict YAML load, every bootstrap source and refusal, the admin-CRUD mutators, keep-on-blank merge, last-admin guard on delete and demotion, deep-copy isolation, a writer race test), `managed_test.go` (the `/managed/*` API behind its session gate -- uniform 401, every error code, body cap, cross-origin refusal, session drops, no-secret-leak), `pages_test.go` (`/login`, `/login/password` and the app and `/solAdmin` gates), `settings_test.go` (`/managed/settings`: live apply, restart-only keys, lock-out, hand-edit refusal), `password_test.go`, `session_test.go`, `throttle_test.go`, `managed_routing_test.go`, `rbac_test.go` (glob + entitlement + the TS<->Go conformance vector). This suite is **not** part of the vitest coverage scope; the 100% gate applies to the frontend.
 
 ### Type-check gate (separate from coverage)
 

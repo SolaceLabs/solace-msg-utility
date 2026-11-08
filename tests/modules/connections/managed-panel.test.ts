@@ -42,7 +42,7 @@ const sempMock = vi.hoisted(() => {
 const svcMock = vi.hoisted(() => ({ me: vi.fn(), logout: vi.fn(), dial: vi.fn() }));
 // Advertise managed mode so the module renders (and instantiates) the Managed tab.
 const hostedMock = vi.hoisted(() => ({
-    probeDeployment: vi.fn(async () => ({ hosted: true, conn: { connModes: 'managed', defaultConn: 'managed' } })),
+    probeDeployment: vi.fn(async () => ({ hosted: true, conn: { connModes: 'provisioned', defaultConn: 'provisioned' } })),
 }));
 
 vi.mock('../../../src/core/services/solace-client', () => ({
@@ -160,7 +160,7 @@ beforeEach(() => {
     // always resolves to THIS test's managed instances.
     solaceMock.instances.length = 0;
     sempMock.instances.length = 0;
-    hostedMock.probeDeployment.mockResolvedValue({ hosted: true, conn: { connModes: 'managed', defaultConn: 'managed' } });
+    hostedMock.probeDeployment.mockResolvedValue({ hosted: true, conn: { connModes: 'provisioned', defaultConn: 'provisioned' } });
 });
 
 describe('connections/managed panel — restoring the gateway session', () => {
@@ -180,7 +180,7 @@ describe('connections/managed panel — restoring the gateway session', () => {
     // Replaces the former "gateway required" gate: availability is now encoded in
     // tab visibility — a deployment that doesn't advertise managed never renders
     // the tab, so the panel is not reachable and asks the gateway nothing.
-    it('does not offer the Managed tab when the gateway does not advertise managed', async () => {
+    it('does not offer the Provisioned tab when the gateway does not advertise Provisioned', async () => {
         hostedMock.probeDeployment.mockResolvedValue({ hosted: false, conn: { connModes: 'direct', defaultConn: 'direct' } });
         const { container } = await setup();
         expect(hidden(container, '#conn-panel-managed')).toBe(true);
@@ -224,7 +224,7 @@ describe('connections/managed panel — restoring the gateway session', () => {
         expect(account().classList.contains('hidden')).toBe(true);
     });
 
-    it('a session opens the Managed tab even when Direct is the default', async () => {
+    it('a session opens the Provisioned tab even when Direct is the default', async () => {
         hostedMock.probeDeployment.mockResolvedValue({ hosted: true, conn: { connModes: 'both', defaultConn: 'direct' } });
         const { container } = await signedIn();
         expect(hidden(container, '#conn-panel-managed')).toBe(false);
@@ -841,14 +841,14 @@ describe('connections/managed panel — mode interlock + tab activation', () => 
     const directSolace = () => solaceMock.instances[0];
     const directSemp = () => sempMock.instances[0];
 
-    it('re-shows the sign-in view as the Managed tab is activated without a session', async () => {
+    it('re-shows the sign-in view as the Provisioned tab is activated without a session', async () => {
         bothTabs();
         const { container } = await setup();
         el<HTMLButtonElement>(container, '#conn-tab-managed').click();
         expect(hidden(container, '#managed-login-view')).toBe(false);
     });
 
-    it('re-shows the select / connected view as the Managed tab is activated', async () => {
+    it('re-shows the select / connected view as the Provisioned tab is activated', async () => {
         bothTabs();
         const { container } = await signedIn();
         const managedTab = el<HTMLButtonElement>(container, '#conn-tab-managed');

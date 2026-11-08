@@ -1,5 +1,42 @@
 # User Guide
 
+## Contents
+
+- [Overview](#overview)
+- [Module 1: Connections](#module-1-connections)
+  - [Solace Client Connection (Web Messaging)](#solace-client-connection-web-messaging)
+  - [SEMP Connection (Management API)](#semp-connection-management-api)
+  - [Connection Profiles](#connection-profiles)
+  - [Status Indicators](#status-indicators)
+- [Module 2: Queue Browser](#module-2-queue-browser)
+  - [Binding to a Queue](#binding-to-a-queue)
+  - [Message Table](#message-table)
+  - [Message Details](#message-details)
+  - [Filtering Messages](#filtering-messages)
+  - [Forwarding Messages](#forwarding-messages)
+  - [Deleting Messages](#deleting-messages)
+  - [Downloading Messages](#downloading-messages)
+  - [Keyboard Shortcuts](#keyboard-shortcuts)
+- [Module 3: Queue Copy](#module-3-queue-copy)
+  - [Two-column layout](#two-column-layout)
+  - [Destination credentials (Provisioned sessions)](#destination-credentials-provisioned-sessions)
+  - [Destination target](#destination-target)
+  - [Important considerations](#important-considerations)
+  - [Confirm Queue Copy modal](#confirm-queue-copy-modal)
+  - [Refreshing source stats inside the modal](#refreshing-source-stats-inside-the-modal)
+- [Module 4: Queue Subscriptions](#module-4-queue-subscriptions)
+  - [Workflow](#workflow)
+  - [Filter syntax](#filter-syntax)
+  - [Caching](#caching)
+- [Tips](#tips)
+- [Shipped Variants](#shipped-variants)
+- [Provisioned Connections](#provisioned-connections)
+  - [Signing in and connecting](#signing-in-and-connecting)
+  - [What you can see and do](#what-you-can-see-and-do)
+  - [Administration (`/solAdmin`)](#administration-soladmin)
+
+---
+
 ## Overview
 
 Solace Message Utility is a browser-based tool for managing Solace PubSub+ Event Brokers. It runs as a single HTML page — no installation required beyond a web browser and network access to your broker.
@@ -11,7 +48,7 @@ The interface has a **sidebar** on the left for navigation and a **main content 
 3. **Queue Copy** — Copy messages from a source queue to a destination queue (same broker or cross-broker)
 4. **Queue Subscriptions** — Search every queue subscription on the broker by VPN, queue, or topic
 
-Which modules appear depends on the build [variant](#shipped-variants). Deployments of the **managed** container image also offer **Managed** connections, a second tab in **Connections** for users who do not have broker credentials — you sign in and pick from the brokers you are entitled to. See [Managed Connections](#managed-connections) below.
+Which modules appear depends on the build [variant](#shipped-variants). The app runs in one of three modes: **Standalone** (the HTML files: your browser connects to the broker itself), **Gateway** (served by the gateway container, which connects to the broker for you) and **Provisioned** (you sign in and pick from the brokers an administrator granted you; see [Provisioned Connections](#provisioned-connections) below). In the first two you type the broker's details on the **Direct** form. [deployment.md](deployment.md#choosing-a-mode) explains how each is set up.
 
 ---
 
@@ -270,14 +307,14 @@ The form is split into Source (left, read-only mirror of the primary connection)
 
 When Same-VPN is enabled, the destination uses the primary Solace session directly — no second connection is needed.
 
-### Destination credentials (managed sessions)
+### Destination credentials (Provisioned sessions)
 
 When the destination is *not* just the primary connection, a **Credentials** choice appears on the Destination Broker card:
 
 - **Provisioned** -- pick a **Broker** and **Message VPN** from the ones you are entitled to. There are no password fields: your administrator provisioned the credentials, exactly as for the primary connection.
 - **Manual** — type the host and credentials yourself, as before.
 
-Which options you get follows the deployment: a managed-only deployment offers **Provisioned** alone, a direct one offers **Manual** alone, and a deployment offering both connection modes lets you choose. Switching between them clears the destination target, since it was picked against a different broker.
+Which options you get follows the deployment: a Provisioned-only deployment offers **Provisioned** alone, a direct one offers **Manual** alone, and a deployment offering both connection modes lets you choose. Switching between them clears the destination target, since it was picked against a different broker.
 
 On a provisioned destination you can only copy **into queues you hold Operate on**, and **Topic destinations are unavailable** — entitlements are defined per queue, and a topic delivers to every queue subscribed to it, so there is no way to check it. Switch to manual credentials (where the deployment allows it) if you need to publish to a topic.
 
@@ -285,7 +322,7 @@ On a provisioned destination you can only copy **into queues you hold Operate on
 
 Choose one of two targets:
 
-- **Queue** — point-to-point delivery; pick an existing destination queue (or type the name). A **Pick** button opens a queue selector populated via SEMP. In a managed session it lists only queues you may **write** to on the destination broker.
+- **Queue** -- point-to-point delivery; pick an existing destination queue (or type the name). A **Pick** button opens a queue selector populated via SEMP. In a Provisioned session it lists only queues you may **write** to on the destination broker.
 - **Topic** — fan-out to subscribers of the named topic.
 
 Each run is either a **Copy** (messages stay on the source) or a **Move** (messages are removed from the source after successful publish).
@@ -374,13 +411,13 @@ The loaded subscription list is held in memory for the session. Subsequent filte
 
 - **Verbose troubleshooting logs**: append `?logLevel=DEBUG` to the URL (e.g. `dist/index.html?logLevel=DEBUG`) to surface fine-grained flow logs in DevTools. Accepted values are `DEBUG`, `INFO` (default), `WARN`, `ERROR`, and `SILENT` (mutes everything). Invalid values fall back to the default.
 
-- **Gateway deployment**: when the app is served by the gateway container, the gateway connects to the broker for you, so the broker need not be reachable from your browser. You still enter the broker's protocol, host, port and path as if connecting directly, and the page shows those same values.
+- **Gateway and Provisioned mode**: when the app is served by the gateway container, the gateway connects to the broker for you, so the broker need not be reachable from your browser. You still enter the broker's protocol, host, port and path as if connecting directly, and the page shows those same values.
 
 ---
 
 ## Shipped Variants
 
-The project builds several HTML variants. The ones below are attached to each [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases), all Direct-only except `managed-demo.html`; `index.html` is also what GitHub Pages and the standard container image serve. The managed container image serves its own bundle (`managed.html`, standard plus the Managed sign-in) as `index.html`, and `solAdmin.html` at `/solAdmin`; neither is a Release download.
+The project builds several HTML variants. The ones below are attached to each [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases), all Direct-only except `provisioned-demo.html`; `index.html` is also what GitHub Pages and the gateway image serve in Gateway mode. In Provisioned mode the image serves its own bundle (`provisioned.html`, standard plus the Provisioned sign-in) at `/`, and `solAdmin.html` at `/solAdmin`; neither is a Release download.
 
 | File | Variant | Use |
 | --- | --- | --- |
@@ -389,9 +426,9 @@ The project builds several HTML variants. The ones below are attached to each [G
 | `no-payload.html` | **No-payload** | Same as Standard, except the Queue Browser never shows or exports the message **body**. The Content Preview, Show Raw Content, Copy Content, Download Content, Download Full, and Body-Content filter are all removed; Forward, Delete, all metadata, and the other filters remain. Use where message bodies must not be visible to the operator. |
 | `no-queue-copy.html` | **No Queue Copy** | Same as Standard, minus the Queue Copy module. For deployments where operators should browse and forward but never bulk-copy between queues. |
 | `demo.html` | Standard + demo broker | Interactive demo (see [Demos](demo.md#direct-demo-demohtml)) |
-| `managed-demo.html` | Managed + admin pages + demo gateway | Managed mode without a gateway or a broker (see [Demos](demo.md#managed-demo-managed-demohtml)). It makes no network request |
+| `provisioned-demo.html` | Provisioned + admin pages + demo gateway | Provisioned mode without a gateway or a broker (see [Demos](demo.md#provisioned-demo-provisioned-demohtml)). It makes no network request |
 
-Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately** (the container images include both):
+Each HTML file is self-contained for the app code (CSS and JS are inlined), but **two vendor scripts are not bundled and must be downloaded separately** (the gateway image includes both):
 
 - **`solclient.js`** — Solace Web Messaging SDK, required for any broker connection. Get it from the [Solace Developer Portal](https://solace.com/downloads/), npm (`solclientjs`), or your broker's web UI (`http://<broker>:8080/`).
 - **`jszip.min.js`** — JSZip library, required for the Queue Browser's ZIP download feature. Get it from a CDN (`https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js`), npm (`jszip`), or [https://stuk.github.io/jszip/](https://stuk.github.io/jszip/).
@@ -407,15 +444,15 @@ See [deployment.md](deployment.md#external-runtime-dependencies) for download so
 
 ---
 
-## Managed Connections
+## Provisioned Connections
 
-**Managed** mode is for users who should not handle broker credentials. Instead of typing connection details, you **sign in** and pick from the brokers and Message VPNs an administrator has granted you.
+**Provisioned** mode is for users who should not handle broker credentials. Instead of typing connection details, you **sign in** and pick from the brokers and Message VPNs an administrator has granted you.
 
-It appears as a second tab in the **Connections** module — **Direct** (type your own credentials) and **Managed** (sign in). Which tabs you see is decided by the deployment: you may get both, or only one. Managed runs **only in the managed container image**: the copies of the app attached to a Release, and the standard image, have no Managed tab. See [deployment.md](deployment.md#managed-mode-rbac) to stand one up.
+It appears as a tab in the **Connections** module -- **Direct** (type your own credentials) and **Provisioned** (sign in). Which tabs you see is decided by the deployment: you may get both, or only one. Provisioned runs **only behind the gateway container in Provisioned mode**: the copies of the app attached to a Release, and the gateway in Gateway mode, have no Provisioned tab. See [provisioned-mode.md](provisioned-mode.md) to stand one up.
 
 ### Signing in and connecting
 
-1. **Sign in.** On a deployment that offers only Managed, opening the app takes you straight to the sign-in page. Otherwise open **Connections**, choose the **Managed** tab and click **Sign in**. Enter the username and password your administrator gave you; you return to the app with the **Managed** tab open.
+1. **Sign in.** On a deployment that offers only Provisioned, opening the app takes you straight to the sign-in page. Otherwise open **Connections**, choose the **Provisioned** tab and click **Sign in**. Enter the username and password your administrator gave you; you return to the app with the **Provisioned** tab open.
 2. **First sign-in of a new deployment:** the bootstrap `admin` account is asked to choose a new password (12 to 128 characters) before anything else.
 3. Pick a **Broker** and **Message VPN** from the dropdowns -- these list only what you're entitled to, by name. You never see or type the broker's address or credentials.
 4. Click **Connect**. From here the **Queue Browser** and **Queue Copy** work exactly as usual, but scoped to your entitlements.
@@ -423,7 +460,7 @@ It appears as a second tab in the **Connections** module — **Direct** (type yo
 
 **Your session** survives a page refresh (F5). It ends after 10 minutes without activity or 30 minutes after you signed in (your deployment may set other limits), when you sign out, and when an administrator changes your password, your administrator flag or deletes your account. You then see *Your session has ended. Sign in again.* the next time the app asks the gateway (for example on **Refresh**). Too many wrong passwords in a row lock sign-in for a while; the page says how long.
 
-**One mode at a time.** Connecting on the Managed tab drops a Direct connection, and connecting on the Direct tab ends your managed session — otherwise your entitlements would be applied to a connection they were never issued for. Just *switching* tabs changes nothing; only Connect does.
+**One mode at a time.** Connecting on the Provisioned tab drops a Direct connection, and connecting on the Direct tab ends your Provisioned session -- otherwise your entitlements would be applied to a connection they were never issued for. Just *switching* tabs changes nothing; only Connect does.
 
 ### What you can see and do
 
@@ -432,25 +469,25 @@ Your entitlements come in two levels, **Operate** (browse + delete) and **Read-o
 - The **VPN picker** lists exactly the VPNs you can connect to — the same provisioned set shown in the **Connections** dropdown (the VPNs your administrator added for you), not every VPN that happens to exist on the broker. The **queue picker** lists only the queues you're entitled to on the chosen VPN — non-entitled queues are filtered out of discovery.
 - Typing or selecting a queue you aren't entitled to **fails to bind**, with an error.
 - On a **read-only** queue, the **Delete** action is hidden and the queue shows a "Read-Only" badge; **Forward** is still available. On an **Operate** queue, Delete is available.
-- In **Queue Copy**, the destination queue must be one you hold **Operate** on — copying into a queue is a write. See [Destination credentials](#destination-credentials-managed-sessions).
-- **Which modules you see is up to your administrator.** Besides Connections, a managed session shows only the modules you were given (Queue Browser, Queue Copy, or both). A module you were not given is simply not in the sidebar; a change shows after your next **Refresh** or page reload.
-- **Queue Subscriptions** and Queue Discovery are **not shown** in a managed session, for anyone, including administrators, and cannot be given. They read the broker over a management path that cannot be filtered by your entitlements, so rather than show you everything, they are hidden.
+- In **Queue Copy**, the destination queue must be one you hold **Operate** on -- copying into a queue is a write. See [Destination credentials](#destination-credentials-provisioned-sessions).
+- **Which modules you see is up to your administrator.** Besides Connections, a Provisioned session shows only the modules you were given (Queue Browser, Queue Copy, or both). A module you were not given is simply not in the sidebar; a change shows after your next **Refresh** or page reload.
+- **Queue Subscriptions** and Queue Discovery are **not shown** in a Provisioned session, for anyone, including administrators, and cannot be given. They read the broker over a management path that cannot be filtered by your entitlements, so rather than show you everything, they are hidden.
 
 If your entitlements change while you are working (you or an admin hit Refresh, or you sign out), anything that depended on what was withdrawn stops: a copy/move run in progress halts the same way pressing Cancel would, and if a provisioned Queue Copy destination is no longer yours, the chosen destination queue is cleared so you cannot start a run against it.
 
-**Messages from the gateway.** *The gateway relays SEMP reads only; this request would change the broker.* means something asked the broker for a change, which a managed session never makes. *The broker refused the credential the gateway holds for it* and *The gateway could not reach the broker...* mean the connection needs your administrator. If the gateway takes your access away while you are connected (you signed out in another tab, your password or administrator flag changed, or an administrator removed your access to that VPN or broker), the connection closes; when your session itself has ended, the app's next request to the gateway returns the Managed tab to **Sign in**.
+**Messages from the gateway.** *The gateway relays SEMP reads only; this request would change the broker.* means something asked the broker for a change, which a Provisioned session never makes. *The broker refused the credential the gateway holds for it* and *The gateway could not reach the broker...* mean the connection needs your administrator. If the gateway takes your access away while you are connected (you signed out in another tab, your password or administrator flag changed, or an administrator removed your access to that VPN or broker), the connection closes; when your session itself has ended, the app's next request to the gateway returns the Provisioned tab to **Sign in**.
 
-> The gateway connects you only to the brokers and Message VPNs you are entitled to, and its management (SEMP) connection is **read-only**: the app only reads through it. The queue-level limits above are guardrails in the app, on top of least-privilege broker accounts. If your deployment offers **both** tabs, note that the Direct tab is outside this model entirely -- see [deployment.md](deployment.md#managed-mode-rbac).
+> The gateway connects you only to the brokers and Message VPNs you are entitled to, and its management (SEMP) connection is **read-only**: the app only reads through it. The queue-level limits above are guardrails in the app, on top of least-privilege broker accounts. If your deployment offers **both** tabs, note that the Direct tab is outside this model entirely -- see [deployment.md](provisioned-mode.md#connection-modes).
 
 ### Administration (`/solAdmin`)
 
-Administration is a **separate app**, not a pair of extra sidebar entries in the main one. Open `https://<your-gateway>/solAdmin`: without a session you are sent to the sign-in page first, and an ordinary account gets an *Administrator access required* page instead of the app. Its **Administration** page shows who is signed in, with **Change password** and **Sign out**. The admin app never connects to a broker; it only edits the deployment's users, connections and gateway settings. It exists only on deployments running in managed mode; anywhere else the URL simply 404s.
+Administration is a **separate app**, not a pair of extra sidebar entries in the main one. Open `https://<your-gateway>/solAdmin`: without a session you are sent to the sign-in page first, and an ordinary account gets an *Administrator access required* page instead of the app. Its **Administration** page shows who is signed in, with **Change password** and **Sign out**. The admin app never connects to a broker; it only edits the deployment's users, connections and gateway settings. It exists only on deployments running in Provisioned mode; anywhere else the URL simply 404s.
 
 Signed in there, you get three modules:
 
 - **User Management** -- list, add, edit, and delete users. For each user you set the username (letters, digits and `. _ @ -`, up to 64, not only dots), password (12 to 128 characters), the **Administrator** flag, and the **Operate** / **Read-only** entitlement rows (each row is a *brokers / msgVpns / queues* glob, e.g. `* / vpn-prod / orders.*`, under the column names **Brokers**, **Message VPNs** and **Queues**). An empty list says what it means: with no Operate rows the user changes no queue, and with no Read-only rows either they can sign in but reach no broker. The **Administrator** flag gives no broker access by itself; an administrator needs rows like anyone else. Leave the password blank when editing to keep the current one. **Add** refuses a username that already exists; use **Edit** to change that user. The last remaining administrator cannot be deleted or have the flag removed (to avoid locking everyone out). Setting a user's password, changing their Administrator flag or deleting them signs that user out everywhere. Under **Modules this user may open**, **Deployment default** (ticked for new users) gives the user whatever the gateway settings give everyone, shown greyed out; untick it to choose their own modules. A module tagged *(not offered)* is switched off for the whole deployment in Gateway Settings, so giving it has no effect until it is offered.
 - **Connection Management** -- list, add, edit, and delete broker connections. For each connection you set the broker name, hostname, the **SEMP** account (port / username / password), the **client** port, and one or more **Message VPNs** (columns **Message VPN**, **Client username**, **Client password**; a broker with none is reachable by no one). Use a **read-only or least-privilege SEMP account**. Passwords are sent to the gateway over TLS and kept in its encrypted store; they are never shown again. Leave a password field blank when editing to keep the stored one. A Message VPN's stored password is matched by its name, so a VPN you add or rename needs its password typed in; **Add** refuses a broker name that already exists. The hostname is a bare host name or IP address (no `https://`, port or path), the SEMP port is required once a SEMP username is set, and the client port once a Message VPN is listed; the gateway refuses a save that breaks these rules and says which.
-- **Settings** -- the gateway's own settings (its `config.yaml`): which connection tabs the app offers, the client access list, session limits, the sign-in throttle, which modules managed users may be given and what a user without their own list gets, the log level, and the file and TLS paths. **Save** applies most changes at once; settings tagged **restart** are saved but take effect only when the gateway restarts, and a banner lists the saved ones still waiting. The file and TLS paths, tagged **edit on host**, are shown but cannot be changed here: edit `config.yaml` on the gateway host and restart. If the gateway cannot read its `config.yaml`, the page says so instead of showing the settings. The gateway refuses an access list that would shut out your own address (the error names it), and refuses any save after someone edited the file directly on the gateway host: a banner says so and Save stays off until the gateway is restarted.
+- **Settings** -- the gateway's own settings (its `config.yaml`): which connection tabs the app offers (Provisioned only, or Direct and Provisioned; leaving Provisioned mode is done in `config.yaml` on the host), the client access list, session limits, the sign-in throttle, which modules signed-in users may be given and what a user without their own list gets, the log level, and the file and TLS paths. **Save** applies most changes at once; settings tagged **restart** are saved but take effect only when the gateway restarts, and a banner lists the saved ones still waiting. The file and TLS paths, tagged **edit on host**, are shown but cannot be changed here: edit `config.yaml` on the gateway host and restart. If the gateway cannot read its `config.yaml`, the page says so instead of showing the settings. The gateway refuses an access list that would shut out your own address (the error names it), and refuses any save after someone edited the file directly on the gateway host: a banner says so and Save stays off until the gateway is restarted.
 
 **Changing your own password or Administrator flag signs you out.** As soon as the save succeeds the admin app shows *Password changed. Sign in again.* (or *Administrator flag changed. Sign in again.*) and returns to its signed-out view, because the gateway has ended your session. Deleting your own account signs you out the same way (the confirmation tells you so). Editing your own entitlements **without** entering a password keeps you signed in. (To change only your own password, **Change password** on the Administration page is the shorter way and keeps you signed in.)
 

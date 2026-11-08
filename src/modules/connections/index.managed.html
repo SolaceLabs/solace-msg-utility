@@ -1,14 +1,14 @@
-<!-- Managed entry template (the `managed` variant). The build splices the
+<!-- Provisioned entry template (the `managed` variant). The build splices the
      Direct markup from index.html in at the module-base marker below. -->
 <div id="conn-tabs" class="conn-tabs flex-row gap-2 mb-4 hidden" role="tablist">
     <button id="conn-tab-direct" class="btn btn-primary conn-tab" type="button" role="tab" data-conn-mode="direct" aria-selected="true">Direct</button>
-    <button id="conn-tab-managed" class="btn btn-secondary conn-tab hidden" type="button" role="tab" data-conn-mode="managed" aria-selected="false">Managed</button>
+    <button id="conn-tab-managed" class="btn btn-secondary conn-tab hidden" type="button" role="tab" data-conn-mode="provisioned" aria-selected="false">Provisioned</button>
 </div>
 <div id="conn-panel-direct" role="tabpanel">
 <!-- @module-base -->
 </div>
-<!-- Managed connection panel: the gateway session's entitled broker/VPN
-     selection. Only rendered when the gateway advertises managed mode via
+<!-- Provisioned connection panel: the gateway session's entitled broker/VPN
+     selection. Only rendered when the gateway advertises Provisioned mode via
      /hosted. Sign-in and password changes happen on the gateway's own pages. -->
 <div id="conn-panel-managed" role="tabpanel" class="hidden">
     <!-- Signed-out view -->
@@ -17,7 +17,7 @@
             <h2 class="m-0">Sign in</h2>
         </div>
         <p class="text-secondary mb-4" style="line-height: 1.5;">
-            Sign in with your managed account to connect to the brokers you are entitled to.
+            Sign in with your account to connect to the brokers you are entitled to.
         </p>
         <div id="managed-login-error" class="text-error mb-4 hidden" style="font-size: 0.9rem;"></div>
         <a id="btn-managed-login" class="btn btn-primary" href="/login">Sign in</a>

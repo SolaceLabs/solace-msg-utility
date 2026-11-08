@@ -61,7 +61,7 @@ describe('mock-broker/boot.managed -- what it installs', () => {
         start();
 
         expect((window as any).solace.Version.version).toBe('10.99.0-mock');
-        expect(await (await fetch('/hosted')).json()).toEqual({ hosted: true, connModes: 'managed', defaultConn: 'managed' });
+        expect(await (await fetch('/hosted')).json()).toEqual({ hosted: true, connModes: 'provisioned', defaultConn: 'provisioned' });
         expect(Array.from(BROKERS.keys())).toEqual(['direct', 'east-prod', 'west-dr', 'lab']);
         expect(getQueue('orders', 'orders.new')!.messages).toHaveLength(24);
         expect(document.getElementById('mock-controls')).not.toBeNull();

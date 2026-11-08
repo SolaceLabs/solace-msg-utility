@@ -202,7 +202,7 @@ describe('mock-broker/gateway/pages -- the app\'s sign-in links', () => {
         expect([ev.defaultPrevented, pages.current()]).toEqual([false, 'app']);
     });
 
-    it('follows the link the Managed panel rewrote, query and all', () => {
+    it('follows the link the Provisioned panel rewrote, query and all', () => {
         gw.signIn('newadmin', 'demo-change-me-01');
         link('/login/password?next=%2F').click();
         expect(pages.current()).toBe('password');

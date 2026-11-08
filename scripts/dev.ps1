@@ -183,30 +183,20 @@ function Task-build {
   # The PWA bundles are target-independent, so every cross-compile leg emits an
   # identical copy; merge-multiple in the release job collapses them.
   $c = Invoke-Logged 'build' 'npm' @('run','build'); if ($c -ne 0) { return $c }
-  # Direct bundles carry no managed UI, managed.html does, and managed-demo.html
-  # carries it with no network -- proven on the output just built, so a wrong
-  # import fails the gate, not a review.
+  # Direct bundles carry no Provisioned UI, provisioned.html does, and
+  # provisioned-demo.html carries it with no network -- proven on the output
+  # just built, so a wrong import fails the gate, not a review.
   $c = Invoke-Logged 'build' 'npm' @('run','check:bundles'); if ($c -ne 0) { return $c }
 
-  # Both gateway variants: the hosted binary and the managed one (RBAC store +
-  # /managed/* handler behind `-tags managed`). Both link gopkg.in/yaml.v3 for
-  # config.yaml; the tag only selects the RBAC files.
+  # The gateway: one binary for every container mode. A compile check -- it
+  # ships only inside the image.
   $env:CGO_ENABLED = '0'; $env:GOOS = $TOs; $env:GOARCH = $TArch
   try {
-    foreach ($tag in @('', 'managed')) {
-      $out = if ($tag) { Join-Path $Dist "$BinBase-$tag$BinSuffix" }
-             else      { Join-Path $Dist "$BinBase$BinSuffix" }
-      # -tags is omitted, never passed empty: PowerShell 5.1 DROPS an empty
-      # string argument to a native command, so `-tags '' -o $out` reaches go as
-      # `-tags -o` and $out becomes a package path. Same shape in dev.sh.
-      $goArgs = @('-C', $GoDir, 'build', '-trimpath',
-                  '-ldflags', "-s -w -X main.version=$Version")
-      if ($tag) { $goArgs += @('-tags', $tag) }
-      $goArgs += @('-o', $out, '.')
-      $c = Invoke-Logged 'build' 'go' $goArgs
-      if ($c -ne 0) { return $c }
-      Write-Note 'build' "built $out"
-    }
+    $out = Join-Path $Dist "$BinBase$BinSuffix"
+    $c = Invoke-Logged 'build' 'go' @('-C', $GoDir, 'build', '-trimpath',
+                                      '-ldflags', "-s -w -X main.version=$Version", '-o', $out, '.')
+    if ($c -ne 0) { return $c }
+    Write-Note 'build' "built $out"
   } finally {
     Remove-Item Env:CGO_ENABLED, Env:GOOS, Env:GOARCH -ErrorAction SilentlyContinue
   }
@@ -218,10 +208,7 @@ function Task-vet {
   # The build strips types without checking them, so tsc --noEmit is the only
   # thing that catches a type error.
   $c = Invoke-Logged 'vet' 'npm' @('run','typecheck'); if ($c -ne 0) { return $c }
-  # Both ways: the RBAC backend is behind the `managed` tag, so an untagged run
-  # never compiles it at all.
-  $c = Invoke-Logged 'vet' 'go' @('-C',$GoDir,'vet','./...'); if ($c -ne 0) { return $c }
-  return (Invoke-Logged 'vet' 'go' @('-C',$GoDir,'vet','-tags','managed','./...'))
+  return (Invoke-Logged 'vet' 'go' @('-C',$GoDir,'vet','./...'))
 }
 
 function Task-test {
@@ -234,12 +221,12 @@ function Task-test {
   } else {
     $c = Invoke-Logged 'test' 'npm' @('run','test:app'); if ($c -ne 0) { return $c }
   }
-  $c = Invoke-Logged 'test' 'go' @('-C',$GoDir,'test','-count=1','./...'); if ($c -ne 0) { return $c }
-  return (Invoke-Logged 'test' 'go' @('-C',$GoDir,'test','-tags','managed','-count=1','./...'))
+  return (Invoke-Logged 'test' 'go' @('-C',$GoDir,'test','-count=1','./...'))
 }
 
-# The demo broker and the managed demo's fake gateway (tests/mock-broker/): the
-# suites behind demo.html and managed-demo.html, the gateway contract included.
+# The demo broker and the Provisioned demo's fake gateway (tests/mock-broker/):
+# the suites behind demo.html and provisioned-demo.html, the gateway contract
+# included.
 # Skipped, like test's web suite, when cov runs them in this invocation.
 function Task-mock {
   $c = Install-Deps 'mock'; if ($c -ne 0) { return $c }
@@ -261,7 +248,7 @@ function Task-cov {
   # After vitest, not before: it empties coverage/ on every run.
   New-Item -ItemType Directory -Force -Path (Join-Path $CovDir 'go') | Out-Null
   $c = Invoke-Logged 'cov' 'go' @(
-    '-C',$GoDir,'test','-tags','managed',"-coverprofile=$covProfile",'./...')
+    '-C',$GoDir,'test',"-coverprofile=$covProfile",'./...')
   if ($c -ne 0) { return $c }
   $c = Invoke-Logged 'cov' 'go' @(
     '-C',$GoDir,'tool','cover',"-html=$covProfile",'-o',(Join-Path $CovDir 'go/coverage.html'))
@@ -283,9 +270,9 @@ function Task-cov {
 }
 
 # The actual build, logged under the calling task so a standalone `scan` never
-# appends to a stale image.log. Compose builds both services (gateway,
-# gateway-managed) into :latest and :managed-latest; we then tag the versioned
-# names the scan and the release refer to.
+# appends to a stale image.log. Compose builds the one image, :latest (the
+# gateway service; the provisioned service runs the same image); we then tag
+# the versioned name the scan and the release refer to.
 function Build-Image {
   param([string]$Task)
   $c = Invoke-Logged $Task 'docker' @(
@@ -293,9 +280,7 @@ function Build-Image {
   if ($c -ne 0) { return $c }
   $c = Invoke-Logged $Task 'docker' @('tag',"${ImageRepo}:latest","${ImageRepo}:$ImageTag")
   if ($c -ne 0) { return $c }
-  $c = Invoke-Logged $Task 'docker' @('tag',"${ImageRepo}:managed-latest","${ImageRepo}:managed-$ImageTag")
-  if ($c -ne 0) { return $c }
-  Write-Note $Task "tagged ${ImageRepo}:$ImageTag and ${ImageRepo}:managed-$ImageTag"
+  Write-Note $Task "tagged ${ImageRepo}:$ImageTag"
   return 0
 }
 
@@ -312,20 +297,17 @@ function Task-scan {
 
   $c = Invoke-Logged 'scan' 'npm' @('run','audit:gate'); if ($c -ne 0) { return $c }
 
-  # The managed superset: every Go file compiles under `-tags managed` (the
-  # untagged build drops the RBAC files), so one tagged scan covers both
-  # binaries and the one third-party dependency, gopkg.in/yaml.v3.
+  # The one binary and its one third-party dependency, gopkg.in/yaml.v3.
   # `go tool`, never `go run pkg@version` -- the latter runs module-less and
   # ignores go.mod's toolchain pin.
-  $c = Invoke-Logged 'scan' 'go' @('-C',$GoDir,'tool','govulncheck','-tags=managed','./...')
+  $c = Invoke-Logged 'scan' 'go' @('-C',$GoDir,'tool','govulncheck','./...')
   if ($c -ne 0) { return $c }
 
   # Image half: never against a stale image, so build first -- `image` is not
   # part of `all`.
   if (Test-LinuxDocker) {
     $c = Build-Image 'scan'; if ($c -ne 0) { return $c }
-    $c = Invoke-TrivyImage 'scan' "${ImageRepo}:$ImageTag"; if ($c -ne 0) { return $c }
-    return (Invoke-TrivyImage 'scan' "${ImageRepo}:managed-$ImageTag")
+    return (Invoke-TrivyImage 'scan' "${ImageRepo}:$ImageTag")
   }
   Warn 'no linux-container docker daemon; skipping the image scan'
   return 0
@@ -343,8 +325,8 @@ function Task-graphify {
   return (Invoke-Logged 'graphify' 'graphify' @('update','.'))
 }
 
-# Local only, and standalone: not in `all` or `full`. The managed image against
-# an existing broker, driven by scripts/e2e.mjs, which owns the stack's lifetime;
+# Local only, and standalone: not in `all` or `full`. The image in Provisioned
+# mode against an existing broker, driven by scripts/e2e.mjs, which owns the stack's lifetime;
 # the down -v here is the backstop for a run that died before its own.
 function Task-e2e {
   if ($env:CI) { Warn 'e2e is local-only; skipping in CI'; return 0 }
@@ -378,7 +360,7 @@ usage: dev.ps1 <task>...
   all   = $($All -join ' ')       (what CI runs, as: all scan)
   full  = $($Full -join ' ')      (pre-tag sweep)
   mock  = the demo broker and fake-gateway suites (tests/mock-broker/)
-  e2e   = the managed gateway against an existing broker (local only, standalone)
+  e2e   = the gateway in Provisioned mode against an existing broker (local only, standalone)
 "@ | Write-Host
 }
 

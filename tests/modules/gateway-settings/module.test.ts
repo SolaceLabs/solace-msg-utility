@@ -17,15 +17,15 @@ const ADMIN: ManagedSession = {
     admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
 };
 const SETTINGS = {
-    hosted: true, managed: true, connModes: 'both', defaultConn: 'direct', appDir: '/SolaceMsgUtility',
+    hosted: true, connModes: 'both', defaultConn: 'direct', appDir: '/SolaceMsgUtility',
     tls: { certFile: '/tls/tls.crt', keyFile: '/tls/tls.key', trustDir: '/tls/trust', insecureSkipVerify: false },
-    logLevel: 'warn', usersFile: '/managed/users.yaml', connectionsFile: '/managed/connections.yaml',
+    logLevel: 'warn', usersFile: '/data/users.yaml', connectionsFile: '/data/connections.yaml',
     access: { allow: ['10.0.0.0/8', '192.0.2.0/24'], trustedProxies: [] },
     session: { idleMinutes: 10, absoluteMinutes: 30 },
     login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60 },
     modules: { offered: ['queue-browser'], userDefault: 'all' },
 };
-const RESTART_ONLY = ['hosted', 'managed', 'appDir', 'tls.certFile', 'tls.keyFile', 'tls.trustDir', 'tls.insecureSkipVerify', 'usersFile', 'connectionsFile'];
+const RESTART_ONLY = ['hosted', 'appDir', 'tls.certFile', 'tls.keyFile', 'tls.trustDir', 'tls.insecureSkipVerify', 'usersFile', 'connectionsFile'];
 const HOST_ONLY = ['appDir', 'tls.certFile', 'tls.keyFile', 'tls.trustDir', 'usersFile', 'connectionsFile'];
 const view = (over: Record<string, unknown> = {}) => ({
     ok: true,
@@ -81,7 +81,6 @@ describe('gateway-settings — load', () => {
         expect(value(container, 'access-allow')).toBe('10.0.0.0/8\n192.0.2.0/24');
         expect(value(container, 'session-idleMinutes')).toBe('10');
         expect(value(container, 'tls-certFile')).toBe('/tls/tls.crt');
-        expect(el<HTMLInputElement>(container, '#gw-set-hosted').checked).toBe(true);
         expect(el<HTMLInputElement>(container, '#gw-set-tls-insecureSkipVerify').checked).toBe(false);
         expect(el(container, '#gw-set-modules-offered').textContent).toBe(' Queue Browser Queue Copy');
         expect(offeredBoxes(container).map(b => b.checked)).toEqual([true, false]);
@@ -93,13 +92,17 @@ describe('gateway-settings — load', () => {
     it('tags the restart-only keys, and shows the path keys read-only for a hand edit', async () => {
         const { container } = await setup();
         const tagged = (cls: string) => [...container.querySelectorAll<HTMLElement>(`.${cls}`)].map(g => g.dataset.key);
-        expect(tagged('gw-set-restart')).toEqual(['hosted', 'managed', 'tls.insecureSkipVerify']);
+        expect(tagged('gw-set-restart')).toEqual(['tls.insecureSkipVerify']);
         expect(tagged('gw-set-host')).toEqual(['appDir', 'usersFile', 'connectionsFile', 'tls.certFile', 'tls.keyFile', 'tls.trustDir']);
         const disabled = [...container.querySelectorAll<HTMLInputElement>('#gw-set-view .form-control:disabled')].map(i => i.id);
         expect(disabled).toEqual(['gw-set-appDir', 'gw-set-usersFile', 'gw-set-connectionsFile', 'gw-set-tls-certFile', 'gw-set-tls-keyFile', 'gw-set-tls-trustDir']);
-        // Every key the gateway may name has a field to tag.
+        // Every key the gateway may name has a field to tag, except hosted: it
+        // must stay true while Provisioned mode serves this page, so the page
+        // offers neither it nor connModes "direct".
         const keys = [...container.querySelectorAll<HTMLElement>('[data-key]')].map(g => g.dataset.key);
-        expect(keys).toEqual(expect.arrayContaining(RESTART_ONLY));
+        expect(keys).toEqual(expect.arrayContaining(RESTART_ONLY.filter(k => k !== 'hosted')));
+        expect(keys).not.toContain('hosted');
+        expect([...container.querySelectorAll<HTMLOptionElement>('#gw-set-connModes option')].map(o => o.value)).toEqual(['provisioned', 'both']);
     });
 
     it('lists the keys saved but not yet running', async () => {

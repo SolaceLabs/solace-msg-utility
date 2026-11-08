@@ -1,5 +1,3 @@
-//go:build managed
-
 package main
 
 import (
@@ -266,13 +264,13 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-// gateApp guards the PWA while connModes is managed (read live, so a settings
+// gateApp guards the PWA while connModes is provisioned (read live, so a settings
 // save applies to the next request): nothing of the app reaches a client
 // without a session. Navigations are sent to the sign-in (or the
 // forced password change); asset requests get a bare 401.
 func (p *authPages) gateApp(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if p.live.get().connModes != connManaged {
+		if p.live.get().connModes != connProvisioned {
 			next.ServeHTTP(w, r)
 			return
 		}

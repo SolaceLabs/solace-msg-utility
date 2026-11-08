@@ -1741,7 +1741,7 @@ describe('ConnectionsModule', () => {
     });
 
     // This is the Release entry: Direct only, whatever the gateway advertises.
-    // The Managed tab ships only in managed.html (module.managed.ts), covered by
+    // The Managed tab ships only in provisioned.html (module.managed.ts), covered by
     // tests/modules/connections/module.managed.test.ts.
     describe('Direct-only entry', () => {
         afterEach(() => setHosted(false));
@@ -1753,18 +1753,18 @@ describe('ConnectionsModule', () => {
             });
         }
 
-        it('publishes a Direct-only connConfig and warns when the gateway offers managed sign-in', async () => {
-            // A standard bundle served by a managed gateway (an APP_DIR override):
+        it('publishes a Direct-only connConfig and warns when the gateway offers Provisioned sign-in', async () => {
+            // The Direct bundle served by a Provisioned gateway (an APP_DIR override):
             // queue-copy derives its destination choices from connConfig, so it
             // must not offer a provisioned mode no session in this bundle can back.
-            stubHosted({ hosted: true, connModes: 'managed', defaultConn: 'managed' });
+            stubHosted({ hosted: true, connModes: 'provisioned', defaultConn: 'provisioned' });
             const warn = vi.spyOn(logger, 'warn');
             const { ctx, appState } = createTestContext(container);
             await ConnectionsModule.install(ctx);
 
             expect(isHosted()).toBe(true);
             expect(appState.connConfig).toEqual({ connModes: 'direct', defaultConn: 'direct' });
-            expect(warn).toHaveBeenCalledWith(expect.stringContaining('Serve managed.html'));
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('Serve provisioned.html'));
         });
 
         it('publishes the same Direct-only connConfig, without a warning, for a Direct gateway', async () => {
@@ -1774,7 +1774,7 @@ describe('ConnectionsModule', () => {
             await ConnectionsModule.install(ctx);
 
             expect(appState.connConfig).toEqual({ connModes: 'direct', defaultConn: 'direct' });
-            expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Serve managed.html'));
+            expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Serve provisioned.html'));
         });
     });
 

@@ -21,18 +21,27 @@ import (
 // this default should only ever be seen in an ad-hoc `go build`.
 var version = "dev"
 
-// Connection modes the app may offer, advertised to the SPA via /hosted.
+// Connection modes the app may offer, advertised to the SPA via /hosted. Any
+// value but direct turns Provisioned mode on: sign-in, the stores and the admin
+// console.
 const (
-	connDirect  = "direct"
-	connManaged = "managed"
-	connBoth    = "both"
+	connDirect      = "direct"
+	connProvisioned = "provisioned"
+	connBoth        = "both"
 )
 
-// Route and bundle for the standalone administration app. Served only when the
-// gateway is hosted AND managed — see adminHandler.
+// Route and bundle for the administration console. Served only in Provisioned
+// mode -- see adminHandler.
 const (
 	adminPath      = "/solAdmin"
 	adminIndexFile = "solAdmin.html"
+)
+
+// The app bundle served at /: the Direct-only Release bundle, or in
+// Provisioned mode the one that carries the sign-in. The image ships both.
+const (
+	directIndexFile      = "index.html"
+	provisionedIndexFile = "provisioned.html"
 )
 
 // config is the validated config.yaml. The keys live.go lists as live are
@@ -46,36 +55,34 @@ type config struct {
 	trustDir           string
 	insecureSkipVerify bool
 	logLevel           slog.Level
-	// Managed (RBAC) mode. When false, /managed/* is not served (falls through
-	// to the SPA) and none of the files below are read.
-	managed         bool
+	// Provisioned mode's stores. Read only when connModes offers provisioned.
 	usersFile       string
 	connectionsFile string
 	storeKeyFile    string // encrypts usersFile and connectionsFile (keyfile.go)
 	// Connection-mode config surfaced to the SPA through /hosted. connModes is
-	// one of direct|managed|both; defaultConn (direct|managed) picks the tab
-	// shown first when both are offered. Defaults keep a plain deployment
-	// Direct-only.
+	// one of direct|provisioned|both; defaultConn (direct|provisioned) picks
+	// the tab shown first when both are offered. The default, direct, is
+	// Gateway mode: users type their broker's details and the gateway relays.
 	connModes   string
 	defaultConn string
 	// Client access list. Lives in config.yaml only (no env var); an empty
 	// allow list admits every client. See access.go.
 	access accessConfig
-	// Managed sign-in limits and module control, config.yaml only (no env
-	// var). Unused when managed is false.
+	// Provisioned sign-in limits and module control, config.yaml only (no env
+	// var). Unused in Gateway mode.
 	session sessionLimits
 	login   loginLimits
 	modules moduleSettings
 }
 
-// managedRoutes is what the managed build adds to the router; nil in the
-// stdlib-only binary or when managed is false.
+// managedRoutes is what Provisioned mode adds to the router; nil in Gateway
+// mode.
 type managedRoutes struct {
 	api       http.Handler                    // /managed/*
 	pages     http.Handler                    // /login, /login/password
-	gateApp   func(http.Handler) http.Handler // the PWA; a session under connModes=managed
+	gateApp   func(http.Handler) http.Handler // the PWA; a session under connModes=provisioned
 	gateAdmin func(http.Handler) http.Handler // /solAdmin; an admin session, every mode
-	gateRelay func(http.Handler) http.Handler // the Direct relay; 404 under connModes=managed
+	gateRelay func(http.Handler) http.Handler // the Direct relay; 404 under connModes=provisioned
 }
 
 // robotsTxt asks every crawler to stay out; X-Robots-Tag on each response says
@@ -83,7 +90,7 @@ type managedRoutes struct {
 const robotsTxt = "User-agent: *\nDisallow: /\n"
 
 // newRootHandler routes a request to the gateway's handlers. /managed/* never
-// falls through to the SPA: without managed routing it is a plain 404.
+// falls through to the SPA: in Gateway mode it is a plain 404.
 func newRootHandler(hosted, admin, app, relay http.Handler, mr *managedRoutes) http.Handler {
 	if mr != nil {
 		app, admin, relay = mr.gateApp(app), mr.gateAdmin(admin), mr.gateRelay(relay)
@@ -119,13 +126,14 @@ func newRootHandler(hosted, admin, app, relay http.Handler, mr *managedRoutes) h
 // with, and what a config.yaml key falls back to when it is missing.
 func defaultConfig() config {
 	return config{
+		hosted:          true,
 		appDir:          "/SolaceMsgUtility",
 		certFile:        "/tls/tls.crt",
 		keyFile:         "/tls/tls.key",
 		trustDir:        "/tls/trust",
 		logLevel:        slog.LevelWarn,
-		usersFile:       "/managed/users.yaml",
-		connectionsFile: "/managed/connections.yaml",
+		usersFile:       "/data/users.yaml",
+		connectionsFile: "/data/connections.yaml",
 		storeKeyFile:    defaultStoreKeyFile,
 		connModes:       connDirect,
 		defaultConn:     connDirect,
@@ -149,15 +157,18 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, fmt.Errorf("LOG_LEVEL=%q: %w", os.Getenv("LOG_LEVEL"), err)
 	}
+	hosted, err := parseHosted(os.Getenv("HOSTED"))
+	if err != nil {
+		return config{}, fmt.Errorf("HOSTED=%q: %w", os.Getenv("HOSTED"), err)
+	}
 	return config{
-		hosted:             os.Getenv("HOSTED") == "true",
+		hosted:             hosted,
 		appDir:             envOr("APP_DIR", d.appDir),
 		certFile:           envOr("SSL_CERT_FILE", d.certFile),
 		keyFile:            envOr("SSL_KEY_FILE", d.keyFile),
 		trustDir:           envOr("SSL_TRUST_DIR", d.trustDir),
 		insecureSkipVerify: os.Getenv("SSL_INSECURE_SKIP_VERIFY") == "true",
 		logLevel:           level,
-		managed:            os.Getenv("MANAGED") == "true",
 		usersFile:          envOr("USERS_FILE", d.usersFile),
 		connectionsFile:    envOr("CONNECTIONS_FILE", d.connectionsFile),
 		storeKeyFile:       envOr("STORE_KEY_FILE", d.storeKeyFile),
@@ -169,37 +180,41 @@ func loadConfig() (config, error) {
 	}, nil
 }
 
-// validateConnModes reports whether the advertised connection modes can actually
-// be served. Called at startup and fatal on failure: a deployment that promises
-// Managed sign-in but cannot serve /managed/* would show users a tab that only
-// fails at login, so it must refuse to start instead. Messages name the
-// config.yaml key and the env var that seeds it, since either may be the source.
-//
-// `managedRouting` is whether the managed handler was actually built + loaded
-// (false on the stdlib-only binary compiled without the `managed` build tag).
-func validateConnModes(cfg config, managedRouting bool) error {
+// parseHosted reads HOSTED. Gateway mode is the image's purpose, so unset is
+// true; "false" makes the gateway serve the files only (browsers then connect
+// to brokers themselves). Anything else is refused rather than guessed.
+func parseHosted(raw string) (bool, error) {
+	switch raw {
+	case "", "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, errors.New(`must be "true" or "false"`)
+}
+
+// provisioned reports whether cfg turns Provisioned mode on: sign-in, the
+// stores and the admin console.
+func (c config) provisioned() bool { return c.connModes != connDirect }
+
+// validateConnModes reports whether the advertised connection modes can be
+// served. Fatal at startup and a refusal on the settings page: Provisioned
+// sign-in on a gateway the app cannot detect would show a tab that only fails
+// at sign-in. Messages name the config.yaml key and the env var that seeds it,
+// since either may be the source.
+func validateConnModes(cfg config) error {
 	switch cfg.connModes {
-	case connDirect, connManaged, connBoth:
+	case connDirect, connProvisioned, connBoth:
 	default:
-		return fmt.Errorf("connModes=%q (config.yaml; seeded by CONN_MODES) must be one of %q, %q, %q", cfg.connModes, connDirect, connManaged, connBoth)
+		return fmt.Errorf("connModes=%q (config.yaml; seeded by CONN_MODES) must be one of %q, %q, %q", cfg.connModes, connDirect, connProvisioned, connBoth)
 	}
 	switch cfg.defaultConn {
-	case connDirect, connManaged:
+	case connDirect, connProvisioned:
 	default:
-		return fmt.Errorf("defaultConn=%q (config.yaml; seeded by DEFAULT_CONN) must be one of %q, %q", cfg.defaultConn, connDirect, connManaged)
+		return fmt.Errorf("defaultConn=%q (config.yaml; seeded by DEFAULT_CONN) must be one of %q, %q", cfg.defaultConn, connDirect, connProvisioned)
 	}
-	if cfg.connModes == connDirect {
-		return nil // managed never offered — nothing else to check
-	}
-	// Managed is advertised: every prerequisite must be in place.
-	if !cfg.hosted {
-		return fmt.Errorf("connModes=%q offers managed sign-in but hosted is false (config.yaml; seeded by HOSTED), so the app cannot detect the gateway", cfg.connModes)
-	}
-	if !cfg.managed {
-		return fmt.Errorf("connModes=%q offers managed sign-in but managed is false (config.yaml; seeded by MANAGED), so /managed/* would not be served", cfg.connModes)
-	}
-	if !managedRouting {
-		return fmt.Errorf("connModes=%q offers managed sign-in but this gateway was built without the \"managed\" build tag", cfg.connModes)
+	if cfg.provisioned() && !cfg.hosted {
+		return fmt.Errorf("connModes=%q offers Provisioned sign-in but hosted is false (config.yaml; seeded by HOSTED), so the app cannot detect the gateway", cfg.connModes)
 	}
 	return nil
 }
@@ -302,31 +317,24 @@ func serve() {
 	}
 
 	hh := newHostedHandler(cfg.hosted, lv)
-	pwa := newPWAHandler(cfg.appDir, logger)
 	upstream := newUpstreamTransport(trustPool, cfg.insecureSkipVerify)
 	rp := newReverseProxy(upstream, logger)
 
-	// Managed sign-in and the /managed/* API are compiled in only with
-	// `-tags managed`; the stdlib-only hosted binary links a stub that returns
-	// nil. A load failure is fatal (misconfiguration shouldn't silently fall
-	// back to an unauthenticated app). When disabled or absent, mr is nil and
-	// /managed/* is a 404.
+	// Provisioned sign-in and the /managed/* API; nil in Gateway mode, where
+	// /managed/* is a 404. A load failure is fatal: a misconfiguration must not
+	// fall back to an unauthenticated app. The connection modes were validated
+	// with the rest of config.yaml (resolveConfig).
 	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, sum: load.sum}, upstream, logger)
 	if err != nil {
-		logger.Error("managed store load failed", "err", err)
-		os.Exit(1)
-	}
-
-	// Refuse to start when the advertised connection modes can't be served — a
-	// Managed tab that always fails at login is worse than a clear startup error.
-	if err := validateConnModes(cfg, mr != nil); err != nil {
-		logger.Error("invalid connection-mode configuration", "err", err)
+		logger.Error("provisioned store load failed", "err", err)
 		os.Exit(1)
 	}
 	logger.Info("connection modes", "conn_modes", cfg.connModes, "default_conn", cfg.defaultConn)
 
-	// The admin app edits the managed store, so it only exists where that store
-	// is actually served: hosted, managed, and built with the managed tag.
+	pwa := newPWAHandler(cfg.appDir, appIndexFile(mr != nil), logger)
+
+	// The admin console edits the stores, so it only exists in Provisioned
+	// mode, where they are served.
 	admin := newAdminHandler(cfg.appDir, cfg.hosted && mr != nil, logger)
 	if admin.enabled {
 		logger.Info("administration app enabled", "path", adminPath)

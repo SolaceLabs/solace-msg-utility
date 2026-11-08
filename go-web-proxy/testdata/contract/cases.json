@@ -438,7 +438,7 @@
           "as": "admin", "method": "GET", "path": "/managed/settings", "status": 200,
           "response": {
             "settings": {
-              "hosted": true, "managed": true, "connModes": "both", "defaultConn": "direct",
+              "hosted": true, "connModes": "both", "defaultConn": "direct",
               "appDir": "/SolaceMsgUtility",
               "tls": { "certFile": "/tls/tls.crt", "keyFile": "/tls/tls.key", "trustDir": "/tls/trust", "insecureSkipVerify": false },
               "logLevel": "warn", "usersFile": "<path>", "connectionsFile": "<path>",
@@ -447,7 +447,7 @@
               "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
               "modules": { "offered": ["queue-browser", "queue-copy"], "userDefault": "all" }
             },
-            "restartOnly": ["hosted", "managed", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"],
+            "restartOnly": ["hosted", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"],
             "hostOnly": ["appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "usersFile", "connectionsFile"],
             "pendingRestart": [],
             "changedOnDisk": false,
@@ -469,7 +469,11 @@
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "connModes": "bogus" },
-          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "connModes=\"bogus\" (config.yaml; seeded by CONN_MODES) must be one of \"direct\", \"managed\", \"both\"" }
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "connModes=\"bogus\" (config.yaml; seeded by CONN_MODES) must be one of \"direct\", \"provisioned\", \"both\"" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "connModes": "direct" },
+          "status": 422, "response": { "error": "invalid", "field": "connModes", "reason": "connModes \"direct\" would turn Provisioned mode off at the next restart, and this console with it. To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart." }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "modules": { "userDefault": "some" } },
@@ -514,7 +518,7 @@
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "defaultConn": "neither" },
-          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "defaultConn=\"neither\" (config.yaml; seeded by DEFAULT_CONN) must be one of \"direct\", \"managed\"" }
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "defaultConn=\"neither\" (config.yaml; seeded by DEFAULT_CONN) must be one of \"direct\", \"provisioned\"" }
         }
       ]
     },
@@ -537,7 +541,7 @@
           "as": "admin", "method": "GET", "path": "/managed/settings", "status": 200,
           "response": {
             "settings": {
-              "hosted": true, "managed": true, "connModes": "both", "defaultConn": "direct",
+              "hosted": true, "connModes": "both", "defaultConn": "direct",
               "appDir": "/SolaceMsgUtility",
               "tls": { "certFile": "/tls/tls.crt", "keyFile": "/tls/tls.key", "trustDir": "/tls/trust", "insecureSkipVerify": false },
               "logLevel": "warn", "usersFile": "<path>", "connectionsFile": "<path>",
@@ -546,7 +550,7 @@
               "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
               "modules": { "offered": ["queue-browser", "queue-copy"], "userDefault": "all" }
             },
-            "restartOnly": ["hosted", "managed", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"],
+            "restartOnly": ["hosted", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"],
             "hostOnly": ["appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "usersFile", "connectionsFile"],
             "pendingRestart": [],
             "changedOnDisk": false,

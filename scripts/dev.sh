@@ -135,31 +135,17 @@ task_build() {
   # The PWA bundles are target-independent, so every cross-compile leg emits an
   # identical copy; merge-multiple in the release job collapses them.
   run build npm run build || return $?
-  # Direct bundles carry no managed UI, managed.html does, and managed-demo.html
-  # carries it with no network -- proven on the output just built, so a wrong
-  # import fails the gate, not a review.
+  # Direct bundles carry no Provisioned UI, provisioned.html does, and
+  # provisioned-demo.html carries it with no network -- proven on the output
+  # just built, so a wrong import fails the gate, not a review.
   run build npm run check:bundles || return $?
 
-  # Both gateway variants: the hosted binary and the managed one (RBAC store +
-  # /managed/* handler behind `-tags managed`). Both link gopkg.in/yaml.v3 for
-  # config.yaml; the tag only selects the RBAC files.
-  local tag out
-  local -a args
-  for tag in "" "managed"; do
-    args=(-trimpath -ldflags "-s -w -X main.version=$VERSION")
-    # -tags is omitted, never passed empty: PowerShell 5.1 drops empty string
-    # arguments to a native command, which would silently shift `-o` into the
-    # -tags slot. Same shape both sides.
-    if [ -n "$tag" ]; then
-      args+=(-tags "$tag")
-      out="$DIST/$BIN_BASE-$tag$BIN_SUFFIX"
-    else
-      out="$DIST/$BIN_BASE$BIN_SUFFIX"
-    fi
-    run build env CGO_ENABLED=0 GOOS="$T_OS" GOARCH="$T_ARCH" \
-      go -C "$GO_DIR" build "${args[@]}" -o "$out" . || return $?
-    note build "built $out"
-  done
+  # The gateway: one binary for every container mode. A compile check -- it
+  # ships only inside the image.
+  local out="$DIST/$BIN_BASE$BIN_SUFFIX"
+  run build env CGO_ENABLED=0 GOOS="$T_OS" GOARCH="$T_ARCH" \
+    go -C "$GO_DIR" build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$out" . || return $?
+  note build "built $out"
 }
 
 task_vet() {
@@ -167,10 +153,7 @@ task_vet() {
   # The build strips types without checking them, so tsc --noEmit is the only
   # thing that catches a type error.
   run vet npm run typecheck || return $?
-  # Both ways: the RBAC backend is behind the `managed` tag, so an untagged run
-  # never compiles it at all.
   run vet go -C "$GO_DIR" vet ./... || return $?
-  run vet go -C "$GO_DIR" vet -tags managed ./... || return $?
 }
 
 task_test() {
@@ -184,11 +167,11 @@ task_test() {
     run test npm run test:app || return $?
   fi
   run test go -C "$GO_DIR" test -count=1 ./... || return $?
-  run test go -C "$GO_DIR" test -tags managed -count=1 ./... || return $?
 }
 
-# The demo broker and the managed demo's fake gateway (tests/mock-broker/): the
-# suites behind demo.html and managed-demo.html, the gateway contract included.
+# The demo broker and the Provisioned demo's fake gateway (tests/mock-broker/):
+# the suites behind demo.html and provisioned-demo.html, the gateway contract
+# included.
 # Skipped, like test's web suite, when cov runs them in this invocation.
 task_mock() {
   ensure_deps mock || return $?
@@ -208,7 +191,7 @@ task_cov() {
 
   # After vitest, not before: it empties coverage/ on every run.
   mkdir -p "$COV_DIR/go"
-  run cov go -C "$GO_DIR" test -tags managed \
+  run cov go -C "$GO_DIR" test \
     -coverprofile="$COV_DIR/go/coverage.out" ./... || return $?
   run cov go -C "$GO_DIR" tool cover \
     -html="$COV_DIR/go/coverage.out" -o "$COV_DIR/go/coverage.html" || return $?
@@ -225,15 +208,14 @@ task_cov() {
 }
 
 # build_image <log-task> -- the actual build, logged under the calling task so
-# a standalone `scan` never appends to a stale image.log. Compose builds both
-# services (gateway, gateway-managed) into :latest and :managed-latest; we then
-# tag the versioned names the scan and the release refer to.
+# a standalone `scan` never appends to a stale image.log. Compose builds the one
+# image, :latest (the gateway service; the provisioned service runs the same
+# image); we then tag the versioned name the scan and the release refer to.
 build_image() {
   local task=$1
   run "$task" docker compose -f "$COMPOSE_FILE" --progress plain build || return $?
   run "$task" docker tag "$IMAGE_REPO:latest" "$IMAGE_REPO:$IMAGE_TAG" || return $?
-  run "$task" docker tag "$IMAGE_REPO:managed-latest" "$IMAGE_REPO:managed-$IMAGE_TAG" || return $?
-  note "$task" "tagged $IMAGE_REPO:$IMAGE_TAG and $IMAGE_REPO:managed-$IMAGE_TAG"
+  note "$task" "tagged $IMAGE_REPO:$IMAGE_TAG"
 }
 
 task_image() {
@@ -248,20 +230,16 @@ task_scan() {
 
   run scan npm run audit:gate || return $?
 
-  # The managed superset: every Go file compiles under `-tags managed` (the
-  # untagged build drops the RBAC files), so one tagged scan covers both
-  # binaries and the one third-party dependency, gopkg.in/yaml.v3.
+  # The one binary and its one third-party dependency, gopkg.in/yaml.v3.
   # `go tool`, never `go run pkg@version` -- the latter runs module-less and
   # ignores go.mod's toolchain pin.
-  run scan go -C "$GO_DIR" tool govulncheck -tags=managed ./... || return $?
+  run scan go -C "$GO_DIR" tool govulncheck ./... || return $?
 
   # Image half: never against a stale image, so build first -- `image` is not
   # part of `all`.
   if has_linux_docker; then
     build_image scan || return $?
     trivy_image scan "$IMAGE_REPO:$IMAGE_TAG" || code=$?
-    [ "$code" -eq 0 ] || return $code
-    trivy_image scan "$IMAGE_REPO:managed-$IMAGE_TAG" || code=$?
   else
     warn "no linux-container docker daemon; skipping the image scan"
   fi
@@ -278,8 +256,8 @@ task_graphify() {
   run graphify graphify update .
 }
 
-# Local only, and standalone: not in `all` or `full`. The managed image against
-# an existing broker, driven by scripts/e2e.mjs, which owns the stack's lifetime;
+# Local only, and standalone: not in `all` or `full`. The image in Provisioned
+# mode against an existing broker, driven by scripts/e2e.mjs, which owns the stack's lifetime;
 # the down -v here is the backstop for a run that died before its own.
 task_e2e() {
   [ -n "${CI:-}" ] && { warn "e2e is local-only; skipping in CI"; return 0; }
@@ -306,7 +284,7 @@ usage: $(basename "$0") <task>...
   all   = $ALL       (what CI runs, as: all scan)
   full  = $FULL      (pre-tag sweep)
   mock  = the demo broker and fake-gateway suites (tests/mock-broker/)
-  e2e   = the managed gateway against an existing broker (local only, standalone)
+  e2e   = the gateway in Provisioned mode against an existing broker (local only, standalone)
 EOF
 }
 

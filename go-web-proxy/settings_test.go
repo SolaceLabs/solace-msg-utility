@@ -1,5 +1,3 @@
-//go:build managed
-
 package main
 
 import (
@@ -76,29 +74,29 @@ func TestSettings_SaveAppliesLiveKeysAtOnce(t *testing.T) {
 	if rec := e.do("GET", "/", "", nil); rec.Body.String() != "app" {
 		t.Fatalf("connModes both: the app is open, got %d", rec.Code)
 	}
-	rec := e.saveSettings(t, `{"connModes":"managed","logLevel":"debug","session":{"idleMinutes":1,"absoluteMinutes":30},"modules":{"offered":["queue-copy"],"userDefault":"none"}}`)
+	rec := e.saveSettings(t, `{"connModes":"provisioned","logLevel":"debug","session":{"idleMinutes":1,"absoluteMinutes":30},"modules":{"offered":["queue-copy"],"userDefault":"none"}}`)
 	expect(t, rec, http.StatusOK, "")
 	if strings.TrimSpace(rec.Body.String()) != `{"restartRequired":[]}` {
 		t.Errorf("live keys need no restart: %s", rec.Body.String())
 	}
 	cur := e.live.get()
-	if cur.connModes != connManaged || cur.session.idle != time.Minute || e.live.level.Level() != slog.LevelDebug {
+	if cur.connModes != connProvisioned || cur.session.idle != time.Minute || e.live.level.Level() != slog.LevelDebug {
 		t.Errorf("not applied: %+v level %v", cur, e.live.level.Level())
 	}
 	if !reflect.DeepEqual(cur.modules, moduleSettings{offered: []string{"queue-copy"}, userDefault: modulesDefaultNone}) {
 		t.Errorf("modules: %+v", cur.modules)
 	}
 	if rec := e.do("GET", "/", "", nil); rec.Code != http.StatusSeeOther {
-		t.Errorf("connModes managed: the app must now need a session, got %d", rec.Code)
+		t.Errorf("connModes provisioned: the app must now need a session, got %d", rec.Code)
 	}
 	disk := e.fileOnDisk(t)
-	if disk.ConnModes != connManaged || disk.Session.IdleMinutes != 1 || disk.AppDir != e.cfg.appDir {
+	if disk.ConnModes != connProvisioned || disk.Session.IdleMinutes != 1 || disk.AppDir != e.cfg.appDir {
 		t.Errorf("file: %+v", disk)
 	}
 	if !strings.Contains(e.log.String(), "gateway settings saved") || !strings.Contains(e.log.String(), "by=admin") {
 		t.Errorf("a save must be logged with who made it: %s", e.log.String())
 	}
-	if got := e.settings(t); got.Settings.ConnModes != connManaged || got.ChangedOnDisk {
+	if got := e.settings(t); got.Settings.ConnModes != connProvisioned || got.ChangedOnDisk {
 		t.Errorf("GET after save: %+v", got)
 	}
 }
@@ -129,8 +127,8 @@ func TestSettings_PathKeysChangeOnlyOnTheHost(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	before, _ := os.ReadFile(e.cfgPath)
 	for key, body := range map[string]string{
-		"appDir":          `{"appDir":"/managed"}`,
-		"tls.certFile":    `{"tls":{"certFile":"/managed/users.yaml"}}`,
+		"appDir":          `{"appDir":"/data"}`,
+		"tls.certFile":    `{"tls":{"certFile":"/data/users.yaml"}}`,
 		"tls.keyFile":     `{"tls":{"keyFile":"/nowhere/tls.key"}}`,
 		"tls.trustDir":    `{"tls":{"trustDir":"/"}}`,
 		"usersFile":       `{"usersFile":"/tmp/users.yaml"}`,
@@ -166,6 +164,8 @@ func TestSettings_Refusals(t *testing.T) {
 		{"bad value", `{"session":{"idleMinutes":0}}`, 422, "invalid", "settings", `"session.idleMinutes"`},
 		{"explorer offered", `{"modules":{"offered":["queue-subscription-explorer"]}}`, 422, "invalid", "settings", "must be one of queue-browser, queue-copy"},
 		{"cross check", `{"hosted":false,"connModes":"both"}`, 422, "invalid", "settings", "hosted is false"},
+		{"direct would end Provisioned mode", `{"connModes":"direct"}`, 422, "invalid", "connModes", "set connModes: direct in config.yaml on the gateway host and restart"},
+		{"managed is retired", `{"managed":true}`, 400, "bad_request", "", ""},
 		{"unknown key", `{"bogus":1}`, 400, "bad_request", "", ""},
 		{"version is the gateway's", `{"version":2}`, 400, "bad_request", "", ""},
 		{"store key path is env-only", `{"storeKeyFile":"/tmp/k"}`, 400, "bad_request", "", ""},
@@ -213,23 +213,6 @@ func TestSettings_LockOutWhenClientUnresolved(t *testing.T) {
 	expect(t, rec, http.StatusConflict, "would_lock_out")
 	if got := errorCode(t, rec).Reason; !strings.Contains(got, "cannot tell your address") {
 		t.Errorf("reason: %q", got)
-	}
-}
-
-// connModes applies at once but hosted only at restart: offering managed
-// sign-in on a gateway that is not hosted yet is refused with the order to
-// follow.
-func TestSettings_ConnModesNeedTheRunningGatewayHosted(t *testing.T) {
-	e := newManagedEnv(t, func(c *config) { c.hosted, c.connModes = false, connDirect })
-	rec := e.saveSettings(t, `{"hosted":true,"connModes":"managed"}`)
-	expect(t, rec, http.StatusUnprocessableEntity, "invalid")
-	if got := errorCode(t, rec); got.Field != "connModes" || !strings.Contains(got.Reason, "hosted is false") || !strings.Contains(got.Reason, "restart") {
-		t.Errorf("want the running-gateway reason, got %+v", got)
-	}
-	rec = e.saveSettings(t, `{"hosted":true}`)
-	expect(t, rec, http.StatusOK, "")
-	if strings.TrimSpace(rec.Body.String()) != `{"restartRequired":["hosted"]}` {
-		t.Errorf("hosted is restart-only: %s", rec.Body.String())
 	}
 }
 

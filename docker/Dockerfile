@@ -1,43 +1,49 @@
 # syntax=docker/dockerfile:1.6
 #
-# Single-binary HTTPS gateway for the Solace Message Utility PWA.
+# Single-binary HTTPS gateway for the Solace Message Utility PWA. One image
+# runs every container mode (docs/deployment.md):
+#   Gateway mode (the default)  serves the app and relays its broker
+#                               connections; users type their broker's details.
+#   Provisioned mode (opt-in,   adds sign-in and the admin console; users get
+#   CONN_MODES=provisioned)     only the brokers an administrator granted.
+#   Files only (opt-in,         serves the app; browsers connect to brokers
+#   HOSTED=false)               themselves, as with the Standalone HTML files.
 #
-# Final image is `FROM scratch` — only the static Go binary and the PWA bundle.
-# No shell, no libc, no /etc/passwd. The gateway listens on :9443 (an
+# Final image is `FROM scratch` -- only the static Go binary and the PWA
+# bundles. No shell, no libc, no /etc/passwd. The gateway listens on :9443 (an
 # unprivileged port) and runs as a non-root UID, so it needs no special Linux
-# capability to bind. It serves the PWA from APP_DIR and reverse-proxies
-# SEMP / SMF traffic to user-configured brokers.
+# capability to bind.
 #
 # Mounts:
-#   /tls         — TLS material (tls.crt, tls.key, trust/*.crt, trust/*.pem).
+#   /tls         -- TLS material (tls.crt, tls.key, trust/*.crt, trust/*.pem).
 #                  If tls.crt / tls.key are missing, the gateway generates a
 #                  self-signed pair on startup (writable mount required for that).
-#   /pwa         — PWA bundle (index.html, plus solAdmin.html on managed images,
-#                  plus solclient.js, jszip.min.js and licenses/). The managed
-#                  image's index.html is the managed build (managed.html).
-#                  Defaults to /SolaceMsgUtility inside the image; override
-#                  with APP_DIR.
-#   /managed     — Writable gateway store: config.yaml on every image, plus
-#                  users.yaml, connections.yaml (both encrypted with
-#                  store.key) and store.key for MANAGED=true.
-#                  Baked empty + owned by UID 65532 so a named volume there
-#                  inherits write access. Without a volume it lives in the
-#                  container's writable layer and config.yaml is re-seeded
-#                  from the environment whenever the container is recreated.
+#   /data        -- Writable: config.yaml in every mode, plus in Provisioned mode
+#                  users.yaml and connections.yaml (both encrypted with
+#                  store.key) and store.key. Baked empty + owned by UID 65532 so
+#                  a named volume there inherits write access. Without a volume
+#                  it lives in the container's writable layer and config.yaml is
+#                  re-seeded from the environment whenever the container is
+#                  recreated.
+#   /SolaceMsgUtility -- the app (APP_DIR): index.html (the Direct bundle),
+#                  provisioned.html (the bundle with the sign-in, served at / in
+#                  Provisioned mode), solAdmin.html (the admin console), and
+#                  solclient.js, jszip.min.js and licenses/.
 #
 # Environment (all optional). Except CONFIG_FILE and STORE_KEY_FILE, these only
 # SEED config.yaml on the first start, when the file does not exist; afterwards
 # the file is authoritative and a differing variable is logged, not applied.
 # The client access list (access.allow, access.trustedProxies) has no variable
 # and lives only in the file. See docs/deployment.md.
-#   CONFIG_FILE               /managed/config.yaml (environment-only, never in
+#   CONFIG_FILE               /data/config.yaml (environment-only, never in
 #                             the file). Startup fails if it cannot be written.
-#   HOSTED                    "true" enables the /hosted probe endpoint.
-#   MANAGED                   "true" loads the RBAC store and serves /managed/*.
-#   CONN_MODES                direct|managed|both → which connection tabs the app
-#                             offers. Managed requires HOSTED + MANAGED + the
-#                             managed build tag, or the gateway refuses to start.
-#   DEFAULT_CONN              direct|managed → which tab opens first under "both".
+#   HOSTED                    true (default) | false. false serves the files
+#                             only; Provisioned mode needs true.
+#   CONN_MODES                direct (default, Gateway mode) | provisioned |
+#                             both. Anything but direct turns Provisioned mode
+#                             on: sign-in, the stores and /solAdmin.
+#   DEFAULT_CONN              direct|provisioned: which tab opens first under
+#                             "both".
 #   APP_DIR                   /SolaceMsgUtility
 #   SSL_CERT_FILE             /tls/tls.crt
 #   SSL_KEY_FILE              /tls/tls.key
@@ -45,23 +51,11 @@
 #   SSL_INSECURE_SKIP_VERIFY  "true" disables upstream cert validation.
 #   LOG_LEVEL                 debug|info|warn|error  (default warn; anything
 #                             else fails startup)
-#   STORE_KEY_FILE            /managed/store.key (managed; environment-only;
-#                             encrypts users.yaml and connections.yaml, made
-#                             on a fresh volume only -- back it up)
+#   STORE_KEY_FILE            /data/store.key (Provisioned mode; environment-
+#                             only; encrypts users.yaml and connections.yaml,
+#                             made on a fresh volume only -- back it up)
 #
-# Build args (select which image variant to build):
-#   MANAGED     Baked default for the MANAGED env var (default empty; "true" for
-#               the managed image).
-#   HOSTED      Baked default for the HOSTED env var (default empty; "true" for
-#               the managed image).
-#   CONN_MODES  Baked default for the CONN_MODES env var (default empty → "direct";
-#               the managed image passes "managed").
-#   GO_TAGS     Go build tags for the gateway (default empty → the hosted binary
-#               without RBAC; the managed image passes "managed" to compile in the
-#               RBAC store + /managed/* handler).
-#   MANAGED_UI  Non-empty serves managed.html (the bundle with the Managed
-#               sign-in) as index.html and ships solAdmin.html (the
-#               administration app). Managed images only → see stage 2.
+# Build args:
 #   APP_VERSION The release tag (e.g. v3.6.0), stamped into the gateway binary's
 #               `version` var and the PWA's `__APP_VERSION__`. Git is not
 #               available inside the build, so the value has to arrive this way;
@@ -72,34 +66,27 @@
 # ---- Stage 1: build the static Go gateway ------------------------------------
 FROM golang:1.27.3-alpine AS gateway-builder
 WORKDIR /src
-# go.sum is needed for the managed build (it pulls gopkg.in/yaml.v3); it is
-# harmless for the default stdlib-only hosted build, which imports nothing
-# third-party. GO_TAGS selects the variant: "" → stdlib-only hosted binary,
-# "managed" → compile in the RBAC store + /managed/* handler + yaml.
-# pages/ holds the sign-in page the managed binary embeds (go:embed); the
-# hosted binary does not compile pages.go and ignores it.
+# pages/ holds the sign-in page the binary embeds (go:embed).
 COPY go-web-proxy/go.mod go-web-proxy/go.sum ./
 COPY go-web-proxy/*.go ./
 COPY go-web-proxy/pages/ ./pages/
-ARG GO_TAGS=""
 ARG APP_VERSION="0.0.0-dev"
 RUN CGO_ENABLED=0 GOOS=linux go build \
         -trimpath -ldflags="-s -w -X main.version=$APP_VERSION" \
-        -tags "$GO_TAGS" \
         -o /gateway .
 
-# Stage the /tls and /managed layouts in the builder so we can ship them
+# Stage the /tls and /data layouts in the builder so we can ship them
 # pre-owned by the non-root runtime UID. Scratch has no shell, so this is the
 # only way to bake an empty, correctly-permissioned directory into the final
-# image. /managed is the gateway's writable store: config.yaml on every image
-# (seeded from env on the first start; an unwritable dir is fatal) plus
-# users.yaml and store.key when MANAGED=true (a store-load failure is fatal
-# too). So the dir must be writable by UID 65532. A named volume mounted there
+# image. /data is the gateway's writable store: config.yaml in every mode
+# (seeded from env on the first start; an unwritable dir is fatal) plus the
+# stores and store.key in Provisioned mode (a store-load failure is fatal too).
+# So the dir must be writable by UID 65532. A named volume mounted there
 # inherits this ownership; with no volume the store lives in the container's
 # writable layer (ephemeral: config.yaml is re-seeded on every recreate).
-RUN mkdir -p /staging/tls/trust /staging/managed \
- && chown -R 65532:65532 /staging/tls /staging/managed \
- && chmod 0755 /staging/tls /staging/tls/trust /staging/managed
+RUN mkdir -p /staging/tls/trust /staging/data \
+ && chown -R 65532:65532 /staging/tls /staging/data \
+ && chmod 0755 /staging/tls /staging/tls/trust /staging/data
 
 # ---- Stage 2: build the PWA bundle ------------------------------------------
 # Builds every dist/*.html variant from source so the runtime image doesn't
@@ -117,61 +104,39 @@ COPY src/ ./src/
 ARG APP_VERSION="0.0.0-dev"
 RUN APP_VERSION="$APP_VERSION" npm run build
 
-# Stage exactly what this image should serve, rather than copying all of dist/.
-# The build emits every variant, and an image has no business shipping bundles it
-# does not serve: demo.html and managed-demo.html are the demo builds (the
-# in-browser broker, and for the managed demo a fake gateway too), and
-# solAdmin.html ships only in the managed image. There the gateway serves it
-# only on the /solAdmin route, behind the admin gate; a request for the plain
-# file /solAdmin.html gets 404.
-# Declared after `npm run build` so the expensive build layer stays cached and
-# shared across both image variants.
+# Stage exactly what the image serves, rather than copying all of dist/. The
+# build emits every variant, and the image has no business shipping bundles it
+# does not serve: demo.html and provisioned-demo.html are the demo builds (the
+# in-browser broker, and for the Provisioned demo a fake gateway too).
 #
-# The images serve DIFFERENT index.html files. The standard image serves the
-# Release bundle (Direct only). The managed image (MANAGED_UI) serves
-# managed.html, the only bundle that carries the Managed sign-in, under the
-# same name, plus solAdmin.html. Which tabs managed.html offers is still a
-# runtime decision from CONN_MODES via /hosted.
-# The two vendor scripts the shell loads from beside index.html, from the exact
+# The gateway picks the bundle at /: index.html (the Release bundle, Direct
+# only) in Gateway mode, provisioned.html (the only bundle that carries the
+# sign-in) in Provisioned mode. Which tabs provisioned.html offers is still a
+# runtime decision from CONN_MODES via /hosted. solAdmin.html is served only on
+# the /solAdmin route, behind the admin gate; a request for either file by name
+# gets 404.
+#
+# The two vendor scripts the shell loads from beside the bundle, from the exact
 # versions package.json pins (package-lock.json holds their hashes), with the
 # licence files their terms ask to travel with them: every notice the Solace
 # SDK ships, and JSZip's licence (taken under MIT). A missing file fails the
 # build. The Release HTML files never carry either: nothing in src/ imports
-# them. Before MANAGED_UI, so both image variants share the layer;
-# tests/build/vendor-scripts.test.ts checks each path exists in the package.
+# them. tests/build/vendor-scripts.test.ts checks each path exists in the
+# package.
 RUN mkdir -p /staging/app/licenses/solclientjs /staging/app/licenses/jszip \
  && cp node_modules/solclientjs/lib-browser/solclient.js node_modules/jszip/dist/jszip.min.js /staging/app/ \
  && cp node_modules/solclientjs/LICENSE.txt node_modules/solclientjs/licenses.txt node_modules/solclientjs/COPYRIGHT.txt /staging/app/licenses/solclientjs/ \
- && cp node_modules/jszip/LICENSE.markdown /staging/app/licenses/jszip/
-
-ARG MANAGED_UI=""
-RUN mkdir -p /staging/app \
- && if [ -n "$MANAGED_UI" ]; then \
-      cp -f /pwa/dist/managed.html /staging/app/index.html \
-      && cp -f /pwa/dist/solAdmin.html /staging/app/solAdmin.html; \
-    else \
-      cp -f /pwa/dist/index.html /staging/app/index.html; \
-    fi
+ && cp node_modules/jszip/LICENSE.markdown /staging/app/licenses/jszip/ \
+ && cp /pwa/dist/index.html /pwa/dist/provisioned.html /pwa/dist/solAdmin.html /staging/app/
 
 # ---- Stage 3: scratch runtime ------------------------------------------------
 FROM scratch
-# Baked ENV defaults. Empty for the standard image (a no-op — os.Getenv returns
-# "" either way), set to "true" for the managed image so it runs correctly out
-# of the box. They seed config.yaml on the first start only; afterwards the file
-# wins and a differing `docker run -e` value is logged as ignored.
-ARG MANAGED=""
-ARG HOSTED=""
-ARG CONN_MODES=""
 # Numeric --chown so everything is owned by the non-root UID we run as.
 # Scratch has no /etc/passwd, so we must use numeric IDs everywhere.
-COPY --chown=65532:65532 --from=gateway-builder /gateway         /gateway
-COPY --chown=65532:65532 --from=gateway-builder /staging/tls     /tls
-COPY --chown=65532:65532 --from=gateway-builder /staging/managed /managed
-COPY --chown=65532:65532 --from=pwa-builder     /staging/app/    /SolaceMsgUtility/
-
-ENV MANAGED=${MANAGED} \
-    HOSTED=${HOSTED} \
-    CONN_MODES=${CONN_MODES}
+COPY --chown=65532:65532 --from=gateway-builder /gateway      /gateway
+COPY --chown=65532:65532 --from=gateway-builder /staging/tls  /tls
+COPY --chown=65532:65532 --from=gateway-builder /staging/data /data
+COPY --chown=65532:65532 --from=pwa-builder     /staging/app/ /SolaceMsgUtility/
 
 # 65532 is the conventional "nonroot" UID used by distroless. /tls is baked
 # into the image owned by this UID so self-signed cert generation works

@@ -145,7 +145,7 @@ func TestJoinHostPort(t *testing.T) {
 func TestHostedHandler_Enabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(true, liveWith(func(c *config) { c.connModes, c.defaultConn = connBoth, connManaged })).ServeHTTP(rec, r)
+	newHostedHandler(true, liveWith(func(c *config) { c.connModes, c.defaultConn = connBoth, connProvisioned })).ServeHTTP(rec, r)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: want 200, got %d", rec.Code)
@@ -156,7 +156,7 @@ func TestHostedHandler_Enabled(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("body is not JSON: %v (%q)", err, rec.Body.String())
 	}
-	want := hostedInfo{Hosted: true, ConnModes: connBoth, DefaultConn: connManaged}
+	want := hostedInfo{Hosted: true, ConnModes: connBoth, DefaultConn: connProvisioned}
 	if got != want {
 		t.Errorf("body: want %+v, got %+v", want, got)
 	}
@@ -201,7 +201,7 @@ func TestHostedHandler_ReadsLiveSettings(t *testing.T) {
 	cfg := defaultConfig()
 	lv := newLive(cfg)
 	h := newHostedHandler(true, lv)
-	cfg.connModes, cfg.defaultConn = connBoth, connManaged
+	cfg.connModes, cfg.defaultConn = connBoth, connProvisioned
 	lv.apply(cfg)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/hosted", nil))
@@ -209,50 +209,49 @@ func TestHostedHandler_ReadsLiveSettings(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.ConnModes != connBoth || got.DefaultConn != connManaged {
+	if got.ConnModes != connBoth || got.DefaultConn != connProvisioned {
 		t.Errorf("want the applied modes, got %+v", got)
 	}
 }
 
 // ----- validateConnModes ------------------------------------------------------
 
-// Startup guard: advertising Managed sign-in without the pieces that serve it
-// must refuse to start rather than ship a tab that only fails at login.
+// Startup guard: Provisioned sign-in on a gateway the app cannot detect must
+// refuse to start rather than ship a tab that only fails at sign-in. Each
+// refusal names the key and the variable that seeds it.
 func TestValidateConnModes(t *testing.T) {
-	base := func(modes, def string, hosted, managed bool) config {
-		return config{connModes: modes, defaultConn: def, hosted: hosted, managed: managed}
+	base := func(modes, def string, hosted bool) config {
+		return config{connModes: modes, defaultConn: def, hosted: hosted}
 	}
 	cases := []struct {
-		name           string
-		cfg            config
-		managedRouting bool
-		wantErr        bool
+		name    string
+		cfg     config
+		wantErr string
 	}{
-		{"direct only needs nothing", base(connDirect, connDirect, false, false), false, false},
-		{"direct ignores an odd defaultConn", base(connDirect, connManaged, false, false), false, false},
-		{"managed fully configured", base(connManaged, connManaged, true, true), true, false},
-		{"both fully configured", base(connBoth, connDirect, true, true), true, false},
-		{"invalid CONN_MODES", base("bogus", connDirect, true, true), true, true},
-		{"invalid DEFAULT_CONN", base(connBoth, "bogus", true, true), true, true},
-		{"managed without HOSTED", base(connManaged, connManaged, false, true), true, true},
-		{"managed without MANAGED", base(connBoth, connDirect, true, false), true, true},
-		{"managed on an untagged binary", base(connManaged, connManaged, true, true), false, true},
+		{"Gateway mode", base(connDirect, connDirect, true), ""},
+		{"direct needs no gateway (HOSTED=false)", base(connDirect, connDirect, false), ""},
+		{"direct ignores an odd defaultConn", base(connDirect, connProvisioned, false), ""},
+		{"provisioned", base(connProvisioned, connProvisioned, true), ""},
+		{"both", base(connBoth, connDirect, true), ""},
+		{"invalid CONN_MODES", base("managed", connDirect, true), `connModes="managed" (config.yaml; seeded by CONN_MODES) must be one of "direct", "provisioned", "both"`},
+		{"invalid DEFAULT_CONN", base(connBoth, "bogus", true), `defaultConn="bogus" (config.yaml; seeded by DEFAULT_CONN) must be one of "direct", "provisioned"`},
+		{"provisioned without HOSTED", base(connProvisioned, connProvisioned, false), `offers Provisioned sign-in but hosted is false (config.yaml; seeded by HOSTED)`},
+		{"both without HOSTED", base(connBoth, connDirect, false), `hosted is false`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateConnModes(tc.cfg, tc.managedRouting)
-			if tc.wantErr && err == nil {
-				t.Fatalf("want an error, got nil")
-			}
-			if !tc.wantErr && err != nil {
+			err := validateConnModes(tc.cfg)
+			if tc.wantErr == "" && err != nil {
 				t.Fatalf("want no error, got %v", err)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("want an error containing %q, got %v", tc.wantErr, err)
 			}
 		})
 	}
 }
 
-// The defaults keep an unconfigured deployment Direct-only (and therefore valid
-// on the stdlib-only binary, which has no managed routing at all).
+// The defaults are Gateway mode: Direct only, so Provisioned mode stays off.
 func TestLoadConfig_ConnModeDefaults(t *testing.T) {
 	t.Setenv("CONN_MODES", "")
 	t.Setenv("DEFAULT_CONN", "")
@@ -263,28 +262,28 @@ func TestLoadConfig_ConnModeDefaults(t *testing.T) {
 	if cfg.connModes != connDirect || cfg.defaultConn != connDirect {
 		t.Fatalf("want direct/direct, got %q/%q", cfg.connModes, cfg.defaultConn)
 	}
-	if err := validateConnModes(cfg, false); err != nil {
-		t.Errorf("defaults should validate without managed routing, got %v", err)
+	if err := validateConnModes(cfg); err != nil {
+		t.Errorf("the defaults must validate, got %v", err)
 	}
 }
 
-// Env values are case-insensitive so "Managed"/"BOTH" don't fail the enum check.
+// Env values are case-insensitive so "Provisioned"/"BOTH" don't fail the enum check.
 func TestLoadConfig_ConnModesLowercased(t *testing.T) {
 	t.Setenv("CONN_MODES", "BOTH")
-	t.Setenv("DEFAULT_CONN", "Managed")
+	t.Setenv("DEFAULT_CONN", "Provisioned")
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.connModes != connBoth || cfg.defaultConn != connManaged {
-		t.Fatalf("want both/managed, got %q/%q", cfg.connModes, cfg.defaultConn)
+	if cfg.connModes != connBoth || cfg.defaultConn != connProvisioned {
+		t.Fatalf("want both/provisioned, got %q/%q", cfg.connModes, cfg.defaultConn)
 	}
 }
 
 // ----- pwaHandler -------------------------------------------------------------
 
 func TestPWAHandler_MissingDir(t *testing.T) {
-	h := newPWAHandler(filepath.Join(t.TempDir(), "absent"), quietLogger())
+	h := newPWAHandler(filepath.Join(t.TempDir(), "absent"), directIndexFile, quietLogger())
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusNotFound {
@@ -293,7 +292,7 @@ func TestPWAHandler_MissingDir(t *testing.T) {
 }
 
 func TestPWAHandler_EmptyDir(t *testing.T) {
-	h := newPWAHandler(t.TempDir(), quietLogger()) // empty dir
+	h := newPWAHandler(t.TempDir(), directIndexFile, quietLogger()) // empty dir
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusNotFound {
@@ -306,7 +305,7 @@ func TestPWAHandler_ServesIndex(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>hi</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := newPWAHandler(dir, quietLogger())
+	h := newPWAHandler(dir, directIndexFile, quietLogger())
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -323,7 +322,7 @@ func TestPWAHandler_SPAFallback_NoExtension(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>SPA</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := newPWAHandler(dir, quietLogger())
+	h := newPWAHandler(dir, directIndexFile, quietLogger())
 
 	// /queue-browser/some/deep/route has no file extension → fallback to index.html.
 	rec := httptest.NewRecorder()
@@ -336,22 +335,61 @@ func TestPWAHandler_SPAFallback_NoExtension(t *testing.T) {
 	}
 }
 
-// The admin bundle sits next to index.html in the managed image; only the
-// gated /solAdmin route may serve it.
-func TestPWAHandler_NeverServesTheAdminBundle(t *testing.T) {
+// The image ships the Direct, Provisioned and admin bundles side by side.
+func writeBundles(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
-	for name, body := range map[string]string{"index.html": "<html>app</html>", adminIndexFile: "<html>admin</html>"} {
+	for name, body := range map[string]string{directIndexFile: "<html>direct</html>", provisionedIndexFile: "<html>provisioned</html>", adminIndexFile: "<html>admin</html>"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	h := newPWAHandler(dir, quietLogger())
-	for _, p := range []string{"/solAdmin.html", "/SOLADMIN.HTML", "/x/../solAdmin.html", "/solAdmin.html/"} {
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
-		if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "admin") {
-			t.Errorf("%s: want 404 without the bundle, got %d %q", p, rec.Code, rec.Body.String())
+	return dir
+}
+
+// / and the history-mode fallback serve the mode's bundle: the Direct-only one
+// in Gateway mode, the one with the sign-in in Provisioned mode.
+func TestPWAHandler_ServesTheModesBundle(t *testing.T) {
+	dir := writeBundles(t)
+	for provisioned, want := range map[bool]string{false: "direct", true: "provisioned"} {
+		h := newPWAHandler(dir, appIndexFile(provisioned), quietLogger())
+		for _, p := range []string{"/", "/queue-browser/deep/route"} {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
+			if rec.Code != http.StatusOK || rec.Body.String() != "<html>"+want+"</html>" || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
+				t.Errorf("provisioned=%v %s: want the %s bundle, got %d %q", provisioned, p, want, rec.Code, rec.Body.String())
+			}
 		}
+	}
+}
+
+// Only the gated /solAdmin route may serve the admin bundle, and only / the
+// Provisioned one, in either mode.
+func TestPWAHandler_NeverServesTheAdminOrProvisionedBundleByName(t *testing.T) {
+	dir := writeBundles(t)
+	for _, provisioned := range []bool{false, true} {
+		h := newPWAHandler(dir, appIndexFile(provisioned), quietLogger())
+		for _, p := range []string{"/solAdmin.html", "/SOLADMIN.HTML", "/x/../solAdmin.html", "/solAdmin.html/", "/provisioned.html", "/Provisioned.HTML"} {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
+			if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "<html>") {
+				t.Errorf("provisioned=%v %s: want 404 without a bundle, got %d %q", provisioned, p, rec.Code, rec.Body.String())
+			}
+		}
+	}
+}
+
+// A deployment missing the mode's bundle says which file it lacks.
+func TestPWAHandler_MissingIndexNamesTheFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, directIndexFile), []byte("<html>direct</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := newPWAHandler(dir, appIndexFile(true), quietLogger())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "provisioned.html not found") {
+		t.Errorf("want 404 naming provisioned.html, got %d %q", rec.Code, rec.Body.String())
 	}
 }
 
@@ -360,7 +398,7 @@ func TestPWAHandler_MissingAsset_404(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html></html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := newPWAHandler(dir, quietLogger())
+	h := newPWAHandler(dir, directIndexFile, quietLogger())
 
 	// Anything with a file extension should NOT fall back — it's an asset request.
 	rec := httptest.NewRecorder()
@@ -636,7 +674,7 @@ func TestAdminHandler_DisabledIs404(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, adminIndexFile), []byte("<html>admin</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Bundle present but the deployment isn't hosted+managed: the surface must
+	// Bundle present but the deployment is not in Provisioned mode: the surface must
 	// not exist, and must be indistinguishable from a wrong URL.
 	h := newAdminHandler(dir, false, quietLogger())
 	rec := httptest.NewRecorder()

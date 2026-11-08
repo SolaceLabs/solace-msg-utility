@@ -1,5 +1,5 @@
 /**
- * The managed demo's entry point (`managed-demo.html`). Redirected in for
+ * The managed demo's entry point (`provisioned-demo.html`). Redirected in for
  * `src/core/boot.ts` by `demoRedirects` in vite.config.ts for the
  * `managed-demo` variant only, so demo.html never carries what this adds:
  * the fake gateway (`./gateway`) over the demo's brokers and accounts, its
@@ -116,11 +116,11 @@ export function boot(opts: { reload?: () => void } = {}): ManagedDemo {
     const pages = createPages({ gateway, navigate });
 
     // Where the browser lands: the page it was on, or, while connModes is
-    // managed, the sign-in (or the forced change) the gateway sends a load
+    // provisioned, the sign-in (or the forced change) the gateway sends a load
     // without a session to (gateApp in pages.go).
     let page: Page = snap?.page ?? 'app';
     const s = gateway.session();
-    if (page === 'app' && gateway.settings.current().connModes === 'managed' && (!s || s.mustChange)) {
+    if (page === 'app' && gateway.settings.current().connModes === 'provisioned' && (!s || s.mustChange)) {
         page = s ? 'password' : 'login';
     }
 

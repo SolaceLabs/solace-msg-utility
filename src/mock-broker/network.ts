@@ -1,5 +1,5 @@
 /**
- * Both demos' network block. demo.html and managed-demo.html answer what the
+ * Both demos' network block. demo.html and provisioned-demo.html answer what the
  * app asks from the in-browser broker (and the managed demo's fake gateway);
  * nothing they do may leave the page, so a real broker or gateway is never
  * reached, whatever is typed into a form.

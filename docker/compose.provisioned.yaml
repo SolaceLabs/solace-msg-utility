@@ -1,0 +1,66 @@
+# Solace Message Utility -- Provisioned mode, ready to deploy.
+#
+# Users sign in and get only the brokers and Message VPNs an administrator
+# granted; they never see or type a broker's address or credentials. See
+# docs/provisioned-mode.md.
+#
+#   1. Put the first administrator's password (12 to 128 characters) in a file
+#      named admin-password next to this one, readable by the gateway's UID
+#      and no one else: sudo chown 65532 admin-password && chmod 400 admin-password
+#   2. SMU_VERSION=3.6.0 docker compose -f compose.provisioned.yaml up -d
+#   3. Open https://<host>:9443/, sign in as admin and change the password.
+#      The admin console is at https://<host>:9443/solAdmin.
+#   4. Back up the store key: docker compose -f compose.provisioned.yaml cp
+#      gateway:/data/store.key ./store.key.backup, and keep it secret.
+#
+# SMU_VERSION is required: pin a release, never `latest`, so an upgrade is a
+# deliberate change of this one value. The admin password is read only on the
+# first start, from a secret file, never from the environment or argv; remove
+# the file afterwards if you like.
+#
+# Posture: non-root UID 65532, privileged off, every capability dropped, no new
+# privileges, read-only root filesystem, the default bridge network. The
+# gateway writes only /tls (a self-signed certificate on the first start, when
+# none is there) and /data (config.yaml, the encrypted user and connection
+# stores, and their key), both named volumes.
+name: solace-msg-utility
+services:
+  gateway:
+    image: ghcr.io/solacelabs/solace-msg-utility:${SMU_VERSION:?set SMU_VERSION to a release, e.g. 3.6.0}
+    user: "65532:65532"
+    privileged: false
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    ports:
+      - "9443:9443"
+    environment:
+      # Seed config.yaml on the first start only; afterwards the admin console's
+      # Gateway Settings, or the file in the data volume, wins.
+      # provisioned: everyone signs in, the recommended setting. both also
+      # offers the Direct form, where anyone can connect with credentials they
+      # know, outside their grants.
+      CONN_MODES: provisioned
+      LOG_LEVEL: warn
+      ADMIN_PASSWORD_FILE: /run/secrets/admin-password
+    secrets:
+      - source: admin-password
+        target: /run/secrets/admin-password
+    volumes:
+      # The gateway's certificate (tls.crt, tls.key) and, under trust/, the CAs
+      # your brokers' certificates chain to.
+      - tls:/tls
+      # config.yaml, users.yaml, connections.yaml and store.key. Without the
+      # store key the stores cannot be read: back it up.
+      - data:/data
+
+secrets:
+  admin-password:
+    file: ./admin-password
+
+volumes:
+  tls:
+  data:

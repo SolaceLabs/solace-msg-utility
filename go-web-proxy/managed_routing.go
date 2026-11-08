@@ -1,5 +1,3 @@
-//go:build managed
-
 package main
 
 import (
@@ -11,18 +9,17 @@ import (
 	"time"
 )
 
-// newManagedRouting builds the managed sign-in, sessions and /managed/* API
-// when managed is true. It is compiled only into the `-tags managed` binary;
-// the stdlib-only hosted binary links the stub in managed_routing_stub.go
-// instead. It returns nil (and nil error) when managed mode is disabled, and
-// the caller then serves /managed/* as a plain 404.
+// newManagedRouting builds Provisioned mode's sign-in, sessions and /managed/*
+// API when connModes offers it (provisioned or both). In Gateway mode it
+// returns nil (and nil error), and the caller then serves /managed/* as a
+// plain 404.
 //
 // lv is the live settings every piece reads per request; src is config.yaml,
 // which the settings endpoint rewrites; upstream is the broker transport the
 // Direct relay uses too (newUpstreamTransport), for the SEMP relay and the
 // SMF gate.
 func newManagedRouting(cfg config, lv *live, src configSource, upstream http.RoundTripper, logger *slog.Logger) (*managedRoutes, error) {
-	if !cfg.managed {
+	if !cfg.provisioned() {
 		return nil, nil
 	}
 	h, err := newHasher(passwordIter, runtime.NumCPU())
@@ -57,7 +54,7 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	if err != nil {
 		return nil, fmt.Errorf("sign-in page template: %w", err)
 	}
-	// gateApp passes everything through unless connModes is managed, which
+	// gateApp passes everything through unless connModes is provisioned, which
 	// it reads per request: the settings page can change it.
 	routes := &managedRoutes{
 		api: newManagedHandler(st, ss, th, lv, newSettingsFile(src, cfg, lv, logger), managedEndpoints{
@@ -70,19 +67,19 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 		gateAdmin: pages.gateAdmin,
 		gateRelay: gateDirect(lv),
 	}
-	logger.Info("managed mode enabled", "users", cfg.usersFile, "connections", cfg.connectionsFile,
-		"session_idle", cfg.session.idle, "session_absolute", cfg.session.absolute, "app_gated", cfg.connModes == connManaged)
+	logger.Info("provisioned mode enabled", "users", cfg.usersFile, "connections", cfg.connectionsFile,
+		"session_idle", cfg.session.idle, "session_absolute", cfg.session.absolute, "app_gated", cfg.connModes == connProvisioned)
 	return routes, nil
 }
 
-// gateDirect closes the Direct relay while connModes is managed, read per
-// request like gateApp: a managed-only deployment offers no Direct tab, and its
-// managed sessions reach brokers through the SEMP relay and the SMF gate only.
+// gateDirect closes the Direct relay while connModes is provisioned, read per
+// request like gateApp: a Provisioned-only deployment offers no Direct tab, and
+// its sessions reach brokers through the SEMP relay and the SMF gate only.
 // Under both or direct the relay is unchanged.
 func gateDirect(lv *live) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if lv.get().connModes == connManaged {
+			if lv.get().connModes == connProvisioned {
 				http.NotFound(w, r)
 				return
 			}
