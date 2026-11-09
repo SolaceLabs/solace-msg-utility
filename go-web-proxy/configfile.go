@@ -120,12 +120,14 @@ type loginLimits struct {
 
 // moduleCatalog is every app module an administrator can give a signed-in user.
 // The sign-in module (connections) is always shown and the admin modules live
-// in the admin app, so neither is listed. Queue Subscription Explorer is left
-// out on purpose: it reads the broker over SEMP v1, which the entitlement
-// filter does not cover, so it stays hidden in every Provisioned session
-// (src/core/rbac.ts). tests/variants.test.ts parses this line and checks it
-// against the managed variant.
-func moduleCatalog() []string { return []string{"queue-browser", "queue-copy"} }
+// in the admin app, so neither is listed. Queue Subscription Explorer reads the
+// broker's whole subscription list over SEMP v1 and filters it to the user's
+// provisioned VPNs and visible queues in the browser (visibleQueueRows in
+// src/core/managed-semp-filter.ts), like the queue lists. Queue Discovery is
+// left out: nothing filters it, so it stays hidden in every Provisioned
+// session (src/core/rbac.ts). tests/variants.test.ts parses this line and
+// checks it against the managed variant.
+func moduleCatalog() []string { return []string{"queue-browser", "queue-copy", "queue-subscription-explorer"} }
 
 // modules.userDefault values: what a user without a list of their own gets.
 const (

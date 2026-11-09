@@ -108,7 +108,7 @@ describe('integration — admin app session lifecycle', () => {
         const app = await openAdminApp();
         umSvc.saveUser.mockResolvedValue({ ok: true });
 
-        rowButton(app.users, 0, '.btn-secondary').click();
+        rowButton(app.users, 0, '.user-mgmt-edit').click();
         q<HTMLInputElement>(app.users, '#user-mgmt-password').value = 'new-password-1';
         q<HTMLButtonElement>(app.users, '#btn-user-mgmt-save').click();
         await vi.waitFor(() => expect(app.appState.managed).toBeNull());
@@ -121,7 +121,7 @@ describe('integration — admin app session lifecycle', () => {
         const app = await openAdminApp();
         umSvc.saveUser.mockResolvedValue({ ok: true });
 
-        rowButton(app.users, 0, '.btn-secondary').click();
+        rowButton(app.users, 0, '.user-mgmt-edit').click();
         q<HTMLInputElement>(app.users, '#user-mgmt-admin').checked = false;
         q<HTMLButtonElement>(app.users, '#btn-user-mgmt-save').click();
         await vi.waitFor(() => expect(app.appState.managed).toBeNull());
@@ -133,7 +133,7 @@ describe('integration — admin app session lifecycle', () => {
         const app = await openAdminApp();
         umSvc.deleteUser.mockResolvedValue({ ok: true });
 
-        rowButton(app.users, 0, '.btn-danger').click();
+        rowButton(app.users, 0, '.user-mgmt-delete').click();
         await vi.waitFor(() => expect(app.appState.managed).toBeNull());
 
         expectSignedOut(app);
@@ -152,7 +152,7 @@ describe('integration — admin app session lifecycle', () => {
         const app = await openAdminApp();
         umSvc.saveUser.mockResolvedValue({ ok: true });
 
-        rowButton(app.users, 0, '.btn-secondary').click();
+        rowButton(app.users, 0, '.user-mgmt-edit').click();
         q<HTMLButtonElement>(app.users, '#btn-user-mgmt-save').click();
         // The own-record save re-emits rbac:changed, which reloads the list.
         await vi.waitFor(() => expect(umSvc.listUsers).toHaveBeenCalledTimes(2));

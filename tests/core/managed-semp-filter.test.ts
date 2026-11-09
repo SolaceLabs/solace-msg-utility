@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { filterSempFetch } from '../../src/core/managed-semp-filter';
+import { filterSempFetch, visibleQueueRows } from '../../src/core/managed-semp-filter';
 import type { ManagedSession } from '../../src/core/types';
 
 function managed(over: Partial<ManagedSession> = {}): ManagedSession {
@@ -81,5 +81,33 @@ describe('core/managed-semp-filter', () => {
         const noData = jsonResponse({ meta: {} });
         const res = await filterSempFetch(vi.fn(async () => noData), managed())('/SEMP/v2/monitor/msgVpns/v1/queues');
         expect(res).toBe(noData);
+    });
+});
+
+describe('core/managed-semp-filter -- visibleQueueRows', () => {
+    // A cross-VPN listing (the subscription explorer's SEMP v1 rows).
+    const ROWS = [
+        { vpn: 'orders', queue: 'orders.new', topic: 'a' },
+        { vpn: 'orders', queue: 'audit.x', topic: 'b' },
+        { vpn: 'payments', queue: 'orders.new', topic: 'c' },
+    ];
+
+    it('passes every row when there is no managed session', () => {
+        expect(visibleQueueRows(null, ROWS)).toBe(ROWS);
+    });
+
+    it('keeps rows in a provisioned VPN whose queue is visible, dropping other VPNs even under a broad glob', () => {
+        const m = managed({ vpns: ['orders'], operate: [{ brokers: 'b1', msgVpns: '*', queues: 'orders.*' }] });
+        expect(visibleQueueRows(m, ROWS).map(r => r.topic)).toEqual(['a']);
+    });
+
+    it('counts read-only rows, and falls back to the entitlement globs before a provisioned set is published', () => {
+        const m = managed({ readOnly: [{ brokers: 'b1', msgVpns: 'payments', queues: '*' }] }); // vpns: []
+        expect(visibleQueueRows(m, ROWS).map(r => r.topic)).toEqual(['c']);
+    });
+
+    it('checks the rows against the connected broker', () => {
+        const m = managed({ broker: 'b2', vpns: ['orders'], operate: [{ brokers: 'b1', msgVpns: '*', queues: '*' }] });
+        expect(visibleQueueRows(m, ROWS)).toEqual([]);
     });
 });

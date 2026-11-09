@@ -7,7 +7,8 @@
  * - `admin` operates everything and sees the admin pages.
  * - `operator` operates `orders.*` on east-prod/orders, reads the rest of
  *   east-prod and lab, and never sees west-dr.
- * - `viewer` reads east-prod/orders only, and has no Queue Copy.
+ * - `viewer` reads east-prod/orders only, and has no Queue Copy; its Queue
+ *   Subscriptions list leaves out east-prod's payments VPN.
  * - `newadmin` must change the password at first sign-in.
  *
  * Mock-only.
@@ -74,12 +75,12 @@ export function demoSeed(): GatewaySeed {
                 username: 'operator', password: pw('operator'), admin: false,
                 operate: [{ brokers: 'east-prod', msgVpns: 'orders', queues: 'orders.*' }],
                 'read-only': [{ brokers: 'east-prod', msgVpns: '*', queues: '*' }, { brokers: 'lab', msgVpns: '*', queues: '*' }],
-                modules: ['queue-browser', 'queue-copy'],
+                modules: ['queue-browser', 'queue-copy', 'queue-subscription-explorer'],
             },
             {
                 username: 'viewer', password: pw('viewer'), admin: false, operate: [],
                 'read-only': [{ brokers: 'east-prod', msgVpns: 'orders', queues: '*' }],
-                modules: ['queue-browser'],
+                modules: ['queue-browser', 'queue-subscription-explorer'],
             },
             { username: 'newadmin', password: pw('newadmin'), admin: true, mustChangePassword: true, operate: everything, 'read-only': [] },
         ],
@@ -100,7 +101,7 @@ export function demoSeed(): GatewaySeed {
             access: { allow: [], trustedProxies: [] },
             session: { idleMinutes: 10, absoluteMinutes: 30 },
             login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60 },
-            modules: { offered: ['queue-browser', 'queue-copy'], userDefault: 'all' },
+            modules: { offered: ['queue-browser', 'queue-copy', 'queue-subscription-explorer'], userDefault: 'all' },
         },
         // TEST-NET-1: the address the fake gateway sees the browser at.
         client: '192.0.2.10',

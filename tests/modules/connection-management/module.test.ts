@@ -133,6 +133,42 @@ describe('connection-management — list', () => {
     });
 });
 
+describe('connection-management -- list rows and search', () => {
+    function search(c: HTMLElement, q: string): void {
+        const input = el<HTMLInputElement>(c, '#conn-mgmt-search');
+        input.value = q;
+        input.dispatchEvent(new Event('input'));
+    }
+    const brokers = (c: HTMLElement) =>
+        [...el(c, '#conn-mgmt-rows').querySelectorAll('tr')].map(tr => tr.cells[0].textContent);
+
+    it("each row's actions are icon buttons named for the connection", async () => {
+        const { container } = await setup();
+        const row = el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0];
+        expect(row.querySelector('.conn-mgmt-edit')!.getAttribute('aria-label')).toBe('Edit connection "b1"');
+        expect(row.querySelector('.conn-mgmt-delete')!.getAttribute('aria-label')).toBe('Delete connection "b1"');
+    });
+
+    it('narrows by broker or hostname as you type, with * spanning any run', async () => {
+        const { container } = await setup();
+        search(container, 'B2');
+        expect(brokers(container)).toEqual(['b2']);
+        search(container, 'HOST1');
+        expect(brokers(container)).toEqual(['b1']);
+        search(container, 'h*2');
+        expect(brokers(container)).toEqual(['b2']);
+        search(container, '');
+        expect(brokers(container)).toEqual(['b1', 'b2']);
+    });
+
+    it('says when no connection matches, writing the query as text', async () => {
+        const { container } = await setup();
+        search(container, '<b>x</b>');
+        expect(el(container, '#conn-mgmt-rows').textContent).toBe('No connections match "<b>x</b>".');
+        expect(el(container, '#conn-mgmt-rows').querySelector('b')).toBeNull();
+    });
+});
+
 describe('connection-management — create / edit form', () => {
     it('Add opens the form in create mode', async () => {
         const { container } = await setup();
@@ -179,7 +215,7 @@ describe('connection-management — create / edit form', () => {
         svcMock.saveConnection.mockResolvedValue({ ok: true });
         // Edit b1 (first row) — passwords arrive blank from the list.
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.btn-secondary')!.click();
+            .querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
         expect(el<HTMLInputElement>(container, '#conn-mgmt-broker').disabled).toBe(true);
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
         await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
@@ -203,7 +239,7 @@ describe('connection-management — create / edit form', () => {
     it('Edit pre-fills the form and blanks the password fields', async () => {
         const { container } = await setup();
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.btn-secondary')!.click();
+            .querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
         expect(el<HTMLInputElement>(container, '#conn-mgmt-hostname').value).toBe('host1');
         expect(el<HTMLInputElement>(container, '#conn-mgmt-semp-user').value).toBe('mon');
         expect(el<HTMLInputElement>(container, '#conn-mgmt-semp-pass').value).toBe('');
@@ -222,7 +258,7 @@ describe('connection-management — create / edit form', () => {
         await ConnectionManagementModule.install(ctx);
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').children.length).toBeGreaterThan(0));
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.btn-secondary')!.click();
+            .querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
         expect(hidden(container, '#conn-mgmt-form-view')).toBe(false);
         expect(el(container, '#conn-mgmt-vpn-rows').querySelectorAll('.row-list-row').length).toBe(0);
     });
@@ -260,7 +296,7 @@ describe('connection-management — create / edit form', () => {
         const { container } = await setup();
         svcMock.saveConnection.mockResolvedValue({ ok: true });
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.btn-secondary')!.click();
+            .querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
         const vpnInputs = el(container, '#conn-mgmt-vpn-rows').querySelectorAll<HTMLInputElement>('input');
         vpnInputs[0].value = 'v1-prod';
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
@@ -306,7 +342,7 @@ describe('connection-management — delete', () => {
         svcMock.deleteConnection.mockResolvedValue({ ok: true });
         (globalThis.confirm as any).mockReturnValue(true);
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.btn-danger')!.click();
+            .querySelector<HTMLButtonElement>('.conn-mgmt-delete')!.click();
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Connection deleted', 'ok'));
         expect(svcMock.deleteConnection).toHaveBeenCalledWith('b1');
     });
@@ -315,7 +351,7 @@ describe('connection-management — delete', () => {
         const { container } = await setup();
         (globalThis.confirm as any).mockReturnValue(false);
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.btn-danger')!.click();
+            .querySelector<HTMLButtonElement>('.conn-mgmt-delete')!.click();
         await Promise.resolve();
         expect(svcMock.deleteConnection).not.toHaveBeenCalled();
     });
@@ -325,7 +361,7 @@ describe('connection-management — delete', () => {
         svcMock.deleteConnection.mockResolvedValue({ ok: false, status: 500, code: 'server_error' });
         (globalThis.confirm as any).mockReturnValue(true);
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.btn-danger')!.click();
+            .querySelector<HTMLButtonElement>('.conn-mgmt-delete')!.click();
         await vi.waitFor(() => expect(toastMock.showToast)
             .toHaveBeenCalledWith('The gateway could not complete the request. Its log has the cause.', 'error'));
     });

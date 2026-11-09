@@ -5,16 +5,20 @@
     <div class="flex-row justify-between items-center mb-4">
         <h2 class="m-0">Users</h2>
         <div class="flex-row items-center gap-4">
+            <input type="search" id="user-mgmt-search" class="form-control user-mgmt-search"
+                placeholder="Search users (* = any)" aria-label="Search users" autocomplete="off">
             <button id="btn-user-mgmt-refresh" class="btn btn-secondary" title="Reload the user list">Refresh</button>
             <button id="btn-user-mgmt-add" class="btn btn-primary">Add user</button>
         </div>
     </div>
-    <table class="user-mgmt-table w-full">
-        <thead>
-            <tr><th>Username</th><th>Role</th><th class="user-mgmt-actions-col">Actions</th></tr>
-        </thead>
-        <tbody id="user-mgmt-rows"></tbody>
-    </table>
+    <div class="data-table-frame">
+        <table class="data-table">
+            <thead>
+                <tr><th>Username</th><th>Role</th><th class="user-mgmt-actions-col">Actions</th></tr>
+            </thead>
+            <tbody id="user-mgmt-rows"></tbody>
+        </table>
+    </div>
     <div id="user-mgmt-list-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
 </div>
 
@@ -69,4 +73,33 @@
         <button id="btn-user-mgmt-cancel" class="btn btn-secondary">Cancel</button>
     </div>
     <div id="user-mgmt-form-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+</div>
+
+<!-- Permission test: shown with the list view (see access-test.ts) -->
+<div id="user-mgmt-test-view" class="card user-mgmt-card hidden">
+    <h2 class="m-0 mb-4">Permission test</h2>
+    <div class="form-group">
+        <label for="user-mgmt-test-user">User</label>
+        <select id="user-mgmt-test-user" class="form-control"></select>
+    </div>
+    <div class="form-group flex-row gap-2">
+        <div class="w-full">
+            <label for="user-mgmt-test-broker">Broker</label>
+            <input type="text" id="user-mgmt-test-broker" class="form-control" autocomplete="off">
+        </div>
+        <div class="w-full">
+            <label for="user-mgmt-test-vpn">Message VPN</label>
+            <input type="text" id="user-mgmt-test-vpn" class="form-control" autocomplete="off">
+        </div>
+        <div class="w-full">
+            <label for="user-mgmt-test-queue">Queue</label>
+            <input type="text" id="user-mgmt-test-queue" class="form-control" autocomplete="off">
+        </div>
+    </div>
+    <div id="user-mgmt-test-result" class="user-mgmt-test-result" aria-live="polite"></div>
+    <p class="user-mgmt-hint text-secondary">
+        Tests the user as saved, against their operate and read-only rows. Names are matched exactly and
+        case-sensitively; <code>*</code> is a wildcard only in the rows. The broker's own queue permissions
+        still apply, and the broker and Message VPN must be in Connection Management to be reached.
+    </p>
 </div>

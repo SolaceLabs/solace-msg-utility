@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatBytes, generateUuid, matchString, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText, moduleLabel, errMessage } from '../../src/core/utils';
+import { formatBytes, generateUuid, matchString, matchContains, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText, moduleLabel, errMessage } from '../../src/core/utils';
 
 describe('core/utils', () => {
 
@@ -58,6 +58,30 @@ describe('core/utils', () => {
         it('escapes regex special characters', () => {
             expect(matchString('test.value', 'test.*')).toBe(true);
             expect(matchString('test[1]', 'test*')).toBe(true);
+        });
+    });
+
+    describe('matchContains()', () => {
+        it('a blank query matches everything', () => {
+            expect(matchContains('alice', '')).toBe(true);
+            expect(matchContains('alice', '   ')).toBe(true);
+        });
+
+        it('plain text is a case-insensitive substring', () => {
+            expect(matchContains('my-Orders-queue', 'ORDERS')).toBe(true);
+            expect(matchContains('my-orders-queue', ' orders ')).toBe(true);
+            expect(matchContains('my-orders-queue', 'payments')).toBe(false);
+        });
+
+        it('a * spans any run between the parts, in order', () => {
+            expect(matchContains('orders-queue', 'ord*q')).toBe(true);
+            expect(matchContains('ordq', 'ord*q')).toBe(true);
+            expect(matchContains('queue-orders', 'ord*q')).toBe(false);
+        });
+
+        it('regex characters are literal', () => {
+            expect(matchContains('host.a.b', 'a.b')).toBe(true);
+            expect(matchContains('host-axb', 'a.b')).toBe(false);
         });
     });
 

@@ -101,7 +101,7 @@ describe('mock-broker/controls/managed -- gateway events', () => {
     it('revokes every entitlement of the signed-in user, keeping the rest of the account', () => {
         btn('Revoke my VPN access').click();
         const p = gw.store.profile('operator', gw.settings.current().modules)!;
-        expect([p.brokers, p.operate, p.readOnly, p.modules]).toEqual([[], [], [], ['queue-browser', 'queue-copy']]);
+        expect([p.brokers, p.operate, p.readOnly, p.modules]).toEqual([[], [], [], ['queue-browser', 'queue-copy', 'queue-subscription-explorer']]);
         expect(gw.session()).toEqual({ user: 'operator', mustChange: false });
     });
 

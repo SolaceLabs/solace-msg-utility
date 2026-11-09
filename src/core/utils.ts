@@ -57,6 +57,19 @@ export function matchString(text: string, pattern: string | null): boolean {
 }
 
 /**
+ * List-search match (case-insensitive): `text` contains `query`, where each
+ * `*` in the query matches any run of characters, so `ord*q` finds "ord"
+ * followed later by "q". A blank query matches everything. Deliberately
+ * looser than the RBAC globs in `./rbac` (anchored, case-sensitive): this
+ * narrows a list on screen and grants nothing.
+ */
+export function matchContains(text: string, query: string): boolean {
+    const q = query.trim();
+    if (!q) return true;
+    return matchString(text, `*${q}*`);
+}
+
+/**
  * Escape HTML special characters to prevent XSS when interpolating into innerHTML.
  */
 export function escapeHtml(str: string): string {

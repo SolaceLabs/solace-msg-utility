@@ -783,7 +783,7 @@ async function runChecks(admin) {
             expect(gated.status === 303 && gated.headers.location === '/login',
                 `/ without a session after the restore: want 303 to /login, got ${gated.status} ${gated.headers.location ?? ''}`);
             const back = await modules();
-            expect(back?.join() === 'queue-browser,queue-copy', `/managed/me modules after the restore: ${JSON.stringify(back)}`);
+            expect(back?.join() === 'queue-browser,queue-copy,queue-subscription-explorer', `/managed/me modules after the restore: ${JSON.stringify(back)}`);
         });
 
         // Before check 13, which then sweeps what the browser received too,
@@ -1066,9 +1066,9 @@ async function runBrowserChecks(admin) {
             const vpns = await values('#managed-vpn-select');
             expect(brokers.join() === BROKER && vpns.join() === vpn, `offered brokers [${brokers.join(', ')}], VPNs [${vpns.join(', ')}]`);
             const nav = await page.locator('.nav-item[data-module-id]').evaluateAll((items) => items.map((i) => i.dataset.moduleId));
-            // Connections always; Queue Browser and Queue Copy as the default
-            // modules.userDefault=all grants them; never the subscription explorer.
-            expect(nav.join() === 'connections,queue-browser,queue-copy', `sidebar: ${nav.join(', ')}`);
+            // Connections always; the three grantable modules, as a fresh config
+            // offers them all and modules.userDefault=all grants them.
+            expect(nav.join() === 'connections,queue-browser,queue-copy,queue-subscription-explorer', `sidebar: ${nav.join(', ')}`);
         });
 
         // The app re-reads /managed/me only on load, on sign-in and on Refresh.
@@ -1098,8 +1098,8 @@ async function runBrowserChecks(admin) {
             expect(none.status === 200, `PUT userDefault none: ${none.status} ${none.body}`);
             expect(shrunk === 'connections', `after none and Refresh the sidebar shows ${shrunk || 'nothing'}`);
             expect(all.status === 200, `PUT userDefault all: ${all.status} ${all.body}`);
-            const back = await refresh('connections,queue-browser,queue-copy');
-            expect(back === 'connections,queue-browser,queue-copy', `after all and Refresh the sidebar shows ${back}`);
+            const back = await refresh('connections,queue-browser,queue-copy,queue-subscription-explorer');
+            expect(back === 'connections,queue-browser,queue-copy,queue-subscription-explorer', `after all and Refresh the sidebar shows ${back}`);
         });
 
         await bcheck('B4', `Connect opens the browser's own WebSocket to ${smfPath}, and the page shows no broker address`, async () => {

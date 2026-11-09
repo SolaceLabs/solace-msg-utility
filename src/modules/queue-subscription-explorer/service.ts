@@ -1,4 +1,5 @@
 import { unfilteredPrimarySempContext } from '../../core/services/sempContext';
+import { visibleQueueRows } from '../../core/managed-semp-filter';
 import { PAGE_DELAY_MS } from '../../core/services/semp-discovery';
 import type { AppContext } from '../../core/types';
 import { parseSubscriptionsResponse, type SubscriptionRow } from './parse';
@@ -26,6 +27,12 @@ const INITIAL_BODY =
  * `<more-cookie>` continuation until the broker stops returning one, and
  * sleeps `PAGE_DELAY_MS` between subsequent page requests so we don't hammer
  * the broker.
+ *
+ * In a Provisioned session each page keeps only the rows the user may see
+ * (`visibleQueueRows`: a provisioned VPN and a visible queue). The RPC itself
+ * still asks for every VPN, so the broker's whole subscription list reaches
+ * the browser and is filtered here -- a guardrail in the app, like the queue
+ * lists, not a boundary the gateway enforces.
  *
  * Mirrors the contract of `createSempDiscovery` (yields `{ ok, data | error }`),
  * including the SEMP-not-connected guard that yields a single error page
@@ -62,7 +69,7 @@ export function createService(ctx: AppContext) {
                     yield { ok: false, error: parsed.error };
                     return;
                 }
-                yield { ok: true, data: parsed.page.rows };
+                yield { ok: true, data: visibleQueueRows(ctx.appState.managed, parsed.page.rows) };
                 body = parsed.page.nextPageBody;
             } catch (e: any) {
                 yield { ok: false, error: e?.message || 'Error fetching subscriptions' };

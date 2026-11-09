@@ -7,8 +7,8 @@
     margin: 2rem auto;
 }
 
-.user-mgmt-table th {
-    text-align: left;
+.user-mgmt-search {
+    width: 14rem;
 }
 
 .user-mgmt-hint {
@@ -19,4 +19,12 @@
 .user-mgmt-actions-col {
     width: 1%;
     white-space: nowrap;
+}
+
+.user-mgmt-test-result {
+    margin-bottom: 0.75rem;
+}
+
+.user-mgmt-test-result > p {
+    margin: 0 0 0.25rem;
 }

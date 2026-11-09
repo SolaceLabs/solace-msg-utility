@@ -292,7 +292,7 @@ func TestManagedAPI_SaveUser_CreateAndValidate(t *testing.T) {
 		{"too large", "carol", `{"password":"` + strings.Repeat("x", maxBodyBytes) + `"}`, 413, "too_large", ""},
 		{"too large after the value", "carol", `{"password":"long-enough-pw"}` + strings.Repeat(" ", maxBodyBytes), 413, "too_large", ""},
 		{"last admin", "admin", `{"admin":false}`, 409, "last_admin", ""},
-		{"unknown module", "carol", `{"password":"long-enough-pw","modules":["queue-subscription-explorer"]}`, 422, "invalid", "modules"},
+		{"unknown module", "carol", `{"password":"long-enough-pw","modules":["queue-discovery"]}`, 422, "invalid", "modules"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

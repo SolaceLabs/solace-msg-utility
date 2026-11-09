@@ -164,8 +164,8 @@ func TestToConfig_InvalidValues(t *testing.T) {
 		{"max backoff", func(fc *fileConfig) { fc.Login.MaxBackoffSeconds = 86401 }, "login.maxBackoffSeconds", "86401"},
 		{"backoff over max", func(fc *fileConfig) { fc.Login.BackoffSeconds = 901 }, "login.backoffSeconds", "901"},
 		{"unauthenticated", func(fc *fileConfig) { fc.Login.UnauthenticatedPerMinute = -1 }, "login.unauthenticatedPerMinute", "-1"},
-		// The explorer reads the broker unfiltered, so it is not in the catalog.
-		{"module outside the catalog", func(fc *fileConfig) { fc.Modules.Offered = []string{"queue-subscription-explorer"} }, "modules.offered[0]", "queue-subscription-explorer"},
+		// Queue Discovery reads the broker unfiltered, so it is not in the catalog.
+		{"module outside the catalog", func(fc *fileConfig) { fc.Modules.Offered = []string{"queue-discovery"} }, "modules.offered[0]", "queue-discovery"},
 		{"module twice", func(fc *fileConfig) { fc.Modules.Offered = []string{"queue-copy", "queue-copy"} }, "modules.offered[1]", "queue-copy"},
 		{"userDefault", func(fc *fileConfig) { fc.Modules.UserDefault = "some" }, "modules.userDefault", "some"},
 	}
@@ -229,12 +229,12 @@ func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 // empty list offers nothing.
 func TestToConfig_ModulesInCatalogOrder(t *testing.T) {
 	fc := defaultFileConfig()
-	fc.Modules.Offered = []string{"queue-copy", "queue-browser"}
+	fc.Modules.Offered = []string{"queue-subscription-explorer", "queue-copy", "queue-browser"}
 	cfg, err := fc.toConfig(secretPaths{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(cfg.modules.offered, []string{"queue-browser", "queue-copy"}) {
+	if !reflect.DeepEqual(cfg.modules.offered, []string{"queue-browser", "queue-copy", "queue-subscription-explorer"}) {
 		t.Errorf("want catalog order, got %v", cfg.modules.offered)
 	}
 	fc.Modules.Offered = []string{}

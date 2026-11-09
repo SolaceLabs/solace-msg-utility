@@ -9,7 +9,7 @@
 import type { ConnRec } from './types';
 
 /** moduleCatalog() in configfile.go. */
-export const CATALOG = ['queue-browser', 'queue-copy'];
+export const CATALOG = ['queue-browser', 'queue-copy', 'queue-subscription-explorer'];
 
 const USERNAME = /^[A-Za-z0-9._@-]{1,64}$/;
 const BROKER = /^[A-Za-z0-9._-]{1,64}$/;

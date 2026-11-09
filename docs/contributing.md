@@ -118,8 +118,8 @@ Each check prints `PASS <id>.` or `FAIL <id>.`: 30 in a full run, 20 with `E2E_B
    The browser checks run here, before the sweep of check 13 and the restart of check 15. They use the app as a person does, in Chromium, at `https://gateway:9443` on the stack's network:
 
    - `B1` signs in through the gateway's own pages (one wrong password first) and lands in the app. The session cookie passes the rules of check 1, the browser holds it `HttpOnly`, and `document.cookie` is empty.
-   - `B2` checks that the Provisioned panel offers only the entitled broker and VPN, and that the sidebar shows Connections, Queue Browser and Queue Copy.
-   - `B3` changes `modules.userDefault` to `none` as the administrator; **Refresh** in the Provisioned panel re-reads `/managed/me` and the sidebar keeps only Connections. Restoring `all` and Refresh bring Queue Browser and Queue Copy back. The app re-reads `/managed/me` only on load, on sign-in and on Refresh.
+   - `B2` checks that the Provisioned panel offers only the entitled broker and VPN, and that the sidebar shows Connections, Queue Browser, Queue Copy and Queue Subscriptions (a fresh `config.yaml` offers all three).
+   - `B3` changes `modules.userDefault` to `none` as the administrator; **Refresh** in the Provisioned panel re-reads `/managed/me` and the sidebar keeps only Connections. Restoring `all` and Refresh bring the three modules back. The app re-reads `/managed/me` only on load, on sign-in and on Refresh.
    - `B4` connects. The browser opens its own WebSocket to `/managed/smf/<broker>/<vpn>`, sending the cookie, `Origin` and `Sec-Fetch-Site` itself, and the page shows no broker address.
    - `B5` binds the queue in Queue Browser. The queue is `Read-Only`, with no Delete.
    - `B6` checks that browser storage holds no password, store key or session cookie.

@@ -7,6 +7,7 @@ import { ACTIVE_MODULES, MODULE_ENTRIES } from '../../src/variants/managed-demo'
 import { ConnectionsModule } from '../../src/modules/connections/module.managed';
 import { QueueBrowserModule } from '../../src/modules/queue-browser/module';
 import { QueueCopyModule } from '../../src/modules/queue-copy/module';
+import { QueueSubscriptionExplorerModule } from '../../src/modules/queue-subscription-explorer/module';
 import { UserManagementModule } from '../../src/modules/user-management/module';
 import { ConnectionManagementModule } from '../../src/modules/connection-management/module';
 import { GatewaySettingsModule } from '../../src/modules/gateway-settings/module';
@@ -27,6 +28,7 @@ const MODULES: Record<string, PwaModule> = {
     'connections': ConnectionsModule,
     'queue-browser': QueueBrowserModule,
     'queue-copy': QueueCopyModule,
+    'queue-subscription-explorer': QueueSubscriptionExplorerModule,
     'user-management': UserManagementModule,
     'connection-management': ConnectionManagementModule,
     'gateway-settings': GatewaySettingsModule,
@@ -151,7 +153,7 @@ describe('managed demo end to end', () => {
         await openDemo(signInAs('operator'));
 
         await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
-        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy']);
+        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer']);
         expect(Array.from(q<HTMLSelectElement>('#managed-broker-select').options, o => o.value)).toEqual(['east-prod', 'lab']);
         expect(q('#sidebar-account').textContent).toContain('operator');
 
@@ -160,6 +162,23 @@ describe('managed demo end to end', () => {
         const res = await ctx.sempFetch('/SEMP/v2/monitor/msgVpns/orders/queues?count=100');
         const names = ((await res.json()).data as { queueName: string }[]).map(d => d.queueName);
         expect(names).toContain('orders.new');
+    });
+
+    it("lists only the viewer's subscriptions in Queue Subscriptions: east-prod's payments VPN is left out", async () => {
+        await openDemo(signInAs('viewer'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('viewer'));
+        await connect('east-prod', 'orders');
+        q('#sidebar-nav .nav-item[data-module-id="queue-subscription-explorer"]').click();
+        q<HTMLButtonElement>('#btn-subexp-load').click();
+        // Every filter blank: the explorer shows totals, not rows, so ask for every VPN.
+        const vpnFilter = q<HTMLInputElement>('#subexp-filter-vpn');
+        vpnFilter.value = '*';
+        vpnFilter.dispatchEvent(new Event('input'));
+        const vpns = () => Array.from(document.querySelectorAll<HTMLTableRowElement>('#subexp-tbody tr'), tr => tr.cells[0]?.textContent);
+        // Two pages (PAGE_DELAY_MS apart) and the filter's debounce.
+        await vi.waitFor(() => expect(vpns()).toContain('orders'), { timeout: 3000 });
+        // The demo broker answers for both east-prod VPNs; the browser keeps the viewer's.
+        expect(new Set(vpns())).toEqual(new Set(['orders']));
     });
 
     it('closes the operator\'s live connection when the VPN access is revoked, and Refresh shows nothing left', async () => {
@@ -190,7 +209,7 @@ describe('managed demo end to end', () => {
     async function openOwnRow(): Promise<HTMLTableRowElement> {
         await openDemo(signInAs('admin'));
         await vi.waitFor(() => expect(ctx.appState.managed?.admin).toBe(true));
-        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'user-management', 'connection-management', 'gateway-settings']);
+        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer', 'user-management', 'connection-management', 'gateway-settings']);
         q('#sidebar-nav .nav-item[data-module-id="user-management"]').click();
         const own = () => Array.from(document.querySelectorAll<HTMLTableRowElement>('#user-mgmt-rows tr'))
             .find(tr => tr.querySelector('td')?.textContent === 'admin');
@@ -208,7 +227,7 @@ describe('managed demo end to end', () => {
     for (const [what, edit] of SELF_EDITS) {
         it(`signs an administrator out at once for ${what}`, async () => {
             const row = await openOwnRow();
-            row.querySelector<HTMLButtonElement>('.btn-secondary')!.click();
+            row.querySelector<HTMLButtonElement>('.user-mgmt-edit')!.click();
             edit();
             await expectSignedOut(demos[demos.length - 1]);
         });
@@ -216,7 +235,7 @@ describe('managed demo end to end', () => {
 
     it('signs an administrator out at once for deleting their own account', async () => {
         const row = await openOwnRow();
-        row.querySelector<HTMLButtonElement>('.btn-danger')!.click();
+        row.querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
         const demo = demos[demos.length - 1];
         await expectSignedOut(demo);
         expect(demo.gateway.store.findUser('admin')).toBeFalsy();

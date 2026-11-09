@@ -36,22 +36,6 @@ export interface QueueSource {
 }
 
 /**
- * FUTURE (types only, no implementation yet): the entitlement-filtered analog of
- * `QueueSource` for subscription listings. `queue-subscription-explorer` reads
- * `(vpn, queue, subscription)` triples over SEMP v1 RPC, which no filter covers,
- * so it is currently gated out of managed sessions entirely
- * (`MODULE_REQUIREMENTS` in `core/rbac.ts`). Migrating it onto a source shaped
- * like this — filtering each triple by `isQueueVisible` inside the constructor —
- * is what lets it run under RBAC. Declared here so that migration has a fixed
- * target next to the seam it mirrors.
- */
-export interface SubscriptionTriple { vpn: string; queue: string; subscription: string }
-export interface SubscriptionSource {
-    key: string;
-    listSubscriptions(): AsyncGenerator<{ ok: true; data: SubscriptionTriple[] } | { ok: false; error: string }>;
-}
-
-/**
  * What the caller intends to do with the queues it discovers. `browse` is the
  * read side (`isQueueVisible` — operate ∪ read-only); `operate` is the write
  * side (`canOperate` — operate rows only), which is what copying INTO a queue

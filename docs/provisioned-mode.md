@@ -132,7 +132,7 @@ The waits apply to the account as well as the client, so someone guessing at a k
 
 | Key | Default | Recommended |
 | --- | --- | --- |
-| `modules.offered` | `[queue-browser, queue-copy]` | Both, unless no one should copy or move messages. Queue Subscriptions is never offered in Provisioned mode. |
+| `modules.offered` | `[queue-browser, queue-copy, queue-subscription-explorer]` | All three, unless no one should copy or move messages (drop `queue-copy`), or queue and topic names in VPNs a user is not granted must stay hidden from them (drop `queue-subscription-explorer`, see the [security checklist](#security-checklist)). A `config.yaml` written by an earlier version lists only the first two: add Queue Subscriptions in Gateway Settings to offer it. |
 | `modules.userDefault` | `all` | `all` for a small team; `none` if each user should get modules explicitly on their account. |
 
 ### Environment variables
@@ -169,6 +169,7 @@ Provisioned mode is meant for **trusted internal** networks. Before exposing it:
 
 - **Set `CONN_MODES=provisioned`** unless you really need the Direct form beside it.
 - **Give each broker a read-only SEMP account**, scoped to what its users may see: a user granted one VPN on a broker can read whatever that account can.
+- **Offer Queue Subscriptions only where that is acceptable.** It reads every queue's subscriptions on the connected broker, across all its VPNs, and narrows them to the user's queues in the browser; anyone with the browser's developer tools can see the rest. Leave `queue-subscription-explorer` out of `modules.offered` where queue and topic names must stay hidden between teams.
 - **Give each VPN a client username** scoped to what its users may do. A signed-in browser receives its password to connect, and the password works outside the app too. Keep the brokers' own ports off networks users can reach.
 - **Change the `admin` password** at the first sign-in (the gateway insists), and remove `ADMIN_PASSWORD` from the environment if you used it.
 - **Back up the store key, and keep it apart** from the stores where you can.

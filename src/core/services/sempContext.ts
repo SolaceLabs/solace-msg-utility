@@ -35,9 +35,10 @@ import { filterSempFetch } from '../managed-semp-filter';
  *   - `queue-source.ts`                      — wraps it in an entitlement-typed source
  *   - `queue-copy` verify (`ui-modal.ts`)    — v1 RPC, run only on a source the
  *                                              modal's source gate has already validated
- *   - `queue-subscription-explorer`          — v1 RPC; gated out of managed sessions
+ *   - `queue-subscription-explorer`          -- v1 RPC; in a managed session it filters
+ *                                              its own rows (`visibleQueueRows`)
+ *   - `queue-discovery`                      -- vestigial; gated out of managed sessions
  *                                              by `MODULE_REQUIREMENTS` in `core/rbac.ts`
- *   - `queue-discovery`                      — vestigial; gated the same way
  *
  * Fully typing this seam with `Access` is the later capability-layer change.
  */

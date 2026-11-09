@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchGlob, isModuleVisible, isVpnVisible, isQueueVisible, canOperate } from '../../src/core/rbac';
+import { matchGlob, isModuleVisible, isVpnVisible, isQueueVisible, canOperate, explainAccess } from '../../src/core/rbac';
 import type { ManagedSession, QGlob } from '../../src/core/types';
 
 /**
@@ -75,12 +75,12 @@ describe('core/rbac — isModuleVisible', () => {
         expect(isModuleVisible(session({ admin: true }), 'queue-browser')).toBe(false);
     });
 
-    // Modules that reach the broker over SEMP v1 RPC cannot be entitlement-
-    // filtered (`filterSempFetch` only rewrites the v2 monitor list shapes), so
-    // they are denied in EVERY managed session — admin included — until they
-    // consume a filtered source. With no session they behave as before.
+    // A module that reaches the broker over SEMP v1 RPC with nothing filtering
+    // its rows (`filterSempFetch` only rewrites the v2 monitor list shapes) is
+    // denied in EVERY managed session -- admin included. With no session it
+    // behaves as before.
     describe("'unfiltered-semp' requirement", () => {
-        const UNFILTERED = ['queue-subscription-explorer', 'queue-discovery'];
+        const UNFILTERED = ['queue-discovery'];
 
         it('is allowed when no managed session is in force', () => {
             for (const id of UNFILTERED) {
@@ -103,7 +103,10 @@ describe('core/rbac — isModuleVisible', () => {
             ['user-management', null, true],
             ['user-management', session({ admin: true }), true],
             ['user-management', session({ admin: false }), false],
-            ['queue-subscription-explorer', null, true],
+            ['queue-discovery', null, true],
+            ['queue-discovery', session({ admin: true, modules: ['queue-discovery'] }), false],
+            // Filters its own rows (visibleQueueRows), so it is granted like any module.
+            ['queue-subscription-explorer', session({ modules: ['queue-subscription-explorer'] }), true],
             ['queue-subscription-explorer', session({ admin: true }), false],
             ['queue-browser', null, true],
             ['queue-browser', session({ modules: ['queue-browser'] }), true],
@@ -169,5 +172,46 @@ describe('core/rbac — canOperate', () => {
         expect(canOperate(readOnlyAll, 'b1', 'v1', 'q1')).toBe(false);
         const operateAll = session({ operate: [ALL] });
         expect(canOperate(operateAll, 'b1', 'v1', 'q1')).toBe(true);
+    });
+});
+
+describe('core/rbac -- explainAccess', () => {
+    const OPS_ROW: QGlob = { brokers: 'prod', msgVpns: 'vpn-*', queues: 'orders.*' };
+    const RO_ROW: QGlob = { brokers: 'prod', msgVpns: 'vpn-a', queues: '*' };
+    const rows = { operate: [OPS_ROW], readOnly: [RO_ROW] };
+
+    it('operate: an operate row matching all three wins over a matching read-only row', () => {
+        expect(explainAccess(rows, 'prod', 'vpn-a', 'orders.new')).toEqual({ level: 'operate', row: OPS_ROW });
+    });
+
+    it('read-only: only a read-only row matches the queue', () => {
+        expect(explainAccess(rows, 'prod', 'vpn-a', 'payments')).toEqual({ level: 'read-only', row: RO_ROW });
+    });
+
+    it('vpn-only: a row reaches broker and VPN but no queue pattern matches, from either list', () => {
+        expect(explainAccess(rows, 'prod', 'vpn-b', 'payments')).toEqual({ level: 'vpn-only', row: OPS_ROW });
+        const readOnlyOnly = { operate: [], readOnly: [{ brokers: '*', msgVpns: 'audit', queues: 'audit.*' }] };
+        expect(explainAccess(readOnlyOnly, 'b1', 'audit', 'orders')).toEqual({ level: 'vpn-only', row: readOnlyOnly.readOnly[0] });
+    });
+
+    it('none: no row matches broker and VPN; globs are case-sensitive', () => {
+        expect(explainAccess(rows, 'PROD', 'vpn-a', 'orders.new')).toEqual({ level: 'none', row: null });
+        expect(explainAccess({ operate: [], readOnly: [] }, 'prod', 'vpn-a', 'q')).toEqual({ level: 'none', row: null });
+    });
+
+    // The permission test must never disagree with what a session is filtered by.
+    it.each([
+        ['prod', 'vpn-a', 'orders.new'],
+        ['prod', 'vpn-a', 'payments'],
+        ['prod', 'vpn-b', 'payments'],
+        ['prod', 'vpn-b', 'orders.x'],
+        ['PROD', 'vpn-a', 'orders.new'],
+        ['dev', 'vpn-a', 'q'],
+    ])('agrees with canOperate / isQueueVisible / isVpnVisible on %s / %s / %s', (broker, vpn, queue) => {
+        const s = session(rows);
+        const { level } = explainAccess(rows, broker, vpn, queue);
+        expect(level === 'operate').toBe(canOperate(s, broker, vpn, queue));
+        expect(level === 'operate' || level === 'read-only').toBe(isQueueVisible(s, broker, vpn, queue));
+        expect(level !== 'none').toBe(isVpnVisible(s, broker, vpn));
     });
 });

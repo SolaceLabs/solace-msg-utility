@@ -102,7 +102,7 @@ exercisable in `demo.html`.
 ## Provisioned demo (`provisioned-demo.html`)
 
 `provisioned-demo.html` is Provisioned mode without a gateway or a broker. It is the real Provisioned sign-in, Connections, Queue
-Browser, Queue Copy and the three administration pages, running against a fake gateway and the demo broker inside the
+Browser, Queue Copy, Queue Subscriptions and the three administration pages, running against a fake gateway and the demo broker inside the
 page. It makes no network request: anything it does not answer itself fails as if the network were down. Like
 `demo.html`, it needs no `solclient.js` (`jszip.min.js` is still needed for the ZIP download).
 
@@ -115,8 +115,8 @@ It is attached to every GitHub Release; open it from disk. It starts on the gate
 | Account | Password | What it shows |
 | --- | --- | --- |
 | `admin` | `demo-admin-0001` | An administrator: every broker, and the administration pages in the sidebar |
-| `operator` | `demo-operator-01` | Operates `orders.*` on `east-prod` / `orders`, reads the rest of `east-prod` and `lab`, never sees `west-dr`; Queue Browser and Queue Copy |
-| `viewer` | `demo-viewer-0001` | Reads `east-prod` / `orders` only; no Queue Copy |
+| `operator` | `demo-operator-01` | Operates `orders.*` on `east-prod` / `orders`, reads the rest of `east-prod` and `lab`, never sees `west-dr`; Queue Browser, Queue Copy and Queue Subscriptions |
+| `viewer` | `demo-viewer-0001` | Reads `east-prod` / `orders` only; no Queue Copy. Queue Subscriptions leaves out `east-prod`'s `payments` VPN |
 | `newadmin` | `demo-change-me-01` | An administrator who must change the password before anything else |
 
 The passwords are fake. The **Demo controls** panel lists them too: click one to copy it, or use **Sign in as**. The

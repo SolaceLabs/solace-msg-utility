@@ -9,13 +9,17 @@
  * Broker passwords are sent as typed, over TLS; the gateway keeps them in its
  * encrypted connections file and never sends them back. The list response
  * omits them, so editing a connection with blank password fields keeps the
- * stored ones. Imports only from `src/core/*` and its own service.
+ * stored ones. The list filters as you type in its search box (`matchContains`
+ * on broker or hostname: contains, case-insensitive, `*` = any run), from the
+ * last load without a refetch. Imports only from `src/core/*` and its own
+ * service.
  */
 import { required } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import { createRowList } from '../../core/components/row-list';
 import { showToast } from '../../core/toast';
-import { escapeHtml } from '../../core/utils';
+import { escapeHtml, matchContains } from '../../core/utils';
+import { ICONS, iconButton } from '../../core/icons';
 import { logger } from '../../core/logger';
 import { reportManagedFailure } from '../../core/services/managed-api';
 import { createConnMgmtService, type ManagedConnRecord } from './service';
@@ -42,6 +46,7 @@ export const ConnectionManagementModule = {
             listView: required<HTMLElement>(container, '#conn-mgmt-list-view'),
             rows: required<HTMLElement>(container, '#conn-mgmt-rows'),
             listError: required<HTMLElement>(container, '#conn-mgmt-list-error'),
+            search: required<HTMLInputElement>(container, '#conn-mgmt-search'),
             btnRefresh: required<HTMLButtonElement>(container, '#btn-conn-mgmt-refresh'),
             btnAdd: required<HTMLButtonElement>(container, '#btn-conn-mgmt-add'),
 
@@ -71,9 +76,9 @@ export const ConnectionManagementModule = {
 
         // null = adding a connection; otherwise the broker being edited.
         let editing: string | null = null;
-        // Brokers from the last list load, and the VPNs the edited connection
-        // has a stored password for (none when adding).
-        let known: string[] = [];
+        // Connections from the last list load, and the VPNs the edited
+        // connection has a stored password for (none when adding).
+        let conns: ManagedConnRecord[] = [];
         let storedVpns = new Set<string>();
 
         function showView(view: 'list' | 'form'): void {
@@ -91,27 +96,33 @@ export const ConnectionManagementModule = {
             el.classList.toggle('hidden', !msg);
         }
 
-        function renderList(conns: ManagedConnRecord[]): void {
+        /** The loaded connections the search box matches (broker or hostname), or a row saying why there are none. */
+        function renderList(): void {
+            const query = els.search.value.trim();
+            const shown = conns.filter(c => matchContains(c.broker, query) || matchContains(c.hostname, query));
             els.rows.innerHTML = '';
-            if (conns.length === 0) {
-                els.rows.innerHTML = '<tr><td colspan="3" class="text-secondary">No connections.</td></tr>';
+            if (shown.length === 0) {
+                const td = document.createElement('td');
+                td.colSpan = 3;
+                td.className = 'text-secondary';
+                td.textContent = conns.length === 0 ? 'No connections.' : `No connections match "${query}".`;
+                els.rows.appendChild(document.createElement('tr')).appendChild(td);
                 return;
             }
-            conns.forEach(c => {
+            shown.forEach(c => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `<td>${escapeHtml(c.broker)}</td><td>${escapeHtml(c.hostname)}</td>`;
-                const actions = document.createElement('td');
+                const actions = document.createElement('div');
                 actions.className = 'flex-row gap-2';
-                const edit = document.createElement('button');
-                edit.className = 'btn btn-secondary btn-sm';
-                edit.textContent = 'Edit';
-                edit.addEventListener('click', () => openEdit(c));
-                const del = document.createElement('button');
-                del.className = 'btn btn-danger btn-sm';
-                del.textContent = 'Delete';
-                del.addEventListener('click', () => void removeConn(c.broker));
-                actions.append(edit, del);
-                tr.appendChild(actions);
+                actions.append(
+                    iconButton(ICONS.edit, `Edit connection "${c.broker}"`, 'conn-mgmt-edit', () => openEdit(c)),
+                    iconButton(ICONS.delete, `Delete connection "${c.broker}"`, 'btn-icon-danger conn-mgmt-delete',
+                        () => void removeConn(c.broker)),
+                );
+                const cell = document.createElement('td');
+                cell.className = 'conn-mgmt-actions-col';
+                cell.appendChild(actions);
+                tr.appendChild(cell);
                 els.rows.appendChild(tr);
             });
         }
@@ -136,8 +147,8 @@ export const ConnectionManagementModule = {
                 reportManagedFailure(res, eventBus, msg => setError(els.listError, msg));
                 return;
             }
-            known = res.data.map(c => c.broker);
-            renderList(res.data);
+            conns = res.data;
+            renderList();
         }
 
         function openCreate(): void {
@@ -185,7 +196,7 @@ export const ConnectionManagementModule = {
             }
             // The gateway's save replaces a connection of the same name, so
             // Add must not reach an existing one.
-            if (!editing && known.includes(broker)) {
+            if (!editing && conns.some(c => c.broker === broker)) {
                 setError(els.formError, `Connection "${broker}" already exists. Use Edit to change it.`);
                 return;
             }
@@ -239,6 +250,7 @@ export const ConnectionManagementModule = {
 
         els.btnAdd.addEventListener('click', openCreate);
         els.btnRefresh.addEventListener('click', () => applyGate());
+        els.search.addEventListener('input', renderList);
         els.btnSave.addEventListener('click', () => void saveForm());
         els.btnCancel.addEventListener('click', () => showView('list'));
         els.btnAddVpn.addEventListener('click', () => vpnList.addRow());

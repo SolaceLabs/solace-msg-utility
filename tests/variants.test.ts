@@ -104,7 +104,7 @@ describe('variants', () => {
         // go-web-proxy/configfile.go; the browser shows them through
         // isModuleVisible. A module is module-controlled when granting it is
         // what makes it visible: not connections (always shown), not one
-        // rbac.ts denies in every managed session (the SEMP v1 readers).
+        // rbac.ts denies in every managed session (queue-discovery).
         const go = readFileSync(path.join(REPO, 'go-web-proxy/configfile.go'), 'utf-8');
         const literal = go.match(/^func moduleCatalog\(\) \[\]string \{ return \[\]string\{([^}]*)\} \}$/m);
         expect(literal, 'moduleCatalog() must stay a one-line literal').not.toBeNull();
@@ -114,7 +114,8 @@ describe('variants', () => {
         const controlled = Object.keys(MANAGED_VARIANT).filter(id =>
             isModuleVisible({ ...base, modules: [id] }, id) && !isModuleVisible({ ...base, modules: [] }, id));
         expect(catalog).toEqual(controlled);
-        expect(catalog).not.toContain('queue-subscription-explorer');
+        // It filters its own rows in the browser, so an administrator can grant it.
+        expect(catalog).toContain('queue-subscription-explorer');
     });
 
     it('managed variant ships the standard modules, with connections on its managed entry', () => {
@@ -136,10 +137,9 @@ describe('variants', () => {
 
     it('managed demo ships the managed variant\'s messaging modules and the three editors, on the managed entry', () => {
         // The one shipped bundle with the admin editors: a demo, against a fake
-        // gateway. No admin-login (the Managed panel owns the session) and no
-        // queue-subscription-explorer (hidden in every managed session).
+        // gateway. No admin-login (the Managed panel owns the session).
         const editors = ['connection-management', 'gateway-settings', 'user-management'];
-        const messaging = Object.keys(MANAGED_VARIANT).filter(id => id !== 'queue-subscription-explorer');
+        const messaging = Object.keys(MANAGED_VARIANT);
         expect(Object.keys(DEMO_VARIANT).sort()).toEqual([...messaging, ...editors].sort());
         expect(DEMO_VARIANT).not.toHaveProperty('admin-login');
         for (const id of messaging) expect(DEMO_VARIANT[id]).toBe(MANAGED_VARIANT[id]);

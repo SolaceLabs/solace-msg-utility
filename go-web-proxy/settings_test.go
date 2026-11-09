@@ -162,7 +162,7 @@ func TestSettings_Refusals(t *testing.T) {
 		code, field, reason string
 	}{
 		{"bad value", `{"session":{"idleMinutes":0}}`, 422, "invalid", "settings", `"session.idleMinutes"`},
-		{"explorer offered", `{"modules":{"offered":["queue-subscription-explorer"]}}`, 422, "invalid", "settings", "must be one of queue-browser, queue-copy"},
+		{"module outside the catalog", `{"modules":{"offered":["queue-discovery"]}}`, 422, "invalid", "settings", "must be one of queue-browser, queue-copy, queue-subscription-explorer"},
 		{"cross check", `{"hosted":false,"connModes":"both"}`, 422, "invalid", "settings", "hosted is false"},
 		{"direct would end Provisioned mode", `{"connModes":"direct"}`, 422, "invalid", "connModes", "set connModes: direct in config.yaml on the gateway host and restart"},
 		{"managed is retired", `{"managed":true}`, 400, "bad_request", "", ""},

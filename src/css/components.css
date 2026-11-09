@@ -208,6 +208,12 @@ a.btn {
     color: var(--text-muted);
 }
 
+/* A destructive icon action (e.g. a row's Delete): red at rest and on hover. */
+.btn-icon-danger,
+.btn-icon-danger:hover {
+    color: var(--status-disconnected);
+}
+
 .btn-sm {
     padding: 0.25rem 0.5rem;
     font-size: 0.5rem;
@@ -259,6 +265,14 @@ a.btn {
 
 .data-table tbody tr:hover {
     background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Bordered scroll box around a .data-table; its header stays put (sticky th). */
+.data-table-frame {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: auto;
+    max-height: 60vh;
 }
 
 /* ---------- Badges ---------- */

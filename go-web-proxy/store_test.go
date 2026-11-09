@@ -341,7 +341,7 @@ func TestLoadStore_RejectsInvalidUsersFile(t *testing.T) {
 		{"dots only username", "msg-utility-users:\n" + user("'..'", good, true), `username ".." must be 1 to 64 characters from A-Z a-z 0-9 . _ @ -, not only dots`},
 		{"duplicate", "msg-utility-users:\n" + user("admin", good, true) + user("admin", good, false), `user "admin" appears more than once`},
 		{"no admin", "msg-utility-users:\n" + user("viewer", good, false), "at least one administrator"},
-		{"unknown module", "msg-utility-users:\n" + user("admin", good, true) + "    modules: [queue-subscription-explorer]\n", `user "admin": key "modules[0]" has invalid value "queue-subscription-explorer"`},
+		{"unknown module", "msg-utility-users:\n" + user("admin", good, true) + "    modules: [queue-discovery]\n", `user "admin": key "modules[0]" has invalid value "queue-discovery"`},
 		{"empty", "", "at least one administrator"},
 	}
 	for _, tc := range cases {
@@ -583,7 +583,7 @@ func TestStore_ProfileAndEntitlement(t *testing.T) {
 	}
 	// Modules: admin has no list of their own (the default: every offered
 	// module), viewer has one.
-	if !reflect.DeepEqual(prof.Modules, []string{"queue-browser", "queue-copy"}) || !reflect.DeepEqual(vp.Modules, []string{"queue-browser"}) {
+	if !reflect.DeepEqual(prof.Modules, []string{"queue-browser", "queue-copy", "queue-subscription-explorer"}) || !reflect.DeepEqual(vp.Modules, []string{"queue-browser"}) {
 		t.Errorf("modules: admin %v, viewer %v", prof.Modules, vp.Modules)
 	}
 	narrow := moduleSettings{offered: []string{"queue-copy"}, userDefault: modulesDefaultAll}

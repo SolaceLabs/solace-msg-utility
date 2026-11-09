@@ -41,10 +41,10 @@ describe('mock-broker/gateway/seed', () => {
 
         // west-dr is not the operator's at all.
         expect(brokers('operator')).toEqual(['east-prod:orders,payments', 'lab:sandbox']);
-        expect(me('operator')!.modules).toEqual(['queue-browser', 'queue-copy']);
+        expect(me('operator')!.modules).toEqual(['queue-browser', 'queue-copy', 'queue-subscription-explorer']);
 
         expect(brokers('viewer')).toEqual(['east-prod:orders']);
-        expect(me('viewer')!.modules).toEqual(['queue-browser']);
+        expect(me('viewer')!.modules).toEqual(['queue-browser', 'queue-subscription-explorer']);
         expect(me('viewer')!.operate).toEqual([]);
 
         expect(gw.store.listUsers().find(u => u.username === 'newadmin')!.mustChangePassword).toBe(true);

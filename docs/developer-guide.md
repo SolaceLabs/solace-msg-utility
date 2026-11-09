@@ -107,14 +107,16 @@ src/
     kernel.ts          # Module orchestrator, state, navigation, SEMP auth
     dom.ts             # required() helper — fail-fast required-element assertion
     utils.ts           # Pure utilities (escapeHtml, escapeXml, formatBytes, generateUuid, matchString,
-                       # topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
+                       # matchContains, topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
                        # isValidHost, isValidPort)
+    icons.ts           # Shared inline SVG icons (ICONS) + iconButton() -- labelled icon-only buttons
     timing.ts          # Shared INPUT_DEBOUNCE_MS for input-driven feedback
     toast.ts           # Toast notification system
     logger.ts          # Leveled logger every module writes through (?logLevel= URL override)
     hosted.ts          # /hosted probe + buildBrokerUrl — the single gateway-rewrite point
     constants.ts       # App-wide constants
-    rbac.ts            # Stateless RBAC matchers — matchGlob, isModuleVisible, isVpnVisible, isQueueVisible, canOperate
+    rbac.ts            # Stateless RBAC matchers — matchGlob, isModuleVisible, isVpnVisible, isQueueVisible, canOperate,
+                       # explainAccess (which level a row set grants, and the row)
     managed-semp-filter.ts # filterSempFetch — scopes SEMP discovery to entitled VPNs/queues (managed)
     services/                  # Pure broker-side factories — no AppContext, no UI.
       solace-client.ts         # createServiceSolace(hooks) → Solace session lifecycle

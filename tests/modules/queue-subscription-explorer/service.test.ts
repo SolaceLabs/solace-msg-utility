@@ -98,6 +98,36 @@ describe('queue-subscription-explorer/service', () => {
         expect(opts.body).toContain('<subscriptions/>');
     });
 
+    it("keeps only the signed-in user's rows in a Provisioned session: a provisioned VPN and a visible queue", async () => {
+        const PAGE = `<rpc-reply>
+  <rpc><show><queue><queues>
+    <queue><name>orders.new</name><info><message-vpn>orders</message-vpn></info>
+      <subscriptions><subscription><topic>o/new</topic></subscription></subscriptions>
+    </queue>
+    <queue><name>audit.x</name><info><message-vpn>orders</message-vpn></info>
+      <subscriptions><subscription><topic>o/audit</topic></subscription></subscriptions>
+    </queue>
+    <queue><name>orders.new</name><info><message-vpn>payments</message-vpn></info>
+      <subscriptions><subscription><topic>p/new</topic></subscription></subscriptions>
+    </queue>
+  </queues></queue></show></rpc>
+  <execute-result code="ok"/>
+</rpc-reply>`;
+        const ctx = createTestContext({
+            managed: {
+                admin: false, username: 'u', broker: 'b1', vpns: ['orders'], modules: ['queue-subscription-explorer'],
+                operate: [{ brokers: 'b1', msgVpns: '*', queues: 'orders.*' }], readOnly: [],
+            },
+        });
+        (ctx.sempFetch as any).mockResolvedValueOnce(textRes(PAGE));
+
+        const pages = await allPages(createService(ctx).fetchAllSubscriptions());
+        // audit.x: no row's queue pattern; payments: not a provisioned VPN.
+        expect(pages).toEqual([{ ok: true, data: [{ vpn: 'orders', queue: 'orders.new', topic: 'o/new' }] }]);
+        // The request still asks the broker for every VPN; the browser filters.
+        expect((ctx.sempFetch as any).mock.calls[0][1].body).toContain('<vpn-name>*</vpn-name>');
+    });
+
     it('follows <more-cookie> to fetch additional pages, throttling between them', async () => {
         vi.useFakeTimers();
         const ctx = createTestContext();

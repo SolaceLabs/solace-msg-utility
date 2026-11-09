@@ -20,16 +20,23 @@
  * deployment default (config.yaml's `modules.userDefault`), or a list of
  * their own. The gateway only ever grants what `modules.offered` allows, so a
  * module outside it is marked "not offered". Imports only from `src/core/*`
- * and its own service.
+ * and its own files.
+ *
+ * The list filters as you type in its search box (`matchContains`: contains,
+ * case-insensitive, `*` = any run), from the last load without a refetch. The
+ * Permission test card below it (`./access-test`) shows what a saved user gets
+ * on a given broker, Message VPN and queue.
  */
 import { required } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import { createRowList } from '../../core/components/row-list';
 import { showToast } from '../../core/toast';
-import { escapeHtml, moduleLabel } from '../../core/utils';
+import { escapeHtml, matchContains, moduleLabel } from '../../core/utils';
+import { ICONS, iconButton } from '../../core/icons';
 import { logger } from '../../core/logger';
 import { reportManagedFailure, SIGNED_OUT_TOAST_MS } from '../../core/services/managed-api';
 import { createUserMgmtService, type ManagedUser, type ModuleChoices, type UserPayload } from './service';
+import { createAccessTest, grantedModules } from './access-test';
 import type { AppContext, QGlob } from '../../core/types';
 
 const GLOB_FIELDS = [
@@ -54,8 +61,10 @@ export const UserManagementModule = {
             listView: required<HTMLElement>(container, '#user-mgmt-list-view'),
             rows: required<HTMLElement>(container, '#user-mgmt-rows'),
             listError: required<HTMLElement>(container, '#user-mgmt-list-error'),
+            search: required<HTMLInputElement>(container, '#user-mgmt-search'),
             btnRefresh: required<HTMLButtonElement>(container, '#btn-user-mgmt-refresh'),
             btnAdd: required<HTMLButtonElement>(container, '#btn-user-mgmt-add'),
+            testView: required<HTMLElement>(container, '#user-mgmt-test-view'),
 
             formView: required<HTMLElement>(container, '#user-mgmt-form-view'),
             formTitle: required<HTMLElement>(container, '#user-mgmt-form-title'),
@@ -78,6 +87,7 @@ export const UserManagementModule = {
         const service = createUserMgmtService();
         const operateList = createRowList(els.operateRows, GLOB_FIELDS, { empty: NO_OPERATE });
         const readonlyList = createRowList(els.readonlyRows, GLOB_FIELDS, { empty: NO_READ_ONLY });
+        const accessTest = createAccessTest(container);
         const gate = createGate(container, {
             id: 'user-mgmt-gate',
             title: 'Administrator Sign-in Required',
@@ -88,15 +98,17 @@ export const UserManagementModule = {
         let editing: string | null = null;
         // From the last list load; empty until then.
         let choices: ModuleChoices = { catalog: [], offered: [], userDefault: 'all' };
-        let known: string[] = [];
+        let users: ManagedUser[] = [];
 
         function showView(view: 'list' | 'form'): void {
             gate.hide();
             els.listView.classList.toggle('hidden', view !== 'list');
+            els.testView.classList.toggle('hidden', view !== 'list');
             els.formView.classList.toggle('hidden', view !== 'form');
         }
         function showGate(): void {
             els.listView.classList.add('hidden');
+            els.testView.classList.add('hidden');
             els.formView.classList.add('hidden');
             gate.show();
         }
@@ -105,27 +117,33 @@ export const UserManagementModule = {
             el.classList.toggle('hidden', !msg);
         }
 
-        function renderList(users: ManagedUser[]): void {
+        /** The loaded users the search box matches (by username), or a row saying why there are none. */
+        function renderList(): void {
+            const query = els.search.value.trim();
+            const shown = users.filter(u => matchContains(u.username, query));
             els.rows.innerHTML = '';
-            if (users.length === 0) {
-                els.rows.innerHTML = '<tr><td colspan="3" class="text-secondary">No users.</td></tr>';
+            if (shown.length === 0) {
+                const td = document.createElement('td');
+                td.colSpan = 3;
+                td.className = 'text-secondary';
+                td.textContent = users.length === 0 ? 'No users.' : `No users match "${query}".`;
+                els.rows.appendChild(document.createElement('tr')).appendChild(td);
                 return;
             }
-            users.forEach(u => {
+            shown.forEach(u => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `<td>${escapeHtml(u.username)}</td><td>${u.admin ? 'Admin' : 'User'}</td>`;
-                const actions = document.createElement('td');
+                const actions = document.createElement('div');
                 actions.className = 'flex-row gap-2';
-                const edit = document.createElement('button');
-                edit.className = 'btn btn-secondary btn-sm';
-                edit.textContent = 'Edit';
-                edit.addEventListener('click', () => openEdit(u));
-                const del = document.createElement('button');
-                del.className = 'btn btn-danger btn-sm';
-                del.textContent = 'Delete';
-                del.addEventListener('click', () => void removeUser(u.username));
-                actions.append(edit, del);
-                tr.appendChild(actions);
+                actions.append(
+                    iconButton(ICONS.edit, `Edit user "${u.username}"`, 'user-mgmt-edit', () => openEdit(u)),
+                    iconButton(ICONS.delete, `Delete user "${u.username}"`, 'btn-icon-danger user-mgmt-delete',
+                        () => void removeUser(u.username)),
+                );
+                const cell = document.createElement('td');
+                cell.className = 'user-mgmt-actions-col';
+                cell.appendChild(actions);
+                tr.appendChild(cell);
                 els.rows.appendChild(tr);
             });
         }
@@ -151,12 +169,9 @@ export const UserManagementModule = {
                 return;
             }
             choices = res.data.modules;
-            known = res.data.users.map(u => u.username);
-            renderList(res.data.users);
-        }
-
-        function defaultModules(): string[] {
-            return choices.userDefault === 'all' ? choices.offered : [];
+            users = res.data.users;
+            renderList();
+            accessTest.setData(users, choices);
         }
 
         function checkedModules(): string[] {
@@ -170,7 +185,7 @@ export const UserManagementModule = {
          */
         function renderModules(own: string[] | null): void {
             const useDefault = own === null;
-            const shown = useDefault ? defaultModules() : own;
+            const shown = useDefault ? grantedModules(null, choices) : own;
             els.modulesDefault.checked = useDefault;
             els.modulesDefaultHint.textContent = choices.userDefault === 'all' ? '(every offered module)' : '(no modules)';
             els.modules.innerHTML = '';
@@ -234,7 +249,7 @@ export const UserManagementModule = {
             }
             // The gateway's save replaces a user of the same name, so Add
             // must not reach an existing one.
-            if (!editing && known.includes(username)) {
+            if (!editing && users.some(u => u.username === username)) {
                 setError(els.formError, `User "${username}" already exists. Use Edit to change it.`);
                 return;
             }
@@ -306,6 +321,7 @@ export const UserManagementModule = {
 
         els.btnAdd.addEventListener('click', openCreate);
         els.btnRefresh.addEventListener('click', () => applyGate());
+        els.search.addEventListener('input', renderList);
         els.btnSave.addEventListener('click', () => void saveForm());
         els.btnCancel.addEventListener('click', () => showView('list'));
         els.btnAddOperate.addEventListener('click', () => operateList.addRow());

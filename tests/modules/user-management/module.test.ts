@@ -59,8 +59,8 @@ async function setup(managed: ManagedSession | null = ADMIN) {
 
 const rowCount = (c: HTMLElement) => el(c, '#user-mgmt-rows').querySelectorAll('tr').length;
 
-/** Click row `i`'s Edit (`.btn-secondary`) or Delete (`.btn-danger`) button. */
-function clickRow(c: HTMLElement, i: number, cls: '.btn-secondary' | '.btn-danger'): void {
+/** Click row `i`'s Edit (`.user-mgmt-edit`) or Delete (`.user-mgmt-delete`) icon button. */
+function clickRow(c: HTMLElement, i: number, cls: '.user-mgmt-edit' | '.user-mgmt-delete'): void {
     el(c, '#user-mgmt-rows').querySelectorAll('tr')[i].querySelector<HTMLButtonElement>(cls)!.click();
 }
 
@@ -135,6 +135,7 @@ describe('user-management — list', () => {
         await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
         expect(toastMock.showToast).toHaveBeenCalledWith('Your session has ended. Sign in again.', 'error', 5000);
         expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+        expect(hidden(container, '#user-mgmt-test-view')).toBe(true);
     });
 
     it('renders an empty-state row when there are no users', async () => {
@@ -161,6 +162,74 @@ describe('user-management — list', () => {
         await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalled());
         expect(hidden(container, '#user-mgmt-gate')).toBe(true);
         expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+    });
+});
+
+describe('user-management -- list rows and search', () => {
+    const MANY = ['alice', 'bob', 'ops-admin', 'ops-viewer'].map(username =>
+        ({ username, admin: false, operate: [], readOnly: [], modules: null }));
+
+    async function setupMany() {
+        const container = loadModuleDOM('user-management');
+        const ctx = makeCtx(container, ADMIN);
+        svcMock.listUsers.mockResolvedValue(listed(MANY));
+        await UserManagementModule.install(ctx);
+        await vi.waitFor(() => expect(rowCount(container)).toBe(4));
+        return container;
+    }
+    function search(c: HTMLElement, q: string): void {
+        const input = el<HTMLInputElement>(c, '#user-mgmt-search');
+        input.value = q;
+        input.dispatchEvent(new Event('input'));
+    }
+    const names = (c: HTMLElement) =>
+        [...el(c, '#user-mgmt-rows').querySelectorAll('tr')].map(tr => tr.cells[0].textContent);
+
+    it("each row's actions are icon buttons named for the user", async () => {
+        const { container } = await setup();
+        const row = el(container, '#user-mgmt-rows').querySelectorAll('tr')[1];
+        expect(row.querySelector('.user-mgmt-edit')!.getAttribute('aria-label')).toBe('Edit user "viewer"');
+        expect(row.querySelector('.user-mgmt-delete')!.getAttribute('aria-label')).toBe('Delete user "viewer"');
+        expect(row.querySelector('.user-mgmt-delete')!.classList.contains('btn-icon-danger')).toBe(true);
+    });
+
+    it('narrows the list as you type: contains, case-insensitive, * spanning any run; clearing restores it', async () => {
+        const container = await setupMany();
+        search(container, 'OPS');
+        expect(names(container)).toEqual(['ops-admin', 'ops-viewer']);
+        search(container, 'o*v');
+        expect(names(container)).toEqual(['ops-viewer']);
+        search(container, '');
+        expect(names(container)).toEqual(['alice', 'bob', 'ops-admin', 'ops-viewer']);
+        expect(svcMock.listUsers).toHaveBeenCalledTimes(1); // filtered in memory
+    });
+
+    it('says when no user matches, writing the query as text', async () => {
+        const container = await setupMany();
+        search(container, '<img src=x>');
+        expect(el(container, '#user-mgmt-rows').textContent).toBe('No users match "<img src=x>".');
+        expect(el(container, '#user-mgmt-rows').querySelector('img')).toBeNull();
+    });
+
+    it('keeps the query across a Refresh', async () => {
+        const container = await setupMany();
+        search(container, 'ops');
+        svcMock.listUsers.mockResolvedValue(listed([...MANY, { ...MANY[0], username: 'ops-new' }]));
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-refresh').click();
+        await vi.waitFor(() => expect(names(container)).toEqual(['ops-admin', 'ops-viewer', 'ops-new']));
+    });
+});
+
+describe('user-management -- permission test card', () => {
+    it('shows with the list, offers the loaded users, and gives way to the form', async () => {
+        const { container } = await setup();
+        expect(hidden(container, '#user-mgmt-test-view')).toBe(false);
+        const options = [...el<HTMLSelectElement>(container, '#user-mgmt-test-user').options].map(o => o.value);
+        expect(options).toEqual(['', 'admin', 'viewer']);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        expect(hidden(container, '#user-mgmt-test-view')).toBe(true);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-cancel').click();
+        expect(hidden(container, '#user-mgmt-test-view')).toBe(false);
     });
 });
 
@@ -241,7 +310,7 @@ describe('user-management — create / edit form', () => {
         const { container } = await setup();
         // second row = viewer
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
-            .querySelector<HTMLButtonElement>('.btn-secondary')!.click();
+            .querySelector<HTMLButtonElement>('.user-mgmt-edit')!.click();
         expect(hidden(container, '#user-mgmt-form-view')).toBe(false);
         expect(el<HTMLInputElement>(container, '#user-mgmt-username').value).toBe('viewer');
         expect(el<HTMLInputElement>(container, '#user-mgmt-username').disabled).toBe(true);
@@ -256,7 +325,7 @@ describe('user-management — create / edit form', () => {
         const { container } = await setup();
         svcMock.saveUser.mockResolvedValue({ ok: true });
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
-            .querySelector<HTMLButtonElement>('.btn-secondary')!.click();
+            .querySelector<HTMLButtonElement>('.user-mgmt-edit')!.click();
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
         await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
         expect(svcMock.saveUser.mock.calls[0][0].password).toBe('');
@@ -270,7 +339,7 @@ describe('user-management — create / edit form', () => {
         await UserManagementModule.install(ctx);
         await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').children.length).toBeGreaterThan(0));
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.btn-secondary')!.click();
+            .querySelector<HTMLButtonElement>('.user-mgmt-edit')!.click();
         expect(el(container, '#user-mgmt-operate-rows').querySelectorAll('.row-list-row').length).toBe(0);
         expect(el(container, '#user-mgmt-readonly-rows').querySelectorAll('.row-list-row').length).toBe(0);
         // No modules field either: the deployment default.
@@ -342,7 +411,7 @@ describe('user-management — modules', () => {
 
     it("editing a user with a list of their own shows it, editable", async () => {
         const { container } = await setup();
-        clickRow(container, 1, '.btn-secondary'); // viewer: ['queue-browser']
+        clickRow(container, 1, '.user-mgmt-edit'); // viewer: ['queue-browser']
         expect(defaultBox(container).checked).toBe(false);
         expect(boxes(container).map(b => [b.checked, b.disabled])).toEqual([[true, false], [false, false]]);
     });
@@ -350,7 +419,7 @@ describe('user-management — modules', () => {
     it("leaving the default starts from what it grants; the save sends the user's own list", async () => {
         const { container } = await setup();
         svcMock.saveUser.mockResolvedValue({ ok: true });
-        clickRow(container, 0, '.btn-secondary'); // admin: default
+        clickRow(container, 0, '.user-mgmt-edit'); // admin: default
         toggleDefault(container, false);
         expect(boxes(container).map(b => [b.checked, b.disabled])).toEqual([[true, false], [false, false]]);
         boxes(container)[0].checked = false;
@@ -363,7 +432,7 @@ describe('user-management — modules', () => {
     it('returning to the default shows it again and sends null', async () => {
         const { container } = await setup();
         svcMock.saveUser.mockResolvedValue({ ok: true });
-        clickRow(container, 1, '.btn-secondary'); // viewer
+        clickRow(container, 1, '.user-mgmt-edit'); // viewer
         boxes(container)[1].checked = true;
         toggleDefault(container, true);
         expect(boxes(container).map(b => [b.checked, b.disabled])).toEqual([[true, true], [false, true]]);
@@ -390,7 +459,7 @@ describe('user-management — delete', () => {
         svcMock.deleteUser.mockResolvedValue({ ok: true });
         (globalThis.confirm as any).mockReturnValue(true);
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
-            .querySelector<HTMLButtonElement>('.btn-danger')!.click();
+            .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('User deleted', 'ok'));
         expect(svcMock.deleteUser).toHaveBeenCalledWith('viewer');
     });
@@ -399,7 +468,7 @@ describe('user-management — delete', () => {
         const { container } = await setup();
         (globalThis.confirm as any).mockReturnValue(false);
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
-            .querySelector<HTMLButtonElement>('.btn-danger')!.click();
+            .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
         await Promise.resolve();
         expect(svcMock.deleteUser).not.toHaveBeenCalled();
     });
@@ -409,7 +478,7 @@ describe('user-management — delete', () => {
         svcMock.deleteUser.mockResolvedValue({ ok: false, status: 404, code: 'not_found' });
         (globalThis.confirm as any).mockReturnValue(true);
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
-            .querySelector<HTMLButtonElement>('.btn-danger')!.click();
+            .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Not found. It may already have been removed.', 'error'));
     });
 
@@ -417,7 +486,7 @@ describe('user-management — delete', () => {
         const { container, ctx } = await setup();
         ctx.setState('managed', null);
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
-            .querySelector<HTMLButtonElement>('.btn-danger')!.click();
+            .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
         await Promise.resolve();
         expect(svcMock.deleteUser).not.toHaveBeenCalled();
     });
@@ -432,7 +501,7 @@ describe('user-management — your own session', () => {
         const signOut = answerSignOut(ctx);
         svcMock.saveUser.mockResolvedValue({ ok: true });
         svcMock.listUsers.mockClear();
-        clickRow(container, 0, '.btn-secondary'); // admin = own record
+        clickRow(container, 0, '.user-mgmt-edit'); // admin = own record
         el<HTMLInputElement>(container, '#user-mgmt-password').value = 'new-pw';
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
         await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
@@ -451,7 +520,7 @@ describe('user-management — your own session', () => {
         const { container, ctx } = await setup();
         const signOut = answerSignOut(ctx);
         svcMock.saveUser.mockResolvedValue({ ok: true });
-        clickRow(container, 0, '.btn-secondary');
+        clickRow(container, 0, '.user-mgmt-edit');
         el<HTMLInputElement>(container, '#user-mgmt-admin').checked = false;
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
         await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
@@ -465,7 +534,7 @@ describe('user-management — your own session', () => {
         const rbac = vi.fn();
         ctx.eventBus.on('rbac:changed', rbac);
         svcMock.saveUser.mockResolvedValue({ ok: true });
-        clickRow(container, 0, '.btn-secondary');
+        clickRow(container, 0, '.user-mgmt-edit');
         el(container, '#user-mgmt-operate-rows').querySelectorAll<HTMLInputElement>('input')[2].value = 'orders.*';
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
         await vi.waitFor(() => expect(rbac).toHaveBeenCalled());
@@ -483,7 +552,7 @@ describe('user-management — your own session', () => {
         const signOut = answerSignOut(ctx);
         svcMock.saveUser.mockResolvedValue({ ok: true });
         svcMock.listUsers.mockClear();
-        clickRow(container, 1, '.btn-secondary'); // viewer
+        clickRow(container, 1, '.user-mgmt-edit'); // viewer
         el<HTMLInputElement>(container, '#user-mgmt-password').value = 'pw2';
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
         await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalled());
@@ -497,7 +566,7 @@ describe('user-management — your own session', () => {
         const { container, ctx } = await setup();
         const signOut = answerSignOut(ctx);
         svcMock.saveUser.mockResolvedValue({ ok: false, status: 500, code: 'server_error' });
-        clickRow(container, 0, '.btn-secondary');
+        clickRow(container, 0, '.user-mgmt-edit');
         el<HTMLInputElement>(container, '#user-mgmt-password').value = 'new-pw';
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
         await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent)
@@ -513,7 +582,7 @@ describe('user-management — your own session', () => {
         const signOut = answerSignOut(ctx);
         svcMock.deleteUser.mockResolvedValue({ ok: true });
         svcMock.listUsers.mockClear();
-        clickRow(container, 0, '.btn-danger');
+        clickRow(container, 0, '.user-mgmt-delete');
         await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
 
         expect(globalThis.confirm).toHaveBeenCalledWith(expect.stringMatching(/your own account.*signed out/i));
@@ -527,7 +596,7 @@ describe('user-management — your own session', () => {
         const { container, ctx } = await setup();
         const signOut = answerSignOut(ctx);
         svcMock.deleteUser.mockResolvedValue({ ok: false, status: 409, code: 'last_admin' });
-        clickRow(container, 0, '.btn-danger');
+        clickRow(container, 0, '.user-mgmt-delete');
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('At least one administrator must remain.', 'error'));
 
         expect(signOut).not.toHaveBeenCalled();

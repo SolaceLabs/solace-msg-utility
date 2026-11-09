@@ -5,16 +5,20 @@
     <div class="flex-row justify-between items-center mb-4">
         <h2 class="m-0">Connections</h2>
         <div class="flex-row items-center gap-4">
+            <input type="search" id="conn-mgmt-search" class="form-control conn-mgmt-search"
+                placeholder="Search connections (* = any)" aria-label="Search connections" autocomplete="off">
             <button id="btn-conn-mgmt-refresh" class="btn btn-secondary" title="Reload the connection list">Refresh</button>
             <button id="btn-conn-mgmt-add" class="btn btn-primary">Add connection</button>
         </div>
     </div>
-    <table class="conn-mgmt-table w-full">
-        <thead>
-            <tr><th>Broker</th><th>Host</th><th class="conn-mgmt-actions-col">Actions</th></tr>
-        </thead>
-        <tbody id="conn-mgmt-rows"></tbody>
-    </table>
+    <div class="data-table-frame">
+        <table class="data-table">
+            <thead>
+                <tr><th>Broker</th><th>Host</th><th class="conn-mgmt-actions-col">Actions</th></tr>
+            </thead>
+            <tbody id="conn-mgmt-rows"></tbody>
+        </table>
+    </div>
     <div id="conn-mgmt-list-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
 </div>
 

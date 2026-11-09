@@ -31,11 +31,9 @@ const MODULE_REQUIREMENTS: Record<string, 'admin' | 'unfiltered-semp'> = {
     'user-management': 'admin',
     'connection-management': 'admin',
     'gateway-settings': 'admin',
-    // Lists every (VPN, queue, subscription) triple over SEMP v1 RPC, which
-    // `filterSempFetch` does not rewrite — it would expose the whole
-    // subscription inventory regardless of entitlement.
-    'queue-subscription-explorer': 'unfiltered-semp',
-    // Vestigial, but it drives raw SEMP discovery the same way.
+    // Vestigial: it drives raw SEMP v1 discovery, which nothing filters.
+    // (queue-subscription-explorer also reads over SEMP v1, but filters its
+    // rows itself with `visibleQueueRows`, so it is under module control.)
     'queue-discovery': 'unfiltered-semp',
 };
 
@@ -52,14 +50,22 @@ export function matchGlob(pattern: string, value: string): boolean {
     return new RegExp(`^${body}$`).test(value);
 }
 
+function findQueueRow(rows: QGlob[], broker: string, vpn: string, queue: string): QGlob | undefined {
+    return rows.find(r => matchGlob(r.brokers, broker) && matchGlob(r.msgVpns, vpn) && matchGlob(r.queues, queue));
+}
+
+function findVpnRow(rows: QGlob[], broker: string, vpn: string): QGlob | undefined {
+    // Connection-level entitlement ignores the queue glob (a broker/vpn is
+    // reachable if any row grants any queue on it).
+    return rows.find(r => matchGlob(r.brokers, broker) && matchGlob(r.msgVpns, vpn));
+}
+
 function matchesAny(rows: QGlob[], broker: string, vpn: string, queue: string): boolean {
-    return rows.some(r => matchGlob(r.brokers, broker) && matchGlob(r.msgVpns, vpn) && matchGlob(r.queues, queue));
+    return findQueueRow(rows, broker, vpn, queue) !== undefined;
 }
 
 function vpnMatchesAny(rows: QGlob[], broker: string, vpn: string): boolean {
-    // Connection-level entitlement ignores the queue glob (a broker/vpn is
-    // reachable if any row grants any queue on it).
-    return rows.some(r => matchGlob(r.brokers, broker) && matchGlob(r.msgVpns, vpn));
+    return findVpnRow(rows, broker, vpn) !== undefined;
 }
 
 /** The sign-in surfaces: shown in every managed session, never granted. */
@@ -116,4 +122,38 @@ export function canOperate(
 ): boolean {
     if (!s) return true;
     return matchesAny(s.operate, broker, vpn, queue);
+}
+
+/** What an entitlement-row set grants on one queue; see `explainAccess`. */
+export type AccessLevel = 'operate' | 'read-only' | 'vpn-only' | 'none';
+
+export interface AccessExplanation {
+    level: AccessLevel;
+    /** The first row that grants `level`; null for `'none'`. */
+    row: QGlob | null;
+}
+
+/**
+ * What a set of entitlement rows gives on one queue, and the row that gives it:
+ *   - `'operate'`   -- an operate row matches broker, VPN and queue (`canOperate`).
+ *   - `'read-only'` -- only a read-only row matches all three (`isQueueVisible`).
+ *   - `'vpn-only'`  -- a row matches broker and VPN but none the queue: the VPN
+ *     is reachable (`isVpnVisible`) and the queue hidden.
+ *   - `'none'`      -- no row matches broker and VPN; `row` is null.
+ * Built on the same predicates as the enforcing helpers above, so the admin
+ * app's permission test cannot disagree with what a session gets.
+ */
+export function explainAccess(
+    rows: Pick<ManagedSession, 'operate' | 'readOnly'>,
+    broker: string,
+    vpn: string,
+    queue: string,
+): AccessExplanation {
+    const operate = findQueueRow(rows.operate, broker, vpn, queue);
+    if (operate) return { level: 'operate', row: operate };
+    const readOnly = findQueueRow(rows.readOnly, broker, vpn, queue);
+    if (readOnly) return { level: 'read-only', row: readOnly };
+    const vpnRow = findVpnRow(rows.operate, broker, vpn) ?? findVpnRow(rows.readOnly, broker, vpn);
+    if (vpnRow) return { level: 'vpn-only', row: vpnRow };
+    return { level: 'none', row: null };
 }

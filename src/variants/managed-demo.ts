@@ -10,13 +10,13 @@
  * the product serves at /solAdmin: here they are sidebar entries, shown to an
  * administrator only (`isModuleVisible`). No `admin-login`: the connections
  * module's Provisioned panel owns the session, as in provisioned.html, and a second
- * owner would race it. No queue-subscription-explorer: every managed session
- * hides it.
+ * owner would race it.
  */
 export const ACTIVE_MODULES: Record<string, number> = {
     'connections': 100,
     'queue-browser': 80,
     'queue-copy': 70,
+    'queue-subscription-explorer': 45,
     'user-management': 20,         // admin-only
     'connection-management': 15,   // admin-only
     'gateway-settings': 10,        // admin-only: config.yaml

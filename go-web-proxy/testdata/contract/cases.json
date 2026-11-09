@@ -14,7 +14,7 @@
               { "broker": "b2", "msgVpns": [{ "name": "v9" }] },
               { "broker": "b3", "msgVpns": [{ "name": "v3" }] }
             ],
-            "modules": ["queue-browser", "queue-copy"]
+            "modules": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
           }
         }
       ]
@@ -47,7 +47,7 @@
               { "broker": "b1", "msgVpns": [{ "name": "v2" }] },
               { "broker": "b2", "msgVpns": [{ "name": "v9" }] }
             ],
-            "modules": ["queue-browser", "queue-copy"]
+            "modules": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
           }
         }
       ]
@@ -176,7 +176,7 @@
                 "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }], "modules": null
               }
             ],
-            "modules": { "catalog": ["queue-browser", "queue-copy"], "offered": ["queue-browser", "queue-copy"], "userDefault": "all" }
+            "modules": { "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" }
           }
         }
       ]
@@ -202,7 +202,7 @@
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
           "body": { "password": "a-long-password-1", "admin": false, "operate": [], "readOnly": [], "modules": ["bogus"] },
-          "status": 422, "response": { "error": "invalid", "field": "modules", "reason": "key \"modules[0]\" has invalid value \"bogus\": must be one of queue-browser, queue-copy" }
+          "status": 422, "response": { "error": "invalid", "field": "modules", "reason": "key \"modules[0]\" has invalid value \"bogus\": must be one of queue-browser, queue-copy, queue-subscription-explorer" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
@@ -258,7 +258,7 @@
                 "operate": [], "readOnly": [{ "brokers": "b2", "msgVpns": "v9", "queues": "q.*" }], "modules": []
               }
             ],
-            "modules": { "catalog": ["queue-browser", "queue-copy"], "offered": ["queue-browser", "queue-copy"], "userDefault": "all" }
+            "modules": { "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" }
           }
         }
       ]
@@ -426,7 +426,7 @@
             "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
             "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }],
             "brokers": [{ "broker": "b1", "msgVpns": [{ "name": "v2" }] }],
-            "modules": ["queue-browser", "queue-copy"]
+            "modules": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
           }
         }
       ]
@@ -445,13 +445,13 @@
               "access": { "allow": [], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
               "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
-              "modules": { "offered": ["queue-browser", "queue-copy"], "userDefault": "all" }
+              "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" }
             },
             "restartOnly": ["hosted", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"],
             "hostOnly": ["appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "usersFile", "connectionsFile"],
             "pendingRestart": [],
             "changedOnDisk": false,
-            "catalog": ["queue-browser", "queue-copy"]
+            "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
           }
         }
       ]
@@ -510,7 +510,7 @@
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "modules": { "offered": ["bogus"] } },
-          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"modules.offered[0]\" has invalid value \"bogus\": must be one of queue-browser, queue-copy" }
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"modules.offered[0]\" has invalid value \"bogus\": must be one of queue-browser, queue-copy, queue-subscription-explorer" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "modules": { "offered": ["queue-copy", "queue-copy"] } },
@@ -548,13 +548,13 @@
               "access": { "allow": ["192.0.2.0/24", "2001:db8::/32", "2001:db8:abcd:1000::/52", "fe80::1:0:0:1/128"], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
               "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
-              "modules": { "offered": ["queue-browser", "queue-copy"], "userDefault": "all" }
+              "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" }
             },
             "restartOnly": ["hosted", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"],
             "hostOnly": ["appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "usersFile", "connectionsFile"],
             "pendingRestart": [],
             "changedOnDisk": false,
-            "catalog": ["queue-browser", "queue-copy"]
+            "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
           }
         }
       ]
