@@ -193,7 +193,7 @@ describe('e2e-lib -- broker details', () => {
     });
 
     // The certificate names solxps.handy, which nothing resolves: the alias
-    // maps that name to the broker's address inside the gateway container.
+    // maps that name to the broker's address inside both gateway containers.
     it('aliases a host name to E2E_BROKER_IP, never an address', () => {
         const file = parseDetailsFile('E2E_BROKER_HOST=solxps.handy\nE2E_BROKER_IP=10.14.128.129\n', FILE);
         expect(resolveDetails({}, file, FILE).values).toMatchObject({ host: 'solxps.handy', brokerIp: '10.14.128.129' });
@@ -201,8 +201,9 @@ describe('e2e-lib -- broker details', () => {
         expect(hostAliasProblem('10.14.128.129', '')).toBe('');
         expect(hostAliasProblem('10.14.128.129', '10.14.128.130')).toBe(
             "E2E_BROKER_IP needs E2E_BROKER_HOST to be a name in the broker's certificate, not an address: 10.14.128.129");
-        expect(JSON.parse(hostAliasOverride('solxps.handy', 'fd00::5')))
-            .toEqual({ services: { gateway: { extra_hosts: ['solxps.handy:fd00::5'] } } });
+        expect(JSON.parse(hostAliasOverride('solxps.handy', 'fd00::5'))).toEqual({ services: {
+            gateway: { extra_hosts: ['solxps.handy:fd00::5'] }, direct: { extra_hosts: ['solxps.handy:fd00::5'] },
+        } });
     });
 
     it('refuses a file line it cannot use, by line number and without its value', () => {
@@ -227,17 +228,19 @@ describe('e2e stack -- broker verification', () => {
     const read = (rel: string) => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf-8');
 
     it('verifies the broker unless the harness passes E2E_INSECURE=1 through', () => {
+        // One per gateway service: gateway (Provisioned mode) and direct (Gateway mode).
         expect(read('docker/docker-compose.e2e.yaml').match(/^[ \t]*SSL_INSECURE_SKIP_VERIFY:.*$/gm))
-            .toEqual(['      SSL_INSECURE_SKIP_VERIFY: ${E2E_GATEWAY_SKIP_VERIFY:-}']);
+            .toEqual(Array(2).fill('      SSL_INSECURE_SKIP_VERIFY: ${E2E_GATEWAY_SKIP_VERIFY:-}'));
         expect(read('scripts/e2e.mjs')).toContain("E2E_GATEWAY_SKIP_VERIFY: insecure() ? 'true' : ''");
     });
 
-    it('has the gateway service the host alias override extends', () => {
-        expect(read('docker/docker-compose.e2e.yaml')).toMatch(/^services:\n(?:.*\n)*?  gateway:$/m);
+    it('has both gateway services the host alias override extends', () => {
+        const text = read('docker/docker-compose.e2e.yaml');
+        for (const name of ['gateway', 'direct']) expect(text).toMatch(new RegExp(`^services:\\n(?:.*\\n)*?  ${name}:$`, 'm'));
     });
 });
 
-// The browser for checks B1-B8 (scripts/e2e.mjs): a pulled image, so its
+// The browser for checks B1-B9 and D4 (scripts/e2e.mjs): a pulled image, so its
 // posture, its pin and its version are held here, where `test` runs without
 // Docker.
 describe('e2e stack -- browser', () => {
@@ -267,7 +270,7 @@ describe('e2e stack -- browser', () => {
 
     // A bare `up` would start the browser even with E2E_BROWSER=0.
     it('is started by name, and only when the browser checks run', () => {
-        expect(read('scripts/e2e.mjs')).toContain("compose(['up', '-d', 'gateway', ...(browserOn() ? ['browser'] : [])])");
+        expect(read('scripts/e2e.mjs')).toContain("compose(['up', '-d', 'gateway', 'direct', ...(browserOn() ? ['browser'] : [])])");
     });
 
     it('never reaches the app: nothing under src/ names playwright', () => {
@@ -275,6 +278,35 @@ describe('e2e stack -- browser', () => {
             .filter((rel) => /\.(?:ts|mjs|js|html|css)$/.test(rel));
         expect(files.length).toBeGreaterThan(0);
         expect(files.filter((rel) => /playwright/i.test(read(path.join('src', rel))))).toEqual([]);
+    });
+});
+
+// The Gateway-mode service for checks D1-D4 (scripts/e2e.mjs): the gateway's
+// image in its default mode. Its posture, and its distance from Provisioned
+// mode's settings, secrets and data, are held here.
+describe('e2e stack -- Gateway mode', () => {
+    const text = fs.readFileSync(path.join(REPO_ROOT, 'docker/docker-compose.e2e.yaml'), 'utf-8');
+    const block = (name: string) => text.match(new RegExp(`^ {2}${name}:\\n((?: {4}.*\\n|\\n)*)`, 'm'))?.[1] ?? '';
+    const count = (t: string, part: string) => t.split(part).length - 1;
+    const direct = block('direct');
+
+    it('runs locked down like the gateway: non-root, read-only, no capability or new privilege, its port on loopback', () => {
+        expect(direct, 'the direct service').not.toBe('');
+        for (const line of [
+            '    user: "65532:65532"', '    privileged: false', '    read_only: true', '    cap_drop:\n      - ALL',
+            '    security_opt:\n      - no-new-privileges:true', '    pull_policy: never', '      - "127.0.0.1:39445:9443"',
+        ]) expect(count(direct, line), line).toBe(1);
+        expect(direct).not.toMatch(/^ {4}(?:ipc|pid|network_mode|cap_add|devices|privileged: true|userns_mode)\b/m);
+    });
+
+    it("runs the gateway's image in Gateway mode, on its own volume, with none of Provisioned mode's settings or secrets", () => {
+        const image = /^ {4}image: .+$/m;
+        expect(direct.match(image)?.[0], 'the direct image').toBeDefined();
+        expect(direct.match(image)?.[0]).toBe(block('gateway').match(image)?.[0]);
+        expect(direct).not.toMatch(/^ {6}(?:CONN_MODES|HOSTED|DEFAULT_CONN|ADMIN_PASSWORD|ADMIN_PASSWORD_FILE|STORE_KEY_FILE):/m);
+        expect(direct).not.toContain('/run/secrets/');
+        expect(count(direct, '      - direct-data:/data\n')).toBe(1);
+        expect(text).toMatch(/^volumes:\n(?: {2}[\w-]+:\n)*? {2}direct-data:$/m);
     });
 });
 

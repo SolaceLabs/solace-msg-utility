@@ -1,48 +1,60 @@
-// End-to-end run of the gateway in Provisioned mode against an existing Solace
-// broker, over docker/docker-compose.e2e.yaml. Run it through
-// `./scripts/dev.sh e2e` (or dev.ps1), which builds the image first;
-// this file drives the gateway. It may have to ask for the broker's details
-// on the terminal, so the task runs it on the real console and it appends its
-// own output to the task log ($E2E_LOG).
+// End-to-end run of the gateway image against an existing Solace broker, over
+// docker/docker-compose.e2e.yaml, in both of its server modes: the `gateway`
+// service in Provisioned mode (CONN_MODES=provisioned) and the `direct` service
+// in Gateway mode, the image's default. Run it through `./scripts/dev.sh e2e`
+// (or dev.ps1), which builds the image first; this file drives the gateways.
+// It may have to ask for the broker's details on the terminal, so the task
+// runs it on the real console and it appends its own output to the task log
+// ($E2E_LOG).
 //
 // The broker's details come from E2E_* environment variables, then
 // docker/e2e-broker.env (git-ignored), and only what neither gives is asked
 // for; the harness writes what it asked for back to that file, except the
 // passwords. Nothing on the broker is created or changed: the run reads it
-// through the gateway's read-only relay and browses an existing queue.
+// through the gateway's read-only relay and browses an existing queue; in
+// Gateway mode it does the same through the Direct relay with the broker
+// credentials it was given. What the run does change is the Provisioned
+// gateway: checks 11, 12 and B3 take the e2e user's grant away or change a
+// setting, and each puts back what it changed, since the checks after them
+// expect the gateway as configureGateway left it.
 //
-// E2E_BROKER_IP maps E2E_BROKER_HOST to that address inside the gateway
-// container (a host alias, through a compose override under scripts/logs/e2e/),
+// E2E_BROKER_IP maps E2E_BROKER_HOST to that address inside both gateway
+// containers (a host alias, through a compose override under scripts/logs/e2e/),
 // so the host can be the name in the broker's certificate even where no DNS
 // resolves it.
 //
-// The gateway verifies the broker's certificate unless E2E_INSECURE=1, which
-// starts the e2e gateway with SSL_INSECURE_SKIP_VERIFY=true for a broker whose
-// certificate does not name the host it is dialled by. The run then says so
-// at the start and in its summary: checks 3, 4 and 6 pass without proving the
-// broker's TLS is trusted.
+// The gateways verify the broker's certificate unless E2E_INSECURE=1, which
+// starts both e2e gateways with SSL_INSECURE_SKIP_VERIFY=true for a broker
+// whose certificate does not name the host it is dialled by. The run then says
+// so at the start and in its summary: checks 3, 4, 6, 11 and 12 and D2-D4 pass
+// without proving the broker's TLS is trusted.
 //
-// Every check prints PASS or FAIL with its number. Any FAIL, or a setup step
-// that cannot complete, exits 1. The gateway's passwords, its store key and
-// its TLS material are generated per run, written only under scripts/logs/e2e/
-// (git-ignored, deleted at the end) and masked in everything printed here; so
-// are the broker's passwords.
+// Every check prints PASS or FAIL with its id: 1-17, B1-B9 in the browser and
+// D1-D4 in Gateway mode. Any FAIL, or a setup step that cannot complete, exits
+// 1. The gateway's passwords, its store key and its TLS material are generated
+// per run, written only under scripts/logs/e2e/ (git-ignored, deleted at the
+// end) and masked in everything printed here; so are the broker's passwords.
 //
 // The SMF half uses the real SDK under Node: the browser build of the
 // solclientjs version package.json pins, the one the images ship. Node's
 // WebSocket cannot send the session cookie or an Origin, which a browser adds
 // on its own, so the SDK connects to a loopback bridge that adds both and
-// pipes the bytes to the gateway's /managed/smf socket unchanged.
+// pipes the bytes to the gateway's /managed/smf socket unchanged. The
+// Gateway-mode checks use the same bridge with no cookie, to the Direct
+// relay's /wss/<port>/<host> path, which forwards the bytes to the broker.
 //
-// Checks B1-B8 then use the app as a person does: Chromium in the compose
+// Checks B1-B9 then use the app as a person does: Chromium in the compose
 // file's `browser` container, driven through playwright-core (a devDependency
 // only), opens https://gateway:9443 on the stack's network, signs in through
-// the gateway's own pages, connects, browses the queue and signs out. That
-// browser sends the cookie and Origin itself. It trusts the gateway's
-// throwaway certificate by ignoring certificate errors; the Node checks verify
-// that certificate against the run's CA. Every response it receives joins the
-// sweep of check 10, and its session cookies are masked and swept for like the
-// others. E2E_BROWSER=0 skips them and the container.
+// the gateway's own pages, sees a settings change on Refresh, connects, browses
+// the queue and signs out. That browser sends the cookie and Origin itself. It
+// trusts the gateways' throwaway certificate by ignoring certificate errors;
+// the Node checks verify that certificate against the run's CA. Every response
+// it receives joins the sweep of check 13, and its session cookies are masked
+// and swept for like the others. D4 does the same in Gateway mode: its own
+// browser connection opens https://direct:9443, fills the Direct form and
+// binds the queue through the Direct relay. E2E_BROWSER=0 skips B1-B9, D4 and
+// the container.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
@@ -70,17 +82,24 @@ const SOLCLIENT = path.join(REPO, 'node_modules', 'solclientjs', 'lib-browser', 
 const LOGS = path.join(REPO, 'scripts', 'logs');
 const LOG = process.env.E2E_LOG ?? '';
 
-// The gateway's host port, bound to 127.0.0.1 by docker/docker-compose.e2e.yaml.
+// The gateways' host ports, bound to 127.0.0.1 by docker/docker-compose.e2e.yaml:
+// `gateway` in Provisioned mode, `direct` in Gateway mode (the image's default).
 const GATEWAY = { host: '127.0.0.1', port: 39443 };
+const DIRECT = { host: '127.0.0.1', port: 39445 };
 const ORIGIN = `https://${GATEWAY.host}:${GATEWAY.port}`;
-// The browser container's Playwright server on the host, and the gateway as
-// that browser reaches it on the stack's network.
+const DIRECT_ORIGIN = `https://${DIRECT.host}:${DIRECT.port}`;
+// The browser container's Playwright server on the host, and the gateways as
+// that browser reaches them on the stack's network.
 const BROWSER_SERVER = 'ws://127.0.0.1:39444/';
 const APP = 'https://gateway:9443';
+const DIRECT_APP = 'https://direct:9443';
 
 const BROKER = 'b1';            // the connection the user is entitled to
 const OTHER = 'b2';             // the same broker under a name the user is not entitled to
 const USER = 'e2e-user';
+// The settings endpoint's refusal of connModes direct (go-web-proxy/settings.go).
+const DIRECT_REFUSAL = 'connModes "direct" would turn Provisioned mode off at the next restart, and this console with it. '
+    + 'To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart.';
 
 const token = () => randomBytes(18).toString('base64url');
 // Generated for this run, so always long enough to mask and look for.
@@ -109,6 +128,14 @@ const sweepable = () => Object.fromEntries(Object.entries({ ...secrets, ...broke
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const enc = encodeURIComponent;
+const basic = (user, pass) => `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
+/** The record label prefix for the direct service's responses; the gateway's have none, so check 13's dial allowance never matches one. */
+const tag = (direct) => (direct ? 'direct ' : '');
+/** The Direct relay's path to the queue's SEMP v2 monitor object, and the broker's own SEMP credential for it. */
+const directSempPath = () => `/https/${broker.sempPort}/${broker.host}/SEMP/v2/monitor/msgVpns/${enc(broker.vpn)}/queues/${enc(broker.queue)}`;
+const sempAuth = () => ({ Accept: 'application/json', Authorization: basic(broker.sempUser, brokerSecrets.sempPassword) });
+/** The e2e user's record as configureGateway saves it, without the password: a PUT of it keeps the password and the sessions. */
+const userRecord = (granted) => ({ admin: false, operate: [], readOnly: granted ? [{ brokers: BROKER, msgVpns: broker.vpn, queues: '*' }] : [] });
 
 function expect(ok, message) {
     if (!ok) throw new Error(message);
@@ -229,17 +256,17 @@ function readBrokerCA(file) {
 }
 
 function describeBroker(certs) {
-    const alias = broker.brokerIp ? ` (${broker.brokerIp} in the gateway container)` : '';
+    const alias = broker.brokerIp ? ` (${broker.brokerIp} in both gateway containers)` : '';
     say(`broker: ${broker.host}${alias}, SEMP port ${broker.sempPort} as ${broker.sempUser}, wss port ${broker.smfPort}, `
         + `VPN ${broker.vpn}, client username ${broker.clientUser}, queue ${broker.queue}`);
     for (const c of certs) say(`trusting ${c.subject.replace(/\n/g, ', ')} (valid until ${c.validTo}) from ${broker.caFile}`);
-    if (insecure()) say("warning: E2E_INSECURE=1: the gateway does not verify the broker's certificate (SSL_INSECURE_SKIP_VERIFY=true)");
+    if (insecure()) say("warning: E2E_INSECURE=1: neither gateway verifies the broker's certificate (SSL_INSECURE_SKIP_VERIFY=true)");
     say(browserOn()
-        ? `browser: Chromium in the compose file's browser container, at ${APP} (the first run pulls the image)`
-        : 'note: E2E_BROWSER=0: the browser checks B1-B8 are skipped');
+        ? `browser: Chromium in the compose file's browser container, at ${APP} and ${DIRECT_APP} (the first run pulls the image)`
+        : 'note: E2E_BROWSER=0: the browser checks B1-B9 and D4 are skipped');
     for (const [name, label] of [['sempPassword', 'the SEMP password'], ['clientPassword', 'the client password']]) {
         if (brokerSecrets[name].length < MIN_MASKED) {
-            say(`note: ${label} is shorter than ${MIN_MASKED} characters: it is masked, but checks 2, 10, 11, 14 and B5 cannot look for it without matching ordinary text`);
+            say(`note: ${label} is shorter than ${MIN_MASKED} characters: it is masked, but checks 2, 13, 14, 17 and B6 cannot look for it without matching ordinary text`);
         }
     }
 }
@@ -267,8 +294,9 @@ function writeMaterial(brokerCerts, roots) {
     fs.rmSync(WORK, { recursive: true, force: true });
     fs.mkdirSync(path.join(WORK, 'trust'), { recursive: true });
     const ca = makeCA('smu-e2e CA');
-    // `gateway` is the name the browser container reaches it by.
-    const gateway = issueCert(ca, { cn: 'localhost', dns: ['localhost', 'gateway'], ip: [GATEWAY.host] });
+    // `gateway` and `direct` are the names the browser container reaches them
+    // by; both serve this certificate.
+    const gateway = issueCert(ca, { cn: 'localhost', dns: ['localhost', 'gateway', 'direct'], ip: [GATEWAY.host] });
     caPem = ca.certPem;
     // Read by the gateway's own user (65532), so world-readable: throwaway
     // material for one run. The gateway warns that the store key is readable
@@ -297,7 +325,7 @@ function writeMaterial(brokerCerts, roots) {
 
 // --- HTTP ----------------------------------------------------------------------
 
-// Every gateway response, for the secret sweep (check 10).
+// Every gateway response, for the secret sweep (check 13).
 const records = [];
 const rawHeaderText = (res) => res.rawHeaders.reduce((s, v, i) => s + (i % 2 ? `${v}\r\n` : `${v}: `), '');
 
@@ -308,7 +336,8 @@ function noteCookies(lines) {
     }
 }
 
-function request(method, pathname, { jar, form, json, body, headers = {} } = {}) {
+/** A request to one of the gateways (`at`: GATEWAY, the default, or DIRECT); every response joins `records`. */
+function request(method, pathname, { at = GATEWAY, jar, form, json, body, headers = {} } = {}) {
     const h = { ...headers };
     let payload = body;
     if (form) { payload = new URLSearchParams(form).toString(); h['Content-Type'] = 'application/x-www-form-urlencoded'; }
@@ -316,7 +345,7 @@ function request(method, pathname, { jar, form, json, body, headers = {} } = {})
     if (jar?.header()) h.Cookie = jar.header();
     if (payload !== undefined) h['Content-Length'] = Buffer.byteLength(payload);
     return new Promise((resolve, reject) => {
-        const req = https.request({ ...GATEWAY, path: pathname, method, headers: h, ca: caPem, agent: false }, (res) => {
+        const req = https.request({ ...at, path: pathname, method, headers: h, ca: caPem, agent: false }, (res) => {
             const chunks = [];
             res.on('data', (c) => chunks.push(c));
             res.on('end', () => {
@@ -324,12 +353,12 @@ function request(method, pathname, { jar, form, json, body, headers = {} } = {})
                 const setCookie = res.headers['set-cookie'] ?? [];
                 noteCookies(setCookie);
                 jar?.store(setCookie);
-                records.push({ label: `${method} ${pathname} -> ${res.statusCode}`, headers: rawHeaderText(res), body: text });
+                records.push({ label: `${tag(at === DIRECT)}${method} ${pathname} -> ${res.statusCode}`, headers: rawHeaderText(res), body: text });
                 resolve({ status: res.statusCode, headers: res.headers, body: text, setCookie });
             });
         });
         req.on('error', reject);
-        req.setTimeout(30_000, () => req.destroy(new Error(`${method} ${pathname}: no answer in 30s`)));
+        req.setTimeout(30_000, () => req.destroy(new Error(`${tag(at === DIRECT)}${method} ${pathname}: no answer in 30s`)));
         req.end(payload);
     });
 }
@@ -386,13 +415,16 @@ function upgrade(pathname, { cookie, origin } = {}) {
 // --- SMF -----------------------------------------------------------------------
 
 const WS_HEADERS = ['sec-websocket-key', 'sec-websocket-version', 'sec-websocket-protocol', 'sec-websocket-extensions'];
+// Every bridge and SMF session the run opens, closed at its end (runChecks).
+const closers = [];
 
 /**
  * A loopback WebSocket bridge: the SDK connects to ws://127.0.0.1:<port>/..., and
- * each upgrade is replayed to the gateway over TLS with the session cookie and
- * a same-origin Origin added, then both sockets are piped together.
+ * each upgrade is replayed to one of the gateways (`at`) over TLS with a
+ * same-origin Origin and, for the Provisioned gateway, the session cookie
+ * added, then both sockets are piped together.
  */
-function startBridge(cookie) {
+function startBridge({ at = GATEWAY, cookie } = {}) {
     const sockets = new Set();
     const closeWaiters = [];
     let lastRefusal = '';
@@ -400,13 +432,14 @@ function startBridge(cookie) {
     server.on('upgrade', (req, client, head) => {
         client.on('error', () => {});
         sockets.add(client);
-        const headers = { Connection: 'Upgrade', Upgrade: 'websocket', Origin: ORIGIN, Cookie: cookie };
+        const headers = { Connection: 'Upgrade', Upgrade: 'websocket', Origin: at === DIRECT ? DIRECT_ORIGIN : ORIGIN };
+        if (cookie) headers.Cookie = cookie;
         for (const h of WS_HEADERS) if (req.headers[h]) headers[h] = req.headers[h];
-        const up = https.request({ ...GATEWAY, path: req.url, method: 'GET', headers, ca: caPem, agent: false });
+        const up = https.request({ ...at, path: req.url, method: 'GET', headers, ca: caPem, agent: false });
         up.on('upgrade', (res, gw, gwHead) => {
             gw.on('error', () => {});
             sockets.add(gw);
-            records.push({ label: `GET ${req.url} (bridge) -> 101`, headers: rawHeaderText(res), body: '' });
+            records.push({ label: `${tag(at === DIRECT)}GET ${req.url} (bridge) -> 101`, headers: rawHeaderText(res), body: '' });
             client.write(`HTTP/1.1 101 Switching Protocols\r\n${rawHeaderText(res)}\r\n`);
             if (gwHead.length) client.write(gwHead);
             if (head.length) gw.write(head);
@@ -426,15 +459,23 @@ function startBridge(cookie) {
         up.on('error', (e) => { lastRefusal = e.message; client.destroy(); });
         up.end();
     });
-    return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({
-        port: server.address().port,
-        refusal: () => lastRefusal || 'none',
-        nextGatewayClose: (ms) => withTimeout(new Promise((r) => closeWaiters.push(r)), ms, `the gateway did not close the SMF socket within ${ms / 1000}s`),
-        close: () => { for (const s of sockets) s.destroy(); server.close(); },
-    })));
+    return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
+        const bridge = {
+            port: server.address().port,
+            refusal: () => lastRefusal || 'none',
+            nextGatewayClose: (ms) => withTimeout(new Promise((r) => closeWaiters.push(r)), ms, `the gateway did not close the SMF socket within ${ms / 1000}s`),
+            close: () => { for (const s of sockets) s.destroy(); server.close(); },
+        };
+        closers.push(bridge.close);
+        resolve(bridge);
+    }));
 }
 
+let solaceSdk = null;
+
+/** The SDK under Node, initialised once: checks 6 and 11 and D3 share it. */
 function loadSolace() {
+    if (solaceSdk) return solaceSdk;
     const solace = createRequire(import.meta.url)(path.join(WORK, 'solclient.cjs'));
     const fp = new solace.SolclientFactoryProperties();
     fp.profile = solace.SolclientFactoryProfiles.version10;
@@ -442,6 +483,7 @@ function loadSolace() {
     const sdkLog = (...a) => say(`solclient: ${a.join(' ')}`);
     fp.logger = { trace() {}, debug() {}, info: sdkLog, warn: sdkLog, error: sdkLog, fatal: sdkLog };
     solace.SolclientFactory.init(fp);
+    solaceSdk = solace;
     return solace;
 }
 
@@ -457,6 +499,7 @@ async function openSession(solace, bridge, dial) {
     props.reconnectRetries = 0;
     props.connectTimeoutInMsecs = 15_000;
     const session = solace.SolclientFactory.createSession(props);
+    closers.push(() => session.dispose());
     const ev = solace.SessionEventCode;
     const down = new Promise((resolve) => {
         for (const code of [ev.DOWN_ERROR, ev.DISCONNECTED]) if (code !== undefined) session.on(code, () => resolve());
@@ -492,10 +535,11 @@ function bindQueue(solace, session, queue) {
 async function stackUp() {
     compose(['down', '-v', '--remove-orphans'], { quiet: true });
     // By name: the browser only when its checks run.
-    const up = compose(['up', '-d', 'gateway', ...(browserOn() ? ['browser'] : [])]);
-    expect(up.code === 0, 'docker compose up failed (output above); the gateway uses the image `./scripts/dev.sh image` builds, '
+    const up = compose(['up', '-d', 'gateway', 'direct', ...(browserOn() ? ['browser'] : [])]);
+    expect(up.code === 0, 'docker compose up failed (output above); both gateways use the image `./scripts/dev.sh image` builds, '
         + 'and the browser container pulls the Playwright image the compose file pins');
     await waitFor('the gateway', 60, async () => (await request('GET', '/hosted')).status === 200, 'gateway');
+    await waitFor('the direct gateway', 60, async () => (await request('GET', '/hosted', { at: DIRECT })).status === 200, 'direct');
 }
 
 /** Signs the bootstrap admin in, changes its password, adds both connections and the user. */
@@ -519,7 +563,7 @@ async function configureGateway() {
     }
     const u = await request('PUT', `/managed/users/${USER}`, {
         jar: admin,
-        json: { password: secrets.userPassword, admin: false, operate: [], readOnly: [{ brokers: BROKER, msgVpns: broker.vpn, queues: '*' }] },
+        json: { password: secrets.userPassword, ...userRecord(true) },
     });
     expect(u.status === 204, `PUT /managed/users/${USER}: want 204, got ${u.status} ${u.body}`);
     return admin;
@@ -616,7 +660,7 @@ async function runChecks(admin) {
 
         await check(6, `a real SMF login through ${smfPath} binds a queue browser to ${queue}`, async () => {
             expect(dial, 'no dial answer (check 5)');
-            bridge = await startBridge(user.header());
+            bridge = await startBridge({ cookie: user.header() });
             solace = loadSolace();
             smf = await openSession(solace, bridge, dial);
             await bindQueue(solace, smf.session, queue);
@@ -659,11 +703,98 @@ async function runChecks(admin) {
             expect(stale.status === 401, `the signed-out cookie: want 401, got ${stale.status}`);
         });
 
-        // Before check 10, which then sweeps what the browser received too,
-        // and before the restart of check 12, which ends every session.
-        if (browserOn()) await runBrowserChecks();
+        await check(10, 'the Direct relay is a plain 404 in Provisioned mode, with or without a session, for HTTP and WebSocket', async () => {
+            const s = await signIn(user, USER, secrets.userPassword);
+            expect(s.status === 303, `signing the user in again (check 9 signed out): want 303, got ${s.status}`);
+            // The broker's own credential: a relay that let the request through
+            // would answer 200, not the broker's 401.
+            for (const [who, jar] of [['with a session', user], ['without one', null]]) {
+                const r = await request('GET', directSempPath(), { jar, headers: sempAuth() });
+                expect(r.status === 404 && r.body === '404 page not found\n', `${who}: want a plain 404, got ${r.status} ${r.body.slice(0, 200)}`);
+            }
+            const ws = await upgrade(`/wss/${broker.smfPort}/${broker.host}`, { cookie: user.header(), origin: ORIGIN });
+            expect(ws.status === 404, `a WebSocket to /wss/${broker.smfPort}/${broker.host}: want 404, got ${ws.status}`);
+        });
 
-        await check(10, 'no gateway response carries a credential except the dial answer\'s body', async () => {
+        await check(11, "taking the user's grant away closes their open SMF socket at once and keeps their session, without the broker, until it is restored", async () => {
+            expect(dial, 'no dial answer (check 5)');
+            expect(user.get(SESSION_COOKIE), 'no user session (check 10)');
+            const rb = await startBridge({ cookie: user.header() });
+            const rs = await openSession(loadSolace(), rb, dial);
+            const closed = rb.nextGatewayClose(10_000);
+            closed.catch(() => {});
+            let restored = null;
+            try {
+                // No password and the same admin flag: the sessions stay, and
+                // only the sockets that lost their grant close.
+                const revoked = await request('PUT', `/managed/users/${USER}`, { jar: admin, json: userRecord(false) });
+                expect(revoked.status === 204, `revoking: want 204, got ${revoked.status} ${revoked.body}`);
+                await closed;
+                await withTimeout(rs.down, 10_000, 'the gateway closed the socket but the SDK did not report the session down within 10s');
+                const me = await request('GET', '/managed/me', { jar: user });
+                expect(me.status === 200 && JSON.parse(me.body).brokers?.length === 0,
+                    `/managed/me after the revocation: want 200 with no broker, got ${me.status} ${me.body.slice(0, 300)}`);
+                const relay = await request('GET', `/managed/relay/${BROKER}/SEMP/v2/monitor/msgVpns/${vpnPath}`, { jar: user });
+                const dialed = await request('POST', '/managed/dial', { jar: user, json: { broker: BROKER, vpn } });
+                expect(relay.status === 404 && dialed.status === 404,
+                    `${BROKER} after the revocation: relay ${relay.status}, dial ${dialed.status}; want 404 for both`);
+            } finally {
+                restored = await request('PUT', `/managed/users/${USER}`, { jar: admin, json: userRecord(true) });
+            }
+            expect(restored.status === 204, `restoring the grant: want 204, got ${restored.status} ${restored.body}`);
+            const back = await request('GET', '/managed/me', { jar: user });
+            expect(back.status === 200 && JSON.parse(back.body).brokers?.map((b) => b.broker).join() === BROKER,
+                `/managed/me after the restore: ${back.status} ${back.body.slice(0, 300)}`);
+        });
+
+        await check(12, 'settings apply to the next request: userDefault none empties the modules, connModes direct is refused, and both opens the Direct relay and the app', async () => {
+            const put = (json) => request('PUT', '/managed/settings', { jar: admin, json });
+            const fresh = (r) => r.status === 200 && JSON.parse(r.body).restartRequired?.length === 0;
+            const modules = async () => JSON.parse((await request('GET', '/managed/me', { jar: user })).body).modules;
+            let restored = null;
+            try {
+                const none = await put({ modules: { userDefault: 'none' } });
+                expect(fresh(none), `PUT modules.userDefault none: want 200 {"restartRequired":[]}, got ${none.status} ${none.body}`);
+                const emptied = await modules();
+                expect(Array.isArray(emptied) && emptied.length === 0, `/managed/me modules: ${JSON.stringify(emptied)}`);
+                const direct = await put({ connModes: 'direct' });
+                const refusal = direct.status === 422 ? JSON.parse(direct.body) : {};
+                expect(refusal.error === 'invalid' && refusal.field === 'connModes' && refusal.reason === DIRECT_REFUSAL,
+                    `PUT connModes direct: want 422 invalid, got ${direct.status} ${direct.body}`);
+                const saved = JSON.parse((await request('GET', '/managed/settings', { jar: admin })).body).settings?.connModes;
+                expect(saved === 'provisioned', `connModes after the refusal: ${saved}`);
+                const both = await put({ connModes: 'both' });
+                expect(fresh(both), `PUT connModes both: want 200 {"restartRequired":[]}, got ${both.status} ${both.body}`);
+                const hosted = JSON.parse((await request('GET', '/hosted')).body);
+                expect(hosted.connModes === 'both', `/hosted under both: ${JSON.stringify(hosted)}`);
+                const relayed = await request('GET', directSempPath(), { headers: sempAuth() });
+                expect(relayed.status === 200 && JSON.parse(relayed.body).data?.queueName === queue,
+                    `the Direct relay under both: want 200 naming ${queue}, got ${relayed.status} ${relayed.body.slice(0, 300)}`);
+                const app = await request('GET', '/');
+                expect(app.status === 200 && app.body.includes('conn-panel-managed'),
+                    `/ without a session under both: want 200 with the Provisioned app, got ${app.status} ${app.headers.location ?? ''}`);
+            } finally {
+                restored = await put({ connModes: 'provisioned', modules: { userDefault: 'all' } });
+            }
+            expect(fresh(restored), `restoring provisioned and all: got ${restored.status} ${restored.body}`);
+            const closedAgain = await request('GET', directSempPath(), { headers: sempAuth() });
+            expect(closedAgain.status === 404, `the Direct relay after the restore: want 404, got ${closedAgain.status}`);
+            const gated = await request('GET', '/');
+            expect(gated.status === 303 && gated.headers.location === '/login',
+                `/ without a session after the restore: want 303 to /login, got ${gated.status} ${gated.headers.location ?? ''}`);
+            const back = await modules();
+            expect(back?.join() === 'queue-browser,queue-copy', `/managed/me modules after the restore: ${JSON.stringify(back)}`);
+        });
+
+        // Before check 13, which then sweeps what the browser received too,
+        // and before the restart of check 15, which ends every session.
+        if (browserOn()) await runBrowserChecks(admin);
+
+        // Gateway mode, on the direct service: before the sweeps of checks 13
+        // and 17, which cover its responses and its log.
+        await runDirectChecks();
+
+        await check(13, 'no response from either gateway carries a credential except the dial answer\'s body', async () => {
             const sweep = sweepable();
             // By value: a SEMP password equal to the client password rightly
             // appears in the dial answer too.
@@ -673,7 +804,7 @@ async function runChecks(admin) {
             return `${records.length} responses`;
         });
 
-        await check(11, 'both stores are sealed at rest (SMUS header, no plaintext)', async () => {
+        await check(14, 'both stores are sealed at rest (SMUS header, no plaintext)', async () => {
             // A short name could turn up in ciphertext by chance.
             const names = [broker.host, broker.clientUser, USER].filter((t) => t.length >= 4);
             for (const [file, role] of [['users.yaml', 'users'], ['connections.yaml', 'connections']]) {
@@ -688,7 +819,7 @@ async function runChecks(admin) {
             }
         });
 
-        await check(12, 'after a restart the stores still open: old sessions are gone, and the admin signs in again', async () => {
+        await check(15, 'after a restart the stores still open: old sessions are gone, and the admin signs in again', async () => {
             const r = compose(['restart', 'gateway'], { quiet: true });
             expect(r.code === 0, `docker compose restart: ${r.out.trim()}`);
             await waitFor('the gateway after its restart', 60, async () => (await request('GET', '/hosted')).status === 200, 'gateway');
@@ -701,7 +832,7 @@ async function runChecks(admin) {
             expect(conns.status === 200 && conns.body.includes(`"${BROKER}"`), `connections: ${conns.status} ${conns.body.slice(0, 300)}`);
         });
 
-        await check(13, 'the gateway refuses to start when its key file is missing beside an existing store', async () => {
+        await check(16, 'the gateway refuses to start when its key file is missing beside an existing store', async () => {
             compose(['stop', 'gateway'], { quiet: true });
             const run = compose(['run', '--rm', '--no-deps', '-T', '-e', 'STORE_KEY_FILE=/run/secrets/absent.key', 'gateway'], { quiet: true });
             runOutput = run.out;
@@ -711,16 +842,18 @@ async function runChecks(admin) {
             return `exit ${run.code}`;
         });
 
-        await check(14, 'the gateway log holds no password, store key or session cookie', async () => {
-            const logs = compose(['logs', '--no-color', 'gateway'], { quiet: true });
+        await check(17, 'neither gateway log holds a password, store key or session cookie', async () => {
+            const logs = compose(['logs', '--no-color', 'gateway', 'direct'], { quiet: true });
             const text = logs.out + runOutput;
             const found = Object.entries({ ...sweepable(), ...cookies }).filter(([, v]) => text.includes(v)).map(([name]) => name);
             expect(found.length === 0, `found ${found.join(', ')}`);
             return `${text.split('\n').length} lines`;
         });
     } finally {
-        try { smf?.session.dispose(); } catch { /* already gone */ }
-        bridge?.close();
+        // Newest first: each SMF session before the bridge it runs through.
+        for (const close of closers.splice(0).reverse()) {
+            try { close(); } catch { /* already gone */ }
+        }
     }
 }
 
@@ -759,10 +892,10 @@ async function connectBrowser() {
     return browser;
 }
 
-/** A gateway response the browser received, as a record for check 10; its session cookie is masked from then on. */
-async function recordResponse(res) {
+/** A response the browser received from `app`'s gateway, as a record for check 13; its session cookie is masked from then on. */
+async function recordResponse(res, app) {
     const url = new URL(res.url());
-    if (url.origin !== APP) return;
+    if (url.origin !== app) return;
     const headers = await res.headersArray();
     noteCookies(headers.filter((h) => h.name.toLowerCase() === 'set-cookie').map((h) => h.value));
     let body = '';
@@ -770,25 +903,29 @@ async function recordResponse(res) {
         body = await res.text();
     } catch { /* a redirect, or a page closed meanwhile, has no body to read */ }
     records.push({
-        label: `${res.request().method()} ${url.pathname} -> ${res.status()}`,
+        label: `${tag(app === DIRECT_APP)}${res.request().method()} ${url.pathname} -> ${res.status()}`,
         headers: headers.reduce((s, h) => `${s}${h.name}: ${h.value}\r\n`, ''),
         body,
     });
 }
 
-/** A browser context on the gateway that notes what its pages do in `seen` (see runBrowserChecks). */
-async function openContext(browser, seen) {
-    const context = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: APP });
+/** A browser context on one gateway's app (`app`: APP, the default, or DIRECT_APP) that notes what its pages do in `seen` (see newSeen). */
+async function openContext(browser, seen, app = APP) {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: app });
     context.setDefaultTimeout(30_000);
-    // Anything but the gateway is aborted, so it never leaves the stack.
+    // Anything but that gateway is aborted, so it never leaves the stack.
     await context.route('**/*', (route) => {
         const url = new URL(route.request().url());
-        if (url.origin === APP || !/^https?:$/.test(url.protocol)) return route.continue();
+        if (url.origin === app || !/^https?:$/.test(url.protocol)) return route.continue();
         seen.foreign.push(url.href);
         return route.abort('blockedbyclient');
     });
     // Caught at once: an unhandled rejection would end the run.
-    context.on('response', (res) => seen.pending.push(recordResponse(res).catch(() => { seen.unread += 1; })));
+    context.on('response', (res) => {
+        const read = { what: `${res.request().method()} ${res.url()}` };
+        seen.open.add(read);
+        seen.pending.push(recordResponse(res, app).catch(() => { seen.unread += 1; }).finally(() => seen.open.delete(read)));
+    });
     // Routes do not see WebSockets, so their URLs are noted apart.
     context.on('page', (p) => {
         p.on('websocket', (ws) => seen.sockets.push(ws.url()));
@@ -812,42 +949,86 @@ async function signInPage(page, username, password) {
 const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
- * Checks B1-B8: the app in a real browser, as the e2e user and then the
- * admin. A failure saves a screenshot to scripts/logs/e2e-<id>.png
+ * What a browser's pages did, for B9 and D4: response reads still running
+ * (check 13 waits for them), those not yet finished, and those that failed;
+ * requests to another origin (aborted), WebSocket URLs and uncaught errors.
+ */
+const newSeen = () => ({ pending: [], open: new Set(), unread: 0, foreign: [], sockets: [], errors: [] });
+
+/** How long drain waits for response bodies: the app streams none, so one still open after this never ends. */
+const DRAIN_MS = 15_000;
+
+/**
+ * Every response read, also those that arrive meanwhile, so check 13 sweeps
+ * all of them. A body still open after DRAIN_MS is not waited for: drain
+ * returns those responses, as `METHOD url`.
+ */
+async function drain(seen) {
+    const until = Date.now() + DRAIN_MS;
+    for (let n = 0; n !== seen.pending.length;) {
+        n = seen.pending.length;
+        const left = until - Date.now();
+        const settled = left > 0 && await withTimeout(Promise.allSettled(seen.pending), left, 'drain').then(() => true, () => false);
+        if (!settled) break;
+    }
+    return [...seen.open].map((r) => r.what);
+}
+
+/** The responses drain left open, as problems: their bodies cannot be swept. */
+const openProblems = (open) => open.map((r) => `a response still open after ${DRAIN_MS / 1000}s: ${r}`);
+
+/** What should not be in `seen`: a request to another origin, a socket to anything but `app`'s gateway, a page error. */
+const seenProblems = (seen, app) => [
+    ...seen.foreign.map((u) => `request to ${u}`),
+    ...seen.sockets.filter((u) => !u.startsWith(`${app.replace(/^https:/, 'wss:')}/`)).map((u) => `socket to ${u}`),
+    ...seen.errors.map((m) => `page error: ${m}`),
+];
+
+/** The page a failing browser check screenshots; null for none. */
+let shown = null;
+
+/** A browser check: a failure saves a screenshot of `shown` to scripts/logs/e2e-<id>.png (git-ignored). */
+const bcheck = (id, title, fn) => check(id, title, async () => {
+    try {
+        return await fn();
+    } catch (e) {
+        const shot = path.join(LOGS, `e2e-${id}.png`);
+        if (shown && await shown.screenshot({ path: shot }).then(() => true, () => false)) e.message += ` (screenshot: scripts/logs/e2e-${id}.png)`;
+        throw e;
+    }
+});
+
+/** Binds `queue` in Queue Browser on `page`: 'bound', or 'error: ' and the bind error. */
+async function bindInQueueBrowser(page, queue) {
+    await page.click('.nav-item[data-module-id="queue-browser"]');
+    await page.locator('#browser-active-view').waitFor();
+    await page.fill('#browser-bind-input', queue);
+    await page.click('#btn-browser-bind');
+    const outcome = await page.waitForFunction((q) => {
+        const error = document.querySelector('#browser-bind-error')?.textContent?.trim();
+        if (error) return `error: ${error}`;
+        return [...document.querySelectorAll('#browser-bound-queues option')].some((o) => o.value === q) && 'bound';
+    }, queue);
+    return outcome.jsonValue();
+}
+
+/**
+ * Checks B1-B9: the Provisioned app in a real browser, as the e2e user and
+ * then the admin. A failure saves a screenshot to scripts/logs/e2e-<id>.png
  * (git-ignored); no page the run opens shows a password.
  */
-async function runBrowserChecks() {
+async function runBrowserChecks(admin) {
     const { vpn, queue } = broker;
     const smfPath = `/managed/smf/${BROKER}/${vpn}`;
-    // What the pages did, for B8: response reads still running (check 10
-    // waits for them) and those that failed, requests to another origin
-    // (aborted), WebSocket URLs and uncaught errors.
-    const seen = { pending: [], unread: 0, foreign: [], sockets: [], errors: [] };
+    const seen = newSeen();
     let browser = null;
     let user = null;
     let page = null;
-    let shown = null;
     let socket = null;
-    // Every response read, also those that arrive meanwhile, so check 10 sweeps all of them.
-    const drain = async () => {
-        for (let n = 0; n !== seen.pending.length;) {
-            n = seen.pending.length;
-            await Promise.allSettled(seen.pending);
-        }
-    };
 
     if (fs.existsSync(LOGS)) {
-        for (const f of fs.readdirSync(LOGS)) if (/^e2e-B\d\.png$/.test(f)) fs.rmSync(path.join(LOGS, f));
+        for (const f of fs.readdirSync(LOGS)) if (/^e2e-[BD]\d\.png$/.test(f)) fs.rmSync(path.join(LOGS, f));
     }
-    const bcheck = (id, title, fn) => check(id, title, async () => {
-        try {
-            return await fn();
-        } catch (e) {
-            const shot = path.join(LOGS, `e2e-${id}.png`);
-            if (shown && await shown.screenshot({ path: shot }).then(() => true, () => false)) e.message += ` (screenshot: scripts/logs/e2e-${id}.png)`;
-            throw e;
-        }
-    });
 
     try {
         await bcheck('B1', "a browser signs the e2e user in through the gateway's own pages and lands in the app, with an HttpOnly session cookie", async () => {
@@ -890,7 +1071,38 @@ async function runBrowserChecks() {
             expect(nav.join() === 'connections,queue-browser,queue-copy', `sidebar: ${nav.join(', ')}`);
         });
 
-        await bcheck('B3', `Connect opens the browser's own WebSocket to ${smfPath}, and the page shows no broker address`, async () => {
+        // The app re-reads /managed/me only on load, on sign-in and on Refresh.
+        await bcheck('B3', 'a settings change reaches the sidebar on Refresh: modules.userDefault none leaves Connections only, and all brings the modules back', async () => {
+            expect(page, 'no signed-in page (B1)');
+            const nav = () => page.locator('.nav-item[data-module-id]').evaluateAll((items) => items.map((i) => i.dataset.moduleId).join());
+            const refresh = async (want) => {
+                const me = page.waitForResponse((r) => new URL(r.url()).pathname === '/managed/me');
+                me.catch(() => {});
+                await page.click('#btn-managed-refresh');
+                const res = await me;
+                expect(res.status() === 200, `Refresh: /managed/me ${res.status()}`);
+                await page.waitForFunction((w) => [...document.querySelectorAll('.nav-item[data-module-id]')]
+                    .map((i) => i.dataset.moduleId).join() === w, want, { timeout: 10_000 }).catch(() => {});
+                return nav();
+            };
+            const put = (userDefault) => request('PUT', '/managed/settings', { jar: admin, json: { modules: { userDefault } } });
+            let none = null;
+            let all = null;
+            let shrunk = '';
+            try {
+                none = await put('none');
+                if (none.status === 200) shrunk = await refresh('connections');
+            } finally {
+                all = await put('all');
+            }
+            expect(none.status === 200, `PUT userDefault none: ${none.status} ${none.body}`);
+            expect(shrunk === 'connections', `after none and Refresh the sidebar shows ${shrunk || 'nothing'}`);
+            expect(all.status === 200, `PUT userDefault all: ${all.status} ${all.body}`);
+            const back = await refresh('connections,queue-browser,queue-copy');
+            expect(back === 'connections,queue-browser,queue-copy', `after all and Refresh the sidebar shows ${back}`);
+        });
+
+        await bcheck('B4', `Connect opens the browser's own WebSocket to ${smfPath}, and the page shows no broker address`, async () => {
             expect(page, 'no signed-in page (B1)');
             const opened = page.waitForEvent('websocket', {
                 timeout: 30_000, predicate: (ws) => decodeURIComponent(new URL(ws.url()).pathname) === smfPath,
@@ -913,18 +1125,9 @@ async function runBrowserChecks() {
             return new URL(socket.url()).origin;
         });
 
-        await bcheck('B4', `the Queue Browser binds ${queue} read-only, with no delete`, async () => {
-            expect(socket, 'no SMF session (B3)');
-            await page.click('.nav-item[data-module-id="queue-browser"]');
-            await page.locator('#browser-active-view').waitFor();
-            await page.fill('#browser-bind-input', queue);
-            await page.click('#btn-browser-bind');
-            const outcome = await page.waitForFunction((q) => {
-                const error = document.querySelector('#browser-bind-error')?.textContent?.trim();
-                if (error) return `error: ${error}`;
-                return [...document.querySelectorAll('#browser-bound-queues option')].some((o) => o.value === q) && 'bound';
-            }, queue);
-            const result = await outcome.jsonValue();
+        await bcheck('B5', `the Queue Browser binds ${queue} read-only, with no delete`, async () => {
+            expect(socket, 'no SMF session (B4)');
+            const result = await bindInQueueBrowser(page, queue);
             expect(result === 'bound', `bind: ${result}`);
             await page.waitForFunction(() => document.querySelector('#browser-permissions')?.textContent === 'Read-Only').catch(() => {});
             // textContent, not innerText: the badge is text-transform: uppercase,
@@ -936,14 +1139,14 @@ async function runBrowserChecks() {
             return `total ${await page.locator('#count-total').innerText()}`;
         });
 
-        await bcheck('B5', 'browser storage holds no password, store key or session cookie', async () => {
+        await bcheck('B6', 'browser storage holds no password, store key or session cookie', async () => {
             expect(page, 'no signed-in page (B1)');
             const stored = await page.evaluate(() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage), document.cookie]));
             const found = Object.entries({ ...sweepable(), ...cookies }).filter(([, v]) => stored.includes(v)).map(([n]) => n);
             expect(found.length === 0, `holds ${found.join(', ')}`);
         });
 
-        await bcheck('B6', '/solAdmin refuses the e2e user, and shows the admin both users and both connections', async () => {
+        await bcheck('B7', '/solAdmin refuses the e2e user, and shows the admin both users and both connections', async () => {
             expect(user, 'no browser (B1)');
             const other = await user.newPage();
             shown = other;
@@ -972,9 +1175,9 @@ async function runBrowserChecks() {
             expect(conns.join() === [BROKER, OTHER].sort().join(), `connections: ${conns.join(', ')}`);
         });
 
-        await bcheck('B7', 'Sign out in the sidebar ends the session and closes the browser\'s SMF socket', async () => {
+        await bcheck('B8', 'Sign out in the sidebar ends the session and closes the browser\'s SMF socket', async () => {
             shown = page;
-            expect(socket, 'no SMF session (B3)');
+            expect(socket, 'no SMF session (B4)');
             const closed = socket.isClosed() ? Promise.resolve() : socket.waitForEvent('close', { timeout: 15_000 });
             closed.catch(() => {});
             const logout = page.waitForResponse((r) => new URL(r.url()).pathname === '/managed/logout');
@@ -990,20 +1193,149 @@ async function runBrowserChecks() {
             expect(new URL(page.url()).pathname === '/login', `/ after sign-out: want /login, got ${page.url()}`);
         });
 
-        await bcheck('B8', 'nothing in the browser reached another origin, and no page threw', async () => {
+        await bcheck('B9', 'nothing in the browser reached another origin, and no page threw', async () => {
             shown = null;
             expect(user, 'no browser (B1)');
-            await drain();
-            const problems = [
-                ...seen.foreign.map((u) => `request to ${u}`),
-                ...seen.sockets.filter((u) => !u.startsWith('wss://gateway:9443/')).map((u) => `socket to ${u}`),
-                ...seen.errors.map((m) => `page error: ${m}`),
-            ];
+            const problems = [...openProblems(await drain(seen)), ...seenProblems(seen, APP)];
             expect(problems.length === 0, problems.join('; '));
             return `${seen.sockets.length} socket(s)${seen.unread ? `; ${seen.unread} response(s) closed before they could be swept` : ''}`;
         });
     } finally {
-        await drain();
+        await drain(seen);
+        await browser?.close().catch(() => {});
+    }
+}
+
+// --- Gateway mode ------------------------------------------------------------------
+
+/**
+ * Checks D1-D4: the image in its default mode, the `direct` service. No
+ * sign-in: the Direct relay forwards what the caller sends, so they use the
+ * broker's details as a person would type them. D4 opens its own browser
+ * connection; B1-B9 closed theirs.
+ */
+async function runDirectChecks() {
+    const { vpn, queue } = broker;
+    const wssPath = `/wss/${broker.smfPort}/${broker.host}`;
+
+    await check('D1', 'Gateway mode: /hosted says direct, / and /login serve the Direct app, and /managed, /solAdmin and the other bundles are plain 404s', async () => {
+        const hosted = await request('GET', '/hosted', { at: DIRECT });
+        expect(hosted.status === 200 && hosted.body.trim() === '{"hosted":true,"connModes":"direct","defaultConn":"direct"}',
+            `/hosted: ${hosted.status} ${hosted.body.trim()}`);
+        const root = await request('GET', '/', { at: DIRECT });
+        expect(root.status === 200 && root.body.includes('id="conn-host"') && !root.body.includes('conn-panel-managed'),
+            `/: want 200 with the Direct form and no Provisioned panel, got ${root.status}`);
+        // No sign-in page in Gateway mode: /login is an app route like any other.
+        const login = await request('GET', '/login', { at: DIRECT });
+        expect(login.status === 200 && login.body === root.body, `/login: want the app, as /, got ${login.status}`);
+        for (const p of ['/managed/me', '/solAdmin', '/provisioned.html', '/solAdmin.html']) {
+            const r = await request('GET', p, { at: DIRECT });
+            expect(r.status === 404 && r.body === '404 page not found\n', `${p}: want a plain 404, got ${r.status} ${r.body.slice(0, 120)}`);
+        }
+        const log = compose(['logs', '--no-color', 'direct'], { quiet: true }).out;
+        expect(/conn_modes=direct\b/.test(log) && !log.includes('provisioned mode enabled'),
+            'the direct log does not say conn_modes=direct, or says provisioned mode enabled');
+    });
+
+    await check('D2', "the Direct relay forwards a SEMP GET with the caller's own credentials, passes the broker's 401 through, and answers a bad path 400 and an unknown host 502", async () => {
+        const ok = await request('GET', directSempPath(), { at: DIRECT, headers: sempAuth() });
+        expect(ok.status === 200 && JSON.parse(ok.body).data?.queueName === queue,
+            `with the SEMP credential: want 200 naming ${queue}, got ${ok.status} ${ok.body.slice(0, 300)}`);
+        const anonymous = await request('GET', directSempPath(), { at: DIRECT, headers: { Accept: 'application/json' } });
+        expect(anonymous.status === 401, `without a credential: want the broker's 401, got ${anonymous.status} ${anonymous.body.slice(0, 200)}`);
+        const bad = await request('GET', '/https/abc/h', { at: DIRECT });
+        expect(bad.status === 400 && bad.body.startsWith('400 bad request: '), `a malformed path: want 400, got ${bad.status} ${bad.body.slice(0, 200)}`);
+        const unknown = await request('GET', `/https/${broker.sempPort}/e2e-no-such-host.invalid/SEMP/v2/monitor/msgVpns`, { at: DIRECT });
+        expect(unknown.status === 502 && unknown.body === '502 bad gateway: upstream unreachable\n',
+            `an unknown host: want 502, got ${unknown.status} ${unknown.body.slice(0, 200)}`);
+    });
+
+    await check('D3', `a real SMF login through the Direct relay's ${wssPath} binds a queue browser to ${queue}`, async () => {
+        const bridge = await startBridge({ at: DIRECT });
+        const solace = loadSolace();
+        const smf = await openSession(solace, bridge, { smfPath: wssPath, vpn, user: broker.clientUser, pass: brokerSecrets.clientPassword });
+        await bindQueue(solace, smf.session, queue);
+        smf.session.disconnect();
+        await withTimeout(smf.down, 10_000, 'the SDK did not report the session down within 10s of its disconnect');
+    });
+
+    if (!browserOn()) return;
+    const seen = newSeen();
+    let browser = null;
+    try {
+        await bcheck('D4', `a browser on the Direct app at ${DIRECT_APP} connects SEMP and SMF through it and binds ${queue}, reaching no other origin`, async () => {
+            shown = null;
+            // isValidHost in src/core/utils.ts: a name or an IPv4 address.
+            expect(!broker.host.includes(':'), `the Direct form takes a host name or an IPv4 address, not ${broker.host}`);
+            browser = await connectBrowser();
+            const page = await (await openContext(browser, seen, DIRECT_APP)).newPage();
+            shown = page;
+            // The form's handlers attach once the app has probed /hosted.
+            const probed = page.waitForResponse((r) => new URL(r.url()).pathname === '/hosted');
+            probed.catch(() => {});
+            await page.goto('/');
+            const hosted = await probed;
+            expect(hosted.status() === 200, `the app's /hosted probe: ${hosted.status()}`);
+            expect(await page.locator('#conn-panel-managed').count() === 0, 'the Direct app shows the Provisioned panel');
+            // 'connected' once the button offers Disconnect; otherwise what the form says is wrong.
+            const until = async (button, error) => (await page.waitForFunction(([b, e]) => {
+                const slot = document.querySelector(e);
+                const text = slot?.textContent?.trim();
+                if (text && slot.style.display !== 'none') return `error: ${text}`;
+                const invalid = [...document.querySelectorAll('.is-invalid')].map((i) => i.id);
+                if (invalid.length) return `invalid: ${invalid.join(', ')}`;
+                return document.querySelector(b)?.textContent?.trim() === 'Disconnect' && 'connected';
+            }, [button, error])).jsonValue();
+            await page.selectOption('#semp-protocol', 'https');
+            await page.fill('#conn-host', broker.host);
+            await page.fill('#semp-port', broker.sempPort);
+            await page.fill('#semp-username', broker.sempUser);
+            await page.fill('#semp-password', brokerSecrets.sempPassword);
+            await page.click('#btn-semp-connect');
+            const semp = await until('#btn-semp-connect', '#semp-connect-error');
+            expect(semp === 'connected', `SEMP: ${semp}`);
+            await page.selectOption('#solace-protocol', 'wss');
+            await page.fill('#solace-port', broker.smfPort);
+            await page.fill('#solace-vpn', vpn);
+            await page.fill('#solace-username', broker.clientUser);
+            await page.fill('#solace-password', brokerSecrets.clientPassword);
+            const opened = page.waitForEvent('websocket', { timeout: 30_000, predicate: (ws) => ws.url().startsWith(`wss://direct:9443${wssPath}`) });
+            opened.catch(() => {});
+            await page.click('#btn-solace-connect');
+            const client = await until('#btn-solace-connect', '#solace-connect-error');
+            expect(client === 'connected', `client: ${client}`);
+            const socket = await opened;
+            const bound = await bindInQueueBrowser(page, queue);
+            expect(bound === 'bound', `bind: ${bound}`);
+            await page.waitForFunction(() => /^Read-(Only|Write)$/.test(document.querySelector('#browser-permissions')?.textContent ?? '')).catch(() => {});
+            // textContent: the badge is text-transform: uppercase. Either value
+            // is right here: it is the broker's own permission for the client
+            // username, not a grant.
+            const shownQueue = ((await page.locator('#browser-queue-name').textContent()) ?? '').trim();
+            const permissions = ((await page.locator('#browser-permissions').textContent()) ?? '').trim();
+            expect(shownQueue === queue && /^Read-(Only|Write)$/.test(permissions), `shows queue ${shownQueue}, permissions ${permissions || '(none)'}`);
+            // The SDK falls back to HTTP when its WebSocket fails: SMF would
+            // then not be on the socket.
+            expect(!socket.isClosed(), `the WebSocket to ${wssPath} closed: the SDK left it for another transport`);
+            const total = await page.locator('#count-total').innerText();
+            // Closed before the drain: the app never reads the body of its
+            // SEMP connect probe (semp-client.ts checks the status only), and
+            // Chromium finishes such a response only once the page reads it.
+            // Closing cancels it, so it is counted as not swept instead of
+            // holding the drain to its limit.
+            shown = null;
+            await page.context().close();
+            const open = await drain(seen);
+            const relayed = `direct GET /https/${broker.sempPort}/${broker.host}/SEMP/`;
+            expect(records.some((r) => r.label.startsWith(relayed) && r.label.endsWith(' -> 200')),
+                `no SEMP call went through ${DIRECT_APP}/https/${broker.sempPort}/${broker.host}/`);
+            const problems = [...openProblems(open), ...seenProblems(seen, DIRECT_APP)];
+            expect(problems.length === 0, problems.join('; '));
+            return `${permissions}; total ${total}; ${seen.sockets.length} socket(s)`
+                + `${seen.unread ? `; ${seen.unread} response(s) the page never read, not swept` : ''}`;
+        });
+    } finally {
+        await drain(seen);
         await browser?.close().catch(() => {});
     }
 }
@@ -1033,7 +1365,7 @@ async function main() {
             try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
         }, tls.rootCertificates);
         say(`trusting ${roots.count} standard roots from ${roots.from}`);
-        process.on('SIGINT', () => { say('interrupted; tearing the gateway down'); teardown(); process.exit(130); });
+        process.on('SIGINT', () => { say('interrupted; tearing the stack down'); teardown(); process.exit(130); });
         started = true;
         writeMaterial(certs, roots);
         await stackUp();
@@ -1048,6 +1380,10 @@ async function main() {
         if (setupError || failed.length) {
             say('--- gateway log (last 60 lines) ---');
             compose(['logs', '--no-color', '--tail', '60', 'gateway']);
+            if (setupError || failed.some((n) => String(n).startsWith('D'))) {
+                say('--- direct log (last 60 lines) ---');
+                compose(['logs', '--no-color', '--tail', '60', 'direct']);
+            }
         }
         teardown();
     }

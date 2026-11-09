@@ -1,17 +1,18 @@
 # End-to-end stack for scripts/e2e.mjs: the gateway image that
-# `./scripts/dev.sh image` builds, pointed at an existing Solace broker whose
-# details the harness reads from docker/e2e-broker.env (git-ignored) or asks
-# for, and a browser that uses the gateway's app. Run it through
-# `./scripts/dev.sh e2e` (or dev.ps1), not by hand: the harness writes the TLS
-# material, the store key and the bootstrap password into scripts/logs/e2e/
-# (git-ignored) before `up`, starts the services by name, and runs `down -v`
-# at the end.
+# `./scripts/dev.sh image` builds, twice (`gateway` in Provisioned mode and
+# `direct` in Gateway mode, the image's default), pointed at an existing Solace
+# broker whose details the harness reads from docker/e2e-broker.env
+# (git-ignored) or asks for, and a browser that uses both gateways' apps. Run it
+# through `./scripts/dev.sh e2e` (or dev.ps1), not by hand: the harness writes
+# the TLS material, the store key and the bootstrap password into
+# scripts/logs/e2e/ (git-ignored) before `up`, starts the services by name, and
+# runs `down -v` at the end.
 #
-# The host ports are the gateway's, 127.0.0.1:39443, and the browser's
-# Playwright server, 127.0.0.1:39444; both are bound to loopback. The gateway
-# reaches the broker over TLS only and verifies it against the CA file the
-# harness was given and the host's standard roots; a broker on this machine
-# is host.docker.internal.
+# The host ports are the Provisioned gateway's, 127.0.0.1:39443, the browser's
+# Playwright server, 127.0.0.1:39444, and the Gateway-mode gateway's,
+# 127.0.0.1:39445; all are bound to loopback. Both gateways reach the broker
+# over TLS only and verify it against the CA file the harness was given and
+# the host's standard roots; a broker on this machine is host.docker.internal.
 name: smu-e2e
 services:
   gateway:
@@ -54,16 +55,53 @@ services:
       - "127.0.0.1:39443:9443"
     restart: "no"
 
-  # The browser for checks B1-B8: Chromium in the official Playwright image,
-  # which the harness on the host drives over Playwright's run-server protocol.
+  # The same image in Gateway mode, its default: no CONN_MODES, so no sign-in,
+  # no stores and no admin console, and the Direct relay forwards each request
+  # with the credentials the caller sends. Checks D1-D4. It has its own volume,
+  # since a seeded /data keeps its connModes; it writes only config.yaml there.
+  # The TLS material and the broker trust are the gateway's.
+  direct:
+    image: ghcr.io/solacelabs/solace-msg-utility:latest
+    # The image `dev.sh image` just built, never a published one.
+    pull_policy: never
+    user: "65532:65532"
+    privileged: false
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      LOG_LEVEL: debug
+      # Verified as for the gateway: the same CA file and host roots, and
+      # skipped only when the harness runs with E2E_INSECURE=1.
+      SSL_TRUST_DIR: /tls/trust
+      SSL_INSECURE_SKIP_VERIFY: ${E2E_GATEWAY_SKIP_VERIFY:-}
+    # Docker Desktop provides this name itself; on Linux it needs the entry.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - direct-data:/data
+      - ../scripts/logs/e2e/gateway.crt:/tls/tls.crt:ro
+      - ../scripts/logs/e2e/gateway.key:/tls/tls.key:ro
+      - ../scripts/logs/e2e/trust:/tls/trust:ro
+      - ../scripts/logs/e2e/system-roots.crt:/etc/ssl/certs/ca-certificates.crt:ro
+    ports:
+      - "127.0.0.1:39445:9443"
+    restart: "no"
+
+  # The browser for checks B1-B9 and D4: Chromium in the official Playwright
+  # image, which the harness on the host drives over Playwright's run-server
+  # protocol.
   # Started only when E2E_BROWSER is not 0. It runs the playwright-core that
   # npm ci installed, mounted read-only, so the client and the server are the
   # same files; the image tag must equal that version and the image is pinned
   # by digest (tests/build/e2e-lib.test.ts). The browser visits only the
-  # gateway, as https://gateway:9443 on this project's network, and the harness
-  # aborts any other request. Chromium runs without its own sandbox
-  # (Playwright's default); this posture is the boundary. One client only: once
-  # the harness has connected, no other local process can.
+  # gateways, as https://gateway:9443 and https://direct:9443 on this project's
+  # network, and the harness aborts any other request. Chromium runs without its
+  # own sandbox (Playwright's default); this posture is the boundary. One client
+  # at a time: while the harness is connected (once for B1-B9, then again for
+  # D4), no other local process can.
   browser:
     image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
     # pwuser in the image.
@@ -92,3 +130,4 @@ services:
 
 volumes:
   data:
+  direct-data:

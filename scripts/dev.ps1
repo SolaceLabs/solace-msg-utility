@@ -325,8 +325,8 @@ function Task-graphify {
   return (Invoke-Logged 'graphify' 'graphify' @('update','.'))
 }
 
-# Local only, and standalone: not in `all` or `full`. The image in Provisioned
-# mode against an existing broker, driven by scripts/e2e.mjs, which owns the stack's lifetime;
+# Local only, and standalone: not in `all` or `full`. The image in Gateway and
+# Provisioned mode against an existing broker, driven by scripts/e2e.mjs, which owns the stack's lifetime;
 # the down -v here is the backstop for a run that died before its own.
 function Task-e2e {
   if ($env:CI) { Warn 'e2e is local-only; skipping in CI'; return 0 }
@@ -360,7 +360,7 @@ usage: dev.ps1 <task>...
   all   = $($All -join ' ')       (what CI runs, as: all scan)
   full  = $($Full -join ' ')      (pre-tag sweep)
   mock  = the demo broker and fake-gateway suites (tests/mock-broker/)
-  e2e   = the gateway in Provisioned mode against an existing broker (local only, standalone)
+  e2e   = the gateway in Gateway and Provisioned mode against an existing broker (local only, standalone)
 "@ | Write-Host
 }
 

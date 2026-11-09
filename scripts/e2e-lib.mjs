@@ -187,9 +187,9 @@ const flagRule = (v) => (v === '0' || v === '1' ? '' : `is not 0 or 1: ${v}`);
  */
 export const BROKER_FIELDS = [
     { key: 'host', env: 'E2E_BROKER_HOST', check: hostRule,
-        label: "broker host the gateway container dials; it must match the broker's TLS certificate (a broker on this machine: host.docker.internal)" },
+        label: "broker host the gateway containers dial; it must match the broker's TLS certificate (a broker on this machine: host.docker.internal)" },
     { key: 'brokerIp', env: 'E2E_BROKER_IP', fallback: '', optional: true, check: ipRule,
-        label: 'address the gateway container maps E2E_BROKER_HOST to (a host alias), for a name it cannot resolve' },
+        label: 'address both gateway containers map E2E_BROKER_HOST to (a host alias), for a name they cannot resolve' },
     { key: 'caFile', env: 'E2E_BROKER_CA', check: plain,
         label: "PEM file with the CA that signed the broker's TLS certificate, or that certificate itself" },
     { key: 'sempPort', env: 'E2E_SEMP_PORT', fallback: '1943', check: portRule, label: 'SEMP over TLS port' },
@@ -202,9 +202,9 @@ export const BROKER_FIELDS = [
     { key: 'queue', env: 'E2E_QUEUE', check: segmentRule,
         label: 'existing queue in that VPN the client username may browse (nothing is consumed)' },
     { key: 'insecure', env: 'E2E_INSECURE', fallback: '0', optional: true, check: flagRule,
-        label: "1: the gateway skips verifying the broker's TLS certificate (SSL_INSECURE_SKIP_VERIFY, the e2e stack only)" },
+        label: "1: the gateways skip verifying the broker's TLS certificate (SSL_INSECURE_SKIP_VERIFY, the e2e stack only)" },
     { key: 'browser', env: 'E2E_BROWSER', fallback: '1', optional: true, check: flagRule,
-        label: '0: skip the browser checks B1-B8 and do not start the browser container' },
+        label: '0: skip the browser checks B1-B9 and D4 and do not start the browser container' },
 ];
 
 /**
@@ -269,13 +269,15 @@ export function hostAliasProblem(host, ip) {
 }
 
 /**
- * The compose override that maps `host` to `ip` inside the gateway container,
- * as docker/docker-compose.e2e.yaml's extra_hosts does for
- * host.docker.internal. JSON is YAML; both values have passed their rules, so
- * neither holds a quote, a colon in the name, or a line break.
+ * The compose override that maps `host` to `ip` inside both gateway
+ * containers (`gateway` and `direct`), as docker/docker-compose.e2e.yaml's
+ * extra_hosts does for host.docker.internal. JSON is YAML; both values have
+ * passed their rules, so neither holds a quote, a colon in the name, or a line
+ * break.
  */
 export function hostAliasOverride(host, ip) {
-    return `${JSON.stringify({ services: { gateway: { extra_hosts: [`${host}:${ip}`] } } }, null, 2)}\n`;
+    const alias = { extra_hosts: [`${host}:${ip}`] };
+    return `${JSON.stringify({ services: { gateway: alias, direct: alias } }, null, 2)}\n`;
 }
 
 const DETAILS_FILE_HEADER = [
