@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -51,6 +52,10 @@ func newManagedEnvFrom(t *testing.T, f storeFixture, mutate func(*config), upstr
 	cfg.hosted, cfg.connModes = true, connBoth
 	cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = f.usersPath, f.connsPath, f.keyPath
 	cfg.login.unauthPerMinute = 1000
+	cfg.backupDir = filepath.Join(filepath.Dir(f.usersPath), "backup")
+	if err := os.MkdirAll(cfg.backupDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if mutate != nil {
 		mutate(&cfg)
 	}

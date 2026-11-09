@@ -274,9 +274,15 @@ export function normalizeUrlPath(val: string | null | undefined): string {
     return withLeading.replace(/\/+$/, '');
 }
 
-/** A module id as a label: "queue-browser" -> "Queue Browser". */
+/** Modules whose sidebar name is not their id title-cased. */
+const MODULE_LABELS: Record<string, string> = { 'queue-subscription-explorer': 'Queue Subscriptions' };
+
+/**
+ * A module id as the sidebar names it: "queue-browser" -> "Queue Browser".
+ * tests/variants.test.ts holds every catalog module's label to its `name`.
+ */
 export function moduleLabel(id: string): string {
-    return id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    return MODULE_LABELS[id] ?? id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
 /**

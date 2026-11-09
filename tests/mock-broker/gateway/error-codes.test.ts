@@ -33,8 +33,19 @@ const savedSettings = async (gw: Gw) => {
     return call(gw, 'PUT', '/managed/settings', (view.json as { settings: unknown }).settings);
 };
 
-/** Codes the fake sends only once a control-panel fault is armed: each row arms it and asks. */
+/**
+ * Codes the fake sends only in a state the contract cannot pin: once a
+ * control-panel fault is armed, or (backup_unavailable) for a second backup
+ * in the same second, which a fixed clock makes certain. Each row sets the
+ * state and asks.
+ */
 const FAULTS: Record<string, { status: number; ask: (gw: Gw) => ReturnType<Gw['handle']> }> = {
+    backup_unavailable: { status: 409, ask: async () => {
+        const gw = createGateway({ seed: contractSeed(), backupIter: 1000, now: () => new Date(Date.UTC(2026, 10, 9, 2)) });
+        await call(gw, 'PUT', '/managed/backup/schedule', { kind: 'daily', hour: 2, keep: 7, passphrase: 'a long passphrase' });
+        await call(gw, 'POST', '/managed/backup/run');
+        return call(gw, 'POST', '/managed/backup/run');
+    } },
     rate_limited: { status: 429, ask: gw => { gw.faults.dialRateLimited = true; return call(gw, 'POST', '/managed/dial', { broker: 'b1', vpn: 'v1' }); } },
     upstream_unavailable: { status: 502, ask: gw => { gw.faults.relayUnreachable = true; return relayed(gw); } },
     upstream_auth: { status: 502, ask: gw => { scenario.fault = FAULT.SEMP_UNAUTHORIZED; return relayed(gw); } },

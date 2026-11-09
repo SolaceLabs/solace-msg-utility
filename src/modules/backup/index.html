@@ -1,0 +1,144 @@
+<!-- The admin gate is created at install by createGate() (see module.ts). -->
+<div id="backup-view" class="card backup-card hidden">
+    <div class="flex-row justify-between items-center mb-4">
+        <h2 class="m-0">Backup &amp; Restore</h2>
+        <button id="btn-backup-reload" type="button" class="btn btn-secondary" title="Reload the schedule and the saved backups">Reload</button>
+    </div>
+    <p class="text-secondary backup-intro">
+        A backup holds the users (their password hashes, never the passwords), the connections with their
+        credentials, and the gateway settings except the file paths, encrypted with a passphrase. Keep the
+        passphrase safe: without it a backup cannot be opened.
+    </p>
+    <div id="backup-error" class="text-error hidden" role="alert"></div>
+
+    <h3 class="backup-section">Export</h3>
+    <div class="form-group">
+        <label for="backup-export-pass">Passphrase (12 to 128 characters)</label>
+        <input id="backup-export-pass" type="password" class="form-control" autocomplete="new-password">
+    </div>
+    <div class="form-group">
+        <label for="backup-export-confirm">Confirm the passphrase</label>
+        <input id="backup-export-confirm" type="password" class="form-control" autocomplete="new-password">
+    </div>
+    <div id="backup-export-error" class="text-error hidden" role="alert"></div>
+    <button id="btn-backup-export" type="button" class="btn btn-primary">Export</button>
+
+    <h3 class="backup-section">Import</h3>
+    <div class="form-group">
+        <label for="backup-import-file">Backup file</label>
+        <input id="backup-import-file" type="file" class="form-control" accept=".json,application/json">
+        <p id="backup-import-source" class="backup-hint hidden"></p>
+    </div>
+    <div class="form-group">
+        <label for="backup-import-pass">Passphrase</label>
+        <input id="backup-import-pass" type="password" class="form-control" autocomplete="off">
+    </div>
+    <div id="backup-import-error" class="text-error hidden" role="alert"></div>
+    <button id="btn-backup-preview" type="button" class="btn btn-secondary">Preview</button>
+
+    <div id="backup-preview" class="backup-preview hidden">
+        <p id="backup-preview-meta" class="backup-hint"></p>
+        <div class="form-group">
+            <label for="backup-choice-users">Users</label>
+            <select id="backup-choice-users" class="form-control">
+                <option value="skip">Skip</option>
+                <option value="merge">Merge: add and update these, keep the others</option>
+                <option value="replace">Replace: these users only</option>
+            </select>
+            <ul id="backup-diff-users" class="backup-diff"></ul>
+        </div>
+        <div class="form-group">
+            <label for="backup-choice-connections">Connections</label>
+            <select id="backup-choice-connections" class="form-control">
+                <option value="skip">Skip</option>
+                <option value="merge">Merge: add and update these, keep the others</option>
+                <option value="replace">Replace: these connections only</option>
+            </select>
+            <ul id="backup-diff-connections" class="backup-diff"></ul>
+        </div>
+        <div class="form-group">
+            <label for="backup-choice-settings">Settings</label>
+            <select id="backup-choice-settings" class="form-control">
+                <option value="skip">Skip</option>
+                <option value="replace">Replace</option>
+            </select>
+            <ul id="backup-diff-settings" class="backup-diff"></ul>
+        </div>
+        <div id="backup-signout" class="backup-banner hidden">
+            Importing the users this way changes your own account: you will be signed out.
+        </div>
+        <button id="btn-backup-import" type="button" class="btn btn-primary">Import</button>
+    </div>
+
+    <h3 class="backup-section">Scheduled backup</h3>
+    <p class="backup-hint">
+        The gateway writes each backup into its backup directory, which you mount from the host to keep the
+        files outside the container. Times are UTC.
+    </p>
+    <div id="backup-dir-problem" class="backup-banner hidden"></div>
+    <p id="backup-schedule-status" class="backup-status"></p>
+    <div class="form-group">
+        <label for="backup-kind">Frequency</label>
+        <select id="backup-kind" class="form-control">
+            <option value="hourly">Hourly</option>
+            <option value="daily" selected>Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+        </select>
+    </div>
+    <div class="form-group" data-kinds="weekly">
+        <label for="backup-weekday">Day of the week</label>
+        <select id="backup-weekday" class="form-control">
+            <option value="0">Sunday</option>
+            <option value="1">Monday</option>
+            <option value="2">Tuesday</option>
+            <option value="3">Wednesday</option>
+            <option value="4">Thursday</option>
+            <option value="5">Friday</option>
+            <option value="6">Saturday</option>
+        </select>
+    </div>
+    <div class="form-group" data-kinds="monthly">
+        <label for="backup-day">Day of the month</label>
+        <input id="backup-day" type="number" class="form-control" min="1" max="31" value="1">
+        <p class="backup-hint">A month without that day backs up on its last day.</p>
+    </div>
+    <div class="form-group" data-kinds="daily weekly monthly">
+        <label for="backup-time">Time (UTC)</label>
+        <input id="backup-time" type="time" class="form-control" value="02:00">
+    </div>
+    <div class="form-group" data-kinds="hourly">
+        <label for="backup-minute">Minute past the hour</label>
+        <input id="backup-minute" type="number" class="form-control" min="0" max="59" value="0">
+    </div>
+    <div class="form-group">
+        <label for="backup-keep">Backups to keep</label>
+        <input id="backup-keep" type="number" class="form-control" min="1" max="365" value="14">
+        <p class="backup-hint">The oldest beyond this number are deleted after each backup.</p>
+    </div>
+    <div class="form-group">
+        <label for="backup-sched-pass">Passphrase</label>
+        <input id="backup-sched-pass" type="password" class="form-control" autocomplete="new-password">
+        <p id="backup-sched-pass-hint" class="backup-hint"></p>
+    </div>
+    <div class="form-group">
+        <label for="backup-sched-confirm">Confirm the passphrase</label>
+        <input id="backup-sched-confirm" type="password" class="form-control" autocomplete="new-password">
+    </div>
+    <div id="backup-schedule-error" class="text-error hidden" role="alert"></div>
+    <div class="flex-row gap-2">
+        <button id="btn-backup-save-schedule" type="button" class="btn btn-primary">Save schedule</button>
+        <button id="btn-backup-run" type="button" class="btn btn-secondary">Back up now</button>
+        <button id="btn-backup-remove-schedule" type="button" class="btn btn-danger">Remove schedule</button>
+    </div>
+
+    <h3 class="backup-section">Saved backups</h3>
+    <div class="data-table-frame">
+        <table class="data-table">
+            <thead>
+                <tr><th>File</th><th>Created (UTC)</th><th>Size</th><th class="backup-actions-col" aria-label="Actions"></th></tr>
+            </thead>
+            <tbody id="backup-rows"></tbody>
+        </table>
+    </div>
+</div>

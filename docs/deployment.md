@@ -139,15 +139,15 @@ Then open <https://localhost:9443/>.
 
 `ghcr.io/solacelabs/solace-msg-utility` serves every container mode. Every release publishes `:<major>.<minor>.<patch>`, `:<major>.<minor>`, `:<major>` and `:latest`, for `linux/amd64` and `linux/arm64`. Pin a full version in production. The Release notes quote the image's digest, and a tag only ever moves to an image that passed the vulnerability scan.
 
-The image includes the two scripts the app loads, `solclient.js` (Solace's JavaScript messaging API) and `jszip.min.js`, with their licences under `/SolaceMsgUtility/licenses/`.
+The image includes the two scripts the app loads, `solclient.js` (Solace's JavaScript messaging API) and `jszip.min.js`, with their licences.
 
 ### Mounts
 
 | Path | What |
 | --- | --- |
 | `/tls` | `tls.crt` and `tls.key`, the gateway's own certificate, and `trust/`, the CAs it trusts for broker connections. |
-| `/data` | Writable: `config.yaml`, and in Provisioned mode the user and connection stores and the store key. Without a volume they are lost when the container is recreated. |
-| `/SolaceMsgUtility` | The app and its two vendor scripts, baked in. Mount over it only to serve your own build, with both scripts beside it (`APP_DIR` moves it). |
+| `/data` | Writable: `config.yaml`, and in Provisioned mode the user and connection stores, the backup schedule and the store key. Without a volume they are lost when the container is recreated. |
+| `/backup` | Provisioned mode only: the scheduled backups, each encrypted with its own passphrase. Mount a host directory owned by UID `65532` to keep them; see [Back up and restore](provisioned-mode.md#back-up-and-restore). |
 
 Use named volumes: they take the image's UID `65532` ownership. A bind-mounted directory must already be owned by UID `65532`, or hold its files ready so the gateway never needs to write.
 
@@ -166,7 +166,6 @@ The gateway keeps its settings in `config.yaml` on the `/data` volume. The varia
 | `HOSTED` | `true` | `true` sends the app's broker connections through the gateway (Gateway and Provisioned mode). `false` serves the files only, and browsers connect to brokers themselves. Any other value stops the start. |
 | `CONN_MODES` | `direct` | Which connection tabs the app offers: `direct` (Gateway mode), `provisioned` or `both` (Provisioned mode; see [provisioned-mode.md](provisioned-mode.md)). |
 | `DEFAULT_CONN` | `direct` | Which tab opens first under `both`: `direct` or `provisioned`. |
-| `APP_DIR` | `/SolaceMsgUtility` | Where the app's files are. May be read-only. |
 | `SSL_CERT_FILE` | `/tls/tls.crt` | The gateway's TLS certificate (PEM). Go also reads this variable to find a system CA bundle, so a container that sets it ignores any bundle mounted at Go's default path: add CAs through `SSL_TRUST_DIR`. |
 | `SSL_KEY_FILE` | `/tls/tls.key` | Its private key (PEM). |
 | `SSL_TRUST_DIR` | `/tls/trust` | The CAs trusted for broker connections (`*.crt`, `*.pem`); see [TLS and trusted CAs](#tls-and-trusted-cas). |
@@ -290,4 +289,6 @@ To update a deployed instance:
   Pin a full version (`:3.6.0`) in production rather than `:3.6`, `:3` or `:latest`. Provisioned mode uses the same tags.
 
   **From v3.3.5 or earlier:** `HOSTED` now defaults to `true`. A container started without `HOSTED=true` used to serve the files only, with browsers connecting to brokers themselves; it now connects to brokers for them, so put your brokers' CAs in `/tls/trust/` first, or set `HOSTED=false` to keep the old behaviour. Mount a volume at `/data` to keep `config.yaml` across recreations.
+
+  **`APP_DIR` is no longer read:** the container always serves the app built into the image. A container that still sets `APP_DIR`, or a `config.yaml` that still has `appDir`, starts as before and logs a warning naming it; remove it. A save from the admin console's Gateway Settings drops the key from the file. If you used it to serve your own build, mount that build at `/SolaceMsgUtility` instead.
 - **Self-host** -- download the new `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) and replace the file on your server; `SHA256SUMS.txt` on the same Release verifies it. The `solclient.js` and `jszip.min.js` files come from the `dist` branch and only need updating if you want a newer version of those libraries.

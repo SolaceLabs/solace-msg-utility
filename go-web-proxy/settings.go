@@ -81,13 +81,15 @@ func (h *managedHandler) getSettings(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// current returns config.yaml as last read or written.
+func (sf *settingsFile) current() fileConfig {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	return sf.saved.clone()
+}
+
 // saveSettings validates and writes the whole file. A key missing from the
-// body keeps its saved value. Refusals, in order:
-//   - 422 invalid: a changed hostOnly path key; a value startup would reject;
-//     connModes direct, which would end Provisioned mode and this console
-//   - 409 would_lock_out: the new access list would deny this request's client
-//   - 500 config_unreadable: the file cannot be read to check for a hand edit
-//   - 409 config_changed_on_disk: a hand edit the gateway has not loaded
+// body keeps its saved value. Refusals are checkSettings'.
 func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	sf := h.settings
 	sf.mu.Lock()
@@ -96,24 +98,47 @@ func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
+	cfg, ok := h.checkSettings(w, r, body)
+	if !ok {
+		return
+	}
+	restart, err := sf.commit(cfg)
+	if err != nil {
+		h.serverError(w, "saveSettings", err)
+		return
+	}
+	h.logger.Warn("gateway settings saved", "by", sessionOf(r).user, "path", sf.path, "restart_required", restart)
+	writeJSON(w, http.StatusOK, map[string]any{"restartRequired": restart})
+}
+
+// checkSettings validates body as the settings to save, for the settings page
+// and for an import alike. On a refusal it has written the response and
+// returns false. sf.mu must be held. Refusals, in order:
+//   - 422 invalid: a changed hostOnly path key; a value startup would reject;
+//     connModes direct, which would end Provisioned mode and this console
+//   - 409 would_lock_out: the new access list would deny this request's client
+//   - 500 config_unreadable: the file cannot be read to check for a hand edit
+//   - 409 config_changed_on_disk: a hand edit the gateway has not loaded
+func (h *managedHandler) checkSettings(w http.ResponseWriter, r *http.Request, body fileConfig) (config, bool) {
+	sf := h.settings
 	body.Version = configVersion
 	for _, k := range restartOnlyKeys {
 		if k.hostOnly && k.value(body) != k.value(sf.saved) {
 			writeInvalid(w, k.key, k.key+" is a path, so it changes only in config.yaml on the gateway host, followed by a restart.")
-			return
+			return config{}, false
 		}
 	}
 	cfg, err := body.toConfig(secretPaths{storeKey: sf.boot.storeKeyFile})
 	if err != nil {
 		writeInvalid(w, "settings", err.Error())
-		return
+		return config{}, false
 	}
 	// Direct alone would end Provisioned mode at the next restart, and this
 	// console with it, leaving no page to undo it from. That change is the
 	// host's to make.
 	if cfg.connModes == connDirect {
 		writeInvalid(w, "connModes", `connModes "direct" would turn Provisioned mode off at the next restart, and this console with it. To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart.`)
-		return
+		return config{}, false
 	}
 	ip, ok := clientIP(r.RemoteAddr, r.Header.Values("X-Forwarded-For"), cfg.access.trustedProxies)
 	if len(cfg.access.allow) > 0 && !(ok && prefixContains(cfg.access.allow, ip)) {
@@ -122,29 +147,32 @@ func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request) {
 			reason = "This allow list would deny your own address (" + ip.String() + "). Add it, or a range that contains it."
 		}
 		writeJSON(w, http.StatusConflict, apiError{Error: "would_lock_out", Field: "access.allow", Reason: reason})
-		return
+		return config{}, false
 	}
 	changed, err := sf.changedOnDisk()
 	if err != nil {
 		h.configUnreadable(w, err)
-		return
+		return config{}, false
 	}
 	if changed {
 		writeError(w, http.StatusConflict, "config_changed_on_disk")
-		return
+		return config{}, false
 	}
+	return cfg, true
+}
+
+// commit writes cfg as config.yaml and applies its live keys, returning the
+// restart-only keys now pending. sf.mu must be held.
+func (sf *settingsFile) commit(cfg config) ([]string, error) {
 	saved := fileConfigFromConfig(cfg)
 	data, err := encodeConfigFile(saved)
 	if err == nil {
 		err = writeFileAtomic(sf.path, data, 0o644)
 	}
 	if err != nil {
-		h.serverError(w, "saveSettings", err)
-		return
+		return nil, err
 	}
 	sf.saved, sf.sum = saved, sha256.Sum256(data)
 	sf.live.apply(cfg)
-	restart := pendingRestart(sf.boot, saved)
-	h.logger.Warn("gateway settings saved", "by", sessionOf(r).user, "path", sf.path, "restart_required", restart)
-	writeJSON(w, http.StatusOK, map[string]any{"restartRequired": restart})
+	return pendingRestart(sf.boot, saved), nil
 }

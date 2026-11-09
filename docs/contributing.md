@@ -100,7 +100,7 @@ Needs: a Linux-container Docker; the npm packages installed (`npm ci`: the SMF c
 
 The harness generates the gateway's TLS material, its store key and every gateway password, writes them only under `scripts/logs/e2e/`, and masks them in all it prints; it masks the broker passwords at any length. A broker password shorter than 8 characters cannot be looked for by checks 2, 13, 14, 17 and `B6` without matching ordinary text, and the run says so. It always ends with `docker compose down -v` and deletes that directory; the task runs `down -v` again as a backstop. The task runs the harness on the real terminal rather than through the log capture, so that it can ask; the harness appends its own masked output to `scripts/logs/e2e.log`. The SMF check uses the real SDK under Node through a loopback bridge, which adds the session cookie and a same-origin `Origin` the way a browser would; the bytes reach the gateway's `/managed/smf` socket unchanged. In Gateway mode the same bridge adds only an `Origin` and dials the Direct relay's `/wss/<port>/<host>`, which forwards the bytes to the broker.
 
-Each check prints `PASS <id>.` or `FAIL <id>.`: 30 in a full run, 20 with `E2E_BROWSER=0`. Any failure exits 1, followed by the tail of the gateway log, and of the `direct` service's when a `D` check or the setup failed:
+Each check prints `PASS <id>.` or `FAIL <id>.`: 31 in a full run, 21 with `E2E_BROWSER=0`. Any failure exits 1, followed by the tail of the gateway log, and of the `direct` service's when a `D` check or the setup failed:
 
 1. A wrong password is refused, and sign-in issues `__Host-smu-session` as `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, with no `Domain` and no lifetime.
 2. `/managed/me` names the entitled broker and VPN only, with no address, port or credential.
@@ -123,7 +123,7 @@ Each check prints `PASS <id>.` or `FAIL <id>.`: 30 in a full run, 20 with `E2E_B
    - `B4` connects. The browser opens its own WebSocket to `/managed/smf/<broker>/<vpn>`, sending the cookie, `Origin` and `Sec-Fetch-Site` itself, and the page shows no broker address.
    - `B5` binds the queue in Queue Browser. The queue is `Read-Only`, with no Delete.
    - `B6` checks that browser storage holds no password, store key or session cookie.
-   - `B7` checks `/solAdmin`: it refuses the e2e user with the 403 page, and the administrator signs in there and sees both users and both connections.
+   - `B7` checks `/solAdmin`: it refuses the e2e user with the 403 page, and the administrator signs in there and sees both users, both connections, and Backup & Restore with no schedule and a writable backup directory.
    - `B8` signs out from the sidebar. The browser's SMF socket closes, `/managed/me` gets `401`, and `/` goes to sign-in.
    - `B9` checks that no request or socket went to another origin and that no page threw.
 
@@ -136,6 +136,8 @@ Each check prints `PASS <id>.` or `FAIL <id>.`: 30 in a full run, 20 with `E2E_B
 
 13. No response from either gateway carries a credential, except the body of the `dial` answer. This includes every response the browser received and every Gateway-mode response.
 14. Both stores are sealed at rest (`SMUS` header, no plaintext).
+
+    Check 18 runs here, while the administrator's session and the gateway are up: an export holds no credential, host or hash in clear and previews as no change; a schedule's **Back up now** writes a file into the `/backup` volume, also sealed; a **Merge** import of that file, settings included, leaves the administrator signed in; the schedule is then removed.
 15. After a restart the stores still open: old sessions are gone, and the administrator signs in again.
 16. A missing key file beside an existing store refuses to start, naming both files.
 17. Neither gateway log (both at `debug`) holds a password, store key or session cookie, the browser's included.

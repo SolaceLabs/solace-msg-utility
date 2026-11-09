@@ -11,6 +11,7 @@ import { QueueSubscriptionExplorerModule } from '../../src/modules/queue-subscri
 import { UserManagementModule } from '../../src/modules/user-management/module';
 import { ConnectionManagementModule } from '../../src/modules/connection-management/module';
 import { GatewaySettingsModule } from '../../src/modules/gateway-settings/module';
+import { BackupModule } from '../../src/modules/backup/module';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
 import type { AppContext, PwaModule } from '../../src/core/types';
 
@@ -32,6 +33,7 @@ const MODULES: Record<string, PwaModule> = {
     'user-management': UserManagementModule,
     'connection-management': ConnectionManagementModule,
     'gateway-settings': GatewaySettingsModule,
+    'backup': BackupModule,
 };
 
 /** A module that only keeps the AppContext, so the test can read AppState. */
@@ -209,7 +211,7 @@ describe('managed demo end to end', () => {
     async function openOwnRow(): Promise<HTMLTableRowElement> {
         await openDemo(signInAs('admin'));
         await vi.waitFor(() => expect(ctx.appState.managed?.admin).toBe(true));
-        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer', 'user-management', 'connection-management', 'gateway-settings']);
+        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer', 'user-management', 'connection-management', 'gateway-settings', 'backup']);
         q('#sidebar-nav .nav-item[data-module-id="user-management"]').click();
         const own = () => Array.from(document.querySelectorAll<HTMLTableRowElement>('#user-mgmt-rows tr'))
             .find(tr => tr.querySelector('td')?.textContent === 'admin');
@@ -240,4 +242,32 @@ describe('managed demo end to end', () => {
         await expectSignedOut(demo);
         expect(demo.gateway.store.findUser('admin')).toBeFalsy();
     });
+    it('exports the configuration as an administrator, and a Merge import brings a deleted user back', async () => {
+        const demo = await openDemo(signInAs('admin'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.admin).toBe(true));
+        q('#sidebar-nav .nav-item[data-module-id="backup"]').click();
+        await vi.waitFor(() => expect(q('#backup-schedule-status').textContent).toContain('No schedule'));
+
+        q<HTMLInputElement>('#backup-export-pass').value = 'a demo backup passphrase';
+        q<HTMLInputElement>('#backup-export-confirm').value = 'a demo backup passphrase';
+        q<HTMLButtonElement>('#btn-backup-export').click();
+        await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled());
+        const exported = await ((URL.createObjectURL as any).mock.calls[0][0] as Blob).text();
+        expect(exported).not.toContain('demo-viewer-0001'); // sealed, not in clear
+
+        expect(demo.gateway.store.deleteUser('viewer')).toBe('deleted');
+        const input = q<HTMLInputElement>('#backup-import-file');
+        Object.defineProperty(input, 'files', { configurable: true, value: [new File([exported], 'smu-backup.json')] });
+        input.dispatchEvent(new Event('change'));
+        await vi.waitFor(() => expect(q('#backup-import-source').textContent).toBe('File: smu-backup.json'));
+        q<HTMLInputElement>('#backup-import-pass').value = 'a demo backup passphrase';
+        q<HTMLButtonElement>('#btn-backup-preview').click();
+        await vi.waitFor(() => expect(shown('#backup-preview')).toBe(true), { timeout: 5000 });
+        expect(q('#backup-diff-users').textContent).toBe('Add: viewer');
+
+        q<HTMLSelectElement>('#backup-choice-users').value = 'merge';
+        q<HTMLButtonElement>('#btn-backup-import').click();
+        await vi.waitFor(() => expect(demo.gateway.store.findUser('viewer')).toBeTruthy(), { timeout: 5000 });
+        expect(demo.gateway.signIn('viewer', 'demo-viewer-0001').ok).toBe(true);
+    }, 20_000);
 });

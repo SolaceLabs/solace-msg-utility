@@ -25,10 +25,16 @@
 #                  it lives in the container's writable layer and config.yaml is
 #                  re-seeded from the environment whenever the container is
 #                  recreated.
-#   /SolaceMsgUtility -- the app (APP_DIR): index.html (the Direct bundle),
-#                  provisioned.html (the bundle with the sign-in, served at / in
-#                  Provisioned mode), solAdmin.html (the admin console), and
-#                  solclient.js, jszip.min.js and licenses/.
+#   /backup      -- Provisioned mode's scheduled backups (the admin console's
+#                  Backup & Restore), at a fixed path. Baked empty, owned by
+#                  UID 65532 and private (0700); mount a host directory here
+#                  (owned by 65532) to keep the backups outside the container.
+#                  Each file is encrypted with the passphrase the
+#                  administrator set, not with store.key.
+#   /SolaceMsgUtility -- the app, at a fixed path: index.html (the Direct
+#                  bundle), provisioned.html (the bundle with the sign-in,
+#                  served at / in Provisioned mode), solAdmin.html (the admin
+#                  console), and solclient.js, jszip.min.js and licenses/.
 #
 # Environment (all optional). Except CONFIG_FILE and STORE_KEY_FILE, these only
 # SEED config.yaml on the first start, when the file does not exist; afterwards
@@ -44,7 +50,6 @@
 #                             on: sign-in, the stores and /solAdmin.
 #   DEFAULT_CONN              direct|provisioned: which tab opens first under
 #                             "both".
-#   APP_DIR                   /SolaceMsgUtility
 #   SSL_CERT_FILE             /tls/tls.crt
 #   SSL_KEY_FILE              /tls/tls.key
 #   SSL_TRUST_DIR             /tls/trust
@@ -84,9 +89,10 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # So the dir must be writable by UID 65532. A named volume mounted there
 # inherits this ownership; with no volume the store lives in the container's
 # writable layer (ephemeral: config.yaml is re-seeded on every recreate).
-RUN mkdir -p /staging/tls/trust /staging/data \
- && chown -R 65532:65532 /staging/tls /staging/data \
- && chmod 0755 /staging/tls /staging/tls/trust /staging/data
+RUN mkdir -p /staging/tls/trust /staging/data /staging/backup \
+ && chown -R 65532:65532 /staging/tls /staging/data /staging/backup \
+ && chmod 0755 /staging/tls /staging/tls/trust /staging/data \
+ && chmod 0700 /staging/backup
 
 # ---- Stage 2: build the PWA bundle ------------------------------------------
 # Builds every dist/*.html variant from source so the runtime image doesn't
@@ -136,6 +142,7 @@ FROM scratch
 COPY --chown=65532:65532 --from=gateway-builder /gateway      /gateway
 COPY --chown=65532:65532 --from=gateway-builder /staging/tls  /tls
 COPY --chown=65532:65532 --from=gateway-builder /staging/data /data
+COPY --chown=65532:65532 --from=gateway-builder /staging/backup /backup
 COPY --chown=65532:65532 --from=pwa-builder     /staging/app/ /SolaceMsgUtility/
 
 # 65532 is the conventional "nonroot" UID used by distroless. /tls is baked

@@ -53,8 +53,8 @@ services:
       LOG_LEVEL: warn
       # Set to "true" ONLY for lab use against brokers with untrusted certs.
       SSL_INSECURE_SKIP_VERIFY: "true"
-      # APP_DIR, SSL_CERT_FILE, SSL_KEY_FILE, SSL_TRUST_DIR all use their defaults.
-      # Override here if you mount the PWA or TLS material at non-default paths.
+      # SSL_CERT_FILE, SSL_KEY_FILE, SSL_TRUST_DIR all use their defaults.
+      # Override here if you mount the TLS material at non-default paths.
     volumes:
       # The self-signed certificate is written here on the first start. To use
       # your own, put tls.crt and tls.key (and CAs under trust/) into this
@@ -108,9 +108,13 @@ services:
       # mount. `docker compose down -v` wipes it all (re-seeds the config and
       # forces a fresh bootstrap).
       - provisioned-data:/data
+      # Scheduled backups (the admin console's Backup & Restore). A deployment
+      # bind-mounts a host directory here instead (compose.provisioned.yaml).
+      - provisioned-backup:/backup
 
 volumes:
   gateway-tls:
   gateway-data:
   provisioned-tls:
   provisioned-data:
+  provisioned-backup:

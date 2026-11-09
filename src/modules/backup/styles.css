@@ -1,0 +1,49 @@
+/* Backup & Restore module styles. Module-prefixed (.backup-*) so they never
+ * collide in the shared (inlined) cascade. Shipped only in the admin app and
+ * the Provisioned demo (main-admin.css). */
+
+.backup-card {
+    max-width: 720px;
+    margin: 2rem auto;
+}
+
+.backup-intro,
+.backup-hint,
+.backup-status {
+    font-size: 0.9rem;
+}
+
+.backup-hint {
+    color: var(--text-secondary);
+    margin: 0.25rem 0 0;
+}
+
+.backup-section {
+    margin: 1.5rem 0 0.5rem;
+    font-size: 0.95rem;
+}
+
+.backup-banner {
+    border-left: 3px solid var(--status-warning);
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+.backup-preview {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.backup-diff {
+    margin: 0.25rem 0 0;
+    padding-left: 1.25rem;
+    font-size: 0.85rem;
+}
+
+.backup-actions-col {
+    width: 1%;
+    white-space: nowrap;
+}

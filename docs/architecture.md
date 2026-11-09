@@ -5,6 +5,7 @@
 - [System Overview](#system-overview)
   - [Publishing pipeline (`solace-publisher`)](#publishing-pipeline-solace-publisher)
   - [Hosted mode (gateway tunnelling)](#hosted-mode-gateway-tunnelling)
+  - [Container image](#container-image)
 - [Module Isolation](#module-isolation)
   - [Install-phase buffering (`hold` / `release`)](#install-phase-buffering-hold--release)
 - [Cross-Module Event Flow](#cross-module-event-flow)
@@ -89,7 +90,7 @@ The PWA can run standalone (talking directly to brokers) OR behind the Go gatewa
 
 The gateway's settings live in `config.yaml` ([go-web-proxy/configfile.go](../go-web-proxy/configfile.go)): on the first start the file is seeded from the environment and written (an unwritable path is fatal), afterwards it is authoritative and a differing env var is only reported. Two values stay environment-only by design, `CONFIG_FILE` and `STORE_KEY_FILE`, so the file can never redirect the gateway to another secret. The request pipeline is `accessLog(withClient(clientACL(root)))` ([access.go](../go-web-proxy/access.go)): `withClient` resolves the client address once (trusted proxies) for the access list and the sign-in throttle, and the access list runs on every route, inside the access log so a denial is recorded as a 403 like any other response; an empty allow list admits everyone. The file's keys are documented in [deployment.md](deployment.md).
 
-**Live settings.** The keys an administrator can change without a restart (`connModes`, `defaultConn`, `logLevel`, `access.*`, `session.*`, `login.*`, `modules.*`) are not read from `config` after startup. `serve()` copies them into a `*live` ([live.go](../go-web-proxy/live.go)), an `atomic.Pointer` swapped as one value plus the logger's `slog.LevelVar`, and passes it to every reader: `withClient`, `clientACL`, `/hosted`, the bundle gate, the session table and the throttle each load the current value per request. The only writer is the settings endpoint ([settings.go](../go-web-proxy/settings.go)): `PUT /managed/settings` decodes into a copy of the saved file, runs the same `toConfig` and connection-mode checks as startup, refuses `connModes: direct` (it would end Provisioned mode, and the console with it, at the next restart, so that change is the host's), refuses a change to a path key (the `hostOnly` entries of `restartOnlyKeys`: `appDir`, `tls.certFile`, `tls.keyFile`, `tls.trustDir`, `usersFile`, `connectionsFile`, which only a hand edit changes, so the endpoint can never point the gateway at its own secrets), an access list that would deny the requesting client (`would_lock_out`) and a write over a hand edit (a fingerprint of the bytes it last read or wrote no longer matches, `config_changed_on_disk`; a file it cannot read is `config_unreadable`, not a hand edit), writes atomically, then swaps the live value. `restartOnlyKeys` lists the rest; `pendingRestart` compares the saved file with the running config. A new live key goes in `liveSettings` and `apply`; a reader must take it from `*live`, never from `config`.
+**Live settings.** The keys an administrator can change without a restart (`connModes`, `defaultConn`, `logLevel`, `access.*`, `session.*`, `login.*`, `modules.*`) are not read from `config` after startup. `serve()` copies them into a `*live` ([live.go](../go-web-proxy/live.go)), an `atomic.Pointer` swapped as one value plus the logger's `slog.LevelVar`, and passes it to every reader: `withClient`, `clientACL`, `/hosted`, the bundle gate, the session table and the throttle each load the current value per request. The only writer is the settings endpoint ([settings.go](../go-web-proxy/settings.go)): `PUT /managed/settings` decodes into a copy of the saved file, runs the same `toConfig` and connection-mode checks as startup, refuses `connModes: direct` (it would end Provisioned mode, and the console with it, at the next restart, so that change is the host's), refuses a change to a path key (the `hostOnly` entries of `restartOnlyKeys`: `tls.certFile`, `tls.keyFile`, `tls.trustDir`, `usersFile`, `connectionsFile`, which only a hand edit changes, so the endpoint can never point the gateway at its own secrets), an access list that would deny the requesting client (`would_lock_out`) and a write over a hand edit (a fingerprint of the bytes it last read or wrote no longer matches, `config_changed_on_disk`; a file it cannot read is `config_unreadable`, not a hand edit), writes atomically, then swaps the live value. `restartOnlyKeys` lists the rest; `pendingRestart` compares the saved file with the running config. A new live key goes in `liveSettings` and `apply`; a reader must take it from `*live`, never from `config`.
 
 The connections module probes the gateway-only `/hosted` endpoint at the very start of its `install(app)`. A 200 response carrying JSON `{hosted, connModes, defaultConn}` flips the singleton in `src/core/hosted.ts` **and** resolves the deployment's connection modes (see [Connection modes](#connection-modes)); a gateway older than that contract answers with the plaintext `'true'`, which is still accepted and means *hosted, Direct only*. Any other outcome (404 from a standalone deployment, unrecognised body, network error) leaves hosted mode off and the app Direct-only. The probe is awaited before any service factory is created so a Connect click can't race the flag.
 
@@ -101,6 +102,21 @@ Two related details:
 - The wss TLS handshake probe in `solace-client.ts` is skipped in hosted mode. The browser only sees the gateway's TLS endpoint (already trusted by the PWA load); probing the internal broker would be wrong. Same reasoning suppresses the "click to trust this URL" help link in connection-error toasts.
 
 `AppState.sempCredentials` carries the user-typed `protocol/host/port/urlPath` alongside the rewritten `baseUrl`, so UI code (queue-copy source/dest readout, modal summary) displays the broker the user reached for — not the gateway-prefixed wire URL.
+
+### Container image
+
+The image ([docker/Dockerfile](../docker/Dockerfile), whose header is the authoritative list) is `FROM scratch`: the gateway binary, the bundles it serves, and two directories baked empty, everything owned by UID `65532`, the user it runs as. Operator docs name only `/tls` and `/data`, the two mounts ([deployment.md -> Mounts](deployment.md#mounts)).
+
+| Path | Holds |
+| --- | --- |
+| `/gateway` | The version-stamped gateway binary built from `go-web-proxy/`; the entrypoint, listening on `:9443`. |
+| `/tls` | `tls.crt` and `tls.key` (generated self-signed on the first start when both are missing, so the directory ships writable) and `trust/`, the broker CAs (`*.crt`, `*.pem`). |
+| `/data` | `config.yaml` in every mode; `users.yaml`, `connections.yaml` (both encrypted) and `store.key` in Provisioned mode. Baked empty so a named volume inherits the ownership. |
+| `/SolaceMsgUtility` | `appRoot`, a fixed path: `index.html` (the Direct Release bundle), `provisioned.html`, `solAdmin.html`, `solclient.js`, `jszip.min.js`, and the vendor licences under `licenses/solclientjs/` and `licenses/jszip/`. Nothing else from `dist/` is copied in. |
+
+**Which bundle is served.** `pwaHandler` ([proxy.go](../go-web-proxy/proxy.go)) serves `index.html` at `/` in Gateway mode and `provisioned.html` in Provisioned mode (`appIndexFile`), and the same bundle for any path without a file extension that is not a file (history-mode fallback); a missing asset with an extension stays a `404`. `solAdmin.html` is reached only through `/solAdmin`, behind the admin gate, and a request for `solAdmin.html` or `provisioned.html` by name gets `404`.
+
+**Serving your own build.** Mount it over `/SolaceMsgUtility`, with the bundles the mode serves and both vendor scripts beside them; the mount may be read-only. The path is not configurable: the `APP_DIR` variable and `appDir` key of earlier releases are ignored. A `config.yaml` that still has `appDir` loads (`fileConfig.RemovedAppDir` keeps the strict decoder from refusing it), `removedInUse` names it and a set `APP_DIR` for a warning at start, and the gateway's next write of the file drops the key.
 
 ---
 
@@ -118,6 +134,7 @@ src/core/                          Shared infrastructure
                                    matchContains, topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
                                    isValidHost, isValidPort)
   icons.ts                         Shared inline SVG icons (ICONS) + iconButton() for labelled icon-only buttons
+  download.ts                      downloadBlob(): save a Blob as a named file (queue-browser's downloads, backup's export)
 
 src/modules/connections/                  Module -- primary connection setup: module.ts (Direct, every Release bundle), module.managed.ts (Direct + Provisioned tabs, provisioned.html)
 src/modules/queue-browser/                Module — queue-browser session + message table
@@ -590,6 +607,7 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'user-management':              20,    // admin-only (gated by isModuleVisible)
     'connection-management':        15,    // admin-only
     'gateway-settings':             10,    // admin-only: config.yaml
+    'backup':                        5,    // admin-only: export, import, scheduled backups
 };
 ```
 
@@ -701,7 +719,7 @@ Module visibility is a **requirement map**, `MODULE_REQUIREMENTS: Record<string,
 
 | Requirement | Modules | Rule |
 | --- | --- | --- |
-| `admin` | `user-management`, `connection-management`, `gateway-settings` | visible only when `session.admin` |
+| `admin` | `user-management`, `connection-management`, `gateway-settings`, `backup` | visible only when `session.admin` |
 | `unfiltered-semp` | `queue-discovery` | visible when there is **no** Provisioned session; hidden in **every** Provisioned session, admin included |
 
 `unfiltered-semp` exists for a module that reads over **SEMP v1 RPC**, which the discovery filter deliberately never rewrites (below), with nothing else filtering its rows -- its listing would be entirely unfiltered under RBAC, so it is hidden. `queue-subscription-explorer` also reads over v1 RPC (one broker-wide `<show><queue>...<subscriptions/>` paged by `<more-cookie>`), but in a Provisioned session its service passes each page through `visibleQueueRows(managed, rows)` ([managed-semp-filter.ts](../src/core/managed-semp-filter.ts)): a row stays when its VPN is one of the provisioned VPNs (`isListedVpn`, the rule the VPN-list filter uses) and its queue passes `isQueueVisible`. So it is under module control like Queue Browser and Queue Copy. The broker's whole subscription list still reaches the browser; like the queue lists, this is an app-side guardrail, not a gateway boundary.
@@ -777,6 +795,22 @@ The entitlement editors and the settings page do not ship in the everyday bundle
 
 [gateway-settings](../src/modules/gateway-settings/module.ts) edits `config.yaml` through `GET`/`PUT /managed/settings` (see Live settings above). Its form is table-driven (`FIELDS`: a key and how its input holds the value) and sends the whole file; the gateway's `restartOnly` list drives the "restart" tags, `pendingRestart` the banner, and `changedOnDisk` disables Save.
 
+[backup](../src/modules/backup/module.ts) is Backup & Restore, over the gateway's `/managed/backup*` routes ([backup_api.go](../go-web-proxy/backup_api.go); the format and the scheduler are in [backup.go](../go-web-proxy/backup.go)):
+
+| Route | Does |
+| --- | --- |
+| `GET /managed/backup` | The schedule and its next run, the last run, `dirProblem` (why `/backup` cannot be written, or `""`), and the saved files, newest first. |
+| `PUT /managed/backup/schedule` | Save `{kind, minute, hour, weekday, day, keep, passphrase}`; `passphrase: ""` keeps the current key. |
+| `DELETE /managed/backup/schedule` | Remove it; the files stay. |
+| `POST /managed/backup/run` | Back up now with the schedule's key; `409 backup_unavailable` with the reason when the file cannot be written. |
+| `POST /managed/backup/export` | `{passphrase}` -> `{filename, content}`; the page saves it through `downloadBlob` ([src/core/download.ts](../src/core/download.ts)). |
+| `POST /managed/backup/preview` | `{file \| backup, passphrase}` -> per-section added/changed/removed names, the changed settings keys, and whether each users mode would end the caller's session. |
+| `POST /managed/backup/import` | The same plus `users`, `connections` (`replace` / `merge` / `skip`) and `settings` (`replace` / `skip`) -> `{restartRequired, signedOut}`. |
+
+- **Format.** A JSON envelope, `{"format":"smu-backup","version":1,"kdf":{"name":"pbkdf2-sha256","iter":N,"salt":...},"data":...}`. `data` is the stores' own sealing (`sealer.seal` in [storecrypt.go](../go-web-proxy/storecrypt.go): AES-256-GCM, random nonce, the authenticated `SMUS` header) with role `backup` (4), under a key PBKDF2 derives from the passphrase at the password hasher's cost and in its slots, never the store key. So a file opens on any deployment, and a store file can never pass for a backup or the reverse. The kdf parameters need no separate authentication: changing them derives another key and the file no longer opens. The sealed text is JSON under the store files' YAML names (`msg-utility-users` with password hashes, `msg-utility-connections` with credentials, `settings` without the host-only paths), which the gateway decodes with the stores' strict YAML rules (JSON is YAML) and the demo's fake gateway reads without a YAML parser.
+- **Import.** Stateless: preview and import each resend the file or a saved file's name (which must match `smu-backup-<UTC>.json`, so no path reaches the directory) and the passphrase. Everything is validated before anything is written: `validateUsers` / `validateConns` on the resulting lists (`409 last_admin` when no administrator would remain) and the settings through `checkSettings`, the check `PUT /managed/settings` runs (host-only paths keep this deployment's values). Then users, connections and `config.yaml` are written, each atomically (no transaction spans the three files). `replaceUsers` returns the users whose sessions end (removed, or a new hash or admin flag: `sessionEnders`, the rule `upsertUser` applies), and the store's `onChange` re-checks the open SMF sockets as for any edit. Preview compares records as the store file holds them (`sameRecord`), so an export of an unchanged gateway previews as no change.
+- **Schedule.** One schedule: hourly, daily, weekly or monthly in UTC (`nextRun`; a monthly day past the month's end runs on its last day). It is kept in `/data/backup.yaml` beside the users file, sealed with the store key (role `backup schedule`, 3), holding the passphrase-derived key and its salt, never the passphrase; a missing store key beside it refuses to start, as beside a store. The image has no cron: `serve()` runs `backupService.loop`, the gateway's one periodic goroutine, on a context it cancels at shutdown (and waits for a backup in progress). The loop sleeps at most an hour at a time and keeps the due time across wake-ups, so a suspended host or a changed clock delays a run rather than skipping it; a schedule change wakes it. Each run writes `smu-backup-<UTC>.json` (0600, never over an existing file) into `backupRoot` (`/backup`, fixed like `appRoot`; `config.backupDir` exists only for tests), then deletes the oldest beyond `keep`, touching only names the gateway writes. The last run is kept in memory for the page and logged.
+
 **Account control (provisioned.html).** The connections module's Provisioned panel mounts its account control ([account.ts](../src/modules/connections/account.ts): the user, Change password as a plain link to `/login/password`, Sign out) in the sidebar footer above the status lights through `AppContext.mountSidebarAccount`, an empty shell slot (`#sidebar-account`) the kernel fills on request. So the actions stay on every page and through a broker connection, while the markup still comes only from the managed entry: Release bundles, which install the Direct `module.ts`, never carry it.
 
 **Session lifecycle.** `admin-login` is the only writer of the session in this app. Its Sign out button and `rbac:sign-out-requested` (from `user-management` after a change to the admin's own account, or from either admin module on a `401`) run the same sign-out: `POST /managed/logout`, clear `AppState.managed`, emit `rbac:changed`, show the signed-out view and `loadSelf()`. The kernel does not navigate by itself here: with `managed` null every module is visible. `admin-login` answers the request only while it holds the session (a closure flag, not `appState.managed`), because in the kitchen-sink build the Connections Provisioned tab may own the session instead and answers through the connections router.
@@ -833,6 +867,10 @@ their order, with the relay answered by the demo broker. It is held to the gatew
 other does not follow fails a test. Entitlement is `matchGlob` from `rbac.ts`, and every answer is typed with the
 app's own interfaces. Each file states what it does not simulate (cross-site checks, body caps, throttles, the
 enforcement of a saved access list).
+Backup & Restore ([backup.ts](../src/mock-broker/gateway/backup.ts)) seals and opens the gateway's backup format with
+WebCrypto, and both sides open the same file, `testdata/contract/backup.json`; its backup directory is in memory, its
+schedule runs only through Back up now, and since the fake keeps passwords in plain text, so do its backups (a real
+gateway refuses those users).
 SMF sockets are the SDK emulator's sessions: one opened on a `/managed/smf/{broker}/{vpn}` URL goes through the
 socket gate the Provisioned demo's boot sets (`setSocketGate`), which checks the page's session, the entitlement and the
 dialled login, and closes it on the same revocations as `sockets.go`.
@@ -843,8 +881,8 @@ the queues and the scenario across in sessionStorage (a new tab starts from the 
 demo.html, it cannot reach a network (`network.ts`, above).
 
 **What ships, and what keeps it honest.** `provisioned-demo.html` (variant
-[managed-demo.ts](../src/variants/managed-demo.ts)) is the managed variant's messaging modules plus the three admin
-editors, which an administrator finds in the sidebar instead of at `/solAdmin`. It has no `admin-login`, because the
+[managed-demo.ts](../src/variants/managed-demo.ts)) is the managed variant's messaging modules plus the admin pages
+(the three editors and Backup & Restore), which an administrator finds in the sidebar instead of at `/solAdmin`. It has no `admin-login`, because the
 Provisioned panel owns the session. It is a Release asset, so [check-bundles.mjs](../scripts/check-bundles.mjs) proves on
 every build that it carries the managed and the demo markers and nothing that reaches past the page: no captured
 `fetch`, no other network API, no form action, no URL to a real host. demo.html is held to the same no-network

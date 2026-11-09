@@ -10,7 +10,6 @@ export interface GatewaySettings {
     hosted: boolean;
     connModes: string;
     defaultConn: string;
-    appDir: string;
     tls: { certFile: string; keyFile: string; trustDir: string; insecureSkipVerify: boolean };
     logLevel: string;
     usersFile: string;

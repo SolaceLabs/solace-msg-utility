@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isModuleVisible } from '../src/core/rbac';
+import { moduleLabel } from '../src/core/utils';
+import { QueueBrowserModule } from '../src/modules/queue-browser/module';
+import { QueueCopyModule } from '../src/modules/queue-copy/module';
+import { QueueSubscriptionExplorerModule } from '../src/modules/queue-subscription-explorer/module';
 import { ACTIVE_MODULES as STANDARD_VARIANT } from '../src/variants/standard';
 import { ACTIVE_MODULES as MIN_VARIANT } from '../src/variants/min';
 import { ACTIVE_MODULES as NO_QUEUE_COPY_VARIANT } from '../src/variants/no-queue-copy';
@@ -65,15 +69,17 @@ describe('variants', () => {
             expect(Object.keys(v)).not.toContain('user-management');
             expect(Object.keys(v)).not.toContain('connection-management');
             expect(Object.keys(v)).not.toContain('gateway-settings');
+            expect(Object.keys(v)).not.toContain('backup');
             expect(Object.keys(v)).not.toContain('admin-login');
         });
     });
 
-    it('admin variant ships the login plus the three editors, and no messaging modules', () => {
+    it('admin variant ships the login plus the three editors and Backup & Restore, and no messaging modules', () => {
         // admin-login authenticates but opens no broker connection, so there is
         // nothing for the messaging modules to attach to.
         expect(Object.keys(ADMIN_VARIANT).sort()).toEqual([
             'admin-login',
+            'backup',
             'connection-management',
             'gateway-settings',
             'user-management',
@@ -81,6 +87,7 @@ describe('variants', () => {
         expect(ADMIN_VARIANT['admin-login']).toBeGreaterThan(ADMIN_VARIANT['user-management']);
         expect(ADMIN_VARIANT['user-management']).toBeGreaterThan(ADMIN_VARIANT['connection-management']);
         expect(ADMIN_VARIANT['connection-management']).toBeGreaterThan(ADMIN_VARIANT['gateway-settings']);
+        expect(ADMIN_VARIANT['gateway-settings']).toBeGreaterThan(ADMIN_VARIANT['backup']);
     });
 
     it('all variant ships the all modules for visual testing purpose', () => {
@@ -88,6 +95,7 @@ describe('variants', () => {
         // both connection modes, so no separate managed connection module appears.
         expect(Object.keys(ALL_VARIANT).sort()).toEqual([
             'admin-login',
+            'backup',
             'connection-management',
             'connections',
             'gateway-settings',
@@ -116,6 +124,9 @@ describe('variants', () => {
         expect(catalog).toEqual(controlled);
         // It filters its own rows in the browser, so an administrator can grant it.
         expect(catalog).toContain('queue-subscription-explorer');
+        // The admin pages (moduleLabel) name each one as the sidebar does.
+        const names = Object.fromEntries([QueueBrowserModule, QueueCopyModule, QueueSubscriptionExplorerModule].map(m => [m.id, m.name]));
+        expect(catalog.map(moduleLabel)).toEqual(catalog.map(id => names[id]));
     });
 
     it('managed variant ships the standard modules, with connections on its managed entry', () => {
@@ -135,10 +146,10 @@ describe('variants', () => {
         });
     });
 
-    it('managed demo ships the managed variant\'s messaging modules and the three editors, on the managed entry', () => {
-        // The one shipped bundle with the admin editors: a demo, against a fake
+    it('managed demo ships the managed variant\'s messaging modules and the admin pages, on the managed entry', () => {
+        // The one shipped bundle with the admin pages: a demo, against a fake
         // gateway. No admin-login (the Managed panel owns the session).
-        const editors = ['connection-management', 'gateway-settings', 'user-management'];
+        const editors = ['backup', 'connection-management', 'gateway-settings', 'user-management'];
         const messaging = Object.keys(MANAGED_VARIANT);
         expect(Object.keys(DEMO_VARIANT).sort()).toEqual([...messaging, ...editors].sort());
         expect(DEMO_VARIANT).not.toHaveProperty('admin-login');

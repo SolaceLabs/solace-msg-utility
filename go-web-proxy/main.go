@@ -44,12 +44,15 @@ const (
 	provisionedIndexFile = "provisioned.html"
 )
 
+// appRoot is where the image keeps the app's files (docker/Dockerfile). It is
+// fixed: to serve another build, mount it here.
+const appRoot = "/SolaceMsgUtility"
+
 // config is the validated config.yaml. The keys live.go lists as live are
 // copied into a *live at startup and swapped by the settings page; read them
 // there, per request, so a save reaches them. The rest apply at restart.
 type config struct {
 	hosted             bool
-	appDir             string
 	certFile           string
 	keyFile            string
 	trustDir           string
@@ -59,6 +62,9 @@ type config struct {
 	usersFile       string
 	connectionsFile string
 	storeKeyFile    string // encrypts usersFile and connectionsFile (keyfile.go)
+	// backupDir is where scheduled backups go: always backupRoot, a field
+	// only so tests can point it elsewhere (backup.go).
+	backupDir string
 	// Connection-mode config surfaced to the SPA through /hosted. connModes is
 	// one of direct|provisioned|both; defaultConn (direct|provisioned) picks
 	// the tab shown first when both are offered. The default, direct, is
@@ -83,6 +89,7 @@ type managedRoutes struct {
 	gateApp   func(http.Handler) http.Handler // the PWA; a session under connModes=provisioned
 	gateAdmin func(http.Handler) http.Handler // /solAdmin; an admin session, every mode
 	gateRelay func(http.Handler) http.Handler // the Direct relay; 404 under connModes=provisioned
+	backups   *backupService                  // the backup schedule, run by serve
 }
 
 // robotsTxt asks every crawler to stay out; X-Robots-Tag on each response says
@@ -127,7 +134,6 @@ func newRootHandler(hosted, admin, app, relay http.Handler, mr *managedRoutes) h
 func defaultConfig() config {
 	return config{
 		hosted:          true,
-		appDir:          "/SolaceMsgUtility",
 		certFile:        "/tls/tls.crt",
 		keyFile:         "/tls/tls.key",
 		trustDir:        "/tls/trust",
@@ -135,6 +141,7 @@ func defaultConfig() config {
 		usersFile:       "/data/users.yaml",
 		connectionsFile: "/data/connections.yaml",
 		storeKeyFile:    defaultStoreKeyFile,
+		backupDir:       backupRoot,
 		connModes:       connDirect,
 		defaultConn:     connDirect,
 		session:         sessionLimits{idle: 10 * time.Minute, absolute: 30 * time.Minute},
@@ -163,7 +170,6 @@ func loadConfig() (config, error) {
 	}
 	return config{
 		hosted:             hosted,
-		appDir:             envOr("APP_DIR", d.appDir),
 		certFile:           envOr("SSL_CERT_FILE", d.certFile),
 		keyFile:            envOr("SSL_KEY_FILE", d.keyFile),
 		trustDir:           envOr("SSL_TRUST_DIR", d.trustDir),
@@ -290,12 +296,15 @@ func serve() {
 	for _, o := range load.overrides {
 		logger.Warn("env var ignored, config.yaml wins", "env", o.Env, "key", o.Key, "env_value", o.EnvValue, "file_value", o.FileValue)
 	}
+	for _, s := range load.removed {
+		logger.Warn("setting no longer used, ignored: remove it. To serve your own build, mount it at "+appRoot, "setting", s)
+	}
 
 	logger.Info("gateway starting",
 		"version", version,
 		"config_file", configFile,
 		"hosted", cfg.hosted,
-		"app_dir", cfg.appDir,
+		"app_dir", appRoot,
 		"cert_file", cfg.certFile,
 		"trust_dir", cfg.trustDir,
 		"insecure_skip_verify", cfg.insecureSkipVerify,
@@ -331,11 +340,11 @@ func serve() {
 	}
 	logger.Info("connection modes", "conn_modes", cfg.connModes, "default_conn", cfg.defaultConn)
 
-	pwa := newPWAHandler(cfg.appDir, appIndexFile(mr != nil), logger)
+	pwa := newPWAHandler(appRoot, appIndexFile(mr != nil), logger)
 
 	// The admin console edits the stores, so it only exists in Provisioned
 	// mode, where they are served.
-	admin := newAdminHandler(cfg.appDir, cfg.hosted && mr != nil, logger)
+	admin := newAdminHandler(appRoot, cfg.hosted && mr != nil, logger)
 	if admin.enabled {
 		logger.Info("administration app enabled", "path", adminPath)
 	}
@@ -357,6 +366,17 @@ func serve() {
 			MinVersion:   tls.VersionTLS12,
 			Certificates: []tls.Certificate{serverCert},
 		},
+	}
+
+	// The backup schedule runs in the gateway: the image has no cron. It
+	// stops at shutdown, after any backup it is writing.
+	backupCtx, stopBackups := context.WithCancel(context.Background())
+	defer stopBackups()
+	backupsDone := make(chan struct{})
+	if mr != nil {
+		go mr.backups.loop(backupCtx, time.After, backupsDone)
+	} else {
+		close(backupsDone)
 	}
 
 	errCh := make(chan error, 1)
@@ -381,7 +401,10 @@ func serve() {
 		logger.Info("shutdown signal received", "signal", sig.String())
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := srv.Shutdown(ctx); err != nil {
+		err := srv.Shutdown(ctx)
+		stopBackups()
+		<-backupsDone
+		if err != nil {
 			logger.Error("graceful shutdown failed", "err", err)
 			os.Exit(1)
 		}

@@ -44,7 +44,6 @@ const FIELDS: ReadonlyArray<{ key: string; kind: Kind }> = [
     { key: 'login.unauthenticatedPerMinute', kind: 'int' },
     { key: 'modules.userDefault', kind: 'text' },
     { key: 'logLevel', kind: 'text' },
-    { key: 'appDir', kind: 'text' },
     { key: 'usersFile', kind: 'text' },
     { key: 'connectionsFile', kind: 'text' },
     { key: 'tls.certFile', kind: 'text' },

@@ -176,6 +176,18 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
             return conns.length < before;
         },
 
+        /** replaceUsers (an import): the whole list, already validated. */
+        replaceUsers(next: UserRec[]): void {
+            users = next.map(u => ({ ...u, operate: rows(u.operate), readOnly: rows(u.readOnly), modules: u.modules ? [...u.modules] : null }));
+            onChange();
+        },
+
+        /** replaceConnections (an import): the whole list, already validated. */
+        replaceConnections(next: ConnRec[]): void {
+            conns = next.map(cloneConn);
+            onChange();
+        },
+
         /** Everything, for the snapshot a reload restores. */
         dump(): { users: UserRec[]; conns: ConnRec[] } {
             return { users: users.map(u => ({ ...u, operate: rows(u.operate), readOnly: rows(u.readOnly) })), conns: conns.map(cloneConn) };

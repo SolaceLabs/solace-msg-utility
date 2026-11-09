@@ -148,14 +148,17 @@ func (s *store) afterWrite(err *error) {
 
 type storeOptions struct {
 	usersPath, connsPath, keyPath string
-	hasher                                  *hasher
-	getenv                                  func(string) string // os.Getenv; injected for tests
+	// schedulePath is the backup schedule (backup.go), also sealed with the
+	// key: a missing key beside it refuses to start, as beside a store.
+	schedulePath string
+	hasher       *hasher
+	getenv       func(string) string // os.Getenv; injected for tests
 }
 
 func loadStore(opts storeOptions, logger *slog.Logger) (*store, error) {
 	// The key comes first: it decides whether the store files may be created
 	// (fresh volume) or must be opened (and refused without their key).
-	key, err := loadStoreKey(opts.keyPath, []string{opts.usersPath, opts.connsPath}, logger)
+	key, err := loadStoreKey(opts.keyPath, []string{opts.usersPath, opts.connsPath, opts.schedulePath}, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -699,6 +702,40 @@ func (s *store) deleteConnection(broker string) (found bool, err error) {
 	}
 	s.conns = next
 	return true, nil
+}
+
+// replaceUsers swaps the whole user list (an import) and persists. It returns
+// the users whose sessions must end (sessionEnders). next must hold an
+// administrator.
+func (s *store) replaceUsers(next []userRec) (drop []string, err error) {
+	defer s.afterWrite(&err)
+	if err := validateUsers(next); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.seal.writeDoc(roleUsers, s.usersPath, usersDoc{Users: next}); err != nil {
+		return nil, err
+	}
+	drop = sessionEnders(s.users, next)
+	s.users = next
+	return drop, nil
+}
+
+// replaceConnections swaps the whole connection list (an import) and
+// persists.
+func (s *store) replaceConnections(next []connRec) (err error) {
+	defer s.afterWrite(&err)
+	if err := validateConns(next); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.seal.writeDoc(roleConns, s.connsPath, connsDoc{Connections: next}); err != nil {
+		return err
+	}
+	s.conns = next
+	return nil
 }
 
 // ----- bootstrap ----------------------------------------------------------------

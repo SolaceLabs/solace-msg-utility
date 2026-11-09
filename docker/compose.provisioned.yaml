@@ -12,6 +12,9 @@
 #      The admin console is at https://<host>:9443/solAdmin.
 #   4. Back up the store key: docker compose -f compose.provisioned.yaml cp
 #      gateway:/data/store.key ./store.key.backup, and keep it secret.
+#   5. For scheduled backups (the admin console's Backup & Restore), make the
+#      backup directory next to this file, writable by the gateway's UID only:
+#      mkdir backup && sudo chown 65532 backup && chmod 700 backup
 #
 # SMU_VERSION is required: pin a release, never `latest`, so an upgrade is a
 # deliberate change of this one value. The admin password is read only on the
@@ -21,8 +24,10 @@
 # Posture: non-root UID 65532, privileged off, every capability dropped, no new
 # privileges, read-only root filesystem, the default bridge network. The
 # gateway writes only /tls (a self-signed certificate on the first start, when
-# none is there) and /data (config.yaml, the encrypted user and connection
-# stores, and their key), both named volumes.
+# none is there), /data (config.yaml, the encrypted user and connection
+# stores, the backup schedule, and their key), both named volumes, and
+# /backup (the scheduled backups, encrypted with their own passphrase), a
+# directory on the host.
 name: solace-msg-utility
 services:
   gateway:
@@ -53,9 +58,13 @@ services:
       # The gateway's certificate (tls.crt, tls.key) and, under trust/, the CAs
       # your brokers' certificates chain to.
       - tls:/tls
-      # config.yaml, users.yaml, connections.yaml and store.key. Without the
-      # store key the stores cannot be read: back it up.
+      # config.yaml, users.yaml, connections.yaml, backup.yaml and store.key.
+      # Without the store key the stores cannot be read: back it up.
       - data:/data
+      # Scheduled backups, kept on the host (step 5 above). Each file is
+      # encrypted with the passphrase set in the admin console, not the store
+      # key, so a file restores on any deployment that has that passphrase.
+      - ./backup:/backup
 
 secrets:
   admin-password:

@@ -31,6 +31,7 @@ const MODULE_REQUIREMENTS: Record<string, 'admin' | 'unfiltered-semp'> = {
     'user-management': 'admin',
     'connection-management': 'admin',
     'gateway-settings': 'admin',
+    'backup': 'admin',
     // Vestigial: it drives raw SEMP v1 discovery, which nothing filters.
     // (queue-subscription-explorer also reads over SEMP v1, but filters its
     // rows itself with `visibleQueueRows`, so it is under module control.)

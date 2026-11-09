@@ -24,13 +24,13 @@ func clearSeedEnv(t *testing.T) {
 	}
 	t.Setenv("CONFIG_FILE", "")
 	t.Setenv("STORE_KEY_FILE", "")
+	t.Setenv("APP_DIR", "") // removed, but still read for its warning
 }
 
 const fullConfigYAML = `version: 1
 hosted: true
 connModes: both
 defaultConn: provisioned
-appDir: /pwa
 tls:
   certFile: /c/tls.crt
   keyFile: /c/tls.key
@@ -61,7 +61,7 @@ func TestDecodeConfigFile_Valid(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := fileConfig{
-		Version: 1, Hosted: true, ConnModes: "both", DefaultConn: "provisioned", AppDir: "/pwa",
+		Version: 1, Hosted: true, ConnModes: "both", DefaultConn: "provisioned",
 		TLS:      fileTLS{CertFile: "/c/tls.crt", KeyFile: "/c/tls.key", TrustDir: "/c/trust", InsecureSkipVerify: true},
 		LogLevel: "debug", UsersFile: "/m/users.yaml", ConnectionsFile: "/m/connections.yaml",
 		Access:  fileAccess{Allow: []string{"10.0.0.0/8", "2001:db8::/32"}, TrustedProxies: []string{"10.0.0.1/32"}},
@@ -211,7 +211,7 @@ func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 	if got := prefixStrings(cfg.access.trustedProxies); !reflect.DeepEqual(got, []string{"192.0.2.0/24"}) {
 		t.Errorf("trustedProxies: got %v", got)
 	}
-	if cfg.logLevel != slog.LevelWarn || cfg.appDir != "/SolaceMsgUtility" {
+	if cfg.logLevel != slog.LevelWarn {
 		t.Errorf("defaults not carried: %+v", cfg)
 	}
 	if cfg.session != (sessionLimits{idle: 10 * time.Minute, absolute: 30 * time.Minute}) {
@@ -465,14 +465,13 @@ func TestResolveConfig_ReadErrorIsReported(t *testing.T) {
 func TestResolveConfig_FileWinsAndReportsOverrides(t *testing.T) {
 	clearSeedEnv(t)
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	doc := "version: 1\nconnModes: direct\nlogLevel: warn\nappDir: /SolaceMsgUtility\n"
+	doc := "version: 1\nconnModes: direct\nlogLevel: warn\n"
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CONN_MODES", "both")
 	t.Setenv("LOG_LEVEL", "debug")
-	t.Setenv("APP_DIR", "/other")
-	t.Setenv("HOSTED", "true")                         // the file's default: nothing to report
+	t.Setenv("HOSTED", "true")                        // the file's default: nothing to report
 	t.Setenv("USERS_FILE", "/data/users.yaml")         // equal to the file: nothing to report
 	t.Setenv("STORE_KEY_FILE", "/elsewhere/store.key") // env-only: applied, never compared
 
@@ -483,7 +482,7 @@ func TestResolveConfig_FileWinsAndReportsOverrides(t *testing.T) {
 	if load.seeded {
 		t.Error("an existing file must not be re-seeded")
 	}
-	if load.cfg.connModes != connDirect || load.cfg.logLevel != slog.LevelWarn || load.cfg.appDir != "/SolaceMsgUtility" {
+	if load.cfg.connModes != connDirect || load.cfg.logLevel != slog.LevelWarn {
 		t.Errorf("the file must win: %+v", load.cfg)
 	}
 	if load.cfg.storeKeyFile != "/elsewhere/store.key" {
@@ -496,7 +495,6 @@ func TestResolveConfig_FileWinsAndReportsOverrides(t *testing.T) {
 	want := map[string][3]string{ // env -> key, env value, file value
 		"CONN_MODES": {"connModes", "both", "direct"},
 		"LOG_LEVEL":  {"logLevel", "debug", "warn"},
-		"APP_DIR":    {"appDir", "/other", "/SolaceMsgUtility"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("overrides: want %d, got %v", len(want), load.overrides)
@@ -510,6 +508,62 @@ func TestResolveConfig_FileWinsAndReportsOverrides(t *testing.T) {
 		if o.Key != w[0] || o.EnvValue != w[1] || o.FileValue != w[2] {
 			t.Errorf("%s: got %+v, want key=%s env=%s file=%s", env, o, w[0], w[1], w[2])
 		}
+	}
+	if len(load.removed) != 0 {
+		t.Errorf("no removed setting is set: %v", load.removed)
+	}
+}
+
+// appDir and APP_DIR are gone: the app is always served from appRoot. A file
+// that still has the key loads, the key and the variable are named for the
+// start-up warning, and the next write of the file (a settings save) drops it.
+func TestResolveConfig_IgnoresTheRemovedAppDir(t *testing.T) {
+	clearSeedEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\nappDir: /pwa\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("APP_DIR", "/other")
+
+	load, err := resolveConfig(path)
+	if err != nil {
+		t.Fatalf("a file with the removed key must still load: %v", err)
+	}
+	if want := []string{"appDir", "APP_DIR"}; !reflect.DeepEqual(load.removed, want) {
+		t.Errorf("removed: want %v, got %v", want, load.removed)
+	}
+	if len(load.overrides) != 0 {
+		t.Errorf("APP_DIR is no longer a seeding variable: %v", load.overrides)
+	}
+	data, err := encodeConfigFile(fileConfigFromConfig(load.cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "appDir") || strings.Contains(string(data), "APP_DIR") {
+		t.Errorf("the next write must drop the key:\n%s", data)
+	}
+}
+
+// A first start with APP_DIR set seeds a file without the key, and names the
+// variable for the start-up warning.
+func TestResolveConfig_SeedIgnoresTheRemovedAppDir(t *testing.T) {
+	clearSeedEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("APP_DIR", "/other")
+
+	load, err := resolveConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !load.seeded || !reflect.DeepEqual(load.removed, []string{"APP_DIR"}) {
+		t.Errorf("seeded=%v removed=%v: want a seed that names APP_DIR", load.seeded, load.removed)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "appDir") || strings.Contains(string(data), "APP_DIR") {
+		t.Errorf("the seeded file must not carry the removed setting:\n%s", data)
 	}
 }
 
@@ -536,7 +590,7 @@ func TestEnvOverrides_EveryVariableAndBoolParsing(t *testing.T) {
 	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "")
 
 	differing := map[string]string{
-		"HOSTED": "false", "CONN_MODES": "both", "DEFAULT_CONN": "provisioned", "APP_DIR": "/x",
+		"HOSTED": "false", "CONN_MODES": "both", "DEFAULT_CONN": "provisioned",
 		"SSL_CERT_FILE": "/x", "SSL_KEY_FILE": "/x", "SSL_TRUST_DIR": "/x", "SSL_INSECURE_SKIP_VERIFY": "true",
 		"LOG_LEVEL": "debug", "USERS_FILE": "/x", "CONNECTIONS_FILE": "/x",
 	}

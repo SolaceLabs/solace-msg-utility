@@ -21,7 +21,7 @@ type Schema = { [key: string]: Kind | Schema };
 
 /** fileConfig's JSON fields and their types. */
 const SCHEMA: Schema = {
-    hosted: 'bool', connModes: 'string', defaultConn: 'string', appDir: 'string',
+    hosted: 'bool', connModes: 'string', defaultConn: 'string',
     tls: { certFile: 'string', keyFile: 'string', trustDir: 'string', insecureSkipVerify: 'bool' },
     logLevel: 'string', usersFile: 'string', connectionsFile: 'string',
     access: { allow: 'strings', trustedProxies: 'strings' },
@@ -33,7 +33,6 @@ const SCHEMA: Schema = {
 /** restartOnlyKeys (live.go), in order; `host` marks the path keys. */
 const RESTART_ONLY: { key: string; host: boolean; value: (s: GatewaySettings) => unknown }[] = [
     { key: 'hosted', host: false, value: s => s.hosted },
-    { key: 'appDir', host: true, value: s => s.appDir },
     { key: 'tls.certFile', host: true, value: s => s.tls.certFile },
     { key: 'tls.keyFile', host: true, value: s => s.tls.keyFile },
     { key: 'tls.trustDir', host: true, value: s => s.tls.trustDir },
@@ -67,6 +66,31 @@ function merge(target: Record<string, any>, patch: unknown, schema: Schema): voi
         if (!ok) throw new BadRequest(`field ${k} has the wrong type`);
         target[k] = Array.isArray(v) ? [...v] : v;
     }
+}
+
+/** A fileConfig's zero value: what the gateway decodes a backup's settings onto. */
+const ZERO: GatewaySettings = {
+    hosted: false, connModes: '', defaultConn: '',
+    tls: { certFile: '', keyFile: '', trustDir: '', insecureSkipVerify: false },
+    logLevel: '', usersFile: '', connectionsFile: '',
+    access: { allow: [], trustedProxies: [] },
+    session: { idleMinutes: 0, absoluteMinutes: 0 },
+    login: { maxFailures: 0, backoffSeconds: 0, maxBackoffSeconds: 0, unauthenticatedPerMinute: 0 },
+    modules: { offered: [], userDefault: '' },
+};
+
+/**
+ * A backup's settings as the gateway's strict decoder reads them: onto a
+ * zero file, unknown or mistyped keys refused (BadRequest). The file's own
+ * `version`, and the `appDir` key an earlier release wrote, are not settings.
+ */
+export function settingsFromBackup(raw: unknown): GatewaySettings {
+    const out = clone(ZERO);
+    const rest = raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? Object.fromEntries(Object.entries(raw).filter(([k]) => k !== 'version' && k !== 'appDir'))
+        : raw;
+    merge(out as unknown as Record<string, any>, rest ?? null, SCHEMA);
+    return out;
 }
 
 function parseLogLevel(s: string): string | null {

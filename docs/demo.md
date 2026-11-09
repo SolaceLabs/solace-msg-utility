@@ -102,7 +102,7 @@ exercisable in `demo.html`.
 ## Provisioned demo (`provisioned-demo.html`)
 
 `provisioned-demo.html` is Provisioned mode without a gateway or a broker. It is the real Provisioned sign-in, Connections, Queue
-Browser, Queue Copy, Queue Subscriptions and the three administration pages, running against a fake gateway and the demo broker inside the
+Browser, Queue Copy, Queue Subscriptions and the four administration pages, running against a fake gateway and the demo broker inside the
 page. It makes no network request: anything it does not answer itself fails as if the network were down. Like
 `demo.html`, it needs no `solclient.js` (`jszip.min.js` is still needed for the ZIP download).
 
@@ -135,8 +135,13 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
 
 ### How it differs from a real gateway
 
-- **Administration is in the sidebar.** The product serves the three administration pages at `/solAdmin`; here an
+- **Administration is in the sidebar.** The product serves the four administration pages at `/solAdmin`; here an
   administrator finds them as sidebar entries.
+- **Backup & Restore keeps its backups in the page.** Export downloads a real backup file, and Import opens it, with
+  the same encryption as the gateway's. The backup directory is held in this tab (it carries over a sign-in reload,
+  the schedule does not), and scheduled backups run only through **Back up now**: the demo keeps no timer. The
+  demo's accounts keep plain-text passwords, so its backups do too; import one into the demo, not a real gateway,
+  which refuses those users.
 - **Sign-in reloads the page,** as the gateway's redirect does. The users, connections, settings, sessions, queues and
   panel settings carry over in this tab. A new tab starts from the seed, and **Reset demo data** starts over.
 - **Changes apply at once,** to the signed-in user too. Change your own password or Administrator flag, or delete

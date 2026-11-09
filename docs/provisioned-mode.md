@@ -18,6 +18,7 @@ It is the same container image as [Gateway mode](deployment.md#gateway-mode), wi
   - [What users may open](#what-users-may-open)
   - [Environment variables](#environment-variables)
 - [Administer](#administer)
+- [Back up and restore](#back-up-and-restore)
 - [Security checklist](#security-checklist)
 - [Troubleshooting](#troubleshooting)
 
@@ -158,8 +159,41 @@ The admin console is at `https://<host>:9443/solAdmin`, for administrator accoun
 - **User Management:** add users, reset passwords, make someone an administrator, and grant brokers, VPNs and queues. A grant can use `*` wildcards, for example queues `orders.*`.
 - **Connection Management:** add brokers, their SEMP account and their VPNs' client credentials. Leave a password blank to keep the stored one.
 - **Gateway Settings:** the settings above. Each save is logged with the administrator's name.
+- **Backup & Restore:** export the configuration to a file, import one, and schedule backups. See [Back up and restore](#back-up-and-restore).
 
 Changes apply at once. Revoking a user's access closes their broker connections. A restart signs everyone out.
+
+---
+
+## Back up and restore
+
+The admin console's **Backup & Restore** page keeps copies of the configuration: the users, the connections and the settings.
+
+**What a backup holds.** The users with their password hashes (never the passwords), the connections with their SEMP and VPN credentials, and the gateway settings except the file paths (`tls.*`, `usersFile`, `connectionsFile`), which belong to each host. A backup is one JSON file, encrypted with AES-256-GCM under a key derived from a passphrase (PBKDF2-SHA256, 600,000 iterations, the cost of a user password). It does not use the store key, so it restores on any deployment. **Without the passphrase it cannot be opened**: keep the passphrase somewhere other than the backups.
+
+**Export** downloads a backup to the browser, encrypted with the passphrase you type for it (12 to 128 characters).
+
+**Scheduled backups** are written by the gateway itself, into `/backup` in the container: the image has no cron. Mount a host directory there to keep them outside the container:
+
+```bash
+mkdir backup && sudo chown 65532 backup && chmod 700 backup
+# compose.provisioned.yaml mounts it: - ./backup:/backup
+# docker run: -v "$PWD/backup:/backup"
+```
+
+The path is fixed; no setting moves it. On the page, choose how often (hourly at a minute, daily at a time, weekly on a day, or monthly on a day, all in UTC; a month without the chosen day backs up on its last day), how many files to keep, and the passphrase. The gateway keeps a key derived from that passphrase, encrypted with the store key in `/data/backup.yaml`, so it can write backups unattended; it never stores the passphrase. After each backup it deletes the oldest beyond the number to keep, and only files it named (`smu-backup-<UTC time>.json`). **Back up now** writes one at once. A backup missed while the gateway was down is not caught up. The page shows the next and last backup, and why `/backup` cannot be written to when it cannot (most often: the host directory is not owned by UID `65532`). Each backup, and each failure, is logged.
+
+**Import** takes an uploaded file or one of the saved backups, and the passphrase it was made with. **Preview** lists, for each section, what the import would add, change and remove; then choose, per section:
+
+| Section | Choices |
+| --- | --- |
+| Users | **Skip**, **Merge** (add the file's users and replace those with the same name; keep the rest), **Replace** (exactly the file's users) |
+| Connections | **Skip**, **Merge**, **Replace**, by broker name |
+| Settings | **Skip**, **Replace** (the file paths stay this deployment's own) |
+
+The gateway checks everything before it writes anything: an import that would leave no administrator is refused, and imported settings get the same checks as a save on Gateway Settings (an access list that would lock you out, or `connModes: direct`, is refused). Users removed, or whose password or administrator flag changed, are signed out, you included: the page warns you before you import. A setting that applies only at restart is reported.
+
+To move a deployment: export (or copy a file from `/backup`), start the new gateway, sign in with its bootstrap admin, and import with **Replace**. The imported users sign in with their old passwords.
 
 ---
 
@@ -173,6 +207,7 @@ Provisioned mode is meant for **trusted internal** networks. Before exposing it:
 - **Give each VPN a client username** scoped to what its users may do. A signed-in browser receives its password to connect, and the password works outside the app too. Keep the brokers' own ports off networks users can reach.
 - **Change the `admin` password** at the first sign-in (the gateway insists), and remove `ADMIN_PASSWORD` from the environment if you used it.
 - **Back up the store key, and keep it apart** from the stores where you can.
+- **Keep backup passphrases secret, and apart from the backups.** A backup holds every broker credential and every password hash; anyone with a file and its passphrase has them. Make `/backup` readable by the gateway's UID only.
 - **Restrict who can reach the gateway** with `access.allow`, and list your reverse proxy in `access.trustedProxies`.
 - **Treat administrator accounts as privileged.** They edit grants, the access list and sign-in itself.
 

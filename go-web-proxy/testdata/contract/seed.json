@@ -59,7 +59,6 @@
     "hosted": true,
     "connModes": "both",
     "defaultConn": "direct",
-    "appDir": "/SolaceMsgUtility",
     "tls": {
       "certFile": "/tls/tls.crt",
       "keyFile": "/tls/tls.key",

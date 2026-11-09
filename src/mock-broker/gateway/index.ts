@@ -16,6 +16,7 @@
  * Mock-only.
  */
 import { delay } from '../fixtures';
+import { BACKUP_ITER, createBackups, type BackupsState } from './backup';
 import type { MockRoute } from '../server';
 import { createRouter, type RouterFaults } from './router';
 import { createSessions } from './sessions';
@@ -43,6 +44,8 @@ export interface GatewaySnapshot {
     cookie: string | null;
     faults: GatewayFaults;
     throttle: ThrottleState;
+    /** Absent in a snapshot from a build before Backup & Restore. */
+    backups?: BackupsState;
 }
 
 function toResponse(r: GatewayResponse): Response {
@@ -62,13 +65,18 @@ function toResponse(r: GatewayResponse): Response {
     return new Response(r.status === 204 ? null : body, { status: r.status, headers });
 }
 
-export function createGateway({ seed }: { seed: GatewaySeed }) {
+/**
+ * `backupIter` is the PBKDF2 cost of a new backup key (the gateway's own by
+ * default; tests pass a lower one), `now` the clock backups are named by.
+ */
+export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new Date() }: { seed: GatewaySeed; backupIter?: number; now?: () => Date }) {
     const faults: GatewayFaults = { relayUnreachable: false, dialRateLimited: false, changedOnDisk: false, unreadable: false };
     const changeListeners: (() => void)[] = [];
     const store = createStore(seed, () => changeListeners.forEach(fn => fn()));
     const sessions = createSessions();
     const settings = createSettings(seed.settings, seed.client, () => faults);
-    const router = createRouter({ store, sessions, settings, faults: () => faults });
+    const backups = createBackups({ store, settings, sessions, iter: backupIter, now });
+    const router = createRouter({ store, sessions, settings, faults: () => faults, backupRoutes: backups.routes });
     let cookie: string | null = null;
     const sockets = createSockets(store, sessions, () => cookie);
     changeListeners.push(() => sockets.recheck());
@@ -156,7 +164,7 @@ export function createGateway({ seed }: { seed: GatewaySeed }) {
         snapshot(): GatewaySnapshot {
             return {
                 store: store.dump(), sessions: sessions.dump(), settings: settings.dump(),
-                cookie, faults: { ...faults }, throttle: throttle.dump(),
+                cookie, faults: { ...faults }, throttle: throttle.dump(), backups: backups.dump(),
             };
         },
         restore(s: GatewaySnapshot): void {
@@ -166,6 +174,7 @@ export function createGateway({ seed }: { seed: GatewaySeed }) {
             cookie = s.cookie;
             Object.assign(faults, s.faults);
             throttle.load(s.throttle);
+            if (s.backups) backups.load(s.backups);
         },
         /** Open a session, as a sign-in does; the caller decides whether the page holds it. */
         openSession: (user: string, mustChange: boolean): string => sessions.create(user, mustChange),

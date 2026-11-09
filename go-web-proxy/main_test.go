@@ -46,7 +46,7 @@ func TestParseLogLevel(t *testing.T) {
 
 func TestLoadConfig_Defaults(t *testing.T) {
 	// Clear all relevant env so we exercise the default path.
-	for _, k := range []string{"HOSTED", "APP_DIR", "SSL_CERT_FILE", "SSL_KEY_FILE", "SSL_TRUST_DIR", "SSL_INSECURE_SKIP_VERIFY", "LOG_LEVEL"} {
+	for _, k := range []string{"HOSTED", "SSL_CERT_FILE", "SSL_KEY_FILE", "SSL_TRUST_DIR", "SSL_INSECURE_SKIP_VERIFY", "LOG_LEVEL"} {
 		t.Setenv(k, "")
 	}
 	cfg, err := loadConfig()
@@ -61,9 +61,6 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	}
 	if cfg.usersFile != "/data/users.yaml" || cfg.connectionsFile != "/data/connections.yaml" || cfg.storeKeyFile != "/data/store.key" {
 		t.Errorf("stores: want them under /data, got %q %q %q", cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile)
-	}
-	if cfg.appDir != "/SolaceMsgUtility" {
-		t.Errorf("appDir: want /SolaceMsgUtility, got %q", cfg.appDir)
 	}
 	if cfg.certFile != "/tls/tls.crt" {
 		t.Errorf("certFile: want /tls/tls.crt, got %q", cfg.certFile)
@@ -84,7 +81,6 @@ func TestLoadConfig_Defaults(t *testing.T) {
 
 func TestLoadConfig_FromEnv(t *testing.T) {
 	t.Setenv("HOSTED", "true")
-	t.Setenv("APP_DIR", "/opt/pwa")
 	t.Setenv("SSL_CERT_FILE", "/x/cert")
 	t.Setenv("SSL_KEY_FILE", "/x/key")
 	t.Setenv("SSL_TRUST_DIR", "/x/trust")
@@ -97,9 +93,6 @@ func TestLoadConfig_FromEnv(t *testing.T) {
 	}
 	if !cfg.hosted {
 		t.Errorf("hosted: want true")
-	}
-	if cfg.appDir != "/opt/pwa" {
-		t.Errorf("appDir: got %q", cfg.appDir)
 	}
 	if !cfg.insecureSkipVerify {
 		t.Errorf("insecureSkipVerify: want true")

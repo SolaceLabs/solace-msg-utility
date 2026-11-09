@@ -16,4 +16,5 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'user-management': 20,         // admin-only
     'connection-management': 15,   // admin-only
     'gateway-settings': 10,        // admin-only: config.yaml
+    'backup': 5,                   // admin-only: export, import, scheduled backups
 };

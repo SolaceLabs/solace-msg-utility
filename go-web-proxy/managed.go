@@ -30,7 +30,8 @@ type managedHandler struct {
 	throttle *throttle
 	live     *live
 	settings *settingsFile
-	relay    http.Handler // /managed/relay/*, dispatched before the mux (relay.go)
+	backups  *backupService // /managed/backup* (backup_api.go)
+	relay    http.Handler   // /managed/relay/*, dispatched before the mux (relay.go)
 	smf      http.Handler // /managed/smf/*, dispatched before the mux (smf.go)
 	dial     http.Handler // POST /managed/dial (dial.go)
 	cop      *http.CrossOriginProtection
@@ -44,9 +45,9 @@ type managedEndpoints struct {
 	relay, smf, dial http.Handler
 }
 
-func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *settingsFile, ep managedEndpoints, logger *slog.Logger) *managedHandler {
+func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *settingsFile, bk *backupService, ep managedEndpoints, logger *slog.Logger) *managedHandler {
 	h := &managedHandler{
-		store: st, sessions: ss, throttle: th, live: lv, settings: sf,
+		store: st, sessions: ss, throttle: th, live: lv, settings: sf, backups: bk,
 		relay: ep.relay, smf: ep.smf, dial: ep.dial,
 		cop: http.NewCrossOriginProtection(), logger: logger,
 	}
@@ -62,6 +63,7 @@ func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *sett
 	mux.HandleFunc("DELETE /managed/connections/{broker}", h.adminOnly(h.deleteConnection))
 	mux.HandleFunc("GET /managed/settings", h.adminOnly(h.getSettings))
 	mux.HandleFunc("PUT /managed/settings", h.adminOnly(h.saveSettings))
+	h.registerBackupRoutes(mux)
 	// Anything else, including a known path with the wrong method, is a 404:
 	// a signed-in client learns nothing a 405 would add.
 	mux.HandleFunc("/managed/", func(w http.ResponseWriter, _ *http.Request) {
@@ -154,7 +156,13 @@ func writeRateLimited(w http.ResponseWriter, wait time.Duration) {
 // unknown fields and trailing data. On failure it has written the response
 // (413 too_large or 400 bad_request) and returns false.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	return decodeJSONLimit(w, r, dst, maxBodyBytes)
+}
+
+// decodeJSONLimit is decodeJSON with another size cap, for the one body that
+// carries a file (an import).
+func decodeJSONLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	dec.DisallowUnknownFields()
 	err := dec.Decode(dst)
 	if err == nil {

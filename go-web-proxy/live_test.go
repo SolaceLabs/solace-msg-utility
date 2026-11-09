@@ -57,8 +57,8 @@ func TestPendingRestart(t *testing.T) {
 	if got := pendingRestart(running, file); len(got) != 0 {
 		t.Fatalf("live keys only: want none, got %v", got)
 	}
-	file.AppDir, file.TLS.InsecureSkipVerify, file.ConnectionsFile = "/elsewhere", true, "/m/c.yaml"
-	want := []string{"appDir", "tls.insecureSkipVerify", "connectionsFile"}
+	file.TLS.CertFile, file.TLS.InsecureSkipVerify, file.ConnectionsFile = "/elsewhere/tls.crt", true, "/m/c.yaml"
+	want := []string{"tls.certFile", "tls.insecureSkipVerify", "connectionsFile"}
 	if got := pendingRestart(running, file); !reflect.DeepEqual(got, want) {
 		t.Errorf("want %v, got %v", want, got)
 	}
@@ -67,14 +67,13 @@ func TestPendingRestart(t *testing.T) {
 // Every restart-only key reads its own field: changing exactly that field
 // flags exactly that key.
 func TestRestartOnlyKeys_EachReadsItsField(t *testing.T) {
-	want := []string{"hosted", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"}
+	want := []string{"hosted", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"}
 	if got := restartOnlyKeyNames(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("restart-only keys: want %v, got %v", want, got)
 	}
 	running := defaultConfig()
 	edits := map[string]func(*fileConfig){
 		"hosted":                 func(f *fileConfig) { f.Hosted = false },
-		"appDir":                 func(f *fileConfig) { f.AppDir = "/x" },
 		"tls.certFile":           func(f *fileConfig) { f.TLS.CertFile = "/x" },
 		"tls.keyFile":            func(f *fileConfig) { f.TLS.KeyFile = "/x" },
 		"tls.trustDir":           func(f *fileConfig) { f.TLS.TrustDir = "/x" },

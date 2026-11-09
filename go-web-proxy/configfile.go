@@ -43,8 +43,8 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # modules.offered lists the app modules a signed-in user may be given,
 # modules.userDefault (all|none) what a user without a list of their own gets.
 # In Provisioned mode an administrator can also edit this file from the admin
-# console's Gateway Settings, where every key except hosted, appDir, tls.*,
-# usersFile and connectionsFile applies at once.
+# console's Gateway Settings, where every key except hosted, tls.*, usersFile
+# and connectionsFile applies at once.
 `
 
 // fileConfig is the on-disk shape. Field order is the order yaml.Marshal writes.
@@ -55,7 +55,6 @@ type fileConfig struct {
 	Hosted          bool        `yaml:"hosted" json:"hosted"`
 	ConnModes       string      `yaml:"connModes" json:"connModes"`
 	DefaultConn     string      `yaml:"defaultConn" json:"defaultConn"`
-	AppDir          string      `yaml:"appDir" json:"appDir"`
 	TLS             fileTLS     `yaml:"tls" json:"tls"`
 	LogLevel        string      `yaml:"logLevel" json:"logLevel"`
 	UsersFile       string      `yaml:"usersFile" json:"usersFile"`
@@ -64,6 +63,11 @@ type fileConfig struct {
 	Session         fileSession `yaml:"session" json:"session"`
 	Login           fileLogin   `yaml:"login" json:"login"`
 	Modules         fileModules `yaml:"modules" json:"modules"`
+	// RemovedAppDir is the appDir key an earlier release read; the app is now
+	// always served from appRoot. A file that still has it loads, the value is
+	// ignored with a warning at start (removedInUse), and the gateway's next
+	// write of the file drops it.
+	RemovedAppDir *string `yaml:"appDir,omitempty" json:"-"`
 }
 
 type fileTLS struct {
@@ -184,7 +188,6 @@ var seedVars = []seedVar{
 	{"HOSTED", "hosted", hostedEnv, func(c config) string { return strconv.FormatBool(c.hosted) }},
 	{"CONN_MODES", "connModes", strings.ToLower, func(c config) string { return c.connModes }},
 	{"DEFAULT_CONN", "defaultConn", strings.ToLower, func(c config) string { return c.defaultConn }},
-	{"APP_DIR", "appDir", identity, func(c config) string { return c.appDir }},
 	{"SSL_CERT_FILE", "tls.certFile", identity, func(c config) string { return c.certFile }},
 	{"SSL_KEY_FILE", "tls.keyFile", identity, func(c config) string { return c.keyFile }},
 	{"SSL_TRUST_DIR", "tls.trustDir", identity, func(c config) string { return c.trustDir }},
@@ -229,7 +232,6 @@ func fileConfigFromConfig(c config) fileConfig {
 		Hosted:      c.hosted,
 		ConnModes:   c.connModes,
 		DefaultConn: c.defaultConn,
-		AppDir:      c.appDir,
 		TLS: fileTLS{
 			CertFile:           c.certFile,
 			KeyFile:            c.keyFile,
@@ -297,7 +299,6 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 	}
 	cfg := config{
 		hosted:             fc.Hosted,
-		appDir:             fc.AppDir,
 		certFile:           fc.TLS.CertFile,
 		keyFile:            fc.TLS.KeyFile,
 		trustDir:           fc.TLS.TrustDir,
@@ -306,6 +307,7 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 		usersFile:          fc.UsersFile,
 		connectionsFile:    fc.ConnectionsFile,
 		storeKeyFile:       secrets.storeKey,
+		backupDir:          backupRoot,
 		connModes:          strings.ToLower(fc.ConnModes),
 		defaultConn:        strings.ToLower(fc.DefaultConn),
 		access:             accessConfig{allow: allow, trustedProxies: trusted},
@@ -456,7 +458,22 @@ type configLoad struct {
 	cfg       config
 	seeded    bool
 	overrides []envOverride
+	removed   []string // removed settings still set (removedInUse); ignored
 	sum       [32]byte // SHA-256 of the file as read or seeded
+}
+
+// removedInUse names the settings an earlier release read that the file or
+// the environment still sets. They are accepted and ignored, so an upgrade
+// never fails on them; serve warns about each.
+func removedInUse(fc fileConfig) []string {
+	var out []string
+	if fc.RemovedAppDir != nil {
+		out = append(out, "appDir")
+	}
+	if os.Getenv("APP_DIR") != "" {
+		out = append(out, "APP_DIR")
+	}
+	return out
 }
 
 // configSource is where the running config came from: the file and the
@@ -487,7 +504,7 @@ func resolveConfig(path string) (configLoad, error) {
 		if err != nil {
 			return configLoad{}, err
 		}
-		return configLoad{cfg: cfg, seeded: true, sum: sum}, nil
+		return configLoad{cfg: cfg, seeded: true, removed: removedInUse(fileConfig{}), sum: sum}, nil
 	case err != nil:
 		return configLoad{}, fmt.Errorf("cannot read config file %q: %w", path, err)
 	}
@@ -499,7 +516,7 @@ func resolveConfig(path string) (configLoad, error) {
 	if err != nil {
 		return configLoad{}, fmt.Errorf("config file %q: %w", path, err)
 	}
-	return configLoad{cfg: cfg, overrides: envOverrides(cfg), sum: sha256.Sum256(data)}, nil
+	return configLoad{cfg: cfg, overrides: envOverrides(cfg), removed: removedInUse(fc), sum: sha256.Sum256(data)}, nil
 }
 
 // seedConfigFile writes the first config.yaml and returns the SHA-256 of what

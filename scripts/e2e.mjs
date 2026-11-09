@@ -819,6 +819,42 @@ async function runChecks(admin) {
             }
         });
 
+        // Numbered after the rest, run here: it needs the admin's session and a
+        // running gateway, which the restart (15) and the stop (16) end.
+        await check(18, 'Backup & Restore: an export opens and previews as no change, a scheduled run writes a sealed file into /backup, and a Merge import of it keeps the admin signed in', async () => {
+            const pass = 'e2e backup passphrase';
+            const api = (method, pathname, json) => request(method, pathname, { jar: admin, json });
+            const status = async () => JSON.parse((await api('GET', '/managed/backup')).body);
+            expect((await status()).dirProblem === '', `dirProblem: ${(await status()).dirProblem}`);
+            const ex = await api('POST', '/managed/backup/export', { passphrase: pass });
+            expect(ex.status === 200, `export: ${ex.status} ${ex.body.slice(0, 200)}`);
+            const { content } = JSON.parse(ex.body);
+            // A stored hash starts pbkdf2-sha256$; the envelope names its kdf "pbkdf2-sha256".
+            const clear = findTokens(content, [...Object.values(sweepable()), broker.host, 'pbkdf2-sha256$']);
+            expect(clear.length === 0, `the export holds ${clear.join(', ')} in clear`);
+            const pv = await api('POST', '/managed/backup/preview', { file: content, passphrase: pass });
+            const p = JSON.parse(pv.body);
+            const changes = [p.users, p.connections].flatMap((d) => [...d.added, ...d.changed, ...d.removed]).concat(p.settings);
+            expect(pv.status === 200 && changes.length === 0, `preview of an unchanged gateway: ${pv.status} ${pv.body.slice(0, 300)}`);
+            const put = await api('PUT', '/managed/backup/schedule', { kind: 'daily', minute: 0, hour: 3, weekday: 0, day: 0, keep: 2, passphrase: pass });
+            expect(put.status === 204, `schedule: ${put.status} ${put.body}`);
+            const run = await api('POST', '/managed/backup/run');
+            expect(run.status === 200, `run: ${run.status} ${run.body}`);
+            const { file } = JSON.parse(run.body);
+            const st = await status();
+            expect(st.files.some((f) => f.name === file) && st.lastRun?.file === file && st.nextRun, `status after the run: ${JSON.stringify(st).slice(0, 300)}`);
+            const dest = path.join(WORK, 'scheduled-backup.json');
+            const cp = compose(['cp', `gateway:/backup/${file}`, dest], { quiet: true });
+            expect(cp.code === 0, `docker compose cp ${file}: ${cp.out.trim()}`);
+            const onDisk = findTokens(fs.readFileSync(dest, 'utf8'), [...Object.values(sweepable()), broker.host, 'pbkdf2-sha256$']);
+            expect(onDisk.length === 0, `${file} holds ${onDisk.join(', ')} in clear`);
+            const imp = await api('POST', '/managed/backup/import', { backup: file, passphrase: pass, users: 'merge', connections: 'merge', settings: 'replace' });
+            expect(imp.status === 200 && imp.body.includes('"signedOut":false'), `import: ${imp.status} ${imp.body}`);
+            expect((await api('GET', '/managed/me')).status === 200, 'the admin was signed out by an import that changed nothing');
+            expect((await api('DELETE', '/managed/backup/schedule')).status === 204, 'removing the schedule');
+            return file;
+        });
+
         await check(15, 'after a restart the stores still open: old sessions are gone, and the admin signs in again', async () => {
             const r = compose(['restart', 'gateway'], { quiet: true });
             expect(r.code === 0, `docker compose restart: ${r.out.trim()}`);
@@ -1146,7 +1182,7 @@ async function runBrowserChecks(admin) {
             expect(found.length === 0, `holds ${found.join(', ')}`);
         });
 
-        await bcheck('B7', '/solAdmin refuses the e2e user, and shows the admin both users and both connections', async () => {
+        await bcheck('B7', '/solAdmin refuses the e2e user, and shows the admin both users, both connections and Backup & Restore', async () => {
             expect(user, 'no browser (B1)');
             const other = await user.newPage();
             shown = other;
@@ -1173,6 +1209,9 @@ async function runBrowserChecks(admin) {
             expect(users.join() === ['admin/Admin', `${USER}/User`].sort().join(), `users: ${users.join(', ')}`);
             const conns = (await rows('connection-management', '#conn-mgmt-rows')).map(([n]) => n).sort();
             expect(conns.join() === [BROKER, OTHER].sort().join(), `connections: ${conns.join(', ')}`);
+            await ap.click('.nav-item[data-module-id="backup"]');
+            await ap.locator('#backup-schedule-status', { hasText: 'No schedule' }).waitFor();
+            expect(await ap.locator('#backup-dir-problem').isHidden(), `backup directory: ${await ap.locator('#backup-dir-problem').innerText()}`);
         });
 
         await bcheck('B8', 'Sign out in the sidebar ends the session and closes the browser\'s SMF socket', async () => {

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 )
@@ -32,10 +33,16 @@ func newManagedRouting(cfg config, lv *live, src configSource, upstream http.Rou
 // buildManagedRoutes wires the pieces; split from newManagedRouting so tests
 // can supply a cheap hasher, an environment and a clock.
 func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, getenv func(string) string, now func() time.Time, upstream http.RoundTripper, logger *slog.Logger) (*managedRoutes, error) {
+	schedulePath := filepath.Join(filepath.Dir(cfg.usersFile), scheduleFileName)
 	st, err := loadStore(storeOptions{
 		usersPath: cfg.usersFile, connsPath: cfg.connectionsFile, keyPath: cfg.storeKeyFile,
-		hasher: h, getenv: getenv,
+		schedulePath: schedulePath, hasher: h, getenv: getenv,
 	}, logger)
+	if err != nil {
+		return nil, err
+	}
+	sf := newSettingsFile(src, cfg, lv, logger)
+	backups, err := newBackupService(cfg.backupDir, schedulePath, st, sf, h, now, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +64,7 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	// gateApp passes everything through unless connModes is provisioned, which
 	// it reads per request: the settings page can change it.
 	routes := &managedRoutes{
-		api: newManagedHandler(st, ss, th, lv, newSettingsFile(src, cfg, lv, logger), managedEndpoints{
+		api: newManagedHandler(st, ss, th, lv, sf, backups, managedEndpoints{
 			relay: newSEMPRelay(st, upstream, logger),
 			smf:   newSMFGate(st, ss, sockets, connects, upstream, logger),
 			dial:  newDialer(st, connects, logger),
@@ -66,6 +73,7 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 		gateApp:   pages.gateApp,
 		gateAdmin: pages.gateAdmin,
 		gateRelay: gateDirect(lv),
+		backups:   backups,
 	}
 	logger.Info("provisioned mode enabled", "users", cfg.usersFile, "connections", cfg.connectionsFile,
 		"session_idle", cfg.session.idle, "session_absolute", cfg.session.absolute, "app_gated", cfg.connModes == connProvisioned)

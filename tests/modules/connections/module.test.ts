@@ -1754,7 +1754,7 @@ describe('ConnectionsModule', () => {
         }
 
         it('publishes a Direct-only connConfig and warns when the gateway offers Provisioned sign-in', async () => {
-            // The Direct bundle served by a Provisioned gateway (an APP_DIR override):
+            // The Direct bundle served by a Provisioned gateway (a build mounted over the app's files):
             // queue-copy derives its destination choices from connConfig, so it
             // must not offer a provisioned mode no session in this bundle can back.
             stubHosted({ hosted: true, connModes: 'provisioned', defaultConn: 'provisioned' });

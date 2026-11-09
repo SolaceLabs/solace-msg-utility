@@ -34,11 +34,13 @@ interface Step {
 const seed: GatewaySeed = read('seed.json');
 const cases: { name: string; steps: Step[] }[] = read('cases.json').cases;
 
-/** contractNormalize in contract_test.go: store paths read `<path>`. */
+/** contractNormalize in contract_test.go: store paths, a backup's next run, an export. */
 function normalize(v: any): any {
     if (v && typeof v === 'object' && v.settings && typeof v.settings === 'object') {
         for (const k of ['usersFile', 'connectionsFile']) if (k in v.settings) v.settings[k] = '<path>';
     }
+    if (v && typeof v === 'object' && typeof v.nextRun === 'string') v.nextRun = '<time>';
+    for (const k of ['filename', 'content']) if (v && typeof v === 'object' && k in v) v[k] = '<file>';
     return v;
 }
 
@@ -54,7 +56,7 @@ describe('mock-broker/gateway -- the gateway contract', () => {
 
     for (const c of cases) {
         it(c.name, async () => {
-            const gw = createGateway({ seed: JSON.parse(JSON.stringify(seed)) });
+            const gw = createGateway({ seed: JSON.parse(JSON.stringify(seed)), backupIter: 1000 });
             // Every session the case names is open before its first step.
             const sid = new Map<string, string>();
             for (const s of c.steps) {

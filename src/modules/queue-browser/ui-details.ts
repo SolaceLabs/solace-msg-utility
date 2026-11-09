@@ -3,7 +3,7 @@ import { state } from './state.js';
 import { escapeHtml } from '../../core/utils';
 import { logger } from '../../core/logger';
 import { showPayload } from './features.js';
-import { BLOB_URL_REVOKE_DELAY_MS } from './constants.js';
+import { downloadBlob } from '../../core/download';
 import type { AppContext } from '../../core/types';
 
 // ui-details.ts - Message Details & Properties
@@ -19,18 +19,7 @@ export function initDetails(ctx: AppContext) {
     };
 
     ui.triggerDownloadBlob = function (blob: Blob, filename: string) {
-        const url = URL.createObjectURL(blob);
-        if (!url) {
-            logger.warn('[ui-details] createObjectURL returned null — download aborted');
-            return;
-        }
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), BLOB_URL_REVOKE_DELAY_MS);
+        downloadBlob(blob, filename);
     };
 
     ui.downloadMessageContent = function (msg: any) {

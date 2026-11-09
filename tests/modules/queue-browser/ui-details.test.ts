@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ui, els } from '../../../src/modules/queue-browser/ui-core.js';
 import { initDetails } from '../../../src/modules/queue-browser/ui-details';
-import { BLOB_URL_REVOKE_DELAY_MS } from '../../../src/modules/queue-browser/constants.js';
+import { BLOB_URL_REVOKE_DELAY_MS } from '../../../src/core/download';
 import { state } from '../../../src/modules/queue-browser/state.js';
 import { initTable } from '../../../src/modules/queue-browser/ui-table';
 import { createEventBus } from '../../../src/core/event-bus';
@@ -64,21 +64,6 @@ describe('queue-browser/ui-details', () => {
             vi.useRealTimers();
         });
 
-        it('aborts when createObjectURL returns null — no anchor appended, no revoke scheduled', () => {
-            vi.useFakeTimers();
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            (URL.createObjectURL as any).mockReturnValueOnce(null);
-            const bodyChildrenBefore = document.body.children.length;
-
-            const blob = new Blob(['data']);
-            ui.triggerDownloadBlob(blob, 'file.bin');
-
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('createObjectURL returned null'));
-            expect(document.body.children.length).toBe(bodyChildrenBefore);
-            vi.advanceTimersByTime(BLOB_URL_REVOKE_DELAY_MS);
-            expect(URL.revokeObjectURL).not.toHaveBeenCalled();
-            vi.useRealTimers();
-        });
     });
 
     describe('downloadMessageContent()', () => {

@@ -7,6 +7,7 @@ import { createServiceSemp } from '../../../src/core/services/semp-client';
 import { createUserMgmtService } from '../../../src/modules/user-management/service';
 import { createConnMgmtService } from '../../../src/modules/connection-management/service';
 import { createSettingsService } from '../../../src/modules/gateway-settings/service';
+import { createBackupService } from '../../../src/modules/backup/service';
 import { productSources, readSource } from '../../helpers/sources';
 import { contractSeed, seedContractBrokers } from './helpers';
 
@@ -28,7 +29,7 @@ beforeEach(() => {
     resetScenario();
     scenario.latencyMs = 0;
     seedContractBrokers();
-    gw = createGateway({ seed: contractSeed() });
+    gw = createGateway({ seed: contractSeed(), backupIter: 1000 });
     installMockServer({ passthrough: () => Promise.reject(new TypeError('refused')), routes: gw.route });
     gw.setCookie(gw.openSession('admin', false));
 });
@@ -42,6 +43,15 @@ const managed = createManagedService();
 const users = createUserMgmtService();
 const conns = createConnMgmtService();
 const settings = createSettingsService();
+const backup = createBackupService();
+const PASS = 'a long passphrase';
+const DAILY = { kind: 'daily' as const, minute: 0, hour: 2, weekday: 0, day: 0, keep: 7, passphrase: PASS };
+/** A backup of the fake gateway as it stands, as the page exports one. */
+const exported = async () => {
+    const res = await backup.exportFile(PASS);
+    if (!res.ok) throw new Error(res.code);
+    return { file: res.data.content };
+};
 
 /** What a row's call resolves to: the service's own result, or a flag. */
 type Outcome = { ok: boolean };
@@ -96,6 +106,31 @@ const ROWS: { segment: string; route: string; call: () => Promise<Outcome> }[] =
             const view = await settings.load();
             return view.ok ? settings.save(view.data.settings) : view;
         },
+    },
+    { segment: 'backup', route: 'GET /managed/backup', call: () => backup.status() },
+    { segment: 'backup', route: 'PUT /managed/backup/schedule', call: () => backup.saveSchedule(DAILY) },
+    {
+        segment: 'backup',
+        route: 'DELETE /managed/backup/schedule',
+        call: async () => {
+            await backup.saveSchedule(DAILY);
+            return backup.removeSchedule();
+        },
+    },
+    {
+        segment: 'backup',
+        route: 'POST /managed/backup/run',
+        call: async () => {
+            await backup.saveSchedule(DAILY);
+            return backup.runNow();
+        },
+    },
+    { segment: 'backup', route: 'POST /managed/backup/export', call: () => backup.exportFile(PASS) },
+    { segment: 'backup', route: 'POST /managed/backup/preview', call: async () => backup.preview(await exported(), PASS) },
+    {
+        segment: 'backup',
+        route: 'POST /managed/backup/import, every section',
+        call: async () => backup.importFile(await exported(), PASS, { users: 'merge', connections: 'merge', settings: 'replace' }),
     },
     { segment: 'logout', route: 'POST /managed/logout', call: () => managed.logout() },
 ];

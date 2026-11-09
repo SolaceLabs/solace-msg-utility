@@ -207,7 +207,7 @@ Found in the October 2026 branch review and parked here for the Managed connecti
 
 **Also for the rework**
 
-- Queue Subscription Explorer and Queue Discovery are hidden in every managed session (admins included) because they read over unfiltered SEMP v1 RPC; `SubscriptionSource` exists as types only.
+- Queue Discovery is hidden in every managed session (admins included) because it reads over unfiltered SEMP v1 RPC. Queue Subscriptions also reads over SEMP v1 but filters its rows in the browser (`visibleQueueRows`), so it is granted like any catalog module.
 - `src/css/main.css` still imports the stylesheets of modules the variant registry no longer bundles (queue-discovery everywhere; queue-copy and the subscription explorer in `min.html`).
 
 ## YAML schemas (as sealed in the store files; edited only through the admin app)

@@ -439,7 +439,6 @@
           "response": {
             "settings": {
               "hosted": true, "connModes": "both", "defaultConn": "direct",
-              "appDir": "/SolaceMsgUtility",
               "tls": { "certFile": "/tls/tls.crt", "keyFile": "/tls/tls.key", "trustDir": "/tls/trust", "insecureSkipVerify": false },
               "logLevel": "warn", "usersFile": "<path>", "connectionsFile": "<path>",
               "access": { "allow": [], "trustedProxies": [] },
@@ -447,8 +446,8 @@
               "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
               "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" }
             },
-            "restartOnly": ["hosted", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"],
-            "hostOnly": ["appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "usersFile", "connectionsFile"],
+            "restartOnly": ["hosted", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"],
+            "hostOnly": ["tls.certFile", "tls.keyFile", "tls.trustDir", "usersFile", "connectionsFile"],
             "pendingRestart": [],
             "changedOnDisk": false,
             "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
@@ -542,7 +541,6 @@
           "response": {
             "settings": {
               "hosted": true, "connModes": "both", "defaultConn": "direct",
-              "appDir": "/SolaceMsgUtility",
               "tls": { "certFile": "/tls/tls.crt", "keyFile": "/tls/tls.key", "trustDir": "/tls/trust", "insecureSkipVerify": false },
               "logLevel": "warn", "usersFile": "<path>", "connectionsFile": "<path>",
               "access": { "allow": ["192.0.2.0/24", "2001:db8::/32", "2001:db8:abcd:1000::/52", "fe80::1:0:0:1/128"], "trustedProxies": [] },
@@ -550,8 +548,8 @@
               "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
               "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" }
             },
-            "restartOnly": ["hosted", "appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"],
-            "hostOnly": ["appDir", "tls.certFile", "tls.keyFile", "tls.trustDir", "usersFile", "connectionsFile"],
+            "restartOnly": ["hosted", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify", "usersFile", "connectionsFile"],
+            "hostOnly": ["tls.certFile", "tls.keyFile", "tls.trustDir", "usersFile", "connectionsFile"],
             "pendingRestart": [],
             "changedOnDisk": false,
             "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
@@ -587,6 +585,810 @@
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "tls": { "insecureSkipVerify": true } },
           "status": 200, "response": { "restartRequired": ["tls.insecureSkipVerify"] }
+        }
+      ]
+    },
+    {
+      "name": "backup: nothing scheduled and an empty directory",
+      "steps": [
+        {
+          "as": "admin",
+          "method": "GET",
+          "path": "/managed/backup",
+          "status": 200,
+          "response": {
+            "schedule": null,
+            "nextRun": null,
+            "lastRun": null,
+            "dirProblem": "",
+            "files": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "backup: each schedule refusal names its field and reason",
+      "steps": [
+        {
+          "as": "admin",
+          "method": "PUT",
+          "path": "/managed/backup/schedule",
+          "body": {
+            "kind": "yearly",
+            "minute": 0,
+            "hour": 2,
+            "weekday": 0,
+            "day": 0,
+            "keep": 7,
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "schedule",
+            "reason": "Choose hourly, daily, weekly or monthly."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "PUT",
+          "path": "/managed/backup/schedule",
+          "body": {
+            "kind": "hourly",
+            "minute": 0,
+            "hour": 2,
+            "weekday": 0,
+            "day": 0,
+            "keep": 7,
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "schedule",
+            "reason": "The hour must be 0 to 23, and an hourly schedule takes none."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "PUT",
+          "path": "/managed/backup/schedule",
+          "body": {
+            "kind": "monthly",
+            "minute": 0,
+            "hour": 2,
+            "weekday": 0,
+            "day": 0,
+            "keep": 7,
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "schedule",
+            "reason": "The day of the month must be 1 to 31, and only a monthly schedule takes one."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "PUT",
+          "path": "/managed/backup/schedule",
+          "body": {
+            "kind": "daily",
+            "minute": 0,
+            "hour": 2,
+            "weekday": 0,
+            "day": 0,
+            "keep": 0,
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "keep",
+            "reason": "Keep 1 to 365 backups."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "PUT",
+          "path": "/managed/backup/schedule",
+          "body": {
+            "kind": "daily",
+            "minute": 0,
+            "hour": 2,
+            "weekday": 0,
+            "day": 0,
+            "keep": 7,
+            "passphrase": ""
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "passphrase",
+            "reason": "A new schedule needs a passphrase."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "PUT",
+          "path": "/managed/backup/schedule",
+          "body": {
+            "kind": "daily",
+            "minute": 0,
+            "hour": 2,
+            "weekday": 0,
+            "day": 0,
+            "keep": 7,
+            "passphrase": "short"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "passphrase",
+            "reason": "The passphrase must be 12 to 128 characters."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "DELETE",
+          "path": "/managed/backup/schedule",
+          "status": 404,
+          "response": {
+            "error": "not_found"
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/run",
+          "status": 404,
+          "response": {
+            "error": "not_found"
+          }
+        },
+        {
+          "as": "admin",
+          "method": "GET",
+          "path": "/managed/backup",
+          "status": 200,
+          "response": {
+            "schedule": null,
+            "nextRun": null,
+            "lastRun": null,
+            "dirProblem": "",
+            "files": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "backup: a saved schedule is shown with its next run, and removed",
+      "steps": [
+        {
+          "as": "admin",
+          "method": "PUT",
+          "path": "/managed/backup/schedule",
+          "body": {
+            "kind": "daily",
+            "minute": 0,
+            "hour": 2,
+            "weekday": 0,
+            "day": 0,
+            "keep": 7,
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 204,
+          "response": null
+        },
+        {
+          "as": "admin",
+          "method": "GET",
+          "path": "/managed/backup",
+          "status": 200,
+          "response": {
+            "schedule": {
+              "kind": "daily",
+              "minute": 0,
+              "hour": 2,
+              "weekday": 0,
+              "day": 0,
+              "keep": 7
+            },
+            "nextRun": "<time>",
+            "lastRun": null,
+            "dirProblem": "",
+            "files": []
+          }
+        },
+        {
+          "as": "admin",
+          "method": "PUT",
+          "path": "/managed/backup/schedule",
+          "body": {
+            "kind": "daily",
+            "minute": 0,
+            "hour": 2,
+            "weekday": 0,
+            "day": 0,
+            "keep": 3,
+            "passphrase": ""
+          },
+          "status": 204,
+          "response": null
+        },
+        {
+          "as": "admin",
+          "method": "GET",
+          "path": "/managed/backup",
+          "status": 200,
+          "response": {
+            "schedule": {
+              "kind": "daily",
+              "minute": 0,
+              "hour": 2,
+              "weekday": 0,
+              "day": 0,
+              "keep": 3
+            },
+            "nextRun": "<time>",
+            "lastRun": null,
+            "dirProblem": "",
+            "files": []
+          }
+        },
+        {
+          "as": "admin",
+          "method": "DELETE",
+          "path": "/managed/backup/schedule",
+          "status": 204,
+          "response": null
+        },
+        {
+          "as": "admin",
+          "method": "GET",
+          "path": "/managed/backup",
+          "status": 200,
+          "response": {
+            "schedule": null,
+            "nextRun": null,
+            "lastRun": null,
+            "dirProblem": "",
+            "files": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "backup: an export needs a passphrase of the password length",
+      "steps": [
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/export",
+          "body": {
+            "passphrase": "short"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "passphrase",
+            "reason": "The passphrase must be 12 to 128 characters."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/export",
+          "body": {
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 200,
+          "response": {
+            "filename": "<file>",
+            "content": "<file>"
+          }
+        }
+      ]
+    },
+    {
+      "name": "backup: a preview names what an import would add, change and remove",
+      "steps": [
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/preview",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 200,
+          "response": {
+            "created": "2026-11-09T02:00:00Z",
+            "gateway": "v3.7.0",
+            "users": {
+              "added": [
+                "newbie"
+              ],
+              "changed": [
+                "admin",
+                "viewer"
+              ],
+              "removed": [
+                "operator"
+              ]
+            },
+            "connections": {
+              "added": [
+                "b4"
+              ],
+              "changed": [
+                "b2"
+              ],
+              "removed": [
+                "b3"
+              ]
+            },
+            "settings": [
+              "logLevel",
+              "session.idleMinutes"
+            ],
+            "signsOutCaller": {
+              "replace": true,
+              "merge": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "backup: each preview refusal names its field and reason",
+      "steps": [
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/preview",
+          "body": {
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "file",
+            "reason": "Choose one file to import: an upload or a saved backup."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/preview",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "backup": "smu-backup-20261109T020000Z.json",
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "file",
+            "reason": "Choose one file to import: an upload or a saved backup."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/preview",
+          "body": {
+            "backup": "../users.yaml",
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "backup",
+            "reason": "There is no backup named \"../users.yaml\"."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/preview",
+          "body": {
+            "backup": "smu-backup-20261109T020000Z.json",
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "backup",
+            "reason": "There is no backup named \"smu-backup-20261109T020000Z.json\"."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/preview",
+          "body": {
+            "file": "{\"users\": []}",
+            "passphrase": "contract-vector-passphrase"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "file",
+            "reason": "This is not a Solace Message Utility backup file."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/preview",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "passphrase": "short"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "passphrase",
+            "reason": "The passphrase must be 12 to 128 characters."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/preview",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "passphrase": "not the passphrase"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "passphrase",
+            "reason": "The passphrase does not open this file, or the file is damaged."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/preview",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "passphrase": "contract-vector-passphrase",
+            "users": "merge"
+          },
+          "status": 400,
+          "response": {
+            "error": "bad_request"
+          }
+        }
+      ]
+    },
+    {
+      "name": "backup: each import refusal names its field and reason",
+      "steps": [
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/import",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "passphrase": "contract-vector-passphrase",
+            "users": "all",
+            "connections": "skip",
+            "settings": "skip"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "users",
+            "reason": "Choose replace, merge or skip."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/import",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "passphrase": "contract-vector-passphrase",
+            "users": "skip",
+            "connections": "",
+            "settings": "skip"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "connections",
+            "reason": "Choose replace, merge or skip."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/import",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "passphrase": "contract-vector-passphrase",
+            "users": "skip",
+            "connections": "skip",
+            "settings": "merge"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "settings",
+            "reason": "Choose replace or skip."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/import",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "passphrase": "contract-vector-passphrase",
+            "users": "skip",
+            "connections": "skip",
+            "settings": "skip"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "sections",
+            "reason": "Choose at least one section to import."
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/import",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "passphrase": "not the passphrase",
+            "users": "merge",
+            "connections": "skip",
+            "settings": "skip"
+          },
+          "status": 422,
+          "response": {
+            "error": "invalid",
+            "field": "passphrase",
+            "reason": "The passphrase does not open this file, or the file is damaged."
+          }
+        }
+      ]
+    },
+    {
+      "name": "backup: an import applies the chosen sections at once",
+      "steps": [
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/import",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "passphrase": "contract-vector-passphrase",
+            "users": "skip",
+            "connections": "replace",
+            "settings": "replace"
+          },
+          "status": 200,
+          "response": {
+            "restartRequired": [],
+            "signedOut": false
+          }
+        },
+        {
+          "as": "admin",
+          "method": "GET",
+          "path": "/managed/connections",
+          "status": 200,
+          "response": {
+            "connections": [
+              {
+                "broker": "b1",
+                "hostname": "host1",
+                "semp": {
+                  "port": "1943",
+                  "user": "mon",
+                  "pass": ""
+                },
+                "client": {
+                  "port": "1443",
+                  "msgVpns": [
+                    {
+                      "name": "v1",
+                      "user": "u1",
+                      "pass": ""
+                    },
+                    {
+                      "name": "v2",
+                      "user": "u2",
+                      "pass": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "broker": "b2",
+                "hostname": "host2-dr",
+                "semp": {
+                  "port": "1943",
+                  "user": "mon",
+                  "pass": ""
+                },
+                "client": {
+                  "port": "1443",
+                  "msgVpns": [
+                    {
+                      "name": "v9",
+                      "user": "u9",
+                      "pass": ""
+                    }
+                  ]
+                }
+              },
+              {
+                "broker": "b4",
+                "hostname": "host4",
+                "semp": {
+                  "port": "",
+                  "user": "",
+                  "pass": ""
+                },
+                "client": {
+                  "port": "1443",
+                  "msgVpns": [
+                    {
+                      "name": "v4",
+                      "user": "u4",
+                      "pass": ""
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "as": "admin",
+          "method": "GET",
+          "path": "/managed/settings",
+          "status": 200,
+          "response": {
+            "settings": {
+              "hosted": true,
+              "connModes": "both",
+              "defaultConn": "direct",
+              "tls": {
+                "certFile": "/tls/tls.crt",
+                "keyFile": "/tls/tls.key",
+                "trustDir": "/tls/trust",
+                "insecureSkipVerify": false
+              },
+              "logLevel": "info",
+              "usersFile": "<path>",
+              "connectionsFile": "<path>",
+              "access": {
+                "allow": [],
+                "trustedProxies": []
+              },
+              "session": {
+                "idleMinutes": 5,
+                "absoluteMinutes": 30
+              },
+              "login": {
+                "maxFailures": 5,
+                "backoffSeconds": 30,
+                "maxBackoffSeconds": 900,
+                "unauthenticatedPerMinute": 1000
+              },
+              "modules": {
+                "offered": [
+                  "queue-browser",
+                  "queue-copy",
+                  "queue-subscription-explorer"
+                ],
+                "userDefault": "all"
+              }
+            },
+            "restartOnly": [
+              "hosted",
+              "tls.certFile",
+              "tls.keyFile",
+              "tls.trustDir",
+              "tls.insecureSkipVerify",
+              "usersFile",
+              "connectionsFile"
+            ],
+            "hostOnly": [
+              "tls.certFile",
+              "tls.keyFile",
+              "tls.trustDir",
+              "usersFile",
+              "connectionsFile"
+            ],
+            "pendingRestart": [],
+            "changedOnDisk": false,
+            "catalog": [
+              "queue-browser",
+              "queue-copy",
+              "queue-subscription-explorer"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "backup: importing users ends the sessions of those whose password changed, the requester's included",
+      "steps": [
+        {
+          "as": "viewer",
+          "method": "GET",
+          "path": "/managed/me",
+          "status": 200,
+          "response": {
+            "username": "viewer",
+            "admin": false,
+            "operate": [],
+            "readOnly": [
+              {
+                "brokers": "b1",
+                "msgVpns": "v1",
+                "queues": "*"
+              }
+            ],
+            "brokers": [
+              {
+                "broker": "b1",
+                "msgVpns": [
+                  {
+                    "name": "v1"
+                  }
+                ]
+              }
+            ],
+            "modules": [
+              "queue-browser"
+            ]
+          }
+        },
+        {
+          "as": "admin",
+          "method": "POST",
+          "path": "/managed/backup/import",
+          "body": {
+            "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+            "passphrase": "contract-vector-passphrase",
+            "users": "merge",
+            "connections": "skip",
+            "settings": "skip"
+          },
+          "status": 200,
+          "response": {
+            "restartRequired": [],
+            "signedOut": true
+          }
+        },
+        {
+          "as": "admin",
+          "method": "GET",
+          "path": "/managed/me",
+          "status": 401,
+          "response": {
+            "error": "unauthenticated"
+          }
+        },
+        {
+          "as": "viewer",
+          "method": "GET",
+          "path": "/managed/me",
+          "status": 401,
+          "response": {
+            "error": "unauthenticated"
+          }
         }
       ]
     }

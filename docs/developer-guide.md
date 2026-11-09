@@ -52,7 +52,7 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 | `npm run build:all` | `all-test.html` (kitchen-sink QA build — every module, including the admin ones) |
 | `npm run build:admin` | `solAdmin.html` (the standalone administration app — see [architecture.md -> The admin app](architecture.md#the-admin-app-soladmin)) |
 | `npm run build:provisioned` | `provisioned.html` (variant `managed`: standard plus the Provisioned sign-in; the gateway serves it at `/` in Provisioned mode) |
-| `npm run build:provisioned-demo` | `provisioned-demo.html` (demo mode, variant `managed-demo`: the Provisioned modules and the three admin editors against the demo's fake gateway and broker; see [architecture.md -> The demo broker](architecture.md#the-demo-broker-demohtml-provisioned-demohtml)) |
+| `npm run build:provisioned-demo` | `provisioned-demo.html` (demo mode, variant `managed-demo`: the Provisioned modules and the admin pages (the three editors and Backup & Restore) against the demo's fake gateway and broker; see [architecture.md -> The demo broker](architecture.md#the-demo-broker-demohtml-provisioned-demohtml)) |
 | `npm run build` | `demo.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, `solAdmin.html`, `provisioned.html` AND `provisioned-demo.html` in one pass |
 | `npm run check:bundles` | Checks `dist/`: no Direct bundle carries Provisioned UI or the fake gateway, `provisioned.html` carries the Provisioned UI only, and `provisioned-demo.html` carries both with no way out to a network. The `build` task runs it after `npm run build` |
 
@@ -110,6 +110,7 @@ src/
                        # matchContains, topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
                        # isValidHost, isValidPort)
     icons.ts           # Shared inline SVG icons (ICONS) + iconButton() -- labelled icon-only buttons
+    download.ts        # downloadBlob(): save a Blob as a named file (queue-browser, backup)
     timing.ts          # Shared INPUT_DEBOUNCE_MS for input-driven feedback
     toast.ts           # Toast notification system
     logger.ts          # Leveled logger every module writes through (?logLevel= URL override)

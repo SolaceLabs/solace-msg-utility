@@ -396,8 +396,11 @@ describe('core/utils', () => {
 describe('core/utils moduleLabel', () => {
     it('title-cases each dash-separated word', () => {
         expect(moduleLabel('queue-browser')).toBe('Queue Browser');
-        expect(moduleLabel('queue-subscription-explorer')).toBe('Queue Subscription Explorer');
         expect(moduleLabel('x')).toBe('X');
+    });
+
+    it('uses the sidebar name where it is not the id title-cased', () => {
+        expect(moduleLabel('queue-subscription-explorer')).toBe('Queue Subscriptions');
     });
 });
 

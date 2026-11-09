@@ -93,7 +93,6 @@ export function demoSeed(): GatewaySeed {
             hosted: true,
             connModes: 'provisioned',
             defaultConn: 'provisioned',
-            appDir: '/SolaceMsgUtility',
             tls: { certFile: '/tls/tls.crt', keyFile: '/tls/tls.key', trustDir: '/tls/trust', insecureSkipVerify: false },
             logLevel: 'warn',
             usersFile: '/data/users.yaml',

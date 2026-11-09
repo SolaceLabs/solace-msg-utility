@@ -54,7 +54,7 @@ describe('core/rbac — isModuleVisible', () => {
     });
 
     it('gates admin-only modules on the admin flag, whatever the granted modules', () => {
-        for (const id of ['user-management', 'connection-management', 'gateway-settings']) {
+        for (const id of ['user-management', 'connection-management', 'gateway-settings', 'backup']) {
             expect(isModuleVisible(session({ admin: false, modules: [id] }), id)).toBe(false);
             expect(isModuleVisible(session({ admin: true }), id)).toBe(true);
         }

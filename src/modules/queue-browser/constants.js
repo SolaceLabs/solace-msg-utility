@@ -1,5 +1,4 @@
 export const DEFAULT_MAX_MESSAGES_PER_QUEUE = 100;
-export const BLOB_URL_REVOKE_DELAY_MS = 1000;
 export const MAX_MESSAGES_PER_QUEUE_LIMIT = 10000;
 
 // Max concurrent queue bindings. Enforced by service.createBrowser and its mock sibling.

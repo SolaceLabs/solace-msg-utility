@@ -51,6 +51,10 @@ describe('compose files -- the ready-made deployments', () => {
         expect(text).not.toMatch(/:latest\b/);
     });
 
+    it('Provisioned mode keeps its scheduled backups in a host directory', () => {
+        expect(service(read('docker/compose.provisioned.yaml'), 'gateway')).toMatch(/^ {6}- \.\/backup:\/backup$/m);
+    });
+
     it('Gateway mode is the default: no CONN_MODES, no HOSTED', () => {
         expect(read('docker/compose.gateway.yaml')).not.toMatch(/^\s*(?:CONN_MODES|HOSTED):/m);
     });

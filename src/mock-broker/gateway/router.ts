@@ -38,6 +38,8 @@ export interface RouterDeps {
     sessions: GatewaySessions;
     settings: GatewaySettingsFile;
     faults: () => RouterFaults;
+    /** Backup & Restore's routes (backup.ts), admin only like the editors'. */
+    backupRoutes: [string, string, Handler][];
 }
 
 const ok = (json: unknown): GatewayResponse => ({ status: 200, json });
@@ -58,9 +60,9 @@ const glob = (x: unknown): QGlob => {
     return { brokers: string(o.brokers), msgVpns: string(o.msgVpns), queues: string(o.queues) };
 };
 
-type Handler = (req: GatewayRequest, s: Session, sid: string, params: string[]) => GatewayResponse | Promise<GatewayResponse>;
+export type Handler = (req: GatewayRequest, s: Session, sid: string, params: string[]) => GatewayResponse | Promise<GatewayResponse>;
 
-export function createRouter({ store, sessions, settings, faults }: RouterDeps) {
+export function createRouter({ store, sessions, settings, faults, backupRoutes }: RouterDeps) {
     const adminOnly = (fn: Handler): Handler => (req, s, sid, params) => {
         const admin = store.isAdmin(s.user);
         if (admin === null) return error(401, 'unauthenticated');
@@ -178,6 +180,7 @@ export function createRouter({ store, sessions, settings, faults }: RouterDeps) 
         ['DELETE', '/managed/connections/{}', adminOnly(deleteConnection)],
         ['GET', '/managed/settings', adminOnly(getSettings)],
         ['PUT', '/managed/settings', adminOnly(saveSettings)],
+        ...backupRoutes.map(([m, p, fn]): [string, string, Handler] => [m, p, adminOnly(fn)]),
     ];
 
     function match(method: string, path: string): { fn: Handler; params: string[] } | null {

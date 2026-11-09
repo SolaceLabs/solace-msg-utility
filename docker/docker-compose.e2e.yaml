@@ -45,6 +45,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - data:/data
+      - backup:/backup
       - ../scripts/logs/e2e/gateway.crt:/tls/tls.crt:ro
       - ../scripts/logs/e2e/gateway.key:/tls/tls.key:ro
       - ../scripts/logs/e2e/trust:/tls/trust:ro
@@ -130,4 +131,5 @@ services:
 
 volumes:
   data:
+  backup:
   direct-data:

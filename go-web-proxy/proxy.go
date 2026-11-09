@@ -122,16 +122,16 @@ func newPWAHandler(appDir, index string, logger *slog.Logger) *pwaHandler {
 	h := &pwaHandler{root: appDir, index: index, logger: logger}
 	info, err := os.Stat(appDir)
 	if err != nil {
-		logger.Warn("APP_DIR missing; PWA handler will return 404", "app_dir", appDir, "err", err)
+		logger.Warn("app directory missing; PWA handler will return 404", "app_dir", appDir, "err", err)
 		return h
 	}
 	if !info.IsDir() {
-		logger.Warn("APP_DIR is not a directory; PWA handler will return 404", "app_dir", appDir)
+		logger.Warn("app directory is not a directory; PWA handler will return 404", "app_dir", appDir)
 		return h
 	}
 	entries, err := os.ReadDir(appDir)
 	if err != nil || len(entries) == 0 {
-		logger.Warn("APP_DIR empty or unreadable; PWA handler will return 404", "app_dir", appDir, "err", err)
+		logger.Warn("app directory empty or unreadable; PWA handler will return 404", "app_dir", appDir, "err", err)
 		return h
 	}
 	h.fs = http.FileServer(http.FS(os.DirFS(appDir)))

@@ -34,8 +34,10 @@ const (
 type storeRole byte
 
 const (
-	roleUsers storeRole = 1
-	roleConns storeRole = 2
+	roleUsers    storeRole = 1
+	roleConns    storeRole = 2
+	roleSchedule storeRole = 3 // the backup schedule, sealed with the store key (backup.go)
+	roleBackup   storeRole = 4 // a backup file's data, sealed with a passphrase-derived key
 )
 
 func (r storeRole) String() string {
@@ -44,6 +46,10 @@ func (r storeRole) String() string {
 		return "users"
 	case roleConns:
 		return "connections"
+	case roleSchedule:
+		return "backup schedule"
+	case roleBackup:
+		return "backup"
 	}
 	return fmt.Sprintf("unknown (%d)", byte(r))
 }
