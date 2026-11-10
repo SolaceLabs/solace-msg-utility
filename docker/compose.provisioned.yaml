@@ -6,15 +6,16 @@
 #
 #   1. Put the first administrator's password (12 to 128 characters) in a file
 #      named admin-password next to this one, readable by the gateway's UID
-#      and no one else: sudo chown 65532 admin-password && chmod 400 admin-password
-#   2. SMU_VERSION=3.6.0 docker compose -f compose.provisioned.yaml up -d
-#   3. Open https://<host>:9443/, sign in as admin and change the password.
+#      and no one else: chmod 400 admin-password && sudo chown 65532 admin-password
+#   2. Make the backup directory next to this file, writable by the gateway's
+#      UID only (left to Docker, it would be root's and take no backups):
+#      mkdir -p backup && chmod 700 backup && sudo chown 65532 backup
+#   3. SMU_VERSION=3.6.0 docker compose -f compose.provisioned.yaml up -d
+#   4. Open https://<host>:9443/, sign in as admin and change the password.
 #      The admin console is at https://<host>:9443/solAdmin.
-#   4. Back up the store key: docker compose -f compose.provisioned.yaml cp
-#      gateway:/data/store.key ./store.key.backup, and keep it secret.
-#   5. For scheduled backups (the admin console's Backup & Restore), make the
-#      backup directory next to this file, writable by the gateway's UID only:
-#      mkdir backup && sudo chown 65532 backup && chmod 700 backup
+#   5. On the admin console's Backup & Restore page, set a backup schedule and
+#      its passphrase. A backup restores the users and connections on any
+#      deployment; keep the passphrase secret and apart from the backups.
 #
 # SMU_VERSION is required: pin a release, never `latest`, so an upgrade is a
 # deliberate change of this one value. The admin password is read only on the
@@ -59,9 +60,10 @@ services:
       # your brokers' certificates chain to.
       - tls:/tls
       # config.yaml, users.yaml, connections.yaml, backup.yaml and store.key.
-      # Without the store key the stores cannot be read: back it up.
+      # Without the store key the stores cannot be read; the backups below
+      # restore the users and connections on any deployment.
       - data:/data
-      # Scheduled backups, kept on the host (step 5 above). Each file is
+      # Scheduled backups, kept on the host (step 2 above). Each file is
       # encrypted with the passphrase set in the admin console, not the store
       # key, so a file restores on any deployment that has that passphrase.
       - ./backup:/backup

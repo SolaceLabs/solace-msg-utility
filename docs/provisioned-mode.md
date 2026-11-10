@@ -55,10 +55,11 @@ Because the browser receives a VPN's client password while it is connected, give
 You need Docker with Compose, and a host your users' browsers can reach on port 9443.
 
 1. Download [`docker/compose.provisioned.yaml`](../docker/compose.provisioned.yaml) from the release you are deploying.
-2. Put the first administrator's password, 12 to 128 characters, in a file named `admin-password` beside it. Make it readable by the gateway's user only:
+2. Beside it, put the first administrator's password, 12 to 128 characters, in a file named `admin-password`, and make the directory for scheduled backups. Give both to the gateway's user only (left to Docker, the directory would be root's and take no backups):
 
    ```bash
-   sudo chown 65532 admin-password && chmod 400 admin-password
+   chmod 400 admin-password && sudo chown 65532 admin-password
+   mkdir -p backup && chmod 700 backup && sudo chown 65532 backup
    ```
 
 3. Start it, pinning the release:
@@ -170,7 +171,7 @@ The admin console's **Backup & Restore** page keeps copies of the configuration:
 **Scheduled backups** are written by the gateway itself, into `/backup` in the container: the image has no cron. Mount a host directory there to keep them outside the container:
 
 ```bash
-mkdir backup && sudo chown 65532 backup && chmod 700 backup
+mkdir -p backup && chmod 700 backup && sudo chown 65532 backup
 # compose.provisioned.yaml mounts it: - ./backup:/backup
 # docker run: -v "$PWD/backup:/backup"
 ```
@@ -202,7 +203,7 @@ Provisioned mode is meant for **trusted internal** networks. Before exposing it:
 - **Offer Queue Subscriptions only where that is acceptable.** It reads every queue's subscriptions on the connected broker, across all its VPNs, and narrows them to the user's queues in the browser; anyone with the browser's developer tools can see the rest. Leave `queue-subscription-explorer` out of `modules.offered` where queue and topic names must stay hidden between teams.
 - **Give each VPN a client username** scoped to what its users may do. A signed-in browser receives its password to connect, and the password works outside the app too. Keep the brokers' own ports off networks users can reach.
 - **Change the `admin` password** at the first sign-in (the gateway insists), and remove `ADMIN_PASSWORD` from the environment if you used it.
-- **Back up the store key, and keep it apart** from the stores where you can.
+- **Keep the store key apart** from the stores where you can (`STORE_KEY_FILE`). It is not what restores a lost deployment: the scheduled backups are.
 - **Keep backup passphrases secret, and apart from the backups.** A backup holds every broker credential and every password hash; anyone with a file and its passphrase has them. Make `/backup` readable by the gateway's UID only.
 - **Restrict who can reach the gateway** with `access.allow`, and list your reverse proxy in `access.trustedProxies`.
 - **Treat administrator accounts as privileged.** They edit grants, the access list and sign-in itself.
