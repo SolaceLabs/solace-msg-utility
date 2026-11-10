@@ -71,7 +71,7 @@ This connection uses the Solace Web Messaging protocol (WebSocket) to communicat
 | Field | Description | Example |
 | --- | --- | --- |
 | Broker Host | IP address or hostname of your broker | `my-broker.solace.cloud`, `192.168.0.10` |
-| Protocol | `ws://` (unencrypted) or `wss://` (TLS) | `wss://` (recommended) |
+| Protocol | `ws://` (unencrypted) or `wss://` (TLS). A page served over `https://` without the gateway offers only `wss://`: the browser blocks unencrypted connections from it. Behind the gateway both are offered, as the gateway makes the connection to the broker. | `wss://` (recommended) |
 | Port | WebSocket port | `8008` (ws) or `1443` (wss) |
 | URL Path | Optional path appended after the port (e.g. when the broker sits behind a reverse proxy). Hidden until you click **+ URL path**; the **x** in the field clears it and hides it again. A saved or loaded path always shows the field. Leave it out for a direct broker URL. | `/solace`, `/ws` |
 | Message VPN | The Solace VPN to connect to | `default` |
@@ -115,7 +115,7 @@ This connection uses the SEMP v2 REST API for management operations (discovering
 
 | Field | Description | Example |
 | --- | --- | --- |
-| Protocol | `http://` or `https://` | `https://` |
+| Protocol | `http://` or `https://`. As for Messaging, a page served over `https://` without the gateway offers only `https://`. | `https://` |
 | Port | SEMP port | `8080` (http) or `1943` (https) |
 | URL Path | Optional path appended after the port and before `/SEMP/v2/...` (e.g. when SEMP is exposed behind a reverse proxy). Hidden until you click **+ URL path**, as in the Messaging card. Leave it out for a direct SEMP URL. | `/api`, `/management` |
 | Username | SEMP admin username | `admin` |
@@ -126,7 +126,7 @@ The SEMP connection shares the same Broker Host as the Solace client connection.
 ### Connection Profiles
 
 - **Save All Config** — Saves all connection fields to browser localStorage. If localStorage is unavailable or its quota is exceeded, an error toast is shown instead of a success toast.
-- **Load All Config** — Restores previously saved fields
+- **Load All Config** — Restores previously saved fields. A saved `ws://` or `http://` that the page cannot use (served over `https://` without the gateway) is loaded as `wss://` or `https://`, with a warning toast: check the port, which is likely still the unencrypted one. The same happens when the app opens with saved fields.
 - **Reset Form** — Clears all fields back to defaults
 
 > **Out-of-date `solclient.js`:** if the SDK next to the app is older than the required version, a banner appears at the top of the page and **Connect** refuses with an explicit message naming the required version, rather than failing somewhere inside the SDK. Replace the file to clear it.

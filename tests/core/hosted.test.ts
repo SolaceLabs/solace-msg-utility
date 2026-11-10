@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isHosted, setHosted, probeHosted, probeDeployment, buildBrokerUrl, gatewayWsUrl } from '../../src/core/hosted';
+import {
+    isHosted, setHosted, probeHosted, probeDeployment, buildBrokerUrl, gatewayWsUrl,
+    plainSchemesUsable, usableScheme, limitSchemeOptions,
+} from '../../src/core/hosted';
 import { DEFAULT_CONN_CONFIG } from '../../src/core/connections/conn-modes';
+import { loadModuleDOM } from '../helpers/loadModuleDOM';
 
 // Reset the singleton between tests so a leftover flag from one test can't
 // silently affect another. Mirrors the pattern used for the logger
@@ -198,5 +202,80 @@ describe('core/hosted -- gatewayWsUrl', () => {
     it('is plain ws on an http page', () => {
         // jsdom's default location is http://localhost:3000/.
         expect(gatewayWsUrl('/managed/smf/b1/v1')).toBe('ws://localhost:3000/managed/smf/b1/v1');
+    });
+});
+
+// A browser blocks an https page's ws:// and http:// requests (mixed content),
+// so without the gateway the plain schemes are hidden there; hosted, the
+// gateway makes the plain hop to the broker and all four stay. The selects are
+// the connections template's own: Messaging (whose http/https are disabled
+// placeholders) and SEMP.
+describe('core/hosted -- plain schemes', () => {
+    let originalLocation: Location;
+    beforeEach(() => {
+        originalLocation = window.location;
+    });
+    afterEach(() => {
+        Object.defineProperty(window, 'location', { value: originalLocation, writable: true, configurable: true });
+    });
+    function servedOver(protocol: string): void {
+        Object.defineProperty(window, 'location', {
+            value: { protocol, host: 'app.example', origin: `${protocol}//app.example` },
+            writable: true,
+            configurable: true,
+        });
+    }
+    function selects(sol: string, semp: string): { sol: HTMLSelectElement; semp: HTMLSelectElement } {
+        const dom = loadModuleDOM('connections');
+        const solSel = dom.querySelector<HTMLSelectElement>('#solace-protocol')!;
+        const sempSel = dom.querySelector<HTMLSelectElement>('#semp-protocol')!;
+        solSel.value = sol;
+        sempSel.value = semp;
+        return { sol: solSel, semp: sempSel };
+    }
+    const option = (sel: HTMLSelectElement, value: string) => sel.querySelector<HTMLOptionElement>(`option[value="${value}"]`)!;
+
+    it.each(['http:', 'file:'])('keeps every scheme on a %s page without the gateway', (protocol) => {
+        servedOver(protocol);
+        const { sol, semp } = selects('ws', 'http');
+        limitSchemeOptions(sol);
+        limitSchemeOptions(semp);
+
+        expect(plainSchemesUsable()).toBe(true);
+        expect(usableScheme('ws')).toBe('ws');
+        expect([sol.value, semp.value]).toEqual(['ws', 'http']);
+        expect(option(sol, 'ws').hidden || option(sol, 'ws').disabled).toBe(false);
+        expect(option(semp, 'http').hidden || option(semp, 'http').disabled).toBe(false);
+        expect(option(sol, 'http').disabled).toBe(true); // the template's placeholder stays as it is
+    });
+
+    it('hides ws and http on an https page without the gateway and moves a selected one to TLS', () => {
+        servedOver('https:');
+        const { sol, semp } = selects('ws', 'http');
+        limitSchemeOptions(sol);
+        limitSchemeOptions(semp);
+
+        expect(plainSchemesUsable()).toBe(false);
+        expect([usableScheme('ws'), usableScheme('http'), usableScheme('wss'), usableScheme('https')])
+            .toEqual(['wss', 'https', 'wss', 'https']);
+        expect([sol.value, semp.value]).toEqual(['wss', 'https']);
+        for (const [sel, value] of [[sol, 'ws'], [sol, 'http'], [semp, 'http']] as const) {
+            expect(option(sel, value).hidden && option(sel, value).disabled).toBe(true);
+        }
+        expect(option(sol, 'wss').hidden || option(sol, 'wss').disabled).toBe(false);
+        expect(option(semp, 'https').hidden || option(semp, 'https').disabled).toBe(false);
+    });
+
+    it('keeps every scheme on an https page behind the gateway', () => {
+        servedOver('https:');
+        setHosted(true);
+        const { sol, semp } = selects('ws', 'http');
+        limitSchemeOptions(sol);
+        limitSchemeOptions(semp);
+
+        expect(plainSchemesUsable()).toBe(true);
+        expect(usableScheme('http')).toBe('http');
+        expect([sol.value, semp.value]).toEqual(['ws', 'http']);
+        expect(option(sol, 'ws').hidden || option(sol, 'ws').disabled).toBe(false);
     });
 });

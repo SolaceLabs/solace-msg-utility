@@ -81,6 +81,44 @@ export async function probeHosted(): Promise<boolean> {
     return (await probeDeployment()).hosted;
 }
 
+/** The plain broker schemes, each with the TLS scheme that replaces it. */
+const TLS_FORM: ReadonlyMap<string, string> = new Map([['ws', 'wss'], ['http', 'https']]);
+
+/**
+ * Whether this page can open plain `ws://` and `http://` broker connections.
+ * Hosted: always, since the browser's hop is to the gateway on the page's own
+ * scheme and the gateway makes the plain one to the broker. Otherwise only on
+ * a page that is not https: a browser blocks an https page's `ws://` and
+ * `http://` requests as mixed content.
+ */
+export function plainSchemesUsable(): boolean {
+    return hostedMode || window.location.protocol !== 'https:';
+}
+
+/** `scheme`, or its TLS form when this page cannot use the plain one. */
+export function usableScheme(scheme: string): string {
+    return plainSchemesUsable() ? scheme : (TLS_FORM.get(scheme) ?? scheme);
+}
+
+/**
+ * Hides the plain options (`ws`, `http`) of an editable protocol select when
+ * this page cannot use them, and moves a selected one to its TLS form. Call it
+ * after the `/hosted` probe: neither input changes while the page is open. The
+ * options are disabled as well, so a browser that still lists a hidden option
+ * cannot pick it. Options are never re-enabled: the select's own disabled
+ * placeholders stay as the template has them.
+ */
+export function limitSchemeOptions(select: HTMLSelectElement): void {
+    if (plainSchemesUsable()) return;
+    for (const opt of Array.from(select.options)) {
+        if (TLS_FORM.has(opt.value)) {
+            opt.hidden = true;
+            opt.disabled = true;
+        }
+    }
+    select.value = usableScheme(select.value);
+}
+
 /**
  * The WebSocket URL of a gateway path on the page's own host: `wss://` on an
  * https page, `ws://` otherwise. Managed SMF sockets use it

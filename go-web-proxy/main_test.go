@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -579,4 +581,34 @@ func (l *acceptWatch) Accept() (net.Conn, error) {
 		close(l.tracked)
 	}
 	return l.Listener.Accept()
+}
+
+// Files only (hosted: false): /hosted is a 404, so the app connects to brokers
+// itself, and every relay path is a 403 that never reaches the broker.
+func TestServe_FilesOnlyRefusesTheRelay(t *testing.T) {
+	dir := gatewayDir(t)
+	var hits atomic.Int32
+	broker := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+	t.Cleanup(broker.Close)
+	port := broker.Listener.Addr().(*net.TCPAddr).Port
+
+	r := startServe(t, process{configFile: writeServeConfig(t, dir, "hosted: false\n")})
+	client := gatewayClient(t, dir)
+	if code, _ := r.get(t, client, "/hosted"); code != http.StatusNotFound {
+		t.Errorf("/hosted: want 404, got %d", code)
+	}
+	for _, scheme := range []string{"http", "https", "ws", "wss"} {
+		path := fmt.Sprintf("/%s/%d/127.0.0.1/SEMP/v2/monitor/msgVpns", scheme, port)
+		if code, body := r.get(t, client, path); code != http.StatusForbidden || !strings.Contains(body, "relays no broker connection") {
+			t.Errorf("%s: want 403, got %d %q", path, code, body)
+		}
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("a refused relay reached the broker %d times", n)
+	}
+
+	r.signals <- syscall.SIGTERM
+	if err := r.result(t); err != nil {
+		t.Fatalf("serve after SIGTERM: %v", err)
+	}
 }

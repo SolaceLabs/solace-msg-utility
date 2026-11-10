@@ -334,6 +334,13 @@ func contextWithTarget(ctx context.Context, u *url.URL) context.Context {
 	return context.WithValue(ctx, targetURLKey{}, u)
 }
 
+// refuseRelay answers the relay paths in files-only mode (hosted: false), where
+// the app connects to brokers itself: the gateway relays nothing, and a 403
+// says so where the app's fallback would hide it.
+func refuseRelay(w http.ResponseWriter, _ *http.Request) {
+	http.Error(w, "403 forbidden: this deployment serves the app's files only and relays no broker connection", http.StatusForbidden)
+}
+
 // isProxyPath returns true for any path whose first segment is a known proxy
 // scheme. Used to route in the main mux without committing to a full parse.
 func isProxyPath(p string) bool {

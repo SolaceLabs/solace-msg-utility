@@ -6,6 +6,7 @@
   - [Publishing pipeline (`solace-publisher`)](#publishing-pipeline-solace-publisher)
   - [Hosted mode (gateway tunnelling)](#hosted-mode-gateway-tunnelling)
   - [Container image](#container-image)
+  - [Gateway routes](#gateway-routes)
 - [Module Isolation](#module-isolation)
   - [Install-phase buffering (`hold` / `release`)](#install-phase-buffering-hold--release)
 - [Cross-Module Event Flow](#cross-module-event-flow)
@@ -96,6 +97,8 @@ The connections module probes the gateway-only `/hosted` endpoint at the very st
 
 `buildBrokerUrl(scheme, host, port, urlPath, isWebSocket)` in `src/core/hosted.ts` is the single rewrite point. In direct mode it returns the original `${scheme}://${host}:${port}${urlPath}` shape; in hosted mode it returns `${wireScheme}://${pageHost}/${scheme}/${port}/${host}${urlPath}`, with `wireScheme` upgraded to `wss`/`ws` for WebSocket (matching the page's https/http) and `https`/`http` for plain HTTP. Both `solace-client` and `semp-client` route through this builder, so every downstream URL (SEMP v2 fetches, SEMP v1 RPC via `deriveSempV1Url`, the queue-discovery paged fetches, queue-subscription-explorer's RPC POSTs, the queue-picker's caches) inherits the rewrite transparently — they all append paths onto the captured `sempCtx.baseUrl`.
 
+**Plain schemes on an https page.** A browser blocks an https page's `ws://` and `http://` requests as mixed content, so without the gateway the app offers them only on a page that is not https (an `http://` server, or the Standalone HTML from disk); behind the gateway all four stay, as the browser's hop is to the gateway on the page's own scheme and the gateway makes the plain one. `plainSchemesUsable()` in `src/core/hosted.ts` is the rule. `limitSchemeOptions(select)` hides and disables the plain options of an editable protocol select (the connections form, queue-copy's destination) and moves a selected one to its TLS form; it runs at install, after the `/hosted` probe, as neither input changes while the page is open, and never re-enables an option the template disables. `usableScheme(scheme)` maps a saved scheme the same way: the connections form's `applyConfig` loads a saved `ws`/`http` as `wss`/`https` with a warning toast, since the saved port is most likely the plain one. Queue-copy's source fields mirror the primary connection and are left as they are.
+
 Two related details:
 
 - `deriveSempV1Url` strips path/query/fragment in direct mode (SEMP v1 lives at the broker root `/SEMP`, regardless of any user-supplied urlPath on v2) but preserves the gateway proxy prefix in hosted mode so the v1 POST still routes via the gateway.
@@ -118,6 +121,22 @@ The image ([docker/Dockerfile](../docker/Dockerfile), whose header is the author
 **Which bundle is served.** `pwaHandler` ([proxy.go](../go-web-proxy/proxy.go)) serves `index.html` at `/` in Gateway mode and `provisioned.html` in Provisioned mode (`appIndexFile`), and the same bundle for any path without a file extension that is not a file (history-mode fallback); a missing asset with an extension stays a `404`. `solAdmin.html` is reached only through `/solAdmin`, behind the admin gate, and a request for `solAdmin.html` or `provisioned.html` by name gets `404`.
 
 **Serving your own build.** Mount it over `/SolaceMsgUtility`, with the bundles the mode serves and both vendor scripts beside them; the mount may be read-only. The path is not configurable: the `APP_DIR` variable and `appDir` key of earlier releases are ignored. A `config.yaml` that still has `appDir` loads (`fileConfig.RemovedAppDir` keeps the strict decoder from refusing it), `removedInUse` names it and a set `APP_DIR` for a warning at start, and the gateway's next write of the file drops the key.
+
+### Gateway routes
+
+`newRootHandler` ([main.go](../go-web-proxy/main.go)) routes on the path, first match wins, inside the access log and the access list (`clientACL`: a denied client gets `403` on every route). Every response carries `X-Robots-Tag: noindex, nofollow`. "Provisioned" means `connModes` is `provisioned` or `both`; a cell names the one it means where they differ. The gates read `connModes` from `*live` per request, so a settings change moves a route between columns without a restart. Files only (`hosted: false`) is always Gateway's `connModes`: Provisioned with it stops the start.
+
+| Path | Served by | Gateway mode | Provisioned mode | Files only |
+| --- | --- | --- | --- | --- |
+| `/robots.txt` | `robotsTxt` (main.go) | `Disallow: /` for every crawler | Same | Same |
+| `/hosted` | `hostedHandler` ([proxy.go](../go-web-proxy/proxy.go)) | JSON `{hosted, connModes, defaultConn}`, `no-store`; left out of the access log (the app polls it) | Same | `404`: the app stays Direct and browsers connect to brokers themselves |
+| `/solAdmin`, `/solAdmin/` | `adminHandler` behind `gateAdmin` ([pages.go](../go-web-proxy/pages.go)) | `404` | `solAdmin.html` (`no-store`) for a signed-in administrator. No session -> `/login?next=/solAdmin`, a forced change -> `/login/password`, not an administrator -> a `403` page | `404` |
+| `/managed/...` | `managedHandler` ([managed.go](../go-web-proxy/managed.go)) | `404` | A session (`401 unauthenticated`, throttled per client), same origin (`403 cross_origin`), and under a forced change only `/managed/logout` (`403 password_change_required`). `/managed/relay/...` is the SEMP relay ([relay.go](../go-web-proxy/relay.go)), `/managed/smf/...` the SMF gate ([smf.go](../go-web-proxy/smf.go)), the rest the API mux: `me`, `logout`, `dial`, and through `adminOnly` `users`, `connections`, `settings` and `backup/...`. An unknown path or method is `404 not_found`, never `405`. All `no-store`. | `404` |
+| `/login`, `/login/password` | `authPages` (pages.go) | The app (history fallback) | The sign-in and password-change pages; a cross-site POST is a `403` page | The app |
+| `/{http,https,ws,wss}/{port}/{host}/...` | `reverseProxy` (proxy.go, `parseProxyPath`) | The Direct relay to that broker; a malformed path is `400` | Under `both`, the Direct relay. Under `provisioned`, `404` (`gateDirect`): sessions reach brokers only through `/managed/relay/` and `/managed/smf/` | `403` (`refuseRelay`): browsers connect to brokers themselves |
+| Anything else | `pwaHandler` (proxy.go) | `index.html` at `/` and for any path without an extension that is not a file; other files from `appRoot`; `solAdmin.html` and `provisioned.html` by name `404` | The same with `provisioned.html`. Under `provisioned`, `gateApp` sends a visitor without a session to `/login` (a path with an extension gets `401`; throttled per client) and a forced change to `/login/password`; under `both` the app is open, and sign-in is the Provisioned tab's | As Gateway mode |
+
+A new route goes in `newRootHandler` above the app's catch-all, or under `/managed/` when it needs a session; anything that falls through is the app's, so a path the gateway does not serve still gets the bundle (history fallback) unless it has an extension.
 
 ---
 

@@ -155,6 +155,29 @@ describe('queue-copy/module', () => {
             consoleSpy.mockRestore();
         });
 
+        // Without the gateway an https page cannot open ws:// or http://: the
+        // destination hides them. The source fields mirror the primary
+        // connection and keep its scheme.
+        it('hides the destination ws:// and http:// on an https page without the gateway', async () => {
+            const originalLocation = window.location;
+            Object.defineProperty(window, 'location', {
+                value: { protocol: 'https:', host: 'app.example', origin: 'https://app.example' },
+                writable: true,
+                configurable: true,
+            });
+            try {
+                await QueueCopyModule.install(makeCtx(eventBus, container, { isConnected: true }));
+            } finally {
+                Object.defineProperty(window, 'location', { value: originalLocation, writable: true, configurable: true });
+            }
+            const option = (id: string, value: string) => container.querySelector<HTMLOptionElement>(`#${id} option[value="${value}"]`)!;
+            expect(option('copy-dest-sol-protocol', 'ws').hidden).toBe(true);
+            expect(option('copy-dest-semp-protocol', 'http').hidden).toBe(true);
+            expect(option('copy-dest-sol-protocol', 'wss').hidden).toBe(false);
+            expect(option('copy-source-sol-protocol', 'ws').hidden).toBe(false);
+            expect(option('copy-source-semp-protocol', 'http').hidden).toBe(false);
+        });
+
         it('source pick icon shown when SEMP already connected at install', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             await QueueCopyModule.install(makeCtx(eventBus, container, {

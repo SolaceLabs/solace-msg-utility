@@ -108,7 +108,7 @@ You can open `index.html` directly in a browser via `file:///...`, but **SEMP AP
 
 ### From the container
 
-The image can also serve the files alone: with `HOSTED=false` it serves the app over HTTPS and nothing else, and browsers connect to brokers themselves, as with any web server. Provisioned mode needs `HOSTED` left at its default, `true`.
+The image can also serve the files alone: with `HOSTED=false` it serves the app over HTTPS and nothing else (the relay paths answer `403`), and browsers connect to brokers themselves, as with any web server. The page being HTTPS, the app then offers only `wss://` and `https://`: a browser blocks unencrypted connections from an HTTPS page. Provisioned mode needs `HOSTED` left at its default, `true`.
 
 ---
 
@@ -160,7 +160,7 @@ The gateway keeps its settings in `config.yaml`. The variables below seed it on 
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `HOSTED` | `true` | `true` sends the app's broker connections through the gateway (Gateway and Provisioned mode). `false` serves the files only, and browsers connect to brokers themselves. Any other value stops the start. |
+| `HOSTED` | `true` | `true` sends the app's broker connections through the gateway (Gateway and Provisioned mode). `false` serves the files only, and browsers connect to brokers themselves, over `wss://` and `https://` only; the gateway refuses to relay (`403`). Any other value stops the start. |
 | `CONN_MODES` | `direct` | Which connection tabs the app offers: `direct` (Gateway mode), `provisioned` or `both` (Provisioned mode; see [provisioned-mode.md](provisioned-mode.md)). |
 | `DEFAULT_CONN` | `direct` | Which tab opens first under `both`: `direct` or `provisioned`. |
 | `SSL_CERT_FILE` | `/tls/tls.crt` | The gateway's TLS certificate (PEM). Go also reads this variable to find a system CA bundle, so a container that sets it ignores any bundle mounted at Go's default path: add CAs through `SSL_TRUST_DIR`. |
@@ -286,6 +286,8 @@ To update a deployed instance:
   Pin a full version (`:3.6.0`) in production rather than `:3.6`, `:3` or `:latest`. Provisioned mode uses the same tags.
 
   **From v3.3.5 or earlier:** `HOSTED` now defaults to `true`. A container started without `HOSTED=true` used to serve the files only, with browsers connecting to brokers themselves; it now connects to brokers for them, so put your brokers' CAs in `/tls/trust/` first, or set `HOSTED=false` to keep the old behaviour.
+
+  **Files only no longer relays:** with `HOSTED=false` the gateway's relay paths (`/http/...`, `/https/...`, `/ws/...`, `/wss/...`) now answer `403`. The app never used them in that mode.
 
   **`APP_DIR` is no longer read:** the container always serves the app built into the image. A container that still sets `APP_DIR`, or a `config.yaml` that still has `appDir`, starts as before and logs a warning naming it; remove it. A save from the admin console's Gateway Settings drops the key from the file. If you used it to serve your own build, mount that build at `/SolaceMsgUtility` instead.
 

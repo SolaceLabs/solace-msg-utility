@@ -27,7 +27,7 @@ import { INPUT_DEBOUNCE_MS } from '../../core/timing';
 import { logger } from '../../core/logger';
 import { normalizeUrlPath, generateUuid } from '../../core/utils';
 import { createOptionalField } from './optional-field';
-import { isHosted, probeDeployment, setHosted } from '../../core/hosted';
+import { isHosted, limitSchemeOptions, probeDeployment, setHosted, usableScheme } from '../../core/hosted';
 import { DEFAULT_CONN_CONFIG } from '../../core/connections/conn-modes';
 import type { AppContext, BusEvents, ConnectionConfig, SolaceConfig, SempConfig } from '../../core/types';
 
@@ -67,6 +67,9 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
     ui.cacheElements(container);
     ui.initEvents();
     const els = ui.getElements();
+    // Without the gateway, an https page cannot open ws:// or http://.
+    limitSchemeOptions(els.elSolProtocol);
+    limitSchemeOptions(els.elSempProtocol);
 
     // The URL Path fields open on demand; sync() after any write in code.
     const urlPaths = [
@@ -206,10 +209,18 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
     // Helper: Apply Config to UI. Each field is guarded individually so a partial
     // saved config (e.g. a user only ever set host + vpn) doesn't blank the rest.
     function applyConfig(cfg: any) {
+        // A saved plain scheme this page cannot use moves to its TLS form, with a
+        // warning: the saved port is most likely the plain one.
+        const moved: string[] = [];
+        const scheme = (saved: string): string => {
+            const s = usableScheme(saved);
+            if (s !== saved) moved.push(`${saved}:// is now ${s}://`);
+            return s;
+        };
         if (cfg.host) els.elHost.value = cfg.host;
 
         if (cfg.solace) {
-            if (cfg.solace.protocol) els.elSolProtocol.value = cfg.solace.protocol;
+            if (cfg.solace.protocol) els.elSolProtocol.value = scheme(cfg.solace.protocol);
             if (cfg.solace.port) els.elSolPort.value = cfg.solace.port;
             if (cfg.solace.urlPath !== undefined) els.elSolUrlPath.value = cfg.solace.urlPath;
             if (cfg.solace.vpn) els.elSolVpn.value = cfg.solace.vpn;
@@ -229,12 +240,15 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         }
 
         if (cfg.semp) {
-            if (cfg.semp.protocol) els.elSempProtocol.value = cfg.semp.protocol;
+            if (cfg.semp.protocol) els.elSempProtocol.value = scheme(cfg.semp.protocol);
             if (cfg.semp.port) els.elSempPort.value = cfg.semp.port;
             if (cfg.semp.urlPath !== undefined) els.elSempUrlPath.value = cfg.semp.urlPath;
             if (cfg.semp.user) els.elSempUser.value = cfg.semp.user;
         }
         syncUrlPaths();
+        if (moved.length) {
+            showToast(`${moved.join(' and ')}: without the gateway, a page served over https reaches brokers only over TLS. Check the port.`, 'warn');
+        }
     }
 
     // 4. Load Saved Settings

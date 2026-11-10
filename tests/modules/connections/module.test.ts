@@ -1850,4 +1850,64 @@ describe('ConnectionsModule', () => {
         });
     });
 
+    // Without the gateway an https page cannot open ws:// or http:// (mixed
+    // content): the plain options are hidden, and a saved plain scheme moves to
+    // TLS with a warning, as its port is most likely the plain one. Behind the
+    // gateway every scheme stays.
+    describe('plain schemes on an https page', () => {
+        let originalLocation: Location;
+        const saved = {
+            host: 'broker.test',
+            solace: { protocol: 'ws', port: '8008' },
+            semp: { protocol: 'http', port: '8080' },
+        };
+
+        beforeEach(() => {
+            originalLocation = window.location;
+            Object.defineProperty(window, 'location', {
+                value: { protocol: 'https:', host: 'app.example', origin: 'https://app.example' },
+                writable: true,
+                configurable: true,
+            });
+            const toasts = document.createElement('div');
+            toasts.id = 'toast-container';
+            document.body.appendChild(toasts);
+            vi.spyOn(config, 'load').mockReturnValue(saved);
+        });
+        afterEach(() => {
+            Object.defineProperty(window, 'location', { value: originalLocation, writable: true, configurable: true });
+            setHosted(false);
+        });
+
+        const select = (id: string) => container.querySelector<HTMLSelectElement>(id)!;
+        const option = (id: string, value: string) => select(id).querySelector<HTMLOptionElement>(`option[value="${value}"]`)!;
+
+        it('hides ws:// and http:// and moves the saved ones to TLS, with a warning, without the gateway', async () => {
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+
+            expect([select('#solace-protocol').value, select('#semp-protocol').value]).toEqual(['wss', 'https']);
+            const port = (id: string) => container.querySelector<HTMLInputElement>(id)!.value;
+            expect([port('#solace-port'), port('#semp-port')]).toEqual(['8008', '8080']); // left for the user to check
+            expect(option('#solace-protocol', 'ws').hidden).toBe(true);
+            expect(option('#semp-protocol', 'http').hidden).toBe(true);
+            const toast = document.querySelector('#toast-container .toast.toast--warn');
+            expect(toast?.textContent).toContain('ws:// is now wss:// and http:// is now https://');
+            expect(toast?.textContent).toContain('Check the port');
+        });
+
+        it('keeps the saved ws:// and http://, without a warning, behind the gateway', async () => {
+            (globalThis.fetch as any).mockImplementation((url: string) => Promise.resolve(url === '/hosted'
+                ? { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ hosted: true, connModes: 'direct', defaultConn: 'direct' })) }
+                : { ok: true, status: 200 }));
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+
+            expect([select('#solace-protocol').value, select('#semp-protocol').value]).toEqual(['ws', 'http']);
+            expect(option('#solace-protocol', 'ws').hidden).toBe(false);
+            expect(option('#semp-protocol', 'http').hidden).toBe(false);
+            expect(document.querySelector('#toast-container .toast.toast--warn')).toBeNull();
+        });
+    });
+
 });

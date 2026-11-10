@@ -61,6 +61,8 @@ vi.mock('../../../src/core/services/semp-client', () => ({
 }));
 vi.mock('../../../src/core/hosted', () => ({
     probeDeployment: hostedMock.probeDeployment, setHosted: vi.fn(), isHosted: () => true, buildBrokerUrl: () => '',
+    // Hosted: every scheme stays usable.
+    limitSchemeOptions: vi.fn(), usableScheme: (scheme: string) => scheme,
 }));
 vi.mock('../../../src/core/services/managed-service', () => ({
     createManagedService: () => ({

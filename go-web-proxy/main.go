@@ -359,7 +359,12 @@ func serve(p process) error {
 
 	hh := newHostedHandler(cfg.hosted, lv)
 	upstream := newUpstreamTransport(trustPool, cfg.insecureSkipVerify)
-	rp := newReverseProxy(upstream, logger)
+	// Files only (hosted: false): browsers reach brokers themselves, so the
+	// relay paths are refused, not left open.
+	var relay http.Handler = newReverseProxy(upstream, logger)
+	if !cfg.hosted {
+		relay = http.HandlerFunc(refuseRelay)
+	}
 
 	// Provisioned sign-in and the /managed/* API; nil in Gateway mode, where
 	// /managed/* is a 404. A load failure is fatal: a misconfiguration must not
@@ -381,7 +386,7 @@ func serve(p process) error {
 		logger.Info("administration app enabled", "path", adminPath)
 	}
 
-	root := newRootHandler(hh, admin, pwa, rp, mr)
+	root := newRootHandler(hh, admin, pwa, relay, mr)
 
 	// The client address is resolved once (trusted proxies) for the access
 	// list and the sign-in throttle. The access list sits inside the access

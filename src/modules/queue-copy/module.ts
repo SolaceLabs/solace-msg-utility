@@ -46,6 +46,7 @@ import {
 import { createSolacePublisher } from '../../core/services/solace-publisher';
 import { createGate } from '../../core/components/module-gate';
 import { logger } from '../../core/logger';
+import { limitSchemeOptions } from '../../core/hosted';
 import { isQueueVisible, canOperate } from '../../core/rbac';
 import { errMessage } from '../../core/utils';
 import { isSessionEnded } from '../../core/services/managed-profile';
@@ -63,6 +64,10 @@ export const QueueCopyModule = {
 
         const state = createInitialState();
         const els = cacheElements(container);
+        // Without the gateway, an https page cannot open ws:// or http://. The
+        // source fields mirror the primary connection and keep its scheme.
+        limitSchemeOptions(els.destSempProtocol);
+        limitSchemeOptions(els.destSolProtocol);
 
         // Connection-required gate (created by the shared component) vs the
         // content panel — the module owns the mutual exclusion.
