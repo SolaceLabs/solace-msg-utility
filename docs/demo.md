@@ -139,7 +139,8 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
   administrator finds them as sidebar entries.
 - **Backup & Restore keeps its backups in the page.** Export downloads a real backup file, and Import opens it, with
   the same encryption as the gateway's. The backup directory is held in this tab (it carries over a sign-in reload,
-  the schedule does not), and scheduled backups run only through **Back up now**: the demo keeps no timer. The
+  the schedule does not), a saved backup's download icon saves it as held, and scheduled backups run only through
+  **Back up now**: the demo keeps no timer. The
   demo's accounts keep plain-text passwords, so its backups do too; import one into the demo, not a real gateway,
   which refuses those users.
 - **Sign-in reloads the page,** as the gateway's redirect does. The users, connections, settings, sessions, queues and

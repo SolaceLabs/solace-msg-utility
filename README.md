@@ -36,7 +36,7 @@ Take `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs
 The image includes the Solace JavaScript API and JSZip, so nothing else is needed:
 
 ```bash
-docker run --rm -p 9443:9443 -v solace-tls:/tls -v solace-data:/data \
+docker run --rm -p 9443:9443 -v solace-tls:/tls \
   ghcr.io/solacelabs/solace-msg-utility:latest
 ```
 

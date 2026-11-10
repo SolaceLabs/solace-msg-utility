@@ -16,15 +16,23 @@ import (
 )
 
 // clearSeedEnv isolates a test from the developer's shell: every seeding
-// variable plus the two environment-only ones is unset for its duration.
+// variable, STORE_KEY_FILE and the removed ones is unset for its duration.
 func clearSeedEnv(t *testing.T) {
 	t.Helper()
 	for _, v := range seedVars {
 		t.Setenv(v.env, "")
 	}
-	t.Setenv("CONFIG_FILE", "")
 	t.Setenv("STORE_KEY_FILE", "")
-	t.Setenv("APP_DIR", "") // removed, but still read for its warning
+	t.Setenv("CONFIG_FILE", "") // removed, but still read for its refusal or warning
+	t.Setenv("APP_DIR", "")     // removed, but still read for its warning
+}
+
+func removedNames(rs []removedSetting) []string {
+	out := []string{}
+	for _, r := range rs {
+		out = append(out, r.name)
+	}
+	return out
 }
 
 const fullConfigYAML = `version: 1
@@ -410,7 +418,7 @@ func TestSeedConfigFile_WriteFailureIsActionable(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error when the directory cannot be created")
 	}
-	for _, want := range []string{path, "cannot write config file", "UID 65532", "CONFIG_FILE"} {
+	for _, want := range []string{path, "cannot write config file", "UID 65532", "/data"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}
@@ -529,8 +537,11 @@ func TestResolveConfig_IgnoresTheRemovedAppDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a file with the removed key must still load: %v", err)
 	}
-	if want := []string{"appDir", "APP_DIR"}; !reflect.DeepEqual(load.removed, want) {
+	if want := []string{"appDir", "APP_DIR"}; !reflect.DeepEqual(removedNames(load.removed), want) {
 		t.Errorf("removed: want %v, got %v", want, load.removed)
+	}
+	if !strings.Contains(load.removed[0].instead, appRoot) {
+		t.Errorf("the warning must say where to mount a build: %q", load.removed[0].instead)
 	}
 	if len(load.overrides) != 0 {
 		t.Errorf("APP_DIR is no longer a seeding variable: %v", load.overrides)
@@ -555,7 +566,7 @@ func TestResolveConfig_SeedIgnoresTheRemovedAppDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !load.seeded || !reflect.DeepEqual(load.removed, []string{"APP_DIR"}) {
+	if !load.seeded || !reflect.DeepEqual(removedNames(load.removed), []string{"APP_DIR"}) {
 		t.Errorf("seeded=%v removed=%v: want a seed that names APP_DIR", load.seeded, load.removed)
 	}
 	data, err := os.ReadFile(path)
@@ -622,13 +633,29 @@ func TestLevelName(t *testing.T) {
 	}
 }
 
-func TestConfigPath(t *testing.T) {
-	t.Setenv("CONFIG_FILE", "")
-	if got := configPath(); got != defaultConfigFile {
-		t.Errorf("default: want %s, got %s", defaultConfigFile, got)
+// CONFIG_FILE is gone: config.yaml is always configFilePath. One that names
+// another file stops the start, since a fresh seed would drop that file's
+// settings (the access list among them); one that names the file read is only
+// warned about.
+func TestResolveConfig_RemovedConfigFile(t *testing.T) {
+	clearSeedEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	elsewhere := filepath.Join(t.TempDir(), "mine.yaml")
+	t.Setenv("CONFIG_FILE", elsewhere)
+	_, err := resolveConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "CONFIG_FILE") || !strings.Contains(err.Error(), "no longer read") || !strings.Contains(err.Error(), path) {
+		t.Fatalf("want a refusal naming CONFIG_FILE and the file read, got %v", err)
 	}
-	t.Setenv("CONFIG_FILE", "/etc/gw/config.yaml")
-	if got := configPath(); got != "/etc/gw/config.yaml" {
-		t.Errorf("from env: got %s", got)
+	if _, err := os.Stat(path); err == nil {
+		t.Error("a refused start must not seed a file")
+	}
+
+	t.Setenv("CONFIG_FILE", path)
+	load, err := resolveConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(removedNames(load.removed), []string{"CONFIG_FILE"}) || !strings.Contains(load.removed[0].instead, configFilePath) {
+		t.Errorf("want a warning that names CONFIG_FILE and the fixed path, got %+v", load.removed)
 	}
 }

@@ -258,6 +258,20 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         expect((await call(gw, 'GET', '/managed/backup')).json.schedule).toBeNull();
     });
 
+    it('downloads a saved backup as written, and nothing it did not write', async () => {
+        const gw = gateway();
+        const name = 'smu-backup-20261109T090000Z.json';
+        for (const p of [name, 'users.yaml', '..%2Fusers.yaml']) {
+            expect(await call(gw, 'GET', `/managed/backup/files/${p}`)).toEqual({ status: 404, json: { error: 'not_found' } });
+        }
+        await call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 2, passphrase: PASS });
+        await call(gw, 'POST', '/managed/backup/run');
+        const got = await call(gw, 'GET', `/managed/backup/files/${name}`);
+        expect([got.status, got.json.filename, gw.snapshot().backups?.files[0]]).toEqual([200, name, [name, got.json.content]]);
+        expect((await openBackup(got.json.content, PASS)).created).toBe('2026-11-09T09:00:00Z');
+        expect((await call(gw, 'GET', `/managed/backup/files/${name}`, undefined, 'viewer')).status).toBe(403);
+    });
+
     it('refuses a schedule as the gateway does', async () => {
         const gw = gateway();
         const put = (body: unknown) => call(gw, 'PUT', '/managed/backup/schedule', body);

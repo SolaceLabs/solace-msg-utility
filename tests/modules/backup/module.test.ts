@@ -5,7 +5,7 @@ import type { AppContext, AppState, ManagedSession } from '../../../src/core/typ
 import type { BackupStatus, ImportPreview } from '../../../src/modules/backup/service';
 
 const svc = vi.hoisted(() => ({
-    status: vi.fn(), saveSchedule: vi.fn(), removeSchedule: vi.fn(), runNow: vi.fn(),
+    status: vi.fn(), download: vi.fn(), saveSchedule: vi.fn(), removeSchedule: vi.fn(), runNow: vi.fn(),
     exportFile: vi.fn(), preview: vi.fn(), importFile: vi.fn(),
 }));
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
@@ -135,7 +135,7 @@ describe('backup -- gate and status', () => {
         expect(hidden(c, '#backup-dir-problem')).toBe(true);
     });
 
-    it('with a schedule: describes it, fills the form, lists the files with a restore button each', async () => {
+    it('with a schedule: describes it, fills the form, lists the files with a download and a restore button each', async () => {
         const { c } = await setup(WEEKLY);
         expect(text(c, '#backup-schedule-status')).toBe(
             'Weekly on Monday at 02:15 UTC; keeps the last 14. Next backup: 2026-11-16 02:15 UTC. '
@@ -149,7 +149,9 @@ describe('backup -- gate and status', () => {
             ['smu-backup-20261109T021500Z.json', '2026-11-09 02:15 UTC', '2 KB'],
             ['smu-backup-20261102T021500Z.json', '2026-11-02 02:15 UTC', '1 KB'],
         ]);
-        expect(rows[0].querySelector('.backup-restore')?.getAttribute('aria-label')).toBe('Restore "smu-backup-20261109T021500Z.json"');
+        expect([...rows[0].querySelectorAll('.backup-actions-col button')].map(b => b.getAttribute('aria-label'))).toEqual([
+            'Download "smu-backup-20261109T021500Z.json"', 'Restore "smu-backup-20261109T021500Z.json"',
+        ]);
         // Only the weekly fields show.
         expect(hidden(c, '[data-kinds="weekly"]')).toBe(false);
         expect(hidden(c, '[data-kinds="monthly"]')).toBe(true);
@@ -170,6 +172,25 @@ describe('backup -- gate and status', () => {
         expect(hidden(c, '#backup-dir-problem')).toBe(false);
         expect(text(c, '#backup-dir-problem')).toBe('/backup does not exist. Mount a directory there.');
         expect(text(c, '#backup-rows')).toBe('The backup directory cannot be read.');
+    });
+
+    it('downloads a saved backup as the gateway holds it, under its own name', async () => {
+        const { c } = await setup(WEEKLY);
+        svc.download.mockResolvedValue(ok({ filename: 'smu-backup-20261102T021500Z.json', content: '{"format":"smu-backup"}' }));
+        c.querySelectorAll<HTMLButtonElement>('#backup-rows .backup-download')[1].click();
+        await flush();
+        expect(svc.download).toHaveBeenCalledWith('smu-backup-20261102T021500Z.json');
+        const [blob, name] = downloadMock.downloadBlob.mock.calls[0] as [Blob, string];
+        expect([name, blob.type, await blob.text()]).toEqual(['smu-backup-20261102T021500Z.json', 'application/json', '{"format":"smu-backup"}']);
+        expect(hidden(c, '#backup-error')).toBe(true);
+    });
+
+    it('shows why a download failed: the file was pruned meanwhile', async () => {
+        const { c } = await setup(WEEKLY);
+        svc.download.mockResolvedValue({ ok: false, status: 404, code: 'not_found' });
+        await click(c, '#backup-rows .backup-download');
+        expect(text(c, '#backup-error')).toBe('Not found. It may already have been removed.');
+        expect(downloadMock.downloadBlob).not.toHaveBeenCalled();
     });
 
     it('shows a failed load, and Reload asks again', async () => {

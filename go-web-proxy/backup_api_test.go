@@ -69,7 +69,8 @@ func TestBackupAPI_AdminsOnly(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	viewer := e.cookie("viewer", false)
 	for _, r := range [][2]string{
-		{"GET", "/managed/backup"}, {"PUT", "/managed/backup/schedule"}, {"DELETE", "/managed/backup/schedule"},
+		{"GET", "/managed/backup"}, {"GET", "/managed/backup/files/smu-backup-20261030T090000Z.json"},
+		{"PUT", "/managed/backup/schedule"}, {"DELETE", "/managed/backup/schedule"},
 		{"POST", "/managed/backup/run"}, {"POST", "/managed/backup/export"},
 		{"POST", "/managed/backup/preview"}, {"POST", "/managed/backup/import"},
 	} {
@@ -186,9 +187,42 @@ func TestBackupAPI_RunNowAndList(t *testing.T) {
 	}
 }
 
+func TestBackupAPI_Download(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	const name = "smu-backup-20261030T090000Z.json"
+	// No such file yet, and names the gateway never writes.
+	for _, n := range []string{name, "users.yaml", "smu-backup-latest.json"} {
+		expect(t, e.do("GET", "/managed/backup/files/"+n, "", e.admin()), http.StatusNotFound, "not_found")
+	}
+	expect(t, e.do("PUT", "/managed/backup/schedule", jsonBody(t, map[string]any{"kind": "hourly", "keep": 5, "passphrase": testPassphrase}), e.admin()), http.StatusNoContent, "")
+	expect(t, e.do("POST", "/managed/backup/run", "", e.admin()), http.StatusOK, "")
+
+	rec := e.do("GET", "/managed/backup/files/"+name, "", e.admin())
+	expect(t, rec, http.StatusOK, "")
+	out := decodeTo[map[string]string](t, rec.Body.Bytes())
+	onDisk, err := os.ReadFile(filepath.Join(e.cfg.backupDir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["filename"] != name || out["content"] != string(onDisk) {
+		t.Fatalf("want the file as written, got %q (%d bytes)", out["filename"], len(out["content"]))
+	}
+	if _, err := openBackup(context.Background(), e.api.backups.hasher, []byte(out["content"]), testPassphrase); err != nil {
+		t.Fatalf("the download opens with the schedule's passphrase: %v", err)
+	}
+	if !strings.Contains(e.log.String(), "backup downloaded") {
+		t.Fatal("a download is logged")
+	}
+
+	big := "smu-backup-20261030T100000Z.json"
+	writeFile(t, filepath.Join(e.cfg.backupDir, big), strings.Repeat("x", maxStoreFile+1))
+	expectInvalid(t, e.do("GET", "/managed/backup/files/"+big, "", e.admin()), "file")
+}
+
 func TestBackupAPI_Export(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	expectInvalid(t, e.do("POST", "/managed/backup/export", `{"passphrase":"short"}`, e.admin()), "passphrase")
+	expect(t, e.do("POST", "/managed/backup/export", `{"passphrase":"x","extra":1}`, e.admin()), http.StatusBadRequest, "bad_request")
 	rec := e.do("POST", "/managed/backup/export", jsonBody(t, map[string]string{"passphrase": testPassphrase}), e.admin())
 	expect(t, rec, http.StatusOK, "")
 	out := decodeTo[map[string]string](t, rec.Body.Bytes())

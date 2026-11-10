@@ -205,6 +205,10 @@ func TestPasswordChange_Rejections(t *testing.T) {
 			expectPage(t, e.form("/login/password", tc.form, c), tc.status, tc.text)
 		})
 	}
+	// A forged submission from another site, with the right current password
+	// and the victim's session cookie, is refused before it is read.
+	expectPage(t, e.form("/login/password", passwordForm(viewerPW, "viewer-new-pw-1", "viewer-new-pw-1"), c, "Sec-Fetch-Site", "cross-site"),
+		http.StatusForbidden, "submitted from another site")
 	if !signsIn(t, e.api.store, "viewer", viewerPW) {
 		t.Error("no rejected change may alter the password")
 	}

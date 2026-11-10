@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -310,6 +311,37 @@ func TestLoadStore_BootstrapRefusesBadSources(t *testing.T) {
 	}
 }
 
+// A store dir the gateway cannot write (a read-only /data, with the key from a
+// secret elsewhere) stops the load, and no password is shown for an admin that
+// was never saved.
+func TestLoadStore_BootstrapThatCannotBeSavedStopsTheLoad(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions do not bind on Windows or as root")
+	}
+	f := bootstrapFixture(t)
+	f.keyPath = filepath.Join(t.TempDir(), "store.key")
+	if err := os.WriteFile(f.keyPath, []byte(testStoreKeyHex+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(f.usersPath)
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf strings.Builder
+	_, err := loadStore(f.opts(noEnv), newCapturingLogger(&buf))
+	if err == nil || !strings.Contains(err.Error(), "bootstrap users file") || !strings.Contains(err.Error(), f.usersPath) {
+		t.Fatalf("want the bootstrap refused, naming %s, got %v", f.usersPath, err)
+	}
+	if strings.Contains(buf.String(), "password=") || strings.Contains(buf.String(), "bootstrap admin created") {
+		t.Errorf("an admin that was never saved must not be announced: %s", buf.String())
+	}
+	if _, err := os.Stat(f.usersPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("no users file may be left behind: %v", err)
+	}
+}
+
 func TestLoadStore_ExistingUsersFileIgnoresBootstrapVariables(t *testing.T) {
 	f := newStoreFixture(t)
 	var buf strings.Builder
@@ -466,6 +498,11 @@ func TestLoadStore_RefusesStoresItCannotOpen(t *testing.T) {
 			users, _ := os.ReadFile(f.usersPath)
 			writeFile(t, f.connsPath, string(users))
 		}, func(f storeFixture) string { return f.connsPath }, "holds the users store, not the connections store"},
+		{"the backup schedule in the users file's place", func(t *testing.T, f storeFixture) {
+			if err := f.sealer(t).writeDoc(roleSchedule, f.usersPath, scheduleDoc{}); err != nil {
+				t.Fatal(err)
+			}
+		}, func(f storeFixture) string { return f.usersPath }, "holds the backup schedule store, not the users store"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -970,4 +1007,30 @@ func TestStore_CRUD_RaceSafe(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// An import replaces whole lists. The store still refuses a list that breaks
+// its rules, and keeps what it had, in memory and on disk.
+func TestStore_ReplaceRefusesAnInvalidList(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	usersBefore, connsBefore := len(s.users), len(s.conns)
+	usersFile, _ := os.ReadFile(f.usersPath)
+	connsFile, _ := os.ReadFile(f.connsPath)
+
+	if _, err := s.replaceUsers(append(append([]userRec{}, s.users...), s.users[0])); err == nil || !strings.Contains(err.Error(), "appears more than once") {
+		t.Errorf("replaceUsers with a duplicate: want a refusal, got %v", err)
+	}
+	if err := s.replaceConnections(append(append([]connRec{}, s.conns...), s.conns[0])); err == nil || !strings.Contains(err.Error(), "appears more than once") {
+		t.Errorf("replaceConnections with a duplicate: want a refusal, got %v", err)
+	}
+	if len(s.users) != usersBefore || len(s.conns) != connsBefore {
+		t.Error("a refused replace changed the store in memory")
+	}
+	if now, _ := os.ReadFile(f.usersPath); !bytes.Equal(now, usersFile) {
+		t.Error("a refused replace rewrote the users file")
+	}
+	if now, _ := os.ReadFile(f.connsPath); !bytes.Equal(now, connsFile) {
+		t.Error("a refused replace rewrote the connections file")
+	}
 }

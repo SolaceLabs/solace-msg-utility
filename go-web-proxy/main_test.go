@@ -2,12 +2,22 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestEnvOr(t *testing.T) {
@@ -241,4 +251,332 @@ func TestRootHandler_WithManagedRouting(t *testing.T) {
 			t.Errorf("%s: want %s, got %q", path, want, got)
 		}
 	}
+}
+
+// ----- serve: a whole start and shutdown ---------------------------------------
+
+// syncBuffer is the log serve writes to from its own goroutines.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// serveRun is one serve call in the background.
+type serveRun struct {
+	base    string // https://127.0.0.1:<port>
+	log     *syncBuffer
+	signals chan os.Signal
+	done    chan error
+}
+
+// startServe runs serve on p with the run's log and signal channel, listening
+// on a loopback port unless p.listen is given, with the real shutdown deadline
+// unless p.shutdown is. Closing the listener at cleanup ends a serve a failed
+// test left running.
+func startServe(t *testing.T, p process) *serveRun {
+	t.Helper()
+	r := &serveRun{log: &syncBuffer{}, signals: make(chan os.Signal, 1), done: make(chan error, 1)}
+	if p.listen == nil {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = ln.Close() })
+		r.base = "https://" + ln.Addr().String()
+		p.listen = func() (net.Listener, error) { return ln, nil }
+	}
+	if p.shutdown == 0 {
+		p.shutdown = shutdownTimeout
+	}
+	p.log, p.signals = r.log, r.signals
+	go func() {
+		r.done <- serve(p)
+	}()
+	return r
+}
+
+// result waits for serve to return.
+func (r *serveRun) result(t *testing.T) error {
+	t.Helper()
+	select {
+	case err := <-r.done:
+		return err
+	case <-time.After(30 * time.Second):
+		t.Fatalf("serve did not return; log:\n%s", r.log)
+		return nil
+	}
+}
+
+// gatewayDir is a temp dir holding a self-signed tls.crt and tls.key, with the
+// seeding and bootstrap variables cleared.
+func gatewayDir(t *testing.T) string {
+	t.Helper()
+	clearSeedEnv(t)
+	t.Setenv("ADMIN_PASSWORD", "")
+	t.Setenv("ADMIN_PASSWORD_FILE", "")
+	dir := t.TempDir()
+	if _, err := generateSelfSigned(filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key")); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// yamlPath is dir/name as a single-quoted YAML scalar (Windows paths included).
+func yamlPath(dir, name string) string { return "'" + filepath.Join(dir, name) + "'" }
+
+// writeServeConfig writes dir/config.yaml for gatewayDir's pair, logging at
+// debug, plus extra keys, and returns its path.
+func writeServeConfig(t *testing.T, dir, extra string) string {
+	t.Helper()
+	path := filepath.Join(dir, "config.yaml")
+	body := "version: 1\ntls:\n  certFile: " + yamlPath(dir, "tls.crt") + "\n  keyFile: " + yamlPath(dir, "tls.key") +
+		"\n  trustDir: " + yamlPath(dir, "trust") + "\nlogLevel: debug\n" + extra
+	writeFile(t, path, body)
+	return path
+}
+
+// provisionedKeys turns Provisioned mode on, with the stores in dir.
+func provisionedKeys(dir string) string {
+	return "connModes: provisioned\nusersFile: " + yamlPath(dir, "users.yaml") + "\nconnectionsFile: " + yamlPath(dir, "connections.yaml") + "\n"
+}
+
+// gatewayClient trusts only the certificate in dir, the one the gateway serves.
+func gatewayClient(t *testing.T, dir string) *http.Client {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "tls.crt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(data) {
+		t.Fatal("tls.crt holds no certificate")
+	}
+	return &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
+	}}
+}
+
+// get fetches path from the running gateway and returns the status and body.
+func (r *serveRun) get(t *testing.T, client *http.Client, path string) (int, string) {
+	t.Helper()
+	resp, err := client.Get(r.base + path)
+	if err != nil {
+		t.Fatalf("GET %s: %v\nlog:\n%s", path, err, r.log)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode, string(body)
+}
+
+func expectLogged(t *testing.T, log string, want ...string) {
+	t.Helper()
+	for _, w := range want {
+		if !strings.Contains(log, w) {
+			t.Errorf("log lacks %q:\n%s", w, log)
+		}
+	}
+}
+
+// A first start in Gateway mode: config.yaml is seeded from the environment,
+// a removed setting and skipped verification are warned about, the gateway
+// serves over its certificate, and SIGTERM shuts it down cleanly.
+func TestServe_GatewayModeStartsAndShutsDownOnASignal(t *testing.T) {
+	dir := gatewayDir(t)
+	t.Setenv("SSL_CERT_FILE", filepath.Join(dir, "tls.crt"))
+	t.Setenv("SSL_KEY_FILE", filepath.Join(dir, "tls.key"))
+	t.Setenv("SSL_TRUST_DIR", filepath.Join(dir, "trust"))
+	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "true")
+	t.Setenv("LOG_LEVEL", "debug")
+	t.Setenv("APP_DIR", "/old")
+	configFile := filepath.Join(dir, "data", "config.yaml")
+	t.Setenv("CONFIG_FILE", configFile) // the file read: warned about, not refused
+
+	r := startServe(t, process{configFile: configFile})
+	if code, body := r.get(t, gatewayClient(t, dir), "/robots.txt"); code != http.StatusOK || body != robotsTxt {
+		t.Errorf("/robots.txt: %d %q", code, body)
+	}
+
+	r.signals <- syscall.SIGTERM
+	if err := r.result(t); err != nil {
+		t.Fatalf("serve after SIGTERM: %v", err)
+	}
+	if _, err := os.Stat(configFile); err != nil {
+		t.Errorf("config.yaml was not seeded: %v", err)
+	}
+	log := r.log.String()
+	expectLogged(t, log,
+		"config file seeded from the environment",
+		"setting=APP_DIR",
+		"setting=CONFIG_FILE",
+		"upstream certificates will NOT be validated",
+		"conn_modes=direct",
+		"listening",
+		"shutdown signal received",
+		"shutdown complete",
+	)
+	if strings.Contains(log, "administration app enabled") {
+		t.Error("Gateway mode enabled the admin console")
+	}
+}
+
+// A start in Provisioned mode: the stores and their key are made, the admin
+// console is enabled, a variable that differs from the file is reported and
+// not applied, and the shutdown stops the backup loop before returning.
+func TestServe_ProvisionedModeStartsAndShutsDownOnASignal(t *testing.T) {
+	dir := gatewayDir(t)
+	configFile := writeServeConfig(t, dir, provisionedKeys(dir))
+	t.Setenv("STORE_KEY_FILE", filepath.Join(dir, "store.key"))
+	t.Setenv("ADMIN_PASSWORD", "serve-test-password")
+	t.Setenv("LOG_LEVEL", "error") // the file says debug, and wins
+
+	r := startServe(t, process{configFile: configFile})
+	if code, _ := r.get(t, gatewayClient(t, dir), "/login"); code != http.StatusOK {
+		t.Errorf("/login: want 200, got %d", code)
+	}
+
+	r.signals <- syscall.SIGTERM
+	if err := r.result(t); err != nil {
+		t.Fatalf("serve after SIGTERM: %v", err)
+	}
+	for _, name := range []string{"users.yaml", "store.key"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s was not created: %v", name, err)
+		}
+	}
+	expectLogged(t, r.log.String(),
+		"env=LOG_LEVEL",
+		"conn_modes=provisioned",
+		"administration app enabled",
+		"shutdown complete",
+	)
+}
+
+// Every way a start can fail ends serve with an error, logged with what failed:
+// main exits 1 on it.
+func TestServe_FailuresStopTheStart(t *testing.T) {
+	cases := []struct {
+		name   string
+		setup  func(t *testing.T, dir string) string // returns config.yaml's path
+		listen func() (net.Listener, error)
+		want   string
+	}{
+		{"a config.yaml it cannot use", func(t *testing.T, dir string) string {
+			return writeServeConfig(t, dir, "bogus: 1\n")
+		}, nil, "configuration failed"},
+		{"a certificate pair that does not load", func(t *testing.T, dir string) string {
+			writeFile(t, filepath.Join(dir, "tls.key"), "not a key")
+			return writeServeConfig(t, dir, "")
+		}, nil, "server certificate setup failed"},
+		{"a trust dir that is a file", func(t *testing.T, dir string) string {
+			writeFile(t, filepath.Join(dir, "trust"), "not a directory")
+			return writeServeConfig(t, dir, "")
+		}, nil, "trust pool setup failed"},
+		{"a store without its key", func(t *testing.T, dir string) string {
+			t.Setenv("STORE_KEY_FILE", filepath.Join(dir, "store.key"))
+			writeFile(t, filepath.Join(dir, "users.yaml"), "users: []\n")
+			return writeServeConfig(t, dir, provisionedKeys(dir))
+		}, nil, "provisioned store load failed"},
+		{"a backup schedule it cannot read", func(t *testing.T, dir string) string {
+			t.Setenv("STORE_KEY_FILE", filepath.Join(dir, "store.key"))
+			writeFile(t, filepath.Join(dir, "store.key"), testStoreKeyHex+"\n")
+			writeFile(t, filepath.Join(dir, scheduleFileName), "not sealed\n")
+			return writeServeConfig(t, dir, provisionedKeys(dir))
+		}, nil, "read backup schedule"},
+		{"a port it cannot listen on", func(t *testing.T, dir string) string {
+			return writeServeConfig(t, dir, "")
+		}, func() (net.Listener, error) {
+			return nil, errors.New("address already in use")
+		}, "listener failed"},
+		{"a listener that fails while serving", func(t *testing.T, dir string) string {
+			return writeServeConfig(t, dir, "")
+		}, func() (net.Listener, error) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				return nil, err
+			}
+			_ = ln.Close() // Accept fails at once
+			return ln, nil
+		}, "listener failed"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := gatewayDir(t)
+			r := startServe(t, process{configFile: c.setup(t, dir), listen: c.listen})
+			if err := r.result(t); err == nil {
+				t.Fatalf("serve returned nil; log:\n%s", r.log)
+			}
+			expectLogged(t, r.log.String(), c.want)
+		})
+	}
+}
+
+// A connection still open at the shutdown deadline, here one that never starts
+// its TLS handshake, fails the graceful shutdown: serve says so and returns the
+// error, so main exits 1 and the stop is never reported as clean.
+func TestServe_ShutdownThatOverrunsItsDeadlineFails(t *testing.T) {
+	dir := gatewayDir(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	tracked := make(chan struct{})
+	r := startServe(t, process{
+		configFile: writeServeConfig(t, dir, ""),
+		listen:     func() (net.Listener, error) { return &acceptWatch{Listener: ln, tracked: tracked}, nil },
+		shutdown:   100 * time.Millisecond,
+	})
+
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	select {
+	case <-tracked:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("the connection was never accepted; log:\n%s", r.log)
+	}
+
+	r.signals <- syscall.SIGTERM
+	if err := r.result(t); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want the shutdown deadline's error, got %v; log:\n%s", err, r.log)
+	}
+	log := r.log.String()
+	expectLogged(t, log, "shutdown signal received", "graceful shutdown failed")
+	if strings.Contains(log, "shutdown complete") {
+		t.Error("an overrun shutdown must not be reported as complete")
+	}
+}
+
+// acceptWatch closes tracked when the server asks for its second connection:
+// by then it has counted the first among the open connections a graceful
+// shutdown waits for. Only the server's accept loop calls Accept.
+type acceptWatch struct {
+	net.Listener
+	tracked chan struct{}
+	calls   int
+}
+
+func (l *acceptWatch) Accept() (net.Conn, error) {
+	l.calls++
+	if l.calls == 2 {
+		close(l.tracked)
+	}
+	return l.Listener.Accept()
 }

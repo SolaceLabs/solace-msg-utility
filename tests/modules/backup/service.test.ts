@@ -14,6 +14,17 @@ describe('backup/service', () => {
         expect(fetchMock()).toHaveBeenCalledWith('/managed/backup', { method: 'GET', credentials: 'same-origin' });
     });
 
+    it('download GETs one saved backup by its name, escaped', async () => {
+        answer(200, { filename: 'smu-backup-20261109T020000Z.json', content: '{}' });
+        expect(await createBackupService().download('smu-backup-20261109T020000Z.json'))
+            .toEqual({ ok: true, data: { filename: 'smu-backup-20261109T020000Z.json', content: '{}' } });
+        expect(fetchMock()).toHaveBeenCalledWith('/managed/backup/files/smu-backup-20261109T020000Z.json', { method: 'GET', credentials: 'same-origin' });
+        fetchMock().mockClear();
+        answer(404, { error: 'not_found' });
+        await createBackupService().download('../users.yaml');
+        expect(sent()[0]).toBe('/managed/backup/files/..%2Fusers.yaml');
+    });
+
     it('saveSchedule PUTs the schedule, the keep count and the passphrase', async () => {
         answer(204);
         const body = { kind: 'weekly' as const, minute: 15, hour: 2, weekday: 1, day: 0, keep: 14, passphrase: '' };

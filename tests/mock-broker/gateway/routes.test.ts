@@ -125,6 +125,15 @@ const ROWS: { segment: string; route: string; call: () => Promise<Outcome> }[] =
             return backup.runNow();
         },
     },
+    {
+        segment: 'backup',
+        route: 'GET /managed/backup/files/{name}',
+        call: async () => {
+            await backup.saveSchedule(DAILY);
+            const run = await backup.runNow();
+            return run.ok ? backup.download(run.data.file) : run;
+        },
+    },
     { segment: 'backup', route: 'POST /managed/backup/export', call: () => backup.exportFile(PASS) },
     { segment: 'backup', route: 'POST /managed/backup/preview', call: async () => backup.preview(await exported(), PASS) },
     {

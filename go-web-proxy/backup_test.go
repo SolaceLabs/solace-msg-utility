@@ -332,6 +332,13 @@ func TestBackup_SettingsChangesNamesDottedKeysAndSkipsHostPaths(t *testing.T) {
 	if got := settingsChanges(cur, cur.clone()); len(got) != 0 {
 		t.Fatalf("no change lists nothing: %v", got)
 	}
+	// A backup that leaves a list unset (null, or the key absent) holds it
+	// empty, as config.yaml does: not a change.
+	unset := cur.clone()
+	unset.Access.Allow, unset.Access.TrustedProxies = nil, nil
+	if got := settingsChanges(cur, unset); len(got) != 0 {
+		t.Fatalf("an unset list is an empty one: %v", got)
+	}
 }
 
 // ----- schedule ------------------------------------------------------------------------
@@ -677,6 +684,68 @@ func TestBackupService_RunFailures(t *testing.T) {
 	}
 	if !strings.Contains(x.log.String(), "backup failed") {
 		t.Fatal("a failure is logged")
+	}
+}
+
+func TestBackupService_RunRenamesThePartialAndDeletesStaleOnes(t *testing.T) {
+	x := newBackupFixture(t)
+	x.schedule(t, 7)
+	// What stopped runs left, and look-alikes the gateway never writes.
+	writeFile(t, filepath.Join(x.dir, "smu-backup-20261108T020000Z.partial"), "half a backup")
+	for _, foreign := range []string{"notes.partial", "smu-backup-latest.partial"} {
+		writeFile(t, filepath.Join(x.dir, foreign), "keep me")
+	}
+	if err := os.Mkdir(filepath.Join(x.dir, "smu-backup-20200101T000000Z.partial"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	name, err := x.b.run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(x.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := []string{}
+	for _, e := range entries {
+		got = append(got, e.Name())
+	}
+	want := []string{"notes.partial", "smu-backup-20200101T000000Z.partial", name, "smu-backup-latest.partial"}
+	if name != "smu-backup-20261109T090000Z.json" || !reflect.DeepEqual(got, want) {
+		t.Fatalf("want %v, got %v (wrote %s)", want, got, name)
+	}
+	if !strings.Contains(x.log.String(), "deleted an unfinished backup") {
+		t.Fatal("a deleted partial is logged")
+	}
+	// A partial the run cannot create leaves no backup.
+	x.clock.set(x.clock.now().Add(time.Second))
+	if err := os.Mkdir(filepath.Join(x.dir, "smu-backup-20261109T090001Z.partial"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := x.b.run(); err == nil || !strings.Contains(err.Error(), "cannot write") {
+		t.Fatalf("want cannot write, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(x.dir, "smu-backup-20261109T090001Z.json")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("no .json without a whole partial: %v", err)
+	}
+}
+
+func TestBackupService_RunLogsAPartialItCannotDelete(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs Unix permissions and a non-root user")
+	}
+	x := newBackupFixture(t)
+	x.schedule(t, 7)
+	writeFile(t, filepath.Join(x.dir, "smu-backup-20261108T020000Z.partial"), "half a backup")
+	if err := os.Chmod(x.dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(x.dir, 0o700)
+	if _, err := x.b.run(); err == nil {
+		t.Fatal("a read-only directory takes no backup")
+	}
+	if !strings.Contains(x.log.String(), "cannot delete an unfinished backup") {
+		t.Fatal("want the failure logged")
 	}
 }
 

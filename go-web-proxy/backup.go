@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,12 +59,22 @@ const (
 	maxBackupSleep = time.Hour
 )
 
-// backupNamePattern is the only name the gateway writes into, lists from, or
-// deletes from backupRoot.
+// backupNamePattern is the only name the gateway lists, reads, or prunes in
+// backupRoot.
 var backupNamePattern = regexp.MustCompile(`^smu-backup-[0-9]{8}T[0-9]{6}Z\.json$`)
+
+// partialNamePattern is a run's file while it is written: the backup's name
+// ending .partial instead of .json. The run renames it once the data is on
+// disk, so a .json in the directory is always a whole backup; a .partial left
+// by a run that stopped (a crash, a full disk) is deleted by the next run.
+var partialNamePattern = regexp.MustCompile(`^smu-backup-[0-9]{8}T[0-9]{6}Z\.partial$`)
 
 func backupName(t time.Time) string {
 	return "smu-backup-" + t.UTC().Format(backupNameLayout) + ".json"
+}
+
+func partialName(name string) string {
+	return strings.TrimSuffix(name, ".json") + ".partial"
 }
 
 // ----- file format ----------------------------------------------------------------
@@ -591,6 +602,7 @@ func (b *backupService) run() (string, error) {
 		return "", errNoSched
 	}
 	k, _ := sd.backupKey() // validated when it was loaded or saved
+	b.removePartials()
 	name := backupName(b.now())
 	data, err := sealBackup(k, b.snapshot())
 	if err == nil {
@@ -612,16 +624,42 @@ func (b *backupService) run() (string, error) {
 	return name, nil
 }
 
-// writeNew writes a backup that must not exist yet, atomically, owner-only.
+// writeNew writes a backup that must not exist yet, owner-only: the data goes
+// to its .partial name, is synced, and only then is renamed to name.
 func (b *backupService) writeNew(name string, data []byte) error {
 	path := filepath.Join(b.dir, name)
 	if _, err := os.Lstat(path); err == nil {
 		return fmt.Errorf("%s already exists; wait a second and run it again", path)
 	}
-	if err := writeFileAtomic(path, data, 0o600); err != nil {
-		return fmt.Errorf("cannot write %s: %w%s", path, err, ownershipHint(err))
+	partial := filepath.Join(b.dir, partialName(name))
+	if err := createExclusive(partial, data, 0o600); err != nil {
+		return fmt.Errorf("cannot write %s: %w%s", partial, err, ownershipHint(err))
+	}
+	if err := os.Rename(partial, path); err != nil {
+		_ = os.Remove(partial)
+		return fmt.Errorf("cannot rename %s to %s: %w%s", partial, name, err, ownershipHint(err))
 	}
 	return nil
+}
+
+// removePartials deletes the .partial files runs that stopped left behind.
+// It runs under runMu, so no run is writing one. A directory it cannot read
+// is left to the write that follows to report.
+func (b *backupService) removePartials() {
+	entries, err := os.ReadDir(b.dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !partialNamePattern.MatchString(e.Name()) || !e.Type().IsRegular() {
+			continue
+		}
+		if err := os.Remove(filepath.Join(b.dir, e.Name())); err != nil {
+			b.logger.Warn("backup: cannot delete an unfinished backup", "file", e.Name(), "err", err)
+			continue
+		}
+		b.logger.Warn("backup: deleted an unfinished backup a stopped run left", "file", e.Name())
+	}
 }
 
 // prune deletes the oldest backups beyond keep. Only names the gateway

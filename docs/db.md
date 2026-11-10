@@ -36,8 +36,11 @@ Standalone and Gateway mode have no store. This question concerns Provisioned mo
 | --- | --- | --- |
 | `users.yaml` | accounts, the admin flag, grants, each user's modules | YAML, encrypted whole |
 | `connections.yaml` | brokers, their SEMP accounts, each Message VPN's client credentials | YAML, encrypted whole |
-| `store.key` | the 32-byte key for both files (`STORE_KEY_FILE` can move it to a secret) | 64 hex characters |
+| `store.key` | the 32-byte key for the encrypted files (`STORE_KEY_FILE` can move it to a secret) | 64 hex characters |
+| `backup.yaml` | the backup schedule and the key derived from its passphrase | YAML, encrypted whole |
 | `config.yaml` | the gateway's settings | plain YAML |
+
+**Backups.** Backup & Restore (`backup.go`, `backup_api.go`) exports users, connections and settings as one file sealed with a passphrase-derived key, imports one section by section, and writes scheduled backups into the `/backup` mount. A store change must keep that format readable, or migrate it.
 
 **Encryption.** `storecrypt.go` seals each store file whole with AES-256-GCM and a fresh random nonce on every write. The header is `SMUS`, a version byte and a role byte. Reads are capped at 8 MiB before decrypting. `keyfile.go` loads or generates the key and refuses to start on any mismatch between the key and the stores.
 

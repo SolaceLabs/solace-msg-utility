@@ -11,8 +11,9 @@
  * passwords in plain text, so a demo backup carries them that way: it imports
  * into the demo, and a real gateway refuses its users.
  *
- * Not simulated: the backup directory is in memory, and the schedule runs
- * only through Back up now (the demo keeps no timer).
+ * Not simulated: the backup directory is in memory, so a run has no
+ * `.partial` file to rename, and the schedule runs only through Back up now
+ * (the demo keeps no timer).
  *
  * Mock-only.
  */
@@ -391,7 +392,7 @@ export interface BackupDeps {
     now: () => Date;
 }
 
-type Route = [string, string, (req: GatewayRequest, s: Session) => GatewayResponse | Promise<GatewayResponse>];
+type Route = [string, string, (req: GatewayRequest, s: Session, sid: string, params: string[]) => GatewayResponse | Promise<GatewayResponse>];
 
 export function createBackups({ store, settings, sessions, iter, now }: BackupDeps) {
     const files = new Map<string, string>();
@@ -433,6 +434,12 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
         dirProblem: '',
         files: list(),
     });
+
+    /** One saved backup, as the directory holds it; a name the gateway never writes is not found. */
+    const download: Route[2] = (_req, _s, _sid, [name]) => {
+        const content = NAME.test(name) ? files.get(name) : undefined;
+        return content === undefined ? error(404, 'not_found') : ok({ filename: name, content });
+    };
 
     const saveSchedule: Route[2] = async req => {
         const b = object(parseBody(req.body), ['kind', 'minute', 'hour', 'weekday', 'day', 'keep', 'passphrase']);
@@ -562,6 +569,7 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
 
     const routes: Route[] = [
         ['GET', '/managed/backup', status],
+        ['GET', '/managed/backup/files/{}', download],
         ['PUT', '/managed/backup/schedule', saveSchedule],
         ['DELETE', '/managed/backup/schedule', deleteSchedule],
         ['POST', '/managed/backup/run', runNow],

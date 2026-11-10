@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -263,32 +264,63 @@ func printVersionIfRequested(args []string, w io.Writer) bool {
 	return false
 }
 
+// listenAddr is the gateway's one port: unprivileged, so the non-root image
+// binds it without a capability.
+const listenAddr = ":9443"
+
+// shutdownTimeout is how long a graceful shutdown waits for open connections
+// before it gives up and fails.
+const shutdownTimeout = 10 * time.Second
+
 func main() {
 	if printVersionIfRequested(os.Args[1:], os.Stdout) {
 		return
 	}
-	serve()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	err := serve(process{
+		configFile: configFilePath,
+		log:        os.Stderr,
+		listen:     func() (net.Listener, error) { return net.Listen("tcp", listenAddr) },
+		signals:    signals,
+		shutdown:   shutdownTimeout,
+	})
+	if err != nil {
+		os.Exit(1)
+	}
 }
 
-// serve is the gateway proper. Split from main so the version query above does
-// not add a branch to an already dense function.
-func serve() {
+// process is what serve takes from main: the operating system's pieces and
+// the shutdown deadline. main passes the real ones; tests pass a config.yaml in
+// a temp dir, a buffer, a loopback listener, their own signal channel and, to
+// overrun it, a short deadline, so a whole start and shutdown runs in a test.
+type process struct {
+	configFile string                       // config.yaml: configFilePath
+	log        io.Writer                    // every log line
+	listen     func() (net.Listener, error) // listenAddr
+	signals    <-chan os.Signal             // SIGINT or SIGTERM: a graceful shutdown
+	shutdown   time.Duration                // shutdownTimeout
+}
+
+// serve is the gateway proper: it returns when a signal has shut it down (nil)
+// or when it cannot start or keep serving (the error, already logged; main
+// exits 1).
+func serve(p process) error {
 	// config.yaml first: the log level lives in it, so the real logger cannot
 	// exist yet. A bootstrap logger at the default level carries the one error
 	// that can happen before it.
-	configFile := configPath()
+	configFile := p.configFile
 	load, err := resolveConfig(configFile)
 	if err != nil {
-		slog.New(slog.NewTextHandler(os.Stderr, nil)).Error("configuration failed", "err", err)
-		os.Exit(1)
+		slog.New(slog.NewTextHandler(p.log, nil)).Error("configuration failed", "err", err)
+		return err
 	}
 	cfg := load.cfg
 
 	// The live keys (live.go), the log level among them, are read per request
 	// from lv, so a save on the settings page reaches them without a restart.
 	lv := newLive(cfg)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: &lv.level}))
-	slog.SetDefault(logger)
+	logger := slog.New(slog.NewTextHandler(p.log, &slog.HandlerOptions{Level: &lv.level}))
 
 	if load.seeded {
 		logger.Info("config file seeded from the environment; it is authoritative from now on", "path", configFile)
@@ -297,7 +329,7 @@ func serve() {
 		logger.Warn("env var ignored, config.yaml wins", "env", o.Env, "key", o.Key, "env_value", o.EnvValue, "file_value", o.FileValue)
 	}
 	for _, s := range load.removed {
-		logger.Warn("setting no longer used, ignored: remove it. To serve your own build, mount it at "+appRoot, "setting", s)
+		logger.Warn("setting no longer used, ignored: remove it", "setting", s.name, "instead", s.instead)
 	}
 
 	logger.Info("gateway starting",
@@ -313,13 +345,13 @@ func serve() {
 	serverCert, err := loadOrGenerateServerCert(cfg.certFile, cfg.keyFile, logger)
 	if err != nil {
 		logger.Error("server certificate setup failed", "err", err)
-		os.Exit(1)
+		return err
 	}
 
 	trustPool, err := buildTrustPool(cfg.trustDir, logger)
 	if err != nil {
 		logger.Error("trust pool setup failed", "err", err)
-		os.Exit(1)
+		return err
 	}
 	if cfg.insecureSkipVerify {
 		logger.Warn("SSL_INSECURE_SKIP_VERIFY=true — upstream certificates will NOT be validated")
@@ -336,7 +368,7 @@ func serve() {
 	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, sum: load.sum}, upstream, logger)
 	if err != nil {
 		logger.Error("provisioned store load failed", "err", err)
-		os.Exit(1)
+		return err
 	}
 	logger.Info("connection modes", "conn_modes", cfg.connModes, "default_conn", cfg.defaultConn)
 
@@ -358,7 +390,6 @@ func serve() {
 	handler := accessLog(withClient(lv, clientACL(lv, root, logger)), logger)
 
 	srv := &http.Server{
-		Addr:              ":9443",
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
@@ -366,6 +397,9 @@ func serve() {
 			MinVersion:   tls.VersionTLS12,
 			Certificates: []tls.Certificate{serverCert},
 		},
+		// net/http's own errors (a failed TLS handshake, a panicking handler)
+		// go to the same log, at info.
+		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelInfo),
 	}
 
 	// The backup schedule runs in the gateway: the image has no cron. It
@@ -379,35 +413,34 @@ func serve() {
 		close(backupsDone)
 	}
 
-	errCh := make(chan error, 1)
+	ln, err := p.listen()
+	if err != nil {
+		logger.Error("listener failed", "err", err)
+		return err
+	}
+	served := make(chan error, 1)
 	go func() {
-		logger.Info("listening", "addr", srv.Addr)
-		if err := srv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
-		close(errCh)
+		logger.Info("listening", "addr", ln.Addr().String())
+		served <- srv.ServeTLS(ln, "", "")
 	}()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
 	select {
-	case err, ok := <-errCh:
-		if ok && err != nil {
-			logger.Error("listener failed", "err", err)
-			os.Exit(1)
-		}
-	case sig := <-sigCh:
+	case err := <-served:
+		// Before a shutdown, ServeTLS returns only when it fails.
+		logger.Error("listener failed", "err", err)
+		return err
+	case sig := <-p.signals:
 		logger.Info("shutdown signal received", "signal", sig.String())
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), p.shutdown)
 		defer cancel()
 		err := srv.Shutdown(ctx)
 		stopBackups()
 		<-backupsDone
 		if err != nil {
 			logger.Error("graceful shutdown failed", "err", err)
-			os.Exit(1)
+			return err
 		}
 		logger.Info("shutdown complete")
+		return nil
 	}
 }

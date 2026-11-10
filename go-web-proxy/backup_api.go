@@ -12,13 +12,14 @@ import (
 // The Backup & Restore page's API (admin only; backup.go has the format and
 // the schedule):
 //
-//	GET    /managed/backup           schedule, last and next run, directory problem, files
-//	PUT    /managed/backup/schedule  save the schedule; a passphrase derives a new key
-//	DELETE /managed/backup/schedule  remove it (the files stay)
-//	POST   /managed/backup/run       back up now, with the schedule's key
-//	POST   /managed/backup/export    a backup file, sealed with the given passphrase
-//	POST   /managed/backup/preview   what importing a file would change
-//	POST   /managed/backup/import    import it, section by section
+//	GET    /managed/backup               schedule, last and next run, directory problem, files
+//	GET    /managed/backup/files/{name}  one saved backup, as it is on disk
+//	PUT    /managed/backup/schedule      save the schedule; a passphrase derives a new key
+//	DELETE /managed/backup/schedule      remove it (the files stay)
+//	POST   /managed/backup/run           back up now, with the schedule's key
+//	POST   /managed/backup/export        a backup file, sealed with the given passphrase
+//	POST   /managed/backup/preview       what importing a file would change
+//	POST   /managed/backup/import        import it, section by section
 //
 // Preview and import take the file itself or the name of one in the backup
 // directory, and the passphrase, each time: the gateway holds no pending
@@ -35,6 +36,7 @@ const (
 
 func (h *managedHandler) registerBackupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /managed/backup", h.adminOnly(h.backupStatus))
+	mux.HandleFunc("GET /managed/backup/files/{name}", h.adminOnly(h.downloadBackup))
 	mux.HandleFunc("PUT /managed/backup/schedule", h.adminOnly(h.saveBackupSchedule))
 	mux.HandleFunc("DELETE /managed/backup/schedule", h.adminOnly(h.deleteBackupSchedule))
 	mux.HandleFunc("POST /managed/backup/run", h.adminOnly(h.runBackup))
@@ -92,6 +94,24 @@ func (h *managedHandler) backupStatus(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// downloadBackup answers one saved backup as {filename, content}, the shape
+// an export has; the content is the file as written, still sealed with its
+// schedule's passphrase. A name the gateway would not write, or no such
+// file, is 404 not_found.
+func (h *managedHandler) downloadBackup(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	data, err := h.backups.read(name)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		writeError(w, http.StatusNotFound, "not_found")
+	case err != nil:
+		h.writeBackupProblem(w, "downloadBackup", err)
+	default:
+		h.logger.Warn("backup downloaded", "by", sessionOf(r).user, "file", name)
+		writeJSON(w, http.StatusOK, map[string]string{"filename": name, "content": string(data)})
+	}
 }
 
 type scheduleSaveJSON struct {

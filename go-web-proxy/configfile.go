@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -20,13 +21,14 @@ import (
 
 // config.yaml is the gateway's single source of settings. Environment variables
 // seed it on first start only (see resolveConfig); afterwards the file wins and
-// a differing env var is reported, never applied. Some values are deliberately
-// environment-only and never written to the file: CONFIG_FILE (where the file
-// is) and STORE_KEY_FILE (where the store key is), so an admin-editable
-// settings file can never point the gateway at a different secret.
+// a differing env var is reported, never applied. The file is always at
+// configFilePath; no setting moves it. STORE_KEY_FILE (where the store key is)
+// is deliberately environment-only and never written to the file, so an
+// admin-editable settings file can never point the gateway at a different
+// secret.
 const (
 	configVersion       = 1
-	defaultConfigFile   = "/data/config.yaml"
+	configFilePath      = "/data/config.yaml" // fixed, like appRoot
 	defaultStoreKeyFile = "/data/store.key"
 )
 
@@ -34,8 +36,7 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # Environment variables seed this file on first start only, when it does not
 # exist. Afterwards the file wins; a changed env var is ignored and logged.
 # Edit this file and restart the gateway, or delete it to re-seed from env.
-# CONFIG_FILE (this file) and STORE_KEY_FILE (the store key) are
-# environment-only and never appear here.
+# STORE_KEY_FILE (the store key) is environment-only and never appears here.
 # access.*, session.*, login.* and modules.* have no env var: edit them here.
 # An empty allow list admits every client; trustedProxies lists the reverse
 # proxies whose X-Forwarded-For is believed. session.*, login.* and modules.*
@@ -209,10 +210,6 @@ func hostedEnv(raw string) string {
 	return raw
 }
 func identity(raw string) string { return raw }
-
-// configPath is one of the environment-only settings (the others are the
-// secret paths, read by secretPathsFromEnv).
-func configPath() string { return envOr("CONFIG_FILE", defaultConfigFile) }
 
 // secretPaths are the environment-only locations of the gateway's secrets.
 // toConfig takes them from its caller, never from the file.
@@ -458,20 +455,31 @@ type configLoad struct {
 	cfg       config
 	seeded    bool
 	overrides []envOverride
-	removed   []string // removed settings still set (removedInUse); ignored
-	sum       [32]byte // SHA-256 of the file as read or seeded
+	removed   []removedSetting // still set (removedInUse); ignored
+	sum       [32]byte         // SHA-256 of the file as read or seeded
 }
 
-// removedInUse names the settings an earlier release read that the file or
-// the environment still sets. They are accepted and ignored, so an upgrade
-// never fails on them; serve warns about each.
-func removedInUse(fc fileConfig) []string {
-	var out []string
+// removedSetting is a setting an earlier release read that the file or the
+// environment still sets.
+type removedSetting struct {
+	name    string // the key or the variable
+	instead string // what replaced it, for the warning
+}
+
+// removedInUse names the removed settings still set. They are accepted and
+// ignored, so an upgrade never fails on them; serve warns about each. A
+// CONFIG_FILE naming another file never gets here: resolveConfig refuses it.
+func removedInUse(fc fileConfig) []removedSetting {
+	const ownBuild = "to serve your own build, mount it at " + appRoot
+	var out []removedSetting
 	if fc.RemovedAppDir != nil {
-		out = append(out, "appDir")
+		out = append(out, removedSetting{"appDir", ownBuild})
 	}
 	if os.Getenv("APP_DIR") != "" {
-		out = append(out, "APP_DIR")
+		out = append(out, removedSetting{"APP_DIR", ownBuild})
+	}
+	if os.Getenv("CONFIG_FILE") != "" {
+		out = append(out, removedSetting{"CONFIG_FILE", "config.yaml is always " + configFilePath})
 	}
 	return out
 }
@@ -487,6 +495,12 @@ type configSource struct {
 // resolveConfig loads config.yaml, seeding it from the environment when it does
 // not exist yet. Every failure is fatal for the caller and names the path.
 func resolveConfig(path string) (configLoad, error) {
+	// CONFIG_FILE is no longer read. One that still names another file stops
+	// the start: seeding a fresh file instead would drop that file's settings,
+	// the access list among them, without a word.
+	if v := os.Getenv("CONFIG_FILE"); v != "" && filepath.Clean(v) != filepath.Clean(path) {
+		return configLoad{}, fmt.Errorf("CONFIG_FILE=%q is no longer read: config.yaml is always %s. Move the file there and remove CONFIG_FILE", v, path)
+	}
 	secrets := secretPathsFromEnv()
 	data, err := os.ReadFile(path)
 	switch {
@@ -527,7 +541,7 @@ func seedConfigFile(path string, cfg config) ([32]byte, error) {
 		return [32]byte{}, fmt.Errorf("cannot encode config file %q: %w", path, err)
 	}
 	if err := writeFileAtomic(path, data, 0o644); err != nil {
-		return [32]byte{}, fmt.Errorf("cannot write config file %q: %w. The gateway creates it on first start. Fix: make the directory writable by the gateway user (UID 65532), e.g. mount a writable volume at /data, or set CONFIG_FILE to a writable path", path, err)
+		return [32]byte{}, fmt.Errorf("cannot write config file %q: %w. The gateway creates it on first start. Fix: make the directory writable by the gateway user (UID 65532), e.g. mount a writable volume at /data", path, err)
 	}
 	return sha256.Sum256(data), nil
 }

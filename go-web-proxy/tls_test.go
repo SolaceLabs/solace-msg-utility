@@ -2,11 +2,13 @@ package main
 
 import (
 	"crypto/x509"
+	"encoding/pem"
 	"io"
 	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -222,6 +224,37 @@ func TestBuildTrustPool_RejectsFile(t *testing.T) {
 	}
 }
 
+// A trust dir the gateway may not look into stops the start, naming it: a
+// /tls mounted owner-only for another user must not quietly leave the broker
+// CAs out.
+func TestBuildTrustPool_UnreadableDirStopsTheStart(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions do not bind on Windows or as root")
+	}
+	closed := filepath.Join(t.TempDir(), "closed")
+	trust := filepath.Join(t.TempDir(), "trust")
+	for _, d := range []string{closed, trust} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(d, 0o755) })
+		if err := os.Chmod(d, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct{ name, dir, want string }{
+		{"its parent cannot be searched", filepath.Join(closed, "trust"), "stat trust dir"},
+		{"it cannot be listed", trust, "read trust dir"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := buildTrustPool(c.dir, quietLogger()); err == nil || !strings.Contains(err.Error(), c.want+" "+c.dir) {
+				t.Fatalf("want %q naming %s, got %v", c.want, c.dir, err)
+			}
+		})
+	}
+}
+
 func TestAppendPEMCerts_CountsCertsSkipsNonCert(t *testing.T) {
 	dir := t.TempDir()
 	cp := filepath.Join(dir, "src.crt")
@@ -242,5 +275,56 @@ func TestAppendPEMCerts_CountsCertsSkipsNonCert(t *testing.T) {
 	// Nothing usable — zero added.
 	if n := appendPEMCerts(pool, []byte("no pem here")); n != 0 {
 		t.Errorf("garbage: want 0 added, got %d", n)
+	}
+}
+
+// Generation that cannot write where the pair belongs stops the start, naming
+// the path: /tls mounted wrong, or a path that is a directory.
+func TestLoadOrGenerateServerCert_UnwritableLocationsStopTheStart(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	writeFile(t, file, "x")
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ name, cert, key, want string }{
+		{"the certificate's directory is a file", filepath.Join(file, "tls.crt"), filepath.Join(dir, "a.key"), "mkdir " + file},
+		{"the key's directory is a file", filepath.Join(dir, "b.crt"), filepath.Join(file, "tls.key"), "mkdir " + file},
+		{"the certificate path is a directory", sub, filepath.Join(dir, "c.key"), "open " + sub},
+		{"the key path is a directory", filepath.Join(dir, "d.crt"), sub, "open " + sub},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := loadOrGenerateServerCert(c.cert, c.key, quietLogger()); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("want an error with %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+// Files in the trust dir that hold no usable certificate are skipped with a
+// warning, never a refusal: a damaged CA, a private key put there by mistake
+// and, where symlinks exist, a link to a file that is gone.
+func TestBuildTrustPool_SkipsFilesWithoutACertificate(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "damaged.crt"), string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("not DER")})))
+	writeFile(t, filepath.Join(dir, "key.pem"), string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("not a key")})))
+	linked := os.Symlink(filepath.Join(dir, "gone"), filepath.Join(dir, "gone.crt")) == nil
+
+	var buf strings.Builder
+	pool, err := buildTrustPool(dir, newCapturingLogger(&buf))
+	if err != nil || pool == nil {
+		t.Fatalf("want a pool, got %v", err)
+	}
+	log := buf.String()
+	if n := strings.Count(log, "trust file contained no certificates"); n != 2 {
+		t.Errorf("want 2 warnings for files without a certificate, got %d: %s", n, log)
+	}
+	if linked && !strings.Contains(log, "trust file unreadable; skipping") {
+		t.Errorf("a dangling link must be skipped with a warning: %s", log)
+	}
+	if !strings.Contains(log, "added_certs=0") {
+		t.Errorf("nothing was added: %s", log)
 	}
 }

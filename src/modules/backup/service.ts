@@ -73,6 +73,8 @@ export interface ImportResult {
 export function createBackupService() {
     return {
         status: () => managedRequest<BackupStatus>('GET', '/managed/backup'),
+        /** A saved backup as written, still sealed with its schedule's passphrase. */
+        download: (name: string) => managedRequest<{ filename: string; content: string }>('GET', `/managed/backup/files/${encodeURIComponent(name)}`),
         /** `passphrase` "" keeps the current schedule's. */
         saveSchedule: (s: BackupSchedule & { keep: number; passphrase: string }) => managedRequest('PUT', '/managed/backup/schedule', s),
         removeSchedule: () => managedRequest('DELETE', '/managed/backup/schedule'),

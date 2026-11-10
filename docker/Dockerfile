@@ -19,8 +19,8 @@
 #                  If tls.crt / tls.key are missing, the gateway generates a
 #                  self-signed pair on startup (writable mount required for that).
 #   /data        -- Writable: config.yaml in every mode, plus in Provisioned mode
-#                  users.yaml and connections.yaml (both encrypted with
-#                  store.key) and store.key. Baked empty + owned by UID 65532 so
+#                  users.yaml, connections.yaml and backup.yaml (all encrypted
+#                  with store.key) and store.key. Baked empty + owned by UID 65532 so
 #                  a named volume there inherits write access. Without a volume
 #                  it lives in the container's writable layer and config.yaml is
 #                  re-seeded from the environment whenever the container is
@@ -36,13 +36,12 @@
 #                  served at / in Provisioned mode), solAdmin.html (the admin
 #                  console), and solclient.js, jszip.min.js and licenses/.
 #
-# Environment (all optional). Except CONFIG_FILE and STORE_KEY_FILE, these only
-# SEED config.yaml on the first start, when the file does not exist; afterwards
-# the file is authoritative and a differing variable is logged, not applied.
-# The client access list (access.allow, access.trustedProxies) has no variable
-# and lives only in the file. See docs/deployment.md.
-#   CONFIG_FILE               /data/config.yaml (environment-only, never in
-#                             the file). Startup fails if it cannot be written.
+# Environment (all optional). Except STORE_KEY_FILE, these only SEED
+# config.yaml (always /data/config.yaml; startup fails if it cannot be written)
+# on the first start, when the file does not exist; afterwards the file is
+# authoritative and a differing variable is logged, not applied. The client
+# access list (access.allow, access.trustedProxies) has no variable and lives
+# only in the file. See docs/deployment.md.
 #   HOSTED                    true (default) | false. false serves the files
 #                             only; Provisioned mode needs true.
 #   CONN_MODES                direct (default, Gateway mode) | provisioned |

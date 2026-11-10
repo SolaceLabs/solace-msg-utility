@@ -821,7 +821,7 @@ async function runChecks(admin) {
 
         // Numbered after the rest, run here: it needs the admin's session and a
         // running gateway, which the restart (15) and the stop (16) end.
-        await check(18, 'Backup & Restore: an export opens and previews as no change, a scheduled run writes a sealed file into /backup, and a Merge import of it keeps the admin signed in', async () => {
+        await check(18, 'Backup & Restore: an export opens and previews as no change, a scheduled run writes a sealed file into /backup that downloads as written, and a Merge import of it keeps the admin signed in', async () => {
             const pass = 'e2e backup passphrase';
             const api = (method, pathname, json) => request(method, pathname, { jar: admin, json });
             const status = async () => JSON.parse((await api('GET', '/managed/backup')).body);
@@ -848,6 +848,8 @@ async function runChecks(admin) {
             expect(cp.code === 0, `docker compose cp ${file}: ${cp.out.trim()}`);
             const onDisk = findTokens(fs.readFileSync(dest, 'utf8'), [...Object.values(sweepable()), broker.host, 'pbkdf2-sha256$']);
             expect(onDisk.length === 0, `${file} holds ${onDisk.join(', ')} in clear`);
+            const dl = await api('GET', `/managed/backup/files/${file}`);
+            expect(dl.status === 200 && JSON.parse(dl.body).content === fs.readFileSync(dest, 'utf8'), `download of ${file}: ${dl.status} ${dl.body.slice(0, 200)}`);
             const imp = await api('POST', '/managed/backup/import', { backup: file, passphrase: pass, users: 'merge', connections: 'merge', settings: 'replace' });
             expect(imp.status === 200 && imp.body.includes('"signedOut":false'), `import: ${imp.status} ${imp.body}`);
             expect((await api('GET', '/managed/me')).status === 200, 'the admin was signed out by an import that changed nothing');

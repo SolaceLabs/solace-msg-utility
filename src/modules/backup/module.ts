@@ -32,6 +32,7 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 /** A file larger than the gateway's import cap is not a backup; refused before it is sent. */
 export const MAX_IMPORT_BYTES = 8 << 20;
 
+const DOWNLOAD_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
 const RESTORE_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -192,6 +193,7 @@ export const BackupModule = {
                 }
                 const actions = document.createElement('td');
                 actions.className = 'backup-actions-col';
+                actions.appendChild(iconButton(DOWNLOAD_ICON, `Download "${f.name}"`, 'backup-download', () => void downloadSaved(f.name)));
                 actions.appendChild(iconButton(RESTORE_ICON, `Restore "${f.name}"`, 'backup-restore', () => chooseSaved(f.name)));
                 tr.appendChild(actions);
                 els.rows.appendChild(tr);
@@ -206,6 +208,17 @@ export const BackupModule = {
                 return;
             }
             renderStatus(res.data);
+        }
+
+        /** Saves a backup from the directory as it is: it opens with its schedule's passphrase. */
+        async function downloadSaved(name: string): Promise<void> {
+            setError(els.error, null);
+            const res = await service.download(name);
+            if (!res.ok) {
+                reportManagedFailure(res, eventBus, fail(els.error));
+                return;
+            }
+            downloadBlob(new Blob([res.data.content], { type: 'application/json' }), res.data.filename);
         }
 
         // ---- export ----

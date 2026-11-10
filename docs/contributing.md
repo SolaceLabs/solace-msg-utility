@@ -137,7 +137,7 @@ Each check prints `PASS <id>.` or `FAIL <id>.`: 31 in a full run, 21 with `E2E_B
 13. No response from either gateway carries a credential, except the body of the `dial` answer. This includes every response the browser received and every Gateway-mode response.
 14. Both stores are sealed at rest (`SMUS` header, no plaintext).
 
-    Check 18 runs here, while the administrator's session and the gateway are up: an export holds no credential, host or hash in clear and previews as no change; a schedule's **Back up now** writes a file into the `/backup` volume, also sealed; a **Merge** import of that file, settings included, leaves the administrator signed in; the schedule is then removed.
+    Check 18 runs here, while the administrator's session and the gateway are up: an export holds no credential, host or hash in clear and previews as no change; a schedule's **Back up now** writes a file into the `/backup` volume, also sealed, which `GET /managed/backup/files/{name}` returns as written; a **Merge** import of that file, settings included, leaves the administrator signed in; the schedule is then removed.
 15. After a restart the stores still open: old sessions are gone, and the administrator signs in again.
 16. A missing key file beside an existing store refuses to start, naming both files.
 17. Neither gateway log (both at `debug`) holds a password, store key or session cookie, the browser's included.

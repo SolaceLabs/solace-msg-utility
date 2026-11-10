@@ -737,3 +737,94 @@ func TestAdminHandler_DoesNotFallBackToTheSPA(t *testing.T) {
 		t.Errorf("served the SPA at %s: %q", adminPath, rec.Body.String())
 	}
 }
+
+// The image keeps the vendor scripts beside the bundle and a licenses/
+// directory: a file is served as itself, a directory with an index.html gets
+// it, and one without is never listed but answered with the bundle.
+func TestPWAHandler_FilesAndDirectories(t *testing.T) {
+	dir := writeBundles(t)
+	writeFile(t, filepath.Join(dir, "solclient.js"), "// solclient")
+	if err := os.MkdirAll(filepath.Join(dir, "licenses", "jszip"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "licenses", "jszip", "LICENSE.markdown"), "jszip licence")
+	if err := os.Mkdir(filepath.Join(dir, "guide"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "guide", "index.html"), "<html>guide</html>")
+	h := newPWAHandler(dir, directIndexFile, quietLogger())
+
+	cases := []struct{ path, want, never string }{
+		{"/solclient.js", "// solclient", ""},
+		{"/licenses/", "<html>direct</html>", "LICENSE.markdown"},
+		{"/guide/", "<html>guide</html>", ""},
+	}
+	for _, c := range cases {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, c.path, nil))
+		body := rec.Body.String()
+		if rec.Code != http.StatusOK || !strings.Contains(body, c.want) {
+			t.Errorf("%s: want 200 with %q, got %d %q", c.path, c.want, rec.Code, body)
+		}
+		if c.never != "" && strings.Contains(body, c.never) {
+			t.Errorf("%s: a directory must never be listed, got %q", c.path, body)
+		}
+	}
+}
+
+// An app path that is a file, not a directory (a mount gone wrong), leaves
+// the handler answering 404, as a missing one does.
+func TestPWAHandler_NotADirectory(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "SolaceMsgUtility")
+	writeFile(t, file, "not a directory")
+	var buf strings.Builder
+	h := newPWAHandler(file, directIndexFile, newCapturingLogger(&buf))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("want 404, got %d", rec.Code)
+	}
+	if !strings.Contains(buf.String(), "app directory is not a directory") {
+		t.Errorf("the start must say why: %s", buf.String())
+	}
+}
+
+// The relay streams through the access log: a flush reaches the client.
+func TestAccessLog_PassesFlushThrough(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("chunk"))
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Errorf("flush through the access log: %v", err)
+		}
+	})
+	rec := httptest.NewRecorder()
+	accessLog(inner, quietLogger()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/http/8080/h/x", nil))
+	if !rec.Flushed {
+		t.Error("the flush did not reach the client's writer")
+	}
+}
+
+// A second WriteHeader is ignored, as net/http ignores it: the log records
+// the status the client got.
+func TestAccessLog_KeepsTheFirstStatus(t *testing.T) {
+	var buf strings.Builder
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	rec := httptest.NewRecorder()
+	accessLog(inner, newCapturingLogger(&buf)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/foo", nil))
+	if rec.Code != http.StatusTeapot || !strings.Contains(buf.String(), "status=418") {
+		t.Errorf("want 418 sent and logged, got %d; log: %s", rec.Code, buf.String())
+	}
+}
+
+// A WebSocket upgrade over a writer that cannot hijack fails with an error
+// the relay reports, rather than a panic.
+func TestRecordingResponseWriter_HijackWithoutSupport(t *testing.T) {
+	rrw := &recordingResponseWriter{ResponseWriter: httptest.NewRecorder(), status: 200}
+	if _, _, err := rrw.Hijack(); err == nil {
+		t.Error("want an error from a writer without http.Hijacker")
+	}
+}

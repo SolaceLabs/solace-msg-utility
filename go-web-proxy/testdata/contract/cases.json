@@ -607,6 +607,14 @@
       ]
     },
     {
+      "name": "backup: a download needs a saved backup's name",
+      "steps": [
+        { "as": "admin", "method": "GET", "path": "/managed/backup/files/smu-backup-20261109T020000Z.json", "status": 404, "response": { "error": "not_found" } },
+        { "as": "admin", "method": "GET", "path": "/managed/backup/files/users.yaml", "status": 404, "response": { "error": "not_found" } },
+        { "as": "viewer", "method": "GET", "path": "/managed/backup/files/smu-backup-20261109T020000Z.json", "status": 403, "response": { "error": "forbidden" } }
+      ]
+    },
+    {
       "name": "backup: each schedule refusal names its field and reason",
       "steps": [
         {
