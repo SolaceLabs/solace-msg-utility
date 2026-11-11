@@ -40,7 +40,6 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
             loadSelf: vi.fn(),
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
-            config: { useMocks: false }
         });
 
         resetQueueBrowserState();

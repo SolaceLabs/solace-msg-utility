@@ -236,8 +236,8 @@ describe('e2e stack -- broker verification', () => {
 
     it('verifies the broker unless the harness passes E2E_INSECURE=1 through', () => {
         // One per gateway service: gateway (Provisioned mode) and direct (Gateway mode).
-        expect(read('docker/docker-compose.e2e.yaml').match(/^[ \t]*SSL_INSECURE_SKIP_VERIFY:.*$/gm))
-            .toEqual(Array(2).fill('      SSL_INSECURE_SKIP_VERIFY: ${E2E_GATEWAY_SKIP_VERIFY:-}'));
+        expect(read('docker/docker-compose.e2e.yaml').match(/^[ \t]*SMU_SSL_SKIP_CERT_VERIFY:.*$/gm))
+            .toEqual(Array(2).fill('      SMU_SSL_SKIP_CERT_VERIFY: ${E2E_GATEWAY_SKIP_VERIFY:-}'));
         expect(read('scripts/e2e.mjs')).toContain("E2E_GATEWAY_SKIP_VERIFY: insecure() ? 'true' : ''");
     });
 
@@ -259,11 +259,11 @@ describe('e2e stack -- browser', () => {
         expect(block, 'the browser service').not.toBe('');
         for (const line of [
             '    user: "1001:1001"', '    privileged: false', '    read_only: true', '    cap_drop:\n      - ALL',
-            '    security_opt:\n      - no-new-privileges:true', '    tmpfs:\n      - /tmp',
+            '    security_opt:\n      - no-new-privileges=true', '    tmpfs:\n      - /tmp',
             '      - ../node_modules/playwright-core:/pw:ro', '"--max-clients", "1"', '      - "127.0.0.1:39444:3000"',
         ]) expect(count(block, line), line).toBe(1);
         expect(block).not.toMatch(WIDENING);
-        expect(securityOpt(block), 'security_opt holds no-new-privileges and nothing else').toBe('      - no-new-privileges:true\n');
+        expect(securityOpt(block), 'security_opt holds no-new-privileges and nothing else').toBe('      - no-new-privileges=true\n');
         expect(block).not.toContain('--unsafe');
     });
 
@@ -302,17 +302,17 @@ describe('e2e stack -- Gateway mode', () => {
         expect(direct, 'the direct service').not.toBe('');
         for (const line of [
             '    user: "65532:65532"', '    privileged: false', '    read_only: true', '    cap_drop:\n      - ALL',
-            '    security_opt:\n      - no-new-privileges:true', '    pull_policy: never', '      - "127.0.0.1:39445:9443"',
+            '    security_opt:\n      - no-new-privileges=true', '    pull_policy: never', '      - "127.0.0.1:39445:9443"',
         ]) expect(count(direct, line), line).toBe(1);
         expect(direct).not.toMatch(WIDENING);
-        expect(securityOpt(direct), 'security_opt holds no-new-privileges and nothing else').toBe('      - no-new-privileges:true\n');
+        expect(securityOpt(direct), 'security_opt holds no-new-privileges and nothing else').toBe('      - no-new-privileges=true\n');
     });
 
     it("runs the gateway's image in Gateway mode, on its own volume, with none of Provisioned mode's settings or secrets", () => {
         const image = /^ {4}image: .+$/m;
         expect(direct.match(image)?.[0], 'the direct image').toBeDefined();
         expect(direct.match(image)?.[0]).toBe(block('gateway').match(image)?.[0]);
-        expect(direct).not.toMatch(/^ {6}(?:CONN_MODES|HOSTED|DEFAULT_CONN|ADMIN_PASSWORD|ADMIN_PASSWORD_FILE|STORE_KEY_FILE):/m);
+        expect(direct).not.toMatch(/^ {6}(?:SMU_CONN_MODES|SMU_HOSTED|SMU_DEFAULT_CONN|SMU_ADMIN_PASSWORD|SMU_ADMIN_PASSWORD_FILE):/m);
         expect(direct).not.toContain('/run/secrets/');
         expect(count(direct, '      - direct-data:/data\n')).toBe(1);
         expect(text).toMatch(/^volumes:\n(?: {2}[\w-]+:\n)*? {2}direct-data:$/m);

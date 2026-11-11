@@ -451,34 +451,6 @@ describe('queue-copy/service-verify', () => {
             expect(result.newestMsgId).toBeNull();
         });
 
-        it('supplementary DOMParser throw → newestMsgId null', async () => {
-            const fetchImpl = vi.fn()
-                .mockResolvedValueOnce(textRes(SAMPLE_RESPONSE))
-                .mockResolvedValueOnce(textRes('<x/>'));
-            const orig = (globalThis as any).DOMParser;
-            // Real DOMParser must run on the detail-call parseSempV1Response;
-            // the throw needs to land only on the SECOND parseFromString call.
-            let callCount = 0;
-            class FlakyParser {
-                parseFromString(xml: string, mime: string): any {
-                    callCount += 1;
-                    if (callCount === 2) throw new Error('parser bomb');
-                    return new orig().parseFromString(xml, mime);
-                }
-            }
-            (globalThis as any).DOMParser = FlakyParser;
-            try {
-                const result = await verifySource({
-                    sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
-                    vpn: 'v', queue: 'q', signal: new AbortController().signal,
-                });
-                expect(result.sourceOk).toBe(true);
-                expect(result.newestMsgId).toBeNull();
-            } finally {
-                (globalThis as any).DOMParser = orig;
-            }
-        });
-
         it('supplementary <message-id> is non-numeric → newestMsgId null (defensive)', async () => {
             const garbageId = `<rpc-reply><rpc><show><queue><queues><queue><spooled-messages>` +
                 `<spooled-message><message-id>not-a-number</message-id></spooled-message>` +
@@ -873,38 +845,6 @@ describe('queue-copy/service-verify', () => {
         });
     });
 
-    describe('parseSempV1Response — DOMParser exception path', () => {
-        // The try/catch around `new DOMParser().parseFromString()` covers the
-        // (unlikely-but-possible) case where the parser itself throws rather
-        // than embedding a `<parsererror>` node in the result. We force this
-        // by stubbing DOMParser globally for the duration of the test.
-        it('parser throw is reported as a SEMP v1 parse error', () => {
-            const orig = (globalThis as any).DOMParser;
-            class ThrowingParser { parseFromString() { throw new Error('boom'); } }
-            (globalThis as any).DOMParser = ThrowingParser;
-            try {
-                const result = parseSempV1Response('<x/>', 'q', 'v', emptyResult('semp'));
-                expect(result.sourceOk).toBe(false);
-                expect(result.errors[0]).toContain('parse error');
-                expect(result.errors[0]).toContain('boom');
-            } finally {
-                (globalThis as any).DOMParser = orig;
-            }
-        });
-
-        it('parser throw without a message falls back to "unknown"', () => {
-            const orig = (globalThis as any).DOMParser;
-            class ThrowingParser { parseFromString() { throw {}; } }
-            (globalThis as any).DOMParser = ThrowingParser;
-            try {
-                const result = parseSempV1Response('<x/>', 'q', 'v', emptyResult('semp'));
-                expect(result.errors[0]).toContain('unknown');
-            } finally {
-                (globalThis as any).DOMParser = orig;
-            }
-        });
-    });
-
     describe('msgIdToString', () => {
         it('returns the message id as a decimal string', () => {
             const msg = { getGuaranteedMessageId: () => 1234567890 };
@@ -927,10 +867,6 @@ describe('queue-copy/service-verify', () => {
             expect(msgIdToString({ getGuaranteedMessageId: () => undefined })).toBeNull();
         });
 
-        it('returns null when getGuaranteedMessageId throws', () => {
-            const msg = { getGuaranteedMessageId: () => { throw new Error('not bound'); } };
-            expect(msgIdToString(msg)).toBeNull();
-        });
     });
 
     describe('compareMsgIds', () => {

@@ -65,8 +65,6 @@ var restartOnlyKeys = []struct {
 	{"tls.keyFile", true, func(f fileConfig) any { return f.TLS.KeyFile }},
 	{"tls.trustDir", true, func(f fileConfig) any { return f.TLS.TrustDir }},
 	{"tls.insecureSkipVerify", false, func(f fileConfig) any { return f.TLS.InsecureSkipVerify }},
-	{"usersFile", true, func(f fileConfig) any { return f.UsersFile }},
-	{"connectionsFile", true, func(f fileConfig) any { return f.ConnectionsFile }},
 }
 
 func restartOnlyKeyNames() []string {

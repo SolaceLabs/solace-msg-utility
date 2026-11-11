@@ -49,8 +49,21 @@
     cursor: pointer;
 }
 
+/* Bulk action row hovers (enabled state only). */
+.hover-danger:not(:disabled):hover {
+    background-color: var(--status-disconnected);
+    color: white;
+    border-color: var(--status-disconnected);
+}
+
+.hover-success:not(:disabled):hover {
+    background-color: var(--status-connected);
+    color: white;
+    border-color: var(--status-connected);
+}
+
 .data-table tr.selected td {
-    background-color: var(--solace-mint) !important;
+    background-color: var(--solace-mint);
     color: var(--text-primary);
 }
 

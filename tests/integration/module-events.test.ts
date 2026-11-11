@@ -97,7 +97,6 @@ function makeCtx(overrides: Partial<AppContext> = {}): AppContext {
         sempFetch: vi.fn(),
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
-        config: { useMocks: false },
         ...overrides
     });
     return ctx;
@@ -131,7 +130,7 @@ describe('Integration: module cross-talk', () => {
         vi.restoreAllMocks();
     });
 
-    describe('Scenario #2 — Discover → Browse flow', () => {
+    describe('Discover -> Browse flow', () => {
         it('connection:check-connection on same VPN emits browser:browse-queue → bind fires', async () => {
             vi.useFakeTimers();
 
@@ -170,7 +169,7 @@ describe('Integration: module cross-talk', () => {
         });
     });
 
-    describe('Scenario #3 — config:max-messages-changed caps ingest', () => {
+    describe('config:max-messages-changed caps ingest', () => {
         it('cap set at connect-time bounds subsequent ingestMessage arrivals', async () => {
             // In real use, config:max-messages-changed only fires from Connections
             // at Connect click time — before any browser is bound and before any
@@ -200,7 +199,7 @@ describe('Integration: module cross-talk', () => {
         });
     });
 
-    describe('Scenario #4 — client:disconnected triggers disconnectAll', () => {
+    describe('client:disconnected triggers disconnectAll', () => {
         it('client:disconnected calls disconnectAll', async () => {
             // Post-publisher-lift, the explicit forward-queue sweep was removed
             // from queue-browser/module.ts: in-flight forward promises are
@@ -223,7 +222,7 @@ describe('Integration: module cross-talk', () => {
         });
     });
 
-    describe('Scenario #6 — SEMP disconnect resets QueueDiscovery UI', () => {
+    describe('SEMP disconnect resets QueueDiscovery UI', () => {
         it('setState(isSempConnected=false) hides content, shows warning, clears VPN input', async () => {
             // fetchVpns runs on install when isSempConnected=true — give it a valid
             // empty async iterable so the install path doesn't explode.

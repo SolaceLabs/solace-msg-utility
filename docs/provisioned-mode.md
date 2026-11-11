@@ -48,7 +48,7 @@ To see it without deploying anything, open `provisioned-demo.html` from any Rele
 
 Because the browser receives a VPN's client password while it is connected, give each VPN a client username scoped to what its users may do (see the [security checklist](#security-checklist)).
 
-**Queue Copy's destination** follows the primary connection. In a Provisioned session it is one shared connection card (Broker and Message VPN pickers from the signed-in profile, one Connect, Disconnect, a status line); the typed Broker URL, SEMP and Client cards and the Provisioned/Manual radio are not shown, so a Provisioned user has no manual destination and no way to type a broker address. Connect calls `ctx.managedProfile.dial(target, { connect })` and builds the destination client inside that callback: the VPN's client credential goes straight to the SDK and is never stored, and destination SEMP goes through the gateway's relay (`/managed/relay/{broker}/SEMP...`), opened only when the destination broker differs from the primary's. Both dials are checked against the user's entitlements by the gateway as for the primary. The card is locked while a connect is in flight, a refresh that withdraws the connected VPN cancels the connect or closes the destination, and typed-credential destinations exist only with a Direct primary connection (Standalone or Gateway mode). For operators: with `CONN_MODES=both` the manual destination bypass that previously existed beside Provisioned is gone; a Provisioned session can write only where its entitlements allow.
+**Queue Copy's destination** follows the primary connection. In a Provisioned session it is one shared connection card (Broker and Message VPN pickers from the signed-in profile, one Connect, Disconnect, a status line); the typed Broker URL, SEMP and Client cards and the Provisioned/Manual radio are not shown, so a Provisioned user has no manual destination and no way to type a broker address. Connect calls `ctx.managedProfile.dial(target, { connect })` and builds the destination client inside that callback: the VPN's client credential goes straight to the SDK and is never stored, and destination SEMP goes through the gateway's relay (`/managed/relay/{broker}/SEMP...`), opened only when the destination broker differs from the primary's. Both dials are checked against the user's entitlements by the gateway as for the primary. The card is locked while a connect is in flight, a refresh that withdraws the connected VPN cancels the connect or closes the destination, and typed-credential destinations exist only with a Direct primary connection (Standalone or Gateway mode). For operators: with `SMU_CONN_MODES=both` the manual destination bypass that previously existed beside Provisioned is gone; a Provisioned session can write only where its entitlements allow.
 
 ---
 
@@ -77,12 +77,12 @@ Then open the admin console at `https://<host>:9443/solAdmin` to add brokers and
 
 **Without the password file**, the gateway generates a password for `admin` and prints it **once** in its log (`docker compose logs gateway`). Lost it before signing in? Delete `users.yaml` and restart.
 
-**Using `docker run` instead:** set `CONN_MODES=provisioned`, and mount a host directory at `/backup` (prepared as in step 2) so scheduled backups outlive the container. Without that mount they are written inside the container and the Backup & Restore page still looks healthy, but recreating the container (an upgrade) deletes them. The users and connections stay with the container too: before replacing it, export a backup and import it into the new one. The compose file keeps both across upgrades.
+**Using `docker run` instead:** set `SMU_CONN_MODES=provisioned`, and mount a host directory at `/backup` (prepared as in step 2) so scheduled backups outlive the container. Without that mount they are written inside the container and the Backup & Restore page still looks healthy, but recreating the container (an upgrade) deletes them. The users and connections stay with the container too: before replacing it, export a backup and import it into the new one. The compose file keeps both across upgrades.
 
 ```bash
 docker run -d -p 9443:9443 \
-  -e CONN_MODES=provisioned \
-  -e ADMIN_PASSWORD_FILE=/run/secrets/admin-password \
+  -e SMU_CONN_MODES=provisioned \
+  -e SMU_ADMIN_PASSWORD_FILE=/run/secrets/admin-password \
   -v "$PWD/admin-password:/run/secrets/admin-password:ro" \
   -v "$PWD/backup:/backup" \
   -v solace-tls:/tls \
@@ -97,13 +97,13 @@ The gateway's settings live in `config.yaml`. An administrator edits most of the
 
 ### Connection modes
 
-| `CONN_MODES` | What users see | Recommended |
+| `SMU_CONN_MODES` | What users see | Recommended |
 | --- | --- | --- |
 | `provisioned` | Sign-in only | **Yes.** Grants are binding: no one reaches a broker they were not given. |
 | `both` | Sign-in, plus the Direct form for typing broker details | Only for mixed audiences or a migration period. Anyone can connect through the Direct form with credentials they happen to know, outside their grants. |
 | `direct` | The Direct form only | This is Gateway mode: no sign-in and no admin console. |
 
-`DEFAULT_CONN` (`direct` or `provisioned`) picks which tab opens first under `both`.
+`SMU_DEFAULT_CONN` (`direct` or `provisioned`) picks which tab opens first under `both`.
 
 The Gateway Settings page switches between `provisioned` and `both`. Leaving Provisioned mode (`direct`) also turns off the admin console, so it is done in `config.yaml` on the host, followed by a restart.
 
@@ -136,15 +136,13 @@ The waits apply to the account as well as the client, so someone guessing at a k
 
 ### Environment variables
 
-These seed `config.yaml` on the first start only, except `STORE_KEY_FILE` and the two password variables, which are never written to it.
+These seed `config.yaml` on the first start only, except the two `SMU_ADMIN_PASSWORD` variables, which are never written to it. The users store, the connections store and the store key are not settings: they always live at `/data/users.yaml`, `/data/connections.yaml` and `/data/store.key`, and you move data with Backup & Restore. A deployment that still sets `USERS_FILE`, `CONNECTIONS_FILE` or `STORE_KEY_FILE` (or the `usersFile` / `connectionsFile` keys in `config.yaml`) starts with a warning that the value is ignored. Gateways renamed their variables with an `SMU_` prefix; a start with an old name set is refused, see [deployment.md](deployment.md#settings).
 
 | Variable | Default | Recommended |
 | --- | --- | --- |
-| `CONN_MODES` | `direct` | `provisioned` |
-| `STORE_KEY_FILE` | `/data/store.key` | A separate secret or mount, so the key does not sit beside the stores it unlocks. |
-| `ADMIN_PASSWORD_FILE` | unset | A secret file, as in the compose file. Read only on the first start. |
-| `ADMIN_PASSWORD` | unset | Avoid: an environment value is visible to anyone who can inspect the container. Set this or `ADMIN_PASSWORD_FILE`, not both. |
-| `USERS_FILE`, `CONNECTIONS_FILE` | `/data/users.yaml`, `/data/connections.yaml` | Keep. |
+| `SMU_CONN_MODES` | `direct` | `provisioned` |
+| `SMU_ADMIN_PASSWORD_FILE` | unset | A secret file, as in the compose file. Read only on the first start. |
+| `SMU_ADMIN_PASSWORD` | unset | Avoid: an environment value is visible to anyone who can inspect the container. Set this or `SMU_ADMIN_PASSWORD_FILE`, not both. |
 
 The rest (TLS, log level) are the same as in Gateway mode: see [Settings](deployment.md#settings).
 
@@ -169,7 +167,7 @@ Changes apply at once. Revoking a user's access closes their broker connections.
 
 The admin console's **Backup & Restore** page keeps copies of the configuration: the users, the connections and the settings.
 
-**What a backup holds.** The users with their password hashes (never the passwords), the connections with their SEMP and VPN credentials, and the gateway settings except the file paths (`tls.*`, `usersFile`, `connectionsFile`), which belong to each host. A backup is one JSON file, encrypted with AES-256-GCM under a key derived from a passphrase (PBKDF2-SHA256, 600,000 iterations, the cost of a user password). It does not use the store key, so it restores on any deployment. **Without the passphrase it cannot be opened**: keep the passphrase somewhere other than the backups.
+**What a backup holds.** The users with their password hashes (never the passwords), the connections with their SEMP and VPN credentials, and the gateway settings except the file paths (`tls.certFile`, `tls.keyFile`, `tls.trustDir`), which belong to each host. A backup is one JSON file, encrypted with AES-256-GCM under a key derived from a passphrase (PBKDF2-SHA256, 600,000 iterations, the cost of a user password). It does not use the store key, so it restores on any deployment. **Without the passphrase it cannot be opened**: keep the passphrase somewhere other than the backups.
 
 **Export** downloads a backup to the browser, encrypted with the passphrase you type for it (12 to 128 characters).
 
@@ -203,12 +201,12 @@ To move a deployment: export (or copy a file from `/backup`), start the new gate
 
 Provisioned mode is meant for **trusted internal** networks. Before exposing it:
 
-- **Set `CONN_MODES=provisioned`** unless you really need the Direct form beside it.
+- **Set `SMU_CONN_MODES=provisioned`** unless you really need the Direct form beside it.
 - **Give each broker a read-only SEMP account**, scoped to what its users may see: a user granted one VPN on a broker can read whatever that account can.
 - **Offer Queue Subscriptions only where that is acceptable.** It reads every queue's subscriptions on the connected broker, across all its VPNs, and narrows them to the user's queues in the browser; anyone with the browser's developer tools can see the rest. Leave `queue-subscription-explorer` out of `modules.offered` where queue and topic names must stay hidden between teams.
 - **Give each VPN a client username** scoped to what its users may do. A signed-in browser receives its password to connect, and the password works outside the app too. Keep the brokers' own ports off networks users can reach.
-- **Change the `admin` password** at the first sign-in (the gateway insists), and remove `ADMIN_PASSWORD` from the environment if you used it.
-- **Keep the store key apart** from the stores where you can (`STORE_KEY_FILE`). It is not what restores a lost deployment: the scheduled backups are.
+- **Change the `admin` password** at the first sign-in (the gateway insists), and remove `SMU_ADMIN_PASSWORD` from the environment if you used it.
+- **Keep the store key apart** from the stores where you can: its path is fixed at `/data/store.key`, so mount a volume or secret there. It is not what restores a lost deployment: the scheduled backups are.
 - **Keep backup passphrases secret, and apart from the backups.** A backup holds every broker credential and every password hash; anyone with a file and its passphrase has them. Make `/backup` readable by the gateway's UID only.
 - **Restrict who can reach the gateway** with `access.allow`, and list your reverse proxy in `access.trustedProxies`.
 - **Treat administrator accounts as privileged.** They edit grants, the access list and sign-in itself.
@@ -230,6 +228,6 @@ A key file other users can read is only warned about, because Docker secrets are
 
 Other refusals at start:
 
-- **`connModes=... offers Provisioned sign-in but hosted is false`:** remove `HOSTED=false`, or set `hosted: true` in `config.yaml`.
+- **`connModes=... offers Provisioned sign-in but hosted is false`:** remove `SMU_HOSTED=false`, or set `hosted: true` in `config.yaml`.
 - **`invalid config file ... field managed not found`:** a `config.yaml` from a pre-release build. Delete the `managed:` line.
 - **`read backup schedule ...` or `backup schedule ...: ...; delete it and set the schedule again`:** `backup.yaml` cannot be opened with this key, or is damaged. Delete it, start the gateway, and set the schedule again on Backup & Restore; the backups already in `/backup` are not affected.

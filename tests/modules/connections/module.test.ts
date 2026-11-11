@@ -38,7 +38,6 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; eventBus:
         sempFetch: vi.fn(),
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
-        config: { useMocks: false }
     });
     return { ctx, eventBus, appState };
 }
@@ -182,8 +181,8 @@ describe('ConnectionsModule', () => {
     });
 
     describe('client name identifier validation', () => {
-        // Closes COV-5: the >100-char branch and the save-button early-return
-        // on invalid clientNameId are otherwise unexercised. A regression that
+        // Covers the >100-char branch and the save-button early-return
+        // on invalid clientNameId, which are otherwise unexercised. A regression that
         // dropped either check would silently forward an over-length or
         // invalid identifier to the SDK, where it would fail late at connect
         // time with a generic broker error instead of the inline UI message.

@@ -24,7 +24,6 @@ function createTestContext(overrides: Partial<AppContext> = {}): AppContext {
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
-        config: { useMocks: false },
         ...overrides
     });
 }
@@ -151,18 +150,34 @@ describe('queue-browser/service', () => {
             expect(result.error).toContain('Limit');
         });
 
-        it('attaches event listeners to browser', () => {
+        it('routes each QueueBrowser event to its serviceEvents handler with the queue name', () => {
             const service = createService(ctx, serviceEvents);
             const { session, browser } = sessionWithBrowser();
             ctx.eventBus.emit('client:connected', { session });
 
             service.createBrowser('test-queue');
 
-            expect(browser.on).toHaveBeenCalledWith('UP', expect.any(Function));
-            expect(browser.on).toHaveBeenCalledWith('CONNECT_FAILED_ERROR', expect.any(Function));
-            expect(browser.on).toHaveBeenCalledWith('DOWN_ERROR', expect.any(Function));
-            expect(browser.on).toHaveBeenCalledWith('GM_DISABLED', expect.any(Function));
-            expect(browser.on).toHaveBeenCalledWith('MESSAGE', expect.any(Function));
+            const handlers = (browser as any)._handlers;
+            const err = new Error('boom');
+            const msg = { id: 'm1' };
+
+            handlers.UP();
+            expect(serviceEvents.onBrowserUp).toHaveBeenCalledWith('test-queue');
+
+            handlers.CONNECT_FAILED_ERROR(err);
+            expect(serviceEvents.onConnectFailed).toHaveBeenCalledWith('test-queue', err);
+
+            handlers.DOWN_ERROR(err);
+            expect(serviceEvents.onBrowserDown).toHaveBeenCalledWith('test-queue', err);
+
+            handlers.GM_DISABLED();
+            expect(serviceEvents.onGmDisabled).toHaveBeenCalledWith('test-queue');
+
+            handlers.MESSAGE(msg);
+            expect(serviceEvents.onMessage).toHaveBeenCalledWith('test-queue', msg);
+
+            // Each event reached only its own handler, once.
+            for (const fn of Object.values(serviceEvents) as any[]) expect(fn).toHaveBeenCalledTimes(1);
         });
 
         it('cleans up on synchronous connect error', () => {

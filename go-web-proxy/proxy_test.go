@@ -248,14 +248,14 @@ func TestValidateConnModes(t *testing.T) {
 		wantErr string
 	}{
 		{"Gateway mode", base(connDirect, connDirect, true), ""},
-		{"direct needs no gateway (HOSTED=false)", base(connDirect, connDirect, false), ""},
+		{"direct needs no gateway (SMU_HOSTED=false)", base(connDirect, connDirect, false), ""},
 		{"direct ignores an odd defaultConn", base(connDirect, connProvisioned, false), ""},
 		{"provisioned", base(connProvisioned, connProvisioned, true), ""},
 		{"both", base(connBoth, connDirect, true), ""},
-		{"invalid CONN_MODES", base("managed", connDirect, true), `connModes="managed" (config.yaml; seeded by CONN_MODES) must be one of "direct", "provisioned", "both"`},
-		{"invalid DEFAULT_CONN", base(connBoth, "bogus", true), `defaultConn="bogus" (config.yaml; seeded by DEFAULT_CONN) must be one of "direct", "provisioned"`},
-		{"provisioned without HOSTED", base(connProvisioned, connProvisioned, false), `offers Provisioned sign-in but hosted is false (config.yaml; seeded by HOSTED)`},
-		{"both without HOSTED", base(connBoth, connDirect, false), `hosted is false`},
+		{"invalid SMU_CONN_MODES", base("managed", connDirect, true), `connModes="managed" (config.yaml; seeded by SMU_CONN_MODES) must be one of "direct", "provisioned", "both"`},
+		{"invalid SMU_DEFAULT_CONN", base(connBoth, "bogus", true), `defaultConn="bogus" (config.yaml; seeded by SMU_DEFAULT_CONN) must be one of "direct", "provisioned"`},
+		{"provisioned without SMU_HOSTED", base(connProvisioned, connProvisioned, false), `offers Provisioned sign-in but hosted is false (config.yaml; seeded by SMU_HOSTED)`},
+		{"both without SMU_HOSTED", base(connBoth, connDirect, false), `hosted is false`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -272,8 +272,8 @@ func TestValidateConnModes(t *testing.T) {
 
 // The defaults are Gateway mode: Direct only, so Provisioned mode stays off.
 func TestLoadConfig_ConnModeDefaults(t *testing.T) {
-	t.Setenv("CONN_MODES", "")
-	t.Setenv("DEFAULT_CONN", "")
+	t.Setenv("SMU_CONN_MODES", "")
+	t.Setenv("SMU_DEFAULT_CONN", "")
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)
@@ -288,8 +288,8 @@ func TestLoadConfig_ConnModeDefaults(t *testing.T) {
 
 // Env values are case-insensitive so "Provisioned"/"BOTH" don't fail the enum check.
 func TestLoadConfig_ConnModesLowercased(t *testing.T) {
-	t.Setenv("CONN_MODES", "BOTH")
-	t.Setenv("DEFAULT_CONN", "Provisioned")
+	t.Setenv("SMU_CONN_MODES", "BOTH")
+	t.Setenv("SMU_DEFAULT_CONN", "Provisioned")
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)

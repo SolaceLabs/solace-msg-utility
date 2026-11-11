@@ -1,6 +1,6 @@
 export { DEFAULT_MAX_MESSAGES_PER_QUEUE } from '../../core/connections/defaults';
 
-// Max concurrent queue bindings. Enforced by service.createBrowser and its mock sibling.
+// Max concurrent queue bindings. Enforced by service.createBrowser.
 export const MAX_BROWSER_BINDINGS = 3;
 
 export const icons = {

@@ -41,7 +41,6 @@ function makeCtx(overrides: Partial<AppContext['appState']> = {}): AppContext {
         sempFetch: vi.fn(),
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
-        config: {},
     });
 }
 

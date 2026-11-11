@@ -38,6 +38,7 @@ export const state = {
     allMessages: [],
     displayedMessages: [],
     forwardQueue: [], // Array of messages to forward
+    selectedMessage: null, // The message open in the detail panel (ui-details.ts)
     activeFilters: defaultActiveFilters(),
     // Moving-window cap per queue. Updated on config:max-messages-changed.
     maxMessagesPerQueue: DEFAULT_MAX_MESSAGES_PER_QUEUE

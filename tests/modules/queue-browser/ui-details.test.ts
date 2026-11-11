@@ -32,7 +32,6 @@ describe('queue-browser/ui-details', () => {
             loadSelf: vi.fn(),
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
-            config: {}
         });
 
         initDetails(ctx);

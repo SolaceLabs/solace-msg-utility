@@ -9,6 +9,8 @@ import { logger } from '../../core/logger';
 import { canOperate } from '../../core/rbac';
 import type { AppState, EventBus } from '../../core/types';
 
+const log = logger.withTag('queue-browser');
+
 // ui-table.ts - Message List & Table Logic
 // Initialized via initTable(eventBus, { appState }) to provide EventBus for
 // delete events and the managed session for read-only rows.
@@ -255,7 +257,7 @@ export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}
             const content = await zip.generateAsync({ type: 'blob' });
             ui.triggerDownloadBlob(content, zipFilename);
         } catch (err) {
-            logger.error('Failed to generate ZIP:', err);
+            log.error('Failed to generate ZIP', err);
             showToast(`Could not create the ZIP: ${solaceErrorText(err, 'unknown error')}`, 'error', NOTICE_TOAST_MS);
         }
     };

@@ -374,7 +374,7 @@ function handleModalStart(
     // paint frame (~60 fps). `onComplete` still renders synchronously to
     // guarantee the final state is on screen before the modal closes.
     let pendingPaint = false;
-    let latestJob: import('./state').CopyJob | null = null;
+    let latestJob!: import('./state').CopyJob;
 
     void runCopyJob(state, primarySession, {
         onProgress: (job) => {
@@ -383,13 +383,7 @@ function handleModalStart(
             pendingPaint = true;
             requestAnimationFrame(() => {
                 pendingPaint = false;
-                /* v8 ignore start -- `latestJob` is set on the preceding
-                 * statement before the rAF is scheduled, and the rAF callback
-                 * is the only reader. The null branch exists purely for
-                 * TypeScript's nullable-narrowing and is unreachable at
-                 * runtime. */
-                if (latestJob) ui.renderProgress(els, latestJob);
-                /* v8 ignore stop */
+                ui.renderProgress(els, latestJob);
             });
         },
         onComplete: (job) => {

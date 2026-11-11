@@ -326,6 +326,27 @@ describe('core/services/solace-publisher', () => {
             await promise;
         });
 
+        it('a throwing content setter falls through to the next content source', async () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
+            const publisher = createSolacePublisher(session);
+            const original = createMessageMock();
+            (original.getSdtContainer as any).mockReturnValue({ kind: 'sdt' });
+            (original.getXmlContent as any).mockReturnValue('<x/>');
+            const cloned = createMessageMock();
+            (cloned.setSdtContainer as any).mockImplementation(() => { throw new Error('bad container'); });
+            solaceMock.SolclientFactory.createMessage.mockReturnValueOnce(cloned);
+
+            const promise = publisher.send(original, queueDest);
+
+            expect(warnSpy).toHaveBeenCalledWith('Failed to set setSdtContainer', expect.any(Error));
+            expect(cloned.setXmlContent).toHaveBeenCalledWith('<x/>');
+            expect(cloned.setBinaryAttachment).not.toHaveBeenCalled();
+
+            fireAck(getKeyFromMsg(cloned));
+            await promise;
+            warnSpy.mockRestore();
+        });
+
         it('content priority: XML fires when SDT is null and short-circuits Binary', async () => {
             const publisher = createSolacePublisher(session);
             const original = createMessageMock();

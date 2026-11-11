@@ -74,7 +74,7 @@ describe('mock-broker/gateway/backup -- the file format', () => {
         const d = await openBackup(vector.file, vector.passphrase);
         expect([d.created, d.gateway, d.users.map(u => u.username), d.connections.map(c => c.broker), d.settings.connModes])
             .toEqual([vector.expect.created, vector.expect.gateway, vector.expect.users, vector.expect.connections, vector.expect.connModes]);
-        expect(d.settings.usersFile).toBe(''); // the file's own version key is not a setting
+        expect(d.settings).not.toHaveProperty('usersFile'); // removed keys are not settings
     });
 
     it('seals and opens a document, carrying every user and connection field', async () => {
@@ -128,11 +128,12 @@ describe('mock-broker/gateway/backup -- the file format', () => {
             version: 1,
             'msg-utility-connections': [{ broker: 'b9', hostname: 'h', semp: { port: 1943 }, client: { port: '1443', msgVpns: [{ name: 'v' }] } }],
             'msg-utility-users': [{ username: 'u', password: 'p', 'read-only': [{ brokers: 'b', msgVpns: 'v', queues: 'q' }], modules: null }],
-            settings: { version: 1, appDir: '/old', connModes: 'both' },
+            settings: { version: 1, appDir: '/old', usersFile: '/old/u.yaml', connectionsFile: '/old/c.yaml', connModes: 'both' },
         })), PASS);
         expect(d.connections[0]).toEqual({ broker: 'b9', hostname: 'h', semp: { port: '1943', username: '', password: '' }, client: { port: '1443', msgVpns: [{ name: 'v', username: '', password: '' }] } });
         expect(d.users[0]).toEqual({ ...user('u', 'p'), readOnly: [{ brokers: 'b', msgVpns: 'v', queues: 'q' }] });
         expect([d.created, d.gateway, d.settings.connModes, d.settings.hosted]).toEqual(['', '', 'both', false]);
+        expect(d.settings).not.toHaveProperty('connectionsFile');
     });
 
     it('reads base64 as the gateway does: padded, nothing else', () => {
@@ -164,9 +165,9 @@ describe('mock-broker/gateway/backup -- import planning', () => {
 
     it('names the settings an import changes, never a host path', () => {
         const cur = settings();
-        const next = { ...cur, logLevel: 'info', usersFile: '/elsewhere', access: { allow: ['10.0.0.0/8'], trustedProxies: [] } };
+        const next = { ...cur, logLevel: 'info', tls: { ...cur.tls, certFile: '/elsewhere' }, access: { allow: ['10.0.0.0/8'], trustedProxies: [] } };
         expect(settingsChanges(cur, next)).toEqual(['access.allow', 'logLevel']);
-        expect(withHostPaths(next, cur).usersFile).toBe(cur.usersFile);
+        expect(withHostPaths(next, cur).tls.certFile).toBe(cur.tls.certFile);
     });
 });
 
@@ -295,8 +296,8 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         const ex = await call(gw, 'POST', '/managed/backup/export', { passphrase: PASS });
         expect(ex.json.filename).toBe('smu-backup-20261109T090000Z.json');
         const d = await openBackup(ex.json.content, PASS);
-        expect([d.created, d.gateway, d.users.map(u => u.username), d.settings.usersFile, d.settings.tls.certFile])
-            .toEqual(['2026-11-09T09:00:00Z', 'demo', ['admin', 'viewer', 'operator'], '', '']);
+        expect([d.created, d.gateway, d.users.map(u => u.username), d.settings.tls.certFile])
+            .toEqual(['2026-11-09T09:00:00Z', 'demo', ['admin', 'viewer', 'operator'], '']);
         expect(d.settings.logLevel).toBe('warn');
     });
 

@@ -39,7 +39,7 @@ services:
     cap_drop:
       - ALL
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges=true
     restart: unless-stopped
     ports:
       - "9443:9443"
@@ -49,9 +49,9 @@ services:
       # provisioned: everyone signs in, the recommended setting. both also
       # offers the Direct form, where anyone can connect with credentials they
       # know, outside their grants.
-      CONN_MODES: provisioned
+      SMU_CONN_MODES: provisioned
       LOG_LEVEL: warn
-      ADMIN_PASSWORD_FILE: /run/secrets/admin-password
+      SMU_ADMIN_PASSWORD_FILE: /run/secrets/admin-password
     secrets:
       - source: admin-password
         target: /run/secrets/admin-password

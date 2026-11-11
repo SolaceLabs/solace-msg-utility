@@ -12,8 +12,6 @@ export interface GatewaySettings {
     defaultConn: string;
     tls: { certFile: string; keyFile: string; trustDir: string; insecureSkipVerify: boolean };
     logLevel: string;
-    usersFile: string;
-    connectionsFile: string;
     access: { allow: string[]; trustedProxies: string[] };
     session: { idleMinutes: number; absoluteMinutes: number };
     login: { maxFailures: number; backoffSeconds: number; maxBackoffSeconds: number; unauthenticatedPerMinute: number };

@@ -132,7 +132,6 @@ async function setupProvisioned(over: Partial<AppState> = {}, signIn = true) {
         sempFetch: vi.fn(),
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
-        config: {},
     });
     ctx.managedProfile.attachDialer(DIALER);
     if (signIn) ctx.managedProfile.setProfile(PROFILE);

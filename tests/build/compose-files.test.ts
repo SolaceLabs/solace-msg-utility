@@ -19,7 +19,7 @@ const read = (rel: string) => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf-8'
 
 const POSTURE = [
     '    user: "65532:65532"', '    privileged: false', '    read_only: true',
-    '    cap_drop:\n      - ALL', '    security_opt:\n      - no-new-privileges:true',
+    '    cap_drop:\n      - ALL', '    security_opt:\n      - no-new-privileges=true',
 ];
 
 // [file, service, its writable mounts]. Writable only where the gateway
@@ -39,7 +39,7 @@ describe('compose files -- posture', () => {
         expect(block, `the ${name} service`).not.toBe('');
         for (const line of POSTURE) expect(count(block, line), line).toBe(1);
         expect(block).not.toMatch(WIDENING);
-        expect(securityOpt(block), 'security_opt holds no-new-privileges and nothing else').toBe('      - no-new-privileges:true\n');
+        expect(securityOpt(block), 'security_opt holds no-new-privileges and nothing else').toBe('      - no-new-privileges=true\n');
         expect(writableMounts(block)).toEqual(writable);
     });
 });
@@ -47,7 +47,7 @@ describe('compose files -- posture', () => {
 // The text reader itself: what it must catch for the posture rows above to mean anything.
 describe('compose files -- reading a service', () => {
     const SAFE = [
-        '    user: "65532:65532"', '    security_opt:', '      - no-new-privileges:true', '    volumes:',
+        '    user: "65532:65532"', '    security_opt:', '      - no-new-privileges=true', '    volumes:',
         '      - data:/data', '      - ./certs:/tls:ro',
     ];
     const compose = (...lines: string[]) => `services:\n  gateway:\n${lines.join('\n')}\n\nvolumes:\n  data:\n`;
@@ -81,10 +81,10 @@ describe('compose files -- reading a service', () => {
 
     it('sees a second security_opt entry after no-new-privileges, and a mount that is not read-only', () => {
         const block = service(compose(
-            '    security_opt:', '      - no-new-privileges:true', '      - seccomp=./profile.json', '    volumes:',
+            '    security_opt:', '      - no-new-privileges=true', '      - seccomp=./profile.json', '    volumes:',
             '      - data:/data', '      # - ./old:/old', '      - ./certs:/tls:ro', '      - ./logs:/logs',
         ), 'gateway');
-        expect(securityOpt(block)).toBe('      - no-new-privileges:true\n      - seccomp=./profile.json\n');
+        expect(securityOpt(block)).toBe('      - no-new-privileges=true\n      - seccomp=./profile.json\n');
         expect(writableMounts(block)).toEqual(['data:/data', './logs:/logs']);
         expect(securityOpt(service(compose('    user: "65532:65532"'), 'gateway'))).toBeUndefined();
     });
@@ -103,16 +103,25 @@ describe('compose files -- the ready-made deployments', () => {
         expect(service(read('docker/compose.provisioned.yaml'), 'gateway')).toMatch(/^ {6}- \.\/backup:\/backup$/m);
     });
 
-    it('Gateway mode is the default: no CONN_MODES, no HOSTED', () => {
-        expect(read('docker/compose.gateway.yaml')).not.toMatch(/^\s*(?:CONN_MODES|HOSTED):/m);
+    it.each([
+        'docker/docker-compose.yaml', 'docker/compose.gateway.yaml', 'docker/compose.provisioned.yaml', 'docker/docker-compose.e2e.yaml',
+    ])('%s spells the option no-new-privileges=true and sets no pre-rename or removed gateway variable', (file) => {
+        const text = read(file);
+        expect(text).not.toContain('no-new-privileges:true');
+        expect(text).not.toMatch(
+            /^\s*(?:SSL_CERT_FILE|SSL_KEY_FILE|SSL_TRUST_DIR|SSL_INSECURE_SKIP_VERIFY|HOSTED|CONN_MODES|DEFAULT_CONN|ADMIN_PASSWORD|ADMIN_PASSWORD_FILE|USERS_FILE|CONNECTIONS_FILE|STORE_KEY_FILE):/m);
+    });
+
+    it('Gateway mode is the default: no SMU_CONN_MODES, no SMU_HOSTED', () => {
+        expect(read('docker/compose.gateway.yaml')).not.toMatch(/^\s*(?:SMU_CONN_MODES|SMU_HOSTED):/m);
     });
 
     it('Provisioned mode takes the admin password from a secret file, never from the environment', () => {
         const text = read('docker/compose.provisioned.yaml');
-        expect(service(text, 'gateway')).toContain('      CONN_MODES: provisioned\n');
-        expect(text).toContain('      ADMIN_PASSWORD_FILE: /run/secrets/admin-password\n');
+        expect(service(text, 'gateway')).toContain('      SMU_CONN_MODES: provisioned\n');
+        expect(text).toContain('      SMU_ADMIN_PASSWORD_FILE: /run/secrets/admin-password\n');
         expect(text).toContain('    secrets:\n      - source: admin-password\n        target: /run/secrets/admin-password\n');
         expect(text).toContain('secrets:\n  admin-password:\n    file: ./admin-password\n');
-        expect(text).not.toMatch(/^\s*ADMIN_PASSWORD:/m);
+        expect(text).not.toMatch(/^\s*SMU_ADMIN_PASSWORD:/m);
     });
 });

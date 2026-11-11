@@ -83,17 +83,25 @@ function Write-Finish {
   Write-Host $line
 }
 
-# Capture once, write once. "$_" flattens stderr ErrorRecords; -Width stops
-# column wrap; the CSI strip keeps the file readable plain text.
+# Stream each line as it arrives, to the console and the log. A long step shows
+# progress, and a cancelled run keeps what it printed. Never Tee-Object (5.1
+# doubles lines and writes UTF-16): one StreamWriter, BOM-less UTF-8, append,
+# flushed per line, closed in finally. "$_" flattens stderr ErrorRecords (not
+# terminating under 'Continue'); the CSI strip keeps the file plain text.
 function Invoke-Logged {
   # NB: $CmdArgs, not $Args -- $Args is a PowerShell automatic variable, so a
   # param named $Args binds empty and `& $Exe @Args` runs $Exe with no args.
   param([string]$Task, [string]$Exe, [string[]]$CmdArgs)
-  $out = (& $Exe @CmdArgs 2>&1 | ForEach-Object { "$_" } | Out-String -Width 4096)
-  $code = $LASTEXITCODE
-  $out = $out -replace "\x1b\[[0-9;?]*[a-zA-Z]", ""
-  Add-LogText (Get-Log $Task) $out
-  Write-Host $out
+  $writer = New-Object System.IO.StreamWriter((Get-Log $Task), $true, $Utf8NoBom)
+  $writer.AutoFlush = $true
+  try {
+    & $Exe @CmdArgs 2>&1 | ForEach-Object {
+      $line = ("$_") -replace "\x1b\[[0-9;?]*[a-zA-Z]", ""
+      $writer.WriteLine($line)
+      Write-Host $line
+    }
+    $code = $LASTEXITCODE
+  } finally { $writer.Dispose() }
   return $code
 }
 
@@ -387,6 +395,7 @@ function Task-e2e {
 # --- dispatch ---------------------------------------------------------------
 $All  = @('build','vet','test','mock')
 $Full = @('build','vet','test','mock','cov','image','scan','graphify')
+$KnownTasks = @('build','vet','test','mock','cov','scan','image','up','down','graphify','e2e')
 
 function Show-Usage {
   @"
@@ -400,17 +409,19 @@ usage: dev.ps1 <task>...
 "@ | Write-Host
 }
 
-if (-not $Tasks -or $Tasks[0] -in @('-h','--help','help')) { Show-Usage; exit 0 }
+if (-not $Tasks -or $Tasks[0] -cin @('-h','--help','help')) { Show-Usage; exit 0 }
 
 $queue = @()
 foreach ($t in $Tasks) {
-  switch ($t) { 'all' { $queue += $All } 'full' { $queue += $Full } default { $queue += $t } }
+  switch -CaseSensitive ($t) { 'all' { $queue += $All } 'full' { $queue += $Full } default { $queue += $t } }
 }
 
 # Every name is checked before anything runs, so a typo late in the list fails
 # at once rather than after the tasks ahead of it.
+# Exact and case-sensitive, as dev.sh: Get-Command takes wildcards (b*) and
+# ignores case (BUILD), so it is not used for this.
 foreach ($task in $queue) {
-  if (-not (Get-Command "Task-$task" -ErrorAction SilentlyContinue)) { Die "unknown task: $task" }
+  if ($KnownTasks -cnotcontains $task) { Die "unknown task: $task" }
 }
 $CovQueued = $queue -contains 'cov'
 

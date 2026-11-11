@@ -7,18 +7,10 @@
  * the message id on its cache wrapper and reads it directly.
  */
 export function getOriginalIdHint(originalMsg: any): string {
-    try {
-        const appId = originalMsg.getApplicationMessageId?.();
-        if (appId) return String(appId);
-        const gmId = originalMsg.getGuaranteedMessageId?.();
-        if (gmId) return String(gmId);
-    /* v8 ignore start -- defensive catch around SDK getter calls; the mock's
-     * getters never throw, production SDK could return malformed objects on
-     * rare error paths. */
-    } catch {
-        /* fallthrough */
-    }
-    /* v8 ignore stop */
+    const appId = originalMsg.getApplicationMessageId?.();
+    if (appId) return String(appId);
+    const gmId = originalMsg.getGuaranteedMessageId?.();
+    if (gmId) return String(gmId);
     return '(no id)';
 }
 

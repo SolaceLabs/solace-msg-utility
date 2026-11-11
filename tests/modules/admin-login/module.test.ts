@@ -47,7 +47,6 @@ async function install(meResult: unknown = { ok: true, data: ADMIN_PROFILE }, on
         sempFetch: vi.fn(),
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
-        config: {},
     });
     await AdminLoginModule.install(ctx);
     const el = <T extends HTMLElement>(sel: string): T => container.querySelector(sel) as T;

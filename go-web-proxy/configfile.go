@@ -22,21 +22,22 @@ import (
 // config.yaml is the gateway's single source of settings. Environment variables
 // seed it on first start only (see resolveConfig); afterwards the file wins and
 // a differing env var is reported, never applied. The file is always at
-// configFilePath; no setting moves it. STORE_KEY_FILE (where the store key is)
-// is deliberately environment-only and never written to the file, so an
-// admin-editable settings file can never point the gateway at a different
-// secret.
+// configFilePath; no setting moves it, and neither the users store, the
+// connections store nor the store key: they are always at their default paths
+// (below), so an admin-editable settings file can never point the gateway at a
+// different secret or store. Moving data is Backup & Restore.
 const (
-	configVersion       = 1
-	configFilePath      = "/data/config.yaml" // fixed, like appRoot
-	defaultStoreKeyFile = "/data/store.key"
+	configVersion          = 1
+	configFilePath         = "/data/config.yaml" // fixed, like appRoot
+	defaultUsersFile       = "/data/users.yaml"
+	defaultConnectionsFile = "/data/connections.yaml"
+	defaultStoreKeyFile    = "/data/store.key"
 )
 
 const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # Environment variables seed this file on first start only, when it does not
 # exist. Afterwards the file wins; a changed env var is ignored and logged.
 # Edit this file and restart the gateway, or delete it to re-seed from env.
-# STORE_KEY_FILE (the store key) is environment-only and never appears here.
 # access.*, session.*, login.* and modules.* have no env var: edit them here.
 # An empty allow list admits every client; trustedProxies lists the reverse
 # proxies whose X-Forwarded-For is believed. session.*, login.* and modules.*
@@ -44,31 +45,32 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # modules.offered lists the app modules a signed-in user may be given,
 # modules.userDefault (all|none) what a user without a list of their own gets.
 # In Provisioned mode an administrator can also edit this file from the admin
-# console's Gateway Settings, where every key except hosted, tls.*, usersFile
-# and connectionsFile applies at once.
+# console's Gateway Settings, where every key except hosted and tls.* applies
+# at once.
 `
 
 // fileConfig is the on-disk shape. Field order is the order yaml.Marshal writes.
 // The JSON names are the settings page's (GET/PUT /managed/settings): the same
 // keys, without the version, which the gateway owns.
 type fileConfig struct {
-	Version         int         `yaml:"version" json:"-"`
-	Hosted          bool        `yaml:"hosted" json:"hosted"`
-	ConnModes       string      `yaml:"connModes" json:"connModes"`
-	DefaultConn     string      `yaml:"defaultConn" json:"defaultConn"`
-	TLS             fileTLS     `yaml:"tls" json:"tls"`
-	LogLevel        string      `yaml:"logLevel" json:"logLevel"`
-	UsersFile       string      `yaml:"usersFile" json:"usersFile"`
-	ConnectionsFile string      `yaml:"connectionsFile" json:"connectionsFile"`
-	Access          fileAccess  `yaml:"access" json:"access"`
-	Session         fileSession `yaml:"session" json:"session"`
-	Login           fileLogin   `yaml:"login" json:"login"`
-	Modules         fileModules `yaml:"modules" json:"modules"`
+	Version     int         `yaml:"version" json:"-"`
+	Hosted      bool        `yaml:"hosted" json:"hosted"`
+	ConnModes   string      `yaml:"connModes" json:"connModes"`
+	DefaultConn string      `yaml:"defaultConn" json:"defaultConn"`
+	TLS         fileTLS     `yaml:"tls" json:"tls"`
+	LogLevel    string      `yaml:"logLevel" json:"logLevel"`
+	Access      fileAccess  `yaml:"access" json:"access"`
+	Session     fileSession `yaml:"session" json:"session"`
+	Login       fileLogin   `yaml:"login" json:"login"`
+	Modules     fileModules `yaml:"modules" json:"modules"`
 	// RemovedAppDir is the appDir key an earlier release read; the app is now
 	// always served from appRoot. A file that still has it loads, the value is
 	// ignored with a warning at start (removedInUse), and the gateway's next
-	// write of the file drops it.
-	RemovedAppDir *string `yaml:"appDir,omitempty" json:"-"`
+	// write of the file drops it. The same holds for the usersFile and
+	// connectionsFile keys: the stores are always at their default paths.
+	RemovedAppDir          *string `yaml:"appDir,omitempty" json:"-"`
+	RemovedUsersFile       *string `yaml:"usersFile,omitempty" json:"-"`
+	RemovedConnectionsFile *string `yaml:"connectionsFile,omitempty" json:"-"`
 }
 
 type fileTLS struct {
@@ -180,7 +182,7 @@ func checkModuleIDs(key string, ids []string) error {
 // seedVar maps one environment variable to its config.yaml key. fromEnv
 // normalises the raw env string the way loadConfig parses it, so the override
 // comparison is on effective values; a value loadConfig would refuse (such as
-// SSL_INSECURE_SKIP_VERIFY=TRUE) stays as typed and is reported as differing.
+// SMU_SSL_SKIP_CERT_VERIFY=TRUE) stays as typed and is reported as differing.
 type seedVar struct {
 	env, key  string
 	fromEnv   func(raw string) string
@@ -188,16 +190,47 @@ type seedVar struct {
 }
 
 var seedVars = []seedVar{
-	{"HOSTED", "hosted", hostedEnv, func(c config) string { return strconv.FormatBool(c.hosted) }},
-	{"CONN_MODES", "connModes", strings.ToLower, func(c config) string { return c.connModes }},
-	{"DEFAULT_CONN", "defaultConn", strings.ToLower, func(c config) string { return c.defaultConn }},
-	{"SSL_CERT_FILE", "tls.certFile", identity, func(c config) string { return c.certFile }},
-	{"SSL_KEY_FILE", "tls.keyFile", identity, func(c config) string { return c.keyFile }},
-	{"SSL_TRUST_DIR", "tls.trustDir", identity, func(c config) string { return c.trustDir }},
-	{"SSL_INSECURE_SKIP_VERIFY", "tls.insecureSkipVerify", insecureEnv, func(c config) string { return strconv.FormatBool(c.insecureSkipVerify) }},
+	{"SMU_HOSTED", "hosted", hostedEnv, func(c config) string { return strconv.FormatBool(c.hosted) }},
+	{"SMU_CONN_MODES", "connModes", strings.ToLower, func(c config) string { return c.connModes }},
+	{"SMU_DEFAULT_CONN", "defaultConn", strings.ToLower, func(c config) string { return c.defaultConn }},
+	{"SMU_SSL_CERTFILE", "tls.certFile", identity, func(c config) string { return c.certFile }},
+	{"SMU_SSL_CERTKEYFILE", "tls.keyFile", identity, func(c config) string { return c.keyFile }},
+	{"SMU_SSL_TRUSTDIR", "tls.trustDir", identity, func(c config) string { return c.trustDir }},
+	{"SMU_SSL_SKIP_CERT_VERIFY", "tls.insecureSkipVerify", insecureEnv, func(c config) string { return strconv.FormatBool(c.insecureSkipVerify) }},
 	{"LOG_LEVEL", "logLevel", strings.ToLower, func(c config) string { return levelName(c.logLevel) }},
-	{"USERS_FILE", "usersFile", identity, func(c config) string { return c.usersFile }},
-	{"CONNECTIONS_FILE", "connectionsFile", identity, func(c config) string { return c.connectionsFile }},
+}
+
+// renamedEnv are the variables an earlier release read, with their names now.
+// SSL_CERT_FILE is the one that forced the rename: Go itself reads it as its
+// CA bundle, so the old name silently replaced the upstream trust pool. A
+// start with any of them set is refused (checkRenamedEnv), so a stale name
+// can never be mistaken for a setting that applies.
+var renamedEnv = []struct{ old, new string }{
+	{"SSL_CERT_FILE", "SMU_SSL_CERTFILE"},
+	{"SSL_KEY_FILE", "SMU_SSL_CERTKEYFILE"},
+	{"SSL_TRUST_DIR", "SMU_SSL_TRUSTDIR"},
+	{"SSL_INSECURE_SKIP_VERIFY", "SMU_SSL_SKIP_CERT_VERIFY"},
+	{"HOSTED", "SMU_HOSTED"},
+	{"CONN_MODES", "SMU_CONN_MODES"},
+	{"DEFAULT_CONN", "SMU_DEFAULT_CONN"},
+	{"ADMIN_PASSWORD", "SMU_ADMIN_PASSWORD"},
+	{"ADMIN_PASSWORD_FILE", "SMU_ADMIN_PASSWORD_FILE"},
+}
+
+// checkRenamedEnv refuses a start with an old variable name set. One error
+// lists every old name found and its new name; values are never printed
+// (ADMIN_PASSWORD is a secret).
+func checkRenamedEnv() error {
+	var found []string
+	for _, r := range renamedEnv {
+		if os.Getenv(r.old) != "" {
+			found = append(found, r.old+" -> "+r.new)
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return fmt.Errorf("environment variables renamed, so the gateway will not start with the old names set: %s. Rename them in the deployment (same values) and start again", strings.Join(found, ", "))
 }
 
 // insecureEnv mirrors parseInsecureSkipVerify for the override comparison,
@@ -220,14 +253,14 @@ func hostedEnv(raw string) string {
 }
 func identity(raw string) string { return raw }
 
-// secretPaths are the environment-only locations of the gateway's secrets.
-// toConfig takes them from its caller, never from the file.
+// secretPaths are the locations of the gateway's secrets. toConfig takes them
+// from its caller, never from the file.
 type secretPaths struct {
-	storeKey string // STORE_KEY_FILE
+	storeKey string
 }
 
-func secretPathsFromEnv() secretPaths {
-	return secretPaths{storeKey: envOr("STORE_KEY_FILE", defaultStoreKeyFile)}
+func defaultSecretPaths() secretPaths {
+	return secretPaths{storeKey: defaultStoreKeyFile}
 }
 
 func defaultFileConfig() fileConfig { return fileConfigFromConfig(defaultConfig()) }
@@ -244,9 +277,7 @@ func fileConfigFromConfig(c config) fileConfig {
 			TrustDir:           c.trustDir,
 			InsecureSkipVerify: c.insecureSkipVerify,
 		},
-		LogLevel:        levelName(c.logLevel),
-		UsersFile:       c.usersFile,
-		ConnectionsFile: c.connectionsFile,
+		LogLevel: levelName(c.logLevel),
 		Access: fileAccess{
 			Allow:          prefixStrings(c.access.allow),
 			TrustedProxies: prefixStrings(c.access.trustedProxies),
@@ -277,7 +308,7 @@ func prefixStrings(ps []netip.Prefix) []string {
 }
 
 // toConfig validates every value and converts to the runtime config.
-// The secret paths come from the environment, never from the file.
+// The stores and the secret paths are fixed, never read from the file.
 func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 	level, err := parseLogLevel(fc.LogLevel)
 	if err != nil {
@@ -310,8 +341,8 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 		trustDir:           fc.TLS.TrustDir,
 		insecureSkipVerify: fc.TLS.InsecureSkipVerify,
 		logLevel:           level,
-		usersFile:          fc.UsersFile,
-		connectionsFile:    fc.ConnectionsFile,
+		usersFile:          defaultUsersFile,
+		connectionsFile:    defaultConnectionsFile,
 		storeKeyFile:       secrets.storeKey,
 		backupDir:          backupRoot,
 		connModes:          strings.ToLower(fc.ConnModes),
@@ -480,6 +511,7 @@ type removedSetting struct {
 // CONFIG_FILE naming another file never gets here: resolveConfig refuses it.
 func removedInUse(fc fileConfig) []removedSetting {
 	const ownBuild = "to serve your own build, mount it at " + appRoot
+	const moveData = "; to move data use Backup & Restore"
 	var out []removedSetting
 	if fc.RemovedAppDir != nil {
 		out = append(out, removedSetting{"appDir", ownBuild})
@@ -489,6 +521,23 @@ func removedInUse(fc fileConfig) []removedSetting {
 	}
 	if os.Getenv("CONFIG_FILE") != "" {
 		out = append(out, removedSetting{"CONFIG_FILE", "config.yaml is always " + configFilePath})
+	}
+	usersNow := "the users store is always " + defaultUsersFile + moveData
+	connsNow := "the connections store is always " + defaultConnectionsFile + moveData
+	if fc.RemovedUsersFile != nil {
+		out = append(out, removedSetting{"usersFile", usersNow})
+	}
+	if os.Getenv("USERS_FILE") != "" {
+		out = append(out, removedSetting{"USERS_FILE", usersNow})
+	}
+	if fc.RemovedConnectionsFile != nil {
+		out = append(out, removedSetting{"connectionsFile", connsNow})
+	}
+	if os.Getenv("CONNECTIONS_FILE") != "" {
+		out = append(out, removedSetting{"CONNECTIONS_FILE", connsNow})
+	}
+	if os.Getenv("STORE_KEY_FILE") != "" {
+		out = append(out, removedSetting{"STORE_KEY_FILE", "the store key is always " + defaultStoreKeyFile + moveData})
 	}
 	return out
 }
@@ -504,13 +553,17 @@ type configSource struct {
 // resolveConfig loads config.yaml, seeding it from the environment when it does
 // not exist yet. Every failure is fatal for the caller and names the path.
 func resolveConfig(path string) (configLoad, error) {
+	// An old variable name stops the start before anything is read or written.
+	if err := checkRenamedEnv(); err != nil {
+		return configLoad{}, err
+	}
 	// CONFIG_FILE is no longer read. One that still names another file stops
 	// the start: seeding a fresh file instead would drop that file's settings,
 	// the access list among them, without a word.
 	if v := os.Getenv("CONFIG_FILE"); v != "" && filepath.Clean(v) != filepath.Clean(path) {
 		return configLoad{}, fmt.Errorf("CONFIG_FILE=%q is no longer read: config.yaml is always %s. Move the file there and remove CONFIG_FILE", v, path)
 	}
-	secrets := secretPathsFromEnv()
+	secrets := defaultSecretPaths()
 	data, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

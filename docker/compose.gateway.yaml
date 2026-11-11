@@ -23,7 +23,7 @@ services:
     cap_drop:
       - ALL
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges=true
     restart: unless-stopped
     ports:
       - "9443:9443"

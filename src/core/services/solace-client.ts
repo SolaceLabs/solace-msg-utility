@@ -136,17 +136,10 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
         if (session) {
             try {
                 session.disconnect();
-                /* v8 ignore start -- defensive catch around an SDK contract that does not throw in jsdom.
-                 * Pre-refactor coverage analysis (see git history of src/modules/connections/service-client.ts)
-                 * concluded driving this path is high-cost / low-signal; that reasoning is unchanged after
-                 * the move to core/services/. The explicit disconnect() throw path is still covered by
-                 * tests/core/services/solace-client.test.ts › "warns and does not propagate when session.disconnect() throws".
-                 */
             } catch (e) {
                 // Prior session may already be disposed — expected during reconnect.
                 log.warn('disconnect() on stale session during reconnect:', e);
             }
-            /* v8 ignore stop */
         }
 
         if (!(window as any).solace) {
@@ -172,11 +165,13 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
         // For secure WebSocket, fire a hidden-iframe TLS handshake alongside
         // the solclient connect — this primes the browser's cert-trust cache
         // so the wss:// handshake can reuse the user's accept/reject decision.
-        // Skip in hosted mode: the browser only sees the gateway's TLS endpoint
-        // (already trusted by the PWA load); the internal broker host is not
-        // user-reachable and probing it would be wrong.
+        // Skip in hosted mode and for a Provisioned session (smfPath): the
+        // browser only sees the gateway's TLS endpoint (already trusted by the
+        // PWA load); the broker host is not user-reachable, and for a
+        // Provisioned session `host` is only the broker's name, so probing it
+        // would send a request to another origin.
         const hosted = cfg.hosted === true;
-        if (cfg.protocol === 'wss' && !hosted) {
+        if (cfg.protocol === 'wss' && !hosted && !cfg.smfPath) {
             tlsHandshakeProbe(buildBrokerUrl('https', host, cfg.port, cfg.urlPath, false, false));
         }
 
@@ -314,10 +309,8 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
     function disposeSession(s: any) {
         try {
             s.dispose();
-            /* v8 ignore start -- defensive catch around an SDK contract that does not throw in jsdom.
-             * Same coverage analysis as the connect() catch above: driving this path requires
-             * order-of-operations coupling that makes the test brittle for a one-line warn whose
-             * downstream effect (the session is dropped) happens regardless.
+            /* v8 ignore start -- SDK Session.dispose() does not throw; defensive catch on a
+             * trusted contract.
              */
         } catch (e) {
             // dispose() on a never-connected or already-disposed session is benign.

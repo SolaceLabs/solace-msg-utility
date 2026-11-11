@@ -37,7 +37,6 @@ function createTestContext(container: HTMLElement, overrides: Partial<AppState> 
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
-        config: {},
     });
     return { ctx, eventBus, appState };
 }

@@ -36,7 +36,7 @@ const DIR = '/backup';
 /** passwordIter in password.go. */
 export const BACKUP_ITER = 600_000;
 const NAME = /^smu-backup-[0-9]{8}T[0-9]{6}Z\.json$/;
-const HOST_KEYS = ['tls.certFile', 'tls.keyFile', 'tls.trustDir', 'usersFile', 'connectionsFile'];
+const HOST_KEYS = ['tls.certFile', 'tls.keyFile', 'tls.trustDir'];
 
 // ----- refusals ----------------------------------------------------------------------
 
@@ -227,16 +227,14 @@ export async function openBackup(file: string, passphrase: string): Promise<Back
 }
 
 /** withHostPaths: the host-only path keys from `host`. */
-export function withHostPaths(s: GatewaySettings, host: Pick<GatewaySettings, 'tls' | 'usersFile' | 'connectionsFile'>): GatewaySettings {
+export function withHostPaths(s: GatewaySettings, host: Pick<GatewaySettings, 'tls'>): GatewaySettings {
     return {
         ...s,
         tls: { ...s.tls, certFile: host.tls.certFile, keyFile: host.tls.keyFile, trustDir: host.tls.trustDir },
-        usersFile: host.usersFile,
-        connectionsFile: host.connectionsFile,
     };
 }
 
-const NO_PATHS = { tls: { certFile: '', keyFile: '', trustDir: '', insecureSkipVerify: false }, usersFile: '', connectionsFile: '' };
+const NO_PATHS = { tls: { certFile: '', keyFile: '', trustDir: '', insecureSkipVerify: false } };
 
 // ----- import planning --------------------------------------------------------------------
 

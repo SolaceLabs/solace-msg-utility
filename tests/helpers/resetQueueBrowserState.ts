@@ -18,6 +18,7 @@ export function resetQueueBrowserState(): void {
     state.allMessages = [];
     state.displayedMessages = [];
     state.forwardQueue = [];
+    state.selectedMessage = null;
     state.activeFilters = defaultActiveFilters();
     state.maxMessagesPerQueue = DEFAULT_MAX_MESSAGES_PER_QUEUE;
 }

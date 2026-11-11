@@ -12,7 +12,7 @@ A browser-based tool for managing Solace PubSub+ Event Brokers events/messages. 
 | **Gateway** | The app served by the gateway container, which connects to your brokers for it. Browsers reach and trust only the gateway. | each user types them | `SMU_VERSION=<release> docker compose -f docker/compose.gateway.yaml up -d` | `demo.html` |
 | **Provisioned** | Gateway mode plus sign-in. An administrator stores the broker credentials and grants each user brokers, VPNs and queues. | stored on the gateway; users sign in | `SMU_VERSION=<release> docker compose -f docker/compose.provisioned.yaml up -d`, after [its setup](#provisioned----sign-in-and-administration) | `provisioned-demo.html` |
 
-Both container modes run the same image: Gateway mode by default, Provisioned mode with `CONN_MODES=provisioned`. [deployment.md](docs/deployment.md#choosing-a-mode) compares them; [provisioned-mode.md](docs/provisioned-mode.md) covers Provisioned mode in full.
+Both container modes run the same image: Gateway mode by default, Provisioned mode with `SMU_CONN_MODES=provisioned`. [deployment.md](docs/deployment.md#choosing-a-mode) compares them; [provisioned-mode.md](docs/provisioned-mode.md) covers Provisioned mode in full.
 
 **Demos.** Both demos are attached to every Release and run from disk with nothing else: no broker, no gateway, no network request.
 

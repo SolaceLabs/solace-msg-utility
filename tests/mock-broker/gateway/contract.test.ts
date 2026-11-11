@@ -44,11 +44,8 @@ const header = (h: Record<string, string>, name: string): string =>
 const seed: GatewaySeed = read('seed.json');
 const cases: { name: string; steps: Step[] }[] = read('cases.json').cases;
 
-/** contractNormalize in contract_test.go: store paths, a backup's next run, an export. */
+/** contractNormalize in contract_test.go: a backup's next run, an export. */
 function normalize(v: any): any {
-    if (v && typeof v === 'object' && v.settings && typeof v.settings === 'object') {
-        for (const k of ['usersFile', 'connectionsFile']) if (k in v.settings) v.settings[k] = '<path>';
-    }
     if (v && typeof v === 'object' && typeof v.nextRun === 'string') v.nextRun = '<time>';
     for (const k of ['filename', 'content']) if (v && typeof v === 'object' && k in v) v[k] = '<file>';
     return v;

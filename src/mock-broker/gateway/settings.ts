@@ -23,7 +23,7 @@ type Schema = { [key: string]: Kind | Schema };
 const SCHEMA: Schema = {
     hosted: 'bool', connModes: 'string', defaultConn: 'string',
     tls: { certFile: 'string', keyFile: 'string', trustDir: 'string', insecureSkipVerify: 'bool' },
-    logLevel: 'string', usersFile: 'string', connectionsFile: 'string',
+    logLevel: 'string',
     access: { allow: 'strings', trustedProxies: 'strings' },
     session: { idleMinutes: 'int', absoluteMinutes: 'int' },
     login: { maxFailures: 'int', backoffSeconds: 'int', maxBackoffSeconds: 'int', unauthenticatedPerMinute: 'int' },
@@ -37,8 +37,6 @@ const RESTART_ONLY: { key: string; host: boolean; value: (s: GatewaySettings) =>
     { key: 'tls.keyFile', host: true, value: s => s.tls.keyFile },
     { key: 'tls.trustDir', host: true, value: s => s.tls.trustDir },
     { key: 'tls.insecureSkipVerify', host: false, value: s => s.tls.insecureSkipVerify },
-    { key: 'usersFile', host: true, value: s => s.usersFile },
-    { key: 'connectionsFile', host: true, value: s => s.connectionsFile },
 ];
 
 const clone = (s: GatewaySettings): GatewaySettings => JSON.parse(JSON.stringify(s));
@@ -72,7 +70,7 @@ function merge(target: Record<string, any>, patch: unknown, schema: Schema): voi
 const ZERO: GatewaySettings = {
     hosted: false, connModes: '', defaultConn: '',
     tls: { certFile: '', keyFile: '', trustDir: '', insecureSkipVerify: false },
-    logLevel: '', usersFile: '', connectionsFile: '',
+    logLevel: '',
     access: { allow: [], trustedProxies: [] },
     session: { idleMinutes: 0, absoluteMinutes: 0 },
     login: { maxFailures: 0, backoffSeconds: 0, maxBackoffSeconds: 0, unauthenticatedPerMinute: 0 },
@@ -82,12 +80,13 @@ const ZERO: GatewaySettings = {
 /**
  * A backup's settings as the gateway's strict decoder reads them: onto a
  * zero file, unknown or mistyped keys refused (BadRequest). The file's own
- * `version`, and the `appDir` key an earlier release wrote, are not settings.
+ * `version`, and the `appDir`, `usersFile` and `connectionsFile` keys earlier
+ * releases wrote, are not settings: accepted and ignored.
  */
 export function settingsFromBackup(raw: unknown): GatewaySettings {
     const out = clone(ZERO);
     const rest = raw && typeof raw === 'object' && !Array.isArray(raw)
-        ? Object.fromEntries(Object.entries(raw).filter(([k]) => k !== 'version' && k !== 'appDir'))
+        ? Object.fromEntries(Object.entries(raw).filter(([k]) => !['version', 'appDir', 'usersFile', 'connectionsFile'].includes(k)))
         : raw;
     merge(out as unknown as Record<string, any>, rest ?? null, SCHEMA);
     return out;
@@ -208,13 +207,13 @@ function range(key: string, v: number, lo: number, hi: number): string | null {
 /** validateConnModes (main.go). */
 export function connModesProblem(s: { connModes: string; defaultConn: string; hosted: boolean }): string | null {
     if (!['direct', 'provisioned', 'both'].includes(s.connModes)) {
-        return `connModes=${quote(s.connModes)} (config.yaml; seeded by CONN_MODES) must be one of "direct", "provisioned", "both"`;
+        return `connModes=${quote(s.connModes)} (config.yaml; seeded by SMU_CONN_MODES) must be one of "direct", "provisioned", "both"`;
     }
     if (!['direct', 'provisioned'].includes(s.defaultConn)) {
-        return `defaultConn=${quote(s.defaultConn)} (config.yaml; seeded by DEFAULT_CONN) must be one of "direct", "provisioned"`;
+        return `defaultConn=${quote(s.defaultConn)} (config.yaml; seeded by SMU_DEFAULT_CONN) must be one of "direct", "provisioned"`;
     }
     if (s.connModes !== 'direct' && !s.hosted) {
-        return `connModes=${quote(s.connModes)} offers Provisioned sign-in but hosted is false (config.yaml; seeded by HOSTED), so the app cannot detect the gateway`;
+        return `connModes=${quote(s.connModes)} offers Provisioned sign-in but hosted is false (config.yaml; seeded by SMU_HOSTED), so the app cannot detect the gateway`;
     }
     return null;
 }

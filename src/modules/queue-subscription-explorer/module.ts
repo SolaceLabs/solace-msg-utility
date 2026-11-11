@@ -157,7 +157,7 @@ export const QueueSubscriptionExplorerModule = {
                     }
                 }
                 /* v8 ignore start -- post-loop supersession check. The
-                 * in-loop line-122 check catches all naturally-emitted
+                 * in-loop supersession check above catches all naturally-emitted
                  * disconnects (a disconnect bumps loadGen, then the next
                  * yield's iteration returns). This line covers the
                  * one-microtask window between the last yield being consumed

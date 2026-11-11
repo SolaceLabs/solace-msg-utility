@@ -181,7 +181,7 @@ a.btn {
     outline-offset: 2px;
 }
 
-/* Canonical .btn-icon — consolidates former duplicate at old line 414 into this one. */
+/* Canonical .btn-icon. */
 .btn-icon {
     display: flex;
     align-items: center;
@@ -217,19 +217,6 @@ a.btn {
 .btn-sm {
     padding: 0.25rem 0.5rem;
     font-size: 0.5rem;
-}
-
-/* Bulk action row hovers (enabled state only). */
-.hover-danger:not(:disabled):hover {
-    background-color: var(--status-disconnected) !important;
-    color: white !important;
-    border-color: var(--status-disconnected) !important;
-}
-
-.hover-success:not(:disabled):hover {
-    background-color: var(--status-connected) !important;
-    color: white !important;
-    border-color: var(--status-connected) !important;
 }
 
 /* ---------- Tables ---------- */

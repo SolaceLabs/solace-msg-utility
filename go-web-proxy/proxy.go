@@ -228,14 +228,14 @@ const upstreamDialTimeout = 10 * time.Second
 
 // newUpstreamTransport is the one transport for every broker-bound request:
 // the Direct relay and, in the managed build, the SEMP relay. It trusts the
-// system roots plus SSL_TRUST_DIR, and never follows redirects (the
+// system roots plus SMU_SSL_TRUSTDIR, and never follows redirects (the
 // ReverseProxy calls RoundTrip directly).
 func newUpstreamTransport(trustPool *x509.CertPool, insecure bool) *http.Transport {
 	return &http.Transport{
 		DialContext: (&net.Dialer{Timeout: upstreamDialTimeout, KeepAlive: 30 * time.Second}).DialContext,
 		TLSClientConfig: &tls.Config{
 			RootCAs:            trustPool,
-			InsecureSkipVerify: insecure, // gated by SSL_INSECURE_SKIP_VERIFY=true
+			InsecureSkipVerify: insecure, // gated by config.yaml tls.insecureSkipVerify (SMU_SSL_SKIP_CERT_VERIFY only seeds it on first start)
 		},
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,

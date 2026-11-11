@@ -26,11 +26,7 @@ import { moduleFiles } from 'virtual:module-registry';
 
 export const modules: RegisteredModule[] = Object.entries(ACTIVE_MODULES).map(([id, priority]) => {
     const file = moduleFiles[id] as Record<string, unknown> | undefined;
-    /* v8 ignore start -- developer-experience guardrail: fires only if a
-     * `src/variants/<name>.ts` lists a module id that doesn't exist on disk.
-     * The registry plugin already fails the build when the entry file is
-     * missing, so this only fires if the virtual module and the manifest
-     * disagree; testing it requires mocking `virtual:module-registry`. */
+    // Both guardrail throws are proven by tests/registry.test.ts (setup guardrails).
     if (!file) {
         throw new Error(
             `[registry] "${id}" is in the active variant manifest but the module ` +
@@ -39,20 +35,15 @@ export const modules: RegisteredModule[] = Object.entries(ACTIVE_MODULES).map(([
             `from the variant file under src/variants/.`
         );
     }
-    /* v8 ignore stop */
     const moduleObject = Object.values(file).find(
         (v): v is PwaModule => !!v && typeof v === 'object' && (v as { id?: unknown }).id === id
     );
-    /* v8 ignore start -- developer-experience guardrail: fires only if a
-     * module entry file exports an object whose `.id` doesn't
-     * match its directory name. Caught at code-review time; reproducing in a
-     * test would require committing a malformed module dir into the repo. */
+    // Proven by tests/registry.test.ts (setup guardrails).
     if (!moduleObject) {
         throw new Error(
             `[registry] the entry file for "${id}" does not export an object with id="${id}". ` +
             `Each module file must export a const whose .id matches the directory name.`
         );
     }
-    /* v8 ignore stop */
     return { module: moduleObject, priority };
 });

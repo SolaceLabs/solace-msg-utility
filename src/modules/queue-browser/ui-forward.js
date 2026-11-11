@@ -149,7 +149,6 @@ ui.renderForwardList = function () {
 ui.closeForwardModal = function () {
     const els = ui.getElements();
     els.modalForward.close();
-    state.selectedForwardMsg = null;
 };
 
 ui.onForwardSuccess = function () {

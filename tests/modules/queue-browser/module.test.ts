@@ -31,7 +31,6 @@ describe('queue-browser/module', () => {
             loadSelf: vi.fn(),
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
-            config: { useMocks: false }
         });
 
         resetQueueBrowserState();
@@ -195,7 +194,7 @@ describe('queue-browser/module', () => {
         });
 
         it('btnBindPick click wires to handleBindPickClick (invokes pickQueue with the primary queue source)', async () => {
-            // Closes COV-10: the click listener at module.ts:89 was
+            // Covers the click listener at module.ts:89, which was
             // previously unexercised. Spy on `pickQueue` — the distinguishing
             // downstream effect of handleBindPickClick — so a regression that
             // re-wires this button to a different handler would fail.
@@ -715,7 +714,6 @@ describe('queue-browser/module', () => {
                 loadSelf: vi.fn(),
                 sempFetch: vi.fn(),
                 copyToClipboard: vi.fn(),
-                config: { useMocks: false }
             });
 
             await expect(QueueBrowserModule.install(minCtx)).rejects.toThrow(/Required element missing/);

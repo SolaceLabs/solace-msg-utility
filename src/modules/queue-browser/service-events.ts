@@ -6,6 +6,8 @@ import { showToast } from '../../core/toast';
 import { solaceErrorText } from '../../core/utils';
 import { logger } from '../../core/logger';
 
+const log = logger.withTag('queue-browser');
+
 declare const solace: any;
 
 /**
@@ -96,7 +98,7 @@ export function createServiceEvents() {
     }
 
     function onBrowserUp(queueName: string) {
-        logger.info(`[${queueName}] Browser UP`);
+        log.info(`Browser UP for queue=${queueName}`);
 
         // Finalize Bind in UI
         ui.addQueueToDropdown(queueName);
@@ -126,7 +128,7 @@ export function createServiceEvents() {
     }
 
     function onConnectFailed(queueName: string, err: any) {
-        logger.error(`[${queueName}] Connect Failed:`, err);
+        log.error(`Connect failed for queue=${queueName}`, err);
         const reason = solaceErrorText(err, 'Unknown Error');
 
         // Show Inline Error for binding
@@ -142,7 +144,7 @@ export function createServiceEvents() {
     }
 
     function onBrowserDown(queueName: string, err: any) {
-        logger.error(`[${queueName}] Browser Down:`, err);
+        log.error(`Browser down for queue=${queueName}`, err);
         // A DOWN for a queue that is no longer bound (unbound, or cleared with the
         // session) is stale: there is no slot to free and nothing to tell the user.
         if (!state.browserInstances.has(queueName)) return;
@@ -162,7 +164,7 @@ export function createServiceEvents() {
     }
 
     function onGmDisabled(queueName: string) {
-        logger.error(`[${queueName}] GM Disabled`);
+        log.error(`Guaranteed messaging disabled for queue=${queueName}`);
         if (state.currentQueue === queueName) {
             ui.showBrowserError('Guaranteed Messaging is disabled on the broker.');
         }
@@ -176,7 +178,7 @@ export function createServiceEvents() {
             else if (msg.getType() === solace.MessageType.MAP) typeStr = 'Map';
             else if (msg.getType() === solace.MessageType.STREAM) typeStr = 'Stream';
         } catch (e) {
-            logger.warn('Failed to determine message type', e);
+            log.warn(`Failed to determine message type on queue=${queueName}`, e);
         }
 
         // TIMESTAMP Handling - Sender Timestamp preference
@@ -200,7 +202,7 @@ export function createServiceEvents() {
             else
                 dateStr = '(No Timestamp)';
         } catch (e) {
-            logger.warn('Failed to extract timestamp', e);
+            log.warn(`Failed to extract timestamp on queue=${queueName}`, e);
         }
 
         const id = msg.getGuaranteedMessageId() ? msg.getGuaranteedMessageId().toString() : 'N/A';
@@ -240,7 +242,7 @@ export function createServiceEvents() {
                     });
                     return obj;
                 } catch (e) {
-                    logger.warn(`[${queueName}] Failed to read the user properties of message ${id}; showing none:`, e);
+                    log.warn(`Failed to read the user properties of message ${id} on queue=${queueName}; showing none`, e);
                     return {};
                 }
             })(),

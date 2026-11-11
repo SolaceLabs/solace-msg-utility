@@ -4,7 +4,7 @@
 # instead; see docs/deployment.md.
 #
 # One image, two services: `gateway` in Gateway mode (the default) and
-# `provisioned` in Provisioned mode (CONN_MODES=provisioned), on different host
+# `provisioned` in Provisioned mode (SMU_CONN_MODES=provisioned), on different host
 # ports so both can run at once.
 #
 # Usage:
@@ -41,7 +41,7 @@ services:
     cap_drop:
       - ALL
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges=true
     restart: unless-stopped
     ports:
       - "19443:9443"
@@ -52,8 +52,8 @@ services:
       # Log level: debug | info | warn | error. Bump to info/debug while testing.
       LOG_LEVEL: warn
       # Set to "true" ONLY for lab use against brokers with untrusted certs.
-      SSL_INSECURE_SKIP_VERIFY: "true"
-      # SSL_CERT_FILE, SSL_KEY_FILE, SSL_TRUST_DIR all use their defaults.
+      SMU_SSL_SKIP_CERT_VERIFY: "true"
+      # SMU_SSL_CERTFILE, SMU_SSL_CERTKEYFILE, SMU_SSL_TRUSTDIR all use their defaults.
       # Override here if you mount the TLS material at non-default paths.
     volumes:
       # The self-signed certificate is written here on the first start. To use
@@ -70,9 +70,9 @@ services:
     # check (k8s liveness probe, docker swarm, monitoring agent) hitting
     # https://<host>:9443/hosted with TLS verification disabled or pinned.
 
-  # Provisioned mode: the same image with CONN_MODES=provisioned. Open
+  # Provisioned mode: the same image with SMU_CONN_MODES=provisioned. Open
   # https://localhost:29443/ (it redirects to the sign-in page). The first start
-  # creates the user "admin" with ADMIN_PASSWORD, or with a generated password
+  # creates the user "admin" with SMU_ADMIN_PASSWORD, or with a generated password
   # printed once in `docker compose logs provisioned`; either way it must be
   # changed at the first sign-in. The admin console is at
   # https://localhost:29443/solAdmin.
@@ -87,26 +87,26 @@ services:
     cap_drop:
       - ALL
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges=true
     restart: unless-stopped
     ports:
       - "29443:9443"
     environment:
       # Seeds config.yaml on the first start only, like the values above.
-      CONN_MODES: provisioned
+      SMU_CONN_MODES: provisioned
       LOG_LEVEL: warn
-      SSL_INSECURE_SKIP_VERIFY: "true"
+      SMU_SSL_SKIP_CERT_VERIFY: "true"
       # Bootstrap admin password, read only when users.yaml does not exist yet
       # (12 to 128 characters). Put it in a .env file next to this one rather
       # than here; never written to config.yaml or the log. For a Docker secret
-      # set ADMIN_PASSWORD_FILE to its path instead.
-      # ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      # set SMU_ADMIN_PASSWORD_FILE to its path instead.
+      # SMU_ADMIN_PASSWORD: ${SMU_ADMIN_PASSWORD}
     volumes:
       - provisioned-tls:/tls
       # config.yaml, users.yaml, connections.yaml and store.key. The store key
-      # encrypts the two stores: back it up, or set STORE_KEY_FILE to a separate
-      # mount. `docker compose down -v` wipes it all (re-seeds the config and
-      # forces a fresh bootstrap).
+      # encrypts the two stores: back it up.
+      # `docker compose down -v` wipes it all (re-seeds the config and forces
+      # a fresh bootstrap).
       - provisioned-data:/data
       # Scheduled backups (the admin console's Backup & Restore). A deployment
       # bind-mounts a host directory here instead (compose.provisioned.yaml).

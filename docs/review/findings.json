@@ -1098,7 +1098,7 @@
       "area": "resilience",
       "severity": "nit",
       "confidence": "verified",
-      "status": "open",
+      "status": "accepted",
       "locations": [
         "src/core/utils.ts:40-57",
         "src/core/utils.ts:66-70"
@@ -1113,7 +1113,7 @@
       },
       "resolved": null,
       "history": [],
-      "notes": ""
+      "notes": "2026-11-11: Accepted by the owner. The cache grows by one compiled RegExp per distinct filter string typed in a session; the growth is a few bytes per pattern, so no cap."
     },
     {
       "id": "CR-0042",

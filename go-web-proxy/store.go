@@ -20,8 +20,8 @@ import (
 // Bootstrap admin password sources, read only when the users file is missing.
 // Environment-only and never written to config.yaml: the value is a secret.
 const (
-	envAdminPassword     = "ADMIN_PASSWORD"
-	envAdminPasswordFile = "ADMIN_PASSWORD_FILE"
+	envAdminPassword     = "SMU_ADMIN_PASSWORD"
+	envAdminPasswordFile = "SMU_ADMIN_PASSWORD_FILE"
 	bootstrapAdminName   = "admin"
 )
 
@@ -845,8 +845,8 @@ func (s *store) replaceStores(tx *fileTx, users []userRec, conns []connRec) (dro
 
 // ----- bootstrap ----------------------------------------------------------------
 
-// adminSeed returns the bootstrap admin password from ADMIN_PASSWORD or the
-// file named by ADMIN_PASSWORD_FILE (a Docker secret), and which variable gave
+// adminSeed returns the bootstrap admin password from SMU_ADMIN_PASSWORD or the
+// file named by SMU_ADMIN_PASSWORD_FILE (a Docker secret), and which variable gave
 // it. Neither set: "" and "", and the caller generates one. The value is never
 // echoed in an error.
 func adminSeed(getenv func(string) string) (password, source string, err error) {

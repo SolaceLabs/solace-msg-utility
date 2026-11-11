@@ -121,7 +121,6 @@ function makeCtx(container: HTMLElement): AppContext {
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         mountSidebarAccount: (node: HTMLElement) => { sidebar.replaceChildren(node); },
-        config: {},
     });
 }
 

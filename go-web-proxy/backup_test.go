@@ -262,9 +262,9 @@ func mustSealer(t *testing.T) *sealer {
 func TestBackup_WithHostPathsCoversTheHostOnlyKeys(t *testing.T) {
 	appDir := "/old"
 	a := fileConfigFromConfig(defaultConfig())
-	a.RemovedAppDir = &appDir
+	a.RemovedAppDir, a.RemovedUsersFile, a.RemovedConnectionsFile = &appDir, &appDir, &appDir
 	b := a.clone()
-	b.TLS.CertFile, b.TLS.KeyFile, b.TLS.TrustDir, b.UsersFile, b.ConnectionsFile = "/h/c", "/h/k", "/h/t", "/h/u", "/h/n"
+	b.TLS.CertFile, b.TLS.KeyFile, b.TLS.TrustDir = "/h/c", "/h/k", "/h/t"
 	b.Hosted, b.TLS.InsecureSkipVerify = !a.Hosted, !a.TLS.InsecureSkipVerify
 	got := withHostPaths(a, b)
 	for _, k := range restartOnlyKeys {
@@ -276,8 +276,8 @@ func TestBackup_WithHostPathsCoversTheHostOnlyKeys(t *testing.T) {
 			t.Errorf("%s: want %v, got %v", k.key, k.value(want), k.value(got))
 		}
 	}
-	if got.RemovedAppDir != nil {
-		t.Error("an export or import never carries the removed appDir key")
+	if got.RemovedAppDir != nil || got.RemovedUsersFile != nil || got.RemovedConnectionsFile != nil {
+		t.Error("an export or import never carries the removed appDir, usersFile or connectionsFile keys")
 	}
 }
 
@@ -324,7 +324,7 @@ func TestBackup_SettingsChangesNamesDottedKeysAndSkipsHostPaths(t *testing.T) {
 	next := cur.clone()
 	next.Session.IdleMinutes++
 	next.Access.Allow = []string{"10.0.0.0/8"}
-	next.UsersFile = "/elsewhere/users.yaml"
+	next.TLS.CertFile = "/elsewhere/tls.crt"
 	next.TLS.InsecureSkipVerify = true
 	if got := settingsChanges(cur, next); !reflect.DeepEqual(got, []string{"access.allow", "session.idleMinutes", "tls.insecureSkipVerify"}) {
 		t.Fatalf("got %v", got)
@@ -651,7 +651,7 @@ func TestBackupService_RunWritesOpensAndPrunes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(userNames(doc.Users), []string{"admin", "viewer"}) || len(doc.Connections) != 2 || doc.Settings.UsersFile != "" {
+	if !reflect.DeepEqual(userNames(doc.Users), []string{"admin", "viewer"}) || len(doc.Connections) != 2 || doc.Settings.TLS.CertFile != "" {
 		t.Fatalf("content: %+v", doc)
 	}
 	if last := x.b.lastRun(); last.file != written[2] || last.err != "" {

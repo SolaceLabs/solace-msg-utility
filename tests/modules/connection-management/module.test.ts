@@ -39,7 +39,7 @@ function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppCon
     return completeContext({
         container, appState, eventBus,
         setState: (k, v) => { (appState as any)[k] = v; eventBus.emit('app:state-change', { key: k, value: v }); },
-        loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(), config: {},
+        loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(),
     });
 }
 

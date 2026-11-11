@@ -124,7 +124,7 @@ describe('queue-subscription-explorer/parse', () => {
             expect(r.error).toContain('Permission denied');
         });
 
-        it('falls back to "error" when <execute-result/> has neither reason nor code (closes COV-11)', () => {
+        it('falls back to "error" when <execute-result/> has neither reason nor code', () => {
             // Defensive parse — broker quirk where execute-result has no
             // attributes. Without the `?? 'error'` tail of the fallback chain
             // the error message would render the misleading literal "null".

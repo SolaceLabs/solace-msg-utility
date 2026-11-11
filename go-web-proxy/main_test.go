@@ -56,9 +56,23 @@ func TestParseLogLevel(t *testing.T) {
 	}
 }
 
+// The stores and the store key sit at fixed paths; only a test (or main, with
+// "") chooses where /data is.
+func TestConfig_InDataDir(t *testing.T) {
+	d := defaultConfig()
+	if got := d.inDataDir(""); got.usersFile != defaultUsersFile || got.connectionsFile != defaultConnectionsFile || got.storeKeyFile != defaultStoreKeyFile {
+		t.Errorf("no data dir: want the fixed paths, got %q %q %q", got.usersFile, got.connectionsFile, got.storeKeyFile)
+	}
+	dir := filepath.Join("some", "dir")
+	got := d.inDataDir(dir)
+	if got.usersFile != filepath.Join(dir, "users.yaml") || got.connectionsFile != filepath.Join(dir, "connections.yaml") || got.storeKeyFile != filepath.Join(dir, "store.key") {
+		t.Errorf("stores not under %s: %q %q %q", dir, got.usersFile, got.connectionsFile, got.storeKeyFile)
+	}
+}
+
 func TestLoadConfig_Defaults(t *testing.T) {
 	// Clear all relevant env so we exercise the default path.
-	for _, k := range []string{"HOSTED", "SSL_CERT_FILE", "SSL_KEY_FILE", "SSL_TRUST_DIR", "SSL_INSECURE_SKIP_VERIFY", "LOG_LEVEL"} {
+	for _, k := range []string{"SMU_HOSTED", "SMU_SSL_CERTFILE", "SMU_SSL_CERTKEYFILE", "SMU_SSL_TRUSTDIR", "SMU_SSL_SKIP_CERT_VERIFY", "LOG_LEVEL"} {
 		t.Setenv(k, "")
 	}
 	cfg, err := loadConfig()
@@ -92,11 +106,11 @@ func TestLoadConfig_Defaults(t *testing.T) {
 }
 
 func TestLoadConfig_FromEnv(t *testing.T) {
-	t.Setenv("HOSTED", "true")
-	t.Setenv("SSL_CERT_FILE", "/x/cert")
-	t.Setenv("SSL_KEY_FILE", "/x/key")
-	t.Setenv("SSL_TRUST_DIR", "/x/trust")
-	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "true")
+	t.Setenv("SMU_HOSTED", "true")
+	t.Setenv("SMU_SSL_CERTFILE", "/x/cert")
+	t.Setenv("SMU_SSL_CERTKEYFILE", "/x/key")
+	t.Setenv("SMU_SSL_TRUSTDIR", "/x/trust")
+	t.Setenv("SMU_SSL_SKIP_CERT_VERIFY", "true")
 	t.Setenv("LOG_LEVEL", "debug")
 
 	cfg, err := loadConfig()
@@ -117,36 +131,36 @@ func TestLoadConfig_FromEnv(t *testing.T) {
 func TestLoadConfig_HostedIsTrueUnlessFalse(t *testing.T) {
 	// Gateway mode is the image's purpose: unset is true, "false" opts out.
 	for v, want := range map[string]bool{"": true, "true": true, "false": false} {
-		t.Setenv("HOSTED", v)
+		t.Setenv("SMU_HOSTED", v)
 		cfg, err := loadConfig()
 		if err != nil || cfg.hosted != want {
-			t.Errorf("HOSTED=%q: want hosted=%v, got %v (%v)", v, want, cfg.hosted, err)
+			t.Errorf("SMU_HOSTED=%q: want hosted=%v, got %v (%v)", v, want, cfg.hosted, err)
 		}
 	}
 	// Anything else is refused rather than guessed, naming the value.
 	for _, v := range []string{"1", "yes", "TRUE", "False", "y"} {
-		t.Setenv("HOSTED", v)
-		if _, err := loadConfig(); err == nil || !strings.Contains(err.Error(), `HOSTED="`+v+`"`) || !strings.Contains(err.Error(), `"true" or "false"`) {
-			t.Errorf("HOSTED=%q: want an error naming the value, got %v", v, err)
+		t.Setenv("SMU_HOSTED", v)
+		if _, err := loadConfig(); err == nil || !strings.Contains(err.Error(), `SMU_HOSTED="`+v+`"`) || !strings.Contains(err.Error(), `"true" or "false"`) {
+			t.Errorf("SMU_HOSTED=%q: want an error naming the value, got %v", v, err)
 		}
 	}
 }
 
-// SSL_INSECURE_SKIP_VERIFY is read as strictly as HOSTED: it is written into
+// SMU_SSL_SKIP_CERT_VERIFY is read as strictly as SMU_HOSTED: it is written into
 // config.yaml on the first start, so a typo must stop the start, not turn
 // verification silently on.
 func TestLoadConfig_InsecureSkipVerifyIsStrict(t *testing.T) {
 	for v, want := range map[string]bool{"": false, "false": false, "true": true} {
-		t.Setenv("SSL_INSECURE_SKIP_VERIFY", v)
+		t.Setenv("SMU_SSL_SKIP_CERT_VERIFY", v)
 		cfg, err := loadConfig()
 		if err != nil || cfg.insecureSkipVerify != want {
-			t.Errorf("SSL_INSECURE_SKIP_VERIFY=%q: want %v, got %v (%v)", v, want, cfg.insecureSkipVerify, err)
+			t.Errorf("SMU_SSL_SKIP_CERT_VERIFY=%q: want %v, got %v (%v)", v, want, cfg.insecureSkipVerify, err)
 		}
 	}
 	for _, v := range []string{"TRUE", "1", "yes", "False"} {
-		t.Setenv("SSL_INSECURE_SKIP_VERIFY", v)
-		if _, err := loadConfig(); err == nil || !strings.Contains(err.Error(), `SSL_INSECURE_SKIP_VERIFY="`+v+`"`) || !strings.Contains(err.Error(), `"true" or "false"`) {
-			t.Errorf("SSL_INSECURE_SKIP_VERIFY=%q: want an error naming the variable and the accepted values, got %v", v, err)
+		t.Setenv("SMU_SSL_SKIP_CERT_VERIFY", v)
+		if _, err := loadConfig(); err == nil || !strings.Contains(err.Error(), `SMU_SSL_SKIP_CERT_VERIFY="`+v+`"`) || !strings.Contains(err.Error(), `"true" or "false"`) {
+			t.Errorf("SMU_SSL_SKIP_CERT_VERIFY=%q: want an error naming the variable and the accepted values, got %v", v, err)
 		}
 	}
 }
@@ -348,8 +362,8 @@ func (r *serveRun) result(t *testing.T) error {
 func gatewayDir(t *testing.T) string {
 	t.Helper()
 	clearSeedEnv(t)
-	t.Setenv("ADMIN_PASSWORD", "")
-	t.Setenv("ADMIN_PASSWORD_FILE", "")
+	t.Setenv("SMU_ADMIN_PASSWORD", "")
+	t.Setenv("SMU_ADMIN_PASSWORD_FILE", "")
 	dir := t.TempDir()
 	if _, err := generateSelfSigned(filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key")); err != nil {
 		t.Fatal(err)
@@ -371,10 +385,9 @@ func writeServeConfig(t *testing.T, dir, extra string) string {
 	return path
 }
 
-// provisionedKeys turns Provisioned mode on, with the stores in dir.
-func provisionedKeys(dir string) string {
-	return "connModes: provisioned\nusersFile: " + yamlPath(dir, "users.yaml") + "\nconnectionsFile: " + yamlPath(dir, "connections.yaml") + "\n"
-}
+// provisionedKeys turns Provisioned mode on. The stores are at fixed paths, so
+// a test passes process.dataDir to keep them in its temp dir.
+const provisionedKeys = "connModes: provisioned\n"
 
 // gatewayClient trusts only the certificate in dir, the one the gateway serves.
 func gatewayClient(t *testing.T, dir string) *http.Client {
@@ -421,12 +434,13 @@ func expectLogged(t *testing.T, log string, want ...string) {
 // serves over its certificate, and SIGTERM shuts it down cleanly.
 func TestServe_GatewayModeStartsAndShutsDownOnASignal(t *testing.T) {
 	dir := gatewayDir(t)
-	t.Setenv("SSL_CERT_FILE", filepath.Join(dir, "tls.crt"))
-	t.Setenv("SSL_KEY_FILE", filepath.Join(dir, "tls.key"))
-	t.Setenv("SSL_TRUST_DIR", filepath.Join(dir, "trust"))
-	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "true")
+	t.Setenv("SMU_SSL_CERTFILE", filepath.Join(dir, "tls.crt"))
+	t.Setenv("SMU_SSL_CERTKEYFILE", filepath.Join(dir, "tls.key"))
+	t.Setenv("SMU_SSL_TRUSTDIR", filepath.Join(dir, "trust"))
+	t.Setenv("SMU_SSL_SKIP_CERT_VERIFY", "true")
 	t.Setenv("LOG_LEVEL", "debug")
 	t.Setenv("APP_DIR", "/old")
+	t.Setenv("USERS_FILE", "/old/users.yaml") // removed: warned about, not refused
 	configFile := filepath.Join(dir, "data", "config.yaml")
 	t.Setenv("CONFIG_FILE", configFile) // the file read: warned about, not refused
 
@@ -447,6 +461,7 @@ func TestServe_GatewayModeStartsAndShutsDownOnASignal(t *testing.T) {
 		"config file seeded from the environment",
 		"setting=APP_DIR",
 		"setting=CONFIG_FILE",
+		"setting=USERS_FILE",
 		"upstream certificates will NOT be validated",
 		"conn_modes=direct",
 		"listening",
@@ -463,12 +478,11 @@ func TestServe_GatewayModeStartsAndShutsDownOnASignal(t *testing.T) {
 // not applied, and the shutdown stops the backup loop before returning.
 func TestServe_ProvisionedModeStartsAndShutsDownOnASignal(t *testing.T) {
 	dir := gatewayDir(t)
-	configFile := writeServeConfig(t, dir, provisionedKeys(dir))
-	t.Setenv("STORE_KEY_FILE", filepath.Join(dir, "store.key"))
-	t.Setenv("ADMIN_PASSWORD", "serve-test-password")
+	configFile := writeServeConfig(t, dir, provisionedKeys)
+	t.Setenv("SMU_ADMIN_PASSWORD", "serve-test-password")
 	t.Setenv("LOG_LEVEL", "error") // the file says debug, and wins
 
-	r := startServe(t, process{configFile: configFile})
+	r := startServe(t, process{configFile: configFile, dataDir: dir})
 	if code, _ := r.get(t, gatewayClient(t, dir), "/login"); code != http.StatusOK {
 		t.Errorf("/login: want 200, got %d", code)
 	}
@@ -511,16 +525,18 @@ func TestServe_FailuresStopTheStart(t *testing.T) {
 			return writeServeConfig(t, dir, "")
 		}, nil, "trust pool setup failed"},
 		{"a store without its key", func(t *testing.T, dir string) string {
-			t.Setenv("STORE_KEY_FILE", filepath.Join(dir, "store.key"))
 			writeFile(t, filepath.Join(dir, "users.yaml"), "users: []\n")
-			return writeServeConfig(t, dir, provisionedKeys(dir))
+			return writeServeConfig(t, dir, provisionedKeys)
 		}, nil, "provisioned store load failed"},
 		{"a backup schedule it cannot read", func(t *testing.T, dir string) string {
-			t.Setenv("STORE_KEY_FILE", filepath.Join(dir, "store.key"))
 			writeFile(t, filepath.Join(dir, "store.key"), testStoreKeyHex+"\n")
 			writeFile(t, filepath.Join(dir, scheduleFileName), "not sealed\n")
-			return writeServeConfig(t, dir, provisionedKeys(dir))
+			return writeServeConfig(t, dir, provisionedKeys)
 		}, nil, "read backup schedule"},
+		{"an old variable name", func(t *testing.T, dir string) string {
+			t.Setenv("HOSTED", "false")
+			return writeServeConfig(t, dir, "")
+		}, nil, "environment variables renamed"},
 		{"a port it cannot listen on", func(t *testing.T, dir string) string {
 			return writeServeConfig(t, dir, "")
 		}, func() (net.Listener, error) {
@@ -540,7 +556,7 @@ func TestServe_FailuresStopTheStart(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir := gatewayDir(t)
-			r := startServe(t, process{configFile: c.setup(t, dir), listen: c.listen})
+			r := startServe(t, process{configFile: c.setup(t, dir), dataDir: dir, listen: c.listen})
 			if err := r.result(t); err == nil {
 				t.Fatalf("serve returned nil; log:\n%s", r.log)
 			}

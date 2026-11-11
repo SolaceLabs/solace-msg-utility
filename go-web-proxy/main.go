@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -59,7 +60,9 @@ type config struct {
 	trustDir           string
 	insecureSkipVerify bool
 	logLevel           slog.Level
-	// Provisioned mode's stores. Read only when connModes offers provisioned.
+	// Provisioned mode's stores, at fixed paths (the defaults below; serve
+	// moves them under process.dataDir for tests). Read only when connModes
+	// offers provisioned.
 	usersFile       string
 	connectionsFile string
 	storeKeyFile    string // encrypts usersFile and connectionsFile (keyfile.go)
@@ -139,8 +142,8 @@ func defaultConfig() config {
 		keyFile:         "/tls/tls.key",
 		trustDir:        "/tls/trust",
 		logLevel:        slog.LevelWarn,
-		usersFile:       "/data/users.yaml",
-		connectionsFile: "/data/connections.yaml",
+		usersFile:       defaultUsersFile,
+		connectionsFile: defaultConnectionsFile,
 		storeKeyFile:    defaultStoreKeyFile,
 		backupDir:       backupRoot,
 		connModes:       connDirect,
@@ -165,33 +168,33 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, fmt.Errorf("LOG_LEVEL=%q: %w", os.Getenv("LOG_LEVEL"), err)
 	}
-	hosted, err := parseHosted(os.Getenv("HOSTED"))
+	hosted, err := parseHosted(os.Getenv("SMU_HOSTED"))
 	if err != nil {
-		return config{}, fmt.Errorf("HOSTED=%q: %w", os.Getenv("HOSTED"), err)
+		return config{}, fmt.Errorf("SMU_HOSTED=%q: %w", os.Getenv("SMU_HOSTED"), err)
 	}
-	insecure, err := parseInsecureSkipVerify(os.Getenv("SSL_INSECURE_SKIP_VERIFY"))
+	insecure, err := parseInsecureSkipVerify(os.Getenv("SMU_SSL_SKIP_CERT_VERIFY"))
 	if err != nil {
-		return config{}, fmt.Errorf("SSL_INSECURE_SKIP_VERIFY=%q: %w", os.Getenv("SSL_INSECURE_SKIP_VERIFY"), err)
+		return config{}, fmt.Errorf("SMU_SSL_SKIP_CERT_VERIFY=%q: %w", os.Getenv("SMU_SSL_SKIP_CERT_VERIFY"), err)
 	}
 	return config{
 		hosted:             hosted,
-		certFile:           envOr("SSL_CERT_FILE", d.certFile),
-		keyFile:            envOr("SSL_KEY_FILE", d.keyFile),
-		trustDir:           envOr("SSL_TRUST_DIR", d.trustDir),
+		certFile:           envOr("SMU_SSL_CERTFILE", d.certFile),
+		keyFile:            envOr("SMU_SSL_CERTKEYFILE", d.keyFile),
+		trustDir:           envOr("SMU_SSL_TRUSTDIR", d.trustDir),
 		insecureSkipVerify: insecure,
 		logLevel:           level,
-		usersFile:          envOr("USERS_FILE", d.usersFile),
-		connectionsFile:    envOr("CONNECTIONS_FILE", d.connectionsFile),
-		storeKeyFile:       envOr("STORE_KEY_FILE", d.storeKeyFile),
-		connModes:          strings.ToLower(envOr("CONN_MODES", d.connModes)),
-		defaultConn:        strings.ToLower(envOr("DEFAULT_CONN", d.defaultConn)),
+		usersFile:          d.usersFile,
+		connectionsFile:    d.connectionsFile,
+		storeKeyFile:       d.storeKeyFile,
+		connModes:          strings.ToLower(envOr("SMU_CONN_MODES", d.connModes)),
+		defaultConn:        strings.ToLower(envOr("SMU_DEFAULT_CONN", d.defaultConn)),
 		session:            d.session,
 		login:              d.login,
 		modules:            d.modules,
 	}, nil
 }
 
-// parseHosted reads HOSTED. Gateway mode is the image's purpose, so unset is
+// parseHosted reads SMU_HOSTED. Gateway mode is the image's purpose, so unset is
 // true; "false" makes the gateway serve the files only (browsers then connect
 // to brokers themselves). Anything else is refused rather than guessed.
 func parseHosted(raw string) (bool, error) {
@@ -204,7 +207,7 @@ func parseHosted(raw string) (bool, error) {
 	return false, errors.New(`must be "true" or "false"`)
 }
 
-// parseInsecureSkipVerify reads SSL_INSECURE_SKIP_VERIFY as strictly as
+// parseInsecureSkipVerify reads SMU_SSL_SKIP_CERT_VERIFY as strictly as
 // parseHosted: unset or "false" verifies brokers' certificates, "true" turns
 // that off, and anything else (TRUE, 1, yes) is refused rather than guessed,
 // since the value is written into config.yaml on the first start.
@@ -216,6 +219,19 @@ func parseInsecureSkipVerify(raw string) (bool, error) {
 		return true, nil
 	}
 	return false, errors.New(`must be "true" or "false"`)
+}
+
+// inDataDir moves the stores and the store key under dir, keeping their file
+// names. It is the one seam tests use to keep the fixed paths out of /data;
+// "" (main) leaves them as they are.
+func (c config) inDataDir(dir string) config {
+	if dir == "" {
+		return c
+	}
+	c.usersFile = filepath.Join(dir, filepath.Base(defaultUsersFile))
+	c.connectionsFile = filepath.Join(dir, filepath.Base(defaultConnectionsFile))
+	c.storeKeyFile = filepath.Join(dir, filepath.Base(defaultStoreKeyFile))
+	return c
 }
 
 // provisioned reports whether cfg turns Provisioned mode on: sign-in, the
@@ -231,15 +247,15 @@ func validateConnModes(cfg config) error {
 	switch cfg.connModes {
 	case connDirect, connProvisioned, connBoth:
 	default:
-		return fmt.Errorf("connModes=%q (config.yaml; seeded by CONN_MODES) must be one of %q, %q, %q", cfg.connModes, connDirect, connProvisioned, connBoth)
+		return fmt.Errorf("connModes=%q (config.yaml; seeded by SMU_CONN_MODES) must be one of %q, %q, %q", cfg.connModes, connDirect, connProvisioned, connBoth)
 	}
 	switch cfg.defaultConn {
 	case connDirect, connProvisioned:
 	default:
-		return fmt.Errorf("defaultConn=%q (config.yaml; seeded by DEFAULT_CONN) must be one of %q, %q", cfg.defaultConn, connDirect, connProvisioned)
+		return fmt.Errorf("defaultConn=%q (config.yaml; seeded by SMU_DEFAULT_CONN) must be one of %q, %q", cfg.defaultConn, connDirect, connProvisioned)
 	}
 	if cfg.provisioned() && !cfg.hosted {
-		return fmt.Errorf("connModes=%q offers Provisioned sign-in but hosted is false (config.yaml; seeded by HOSTED), so the app cannot detect the gateway", cfg.connModes)
+		return fmt.Errorf("connModes=%q offers Provisioned sign-in but hosted is false (config.yaml; seeded by SMU_HOSTED), so the app cannot detect the gateway", cfg.connModes)
 	}
 	return nil
 }
@@ -316,6 +332,7 @@ func main() {
 type process struct {
 	configFile string                       // config.yaml: configFilePath
 	appDir     string                       // the app's files: appRoot
+	dataDir    string                       // holds the stores and the store key; "" keeps the fixed /data paths
 	log        io.Writer                    // every log line
 	listen     func() (net.Listener, error) // listenAddr
 	signals    <-chan os.Signal             // SIGINT or SIGTERM: a graceful shutdown
@@ -335,7 +352,7 @@ func serve(p process) error {
 		slog.New(slog.NewTextHandler(p.log, nil)).Error("configuration failed", "err", err)
 		return err
 	}
-	cfg := load.cfg
+	cfg := load.cfg.inDataDir(p.dataDir)
 
 	// The live keys (live.go), the log level among them, are read per request
 	// from lv, so a save on the settings page reaches them without a restart.
@@ -368,7 +385,7 @@ func serve(p process) error {
 		return err
 	}
 	if cfg.insecureSkipVerify {
-		logger.Warn("tls.insecureSkipVerify is true (config.yaml; seeded by SSL_INSECURE_SKIP_VERIFY): upstream certificates will NOT be validated",
+		logger.Warn("tls.insecureSkipVerify is true (config.yaml; seeded by SMU_SSL_SKIP_CERT_VERIFY): upstream certificates will NOT be validated",
 			"component", "tls")
 	}
 

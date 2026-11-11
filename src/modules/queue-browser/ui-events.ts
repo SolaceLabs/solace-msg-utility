@@ -8,6 +8,8 @@ import { showToast } from '../../core/toast';
 import { logger } from '../../core/logger';
 import type { AppContext } from '../../core/types';
 
+const log = logger.withTag('queue-browser');
+
 /**
  * Queue Browser UI event handlers.
  * Factory receives AppContext and service — no window.App references.
@@ -92,7 +94,7 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
                     }
                 })
                 .catch((e) => {
-                    logger.warn(`[queue-browser] Forward of message ${item.id} to ${itemDestType} "${itemDestName}" failed to send:`, e);
+                    log.warn(`Forward of message ${item.id} to ${itemDestType} "${itemDestName}" failed to send`, e);
                     ui.updateForwardItemStatus(item.correlationValue, 'FAILED', 'Unable to send message.');
                 });
 

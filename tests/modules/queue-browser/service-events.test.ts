@@ -53,7 +53,6 @@ describe('queue-browser/service-events', () => {
             loadSelf: vi.fn(),
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
-            config: {}
         } as any;
         initDetails(ctx);
         initTable(eventBus);
@@ -608,7 +607,7 @@ describe('queue-browser/service-events', () => {
             expect(state.messageStore.get('q1')!.length).toBe(1);
             // The user-properties failure names the queue and message and keeps its cause.
             expect(state.messageStore.get('q1')![0].appProperties).toEqual({});
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[q1] Failed to read the user properties of message 114'), expect.any(Error));
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/^\[queue-browser\] Failed to read the user properties of message 114 on queue=q1/), expect.any(Error));
         });
 
         it('handles all delivery mode values', () => {

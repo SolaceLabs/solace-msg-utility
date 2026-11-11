@@ -20,14 +20,14 @@ const ADMIN: ManagedSession = {
 const SETTINGS = {
     hosted: true, connModes: 'both', defaultConn: 'direct',
     tls: { certFile: '/tls/tls.crt', keyFile: '/tls/tls.key', trustDir: '/tls/trust', insecureSkipVerify: false },
-    logLevel: 'warn', usersFile: '/data/users.yaml', connectionsFile: '/data/connections.yaml',
+    logLevel: 'warn',
     access: { allow: ['10.0.0.0/8', '192.0.2.0/24'], trustedProxies: [] },
     session: { idleMinutes: 10, absoluteMinutes: 30 },
     login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60 },
     modules: { offered: ['queue-browser'], userDefault: 'all' },
 };
-const RESTART_ONLY = ['hosted', 'tls.certFile', 'tls.keyFile', 'tls.trustDir', 'tls.insecureSkipVerify', 'usersFile', 'connectionsFile'];
-const HOST_ONLY = ['tls.certFile', 'tls.keyFile', 'tls.trustDir', 'usersFile', 'connectionsFile'];
+const RESTART_ONLY = ['hosted', 'tls.certFile', 'tls.keyFile', 'tls.trustDir', 'tls.insecureSkipVerify'];
+const HOST_ONLY = ['tls.certFile', 'tls.keyFile', 'tls.trustDir'];
 const view = (over: Record<string, unknown> = {}) => ({
     ok: true,
     data: { settings: SETTINGS, restartOnly: RESTART_ONLY, hostOnly: HOST_ONLY, pendingRestart: [], changedOnDisk: false, catalog: ['queue-browser', 'queue-copy'], ...over },
@@ -50,7 +50,7 @@ function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppCon
     return completeContext({
         container, appState, eventBus,
         setState: (k, v) => { (appState as any)[k] = v; },
-        loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(), config: {},
+        loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(),
     });
 }
 
@@ -124,9 +124,9 @@ describe('gateway-settings — load', () => {
         const { container } = await setup();
         const tagged = (cls: string) => [...container.querySelectorAll<HTMLElement>(`.${cls}`)].map(g => g.dataset.key);
         expect(tagged('gw-set-restart')).toEqual(['tls.insecureSkipVerify']);
-        expect(tagged('gw-set-host')).toEqual(['usersFile', 'connectionsFile', 'tls.certFile', 'tls.keyFile', 'tls.trustDir']);
+        expect(tagged('gw-set-host')).toEqual(['tls.certFile', 'tls.keyFile', 'tls.trustDir']);
         const disabled = [...container.querySelectorAll<HTMLInputElement>('#gw-set-view .form-control:disabled')].map(i => i.id);
-        expect(disabled).toEqual(['gw-set-usersFile', 'gw-set-connectionsFile', 'gw-set-tls-certFile', 'gw-set-tls-keyFile', 'gw-set-tls-trustDir']);
+        expect(disabled).toEqual(['gw-set-tls-certFile', 'gw-set-tls-keyFile', 'gw-set-tls-trustDir']);
         // Every key the gateway may name has a field to tag, except hosted: it
         // must stay true while Provisioned mode serves this page, so the page
         // offers neither it nor connModes "direct".
@@ -137,9 +137,9 @@ describe('gateway-settings — load', () => {
     });
 
     it('lists the keys saved but not yet running', async () => {
-        const { container } = await setup(ADMIN, view({ pendingRestart: ['usersFile', 'tls.certFile'] }));
+        const { container } = await setup(ADMIN, view({ pendingRestart: ['tls.keyFile', 'tls.certFile'] }));
         expect(hidden(container, '#gw-set-pending')).toBe(false);
-        expect(el(container, '#gw-set-pending').textContent).toBe('Saved, applies when the gateway restarts: usersFile, tls.certFile.');
+        expect(el(container, '#gw-set-pending').textContent).toBe('Saved, applies when the gateway restarts: tls.keyFile, tls.certFile.');
     });
 
     it('a hand edit on disk shows the banner and disables Save', async () => {

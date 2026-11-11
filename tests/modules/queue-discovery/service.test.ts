@@ -34,7 +34,6 @@ function createTestContext(overrides: Partial<AppContext> = {}): AppContext {
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
-        config: { useMocks: false },
         ...overrides
     });
 }

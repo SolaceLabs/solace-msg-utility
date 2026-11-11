@@ -7,6 +7,8 @@ import { bytesToBase64 } from './payload.js';
 import { downloadBlob } from '../../core/download';
 import type { AppContext } from '../../core/types';
 
+const log = logger.withTag('queue-browser');
+
 // ui-details.ts - Message Details & Properties
 // Initialized via initDetails(ctx) which closes over AppContext for copyToClipboard.
 
@@ -59,7 +61,7 @@ export function initDetails(ctx: AppContext) {
                 else if (dType === (window as any).solace.DestinationType.QUEUE) fullObj.messageProperties.destination.type = 'Queue';
                 else fullObj.messageProperties.destination.type = dType.toString();
             }
-        } catch (e) { logger.warn('Failed to extract destination details', e); }
+        } catch (e) { log.warn('Failed to extract destination details', e); }
         return fullObj;
     };
 

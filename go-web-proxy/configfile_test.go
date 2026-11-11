@@ -16,13 +16,19 @@ import (
 )
 
 // clearSeedEnv isolates a test from the developer's shell: every seeding
-// variable, STORE_KEY_FILE and the removed ones is unset for its duration.
+// variable, the old names of the renamed ones and the removed ones is unset
+// for its duration.
 func clearSeedEnv(t *testing.T) {
 	t.Helper()
 	for _, v := range seedVars {
 		t.Setenv(v.env, "")
 	}
-	t.Setenv("STORE_KEY_FILE", "")
+	for _, r := range renamedEnv {
+		t.Setenv(r.old, "")
+	}
+	for _, name := range []string{"USERS_FILE", "CONNECTIONS_FILE", "STORE_KEY_FILE"} {
+		t.Setenv(name, "") // removed, but still read for their warning
+	}
 	t.Setenv("CONFIG_FILE", "") // removed, but still read for its refusal or warning
 	t.Setenv("APP_DIR", "")     // removed, but still read for its warning
 }
@@ -45,8 +51,6 @@ tls:
   trustDir: /c/trust
   insecureSkipVerify: true
 logLevel: debug
-usersFile: /m/users.yaml
-connectionsFile: /m/connections.yaml
 access:
   allow: [10.0.0.0/8, "2001:db8::/32"]
   trustedProxies: [10.0.0.1/32]
@@ -71,11 +75,11 @@ func TestDecodeConfigFile_Valid(t *testing.T) {
 	want := fileConfig{
 		Version: 1, Hosted: true, ConnModes: "both", DefaultConn: "provisioned",
 		TLS:      fileTLS{CertFile: "/c/tls.crt", KeyFile: "/c/tls.key", TrustDir: "/c/trust", InsecureSkipVerify: true},
-		LogLevel: "debug", UsersFile: "/m/users.yaml", ConnectionsFile: "/m/connections.yaml",
-		Access:  fileAccess{Allow: []string{"10.0.0.0/8", "2001:db8::/32"}, TrustedProxies: []string{"10.0.0.1/32"}},
-		Session: fileSession{IdleMinutes: 5, AbsoluteMinutes: 60},
-		Login:   fileLogin{MaxFailures: 3, BackoffSeconds: 10, MaxBackoffSeconds: 600, UnauthenticatedPerMinute: 20},
-		Modules: fileModules{Offered: []string{"queue-copy"}, UserDefault: "none"},
+		LogLevel: "debug",
+		Access:   fileAccess{Allow: []string{"10.0.0.0/8", "2001:db8::/32"}, TrustedProxies: []string{"10.0.0.1/32"}},
+		Session:  fileSession{IdleMinutes: 5, AbsoluteMinutes: 60},
+		Login:    fileLogin{MaxFailures: 3, BackoffSeconds: 10, MaxBackoffSeconds: 600, UnauthenticatedPerMinute: 20},
+		Modules:  fileModules{Offered: []string{"queue-copy"}, UserDefault: "none"},
 	}
 	if !reflect.DeepEqual(fc, want) {
 		t.Errorf("decoded:\n%+v\nwant:\n%+v", fc, want)
@@ -196,7 +200,7 @@ func TestToConfig_InvalidValues(t *testing.T) {
 func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 	fc := defaultFileConfig()
 	fc.ConnModes = "Both" // a hand-edited file is lowercased like the env
-	fc.Hosted = false     // HOSTED=false: the files only, so no gateway for sign-in
+	fc.Hosted = false     // SMU_HOSTED=false: the files only, so no gateway for sign-in
 	if _, err := fc.toConfig(secretPaths{}); err == nil || !strings.Contains(err.Error(), "hosted is false") {
 		t.Fatalf("both without hosted must fail the cross check, got %v", err)
 	}
@@ -342,10 +346,9 @@ func TestEncodeConfigFile_HeaderNoSecretsRoundTrip(t *testing.T) {
 func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	clearSeedEnv(t)
 	path := filepath.Join(t.TempDir(), "cfg", "config.yaml")
-	t.Setenv("HOSTED", "true")
-	t.Setenv("CONN_MODES", "both")
+	t.Setenv("SMU_HOSTED", "true")
+	t.Setenv("SMU_CONN_MODES", "both")
 	t.Setenv("LOG_LEVEL", "Info")
-	t.Setenv("STORE_KEY_FILE", "/x/store.key")
 
 	load, err := resolveConfig(path)
 	if err != nil {
@@ -357,14 +360,14 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	if !load.cfg.hosted || !load.cfg.provisioned() || load.cfg.connModes != connBoth || load.cfg.logLevel != slog.LevelInfo {
 		t.Errorf("seeded config does not reflect env: %+v", load.cfg)
 	}
-	if load.cfg.storeKeyFile != "/x/store.key" {
-		t.Errorf("store key path: want the env value, got %q", load.cfg.storeKeyFile)
+	if load.cfg.storeKeyFile != defaultStoreKeyFile {
+		t.Errorf("store key path: want the fixed default, got %q", load.cfg.storeKeyFile)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("seed file not written: %v", err)
 	}
-	if strings.Contains(string(raw), "/x/store.key") {
+	if strings.Contains(string(raw), defaultStoreKeyFile) {
 		t.Error("a secret path leaked into config.yaml")
 	}
 	if load.sum != sha256.Sum256(raw) {
@@ -392,15 +395,15 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 func TestResolveConfig_InvalidEnvFailsWithoutWriting(t *testing.T) {
 	clearSeedEnv(t)
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	t.Setenv("CONN_MODES", "bogus")
+	t.Setenv("SMU_CONN_MODES", "bogus")
 	_, err := resolveConfig(path)
-	if err == nil || !strings.Contains(err.Error(), `connModes="bogus"`) || !strings.Contains(err.Error(), "CONN_MODES") {
+	if err == nil || !strings.Contains(err.Error(), `connModes="bogus"`) || !strings.Contains(err.Error(), "SMU_CONN_MODES") {
 		t.Fatalf("want an error naming the key and the env var, got %v", err)
 	}
 	if _, statErr := os.Stat(path); !errors.Is(statErr, fs.ErrNotExist) {
 		t.Error("a rejected seed must not be written")
 	}
-	t.Setenv("CONN_MODES", "")
+	t.Setenv("SMU_CONN_MODES", "")
 	t.Setenv("LOG_LEVEL", "verbose")
 	if _, err := resolveConfig(path); err == nil || !strings.Contains(err.Error(), `LOG_LEVEL="verbose"`) {
 		t.Fatalf("want the LOG_LEVEL error, got %v", err)
@@ -477,11 +480,9 @@ func TestResolveConfig_FileWinsAndReportsOverrides(t *testing.T) {
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CONN_MODES", "both")
+	t.Setenv("SMU_CONN_MODES", "both")
 	t.Setenv("LOG_LEVEL", "debug")
-	t.Setenv("HOSTED", "true")                         // the file's default: nothing to report
-	t.Setenv("USERS_FILE", "/data/users.yaml")         // equal to the file: nothing to report
-	t.Setenv("STORE_KEY_FILE", "/elsewhere/store.key") // env-only: applied, never compared
+	t.Setenv("SMU_HOSTED", "true") // the file's default: nothing to report
 
 	load, err := resolveConfig(path)
 	if err != nil {
@@ -493,16 +494,13 @@ func TestResolveConfig_FileWinsAndReportsOverrides(t *testing.T) {
 	if load.cfg.connModes != connDirect || load.cfg.logLevel != slog.LevelWarn {
 		t.Errorf("the file must win: %+v", load.cfg)
 	}
-	if load.cfg.storeKeyFile != "/elsewhere/store.key" {
-		t.Errorf("store key path: want the env value, got %q", load.cfg.storeKeyFile)
-	}
 	got := map[string]envOverride{}
 	for _, o := range load.overrides {
 		got[o.Env] = o
 	}
 	want := map[string][3]string{ // env -> key, env value, file value
-		"CONN_MODES": {"connModes", "both", "direct"},
-		"LOG_LEVEL":  {"logLevel", "debug", "warn"},
+		"SMU_CONN_MODES": {"connModes", "both", "direct"},
+		"LOG_LEVEL":      {"logLevel", "debug", "warn"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("overrides: want %d, got %v", len(want), load.overrides)
@@ -581,33 +579,33 @@ func TestResolveConfig_SeedIgnoresTheRemovedAppDir(t *testing.T) {
 func TestEnvOverrides_EveryVariableAndBoolParsing(t *testing.T) {
 	clearSeedEnv(t)
 	file := defaultConfig()
-	t.Setenv("HOSTED", "false")
-	if o := envOverrides(file); len(o) != 1 || o[0].Env != "HOSTED" || o[0].FileValue != "true" {
-		t.Errorf("HOSTED=false vs hosted:true: want one override, got %v", o)
+	t.Setenv("SMU_HOSTED", "false")
+	if o := envOverrides(file); len(o) != 1 || o[0].Env != "SMU_HOSTED" || o[0].FileValue != "true" {
+		t.Errorf("SMU_HOSTED=false vs hosted:true: want one override, got %v", o)
 	}
-	t.Setenv("HOSTED", "true") // agrees with the default file
+	t.Setenv("SMU_HOSTED", "true") // agrees with the default file
 	if o := envOverrides(file); len(o) != 0 {
-		t.Errorf("HOSTED=true must not be reported, got %v", o)
+		t.Errorf("SMU_HOSTED=true must not be reported, got %v", o)
 	}
-	t.Setenv("HOSTED", "TRUE") // not a value HOSTED takes: reported as typed
+	t.Setenv("SMU_HOSTED", "TRUE") // not a value SMU_HOSTED takes: reported as typed
 	if o := envOverrides(file); len(o) != 1 || o[0].EnvValue != "TRUE" {
-		t.Errorf("HOSTED=TRUE: want it reported as typed, got %v", o)
+		t.Errorf("SMU_HOSTED=TRUE: want it reported as typed, got %v", o)
 	}
-	t.Setenv("HOSTED", "")
-	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "false") // agrees with the default file
+	t.Setenv("SMU_HOSTED", "")
+	t.Setenv("SMU_SSL_SKIP_CERT_VERIFY", "false") // agrees with the default file
 	if o := envOverrides(file); len(o) != 0 {
-		t.Errorf("SSL_INSECURE_SKIP_VERIFY=false must not be reported, got %v", o)
+		t.Errorf("SMU_SSL_SKIP_CERT_VERIFY=false must not be reported, got %v", o)
 	}
-	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "TRUE") // not a value loadConfig takes: reported as typed
+	t.Setenv("SMU_SSL_SKIP_CERT_VERIFY", "TRUE") // not a value loadConfig takes: reported as typed
 	if o := envOverrides(file); len(o) != 1 || o[0].EnvValue != "TRUE" || o[0].Key != "tls.insecureSkipVerify" {
-		t.Errorf("SSL_INSECURE_SKIP_VERIFY=TRUE: want it reported as typed, got %v", o)
+		t.Errorf("SMU_SSL_SKIP_CERT_VERIFY=TRUE: want it reported as typed, got %v", o)
 	}
-	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "")
+	t.Setenv("SMU_SSL_SKIP_CERT_VERIFY", "")
 
 	differing := map[string]string{
-		"HOSTED": "false", "CONN_MODES": "both", "DEFAULT_CONN": "provisioned",
-		"SSL_CERT_FILE": "/x", "SSL_KEY_FILE": "/x", "SSL_TRUST_DIR": "/x", "SSL_INSECURE_SKIP_VERIFY": "true",
-		"LOG_LEVEL": "debug", "USERS_FILE": "/x", "CONNECTIONS_FILE": "/x",
+		"SMU_HOSTED": "false", "SMU_CONN_MODES": "both", "SMU_DEFAULT_CONN": "provisioned",
+		"SMU_SSL_CERTFILE": "/x", "SMU_SSL_CERTKEYFILE": "/x", "SMU_SSL_TRUSTDIR": "/x", "SMU_SSL_SKIP_CERT_VERIFY": "true",
+		"LOG_LEVEL": "debug",
 	}
 	if len(differing) != len(seedVars) {
 		t.Fatalf("test table covers %d vars, seedVars has %d", len(differing), len(seedVars))
@@ -661,5 +659,152 @@ func TestResolveConfig_RemovedConfigFile(t *testing.T) {
 	}
 	if !reflect.DeepEqual(removedNames(load.removed), []string{"CONFIG_FILE"}) || !strings.Contains(load.removed[0].instead, configFilePath) {
 		t.Errorf("want a warning that names CONFIG_FILE and the fixed path, got %+v", load.removed)
+	}
+}
+
+// An old variable name stops the start before anything is written: one error
+// lists every old name set with its new name, and never a value (ADMIN_PASSWORD
+// is a secret). An empty value counts as unset.
+func TestResolveConfig_RefusesRenamedVariables(t *testing.T) {
+	clearSeedEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("SSL_CERT_FILE", "/old/value-one")
+	t.Setenv("HOSTED", "false")
+	t.Setenv("ADMIN_PASSWORD", "hunter2-not-for-logs")
+
+	_, err := resolveConfig(path)
+	if err == nil {
+		t.Fatal("want a refusal")
+	}
+	msg := err.Error()
+	for _, want := range []string{"SSL_CERT_FILE -> SMU_SSL_CERTFILE", "HOSTED -> SMU_HOSTED", "ADMIN_PASSWORD -> SMU_ADMIN_PASSWORD", "Rename them"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error lacks %q: %s", want, msg)
+		}
+	}
+	for _, leaked := range []string{"hunter2-not-for-logs", "/old/value-one"} {
+		if strings.Contains(msg, leaked) {
+			t.Errorf("a value leaked into the error: %s", msg)
+		}
+	}
+	for _, unset := range []string{"SSL_KEY_FILE", "SSL_TRUST_DIR", "CONN_MODES", "DEFAULT_CONN", "ADMIN_PASSWORD_FILE", "SSL_INSECURE_SKIP_VERIFY"} {
+		if strings.Contains(msg, unset) {
+			t.Errorf("%s is not set and must not be listed: %s", unset, msg)
+		}
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Error("a refused start must not seed a file")
+	}
+}
+
+// Each old name alone is refused, with its new name, whether config.yaml
+// exists or not.
+func TestResolveConfig_RefusesEachRenamedVariable(t *testing.T) {
+	existing := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(existing, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range renamedEnv {
+		t.Run(r.old, func(t *testing.T) {
+			clearSeedEnv(t)
+			t.Setenv(r.old, "x")
+			for _, path := range []string{existing, filepath.Join(t.TempDir(), "fresh.yaml")} {
+				_, err := resolveConfig(path)
+				if err == nil || !strings.Contains(err.Error(), r.old+" -> "+r.new) {
+					t.Errorf("%s: want a refusal naming %s, got %v", path, r.new, err)
+				}
+			}
+		})
+	}
+}
+
+// The users store, the connections store and the store key are always at their
+// default paths. An environment variable that still names one is ignored and
+// named for the start-up warning, which sends the operator to Backup & Restore;
+// it never refuses the start.
+func TestResolveConfig_IgnoresTheRemovedStoreVariables(t *testing.T) {
+	clearSeedEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("USERS_FILE", "/m/users.yaml")
+	t.Setenv("CONNECTIONS_FILE", "/m/connections.yaml")
+	t.Setenv("STORE_KEY_FILE", "/m/store.key")
+
+	load, err := resolveConfig(path)
+	if err != nil {
+		t.Fatalf("a removed variable must only warn: %v", err)
+	}
+	if want := []string{"USERS_FILE", "CONNECTIONS_FILE", "STORE_KEY_FILE"}; !reflect.DeepEqual(removedNames(load.removed), want) {
+		t.Errorf("removed: want %v, got %v", want, load.removed)
+	}
+	for _, r := range load.removed {
+		if !strings.Contains(r.instead, "Backup & Restore") || !strings.Contains(r.instead, "/data/") {
+			t.Errorf("%s: the warning must name the fixed path and Backup & Restore: %q", r.name, r.instead)
+		}
+	}
+	if load.cfg.usersFile != defaultUsersFile || load.cfg.connectionsFile != defaultConnectionsFile || load.cfg.storeKeyFile != defaultStoreKeyFile {
+		t.Errorf("the stores stay at their fixed paths: %q %q %q", load.cfg.usersFile, load.cfg.connectionsFile, load.cfg.storeKeyFile)
+	}
+	if len(load.overrides) != 0 {
+		t.Errorf("a removed variable is no longer a seeding variable: %v", load.overrides)
+	}
+}
+
+// A first start with a removed variable set seeds a file without it and names
+// the variable for the warning.
+func TestResolveConfig_SeedIgnoresTheRemovedStoreVariables(t *testing.T) {
+	clearSeedEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("USERS_FILE", "/m/users.yaml")
+
+	load, err := resolveConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !load.seeded || !reflect.DeepEqual(removedNames(load.removed), []string{"USERS_FILE"}) {
+		t.Errorf("seeded=%v removed=%v: want a seed that names USERS_FILE", load.seeded, load.removed)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "usersFile") || strings.Contains(string(data), "/m/users.yaml") {
+		t.Errorf("the seeded file must not carry the removed setting:\n%s", data)
+	}
+}
+
+// usersFile and connectionsFile are gone from config.yaml. A file that still
+// has them loads, the value is ignored, both keys are named for the warning,
+// and the next write of the file (a settings save) drops them.
+func TestResolveConfig_IgnoresTheRemovedStoreKeys(t *testing.T) {
+	clearSeedEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\nusersFile: /m/users.yaml\nconnectionsFile: /m/connections.yaml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	load, err := resolveConfig(path)
+	if err != nil {
+		t.Fatalf("a file with the removed keys must still load: %v", err)
+	}
+	if want := []string{"usersFile", "connectionsFile"}; !reflect.DeepEqual(removedNames(load.removed), want) {
+		t.Errorf("removed: want %v, got %v", want, load.removed)
+	}
+	for _, r := range load.removed {
+		if !strings.Contains(r.instead, "Backup & Restore") {
+			t.Errorf("%s: the warning must point to Backup & Restore: %q", r.name, r.instead)
+		}
+	}
+	if load.cfg.usersFile != defaultUsersFile || load.cfg.connectionsFile != defaultConnectionsFile {
+		t.Errorf("the file's paths must be ignored: %q %q", load.cfg.usersFile, load.cfg.connectionsFile)
+	}
+	data, err := encodeConfigFile(fileConfigFromConfig(load.cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "usersFile") || strings.Contains(string(data), "connectionsFile") {
+		t.Errorf("the next write must drop the keys:\n%s", data)
 	}
 }

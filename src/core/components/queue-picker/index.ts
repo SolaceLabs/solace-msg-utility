@@ -1,5 +1,6 @@
 import { required, attachBackdropClose } from '../../dom';
 import { INPUT_DEBOUNCE_MS } from '../../timing';
+import { errMessage } from '../../utils';
 import type { QueueSource } from '../../services/queue-source';
 
 /**
@@ -199,12 +200,11 @@ async function fetchVpns(): Promise<void> {
             applyVpnFilter();
             setStatus(`Loading VPNs… (${accumulated.length} so far)`);
         }
-        /* v8 ignore start -- defensive race guard against state/gen changing
-         * between the last loop iteration's body and this check. The for-await
-         * mechanism runs synchronously between iterations, so this window does
-         * not exist in normal use. */
-        if (!state || state.vpnFetchGen !== gen) return;
-        /* v8 ignore stop */
+        // A source may still await after its last page (QueueSource allows it),
+        // and a Cancel, a Refresh, or a cancel-and-reopen (whose generations
+        // restart at 0) can land in that window: a stale listing must not seed
+        // the cache or overwrite the status.
+        if (!state || state.vpnFetchGen !== gen || abort.signal.aborted) return;
         // Persist the just-fetched list to the module cache so the next
         // pickQueue() invocation against the same source gets instant render.
         ensureCache(source).vpns = [...accumulated];
@@ -213,13 +213,13 @@ async function fetchVpns(): Promise<void> {
         if (state.selectedVpn && accumulated.includes(state.selectedVpn)) {
             selectVpn(state.selectedVpn);
         }
-    /* v8 ignore start -- defensive catch. The source generators catch every
-     * fetch / json / mapper error internally and yield `{ok:false}` pages (the
-     * provisioned-VPN source yields a static list that can't throw), so errors
-     * never escape the for-await loop. */
-    } catch (err: any) {
+    /* v8 ignore start -- defensive catch around a contract that never throws:
+     * the source generators catch every fetch / json / mapper error internally
+     * and yield `{ok:false}` pages (the provisioned-VPN source yields a static
+     * list), so errors never escape the for-await loop. */
+    } catch (err: unknown) {
         if (state && state.vpnFetchGen === gen) {
-            setStatus(`Failed to load VPNs: ${err?.message ?? 'unknown error'}`);
+            setStatus(`Failed to load VPNs: ${errMessage(err)}`);
         }
     }
     /* v8 ignore stop */
@@ -249,9 +249,8 @@ async function fetchQueues(): Promise<void> {
             applyQueueFilter();
             setStatus(`Loading queues for ${vpn}… (${accumulated.length} so far)`);
         }
-        /* v8 ignore start -- same rationale as fetchVpns post-loop guard. */
-        if (!state || state.queueFetchGen !== gen) return;
-        /* v8 ignore stop */
+        // Same source-tail race as the fetchVpns post-loop guard.
+        if (!state || state.queueFetchGen !== gen || abort.signal.aborted) return;
         // Persist this VPN's queue list to the module cache.
         ensureCache(source).queues.set(vpn, [...accumulated]);
         setStatus(
@@ -259,10 +258,11 @@ async function fetchQueues(): Promise<void> {
                 ? `No queues found in ${vpn}.`
                 : `${accumulated.length} queue${accumulated.length === 1 ? '' : 's'} loaded.`
         );
-    /* v8 ignore start -- defensive catch, same rationale as fetchVpns above. */
-    } catch (err: any) {
+    /* v8 ignore start -- defensive catch around a contract that never throws:
+     * the sources yield `{ok:false}` pages instead of throwing (see fetchVpns). */
+    } catch (err: unknown) {
         if (state && state.queueFetchGen === gen) {
-            setStatus(`Failed to load queues: ${err?.message ?? 'unknown error'}`);
+            setStatus(`Failed to load queues: ${errMessage(err)}`);
         }
     }
     /* v8 ignore stop */

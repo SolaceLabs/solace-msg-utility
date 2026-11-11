@@ -95,6 +95,8 @@ The two vendor scripts (`solclient.js`, `jszip.min.js`) are intentionally **not*
 
 `./scripts/dev.sh image up` builds the image from source and starts it twice with [docker/docker-compose.yaml](../docker/docker-compose.yaml): Gateway mode on host port `19443`, Provisioned mode on `29443` (`docker compose -f docker/docker-compose.yaml up --build gateway` starts one). The image takes both vendor scripts from the npm packages `package.json` pins (`solclientjs`, `jszip`), so `up` needs nothing in `dist/`. Bump either with `npm install --save-exact`, at or above the shell's `MIN_VERSION` in `src/index.html`: [tests/build/vendor-scripts.test.ts](../tests/build/vendor-scripts.test.ts) holds both rules and checks the Dockerfile's copy paths.
 
+**Adding a gateway `config.yaml` setting.** Classify the new key as live (a field of `liveSettings`, applied by `apply`), restart-only (`restartOnlyKeys`) or host-only (`hostOnly`); `TestFileConfig_EveryKeyIsClassifiedOnce` in `go-web-proxy/live_test.go` fails until it is exactly one. A variable that seeds it takes the `SMU_` prefix (only `LOG_LEVEL` keeps its bare name); never reuse a name Go or another tool reads itself, such as `SSL_CERT_FILE`.
+
 ---
 
 ## Project Structure
@@ -118,7 +120,7 @@ src/
     logger.ts          # Leveled logger every module writes through (?logLevel= URL override)
     hosted.ts          # /hosted probe + buildBrokerUrl — the single gateway-rewrite point
     constants.ts       # App-wide constants
-    rbac.ts            # Stateless RBAC matchers — matchGlob, isModuleVisible, isVpnVisible, isQueueVisible, canOperate,
+    rbac.ts            # Stateless RBAC matchers -- matchGlob, isModuleVisible, isVpnVisible, isQueueVisible, canOperate,
                        # explainAccess (which level a row set grants, and the row)
     managed-semp-filter.ts # filterSempFetch — scopes SEMP discovery to entitled VPNs/queues (managed)
     services/                  # Pure broker-side factories — no AppContext, no UI.
@@ -137,7 +139,7 @@ src/
       types.ts                 # SolaceConfig, SempConfig, ConnectionConfig, ConnectionCredentials, SempContext
       defaults.ts              # DEFAULT_CONFIG + validateConfig (data-shape validator)
       conn-modes.ts            # ConnDeploymentConfig + DEFAULT_CONN_CONFIG + coerceConnConfig +
-                               # resolveConnTabs (fed by CONN_MODES/DEFAULT_CONN)
+                               # resolveConnTabs (fed by SMU_CONN_MODES/SMU_DEFAULT_CONN)
     components/                # Reusable UI components with function APIs.
       queue-picker/
         index.ts               # pickQueue(source, opts?) — takes a QueueSource, never SEMP directly
@@ -497,7 +499,7 @@ describe('YourModule', () => {
 
 Hand-rolled `container.innerHTML = '...'` literals are only acceptable when a test intentionally exercises a partial or malformed DOM (e.g. to verify a defensive early-return).
 
-**Shared state reset.** Queue-browser tests must call `resetQueueBrowserState()` from [tests/helpers/resetQueueBrowserState.ts](../tests/helpers/resetQueueBrowserState.ts) in `beforeEach` — the `state.js` singleton has nine fields, and resetting only the ones a specific test touches lets mutations leak across files. Global `beforeEach`/`afterEach` hooks in [tests/setup.ts](../tests/setup.ts) also re-install default `localStorage` mock implementations and revert fake timers automatically; see [contributing.md](contributing.md) for details.
+**Shared state reset.** Queue-browser tests must call `resetQueueBrowserState()` from [tests/helpers/resetQueueBrowserState.ts](../tests/helpers/resetQueueBrowserState.ts) in `beforeEach` -- the `state.js` singleton declares every field the module uses (the helper resets all of them), and resetting only the ones a specific test touches lets mutations leak across files. Global `beforeEach`/`afterEach` hooks in [tests/setup.ts](../tests/setup.ts) also re-install default `localStorage` mock implementations and revert fake timers automatically; see [contributing.md](contributing.md) for details.
 
 ### Coverage Requirements
 
@@ -538,7 +540,7 @@ Use `/* v8 ignore start */` / `/* v8 ignore stop */` only for architecturally un
 One standard for the web app and the gateway, so a line can be read, filtered and tied to the others for the same user or request without the source at hand.
 
 - **Levels by meaning.** `error`: something failed and needs attention (a request answered with a 5xx, a store that will not load, a run that ended in error). `warn`: a recoverable problem the code handled (a refused request, a fallback taken, a value ignored). `info`: lifecycle, state changes and audit events (start and stop, connect and disconnect, a sign-in, an administrator's change, a setting applied). `debug`: trace for a developer (each step, each message, request detail).
-- **Every line names its component and what it concerns.** The component is the tag (`[Connections]`, `[Copy]`) in the web app and the logger's attributes in the gateway; then the identifiers the event is about, as they apply: user, client, broker, VPN, queue, path.
+- **Every line names its component and what it concerns.** The component is the tag (`[Connections]`, `[Copy]`, `[queue-browser]`, `[queue-discovery]`) in the web app and the logger's attributes in the gateway; then the identifiers the event is about, as they apply: user, client, broker, VPN, queue, path.
 - **Facts as attributes, not prose.** In the gateway an operation, an error code or a count is a key-value attribute (`"code", "read_only"`), and the message stays a fixed sentence, so a line filters without a regular expression. In the web app the values follow a fixed phrase, as `key=value` where there are several.
 - **No secrets, at any level.** Never a password, a passphrase, a store key, a session cookie or an `Authorization` header: leave it out or mask it. A broker's address is not a secret; its credential is.
 - **Web app.** `const log = logger.withTag('<Component>')` from [src/core/logger.ts](../src/core/logger.ts), never `console.*`: ESLint holds it, and the inline script in `src/index.html`, which runs before any module, is the one exception. The level is set at boot; `?logLevel=DEBUG` (or `WARN`, `ERROR`, `SILENT`) overrides it.

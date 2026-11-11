@@ -473,6 +473,33 @@ describe('core/services/solace-client', () => {
         });
     });
 
+    describe('reconnect over a stale session', () => {
+        it('reconnect proceeds when the stale session.disconnect() throws', () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
+            const service = createServiceSolace(makeHooks());
+            service.init();
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            const first = solaceMock.SolclientFactory.createSession.mock.results[0].value;
+            const upHandler = first.on.mock.calls.find((c: any[]) => c[0] === 'UP_NOTICE')[1];
+            upHandler();
+            first.disconnect.mockImplementationOnce(() => { throw new Error('already disposed'); });
+
+            const result = service.connect(baseCfg(), 'broker.test', 'admin');
+
+            expect(warnSpy).toHaveBeenCalledWith(
+                expect.stringContaining('disconnect() on stale session during reconnect'),
+                expect.any(Error)
+            );
+            expect(result).toEqual({ ok: true });
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(2);
+            const second = solaceMock.SolclientFactory.createSession.mock.results[1].value;
+            expect(second.connect).toHaveBeenCalled();
+
+            warnSpy.mockRestore();
+        });
+    });
+
     describe('TLS handshake probe', () => {
         it('injects a hidden iframe targeting the https broker URL on wss connect', () => {
             const service = createServiceSolace(makeHooks());
@@ -527,6 +554,18 @@ describe('core/services/solace-client', () => {
             service.connect(baseCfg({ protocol: 'ws' }), 'broker.test', 'admin');
 
             expect(document.querySelector('iframe[src^="https://"]')).toBeNull();
+        });
+
+        it('does not inject the probe iframe for a Provisioned session through the gateway socket', () => {
+            // The dialled cfg (managed-profile.ts) is wss with an smfPath and no
+            // hosted flag; `host` is the broker's name, never a reachable origin.
+            const service = createServiceSolace(makeHooks());
+            service.init();
+            service.connect(baseCfg({ protocol: 'wss', port: '', smfPath: '/managed/smf/b1/v1' }), 'b1', 'dialled-pw');
+
+            expect(document.querySelector('iframe[src^="https://b1"]')).toBeNull();
+            // The session itself still goes to the gateway's socket.
+            expect(solaceMock.SessionProperties.mock.results[0].value.url).toMatch(/\/managed\/smf\/b1\/v1$/);
         });
     });
 

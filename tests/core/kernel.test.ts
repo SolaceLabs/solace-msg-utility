@@ -64,7 +64,7 @@ describe('Kernel', () => {
             expect(nav?.innerHTML).toContain('Test');
         });
 
-        it('applies ?logLevel= URL override before any kernel logging (closes COV-6)', async () => {
+        it('applies ?logLevel= URL override before any kernel logging', async () => {
             // The kernel parses `?logLevel=DEBUG` from window.location.search
             // at start time and calls setLogLevel(...) BEFORE the first
             // banner log fires. Without this test, the truthy branch of
@@ -797,24 +797,6 @@ describe('Kernel', () => {
             await capturedCtx!.copyToClipboard('text');
             expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('clipboard'), expect.any(Error));
         });
-
-        it('provides config from window.APP_CONFIG', async () => {
-            (window as any).APP_CONFIG = { useMocks: true, custom: 'value' };
-            let capturedCtx: AppContext | null = null;
-            const mod = createMockModule({
-                id: 'test-module',
-                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
-            });
-            setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
-
-            expect(capturedCtx!.config.useMocks).toBe(true);
-            expect(capturedCtx!.config.custom).toBe('value');
-
-            // Restore
-            (window as any).APP_CONFIG = { useMocks: false };
-        });
     });
 
     describe('renderSidebar', () => {
@@ -979,23 +961,6 @@ describe('Kernel', () => {
             const mod = createMockModule({ id: 'test-module' });
             const kernel = new Kernel([reg(mod)]);
             await kernel.start();
-        });
-
-        it('uses default config when APP_CONFIG is missing', async () => {
-            const saved = (window as any).APP_CONFIG;
-            delete (window as any).APP_CONFIG;
-
-            let capturedCtx: AppContext | null = null;
-            const mod = createMockModule({
-                id: 'test-module',
-                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
-            });
-            setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
-
-            expect(capturedCtx!.config.useMocks).toBe(false);
-            (window as any).APP_CONFIG = saved;
         });
     });
 

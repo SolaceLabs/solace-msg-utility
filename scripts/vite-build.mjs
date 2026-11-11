@@ -2,17 +2,18 @@
 /**
  * Vite build wrapper.
  *
- * Vite's CLI parser (CAC) rejects unknown options, so `--variant=<name>` and
- * `--out-filename=<name>` can't be passed directly. This wrapper strips them
+ * Vite's CLI parser (CAC) rejects unknown options, so `--variant=<name>`,
+ * `--out-filename=<name>` and `--show-payload=<true|false>` can't be passed directly. This wrapper strips them
  * from argv before spawning vite, and forwards them to `vite.config.ts` via
- * private env vars (`__VITE_VARIANT`, `__VITE_OUT_FILENAME`).
+ * private env vars (`__VITE_VARIANT`, `__VITE_OUT_FILENAME`, `__VITE_SHOW_PAYLOAD`).
  *
  * Usage:
- *   node scripts/vite-build.mjs [--variant=<name>] [--out-filename=<name>] [vite args...]
+ *   node scripts/vite-build.mjs [--variant=<name>] [--out-filename=<name>] [--show-payload=<true|false>] [vite args...]
  *
  * Examples:
  *   node scripts/vite-build.mjs --variant=min --out-filename=min.html
  *   node scripts/vite-build.mjs --variant=admin --out-filename=solAdmin.html
+ *   node scripts/vite-build.mjs --variant=min --show-payload=false   (default true)
  */
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';

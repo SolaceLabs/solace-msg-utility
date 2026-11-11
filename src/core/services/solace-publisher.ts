@@ -117,15 +117,9 @@ function cloneMessage(originalMsg: any, dest: DestTarget): any {
                     return true;
                 }
             }
-        /* v8 ignore start -- defensive catch around SDK setter/getter calls.
-         * The test-suite mock's setters never throw; production SDK could fail
-         * on a malformed value but the contract is silent on which getter
-         * outputs trigger which setter rejections. Matches the historical
-         * policy in queue-copy/message-clone.ts and queue-browser/service.ts. */
         } catch (e) {
             logger.warn(`Failed to set ${setter}`, e);
         }
-        /* v8 ignore stop */
         return false;
     };
 
@@ -277,10 +271,9 @@ export function createSolacePublisher(session: any, opts?: PublisherOptions): So
         try {
             session.removeListener?.(solace.SessionEventCode.ACKNOWLEDGED_MESSAGE, ackListener);
             session.removeListener?.(solace.SessionEventCode.REJECTED_MESSAGE_ERROR, rejectListener);
-        /* v8 ignore start -- defensive catch around SDK removeListener; the
-         * session may already be torn down by the SDK when dispose() runs from
-         * a disconnect handler. Mirrors the same defensive pattern used in
-         * connections/queue-browser session-listener teardown. */
+        /* v8 ignore start -- SDK removeListener does not throw; defensive catch on a
+         * trusted contract (the session may already be torn down when dispose()
+         * runs from a disconnect handler). */
         } catch (e) {
             logger.warn('[solace-publisher] removeListener during dispose:', e);
         }

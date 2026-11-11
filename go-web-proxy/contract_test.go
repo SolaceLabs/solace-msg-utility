@@ -167,18 +167,10 @@ func newContractEnv(t *testing.T, st contractStores) (*managedEnv, *scriptedUpst
 	return newManagedEnvFrom(t, f, nil, up), up
 }
 
-// contractNormalize replaces what differs between runs: the store paths in
-// a settings body are temporary directories here, a backup's next run
+// contractNormalize replaces what differs between runs: a backup's next run
 // follows the clock, and an export is sealed with a fresh salt and nonce.
 func contractNormalize(v any) any {
 	if m, ok := v.(map[string]any); ok {
-		if s, ok := m["settings"].(map[string]any); ok {
-			for _, k := range []string{"usersFile", "connectionsFile"} {
-				if _, ok := s[k]; ok {
-					s[k] = "<path>"
-				}
-			}
-		}
 		if _, ok := m["nextRun"].(string); ok {
 			m["nextRun"] = "<time>"
 		}

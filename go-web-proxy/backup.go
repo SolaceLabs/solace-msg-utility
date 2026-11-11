@@ -239,8 +239,7 @@ func openBackup(ctx context.Context, h *hasher, data []byte, passphrase string) 
 // the deployment's own.
 func withHostPaths(fc, host fileConfig) fileConfig {
 	fc.TLS.CertFile, fc.TLS.KeyFile, fc.TLS.TrustDir = host.TLS.CertFile, host.TLS.KeyFile, host.TLS.TrustDir
-	fc.UsersFile, fc.ConnectionsFile = host.UsersFile, host.ConnectionsFile
-	fc.RemovedAppDir = nil
+	fc.RemovedAppDir, fc.RemovedUsersFile, fc.RemovedConnectionsFile = nil, nil, nil
 	return fc
 }
 

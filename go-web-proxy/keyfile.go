@@ -14,8 +14,8 @@ import (
 )
 
 // The store key encrypts the users and connections files (storecrypt.go). It
-// is 32 random bytes, kept as 64 hex characters in the file STORE_KEY_FILE
-// names. That path is environment-only, so config.yaml can never point the
+// is 32 random bytes, kept as 64 hex characters in defaultStoreKeyFile.
+// The path is fixed, so neither config.yaml nor the environment can point the
 // gateway at another key. Hex is deliberate: the 44-character
 // base64 site seed of earlier builds, which /managed/me sent to every
 // signed-in user, can never pass as a key.

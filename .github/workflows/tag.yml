@@ -171,7 +171,7 @@ jobs:
       contents: read
       packages: write # push to GHCR
     # One image for every container mode: Gateway by default, Provisioned and
-    # files-only by CONN_MODES / HOSTED at run time (docker/Dockerfile).
+    # files-only by SMU_CONN_MODES / SMU_HOSTED at run time (docker/Dockerfile).
     env:
       DOCKERFILE: docker/Dockerfile # deviation 1
       # One `Trivy gate (<platform>)` step per entry; "Resolve per-platform

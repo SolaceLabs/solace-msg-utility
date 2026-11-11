@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { modules } from '../src/registry';
 import { Kernel } from '../src/core/kernel';
 import type { RegisteredModule } from '../src/core/types';
@@ -100,6 +100,34 @@ describe('registry', () => {
                 .sort((a, b) => b.priority - a.priority)
                 .map(r => r.module.id);
             expect(order).toEqual(expected);
+        });
+    });
+
+    describe('setup guardrails', () => {
+        afterEach(() => {
+            vi.doUnmock('../src/variants/_active');
+            vi.doUnmock('virtual:module-registry');
+            vi.resetModules();
+        });
+
+        /** Load a fresh registry against a hand-written manifest and entry-file map. */
+        async function loadRegistry(manifest: Record<string, number>, files: Record<string, unknown>) {
+            vi.resetModules();
+            vi.doMock('../src/variants/_active', () => ({ ACTIVE_MODULES: manifest }));
+            vi.doMock('virtual:module-registry', () => ({ moduleFiles: files }));
+            return import('../src/registry');
+        }
+
+        it('throws when a manifest id has no entry file', async () => {
+            await expect(loadRegistry({ ghost: 1 }, {})).rejects.toThrow(
+                /"ghost" is in the active variant manifest but the module registry has no entry file/
+            );
+        });
+
+        it('throws when the entry file exports no object with the matching id', async () => {
+            await expect(loadRegistry({ ghost: 1 }, { ghost: { default: { id: 'other' } } })).rejects.toThrow(
+                /entry file for "ghost" does not export an object with id="ghost"/
+            );
         });
     });
 

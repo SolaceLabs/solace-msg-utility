@@ -52,7 +52,7 @@ The app runs in one of three modes. They differ in where the app is served from,
 - **Gateway** puts one HTTPS endpoint in front of your brokers: browsers reach and trust only the gateway.
 - **Provisioned** adds sign-in on top of Gateway mode: users never see or type a broker's address or password. See [provisioned-mode.md](provisioned-mode.md).
 
-One image serves both container modes: Gateway mode by default, Provisioned mode when you set `CONN_MODES`. The demos are offline: see [demo.md](demo.md).
+One image serves both container modes: Gateway mode by default, Provisioned mode when you set `SMU_CONN_MODES`. The demos are offline: see [demo.md](demo.md).
 
 ---
 
@@ -110,7 +110,7 @@ You can open `index.html` directly in a browser via `file:///...`, but **SEMP AP
 
 ### From the container
 
-The image can also serve the files alone: with `HOSTED=false` it serves the app over HTTPS and nothing else (the relay paths answer `403`), and browsers connect to brokers themselves, as with any web server. The page being HTTPS, the app then offers only `wss://` and `https://`: a browser blocks unencrypted connections from an HTTPS page. Provisioned mode needs `HOSTED` left at its default, `true`.
+The image can also serve the files alone: with `SMU_HOSTED=false` it serves the app over HTTPS and nothing else (the relay paths answer `403`), and browsers connect to brokers themselves, as with any web server. The page being HTTPS, the app then offers only `wss://` and `https://`: a browser blocks unencrypted connections from an HTTPS page. Provisioned mode needs `SMU_HOSTED` left at its default, `true`.
 
 ---
 
@@ -154,7 +154,7 @@ Use named volumes: they take the image's UID `65532` ownership. A bind-mounted d
 ### TLS and trusted CAs
 
 - **The gateway's certificate:** put yours at `/tls/tls.crt` and `/tls/tls.key`. A pair that does not load stops the start, and so does half a pair (only the key, or only the certificate): the gateway never writes over a file it did not make. Add the missing file, or remove the one that is there. With neither, the gateway generates a self-signed **bootstrap** pair (`CN=localhost`, valid **7 days**) on its first start and logs its SHA-256 fingerprint. It is a convenience for the first sign-in only: it is never renewed, and once it expires browsers refuse it, so put your own certificate in place before then.
-- **Brokers' certificates:** the gateway verifies every broker it connects to, and the image ships no root CAs. Put each CA your brokers' certificates chain to, a public root included, in `/tls/trust/` as a `*.crt` or `*.pem` file (`SSL_TRUST_DIR`). They are read at start, so restart after adding one. `SSL_INSECURE_SKIP_VERIFY=true` turns verification off: lab use only.
+- **Brokers' certificates:** the gateway verifies every broker it connects to, and the image ships no root CAs. Put each CA your brokers' certificates chain to, a public root included, in `/tls/trust/` as a `*.crt` or `*.pem` file (`SMU_SSL_TRUSTDIR`). They are read at start, so restart after adding one. `SMU_SSL_SKIP_CERT_VERIFY=true` turns verification off: lab use only.
 
 ### Settings
 
@@ -162,18 +162,22 @@ The gateway keeps its settings in `config.yaml`. The variables below seed it on 
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `HOSTED` | `true` | `true` sends the app's broker connections through the gateway (Gateway and Provisioned mode). `false` serves the files only, and browsers connect to brokers themselves, over `wss://` and `https://` only; the gateway refuses to relay (`403`). Any other value stops the start. |
-| `CONN_MODES` | `direct` | Which connection tabs the app offers: `direct` (Gateway mode), `provisioned` or `both` (Provisioned mode; see [provisioned-mode.md](provisioned-mode.md)). |
-| `DEFAULT_CONN` | `direct` | Which tab opens first under `both`: `direct` or `provisioned`. |
-| `SSL_CERT_FILE` | `/tls/tls.crt` | The gateway's TLS certificate (PEM). Go also reads this variable to find a system CA bundle, so a container that sets it ignores any bundle mounted at Go's default path: add CAs through `SSL_TRUST_DIR`. |
-| `SSL_KEY_FILE` | `/tls/tls.key` | Its private key (PEM). |
-| `SSL_TRUST_DIR` | `/tls/trust` | The CAs trusted for broker connections (`*.crt`, `*.pem`); see [TLS and trusted CAs](#tls-and-trusted-cas). |
-| `SSL_INSECURE_SKIP_VERIFY` | `false` | `true` skips verifying brokers' certificates (`tls.insecureSkipVerify` in `config.yaml`), with a warning at every start. Lab use only. Any value other than `true` or `false` stops the start. |
+| `SMU_HOSTED` | `true` | `true` sends the app's broker connections through the gateway (Gateway and Provisioned mode). `false` serves the files only, and browsers connect to brokers themselves, over `wss://` and `https://` only; the gateway refuses to relay (`403`). Any other value stops the start. |
+| `SMU_CONN_MODES` | `direct` | Which connection tabs the app offers: `direct` (Gateway mode), `provisioned` or `both` (Provisioned mode; see [provisioned-mode.md](provisioned-mode.md)). |
+| `SMU_DEFAULT_CONN` | `direct` | Which tab opens first under `both`: `direct` or `provisioned`. |
+| `SMU_SSL_CERTFILE` | `/tls/tls.crt` | The gateway's TLS certificate (PEM). |
+| `SMU_SSL_CERTKEYFILE` | `/tls/tls.key` | Its private key (PEM). |
+| `SMU_SSL_TRUSTDIR` | `/tls/trust` | The CAs trusted for broker connections (`*.crt`, `*.pem`); see [TLS and trusted CAs](#tls-and-trusted-cas). |
+| `SMU_SSL_SKIP_CERT_VERIFY` | `false` | `true` skips verifying brokers' certificates (`tls.insecureSkipVerify` in `config.yaml`), with a warning at every start. Lab use only. Any value other than `true` or `false` stops the start. |
 | `LOG_LEVEL` | `warn` | `debug`, `info`, `warn` or `error`. See [Logs](#logs). |
+
+**Renamed variables.** Every gateway variable except `LOG_LEVEL` carries the `SMU_` prefix. The `SSL_` names were renamed because Go itself reads `SSL_CERT_FILE` as its CA bundle, so the old name silently replaced the gateway's trust pool for upstream brokers; the rest were prefixed to match. The old names are refused: a start with any of `SSL_CERT_FILE`, `SSL_KEY_FILE`, `SSL_TRUST_DIR`, `SSL_INSECURE_SKIP_VERIFY`, `HOSTED`, `CONN_MODES`, `DEFAULT_CONN`, `ADMIN_PASSWORD` or `ADMIN_PASSWORD_FILE` set stops with one error that lists each old name found and its new name (never the value). The new names behave exactly as the old ones did.
+
+**Removed variables.** `USERS_FILE`, `CONNECTIONS_FILE` and `STORE_KEY_FILE` are no longer read: the stores and the key always live under `/data`. A deployment that still sets one starts, with a warning naming it and saying it is ignored; use Backup & Restore to move data.
 
 ### In production
 
-- **Health check:** the image has no shell, so it declares no `HEALTHCHECK`. Probe `https://<host>:9443/hosted` from outside (`200` while `HOSTED=true`; `503` once the app bundle can no longer be served, say a mounted build went away), with the certificate pinned or verification off. A client access list must allow the prober.
+- **Health check:** the image has no shell, so it declares no `HEALTHCHECK`. Probe `https://<host>:9443/hosted` from outside (`200` while `SMU_HOSTED=true`; `503` once the app bundle can no longer be served, say a mounted build went away), with the certificate pinned or verification off. A client access list must allow the prober.
 - **Your own build:** mount it at `/SolaceMsgUtility`. It must hold the mode's bundle (`index.html` in Gateway mode, `provisioned.html` in Provisioned mode): without it the gateway does not start, and the log names the file.
 - **Behind a reverse proxy:** pass the original `Host` header through, allow WebSocket upgrades, and list the proxy in `access.trustedProxies` so the gateway sees each client's own address. See [Client addresses behind Docker and proxies](#client-addresses-behind-docker-and-proxies).
 - **Network:** browsers need to reach only the gateway; the gateway needs the brokers' SEMP and web messaging ports. In Gateway mode the user picks `https`/`wss` or `http`/`ws` per connection; in Provisioned mode each stored connection uses TLS (`https` for SEMP, `wss` for messaging) unless an administrator gave it the plain scheme (`http`, `ws`).
@@ -202,7 +206,7 @@ Each line names its `component` and what it concerns (`user`, `client`, `broker`
 
 ## Provisioned mode
 
-Users sign in and get only the brokers and Message VPNs an administrator granted. It is the same image with `CONN_MODES=provisioned`, and everything under [Gateway mode](#gateway-mode) applies to it too. The ready-made deployment is [`docker/compose.provisioned.yaml`](../docker/compose.provisioned.yaml); how it works, how to configure it and the recommended values are in [provisioned-mode.md](provisioned-mode.md).
+Users sign in and get only the brokers and Message VPNs an administrator granted. It is the same image with `SMU_CONN_MODES=provisioned`, and everything under [Gateway mode](#gateway-mode) applies to it too. The ready-made deployment is [`docker/compose.provisioned.yaml`](../docker/compose.provisioned.yaml); how it works, how to configure it and the recommended values are in [provisioned-mode.md](provisioned-mode.md).
 
 ---
 
@@ -290,7 +294,7 @@ Connection profiles are stored in the browser's `localStorage`. They persist acr
 | `access.trustedProxies` | `[]` | CIDR list of your reverse proxies. From one of them the client's address is taken from `X-Forwarded-For`; from any other peer that header is ignored. See [Client addresses behind Docker and proxies](#client-addresses-behind-docker-and-proxies). |
 | `session.*`, `login.*`, `modules.*` | see [provisioned-mode.md](provisioned-mode.md#configure) | Provisioned mode only: session lengths, the sign-in limits and the modules users may be given. |
 
-Missing keys take the built-in defaults, never an environment value; an unknown key, an empty file, a missing `version: 1` or a value out of range stops the start, naming the key and the value. `STORE_KEY_FILE` is never in the file. In Provisioned mode the admin console's Gateway Settings page edits this file too.
+Missing keys take the built-in defaults, never an environment value; an unknown key, an empty file, a missing `version: 1` or a value out of range stops the start, naming the key and the value. The users store, the connections store and the store key are not settings: they always live at `/data/users.yaml`, `/data/connections.yaml` and `/data/store.key`, and you move data with Backup & Restore (see [provisioned-mode.md](provisioned-mode.md)). An old `usersFile` or `connectionsFile` key still loads, is ignored with a warning, and is dropped the next time the gateway writes the file. In Provisioned mode the admin console's Gateway Settings page edits this file too.
 
 ---
 
@@ -307,9 +311,9 @@ To update a deployed instance:
 
   Pin a full version (`:3.6.0`) in production rather than `:3.6`, `:3` or `:latest`. Provisioned mode uses the same tags.
 
-  **From v3.3.5 or earlier:** `HOSTED` now defaults to `true`. A container started without `HOSTED=true` used to serve the files only, with browsers connecting to brokers themselves; it now connects to brokers for them, so put your brokers' CAs in `/tls/trust/` first, or set `HOSTED=false` to keep the old behaviour.
+  **From v3.3.5 or earlier:** `HOSTED` (now `SMU_HOSTED`) defaults to `true`. A container started without `SMU_HOSTED=true` used to serve the files only, with browsers connecting to brokers themselves; it now connects to brokers for them, so put your brokers' CAs in `/tls/trust/` first, or set `SMU_HOSTED=false` to keep the old behaviour.
 
-  **Files only no longer relays:** with `HOSTED=false` the gateway's relay paths (`/http/...`, `/https/...`, `/ws/...`, `/wss/...`) now answer `403`. The app never used them in that mode.
+  **Files only no longer relays:** with `SMU_HOSTED=false` the gateway's relay paths (`/http/...`, `/https/...`, `/ws/...`, `/wss/...`) now answer `403`. The app never used them in that mode.
 
   **`APP_DIR` is no longer read:** the container always serves the app built into the image. A container that still sets `APP_DIR`, or a `config.yaml` that still has `appDir`, starts as before and logs a warning naming it; remove it. A save from the admin console's Gateway Settings drops the key from the file. If you used it to serve your own build, mount that build at `/SolaceMsgUtility` instead.
 

@@ -257,7 +257,6 @@ export { createSolaceMock, createSessionMock, createBrowserMock, createMessageMo
 // true so suites exercise the normal path — the refusal branch is driven by the
 // one test that sets it false explicitly.
 (window as any).solaceLibLoaded = true;
-(window as any).APP_CONFIG = { useMocks: false };
 
 // Reset mocks between tests
 beforeEach(() => {

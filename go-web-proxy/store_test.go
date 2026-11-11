@@ -285,9 +285,9 @@ func TestLoadStore_BootstrapRefusesBadSources(t *testing.T) {
 		want string
 	}{
 		{"both set", map[string]string{envAdminPassword: "long-enough-pw", envAdminPasswordFile: "/x"}, "not both"},
-		{"too short", map[string]string{envAdminPassword: "short"}, "ADMIN_PASSWORD: password must be 12 to 128"},
-		{"file too short", map[string]string{envAdminPasswordFile: "SHORTFILE"}, "ADMIN_PASSWORD_FILE: password must be"},
-		{"file unreadable", map[string]string{envAdminPasswordFile: "/nonexistent/admin.pw"}, `ADMIN_PASSWORD_FILE="/nonexistent/admin.pw" cannot be read`},
+		{"too short", map[string]string{envAdminPassword: "short"}, "SMU_ADMIN_PASSWORD: password must be 12 to 128"},
+		{"file too short", map[string]string{envAdminPasswordFile: "SHORTFILE"}, "SMU_ADMIN_PASSWORD_FILE: password must be"},
+		{"file unreadable", map[string]string{envAdminPasswordFile: "/nonexistent/admin.pw"}, `SMU_ADMIN_PASSWORD_FILE="/nonexistent/admin.pw" cannot be read`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

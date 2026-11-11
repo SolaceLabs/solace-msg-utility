@@ -681,9 +681,9 @@ describe('core/components/queue-picker', () => {
         });
 
         it('VPN option with empty textContent is hidden by any non-empty filter', async () => {
-            // Sibling of the queue-list COV-12 test below — same `(opt.textContent
-            // || '').toLowerCase()` defensive fallback at applyVpnFilter
-            // (queue-picker/index.ts:297). Mirrors the queue-list test
+            // Sibling of the "queue option with empty textContent is hidden by any non-empty filter"
+            // test below (this file) -- same `(opt.textContent || '').toLowerCase()` defensive
+            // fallback at applyVpnFilter (queue-picker/index.ts:297). Mirrors the queue-list test
             // exactly so a regression in either filter is caught.
             vi.useFakeTimers();
             const sempCtx = makeSempCtx();
@@ -712,7 +712,7 @@ describe('core/components/queue-picker', () => {
             vi.useRealTimers();
         });
 
-        it('queue option with empty textContent is hidden by any non-empty filter (closes COV-12)', async () => {
+        it('queue option with empty textContent is hidden by any non-empty filter', async () => {
             // The `(opt.textContent || '').toLowerCase()` fallback at
             // queue-picker/index.ts:297,307 collapses the spec-impossible
             // null and the spec-allowed empty string into one observable
@@ -1386,6 +1386,158 @@ describe('core/components/queue-picker', () => {
             rejectFetch(new Error('post-close throw'));
             await flushAsync();
             expect(getDialog().hasAttribute('open')).toBe(false);
+        });
+    });
+
+    describe('source tail (a source that awaits after its last page)', () => {
+        /** A QueueSource whose first listing yields `stale`, then awaits `release`
+         *  before returning; every later listing yields `fresh` and returns at once.
+         *  VPNs list as `['v1']` immediately so queue tests can reach fetchQueues. */
+        function tailSource(kind: 'vpns' | 'queues', stale: string[], fresh: string[]) {
+            let release: () => void = () => {};
+            const tail = new Promise<void>((r) => { release = r; });
+            let calls = 0;
+            async function* listing() {
+                calls++;
+                if (calls === 1) {
+                    yield { ok: true as const, data: stale };
+                    await tail;
+                } else {
+                    yield { ok: true as const, data: fresh };
+                }
+            }
+            const listVpns = vi.fn(async function* () {
+                if (kind === 'vpns') yield* listing();
+                else yield { ok: true as const, data: ['v1'] };
+            });
+            const listQueues = vi.fn(async function* () {
+                if (kind === 'queues') yield* listing();
+                else yield { ok: true as const, data: [] as string[] };
+            });
+            return { source: { key: `tail-${kind}`, listVpns, listQueues }, release: () => release(), listVpns, listQueues };
+        }
+
+        const status = () => $<HTMLElement>('.picker-status').textContent;
+
+        async function cancel(p: Promise<unknown>) {
+            $<HTMLButtonElement>('.picker-cancel').click();
+            await p;
+        }
+
+        it('a cancel during the VPN tail does not seed the cache', async () => {
+            const t = tailSource('vpns', ['stale'], ['fresh']);
+            const p = pickQueue(t.source);
+            await flushAsync();
+            await cancel(p);
+
+            t.release();
+            await flushAsync();
+
+            const p2 = pickQueue(t.source);
+            await flushAsync();
+            expect(t.listVpns).toHaveBeenCalledTimes(2);
+            expect(visibleOptions('.picker-vpn-list')).toEqual(['fresh']);
+            await cancel(p2);
+        });
+
+        it('a Refresh during the VPN tail keeps the newer listing', async () => {
+            const t = tailSource('vpns', ['s1', 's2'], ['fresh']);
+            const p = pickQueue(t.source);
+            await flushAsync();
+            $<HTMLButtonElement>('.picker-vpn-refresh').click();
+            await flushAsync();
+            expect(status()).toBe('1 VPN loaded.');
+
+            t.release();
+            await flushAsync();
+            expect(status()).toBe('1 VPN loaded.');
+            await cancel(p);
+
+            const p2 = pickQueue(t.source);
+            await flushAsync();
+            expect(t.listVpns).toHaveBeenCalledTimes(2);
+            expect(visibleOptions('.picker-vpn-list')).toEqual(['fresh']);
+            await cancel(p2);
+        });
+
+        it('a cancel and reopen during the VPN tail ignores the old listing even when the generation matches', async () => {
+            const t = tailSource('vpns', ['s1', 's2'], ['fresh']);
+            const p = pickQueue(t.source);
+            await flushAsync();
+            await cancel(p);
+            // The reopened picker restarts its generations at 0, so its first
+            // listing carries the same generation as the cancelled one.
+            const p2 = pickQueue(t.source);
+            await flushAsync();
+            expect(status()).toBe('1 VPN loaded.');
+
+            t.release();
+            await flushAsync();
+            expect(status()).toBe('1 VPN loaded.');
+            expect(visibleOptions('.picker-vpn-list')).toEqual(['fresh']);
+            await cancel(p2);
+
+            const p3 = pickQueue(t.source);
+            await flushAsync();
+            expect(t.listVpns).toHaveBeenCalledTimes(2);
+            await cancel(p3);
+        });
+
+        it('a cancel during the queue tail does not seed the cache', async () => {
+            const t = tailSource('queues', ['stale'], ['fresh']);
+            const p = pickQueue(t.source, { defaultVpn: 'v1' });
+            await flushAsync();
+            await cancel(p);
+
+            t.release();
+            await flushAsync();
+
+            const p2 = pickQueue(t.source, { defaultVpn: 'v1' });
+            await flushAsync();
+            expect(t.listQueues).toHaveBeenCalledTimes(2);
+            expect(visibleOptions('.picker-queue-list')).toEqual(['fresh']);
+            await cancel(p2);
+        });
+
+        it('a Refresh during the queue tail keeps the newer listing', async () => {
+            const t = tailSource('queues', ['s1', 's2'], ['fresh']);
+            const p = pickQueue(t.source, { defaultVpn: 'v1' });
+            await flushAsync();
+            $<HTMLButtonElement>('.picker-queue-refresh').click();
+            await flushAsync();
+            expect(status()).toBe('1 queue loaded.');
+
+            t.release();
+            await flushAsync();
+            expect(status()).toBe('1 queue loaded.');
+            await cancel(p);
+
+            const p2 = pickQueue(t.source, { defaultVpn: 'v1' });
+            await flushAsync();
+            expect(t.listQueues).toHaveBeenCalledTimes(2);
+            expect(visibleOptions('.picker-queue-list')).toEqual(['fresh']);
+            await cancel(p2);
+        });
+
+        it('a cancel and reopen during the queue tail ignores the old listing even when the generation matches', async () => {
+            const t = tailSource('queues', ['s1', 's2'], ['fresh']);
+            const p = pickQueue(t.source, { defaultVpn: 'v1' });
+            await flushAsync();
+            await cancel(p);
+            const p2 = pickQueue(t.source, { defaultVpn: 'v1' });
+            await flushAsync();
+            expect(status()).toBe('1 queue loaded.');
+
+            t.release();
+            await flushAsync();
+            expect(status()).toBe('1 queue loaded.');
+            expect(visibleOptions('.picker-queue-list')).toEqual(['fresh']);
+            await cancel(p2);
+
+            const p3 = pickQueue(t.source, { defaultVpn: 'v1' });
+            await flushAsync();
+            expect(t.listQueues).toHaveBeenCalledTimes(2);
+            await cancel(p3);
         });
     });
 

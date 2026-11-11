@@ -3,6 +3,7 @@ import { ui } from '../../../src/modules/queue-browser/ui-core.js';
 import { wireForward } from '../../../src/modules/queue-browser/ui-forward.js';
 import { state } from '../../../src/modules/queue-browser/state.js';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
+import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 
 function createBrowserDOM() {
     return loadModuleDOM('queue-browser');
@@ -13,7 +14,7 @@ describe('queue-browser/ui-forward', () => {
         const container = createBrowserDOM();
         document.body.appendChild(container);
         ui.initElements(container);
-        state.forwardQueue = [];
+        resetQueueBrowserState();
         // Spy (not direct reassign) so vi.restoreAllMocks() in the global afterEach
         // puts the real generateUuid back even if a test throws before its own
         // cleanup line would run. Counter is local per-test so there's no
@@ -155,12 +156,11 @@ describe('queue-browser/ui-forward', () => {
     });
 
     describe('closeForwardModal()', () => {
-        it('hides modal and clears state', () => {
+        it('closes the modal', () => {
             ui.showForwardModal({ id: 'msg-1', content: 'test' });
             ui.closeForwardModal();
 
             expect(ui.getElements().modalForward.open).toBe(false);
-            expect(state.selectedForwardMsg).toBeNull();
         });
     });
 

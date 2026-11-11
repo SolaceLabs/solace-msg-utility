@@ -36,7 +36,7 @@ Standalone and Gateway mode have no store. This question concerns Provisioned mo
 | --- | --- | --- |
 | `users.yaml` | accounts, the admin flag, grants, each user's modules | YAML, encrypted whole |
 | `connections.yaml` | brokers, how to reach them (host, ports, and TLS or the plain scheme for SEMP and for messaging), their SEMP accounts, each Message VPN's client credentials | YAML, encrypted whole |
-| `store.key` | the 32-byte key for the encrypted files (`STORE_KEY_FILE` can move it to a secret) | 64 hex characters |
+| `store.key` | the 32-byte key for the encrypted files (its path is fixed at `/data/store.key`; mount a secret there) | 64 hex characters |
 | `backup.yaml` | the backup schedule and the key derived from its passphrase | YAML, encrypted whole |
 | `config.yaml` | the gateway's settings | plain YAML |
 

@@ -7,7 +7,7 @@
  * Source of truth by deployment context:
  *   - Standalone (static HTML, no gateway): no `/hosted` -> `DEFAULT_CONN_CONFIG`
  *     applies -> **Direct only**. Provisioned never shows without `/hosted`.
- *   - Behind the gateway: it resolves `CONN_MODES` / `DEFAULT_CONN` from
+ *   - Behind the gateway: it resolves `SMU_CONN_MODES` / `SMU_DEFAULT_CONN` from
  *     config.yaml and returns them in the `/hosted` JSON; the app applies that
  *     over the default (see `core/hosted.ts` `probeDeployment`).
  *

@@ -39,7 +39,6 @@ function makeCtx(container: HTMLElement): AppContext {
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
-        config: { useMocks: false }
     });
 }
 

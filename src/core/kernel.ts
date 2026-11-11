@@ -41,7 +41,6 @@ export class Kernel {
      * (`wireNotifications`) and shown by the header bell.
      */
     private notifications: NotificationCenter = createNotificationCenter();
-    private config: Record<string, any> = (window as any).APP_CONFIG || { useMocks: false };
     private moduleContainer: HTMLElement | null = null;
     private sidebarNav: HTMLElement | null = null;
     private pageTitle: HTMLElement | null = null;
@@ -190,8 +189,7 @@ export class Kernel {
             managedProfile: this.managedProfile,
             notifications: this.notifications,
             copyToClipboard: this.copyToClipboard.bind(this),
-            mountSidebarAccount: this.mountSidebarAccount.bind(this),
-            config: this.config
+            mountSidebarAccount: this.mountSidebarAccount.bind(this)
         };
 
         try {

@@ -246,7 +246,7 @@ func TestBackupAPI_Export(t *testing.T) {
 		len(settingsChanges(e.api.settings.current(), doc.Settings)) != 0 {
 		t.Fatal("an export holds the configuration as it is, and previews as no change")
 	}
-	if doc.Settings.UsersFile != "" || doc.Settings.TLS.CertFile != "" || doc.Settings.ConnModes != connBoth {
+	if doc.Settings.TLS.CertFile != "" || doc.Settings.ConnModes != connBoth {
 		t.Fatalf("settings, without the host paths: %+v", doc.Settings)
 	}
 	if !strings.Contains(e.log.String(), "configuration exported") {
@@ -286,7 +286,7 @@ func TestBackupAPI_PreviewSaysWhatWouldChange(t *testing.T) {
 		d.Users[0].Password = mustHash(t, e.f.h, "a new admin password")
 		d.Connections[0].Hostname = "host1-new"
 		d.Settings.Session.IdleMinutes = 5
-		d.Settings.UsersFile = "/elsewhere/users.yaml" // never imported
+		d.Settings.TLS.CertFile = "/elsewhere/tls.crt" // never imported
 	})
 	rec := e.do("POST", "/managed/backup/preview", jsonBody(t, map[string]string{"file": file, "passphrase": testPassphrase}), e.admin())
 	expect(t, rec, http.StatusOK, "")
@@ -355,7 +355,7 @@ func TestBackupAPI_ImportReplaceAll(t *testing.T) {
 		d.Connections = d.Connections[:1]
 		d.Settings.Session.IdleMinutes = 5
 		d.Settings.TLS.InsecureSkipVerify = true
-		d.Settings.UsersFile = "/elsewhere/users.yaml" // the deployment keeps its own
+		d.Settings.TLS.CertFile = "/elsewhere/tls.crt" // the deployment keeps its own
 	})
 	rec := e.do("POST", "/managed/backup/import", jsonBody(t, map[string]string{
 		"file": file, "passphrase": testPassphrase, "users": "replace", "connections": "replace", "settings": "replace",
@@ -375,8 +375,8 @@ func TestBackupAPI_ImportReplaceAll(t *testing.T) {
 	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusUnauthorized, "unauthenticated")
 	expect(t, e.do("GET", "/managed/me", "", e.admin()), http.StatusOK, "")
 	s := e.settings(t).Settings
-	if s.Session.IdleMinutes != 5 || s.UsersFile != e.f.usersPath {
-		t.Fatalf("settings: idle %d, usersFile %q", s.Session.IdleMinutes, s.UsersFile)
+	if s.Session.IdleMinutes != 5 || s.TLS.CertFile != e.cfg.certFile {
+		t.Fatalf("settings: idle %d, tls.certFile %q", s.Session.IdleMinutes, s.TLS.CertFile)
 	}
 	if e.live.get().session.idle.Minutes() != 5 {
 		t.Fatal("a live key applies at once")

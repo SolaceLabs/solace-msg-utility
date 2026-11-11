@@ -66,7 +66,7 @@ async function installAdminApp(list: unknown = { ok: true, data: { users: USERS,
     const ctxFor = (container: HTMLElement): AppContext => (completeContext({
         container, appState, eventBus, managedProfile,
         setState: (k, v) => { (appState as any)[k] = v; eventBus.emit('app:state-change', { key: k, value: v }); },
-        loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(), config: {},
+        loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(),
     }));
     const login = loadModuleDOM('admin-login');
     const users = loadModuleDOM('user-management');

@@ -1,6 +1,6 @@
 // End-to-end run of the gateway image against an existing Solace broker, over
 // docker/docker-compose.e2e.yaml, in both of its server modes: the `gateway`
-// service in Provisioned mode (CONN_MODES=provisioned) and the `direct` service
+// service in Provisioned mode (SMU_CONN_MODES=provisioned) and the `direct` service
 // in Gateway mode, the image's default. Run it through `./scripts/dev.sh e2e`
 // (or dev.ps1), which builds the image first; this file drives the gateways.
 // It may have to ask for the broker's details on the terminal, so the task
@@ -24,14 +24,14 @@
 // resolves it.
 //
 // The gateways verify the broker's certificate unless E2E_INSECURE=1, which
-// starts both e2e gateways with SSL_INSECURE_SKIP_VERIFY=true for a broker
+// starts both e2e gateways with SMU_SSL_SKIP_CERT_VERIFY=true for a broker
 // whose certificate does not name the host it is dialled by. The run then says
 // so at the start and in its summary: checks 3, 4, 6, 11 and 12 and D2-D4 pass
 // without proving the broker's TLS is trusted.
 //
 // Every check prints PASS or FAIL with its id: 1-17, B1-B9 in the browser and
 // D1-D4 in Gateway mode. Any FAIL, or a setup step that cannot complete, exits
-// 1. The gateway's passwords, its store key and its TLS material are generated
+// 1. The gateway's passwords and its TLS material are generated
 // per run, written only under scripts/logs/e2e/ (git-ignored, deleted at the
 // end) and masked in everything printed here; so are the broker's passwords.
 //
@@ -107,7 +107,6 @@ const secrets = {
     bootstrapPassword: token(),
     adminPassword: token(),
     userPassword: token(),
-    storeKey: randomBytes(32).toString('hex'),
 };
 // The broker's details (see BROKER_FIELDS in e2e-lib.mjs), and its two
 // passwords apart: those are masked at any length.
@@ -260,7 +259,7 @@ function describeBroker(certs) {
     say(`broker: ${broker.host}${alias}, SEMP port ${broker.sempPort} as ${broker.sempUser}, wss port ${broker.smfPort}, `
         + `VPN ${broker.vpn}, client username ${broker.clientUser}, queue ${broker.queue}`);
     for (const c of certs) say(`trusting ${c.subject.replace(/\n/g, ', ')} (valid until ${c.validTo}) from ${broker.caFile}`);
-    if (insecure()) say("warning: E2E_INSECURE=1: neither gateway verifies the broker's certificate (SSL_INSECURE_SKIP_VERIFY=true)");
+    if (insecure()) say("warning: E2E_INSECURE=1: neither gateway verifies the broker's certificate (SMU_SSL_SKIP_CERT_VERIFY=true)");
     say(browserOn()
         ? `browser: Chromium in the compose file's browser container, at ${APP} and ${DIRECT_APP} (the first run pulls the image)`
         : 'note: E2E_BROWSER=0: the browser checks B1-B9 and D4 are skipped');
@@ -299,9 +298,8 @@ function writeMaterial(brokerCerts, roots) {
     const gateway = issueCert(ca, { cn: 'localhost', dns: ['localhost', 'gateway', 'direct'], ip: [GATEWAY.host] });
     caPem = ca.certPem;
     // Read by the gateway's own user (65532), so world-readable: throwaway
-    // material for one run. The gateway warns that the store key is readable
-    // by others; that is expected here. chmod, not the write's mode, which a
-    // restrictive umask would narrow.
+    // material for one run. chmod, not the write's mode, which a restrictive
+    // umask would narrow.
     fs.chmodSync(path.join(WORK, 'trust'), 0o755);
     const put = (name, text) => {
         const file = path.join(WORK, name);
@@ -316,7 +314,6 @@ function writeMaterial(brokerCerts, roots) {
     put('gateway.crt', gateway.certPem);
     put('gateway.key', gateway.keyPem);
     put('admin-password', `${secrets.bootstrapPassword}\n`);
-    put('store.key', `${secrets.storeKey}\n`);
     if (broker.brokerIp) put(path.basename(ALIAS), hostAliasOverride(broker.host, broker.brokerIp));
     // The repo's package.json says "type": "module", so the SDK's UMD bundle
     // is loaded from a .cjs copy.
@@ -872,7 +869,16 @@ async function runChecks(admin) {
 
         await check(16, 'the gateway refuses to start when its key file is missing beside an existing store', async () => {
             compose(['stop', 'gateway'], { quiet: true });
-            const run = compose(['run', '--rm', '--no-deps', '-T', '-e', 'STORE_KEY_FILE=/run/secrets/absent.key', 'gateway'], { quiet: true });
+            // The key's path is fixed (/data/store.key), so the refusal is
+            // provoked with a /data that holds the users file and no key: a copy
+            // of the store out of the stopped gateway, mounted over its volume.
+            const bare = path.join(WORK, 'no-key-data');
+            fs.mkdirSync(bare, { recursive: true });
+            fs.chmodSync(bare, 0o777);
+            const cp = compose(['cp', 'gateway:/data/users.yaml', path.join(bare, 'users.yaml')], { quiet: true });
+            expect(cp.code === 0, `docker compose cp users.yaml: ${cp.out.trim()}`);
+            fs.chmodSync(path.join(bare, 'users.yaml'), 0o644);
+            const run = compose(['run', '--rm', '--no-deps', '-T', '-v', `${bare}:/data`, 'gateway'], { quiet: true });
             runOutput = run.out;
             expect(run.code !== 0, 'the gateway started without its key file');
             // slog quotes the error, so the inner quotes arrive escaped.
@@ -883,7 +889,13 @@ async function runChecks(admin) {
         await check(17, 'neither gateway log holds a password, store key or session cookie', async () => {
             const logs = compose(['logs', '--no-color', 'gateway', 'direct'], { quiet: true });
             const text = logs.out + runOutput;
-            const found = Object.entries({ ...sweepable(), ...cookies }).filter(([, v]) => text.includes(v)).map(([name]) => name);
+            // The key the gateway made on its fresh volume (64 hex characters).
+            const keyFile = path.join(WORK, 'at-rest-store.key');
+            const cp = compose(['cp', 'gateway:/data/store.key', keyFile], { quiet: true });
+            expect(cp.code === 0, `docker compose cp store.key: ${cp.out.trim()}`);
+            const storeKey = fs.readFileSync(keyFile, 'utf8').trim();
+            expect(storeKey.length >= MIN_MASKED, 'the gateway made no store key');
+            const found = Object.entries({ ...sweepable(), storeKey, ...cookies }).filter(([, v]) => text.includes(v)).map(([name]) => name);
             expect(found.length === 0, `found ${found.join(', ')}`);
             return `${text.split('\n').length} lines`;
         });

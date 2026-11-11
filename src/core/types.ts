@@ -277,8 +277,6 @@ export interface AppContext {
      * connections module's managed entry uses it.
      */
     mountSidebarAccount: (el: HTMLElement) => void;
-    /** Global app config */
-    config: Record<string, any>;
 }
 
 /* ------------------------------------------------------------------ */

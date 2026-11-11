@@ -59,7 +59,7 @@ func TestSettings_GetReportsTheFile(t *testing.T) {
 	if !reflect.DeepEqual(s.RestartOnly, restartOnlyKeyNames()) || len(s.PendingRestart) != 0 || s.ChangedOnDisk {
 		t.Errorf("flags: %+v", s)
 	}
-	if want := []string{"tls.certFile", "tls.keyFile", "tls.trustDir", "usersFile", "connectionsFile"}; !reflect.DeepEqual(s.HostOnly, want) {
+	if want := []string{"tls.certFile", "tls.keyFile", "tls.trustDir"}; !reflect.DeepEqual(s.HostOnly, want) {
 		t.Errorf("hostOnly: %v, want %v", s.HostOnly, want)
 	}
 	if !reflect.DeepEqual(s.Catalog, moduleCatalog()) {
@@ -90,7 +90,7 @@ func TestSettings_SaveAppliesLiveKeysAtOnce(t *testing.T) {
 		t.Errorf("connModes provisioned: the app must now need a session, got %d", rec.Code)
 	}
 	disk := e.fileOnDisk(t)
-	if disk.ConnModes != connProvisioned || disk.Session.IdleMinutes != 1 || disk.UsersFile != e.cfg.usersFile {
+	if disk.ConnModes != connProvisioned || disk.Session.IdleMinutes != 1 || disk.TLS.CertFile != e.cfg.certFile {
 		t.Errorf("file: %+v", disk)
 	}
 	line := logLine(e.log.String(), `msg="gateway settings saved"`)
@@ -129,11 +129,9 @@ func TestSettings_PathKeysChangeOnlyOnTheHost(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	before, _ := os.ReadFile(e.cfgPath)
 	for key, body := range map[string]string{
-		"tls.certFile":    `{"tls":{"certFile":"/data/users.yaml"}}`,
-		"tls.keyFile":     `{"tls":{"keyFile":"/nowhere/tls.key"}}`,
-		"tls.trustDir":    `{"tls":{"trustDir":"/"}}`,
-		"usersFile":       `{"usersFile":"/tmp/users.yaml"}`,
-		"connectionsFile": `{"connectionsFile":"/tmp/connections.yaml"}`,
+		"tls.certFile": `{"tls":{"certFile":"/data/users.yaml"}}`,
+		"tls.keyFile":  `{"tls":{"keyFile":"/nowhere/tls.key"}}`,
+		"tls.trustDir": `{"tls":{"trustDir":"/"}}`,
 	} {
 		t.Run(key, func(t *testing.T) {
 			rec := e.saveSettings(t, body)

@@ -251,12 +251,7 @@ async function fetchNewestMsgIdViaSempV1(
     if (!res.ok) return null;
 
     const text = await res.text();
-    let doc: XMLDocument;
-    try {
-        doc = new DOMParser().parseFromString(text, 'text/xml');
-    } catch {
-        return null;
-    }
+    const doc = new DOMParser().parseFromString(text, 'text/xml');
     if (doc.querySelector('parsererror')) return null;
 
     const execResult = doc.querySelector('rpc-reply > execute-result');
@@ -299,13 +294,7 @@ export function parseSempV1Response(
     requestedVpn: string,
     result: VerifyResult,
 ): VerifyResult {
-    let doc: XMLDocument;
-    try {
-        doc = new DOMParser().parseFromString(xml, 'text/xml');
-    } catch (e: any) {
-        result.errors.push(`SEMP v1 parse error: ${e?.message ?? 'unknown'}`);
-        return result;
-    }
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
 
     // DOMParser embeds parser errors as `<parsererror>` nodes rather than throwing.
     if (doc.querySelector('parsererror')) {
@@ -506,15 +495,11 @@ function verifyViaQueueBrowserAccumulate(
  * but is handled defensively.
  */
 export function msgIdToString(msg: any): string | null {
-    try {
-        const id = msg?.getGuaranteedMessageId?.();
-        if (id === null || id === undefined) return null;
-        // SDK returns a `Long` instance with toString(); BigInt and plain
-        // number both also stringify cleanly.
-        return String(id);
-    } catch {
-        return null;
-    }
+    const id = msg?.getGuaranteedMessageId?.();
+    if (id === null || id === undefined) return null;
+    // SDK returns a `Long` instance with toString(); BigInt and plain
+    // number both also stringify cleanly.
+    return String(id);
 }
 
 /**

@@ -95,7 +95,6 @@ function makeCtx(eventBus: EventBus, container: HTMLElement, overrides: Partial<
         sempFetch: vi.fn(),
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
-        config: {},
     });
 }
 

@@ -5,9 +5,9 @@
 #   Gateway mode (the default)  serves the app and relays its broker
 #                               connections; users type their broker's details.
 #   Provisioned mode (opt-in,   adds sign-in and the admin console; users get
-#   CONN_MODES=provisioned)     only the brokers an administrator granted.
+#   SMU_CONN_MODES=provisioned)     only the brokers an administrator granted.
 #   Files only (opt-in,         serves the app; browsers connect to brokers
-#   HOSTED=false)               themselves, as with the Standalone HTML files.
+#   SMU_HOSTED=false)               themselves, as with the Standalone HTML files.
 #
 # Final image is `FROM scratch` -- only the static Go binary and the PWA
 # bundles. No shell, no libc, no /etc/passwd. The gateway listens on :9443 (an
@@ -36,28 +36,35 @@
 #                  served at / in Provisioned mode), solAdmin.html (the admin
 #                  console), and solclient.js, jszip.min.js and licenses/.
 #
-# Environment (all optional). Except STORE_KEY_FILE, these only SEED
-# config.yaml (always /data/config.yaml; startup fails if it cannot be written)
-# on the first start, when the file does not exist; afterwards the file is
-# authoritative and a differing variable is logged, not applied. The client
-# access list (access.allow, access.trustedProxies) has no variable and lives
-# only in the file. See docs/deployment.md.
-#   HOSTED                    true (default) | false. false serves the files
+# Environment (all optional). These only SEED config.yaml (always
+# /data/config.yaml; startup fails if it cannot be written) on the first start,
+# when the file does not exist; afterwards the file is authoritative and a
+# differing variable is logged, not applied. The client access list
+# (access.allow, access.trustedProxies) has no variable and lives only in the
+# file. See docs/deployment.md.
+#   SMU_HOSTED                true (default) | false. false serves the files
 #                             only; Provisioned mode needs true.
-#   CONN_MODES                direct (default, Gateway mode) | provisioned |
+#   SMU_CONN_MODES            direct (default, Gateway mode) | provisioned |
 #                             both. Anything but direct turns Provisioned mode
 #                             on: sign-in, the stores and /solAdmin.
-#   DEFAULT_CONN              direct|provisioned: which tab opens first under
+#   SMU_DEFAULT_CONN          direct|provisioned: which tab opens first under
 #                             "both".
-#   SSL_CERT_FILE             /tls/tls.crt
-#   SSL_KEY_FILE              /tls/tls.key
-#   SSL_TRUST_DIR             /tls/trust
-#   SSL_INSECURE_SKIP_VERIFY  "true" disables upstream cert validation.
+#   SMU_SSL_CERTFILE          /tls/tls.crt
+#   SMU_SSL_CERTKEYFILE       /tls/tls.key
+#   SMU_SSL_TRUSTDIR          /tls/trust
+#   SMU_SSL_SKIP_CERT_VERIFY  "true" disables upstream cert validation.
+#   SMU_ADMIN_PASSWORD        Provisioned mode: the bootstrap admin password,
+#                             read only while users.yaml does not exist yet.
+#   SMU_ADMIN_PASSWORD_FILE   The same, as the path of a file (a Docker secret).
 #   LOG_LEVEL                 debug|info|warn|error  (default warn; anything
 #                             else fails startup)
-#   STORE_KEY_FILE            /data/store.key (Provisioned mode; environment-
-#                             only; encrypts users.yaml and connections.yaml,
-#                             made on a fresh volume only -- back it up)
+# The users store, connections store and store key always live at
+# /data/users.yaml, /data/connections.yaml and /data/store.key (the key is made
+# on a fresh volume only -- back it up); move them with Backup & Restore. The
+# gateway refuses to start while a pre-rename variable (SSL_CERT_FILE,
+# SSL_KEY_FILE, SSL_TRUST_DIR, SSL_INSECURE_SKIP_VERIFY, HOSTED, CONN_MODES,
+# DEFAULT_CONN, ADMIN_PASSWORD, ADMIN_PASSWORD_FILE) is set, and warns that
+# USERS_FILE, CONNECTIONS_FILE and STORE_KEY_FILE are ignored.
 #
 # Build args:
 #   APP_VERSION The release tag (e.g. v3.6.0), stamped into the gateway binary's
@@ -122,7 +129,7 @@ RUN npm run check:bundles
 # The gateway picks the bundle at /: index.html (the Release bundle, Direct
 # only) in Gateway mode, provisioned.html (the only bundle that carries the
 # sign-in) in Provisioned mode. Which tabs provisioned.html offers is still a
-# runtime decision from CONN_MODES via /hosted. solAdmin.html is served only on
+# runtime decision from SMU_CONN_MODES via /hosted. solAdmin.html is served only on
 # the /solAdmin route, behind the admin gate; a request for either file by name
 # gets 404.
 #

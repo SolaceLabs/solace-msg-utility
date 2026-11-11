@@ -12,6 +12,8 @@ import { logger } from '../../core/logger';
 import { showToast } from '../../core/toast';
 import type { AppContext } from '../../core/types';
 
+const log = logger.withTag('queue-discovery');
+
 export const QueueDiscoveryModule = {
     name: 'Queue Discovery',
     id: 'queue-discovery',
@@ -57,7 +59,7 @@ export const QueueDiscoveryModule = {
         function handleVpnSelect(vpn: string) {
             selectedVpn = vpn;
             vpnInput.value = vpn;
-            logger.info(`VPN Selected: ${vpn}`);
+            log.info(`VPN selected: vpn=${vpn}`);
 
             setState('selectedVpn', vpn);
 
@@ -67,19 +69,19 @@ export const QueueDiscoveryModule = {
         function handleQueueSelect(queue: string) {
             selectedQueue = queue;
             queueInput.value = queue;
-            logger.info(`Queue Selected: ${queue}`);
+            log.info(`Queue selected: vpn=${selectedVpn} queue=${queue}`);
             btnCopy.disabled = false;
         }
 
         async function fetchVpns() {
             if (vpnCache) {
-                logger.debug('[Discovery] Using cached VPN list');
+                log.debug('Using cached VPN list');
                 currentVpnList = [...vpnCache];
                 ui.renderOptions(vpnList, currentVpnList, handleVpnSelect);
                 vpnInput.placeholder = 'Select a Message VPN';
                 return;
             }
-            logger.info('Fetching VPNs...');
+            log.info('Fetching VPN list');
             vpnInput.placeholder = 'Loading...';
             currentVpnList = [];
 
@@ -88,7 +90,7 @@ export const QueueDiscoveryModule = {
                     currentVpnList = [...currentVpnList, ...page.data].sort();
                     ui.renderOptions(vpnList, currentVpnList, handleVpnSelect);
                 } else {
-                    logger.error('Failed to fetch VPNs', page.error);
+                    log.error('Failed to fetch VPN list', page.error);
                     vpnInput.placeholder = page.error;
                     return;
                 }
@@ -111,7 +113,7 @@ export const QueueDiscoveryModule = {
             // next iteration.
             const cached = queueCache.get(vpn);
             if (cached) {
-                logger.debug(`[Discovery] Using cached queue list for ${vpn}`);
+                log.debug(`Using cached queue list for vpn=${vpn}`);
                 currentQueueList = [...cached];
                 ui.renderOptions(queueList, currentQueueList, handleQueueSelect);
                 if (currentQueueList.length === 0) {
@@ -125,7 +127,7 @@ export const QueueDiscoveryModule = {
                 return;
             }
 
-            logger.info(`Fetching Queues for ${vpn}...`);
+            log.info(`Fetching queue list for vpn=${vpn}`);
             queueInput.placeholder = 'Loading...';
             currentQueueList = [];
             ui.renderOptions(queueList, [], handleQueueSelect);
@@ -143,7 +145,7 @@ export const QueueDiscoveryModule = {
                     queueInput.disabled = false;
                     ui.renderOptions(queueList, currentQueueList, handleQueueSelect);
                 } else {
-                    logger.error('Failed to fetch Queues', page.error);
+                    log.error(`Failed to fetch queue list for vpn=${vpn}`, page.error);
                     queueInput.placeholder = page.error;
                     return;
                 }
@@ -186,7 +188,7 @@ export const QueueDiscoveryModule = {
             setTimeout(() => {
                 const val = vpnInput.value;
                 if ((val && !currentVpnList.includes(val)) || !val) {
-                    if (val) logger.warn('Invalid VPN entered. Clearing.');
+                    if (val) log.warn(`Invalid VPN entered, clearing: vpn=${val}`);
                     selectedVpn = null;
                     selectedQueue = null;
                     vpnInput.value = '';
@@ -200,7 +202,7 @@ export const QueueDiscoveryModule = {
                 if (queueInput.disabled) return;
                 const val = queueInput.value;
                 if (val && !currentQueueList.includes(val)) {
-                    logger.warn('Invalid queue entered. Clearing.');
+                    log.warn(`Invalid queue entered, clearing: vpn=${selectedVpn} queue=${val}`);
                     queueInput.value = '';
                     selectedQueue = null;
                     btnCopy.disabled = true;
@@ -241,7 +243,7 @@ export const QueueDiscoveryModule = {
 
         btnCopy.addEventListener('click', () => {
             if (selectedVpn && selectedQueue) {
-                logger.info(`[Discovery] Requesting Open in Browser: VPN=${selectedVpn}, Queue=${selectedQueue}`);
+                log.info(`Requesting open in browser: vpn=${selectedVpn} queue=${selectedQueue}`);
                 eventBus.emit('connection:check-connection', { vpn: selectedVpn, queue: selectedQueue });
             } else {
                 showToast('Select a Message VPN and a queue first.', 'warn');
@@ -281,6 +283,6 @@ export const QueueDiscoveryModule = {
             }
         });
 
-        logger.info('Queue Discovery Module Setup Complete');
+        log.info('Module setup complete');
     }
 };

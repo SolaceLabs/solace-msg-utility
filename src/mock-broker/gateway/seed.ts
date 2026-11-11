@@ -95,8 +95,6 @@ export function demoSeed(): GatewaySeed {
             defaultConn: 'provisioned',
             tls: { certFile: '/tls/tls.crt', keyFile: '/tls/tls.key', trustDir: '/tls/trust', insecureSkipVerify: false },
             logLevel: 'warn',
-            usersFile: '/data/users.yaml',
-            connectionsFile: '/data/connections.yaml',
             access: { allow: [], trustedProxies: [] },
             session: { idleMinutes: 10, absoluteMinutes: 30 },
             login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60 },

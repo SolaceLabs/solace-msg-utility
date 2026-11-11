@@ -37,7 +37,6 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; eventBus:
             return { ok: true, json: async () => ({ data: [{ msgVpnName: 'default' }, { msgVpnName: 'dev' }] }) };
         }),
         copyToClipboard: vi.fn(),
-        config: {}
     });
     return { ctx, eventBus, appState };
 }

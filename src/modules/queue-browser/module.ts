@@ -21,6 +21,8 @@ import { required, attachBackdropClose } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import type { AppContext } from '../../core/types';
 
+const log = logger.withTag('queue-browser');
+
 export const QueueBrowserModule = {
     name: 'Queue Browser',
     id: 'queue-browser',
@@ -232,13 +234,13 @@ export const QueueBrowserModule = {
 
         // Client Disconnect (from broker)
         eventBus.on('client:disconnected', () => {
-            logger.info('[Browser] Client disconnected, cleaning up...');
+            log.info('Client disconnected, cleaning up');
             handleDisconnect();
         });
 
         // 6. Cross-Module: Handle "Browse Queue" from Discovery via EventBus
         eventBus.on('browser:browse-queue', ({ queue: targetQueue }) => {
-            logger.info('[Browser] Received browse request:', targetQueue);
+            log.info(`Received browse request for queue=${targetQueue}`);
 
             // Switch view to Browser
             if (loadSelf) loadSelf();
@@ -271,6 +273,6 @@ export const QueueBrowserModule = {
         // so subscription order doesn't matter.
         eventBus.emit('browser:available');
 
-        logger.info('Queue Browser Module Setup Complete');
+        log.info('Module setup complete');
     }
 };
