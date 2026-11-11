@@ -7,7 +7,12 @@
  *     Connections" button jumps to the connections module for credential
  *     changes.
  *   - Destination (right): Broker (with Same-broker / Same-VPN toggles), SEMP,
- *     Client, Destination target (queue/topic + mode).
+ *     Client, Destination target (queue/topic + mode). The destination
+ *     follows the primary connection's mode: a Direct primary keeps the typed
+ *     Broker host, SEMP and Client cards; a Provisioned primary replaces them
+ *     with one provisioned connection card (Broker + Message VPN pickers, one
+ *     Connect that dials the client credential and opens SEMP through the
+ *     gateway relay).
  *
  * The modal Confirm Queue Copy verifies the source via SEMP v1 (with a
  * QueueBrowser-accumulate fallback) and then runs the copy/move engine.
@@ -48,6 +53,7 @@ import {
 } from '../../core/services/semp-client';
 import { createSolacePublisher } from '../../core/services/solace-publisher';
 import { createGate } from '../../core/components/module-gate';
+import type { ProvisionedStatus, ProvisionedTarget } from '../../core/components/provisioned-connection';
 import { logger } from '../../core/logger';
 import { isHostedDeployment, limitSchemeOptions } from '../../core/hosted';
 import { isQueueVisible, canOperate } from '../../core/rbac';
@@ -152,6 +158,29 @@ export const QueueCopyModule = {
             refreshDestPickVisible();
         }
 
+        // -------- Provisioned destination card --------
+        // The card shows where a provisioned destination connect stands. These
+        // helpers mirror the Client / SEMP hooks into it; they do nothing for a
+        // Direct primary (credMode 'manual'), whose rows report themselves.
+        let provSempIssue = '';
+        function provDetail(): string {
+            const t = state.destForm.provisioned;
+            const base = `Broker "${t.broker}", VPN "${t.vpn}"`;
+            return provSempIssue ? `${base} -- queue list unavailable: ${provSempIssue}` : base;
+        }
+        /** Re-render the connected card's status line, after the SEMP side changed. */
+        function refreshProvDetail(): void {
+            if (state.destForm.credMode !== 'provisioned') return;
+            if (destUi.destCard.status() === 'connected') destUi.destCard.setStatus('connected', provDetail());
+        }
+        function mirrorProv(status: ProvisionedStatus, detail?: string): void {
+            if (state.destForm.credMode !== 'provisioned') return;
+            // A refusal stays on screen: the disconnect that follows it must
+            // not wipe the reason.
+            if (status === 'disconnected' && destUi.destCard.status() === 'error') return;
+            destUi.destCard.setStatus(status, detail);
+        }
+
         // -------- Destination connect factories --------
         // Pure factories from core/services with module-scoped bridging hooks.
         // Effects land in `state` and module-owned UI — never AppState, never
@@ -170,6 +199,7 @@ export const QueueCopyModule = {
                     destSolClient.disconnect();
                     setDestSolStatus(els, 'disconnected');
                     setDestSolError(els, 'The destination changed while connecting. Connect again.');
+                    mirrorProv('error', 'The destination changed while connecting. Connect again.');
                     destUi.refreshDestTarget();
                     return;
                 }
@@ -178,6 +208,7 @@ export const QueueCopyModule = {
                 state.destPublisher = createSolacePublisher(session);
                 setDestSolStatus(els, 'connected', vpn);
                 setDestSolError(els, null);
+                mirrorProv('connected', provDetail());
                 destUi.refreshDestTarget();
                 setDestSolFormLocked(els, true);
                 setDestBrokerLocked(els, true);
@@ -192,6 +223,7 @@ export const QueueCopyModule = {
                 // A connect in flight ends here too: its SDK session is gone.
                 state.destSolPending = null;
                 setDestSolStatus(els, 'disconnected');
+                mirrorProv('disconnected');
                 setDestSolFormLocked(els, false);
                 // Re-derive broker-host lock from toggle state — Same-broker
                 // dictates whether the host stays locked even with no live
@@ -205,12 +237,14 @@ export const QueueCopyModule = {
                 state.destSolPending = null;
                 setDestSolStatus(els, 'disconnected');
                 setDestSolError(els, `Connection failed: ${infoStr}`);
+                mirrorProv('error', `Connection failed: ${infoStr}`);
                 destUi.refreshDestTarget();
             },
             onError: (err) => {
                 state.destSolPending = null;
                 setDestSolStatus(els, 'disconnected');
                 setDestSolError(els, err.message);
+                mirrorProv('error', err.message);
                 destUi.refreshDestTarget();
             },
         };
@@ -218,6 +252,8 @@ export const QueueCopyModule = {
         const destSempHooks: SempConnectionHooks = {
             onConnected: (sempCtx) => {
                 state.destSempCtx = sempCtx;
+                provSempIssue = '';
+                refreshProvDetail();
                 setDestSempStatus(els, 'connected');
                 setDestSempError(els, null);
                 setDestSempFormLocked(els, true);
@@ -236,7 +272,9 @@ export const QueueCopyModule = {
                 if (state.destForm.credMode === 'provisioned') {
                     // The gateway's relay answers 401 only when its session has
                     // ended: ask the session owner to sign out.
-                    setDestSempError(els, managedErrorMessage({ ok: false, status: 401, code: 'unauthenticated' }));
+                    const ended = managedErrorMessage({ ok: false, status: 401, code: 'unauthenticated' });
+                    setDestSempError(els, ended);
+                    noteProvSempIssue(ended);
                     eventBus.emit('rbac:sign-out-requested');
                     return;
                 }
@@ -245,8 +283,15 @@ export const QueueCopyModule = {
             onError: ({ message }) => {
                 setDestSempStatus(els, 'disconnected');
                 setDestSempError(els, `SEMP error: ${message}`);
+                noteProvSempIssue(`SEMP error: ${message}`);
             },
         };
+
+        /** SEMP only feeds the queue picker: its failure leaves the copy itself possible, so it annotates the card instead of failing it. */
+        function noteProvSempIssue(message: string): void {
+            provSempIssue = message;
+            refreshProvDetail();
+        }
 
         const destSolClient = createServiceSolace(destSolHooks);
         const destSempClient = createServiceSemp(destSempHooks);
@@ -266,6 +311,7 @@ export const QueueCopyModule = {
                     .catch((e) => {
                         setDestSempStatus(els, 'disconnected');
                         setDestSempError(els, errMessage(e));
+                        noteProvSempIssue(errMessage(e));
                     });
                 return;
             }
@@ -286,6 +332,7 @@ export const QueueCopyModule = {
             // choose it stay locked until the connect ends.
             state.destSolPending = destTargetKey(f);
             setDestTargetLocked(els, true);
+            destUi.destCard.lock(true);
             if (f.credMode === 'provisioned') {
                 destSolClient.init();
                 setDestSolStatus(els, 'connecting');
@@ -301,6 +348,7 @@ export const QueueCopyModule = {
                         state.destSolPending = null;
                         setDestSolStatus(els, 'disconnected');
                         setDestSolError(els, errMessage(e));
+                        mirrorProv('error', errMessage(e));
                         destUi.refreshDestTarget();
                         if (isSessionEnded(e)) eventBus.emit('rbac:sign-out-requested');
                     });
@@ -330,6 +378,26 @@ export const QueueCopyModule = {
             destSolClient.connect(cfg, f.host, state.destSolacePass);
         }
 
+        /**
+         * The card's Connect. The card has shown "Connecting" and locked its
+         * pickers by now; this records the chosen names (the form's destination
+         * from here on), then dials the client credential and, when the broker is
+         * not the primary's, opens the destination SEMP through the relay for the
+         * queue picker. Both dials hand their credential to the SDK inside the
+         * callback and keep nothing.
+         */
+        function connectDestProvisioned(target: ProvisionedTarget): void {
+            const f = state.destForm;
+            f.provisioned = { broker: target.broker, vpn: target.vpn };
+            provSempIssue = '';
+            connectDestSol();
+            if (!f.sameBroker) connectDestSemp();
+        }
+        function disconnectDestProvisioned(): void {
+            disconnectDestSemp();
+            disconnectDestSol();
+        }
+
         // Disconnect path: button reads as "Disconnect" once connected, so the
         // same button triggers either connect or disconnect depending on the
         // active state. We dispatch from the click handler in ui-events.
@@ -340,6 +408,7 @@ export const QueueCopyModule = {
                 // late session, and the destination controls unlock now.
                 state.destSolPending = null;
                 setDestSolStatus(els, 'disconnected');
+                mirrorProv('disconnected');
                 destUi.refreshDestTarget();
             }
             destSolClient.disconnect();
@@ -396,6 +465,8 @@ export const QueueCopyModule = {
             disconnectDestSemp,
             connectDestSol,
             disconnectDestSol,
+            connectDestProvisioned,
+            disconnectDestProvisioned,
             refreshStartEnabled,
             refreshDestPickVisible,
         });
@@ -463,7 +534,16 @@ export const QueueCopyModule = {
             const vpn = appState.selectedVpn ?? '';
             const broker = session?.broker ?? '';
 
-            const destProvisioned = state.destForm.credMode === 'provisioned';
+            // Only a secondary dialled for a provisioned destination (live, or
+            // connecting) can lose its entitlement; the primary's own endpoint is
+            // the connections module's, and a destination never connected has
+            // no identity yet (the card records the names on Connect), so a
+            // mode flip that disposes a typed destination is not a revocation.
+            const destLive = state.destSession !== null || state.destSempCtx !== null || state.destSolPending !== null;
+            const destProvisioned = state.destForm.credMode === 'provisioned'
+                && (!state.destForm.sameBroker || !state.destForm.sameVpn)
+                && state.destForm.provisioned.broker !== ''
+                && destLive;
             const destStillProvisioned = !destProvisioned || app.managedProfile
                 .vpnsFor(state.destForm.provisioned.broker)
                 .includes(state.destForm.provisioned.vpn);

@@ -8,6 +8,15 @@
  *   and `service-verify.ts`, not through a getter. Without it every message
  *   sizes as 0 bytes.
  * - Setters return `this` so the publisher's chained `safeSet` calls behave.
+ * - Payload bytes: real SDK under the `version10` profile hands back the binary
+ *   attachment as a Latin-1 string, one char per byte, and takes either such a
+ *   string or a Uint8Array on `setBinaryAttachment()`. Fixtures stay authored
+ *   as plain text in `payload`; `getBinaryAttachment()` encodes it to its UTF-8
+ *   bytes once, here at the edge. A published or binary-seeded payload lives as
+ *   a byte string in `payloadBytes` (JSON-safe for the managed demo's reloads)
+ *   and wins over `payload`. `getXmlContent()`/`setXmlContent()` stay a plain
+ *   string stored as given: the real SDK's raw XML is a byte string too, so the
+ *   demo does not model UTF-8 XML as mojibake.
  * - `getSdtContainer()` returns null for seeded messages, so the publisher's
  *   first-match-wins content chain (`setSdtContainer || setXmlContent ||
  *   setBinaryAttachment`) falls through to the binary attachment, which is the
@@ -16,6 +25,18 @@
  * Mock-only.
  */
 import { DestinationType, MessageDeliveryModeType, MessageType } from './enums';
+
+/** A byte string (one char per byte, as the SDK's version10 profile returns) from bytes. */
+export function bytesToLatin1(bytes: Uint8Array): string {
+    let out = '';
+    for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i]);
+    return out;
+}
+
+/** The byte string a payload's text encodes to: its UTF-8 bytes, one char each. */
+function textToLatin1(text: string): string {
+    return bytesToLatin1(new TextEncoder().encode(text));
+}
 
 export interface MockDestination {
     getName(): string;
@@ -28,7 +49,10 @@ export function createDestination(name: string, type: number): MockDestination {
 
 /** Field bag a message carries. Everything is optional — absent means unset. */
 export interface MessageFields {
+    /** Authored payload text; the SDK edge hands out its UTF-8 bytes. Ignored when `payloadBytes` is set. */
     payload?: string;
+    /** Payload as a byte string (one char per byte, all <= 0xFF): a published or binary-seeded attachment. */
+    payloadBytes?: string;
     destination?: MockDestination;
     guaranteedMessageId?: string;
     deliveryMode?: number;
@@ -68,6 +92,25 @@ export interface MockMessage {
     smfHeader: { messageLength: number };
 }
 
+/** The attachment as the SDK returns it: a byte string, or null when none is set. */
+function attachmentOf(f: MessageFields): string | null {
+    if (f.payloadBytes !== undefined) return f.payloadBytes;
+    return f.payload === undefined ? null : textToLatin1(f.payload);
+}
+
+/** Attachment size in bytes, as the broker counts it. */
+export function payloadByteLength(f: MessageFields): number {
+    return (attachmentOf(f) ?? '').length;
+}
+
+/** What `setBinaryAttachment` accepts: a Uint8Array, or a Latin-1 byte string (text with a char above 0xFF is encoded as UTF-8). */
+function toByteString(v: unknown): string | undefined {
+    if (v === null || v === undefined) return undefined;
+    if (v instanceof Uint8Array) return bytesToLatin1(v);
+    const text = String(v);
+    return /[^\x00-\xFF]/.test(text) ? textToLatin1(text) : text;
+}
+
 function propertyMap(props: Record<string, string> | undefined) {
     if (!props) return null;
     const keys = Object.keys(props);
@@ -87,11 +130,11 @@ export function createMessage(fields: MessageFields = {}): MockMessage {
 
     const msg: MockMessage = {
         _fields: f,
-        smfHeader: { messageLength: (f.payload ?? '').length + 120 },
+        smfHeader: { messageLength: payloadByteLength(f) + 120 },
 
         // ---- content -------------------------------------------------
         getType: () => MessageType.BINARY,
-        getBinaryAttachment: () => f.payload ?? null,
+        getBinaryAttachment: () => attachmentOf(f),
         getSdtContainer: () => null,
         getXmlContent: () => f.xmlContent ?? null,
 
@@ -140,8 +183,8 @@ export function createMessage(fields: MessageFields = {}): MockMessage {
             `Class Of Service:       ${f.userCos ?? 0}`,
             `DeliveryMode:           ${f.deliveryMode === MessageDeliveryModeType.DIRECT ? 'DIRECT' : 'PERSISTENT'}`,
             `Message Id:             ${f.guaranteedMessageId ?? '(null)'}`,
-            `Binary Attachment:      len=${(f.payload ?? '').length}`,
-            f.payload ?? '',
+            `Binary Attachment:      len=${payloadByteLength(f)}`,
+            attachmentOf(f) ?? '',
         ].join('\n'),
     };
 
@@ -149,7 +192,10 @@ export function createMessage(fields: MessageFields = {}): MockMessage {
     // Each returns `this` so the publisher's chaining works, and each writes
     // through to `_fields` so a cloned message really carries the value.
     const setters: Record<string, (v: any) => void> = {
-        setBinaryAttachment: v => { f.payload = typeof v === 'string' ? v : String(v ?? ''); },
+        setBinaryAttachment: v => {
+            delete f.payload;
+            f.payloadBytes = toByteString(v);
+        },
         setXmlContent: v => { f.xmlContent = v; },
         setSdtContainer: () => { throw new Error('SDT container not supported by the demo broker'); },
         setDestination: v => { f.destination = v; },
@@ -190,7 +236,7 @@ export function createMessage(fields: MessageFields = {}): MockMessage {
     for (const [name, apply] of Object.entries(setters)) {
         msg[name] = function (v: any) {
             apply(v);
-            if (name === 'setBinaryAttachment') msg.smfHeader.messageLength = (f.payload ?? '').length + 120;
+            if (name === 'setBinaryAttachment') msg.smfHeader.messageLength = payloadByteLength(f) + 120;
             return this;
         };
     }

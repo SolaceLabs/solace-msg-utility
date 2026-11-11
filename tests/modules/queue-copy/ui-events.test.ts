@@ -75,6 +75,8 @@ function setup(opts: { ctx?: Partial<AppContext['appState']>; primarySnap?: Prim
         disconnectDestSemp: vi.fn(),
         connectDestSol: vi.fn(),
         disconnectDestSol: vi.fn(),
+        connectDestProvisioned: vi.fn(),
+        disconnectDestProvisioned: vi.fn(),
         refreshStartEnabled: vi.fn(refreshStartEnabled),
         refreshDestPickVisible: vi.fn(refreshDestPickVisible),
     };

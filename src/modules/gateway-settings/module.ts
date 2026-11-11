@@ -15,13 +15,13 @@
  * (`changedOnDisk`, which also disables Save). Imports only from
  * `src/core/*` and its own service.
  */
-import { required } from '../../core/dom';
+import { required, setError as setErrorOn } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import { showToast } from '../../core/toast';
 import { moduleLabel } from '../../core/utils';
 import { logger } from '../../core/logger';
 import { reportManagedFailure } from '../../core/services/managed-api';
-import { createSettingsService, type GatewaySettings, type SettingsView } from './service';
+import { createSettingsService, type ClientSeen, type GatewaySettings, type SettingsView } from './service';
 import type { AppContext } from '../../core/types';
 
 type Kind = 'text' | 'bool' | 'int' | 'lines';
@@ -79,6 +79,7 @@ export const GatewaySettingsModule = {
             btnSave: required<HTMLButtonElement>(container, '#btn-gw-set-save'),
             disk: required<HTMLElement>(container, '#gw-set-disk'),
             pending: required<HTMLElement>(container, '#gw-set-pending'),
+            client: required<HTMLElement>(container, '#gw-set-client'),
             offered: required<HTMLElement>(container, '#gw-set-modules-offered'),
             error: required<HTMLElement>(container, '#gw-set-error'),
         };
@@ -96,8 +97,7 @@ export const GatewaySettingsModule = {
         let loaded: GatewaySettings | null = null;
 
         function setError(msg: string | null): void {
-            els.error.textContent = msg ?? '';
-            els.error.classList.toggle('hidden', !msg);
+            setErrorOn(els.error, msg);
         }
 
         function showChangedOnDisk(changed: boolean): void {
@@ -139,6 +139,23 @@ export const GatewaySettingsModule = {
             showChangedOnDisk(view.changedOnDisk);
         }
 
+        /** The one line saying which address the gateway takes this browser for, and why. */
+        function clientLine(seen: ClientSeen): string {
+            const head = 'Your address as the gateway sees it: ';
+            if (!seen.address) {
+                return `${head}unknown. The connection comes from ${seen.peer} and its X-Forwarded-For header could not be read.`;
+            }
+            if (seen.viaProxy) {
+                return `${head}${seen.address} (from X-Forwarded-For, sent by the trusted proxy ${seen.peer}).`;
+            }
+            return `${head}${seen.address} (the TCP peer). If this is a proxy's or Docker's address and not yours, every user looks like it: for a reverse proxy, list it under Trusted reverse proxies and have it pass X-Forwarded-For.`;
+        }
+
+        async function showClient(): Promise<void> {
+            const res = await service.client();
+            els.client.textContent = res.ok ? clientLine(res.data) : 'Your address as the gateway sees it: unavailable.';
+        }
+
         async function load(): Promise<void> {
             setError(null);
             const res = await service.load();
@@ -147,6 +164,7 @@ export const GatewaySettingsModule = {
                 return;
             }
             render(res.data);
+            await showClient();
         }
 
         /** The form as a whole file, or the reason it cannot be sent. */

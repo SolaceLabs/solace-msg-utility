@@ -29,3 +29,12 @@ export function attachBackdropClose(dialog: HTMLDialogElement): void {
         if (!inside) dialog.close('backdrop');
     });
 }
+
+/**
+ * Shows `msg` in an error element, or hides the element for null / empty.
+ * The one place modules turn an error banner on and off.
+ */
+export function setError(el: HTMLElement, msg: string | null): void {
+    el.textContent = msg ?? '';
+    el.classList.toggle('hidden', !msg);
+}

@@ -106,7 +106,8 @@ src/
                        # Re-exports ConnectionConfig + SempContext from connections/types.ts.
     event-bus.ts       # Typed pub/sub implementation
     kernel.ts          # Module orchestrator, state, navigation, SEMP auth
-    dom.ts             # required() helper — fail-fast required-element assertion
+    dom.ts             # required() fail-fast required-element assertion, setError(el, msg) error banner,
+                       # attachBackdropClose(dialog)
     utils.ts           # Pure utilities (escapeHtml, escapeXml, formatBytes, generateUuid, matchString,
                        # matchContains, topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
                        # isValidHost, isValidPort)
@@ -128,6 +129,7 @@ src/
       sempContext.ts           # unfilteredPrimarySempContext(ctx) → SempContext from primary AppState.
                                # Named for what it does NOT do: only two SEMP v2 list shapes are filtered
       queue-source.ts          # QueueSource + typed Access/scope — the discovery seam components consume
+      semp-errors.ts           # One error text for a SEMP answer (relay refusal code, or the HTTP status)
       managed-profile.ts       # Provisioned broker/VPN names; dial(target, {connect}): relay config or a dialled SMF credential
       managed-api.ts           # managedRequest() — /managed/* on the gateway session cookie; error codes → text
       managed-service.ts       # createManagedService() -> /managed/me, /managed/logout, /managed/dial, the relay base
@@ -135,13 +137,21 @@ src/
       types.ts                 # SolaceConfig, SempConfig, ConnectionConfig, ConnectionCredentials, SempContext
       defaults.ts              # DEFAULT_CONFIG + validateConfig (data-shape validator)
       conn-modes.ts            # ConnDeploymentConfig + DEFAULT_CONN_CONFIG + coerceConnConfig +
-                               # resolveConnTabs / resolveDestCredModes (fed by CONN_MODES/DEFAULT_CONN)
+                               # resolveConnTabs (fed by CONN_MODES/DEFAULT_CONN)
     components/                # Reusable UI components with function APIs.
       queue-picker/
         index.ts               # pickQueue(source, opts?) — takes a QueueSource, never SEMP directly
         styles.css             # Component-scoped .picker-* styles
       row-list/
-        index.ts               # createRowList(container, fields) — dynamic add/remove row editor (managed admin forms)
+        index.ts               # createRowList(container, fields) -- dynamic add/remove row editor (managed admin forms);
+                               # renderAdminRows(tbody, shown, total, query, opts) -- the admin table body (connection-management, user-management)
+      provisioned-connection/
+        index.ts               # createProvisionedConnectionCard -- Broker + Message VPN pickers, Connect, status; used by connections and queue-copy
+        styles.css             # Component-scoped styles
+      confirm-dialog/
+        index.ts               # confirmDialog(message, opts) -- the yes/no question, in place of confirm()
+      notification-center/
+        index.ts               # The bell in the header: a record of toasts and the connection lifecycle
       module-gate/
         index.ts               # createGate(container, {id,title,message}) — full-view "… Required" gate card
   css/                 # Split by responsibility; aggregated by main.css
@@ -160,6 +170,7 @@ src/
                        # the connections form's UI updates.
       module.managed.ts # Provisioned entry (the managed variant): tab bar + installDirect + panel
       managed-panel.ts # The Provisioned tab -- gateway session restore, provisioned dropdowns, browser guardrails
+      vpn-switch.ts    # The VPN switch both modes share (connection:check-connection)
       config.js        # localStorage persistence (values obfuscated at rest)
       ui.js            # Element caching, auth mode, visual feedback
       styles.css       # Module-scoped styles
@@ -169,6 +180,7 @@ src/
       module.ts        # Event listener wiring
       service.ts       # Browser create, forward, delete
       features.ts      # Build-time flavor flag — showPayload() reads VITE_SHOW_PAYLOAD
+      payload.ts       # Binary-attachment helpers: attachmentBytes, classifyAttachment (text vs size-only placeholder)
       service-events.ts # onMessage, onBrowserUp/Down, ACK/REJECT
       state.js         # Message store, filter logic
       ui-core.js       # Element cache, visibility, counts
@@ -190,6 +202,7 @@ src/
     user-management/       # Admin-only (/solAdmin) — user + entitlement CRUD
     connection-management/ # Admin-only (/solAdmin) — broker connection CRUD
     gateway-settings/      # Admin-only (/solAdmin) — config.yaml editor
+    backup/                # Admin-only (/solAdmin) — encrypted export/import and scheduled backups
   variants/
     standard.ts        # Default variant -- the everyday bundle (no admin modules)
     min.ts             # Minimal variant — connections + queue-browser only
@@ -319,7 +332,7 @@ export interface SolaceConnectionHooks {
 export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient;
 ```
 
-The connections module owns the **primary** connection: `installDirect` in its `module.ts` (shared by the Release and managed entries) defines `solaceHooks`/`sempHooks` that bridge factory events to `ctx.setState` + `eventBus.emit('client:connected'...)` + the connections form's UI updates. Other modules subscribe to those bus events as they always have. queue-copy is the secondary-connection caller: it defines different hooks that target module-scoped state instead of global state -- same factory, different bridging. When its destination is provisioned it asks `ctx.managedProfile.dial(target, { connect })` and creates the client inside that callback: SEMP gets the gateway's relay base (`SempConfig.relayBase`, no credential at all), and SMF gets the VPN's dialled password and socket path (`SolaceConfig.smfPath`), which go straight to the SDK and are never stored.
+The connections module owns the **primary** connection: `installDirect` in its `module.ts` (shared by the Release and managed entries) defines `solaceHooks`/`sempHooks` that bridge factory events to `ctx.setState` + `eventBus.emit('client:connected'...)` + the connections form's UI updates. Other modules subscribe to those bus events as they always have. queue-copy is the secondary-connection caller: it defines different hooks that target module-scoped state instead of global state -- same factory, different bridging. When the primary connection is Provisioned its destination is the shared provisioned connection card (`src/core/components/provisioned-connection/`) and, on Connect, it asks `ctx.managedProfile.dial(target, { connect })` and creates the client inside that callback: SEMP gets the gateway's relay base (`SempConfig.relayBase`, no credential at all), and SMF gets the VPN's dialled password and socket path (`SolaceConfig.smfPath`), which go straight to the SDK and are never stored.
 
 The same shape applies to SEMP: `createServiceSemp(hooks)` and the discovery generator `createSempDiscovery(sempCtx)` (from `src/core/services/semp-discovery.ts`) which is parameterized by a `SempContext` — a `{ fetch, baseUrl }` pair scoped to a specific broker. Build a primary SempContext via `unfilteredPrimarySempContext(ctx)` from `src/core/services/sempContext.ts` — read its docstring before adding a consumer, because only two SEMP v2 list shapes are entitlement-filtered. For discovery, prefer `queueSourceFrom(ctx, scope)` from `src/core/services/queue-source.ts`; components take a `QueueSource` and never run their own SEMP calls.
 
@@ -404,6 +417,8 @@ serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser });
    > **Gating a module in Provisioned deployments:** a module in the `managed` variant is under module control: a signed-in user sees it only if an administrator grants it, so add its id to `moduleCatalog()` in [go-web-proxy/configfile.go](../go-web-proxy/configfile.go) (`tests/variants.test.ts` fails until you do). To keep it out of Provisioned sessions instead, add it to `MODULE_REQUIREMENTS` in [src/core/rbac.ts](../src/core/rbac.ts): `'admin'` for admin-only CRUD (like the editors, which ship only in `src/variants/admin.ts`), or `'unfiltered-semp'` for a module that reaches the broker over a path RBAC cannot filter, which hides it in **every** Provisioned session and keeps it out of the catalog. The kernel hides the sidebar entry and re-evaluates on `rbac:changed`. See [architecture.md -> Provisioned Connections](architecture.md#provisioned-connections-rbac).
 
 5. **Nothing to import for the module's CSS.** If you added `styles.css`, the registry plugin imports it into every variant that lists the module (and no other), after the design system. Never `@import` a module stylesheet from `src/css/main.css`: it would ship in every bundle, the variants without the module included.
+
+   **Admin list modules:** an admin CRUD list calls `renderAdminRows(tbody, shown, total, query, { plural, noun, classPrefix, cells, label, onEdit, onDelete })` from `core/components/row-list` for its rows and filter feedback, and `setError(el, msg)` from `core/dom` for banners. Do not write a local `setError` or a hand-built row and actions cell.
 
 6. **Write tests** in `tests/modules/your-module/module.test.ts`. Use `loadModuleDOM('your-module')` from `tests/helpers/loadModuleDOM.ts` to load the real template in tests.
 

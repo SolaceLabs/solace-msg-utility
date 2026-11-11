@@ -22,6 +22,14 @@ describe('gateway-settings/service', () => {
         expect(fetchMock()).toHaveBeenCalledWith('/managed/settings', { method: 'GET', credentials: 'same-origin' });
     });
 
+    it('client GETs /managed/client', async () => {
+        const seen = { address: '203.0.113.9', peer: '192.0.2.10', viaProxy: true };
+        fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => seen });
+
+        expect(await createSettingsService().client()).toEqual({ ok: true, data: seen });
+        expect(fetchMock()).toHaveBeenCalledWith('/managed/client', { method: 'GET', credentials: 'same-origin' });
+    });
+
     it('save PUTs the whole file and returns the keys that wait for a restart', async () => {
         fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => ({ restartRequired: ['usersFile'] }) });
 

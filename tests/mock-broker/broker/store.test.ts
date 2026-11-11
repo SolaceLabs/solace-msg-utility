@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
-    allQueues, dumpStore, findQueueAnyVpn, getQueue, listQueues, listVpns, loadStore, publish, seed, vpnOn,
+    allQueues, dumpStore, findQueueAnyVpn, getQueue, listQueues, listVpns, loadStore, publish, publishRejection, seed, vpnOn,
 } from '../../../src/mock-broker/broker/store';
 import {
     BROKERS, DIRECT_BROKER, QUEUE_STATE, VPNS, queueStateOf, resetScenario, scenario, setBrokers,
@@ -113,5 +113,41 @@ describe('mock-broker/store -- brokers', () => {
         expect(Array.from(BROKERS.keys())).toEqual([DIRECT_BROKER]);
         expect(listVpns('east')).toEqual([]);
         expect(scenario.queueState.has('orders/audit')).toBe(false);
+    });
+});
+
+describe('mock-broker/broker/store -- payload bytes and refused publishes', () => {
+    beforeEach(() => {
+        resetScenario();
+        scenario.latencyMs = 0;
+        seed();
+    });
+
+    it('survives a JSON snapshot with a binary payload byte for byte, sized in bytes', () => {
+        const before = getQueue('default', 'test-queue-1')!.messages[5];
+        const bytes = before.msg.getBinaryAttachment();
+
+        const snap = JSON.parse(JSON.stringify(dumpStore()));
+        seed();
+        loadStore(snap);
+
+        const after = getQueue('default', 'test-queue-1')!.messages[5];
+        expect(after.msg.getBinaryAttachment()).toBe(bytes);
+        expect(after.sizeBytes).toBe(bytes.length + 120);
+    });
+
+    it('sizes a non-ASCII text payload by its UTF-8 bytes', () => {
+        const m = getQueue('default', 'test-queue-1')!.messages[4];
+        expect(m.sizeBytes).toBe(m.msg.getBinaryAttachment().length + 120);
+        expect(m.msg.getBinaryAttachment().length).toBeGreaterThan(m.msg._fields.payload!.length);
+    });
+
+    it('names the refusing queue for a publish to a PUBLISH_REJECTED queue, and nothing otherwise', () => {
+        expect(publishRejection('Q/ORDER/ARCHIVE', DestinationType.QUEUE)).toBeNull();
+        scenario.queueState.set('vpn-prod/Q/ORDER/ARCHIVE', QUEUE_STATE.PUBLISH_REJECTED);
+        expect(publishRejection('Q/ORDER/ARCHIVE', DestinationType.QUEUE)).toContain('Q/ORDER/ARCHIVE');
+        // A queue the destination does not reach is not asked.
+        expect(publishRejection('Q/ORDER/PROCESS', DestinationType.QUEUE)).toBeNull();
+        expect(publishRejection('nowhere/>', DestinationType.TOPIC)).toBeNull();
     });
 });

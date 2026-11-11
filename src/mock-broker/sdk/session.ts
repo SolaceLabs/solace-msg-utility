@@ -14,6 +14,10 @@
  * the session on revocation. demo.html sets none, so such a URL is just an
  * unknown host there.
  *
+ * A queue in the PUBLISH_REJECTED state refuses the publish instead: nothing is
+ * spooled and REJECTED_MESSAGE_ERROR comes back the same way, with the reason
+ * on `infoStr`.
+ *
  * Publish acknowledgement round-trips through `ACKNOWLEDGED_MESSAGE` on the
  * session with the correlation key nested exactly where the publisher looks for
  * it (`event.correlationKey.Solace_Msg_Utility_Seq_Num`). Any other shape leaves
@@ -25,7 +29,7 @@ import { createEmitter } from '../emitter';
 import { SessionEventCode } from './enums';
 import { sessionError } from './errors';
 import { createQueueBrowser } from './browser';
-import { publish } from '../broker/store';
+import { publish, publishRejection } from '../broker/store';
 import { DIRECT_BROKER, FAULT, MOCK_HOST, scenario } from '../fixtures';
 
 export interface MockSession {
@@ -145,9 +149,12 @@ export function createSession(props: any): MockSession {
             const dest = msg?._fields?.destination;
             if (!dest) throw new Error('Message has no destination (mock broker)');
 
-            publish(dest.getName(), dest.getType(), msg, broker);
+            const rejection = publishRejection(dest.getName(), dest.getType(), broker);
+            if (!rejection) publish(dest.getName(), dest.getType(), msg, broker);
             setTimeout(() => {
-                emitter.emit(SessionEventCode.ACKNOWLEDGED_MESSAGE, { correlationKey: key });
+                // A refusal is a session event too, carrying the correlation key and the reason on `infoStr`.
+                if (rejection) emitter.emit(SessionEventCode.REJECTED_MESSAGE_ERROR, { ...sessionError(rejection), correlationKey: key });
+                else emitter.emit(SessionEventCode.ACKNOWLEDGED_MESSAGE, { correlationKey: key });
             }, Math.max(1, Math.round(scenario.latencyMs / 6)));
         },
 

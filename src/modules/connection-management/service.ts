@@ -15,11 +15,12 @@ export interface ManagedConnVpn {
     pass: string; // as typed on write; '' from list / '' = keep on edit
 }
 
+/** A blank or missing scheme is TLS: https for SEMP, wss for SMF. */
 export interface ManagedConnRecord {
     broker: string;
     hostname: string;
-    semp: { port: string; user: string; pass: string };
-    client: { port: string; msgVpns: ManagedConnVpn[] };
+    semp: { scheme?: 'https' | 'http'; port: string; user: string; pass: string };
+    client: { scheme?: 'wss' | 'ws'; port: string; msgVpns: ManagedConnVpn[] };
 }
 
 export interface ConnMgmtService {

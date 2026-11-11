@@ -142,10 +142,9 @@ export interface AppState {
      * The deployment's connection-mode config and `/hosted` verdict, published
      * once by the connections module from its probe -- the single home of the
      * hosted flag (`isHostedDeployment` in `core/hosted.ts`). Other modules read
-     * it to derive what they may offer for a SECONDARY connection (see
-     * `resolveDestCredModes`) and to route a secondary connection's URLs
-     * (`SolaceConfig.hosted` / `SempConfig.hosted`) rather than probing the
-     * gateway again.
+     * it to route a secondary connection's URLs (`SolaceConfig.hosted` /
+     * `SempConfig.hosted`) rather than probing the gateway again; a secondary
+     * connection's mode follows the primary's (queue-copy's destination).
      */
     connConfig?: DeploymentConfig;
 }

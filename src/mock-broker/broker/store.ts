@@ -18,7 +18,7 @@
  * Mock-only. demo.html reseeds on every page load; the managed demo carries
  * the store across its sign-in reloads with `dumpStore` / `loadStore`.
  */
-import { createDestination, createMessage, type MessageFields, type MockDestination, type MockMessage } from '../sdk/message';
+import { bytesToLatin1, createDestination, createMessage, payloadByteLength, type MessageFields, type MockDestination, type MockMessage } from '../sdk/message';
 import { DestinationType } from '../sdk/enums';
 import { BROKERS, DIRECT_BROKER, brokerVpns, scenario, queueStateOf, QUEUE_STATE } from '../fixtures';
 
@@ -49,6 +49,17 @@ const PAYLOAD_TEMPLATES = [
 
 const CONTENT_TYPES = ['application/json', 'application/json', 'text/plain', 'application/json'];
 
+/**
+ * Queues whose 5th and 6th messages showcase payload fidelity: UTF-8 text with
+ * non-ASCII characters (must display decoded) and bytes that are not valid
+ * UTF-8 (the details pane shows the size-only placeholder). Keyed `vpn/queue`;
+ * one in the default VPN to browse, one that the copy/move flows exercise.
+ */
+const SHOWCASE_QUEUES = new Set(['default/test-queue-1', 'vpn-prod/Q/ORDER/PROCESS']);
+const SHOWCASE_UTF8 = 4;
+const SHOWCASE_BINARY = 5;
+const BINARY_SAMPLE = Uint8Array.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0xFE, 0x80]);
+
 let nextId = 1;
 const queues = new Map<string, MockQueue>();
 
@@ -59,20 +70,22 @@ function key(vpn: string, queue: string): string {
 function buildMessage(vpn: string, queueName: string, n: number): SpooledMessage {
     const id = nextId++;
     const variant = n % PAYLOAD_TEMPLATES.length;
-    const payload = PAYLOAD_TEMPLATES[variant](n);
+    const utf8 = SHOWCASE_QUEUES.has(key(vpn, queueName)) && n === SHOWCASE_UTF8;
+    const binary = SHOWCASE_QUEUES.has(key(vpn, queueName)) && n === SHOWCASE_BINARY;
+    const payload = utf8 ? `Gr\u00FC\u00DFe aus Z\u00FCrich \u2014 \u6771\u4EAC \u2713 order #${n}` : PAYLOAD_TEMPLATES[variant](n);
     const msg = createMessage({
-        payload,
+        ...(binary ? { payloadBytes: bytesToLatin1(BINARY_SAMPLE) } : { payload }),
         guaranteedMessageId: String(id),
         destination: createDestination(queueName, DestinationType.QUEUE),
         applicationMessageId: `app-msg-${id}`,
-        applicationMessageType: variant === 2 ? 'text' : 'json',
+        applicationMessageType: binary ? 'binary' : (utf8 || variant === 2) ? 'text' : 'json',
         correlationId: `corr-${id}`,
         senderId: `demo-publisher-${n % 3}`,
         senderTimestamp: Date.parse('2026-08-01T09:00:00Z') + n * 60_000,
         sequenceNumber: n + 1,
         priority: n % 10,
         deliveryCount: 1,
-        httpContentType: CONTENT_TYPES[variant],
+        httpContentType: binary ? 'application/octet-stream' : utf8 ? 'text/plain; charset=utf-8' : CONTENT_TYPES[variant],
         redelivered: n % 11 === 0,
         dmqEligible: n % 3 === 0,
         userProperties: {
@@ -81,7 +94,7 @@ function buildMessage(vpn: string, queueName: string, n: number): SpooledMessage
             trace: `trace-${id}`,
         },
     });
-    return { id, msg, sizeBytes: payload.length + 120 };
+    return { id, msg, sizeBytes: payloadByteLength(msg._fields) + 120 };
 }
 
 /**
@@ -154,22 +167,38 @@ export function removeMessage(vpn: string, queue: string, id: string): boolean {
     return true;
 }
 
+/** The queues a publish to `destName` reaches: the named queue, or every queue subscribed to the topic. */
+function publishTargets(destName: string, destType: number, broker: string): MockQueue[] {
+    return destType === DestinationType.QUEUE
+        ? allQueues(broker).filter(q => q.name === destName)
+        : allQueues(broker).filter(q => q.subscriptions.some(sub => topicMatches(sub, destName)));
+}
+
+/**
+ * Why the broker refuses a publish to `destName`, or null when it accepts it:
+ * the first reached queue set to PUBLISH_REJECTED. All or nothing, as a real
+ * broker rejects the message rather than spooling it to some queues only.
+ */
+export function publishRejection(destName: string, destType: number, broker: string = DIRECT_BROKER): string | null {
+    const refusing = publishTargets(destName, destType, broker)
+        .find(q => queueStateOf(q.vpn, q.name) === QUEUE_STATE.PUBLISH_REJECTED);
+    return refusing ? `Message rejected: ingress of queue ${refusing.name} is shut down (demo fault)` : null;
+}
+
 /**
  * Publish into a queue (direct enqueue) or to a topic (fan out to every queue
  * on the broker whose subscriptions match). Returns the number of queues that accepted it,
  * so the publisher can report a topic with no subscribers honestly.
  */
 export function publish(destName: string, destType: number, msg: MockMessage, broker: string = DIRECT_BROKER): number {
-    const targets = destType === DestinationType.QUEUE
-        ? allQueues(broker).filter(q => q.name === destName)
-        : allQueues(broker).filter(q => q.subscriptions.some(sub => topicMatches(sub, destName)));
+    const targets = publishTargets(destName, destType, broker);
 
     for (const q of targets) {
         const id = nextId++;
         // Re-stamp identity: the broker owns spool ids, not the publisher.
         const stored = msg;
         stored.setGuaranteedMessageId(String(id));
-        q.messages.push({ id, msg: stored, sizeBytes: (stored._fields.payload ?? '').length + 120 });
+        q.messages.push({ id, msg: stored, sizeBytes: payloadByteLength(stored._fields) + 120 });
     }
     return targets.length;
 }

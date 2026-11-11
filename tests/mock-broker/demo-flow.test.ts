@@ -167,6 +167,31 @@ describe('managed demo end to end', () => {
         expect(names).toContain('orders.new');
     });
 
+    it('Queue Copy follows the Provisioned connection: one destination card dials a VPN of the same broker through the fake gateway', async () => {
+        await openDemo(signInAs('operator'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
+        await connect('east-prod', 'orders');
+
+        // The typed destination cards give way to the shared card (Same broker, so its Broker list is east-prod alone).
+        const toggle = q<HTMLInputElement>('#copy-toggle-same-vpn');
+        toggle.checked = false;
+        toggle.dispatchEvent(new Event('change'));
+        expect(shown('#copy-dest-prov-card')).toBe(true);
+        expect(q('#copy-dest-semp-card').classList.contains('hidden')).toBe(true);
+        expect(q('#copy-dest-sol-card').classList.contains('hidden')).toBe(true);
+        expect(Array.from(q<HTMLSelectElement>('#copy-dest-prov-broker').options, o => o.value)).toEqual(['east-prod']);
+        expect(Array.from(q<HTMLSelectElement>('#copy-dest-prov-vpn').options, o => o.value)).toEqual(['orders', 'payments']);
+
+        q<HTMLSelectElement>('#copy-dest-prov-vpn').value = 'payments';
+        q('#copy-dest-prov-vpn').dispatchEvent(new Event('change'));
+        q<HTMLButtonElement>('#copy-btn-dest-prov-connect').click();
+        await vi.waitFor(() => expect(q('#copy-dest-prov-card .prov-conn-status').textContent).toBe('Broker "east-prod", VPN "payments"'));
+        expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').textContent).toBe('Disconnect');
+
+        q<HTMLButtonElement>('#copy-btn-dest-prov-connect').click();
+        await vi.waitFor(() => expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').textContent).toBe('Connect'));
+    });
+
     it("lists only the viewer's subscriptions in Queue Subscriptions: east-prod's payments VPN is left out", async () => {
         await openDemo(signInAs('viewer'));
         await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('viewer'));

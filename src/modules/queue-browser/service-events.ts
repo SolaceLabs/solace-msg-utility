@@ -75,7 +75,12 @@ function extractPayload(msg: any, contentType: string | undefined): { content: s
     }
     const attachment = msg.getBinaryAttachment();
     if (attachment) return classifyAttachment(attachmentBytes(attachment), contentType);
-    return { content: msg.getXmlContent() || '', binary: false };
+    // getXmlContent() is the SDK's raw string in every profile (the wire bytes, one char
+    // per byte, so UTF-8 XML arrives as mojibake); getXmlContentDecoded() would hand back
+    // text but lose the original bytes. Route it through the attachment path instead.
+    const xml = msg.getXmlContent();
+    if (xml) return classifyAttachment(attachmentBytes(xml), contentType);
+    return { content: '', binary: false };
 }
 
 /**

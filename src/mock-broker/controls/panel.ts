@@ -195,11 +195,12 @@ export function mountControlPanel(opts: PanelOptions = {}): void {
         { value: QUEUE_STATE.READ_ONLY, label: 'Read-only' },
         { value: QUEUE_STATE.BIND_DENIED, label: 'Bind denied' },
         { value: QUEUE_STATE.EMPTY, label: 'Empty' },
+        { value: QUEUE_STATE.PUBLISH_REJECTED, label: 'Publish rejected' },
     ], v => scenario.queueState.set(selectedQueue, v as QueueState));
     statePick.value = scenario.queueState.get(selectedQueue) ?? QUEUE_STATE.NORMAL;
     queueSection.append(queuePick, statePick);
     queueSection.appendChild(el('p', 'mockctl-hint',
-        'Applies on the next bind. Empty takes effect after Reset.'));
+        'Applies on the next bind. Empty takes effect after Reset. Publish rejected refuses every publish to the queue until set back.'));
 
     /* ---- connection faults ---- */
     const faultSection = section('Connection faults');

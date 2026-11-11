@@ -361,11 +361,13 @@ Two fidelity guards help catch production bugs early:
 [go-web-proxy/testdata/contract/](../go-web-proxy/testdata/contract) is what the Provisioned demo's fake gateway is held to:
 - `seed.json`: users, connections, the settings the gateway starts with, and the client address.
 - `cases.json`: request steps, each with the status and body the real gateway answers.
-- `validation.json`: vectors for the checks behind a `422`.
+- `validation.json`: vectors for the checks behind a `422`, and the glob vectors `rbac_test.go` runs.
+- `throttle.json`: sign-in throttle vectors (fail, succeed, advance the clock, the wait a sign-in must get), run by `throttle_test.go` and `tests/mock-broker/gateway/throttle.test.ts`.
+- `backup.json`: one encrypted backup file with its passphrase, which both gateways must open; `backup_test.go` and `tests/mock-broker/gateway/backup.test.ts` open it, and `cases.json` previews and imports it against `seed.json`.
 
-[`contract_test.go`](../go-web-proxy/contract_test.go) proves that the real gateway gives exactly those answers. A gateway change that alters one fails it.
+[`contract_test.go`](../go-web-proxy/contract_test.go) proves that the real gateway gives exactly the `seed.json`, `cases.json` and `validation.json` answers, and [`tests/mock-broker/gateway/contract.test.ts`](../tests/mock-broker/gateway/contract.test.ts) proves the fake gives the same ones from the same files. A gateway change that alters one fails the Go test first, then the fake's, until the fake follows.
 
-When the change is deliberate, rewrite the answers from the real gateway and review the diff:
+When the change is deliberate, rewrite the answers in `cases.json` from the real gateway (the other files are written by hand), review the diff, then bring the fake in line:
 
 ```bash
 cd go-web-proxy && go test -run Contract -update .
@@ -374,7 +376,7 @@ cd go-web-proxy && go test -run Contract -update .
 Each case runs on a fresh gateway over the seed. A case's sessions are opened before its first step, so a step after a revocation still uses the cookie the user held. Usage: put `as` (a username) on a step to send it signed in, `mustChange: true` for a session held at the password page, `body` for JSON and `raw` for an XML body. Store paths in a settings body read `<path>`.
 
 Three suites hold the Provisioned demo to the app as well:
-- `tests/mock-broker/gateway/routes.test.ts`: a new gateway route needs a row that calls it through its service. A `/managed/<name>` in `src/` with no row fails.
+- `tests/mock-broker/gateway/routes.test.ts`: every gateway route through the service that ships, keyed by method + path template (for example `PUT /managed/users/{name}`); a route with no row, or a row no helper calls, fails. A new route under an existing segment needs its own row.
 - `tests/mock-broker/gateway/error-codes.test.ts`: a new error code in `managed-api.ts` needs a place. It is a contract golden, a fault the demo panel arms, a code the app makes itself, or a code the demo does not simulate.
 - `tests/mock-broker/demo-flow.test.ts`: whole sessions through the real Kernel, the `managed-demo` variant's modules and the demo's boot.
 

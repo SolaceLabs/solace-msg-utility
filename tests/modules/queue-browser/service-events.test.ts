@@ -379,6 +379,29 @@ describe('queue-browser/service-events', () => {
             expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual(Array.from(bytes));
         });
 
+        it('decodes UTF-8 XML content from the SDK byte string: shown as text, filterable, saved byte for byte', async () => {
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            state.currentQueue = 'q1';
+            const xml = '<doc>Gr\u00fc\u00dfe \u20ac</doc>';
+            const utf8 = new TextEncoder().encode(xml);
+            const msg = createSolaceMessage({ type: 1, xmlContent: latin1(utf8), gmid: 302 });
+            msg.getHttpContentType = () => 'application/xml';
+            se.onMessage('q1', msg);
+
+            const stored = state.messageStore.get('q1')![0];
+            expect([stored.content, stored.binary]).toEqual([xml, false]);
+
+            state.activeFilters.content = 'gr\u00fc\u00dfe';
+            expect(shouldShowMessage(stored)).toBe(true);
+
+            const saved = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
+            ui.downloadMessageContent(stored);
+            const blob = saved.mock.calls[0][0] as Blob;
+            expect(blob.type).toBe('application/xml');
+            expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual(Array.from(utf8));
+        });
+
         it('handles SDT Map and Stream types', () => {
             const se = createServiceEvents();
             state.messageStore.set('q1', []);

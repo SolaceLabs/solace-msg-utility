@@ -100,7 +100,7 @@ Once the app is loaded:
 - Copy or **move** messages between queues, on the same broker or **across brokers**.
 - Two-column form — read-only Source mirror + editable Destination with **Same Broker** / **Same VPN** shortcuts.
 - Destination can be a **queue** (with SEMP-driven picker) or a **topic**.
-- Destination credentials are typed by hand, or -- in a Provisioned session -- chosen from a provisioned broker/VPN you are entitled to, with no password to enter.
+- The Destination follows the primary connection: with a Direct connection its credentials are typed by hand, and in a Provisioned session one card picks a broker and Message VPN you are entitled to, with no password to enter.
 - Bounded runs — snapshots the source before starting so the run has a defined end.
 - Pre-flight verification (count, size, quota, oldest/newest message ID) via SEMP, with QueueBrowser fallback if SEMP is unavailable.
 - Live progress with per-message ACK. The run is bounded to the snapshot taken at verify time, so messages arriving mid-run are left for the next run.

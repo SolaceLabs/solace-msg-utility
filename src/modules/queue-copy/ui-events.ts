@@ -1,8 +1,11 @@
 import type { AppContext } from '../../core/types';
 import { queueSourceFrom, sempQueueSource, type QueueSource } from '../../core/services/queue-source';
-import { resolveDestCredModes } from '../../core/connections/conn-modes';
-import type { DestCredMode } from './state';
 import { pickQueue } from '../../core/components/queue-picker';
+import {
+    createProvisionedConnectionCard,
+    type ProvisionedConnectionCard,
+    type ProvisionedTarget,
+} from '../../core/components/provisioned-connection';
 import * as ui from './ui';
 import type { CopyUiElements, PrimarySnapshot } from './ui';
 import type { QueueCopyState, CopyMode, DestType } from './state';
@@ -27,6 +30,14 @@ export interface CopyUiServices {
     connectDestSol: () => void;
     /** Tear down the destination Solace (Client) connection. */
     disconnectDestSol: () => void;
+    /**
+     * The provisioned card's Connect: dial the destination's client credential
+     * (and open its SEMP through the gateway relay when the broker differs from
+     * the primary's). Names only -- the credential never leaves the dial callback.
+     */
+    connectDestProvisioned: (target: ProvisionedTarget) => void;
+    /** The provisioned card's Disconnect: tear down both destination connections. */
+    disconnectDestProvisioned: () => void;
     /** Re-derive the Next button's enabled state. Owned by module.ts. */
     refreshStartEnabled: () => void;
     /** Re-derive the destination picker icon's visibility. Owned by module.ts. */
@@ -36,12 +47,14 @@ export interface CopyUiServices {
 /** What `wireUiEvents` hands back to module.ts. */
 export interface CopyUiApi {
     /**
-     * Re-derive the controls that choose the destination (the toggles, the
-     * credential source, the provisioned broker and VPN), locked while
-     * `state.destSolPending` names a connect in flight. module.ts locks them
-     * when a destination connect starts and calls this whenever one ends.
+     * Re-derive the controls that choose the destination (the toggles and the
+     * provisioned card), locked while `state.destSolPending` names a connect in
+     * flight. module.ts locks them when a destination connect starts and calls
+     * this whenever one ends.
      */
     refreshDestTarget: () => void;
+    /** The provisioned destination card; module.ts reports connect outcomes to it. */
+    destCard: ProvisionedConnectionCard;
 }
 
 export function wireUiEvents(
@@ -126,6 +139,7 @@ export function wireUiEvents(
         els.destSolPass.value = '';
         ui.setDestSolStatus(els, 'disconnected');
         ui.setDestSolError(els, null);
+        if (state.destForm.credMode === 'provisioned') destCard.setStatus('disconnected');
     }
 
     // ===== Destination Broker host =====
@@ -264,62 +278,91 @@ export function wireUiEvents(
     // Modal Start is wired inside ui-modal so it has access to the verify
     // result + dest-connection orchestration. No event listener here.
 
-    // ===== Destination credential source =====
+    // ===== Destination mode (follows the primary connection) =====
 
     /** A secondary connection is only needed when the dest isn't the primary. */
     const needsSecondary = (): boolean => !state.destForm.sameBroker || !state.destForm.sameVpn;
 
     /**
-     * Which credential sources this deployment permits, derived from the same
-     * `CONN_MODES` enum that drives the primary's tabs. Provisioned additionally
-     * requires a signed-in managed session; if filtering by that would leave
-     * nothing, keep the deployment's offer rather than silently falling back to
-     * Manual — a managed-only deployment must never hand out a manual bypass.
+     * The provisioned destination card. It lists the brokers the account is
+     * provisioned for -- only the primary's own broker while Same broker is on
+     * -- and the VPNs of the chosen one, straight from the managed profile. Its
+     * Connect hands the chosen names to module.ts, which dials inside the
+     * callback; the card never sees a credential.
      */
-    function offeredCredModes(): DestCredMode[] {
-        const offered = resolveDestCredModes(ctx.appState.connConfig ?? null);
-        const usable = ctx.managedProfile.isActive() ? offered : offered.filter(m => m !== 'provisioned');
-        return usable.length ? usable : offered;
+    const destCard = createProvisionedConnectionCard(els.destProvCardHost, {
+        profile: {
+            brokers: () => {
+                const own = ctx.appState.managed?.broker ?? '';
+                return ctx.managedProfile.brokers().filter(b => !state.destForm.sameBroker || b === own);
+            },
+            vpnsFor: (broker) => ctx.managedProfile.vpnsFor(broker),
+        },
+        title: 'Destination Connection',
+        onConnect: async (target) => { services.connectDestProvisioned(target); },
+        onDisconnect: () => services.disconnectDestProvisioned(),
+        ids: { broker: 'copy-dest-prov-broker', vpn: 'copy-dest-prov-vpn', action: 'copy-btn-dest-prov-connect', error: 'copy-dest-prov-error' },
+    });
+
+    /** False until the first derive: a mode change is a flip only once a mode has been shown. */
+    let modeShown = false;
+
+    /**
+     * Derive the destination's mode from the primary connection's: a
+     * Provisioned primary (a signed-in managed profile) means one provisioned
+     * card, a Direct primary the typed Broker, SEMP and Client cards. Runs at
+     * install and on rbac:changed, the sign-in lifecycle; a change of mode
+     * under a live destination drops it -- it was dialled for the other mode.
+     * A connect that ends or a toggle only re-renders (renderDestMode), so a
+     * refusal shown on the card survives the profile going away under it.
+     */
+    function deriveDestMode(): void {
+        const credMode = ctx.managedProfile.isActive() ? 'provisioned' : 'manual';
+        if (modeShown && state.destForm.credMode !== credMode) {
+            state.destForm.credMode = credMode;
+            disposeDestSempConnection();
+            disposeDestSolConnection();
+            destCard.setStatus('disconnected');
+            state.dest.name = '';
+            els.destInput.value = '';
+        }
+        state.destForm.credMode = credMode;
+        modeShown = true;
+        renderDestMode();
     }
 
-    /** Re-render the credential-source control and everything gated on it. */
-    function refreshDestCredUi(): void {
-        const offered = offeredCredModes();
-        // Pin to the deployment's default when the current choice isn't on offer.
-        if (!offered.includes(state.destForm.credMode)) state.destForm.credMode = offered[0];
-        const active = state.destForm.credMode;
-
-        ui.applyDestCredMode(els, { offered, active, needsSecondary: needsSecondary() });
-        ui.setDestManualFieldsEnabled(els, active === 'manual');
-
-        if (active === 'provisioned') {
-            const brokers = ctx.managedProfile.brokers();
-            ui.renderDestProvisionedBrokers(els, brokers, state.destForm.provisioned.broker);
-            state.destForm.provisioned.broker = els.destProvBroker.value;
-            refreshDestProvisionedVpns();
+    /** Render the destination for the mode in state: the card and its lists, or the typed cards. */
+    function renderDestMode(): void {
+        const provisioned = state.destForm.credMode === 'provisioned';
+        ui.applyDestMode(els, { provisioned, needsSecondary: needsSecondary() });
+        if (provisioned) {
+            destCard.setChoices();
+        } else {
+            // Never leave a typed secret sitting in a field the user can no longer see.
+            state.destSempPass = '';
+            state.destSolacePass = '';
+            ui.clearDestTypedSecrets(els);
         }
         // A managed session publishing provisioned credentials cannot express
         // topic entitlement, so the type is forced to Queue (the run-start gate
-        // refuses topics on that path regardless — this keeps the UI honest).
+        // refuses topics on that path regardless -- this keeps the UI honest).
         refreshDestTypeAvailability();
         // The renders above re-enable what they own; a connect in flight keeps
         // the destination locked until it ends.
-        if (state.destSolPending !== null) ui.setDestTargetLocked(els, true);
+        if (state.destSolPending !== null) {
+            ui.setDestTargetLocked(els, true);
+            destCard.lock(true);
+        }
     }
 
     function refreshDestTarget(): void {
         ui.setDestTargetLocked(els, false);
+        destCard.lock(false);
         // Hand each unlocked control back to its own rule: Same VPN means
-        // nothing without Same broker (applyDestPrefill), and refreshDestCredUi
-        // re-renders the credential source and the provisioned lists.
+        // nothing without Same broker (applyDestPrefill), and renderDestMode
+        // re-renders the mode's cards and the card's lists.
         if (!state.destForm.sameBroker) els.toggleSameVpn.disabled = true;
-        refreshDestCredUi();
-    }
-
-    function refreshDestProvisionedVpns(): void {
-        const vpns = ctx.managedProfile.vpnsFor(state.destForm.provisioned.broker);
-        ui.renderDestProvisionedVpns(els, vpns, state.destForm.provisioned.vpn);
-        state.destForm.provisioned.vpn = els.destProvVpn.value;
+        renderDestMode();
     }
 
     /** True when the publish path will use provisioned managed credentials. */
@@ -340,44 +383,6 @@ export function wireUiEvents(
         }
     }
 
-    els.destCredProvisioned.addEventListener('change', () => selectCredMode('provisioned'));
-    els.destCredManual.addEventListener('change', () => selectCredMode('manual'));
-
-    /**
-     * Switching credential source invalidates any live secondary connection AND
-     * the chosen target (it was picked against a different broker), so both are
-     * dropped — same discipline as the connection module's tab switch.
-     */
-    function selectCredMode(mode: DestCredMode): void {
-        if (state.destForm.credMode === mode) return;
-        state.destForm.credMode = mode;
-        disposeDestSempConnection();
-        disposeDestSolConnection();
-        state.dest.name = '';
-        els.destInput.value = '';
-        // Re-derive prefill first (it owns manual field enablement), then let
-        // refreshDestCredUi re-lock them if we've switched to provisioned.
-        syncDestFromToggles();
-    }
-
-    els.destProvBroker.addEventListener('change', () => {
-        state.destForm.provisioned.broker = els.destProvBroker.value;
-        // A different broker means different VPNs and a different queue namespace.
-        disposeDestSempConnection();
-        disposeDestSolConnection();
-        state.dest.name = '';
-        els.destInput.value = '';
-        refreshDestProvisionedVpns();
-        services.refreshStartEnabled();
-        services.refreshDestPickVisible();
-    });
-
-    els.destProvVpn.addEventListener('change', () => {
-        state.destForm.provisioned.vpn = els.destProvVpn.value;
-        disposeDestSolConnection();
-        services.refreshStartEnabled();
-    });
-
     // ===== Helpers =====
     function syncDestFromToggles(): void {
         const snap = services.getPrimarySnapshot();
@@ -385,7 +390,7 @@ export function wireUiEvents(
         // Prefill also needs to flow back into state so the modal summary +
         // any downstream consumer see the values that now live in the inputs.
         syncDestFormFromSnapshot(state, snap);
-        refreshDestCredUi();
+        renderDestMode();
         services.refreshDestPickVisible();
         services.refreshStartEnabled();
     }
@@ -399,28 +404,25 @@ export function wireUiEvents(
         syncDestFormFromSnapshot(state, snap);
     }
     // The provisioned set and the session itself can both change under us; this
-    // panel owns the credential control, so it re-derives its own UI here while
-    // module.ts handles the run/connection lifecycle for the same event.
+    // panel owns the destination's mode and card, so it re-derives its own UI
+    // here while module.ts handles the run/connection lifecycle for the same event.
     ctx.eventBus.on('rbac:changed', () => {
-        if (state.destForm.credMode === 'provisioned') {
-            const stillThere = ctx.managedProfile
-                .vpnsFor(state.destForm.provisioned.broker)
-                .includes(state.destForm.provisioned.vpn);
-            if (!stillThere) {
-                // The chosen identity is gone — drop the target picked against it.
-                state.dest.name = '';
-                els.destInput.value = '';
-            }
+        const target = state.destForm.provisioned;
+        if (state.destForm.credMode === 'provisioned' && state.destSession !== null
+            && !ctx.managedProfile.vpnsFor(target.broker).includes(target.vpn)) {
+            // The connected identity is gone -- drop the target picked against it.
+            state.dest.name = '';
+            els.destInput.value = '';
         }
-        refreshDestCredUi();
+        deriveDestMode();
         services.refreshStartEnabled();
         services.refreshDestPickVisible();
     });
 
-    refreshDestCredUi();
+    deriveDestMode();
     services.refreshStartEnabled();
     services.refreshDestPickVisible();
-    return { refreshDestTarget };
+    return { refreshDestTarget, destCard };
 }
 
 /**

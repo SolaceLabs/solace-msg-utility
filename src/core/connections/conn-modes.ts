@@ -72,15 +72,3 @@ export function resolveConnTabs(cfg: ConnDeploymentConfig | null): ConnMode[] {
     // 'both' -- order by defaultConn (Provisioned first only when explicitly asked).
     return c.defaultConn === 'provisioned' ? ['provisioned', 'direct'] : ['direct', 'provisioned'];
 }
-
-/**
- * Credential sources a deployment permits for a **secondary** connection
- * (queue-copy's destination), derived from the very same enum that drives the
- * primary's tabs so the two can never drift:
- *   `direct` => manual only; `provisioned` => provisioned only; `both` => both.
- *
- * Ordering matches `resolveConnTabs`, so `[0]` is the deployment's default.
- */
-export function resolveDestCredModes(cfg: ConnDeploymentConfig | null): ('provisioned' | 'manual')[] {
-    return resolveConnTabs(cfg).map(t => (t === 'provisioned' ? 'provisioned' : 'manual'));
-}

@@ -3,12 +3,12 @@ import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { createEventBus } from '../../../src/core/event-bus';
 import type { AppContext, AppState, ManagedSession } from '../../../src/core/types';
 
-const svcMock = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
+const svcMock = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), client: vi.fn() }));
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
 
 vi.mock('../../../src/core/toast', () => ({ showToast: toastMock.showToast }));
 vi.mock('../../../src/modules/gateway-settings/service', () => ({
-    createSettingsService: () => ({ load: svcMock.load, save: svcMock.save }),
+    createSettingsService: () => ({ load: svcMock.load, save: svcMock.save, client: svcMock.client }),
 }));
 
 import { GatewaySettingsModule } from '../../../src/modules/gateway-settings/module';
@@ -70,6 +70,8 @@ function clickSave(c: HTMLElement): void {
 beforeEach(() => {
     svcMock.load.mockReset();
     svcMock.save.mockReset();
+    svcMock.client.mockReset();
+    svcMock.client.mockResolvedValue({ ok: true, data: { address: '192.0.2.10', peer: '192.0.2.10', viaProxy: false } });
     toastMock.showToast.mockReset();
 });
 
@@ -88,6 +90,34 @@ describe('gateway-settings — load', () => {
         expect(hidden(container, '#gw-set-pending')).toBe(true);
         expect(hidden(container, '#gw-set-disk')).toBe(true);
         expect(el<HTMLButtonElement>(container, '#btn-gw-set-save').disabled).toBe(false);
+    });
+
+    it('says the address is the TCP peer, and what to do if it is the proxy', async () => {
+        const { container } = await setup();
+        const line = el(container, '#gw-set-client').textContent as string;
+        expect(line).toContain('Your address as the gateway sees it: 192.0.2.10 (the TCP peer).');
+        expect(line).toContain('list it under Trusted reverse proxies and have it pass X-Forwarded-For');
+    });
+
+    it('says the address came from X-Forwarded-For through a trusted proxy', async () => {
+        svcMock.client.mockResolvedValue({ ok: true, data: { address: '203.0.113.9', peer: '172.18.0.1', viaProxy: true } });
+        const { container } = await setup();
+        expect(el(container, '#gw-set-client').textContent)
+            .toBe('Your address as the gateway sees it: 203.0.113.9 (from X-Forwarded-For, sent by the trusted proxy 172.18.0.1).');
+    });
+
+    it('says unknown when the gateway could not resolve the address', async () => {
+        svcMock.client.mockResolvedValue({ ok: true, data: { address: '', peer: '172.18.0.1', viaProxy: false } });
+        const { container } = await setup();
+        expect(el(container, '#gw-set-client').textContent)
+            .toBe('Your address as the gateway sees it: unknown. The connection comes from 172.18.0.1 and its X-Forwarded-For header could not be read.');
+    });
+
+    it('says unavailable when the address cannot be fetched, and still shows the settings', async () => {
+        svcMock.client.mockResolvedValue({ ok: false, status: 500, code: 'x' });
+        const { container } = await setup();
+        expect(el(container, '#gw-set-client').textContent).toBe('Your address as the gateway sees it: unavailable.');
+        expect(value(container, 'connModes')).toBe('both');
     });
 
     it('tags the restart-only keys, and shows the path keys read-only for a hand edit', async () => {

@@ -655,6 +655,19 @@ describe('queue-copy/module', () => {
             expect(sameBroker.disabled).toBe(false);
         });
 
+        it('disables the manual Connect button while connecting, so a second click starts nothing; a failure re-enables it', async () => {
+            const { el } = await connectingManual();
+            const btn = el<HTMLButtonElement>('#copy-btn-dest-sol-connect');
+            expect(btn.disabled).toBe(true);
+            expect(btn.textContent).toMatch(/Connecting/);
+            btn.click();
+            expect(destSolConnect).toHaveBeenCalledTimes(1);
+
+            capturedSolHooks.current.onConnectFailed({ infoStr: 'auth fail' });
+            expect(btn.disabled).toBe(false);
+            expect(btn.textContent).toBe('Connect');
+        });
+
         it('switching Same VPN on mid-connect cancels it: the late session is discarded, not installed', async () => {
             const { el, sameVpn } = await connectingManual();
             // The toggle is locked; dispatching the change models the race the lock closes.

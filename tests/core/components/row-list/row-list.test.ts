@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { createRowList } from '../../../../src/core/components/row-list';
+import { describe, it, expect, vi } from 'vitest';
+import { createRowList, renderAdminRows, type AdminTableOptions } from '../../../../src/core/components/row-list';
 
 const FIELDS = [
     { key: 'a', placeholder: 'A' },
@@ -125,5 +125,56 @@ describe('core/components/row-list', () => {
         const rl = createRowList(c, [{ key: 'p', placeholder: 'P', type: 'password' }]);
         rl.addRow();
         expect(c.querySelector<HTMLInputElement>('input')!.type).toBe('password');
+    });
+});
+
+describe('renderAdminRows()', () => {
+    const opts = (over: Partial<AdminTableOptions<{ n: string }>> = {}): AdminTableOptions<{ n: string }> => ({
+        plural: 'things',
+        noun: 'thing',
+        classPrefix: 'thing',
+        cells: t => `<td>${t.n}</td><td>x</td>`,
+        label: t => t.n,
+        onEdit: () => {},
+        onDelete: () => {},
+        ...over,
+    });
+
+    it('says there are none when nothing was loaded', () => {
+        const tbody = document.createElement('tbody');
+        renderAdminRows(tbody, [], 0, '', opts());
+        expect(tbody.textContent).toBe('No things.');
+    });
+
+    it('names the filter when the loaded items all miss it', () => {
+        const tbody = document.createElement('tbody');
+        renderAdminRows(tbody, [], 2, 'zz', opts());
+        expect(tbody.textContent).toBe('No things match "zz".');
+    });
+
+    it('renders a row per item with labelled Edit and Delete buttons that call back', () => {
+        const tbody = document.createElement('tbody');
+        const onEdit = vi.fn();
+        const onDelete = vi.fn();
+        const items = [{ n: 'a' }, { n: 'b' }];
+        renderAdminRows(tbody, items, 2, '', opts({ onEdit, onDelete }));
+        expect(tbody.querySelectorAll('tr')).toHaveLength(2);
+        expect(tbody.querySelector('td.thing-actions-col')).not.toBeNull();
+        const edit = tbody.querySelectorAll<HTMLButtonElement>('.thing-edit')[1];
+        const del = tbody.querySelectorAll<HTMLButtonElement>('.thing-delete')[0];
+        expect(edit.title).toBe('Edit thing "b"');
+        expect(del.title).toBe('Delete thing "a"');
+        edit.click();
+        del.click();
+        expect(onEdit).toHaveBeenCalledWith(items[1]);
+        expect(onDelete).toHaveBeenCalledWith(items[0]);
+    });
+
+    it('replaces earlier rows on a re-render', () => {
+        const tbody = document.createElement('tbody');
+        renderAdminRows(tbody, [{ n: 'a' }], 1, '', opts());
+        renderAdminRows(tbody, [], 1, 'q', opts());
+        expect(tbody.querySelectorAll('tr')).toHaveLength(1);
+        expect(tbody.textContent).toBe('No things match "q".');
     });
 });

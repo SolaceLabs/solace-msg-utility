@@ -14,13 +14,12 @@
  * last load without a refetch. Imports only from `src/core/*` and its own
  * service.
  */
-import { required } from '../../core/dom';
+import { required, setError } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
-import { createRowList } from '../../core/components/row-list';
+import { createRowList, renderAdminRows } from '../../core/components/row-list';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
 import { escapeHtml, matchContains } from '../../core/utils';
-import { ICONS, iconButton } from '../../core/icons';
 import { logger } from '../../core/logger';
 import { reportManagedFailure } from '../../core/services/managed-api';
 import { createConnMgmtService, type ManagedConnRecord } from './service';
@@ -55,10 +54,12 @@ export const ConnectionManagementModule = {
             formTitle: required<HTMLElement>(container, '#conn-mgmt-form-title'),
             broker: required<HTMLInputElement>(container, '#conn-mgmt-broker'),
             hostname: required<HTMLInputElement>(container, '#conn-mgmt-hostname'),
+            sempScheme: required<HTMLSelectElement>(container, '#conn-mgmt-semp-scheme'),
             sempPort: required<HTMLInputElement>(container, '#conn-mgmt-semp-port'),
             sempUser: required<HTMLInputElement>(container, '#conn-mgmt-semp-user'),
             sempPass: required<HTMLInputElement>(container, '#conn-mgmt-semp-pass'),
             sempPassHint: required<HTMLElement>(container, '#conn-mgmt-semp-pass-hint'),
+            clientScheme: required<HTMLSelectElement>(container, '#conn-mgmt-client-scheme'),
             clientPort: required<HTMLInputElement>(container, '#conn-mgmt-client-port'),
             vpnRows: required<HTMLElement>(container, '#conn-mgmt-vpn-rows'),
             btnAddVpn: required<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn'),
@@ -92,39 +93,19 @@ export const ConnectionManagementModule = {
             els.formView.classList.add('hidden');
             gate.show();
         }
-        function setError(el: HTMLElement, msg: string | null): void {
-            el.textContent = msg ?? '';
-            el.classList.toggle('hidden', !msg);
-        }
 
         /** The loaded connections the search box matches (broker or hostname), or a row saying why there are none. */
         function renderList(): void {
             const query = els.search.value.trim();
             const shown = conns.filter(c => matchContains(c.broker, query) || matchContains(c.hostname, query));
-            els.rows.innerHTML = '';
-            if (shown.length === 0) {
-                const td = document.createElement('td');
-                td.colSpan = 3;
-                td.className = 'text-secondary';
-                td.textContent = conns.length === 0 ? 'No connections.' : `No connections match "${query}".`;
-                els.rows.appendChild(document.createElement('tr')).appendChild(td);
-                return;
-            }
-            shown.forEach(c => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${escapeHtml(c.broker)}</td><td>${escapeHtml(c.hostname)}</td>`;
-                const actions = document.createElement('div');
-                actions.className = 'flex-row gap-2';
-                actions.append(
-                    iconButton(ICONS.edit, `Edit connection "${c.broker}"`, 'conn-mgmt-edit', () => openEdit(c)),
-                    iconButton(ICONS.delete, `Delete connection "${c.broker}"`, 'btn-icon-danger conn-mgmt-delete',
-                        () => void removeConn(c.broker)),
-                );
-                const cell = document.createElement('td');
-                cell.className = 'conn-mgmt-actions-col';
-                cell.appendChild(actions);
-                tr.appendChild(cell);
-                els.rows.appendChild(tr);
+            renderAdminRows(els.rows, shown, conns.length, query, {
+                plural: 'connections',
+                noun: 'connection',
+                classPrefix: 'conn-mgmt',
+                cells: c => `<td>${escapeHtml(c.broker)}</td><td>${escapeHtml(c.hostname)}</td>`,
+                label: c => c.broker,
+                onEdit: openEdit,
+                onDelete: c => void removeConn(c.broker),
             });
         }
 
@@ -159,10 +140,12 @@ export const ConnectionManagementModule = {
             els.broker.value = '';
             els.broker.disabled = false;
             els.hostname.value = '';
+            els.sempScheme.value = 'https';
             els.sempPort.value = '';
             els.sempUser.value = '';
             els.sempPass.value = '';
             els.sempPassHint.textContent = '';
+            els.clientScheme.value = 'wss';
             els.clientPort.value = '';
             vpnList.clear();
             setError(els.formError, null);
@@ -176,10 +159,12 @@ export const ConnectionManagementModule = {
             els.broker.value = c.broker;
             els.broker.disabled = true; // broker is the key; rename = delete + recreate
             els.hostname.value = c.hostname;
+            els.sempScheme.value = c.semp.scheme === 'http' ? 'http' : 'https';
             els.sempPort.value = c.semp.port;
             els.sempUser.value = c.semp.user;
             els.sempPass.value = '';
             els.sempPassHint.textContent = '(leave blank to keep current)';
+            els.clientScheme.value = c.client.scheme === 'ws' ? 'ws' : 'wss';
             els.clientPort.value = c.client.port;
             vpnList.clear();
             (c.client.msgVpns ?? []).forEach(v =>
@@ -217,11 +202,13 @@ export const ConnectionManagementModule = {
                     broker,
                     hostname: els.hostname.value.trim(),
                     semp: {
+                        scheme: els.sempScheme.value === 'http' ? 'http' : 'https',
                         port: els.sempPort.value.trim(),
                         user: els.sempUser.value.trim(),
                         pass: els.sempPass.value,
                     },
                     client: {
+                        scheme: els.clientScheme.value === 'ws' ? 'ws' : 'wss',
                         port: els.clientPort.value.trim(),
                         msgVpns: rows.map(r => ({ name: r.name, user: r.user, pass: r.pass })),
                     },

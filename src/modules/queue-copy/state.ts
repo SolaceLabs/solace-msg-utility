@@ -13,9 +13,11 @@ export type DestType = 'queue' | 'topic';
 
 /**
  * Where the destination's credentials come from when a secondary connection is
- * needed. `'manual'` is the typed form (the only option outside a managed
- * session); `'provisioned'` selects a broker/VPN the managed session is entitled
- * to and lets the core store broker the credential, so nothing is typed.
+ * needed. It follows the primary connection's mode, never a user choice:
+ * `'provisioned'` while the primary is a Provisioned connection (a signed-in
+ * managed profile; the destination is one provisioned connection card and the
+ * core managed profile dials the credential, so nothing is typed), `'manual'`
+ * with a Direct primary (the typed Broker, SEMP and Client cards).
  */
 export type DestCredMode = 'manual' | 'provisioned';
 
@@ -25,12 +27,11 @@ export interface DestForm {
     /** When true, dest reuses primary VPN + Solace creds. Forced false when sameBroker is false. */
     sameVpn: boolean;
     /**
-     * Credential source for the secondary connection. Which options the user is
-     * offered is derived from the deployment's `CONN_MODES` — see
-     * `destCredModesFor` in ui-events.
+     * Credential source for the secondary connection: pinned by ui-events from
+     * the primary connection's mode (`deriveDestMode` in ui-events.ts).
      */
     credMode: DestCredMode;
-    /** Selection when `credMode === 'provisioned'` — names only, from the store. */
+    /** The provisioned destination last connected (or connecting) -- names only, set when the card's Connect is clicked. */
     provisioned: { broker: string; vpn: string };
     /** Visible only when !sameBroker. */
     host: string;

@@ -143,6 +143,18 @@ describe('mock-broker/panel — levers', () => {
         expect(scenario.fault).toBe(FAULT.NONE);
     });
 
+    it('offers Publish rejected as a queue state and applies it to the selected queue', () => {
+        const statePick = selectWith(QUEUE_STATE.PUBLISH_REJECTED);
+        const queuePick = selectWith('default/test-queue-1');
+        queuePick.value = 'default/test-queue-1';
+        queuePick.dispatchEvent(new Event('change'));
+
+        statePick.value = QUEUE_STATE.PUBLISH_REJECTED;
+        statePick.dispatchEvent(new Event('change'));
+
+        expect(scenario.queueState.get('default/test-queue-1')).toBe(QUEUE_STATE.PUBLISH_REJECTED);
+    });
+
     it('Reset restores every lever and rebuilds the data', () => {
         scenario.latencyMs = 900;
         scenario.queueState.set('default/test-queue-1', QUEUE_STATE.BIND_DENIED);

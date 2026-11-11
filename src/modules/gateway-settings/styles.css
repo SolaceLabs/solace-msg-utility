@@ -7,7 +7,8 @@
     margin: 2rem auto;
 }
 
-.gw-set-intro {
+.gw-set-intro,
+.gw-set-client {
     font-size: 0.9rem;
 }
 

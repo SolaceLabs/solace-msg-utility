@@ -41,6 +41,13 @@
     <h3 class="conn-mgmt-section">SEMP (management)</h3>
     <div class="form-group flex-row">
         <div class="w-full">
+            <label for="conn-mgmt-semp-scheme">Scheme</label>
+            <select id="conn-mgmt-semp-scheme" class="form-control">
+                <option value="https">https (TLS)</option>
+                <option value="http">http (plain)</option>
+            </select>
+        </div>
+        <div class="w-full">
             <label for="conn-mgmt-semp-port">Port</label>
             <input type="text" id="conn-mgmt-semp-port" class="form-control" autocomplete="off">
         </div>
@@ -55,9 +62,18 @@
     </div>
 
     <h3 class="conn-mgmt-section">Client (messaging)</h3>
-    <div class="form-group">
-        <label for="conn-mgmt-client-port">Port</label>
-        <input type="text" id="conn-mgmt-client-port" class="form-control" autocomplete="off">
+    <div class="form-group flex-row">
+        <div class="w-full">
+            <label for="conn-mgmt-client-scheme">Scheme</label>
+            <select id="conn-mgmt-client-scheme" class="form-control">
+                <option value="wss">wss (TLS)</option>
+                <option value="ws">ws (plain)</option>
+            </select>
+        </div>
+        <div class="w-full">
+            <label for="conn-mgmt-client-port">Port</label>
+            <input type="text" id="conn-mgmt-client-port" class="form-control" autocomplete="off">
+        </div>
     </div>
     <div class="form-group">
         <div class="flex-row justify-between items-center mb-2">

@@ -27,13 +27,12 @@
  * Permission test card below it (`./access-test`) shows what a saved user gets
  * on a given broker, Message VPN and queue.
  */
-import { required } from '../../core/dom';
+import { required, setError } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
-import { createRowList } from '../../core/components/row-list';
+import { createRowList, renderAdminRows } from '../../core/components/row-list';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
 import { escapeHtml, matchContains, moduleLabel } from '../../core/utils';
-import { ICONS, iconButton } from '../../core/icons';
 import { logger } from '../../core/logger';
 import { reportManagedFailure, SIGNED_OUT_TOAST_MS } from '../../core/services/managed-api';
 import { createUserMgmtService, type ManagedUser, type ModuleChoices, type UserPayload } from './service';
@@ -113,39 +112,18 @@ export const UserManagementModule = {
             els.formView.classList.add('hidden');
             gate.show();
         }
-        function setError(el: HTMLElement, msg: string | null): void {
-            el.textContent = msg ?? '';
-            el.classList.toggle('hidden', !msg);
-        }
-
         /** The loaded users the search box matches (by username), or a row saying why there are none. */
         function renderList(): void {
             const query = els.search.value.trim();
             const shown = users.filter(u => matchContains(u.username, query));
-            els.rows.innerHTML = '';
-            if (shown.length === 0) {
-                const td = document.createElement('td');
-                td.colSpan = 3;
-                td.className = 'text-secondary';
-                td.textContent = users.length === 0 ? 'No users.' : `No users match "${query}".`;
-                els.rows.appendChild(document.createElement('tr')).appendChild(td);
-                return;
-            }
-            shown.forEach(u => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${escapeHtml(u.username)}</td><td>${u.admin ? 'Admin' : 'User'}</td>`;
-                const actions = document.createElement('div');
-                actions.className = 'flex-row gap-2';
-                actions.append(
-                    iconButton(ICONS.edit, `Edit user "${u.username}"`, 'user-mgmt-edit', () => openEdit(u)),
-                    iconButton(ICONS.delete, `Delete user "${u.username}"`, 'btn-icon-danger user-mgmt-delete',
-                        () => void removeUser(u.username)),
-                );
-                const cell = document.createElement('td');
-                cell.className = 'user-mgmt-actions-col';
-                cell.appendChild(actions);
-                tr.appendChild(cell);
-                els.rows.appendChild(tr);
+            renderAdminRows(els.rows, shown, users.length, query, {
+                plural: 'users',
+                noun: 'user',
+                classPrefix: 'user-mgmt',
+                cells: u => `<td>${escapeHtml(u.username)}</td><td>${u.admin ? 'Admin' : 'User'}</td>`,
+                label: u => u.username,
+                onEdit: openEdit,
+                onDelete: u => void removeUser(u.username),
             });
         }
 

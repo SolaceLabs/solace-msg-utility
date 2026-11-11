@@ -17,6 +17,7 @@
  * (`flex-row`, `gap-2`, `btn-icon`) plus this component's `styles.css`.
  */
 import { required } from '../../dom';
+import { ICONS, iconButton } from '../../icons';
 
 export interface RowField {
     /** Identity of the field: the key in read rows AND the input's data-key. */
@@ -138,4 +139,54 @@ export function createRowList(container: HTMLElement, fields: RowField[], opts: 
 
     sync();
     return { addRow, readRows, clear, count };
+}
+
+export interface AdminTableOptions<T> {
+    /** Plural noun for the empty rows: "No <plural>." / "No <plural> match "<q>"." */
+    plural: string;
+    /** Prefix of the action classes: `<prefix>-edit`, `<prefix>-delete`, `<prefix>-actions-col`. */
+    classPrefix: string;
+    /** Inner HTML of the row's data cells; the caller escapes every value. */
+    cells: (item: T) => string;
+    /** The row's identity, for the Edit / Delete button labels. */
+    label: (item: T) => string;
+    /** The noun in those labels ("user", "connection"). */
+    noun: string;
+    onEdit: (item: T) => void;
+    onDelete: (item: T) => void;
+}
+
+/**
+ * Fills an admin table body: one row per item (data cells, then an Edit and a
+ * Delete icon button), or a single row saying why there are none -- the list
+ * is empty, or the filter `query` matched nothing. The caller filters; `items`
+ * is what to show, `total` how many were loaded.
+ */
+export function renderAdminRows<T>(tbody: HTMLElement, items: T[], total: number, query: string, opts: AdminTableOptions<T>): void {
+    tbody.innerHTML = '';
+    if (items.length === 0) {
+        const td = document.createElement('td');
+        td.colSpan = 3;
+        td.className = 'text-secondary';
+        td.textContent = total === 0 ? `No ${opts.plural}.` : `No ${opts.plural} match "${query}".`;
+        tbody.appendChild(document.createElement('tr')).appendChild(td);
+        return;
+    }
+    items.forEach(item => {
+        const name = opts.label(item);
+        const tr = document.createElement('tr');
+        tr.innerHTML = opts.cells(item);
+        const actions = document.createElement('div');
+        actions.className = 'flex-row gap-2';
+        actions.append(
+            iconButton(ICONS.edit, `Edit ${opts.noun} "${name}"`, `${opts.classPrefix}-edit`, () => opts.onEdit(item)),
+            iconButton(ICONS.delete, `Delete ${opts.noun} "${name}"`, `btn-icon-danger ${opts.classPrefix}-delete`,
+                () => opts.onDelete(item)),
+        );
+        const cell = document.createElement('td');
+        cell.className = `${opts.classPrefix}-actions-col`;
+        cell.appendChild(actions);
+        tr.appendChild(cell);
+        tbody.appendChild(tr);
+    });
 }

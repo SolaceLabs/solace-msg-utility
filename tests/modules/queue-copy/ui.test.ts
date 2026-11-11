@@ -16,6 +16,8 @@ import {
     setDestSolFormLocked,
     setDestBrokerLocked,
     setDestTargetLocked,
+    applyDestMode,
+    clearDestTypedSecrets,
     DEST_TARGET_LOCKED_TITLE,
     renderModalInitial,
     renderDestSummary,
@@ -258,10 +260,10 @@ describe('queue-copy/ui', () => {
     });
 
     describe('setDestTargetLocked', () => {
-        it('locks every control that chooses the destination, with a title saying why', () => {
+        it('locks the toggles that choose the destination, with a title saying why', () => {
             const e = elsHolder.els;
             setDestTargetLocked(e, true);
-            for (const el of [e.toggleSameBroker, e.toggleSameVpn, e.destCredProvisioned, e.destCredManual, e.destProvBroker, e.destProvVpn]) {
+            for (const el of [e.toggleSameBroker, e.toggleSameVpn]) {
                 expect(el.disabled).toBe(true);
                 expect(el.title).toBe(DEST_TARGET_LOCKED_TITLE);
             }
@@ -269,14 +271,53 @@ describe('queue-copy/ui', () => {
 
         it('unlocking re-enables only what the lock disabled', () => {
             const e = elsHolder.els;
-            setDestTargetLocked(e, true);
-            // Disabled by its own renderer, not by the lock: unlocking leaves it alone.
-            e.destCredManual.title = '';
+            // Disabled by its own renderer (applyDestPrefill), not by the lock.
+            e.toggleSameVpn.disabled = true;
+            e.toggleSameBroker.disabled = true;
+            e.toggleSameBroker.title = DEST_TARGET_LOCKED_TITLE;
             setDestTargetLocked(e, false);
             expect(e.toggleSameBroker.disabled).toBe(false);
             expect(e.toggleSameBroker.title).toBe('');
-            expect(e.destProvVpn.disabled).toBe(false);
-            expect(e.destCredManual.disabled).toBe(true);
+            expect(e.toggleSameVpn.disabled).toBe(true);
+        });
+    });
+
+    describe('applyDestMode', () => {
+        const shown = (el: HTMLElement) => !el.classList.contains('hidden');
+
+        it('Direct primary: the typed Broker host, SEMP and Client cards; no provisioned card', () => {
+            const e = elsHolder.els;
+            applyDestMode(e, { provisioned: false, needsSecondary: true });
+            expect([e.destHostGroup, e.destSempCard, e.destSolCard].every(shown)).toBe(true);
+            expect(shown(e.destProv)).toBe(false);
+        });
+
+        it('Provisioned primary needing a secondary: the card replaces the host field and both cards', () => {
+            const e = elsHolder.els;
+            applyDestMode(e, { provisioned: true, needsSecondary: true });
+            expect([e.destHostGroup, e.destSempCard, e.destSolCard].some(shown)).toBe(false);
+            expect(shown(e.destProv)).toBe(true);
+            expect(shown(e.destProvCardHost)).toBe(true);
+            expect(shown(e.destProvSame)).toBe(false);
+        });
+
+        it('Provisioned primary reused as the destination: a note instead of the card', () => {
+            const e = elsHolder.els;
+            applyDestMode(e, { provisioned: true, needsSecondary: false });
+            expect(shown(e.destProv)).toBe(true);
+            expect(shown(e.destProvCardHost)).toBe(false);
+            expect(shown(e.destProvSame)).toBe(true);
+        });
+    });
+
+    describe('clearDestTypedSecrets', () => {
+        it('empties both destination password fields', () => {
+            const e = elsHolder.els;
+            e.destSempPass.value = 'a';
+            e.destSolPass.value = 'b';
+            clearDestTypedSecrets(e);
+            expect(e.destSempPass.value).toBe('');
+            expect(e.destSolPass.value).toBe('');
         });
     });
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createEmitter } from '../../src/mock-broker/emitter';
 import { buildSolaceSdk } from '../../src/mock-broker/sdk';
+import { createMessage } from '../../src/mock-broker/sdk/message';
 import { seed, getQueue } from '../../src/mock-broker/broker/store';
 import { FAULT, QUEUE_STATE, resetScenario, scenario } from '../../src/mock-broker/fixtures';
 import { MOCK_SUBCODE } from '../../src/mock-broker/sdk/errors';
@@ -349,5 +350,131 @@ describe('mock-broker — queue state levers', () => {
 
         expect(session.createQueueBrowser({ queueDescriptor: { name: 'test-queue-1' } })
             ._messageConsumer._permissions).toBe('READ_ONLY');
+    });
+});
+
+describe('mock-broker/sdk -- payload bytes', () => {
+    const latin1 = (bytes: number[]) => String.fromCharCode(...bytes);
+    /** The bytes a Latin-1 byte string stands for (one char per byte). */
+    const bytesOf = (byteString: string | null) => Uint8Array.from(byteString ?? '', c => c.charCodeAt(0));
+
+    it('hands an authored text payload back as the Latin-1 form of its UTF-8 bytes, as the real SDK does under version10', () => {
+        const sdk = buildSolaceSdk();
+        const msg = sdk.SolclientFactory.createMessage();
+        // Plain-text fixtures stay plain text; the edge encodes once.
+        const fixture = (text: string) => createMessage({ payload: text });
+        expect(fixture('caf\u00E9').getBinaryAttachment()).toBe(latin1([0x63, 0x61, 0x66, 0xC3, 0xA9]));
+        expect(fixture('\u6771').getBinaryAttachment()).toBe(latin1([0xE6, 0x9D, 0xB1]));
+        // A string handed to setBinaryAttachment is already bytes: the real SDK
+        // reads it as Latin-1 (Buffer.from(value, 'latin1')), so it comes back unchanged.
+        expect(msg.setBinaryAttachment('caf\u00E9').getBinaryAttachment()).toBe('caf\u00E9');
+        expect(sdk.SolclientFactory.createMessage().getBinaryAttachment()).toBeNull();
+    });
+
+    it('seeds one UTF-8 message and one non-UTF-8 binary message that read back as bytes', () => {
+        const messages = getQueue('default', 'test-queue-1')!.messages;
+        const utf8 = messages[4].msg;
+        const binary = messages[5].msg;
+
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(bytesOf(utf8.getBinaryAttachment()));
+        expect(text).toContain('Z\u00FCrich');
+        expect(text).toContain('\u6771\u4EAC');
+        expect(binary.getBinaryAttachment()).toBe(latin1([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0xFE, 0x80]));
+        expect(() => new TextDecoder('utf-8', { fatal: true }).decode(bytesOf(binary.getBinaryAttachment()))).toThrow();
+        expect(binary.getHttpContentType()).toBe('application/octet-stream');
+        // Size is the byte count (plus the header allowance), not the char count.
+        expect(utf8.smfHeader.messageLength).toBe(utf8.getBinaryAttachment().length + 120);
+        expect(messages[5].sizeBytes).toBe(12 + 120);
+    });
+
+    it('stores a Latin-1 string or a Uint8Array published byte for byte, and a char above 0xFF as UTF-8', () => {
+        const sdk = buildSolaceSdk();
+        const bytes = [0x00, 0x80, 0xFF, 0xC3];
+        const set = (v: unknown) => sdk.SolclientFactory.createMessage().setBinaryAttachment(v);
+
+        expect(set(latin1(bytes)).getBinaryAttachment()).toBe(latin1(bytes));
+        expect(set(Uint8Array.from(bytes)).getBinaryAttachment()).toBe(latin1(bytes));
+        expect(set('\u20AC').getBinaryAttachment()).toBe(latin1([0xE2, 0x82, 0xAC]));
+        expect(set(Uint8Array.from(bytes)).smfHeader.messageLength).toBe(4 + 120);
+        expect(set(null).getBinaryAttachment()).toBeNull();
+    });
+
+    it('keeps a browsed binary payload unchanged when it is published to another queue', async () => {
+        const sdk = buildSolaceSdk();
+        const session = sdk.SolclientFactory.createSession({ url: 'wss://broker.solace.com', vpnName: 'vpn-prod' });
+        const original = getQueue('vpn-prod', 'Q/ORDER/PROCESS')!.messages[5].msg.getBinaryAttachment();
+
+        const msg = sdk.SolclientFactory.createMessage();
+        msg.setDestination(sdk.SolclientFactory.createDurableQueueDestination('Q/ORDER/ARCHIVE'));
+        msg.setBinaryAttachment(original);
+        msg.setCorrelationKey({ Solace_Msg_Utility_Seq_Num: 'b' });
+        session.send(msg);
+
+        const archive = getQueue('vpn-prod', 'Q/ORDER/ARCHIVE')!.messages;
+        expect(archive[archive.length - 1].msg.getBinaryAttachment()).toBe(original);
+    });
+});
+
+describe('mock-broker/sdk -- publish rejected', () => {
+    function publishTo(queue: string) {
+        const sdk = buildSolaceSdk();
+        const session = sdk.SolclientFactory.createSession({ url: 'wss://broker.solace.com', vpnName: 'vpn-prod' });
+        const acks = vi.fn();
+        const rejects = vi.fn();
+        session.on(sdk.SessionEventCode.ACKNOWLEDGED_MESSAGE, acks);
+        session.on(sdk.SessionEventCode.REJECTED_MESSAGE_ERROR, rejects);
+        const msg = sdk.SolclientFactory.createMessage();
+        msg.setDestination(sdk.SolclientFactory.createDurableQueueDestination(queue));
+        msg.setBinaryAttachment('refused?');
+        msg.setCorrelationKey({ Solace_Msg_Utility_Seq_Num: 'r-1' });
+        session.send(msg);
+        return { acks, rejects };
+    }
+
+    it('answers a publish to a PUBLISH_REJECTED queue with REJECTED_MESSAGE_ERROR, the reason on infoStr, and spools nothing', async () => {
+        scenario.queueState.set('vpn-prod/Q/ORDER/ARCHIVE', QUEUE_STATE.PUBLISH_REJECTED);
+
+        const { acks, rejects } = publishTo('Q/ORDER/ARCHIVE');
+
+        await vi.waitFor(() => expect(rejects).toHaveBeenCalledTimes(1));
+        const event = rejects.mock.calls[0][0];
+        expect(event.correlationKey.Solace_Msg_Utility_Seq_Num).toBe('r-1');
+        expect(event.infoStr).toContain('Q/ORDER/ARCHIVE');
+        expect(event.message).toBeUndefined();
+        expect(acks).not.toHaveBeenCalled();
+        expect(getQueue('vpn-prod', 'Q/ORDER/ARCHIVE')!.messages).toHaveLength(0);
+    });
+
+    it('rejects a topic publish when a subscribed queue refuses, and still acks one that no refusing queue receives', async () => {
+        scenario.queueState.set('vpn-prod/Q/ORDER/NEW', QUEUE_STATE.PUBLISH_REJECTED);
+        const sdk = buildSolaceSdk();
+        const session = sdk.SolclientFactory.createSession({ url: 'wss://broker.solace.com', vpnName: 'vpn-prod' });
+        const rejects = vi.fn();
+        const acks = vi.fn();
+        session.on(sdk.SessionEventCode.REJECTED_MESSAGE_ERROR, rejects);
+        session.on(sdk.SessionEventCode.ACKNOWLEDGED_MESSAGE, acks);
+        const before = getQueue('vpn-prod', 'Q/ORDER/PROCESS')!.messages.length;
+        const topic = (name: string) => {
+            const msg = sdk.SolclientFactory.createMessage();
+            msg.setDestination(sdk.SolclientFactory.createTopicDestination(name));
+            msg.setBinaryAttachment('t');
+            msg.setCorrelationKey({ Solace_Msg_Utility_Seq_Num: name });
+            return msg;
+        };
+
+        session.send(topic('orders/new/uk'));       // reaches Q/ORDER/NEW, which refuses
+        session.send(topic('orders/process/uk'));   // reaches Q/ORDER/PROCESS only
+
+        await vi.waitFor(() => expect(rejects).toHaveBeenCalledTimes(1));
+        await vi.waitFor(() => expect(acks).toHaveBeenCalledTimes(1));
+        expect(rejects.mock.calls[0][0].correlationKey.Solace_Msg_Utility_Seq_Num).toBe('orders/new/uk');
+        expect(getQueue('vpn-prod', 'Q/ORDER/PROCESS')!.messages).toHaveLength(before + 1);
+    });
+
+    it('acks a publish to a queue in any other state', async () => {
+        const { acks, rejects } = publishTo('Q/ORDER/ARCHIVE');
+
+        await vi.waitFor(() => expect(acks).toHaveBeenCalledTimes(1));
+        expect(rejects).not.toHaveBeenCalled();
     });
 });

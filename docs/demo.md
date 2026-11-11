@@ -75,6 +75,8 @@ Five of those are shaped to exercise a specific path rather than to look realist
 - **`Q/BULK`** holds several hundred messages, enough for paging and for the copy engine's backpressure to engage.
 - **`Q/ORDER/ARCHIVE`** starts empty and is the natural destination for a Queue Copy demo.
 
+Two messages in `test-queue-1` and in `Q/ORDER/PROCESS` (the 5th and 6th) exercise payload handling. The 5th is UTF-8 text with non-ASCII characters and shows decoded in the details pane. The 6th is a 12-byte binary payload that is not valid UTF-8, so the details pane shows the size-only placeholder `[Binary payload: 12 bytes]` with the binary type badge. The demo SDK hands payloads back the way the real SDK does under its version10 profile (a Latin-1 string, one character per byte) and a copy or move stores them byte for byte, so the binary message arrives in the destination unchanged. At Small volume (a quarter of the seed) `test-queue-1` keeps both messages, but `Q/ORDER/PROCESS` holds only 4 messages, so it loses both; use Normal volume or larger to see them there.
+
 Queues carry topic subscriptions, so a forward to a topic really fans out: publishing to `orders/new/uk` lands in
 `Q/ORDER/NEW`, because that queue subscribes to `orders/new/>`.
 
@@ -83,7 +85,7 @@ Queues carry topic subscriptions, so a forward to a topic really fans out: publi
 A **Demo controls** panel sits at the bottom-right. It opens on the first load in a browser tab and stays collapsed after that; click its header to open or close it. Its first line says that nothing leaves the page. It both tells you what the demo accepts and drives the broker live:
 
 - **Connection values** -- the accepted host, every Message VPN, and the host that simulates a certificate error. Click any value to copy it. Usernames, passwords, ports and URL paths are accepted as typed -- only the host is checked -- and the list is generated from the broker's own topology, so it can never disagree with what the pickers show. Pick a VPN and press **Fill the connection form** to type the host, that VPN and a demo username and password (`demo` / `demo`) into the form; then press **Connect** on each card.
-- **Queue state** -- switch any queue between normal, read-only, bind-denied and empty. Applies on the next bind.
+- **Queue state** -- switch any queue between normal, read-only, bind-denied, empty and publish-rejected. Applies on the next bind. **Publish rejected** keeps the queue browsable but refuses every publish to it, including a topic publish that fans out to it, with `REJECTED_MESSAGE_ERROR` on the publishing session and nothing spooled. It stays set until you switch the queue back. Use it to show a Queue Copy or Move stopping at the broker rejection with the source untouched.
 - **Connection faults** -- fail the next connect, simulate SEMP `401` or `500`, or drop a live session to show the
   disconnect path. The connect failure is one-shot; the SEMP faults stay armed until you clear them.
 - **Latency and volume** -- tune the artificial response delay and the seeded message count, then **Reset demo
@@ -121,6 +123,8 @@ It is attached to every GitHub Release; open it from disk. It starts on the gate
 
 The passwords are fake. The **Demo controls** panel lists them too: click one to copy it, or use **Sign in as**. The
 panel opens on the first load in a browser tab, as in `demo.html`.
+
+In the Provisioned demo Queue Copy shows one Destination Connection card instead of the typed destination cards: sign in as operator, connect to east-prod / orders, untick Same Message VPN, pick the payments VPN and press Connect; the fake gateway dials the VPN's client credential and the demo broker answers. Operator may only write to `orders.*` on east-prod/orders, so the run gate refuses the other VPN's queues. The Direct demo (`demo.html`) keeps the typed destination cards.
 
 ### The demo brokers
 

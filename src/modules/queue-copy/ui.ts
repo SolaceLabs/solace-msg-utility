@@ -34,13 +34,16 @@ export interface CopyUiElements {
     toggleSameBroker: HTMLInputElement;
     toggleSameVpn: HTMLInputElement;
     destHost: HTMLInputElement;
-    // Destination credential source (managed deployments only)
-    destCredModeRow: HTMLElement;
-    destCredProvisioned: HTMLInputElement;
-    destCredManual: HTMLInputElement;
-    destProvisionedBlock: HTMLElement;
-    destProvBroker: HTMLSelectElement;
-    destProvVpn: HTMLSelectElement;
+    destHostGroup: HTMLElement;
+    // Provisioned destination (the primary is a Provisioned connection): the
+    // host of the shared connection card, and the note shown instead of it
+    // while the destination is the primary itself. The manual SEMP and Client
+    // cards are hidden meanwhile.
+    destSempCard: HTMLElement;
+    destSolCard: HTMLElement;
+    destProv: HTMLElement;
+    destProvCardHost: HTMLElement;
+    destProvSame: HTMLElement;
 
     // Destination SEMP (Management) card
     destSempProtocol: HTMLSelectElement;
@@ -159,12 +162,12 @@ export function cacheElements(container: HTMLElement): CopyUiElements {
         toggleSameBroker: required<HTMLInputElement>(container, '#copy-toggle-same-broker'),
         toggleSameVpn: required<HTMLInputElement>(container, '#copy-toggle-same-vpn'),
         destHost: required<HTMLInputElement>(container, '#copy-dest-host'),
-        destCredModeRow: required<HTMLElement>(container, '#copy-dest-cred-mode-row'),
-        destCredProvisioned: required<HTMLInputElement>(container, '#copy-dest-cred-provisioned'),
-        destCredManual: required<HTMLInputElement>(container, '#copy-dest-cred-manual'),
-        destProvisionedBlock: required<HTMLElement>(container, '#copy-dest-provisioned-block'),
-        destProvBroker: required<HTMLSelectElement>(container, '#copy-dest-prov-broker'),
-        destProvVpn: required<HTMLSelectElement>(container, '#copy-dest-prov-vpn'),
+        destHostGroup: required<HTMLElement>(container, '#copy-dest-host-group'),
+        destSempCard: required<HTMLElement>(container, '#copy-dest-semp-card'),
+        destSolCard: required<HTMLElement>(container, '#copy-dest-sol-card'),
+        destProv: required<HTMLElement>(container, '#copy-dest-prov'),
+        destProvCardHost: required<HTMLElement>(container, '#copy-dest-prov-card'),
+        destProvSame: required<HTMLElement>(container, '#copy-dest-prov-same'),
 
         destSempProtocol: required<HTMLSelectElement>(container, '#copy-dest-semp-protocol'),
         destSempPort: required<HTMLInputElement>(container, '#copy-dest-semp-port'),
@@ -341,85 +344,46 @@ export function applyDestPrefill(
 }
 
 /**
- * Lock or unlock the destination SEMP form fields. Called from module.ts's
- * SEMP factory hooks: `onConnected` → lock, `onDisconnected`/`onAuthFailed`/
- * `onError` → unlock. Mirrors the connections module's "fields disabled while
- * bound" pattern so the user can't change creds out from under a live session.
+ * Render the destination for the primary connection's mode.
  *
- * Host stays under the broker-level lock — see `setDestBrokerLocked` — because
- * SEMP and Client share the same host field.
+ * Primary Direct: the typed Broker host, SEMP and Client cards (what the
+ * toggles and the Connect buttons drive). Primary Provisioned: the host field
+ * and both cards give way to the shared provisioned connection card -- or, while
+ * the destination is the primary itself (Same broker + Same VPN), to a note.
+ * The Same broker / Same VPN toggles stay in both modes.
  */
-/**
- * Render the destination credential-source control.
- *
- * The radio row only appears when a secondary connection is actually needed AND
- * the deployment offers a choice — a managed-only deployment pins Provisioned
- * and a direct deployment pins Manual, so neither shows a pointless control.
- */
-export function applyDestCredMode(
+export function applyDestMode(
     els: CopyUiElements,
-    opts: { offered: readonly ('provisioned' | 'manual')[]; active: 'provisioned' | 'manual'; needsSecondary: boolean },
+    opts: { provisioned: boolean; needsSecondary: boolean },
 ): void {
-    const { offered, active, needsSecondary } = opts;
-    els.destCredModeRow.classList.toggle('hidden', !(needsSecondary && offered.length > 1));
-    els.destCredProvisioned.checked = active === 'provisioned';
-    els.destCredManual.checked = active === 'manual';
-    els.destCredProvisioned.disabled = !offered.includes('provisioned');
-    els.destCredManual.disabled = !offered.includes('manual');
-    els.destProvisionedBlock.classList.toggle('hidden', !(needsSecondary && active === 'provisioned'));
-}
-
-/** Fill the provisioned broker list (names only — the store never exposes creds). */
-export function renderDestProvisionedBrokers(els: CopyUiElements, brokers: readonly string[], selected: string): void {
-    els.destProvBroker.innerHTML = '';
-    brokers.forEach((b) => {
-        const opt = document.createElement('option');
-        opt.value = b;
-        opt.textContent = b;
-        els.destProvBroker.appendChild(opt);
-    });
-    if (selected && brokers.includes(selected)) els.destProvBroker.value = selected;
-    els.destProvBroker.disabled = brokers.length === 0;
-}
-
-/** Fill the provisioned VPN list for the selected broker. */
-export function renderDestProvisionedVpns(els: CopyUiElements, vpns: readonly string[], selected: string): void {
-    els.destProvVpn.innerHTML = '';
-    vpns.forEach((v) => {
-        const opt = document.createElement('option');
-        opt.value = v;
-        opt.textContent = v;
-        els.destProvVpn.appendChild(opt);
-    });
-    if (selected && vpns.includes(selected)) els.destProvVpn.value = selected;
-    els.destProvVpn.disabled = vpns.length === 0;
+    const { provisioned, needsSecondary } = opts;
+    els.destHostGroup.classList.toggle('hidden', provisioned);
+    els.destSempCard.classList.toggle('hidden', provisioned);
+    els.destSolCard.classList.toggle('hidden', provisioned);
+    els.destProv.classList.toggle('hidden', !provisioned);
+    els.destProvCardHost.classList.toggle('hidden', !needsSecondary);
+    els.destProvSame.classList.toggle('hidden', needsSecondary);
 }
 
 /**
- * Enable/disable every typed destination credential field. Provisioned mode
- * disables them because the store supplies host, port, user and password — the
- * user selects an identity, not a credential. Runs after `applyDestPrefill` so
- * it has the final say.
+ * Forget the typed destination passwords (the field values; the caller clears
+ * the state copies). Run when the destination stops being typed: a secret
+ * must not sit in a field the user can no longer see.
  */
-export function setDestManualFieldsEnabled(els: CopyUiElements, enabled: boolean): void {
-    // One-directional by design: this may only ever DISABLE. `applyDestPrefill`
-    // owns the enabled state in manual mode (it locks whatever the same-broker /
-    // same-VPN toggles imply), so re-enabling here would fight it and unlock
-    // fields the toggles had deliberately locked.
-    if (enabled) return;
-    const fields: HTMLInputElement[] = [
-        els.destHost,
-        els.destSempPort, els.destSempUrlPath, els.destSempUser, els.destSempPass,
-        els.destSolPort, els.destSolUrlPath, els.destSolVpn, els.destSolUser, els.destSolPass,
-    ];
-    fields.forEach((f) => { f.disabled = true; });
-    els.destSempProtocol.disabled = true;
-    els.destSolProtocol.disabled = true;
-    // Never leave a typed secret sitting in a field the user can no longer see.
+export function clearDestTypedSecrets(els: CopyUiElements): void {
     els.destSempPass.value = '';
     els.destSolPass.value = '';
 }
 
+/**
+ * Lock or unlock the destination SEMP form fields. Called from module.ts's
+ * SEMP factory hooks: `onConnected` -> lock, `onDisconnected`/`onAuthFailed`/
+ * `onError` -> unlock. Mirrors the connections module's "fields disabled while
+ * bound" pattern so the user can't change creds out from under a live session.
+ *
+ * Host stays under the broker-level lock -- see `setDestBrokerLocked` -- because
+ * SEMP and Client share the same host field.
+ */
 export function setDestSempFormLocked(els: CopyUiElements, locked: boolean): void {
     els.destSempProtocol.disabled = locked;
     els.destSempPort.disabled = locked;
@@ -462,17 +426,15 @@ export const DEST_TARGET_LOCKED_TITLE = 'Locked while the destination connects.'
 
 /**
  * Lock the controls that choose where the destination session lands -- the
- * Same-broker / Same-VPN toggles, the credential source and the provisioned
- * broker and VPN -- while a destination connect is in flight, with a title
- * saying why. Unlocking re-enables only the controls this lock disabled; the
- * caller then re-renders them so each owning renderer re-applies its own rule
- * (applyDestPrefill, applyDestCredMode, the provisioned lists).
+ * Same-broker / Same-VPN toggles -- while a destination connect is in flight,
+ * with a title saying why. (The provisioned card locks its own Broker and VPN
+ * pickers while it connects.) Unlocking re-enables only the controls this lock
+ * disabled; the caller then re-renders them so applyDestPrefill re-applies its
+ * own rule.
  */
 export function setDestTargetLocked(els: CopyUiElements, locked: boolean): void {
     const controls: (HTMLInputElement | HTMLSelectElement)[] = [
         els.toggleSameBroker, els.toggleSameVpn,
-        els.destCredProvisioned, els.destCredManual,
-        els.destProvBroker, els.destProvVpn,
     ];
     for (const el of controls) {
         if (locked) {

@@ -47,6 +47,8 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
                      -> SDK opens wss://{page host}/managed/smf/{broker}/{vpn}
    queue-browser -- entitlement-filtered queue-picker; read-only rows downgrade Delete
    queue-copy -- source filtered as above; destination may use a provisioned broker + VPN
+   (shipped as one shared provisioned connection card shown whenever the primary is Provisioned;
+    no manual destination in a Provisioned session)
    (administration is a SEPARATE app at /solAdmin: admin-login + user-management +
     connection-management, on /managed/{users,connections,settings}. Served only to an
     admin session; it opens NO broker connection.)
@@ -113,8 +115,8 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
   default (`modules.userDefault`), always within `modules.offered` in `config.yaml`. Connections is
   always shown. The catalog an admin can grant from is Queue Browser and Queue Copy.
 - **Connection posture is one enum.** `CONN_MODES` (`direct` | `managed` | `both`) plus
-  `DEFAULT_CONN` reach the app through `/hosted`; `resolveConnTabs` turns them into the tab list and
-  `resolveDestCredModes` derives what a *secondary* connection may offer. One source of truth, so the
+  `DEFAULT_CONN` reach the app through `/hosted`; `resolveConnTabs` turns them into the tab list. A *secondary* connection
+  (Queue Copy's destination) no longer reads the enum: it follows the primary connection, so the
   primary's tabs and a module's secondary credential options cannot drift apart. No `/hosted` ⇒
   Direct only, always.
 - **Managed is a convenience unless the deployment makes it exclusive.** Under `CONN_MODES=both` a

@@ -45,6 +45,13 @@ export const QUEUE_STATE = {
     BIND_DENIED: 'bind-denied',
     /** Binds and reports zero messages. */
     EMPTY: 'empty',
+    /**
+     * Browsable and bindable, but every publish to it (direct, or fanned out
+     * from a topic) is refused with REJECTED_MESSAGE_ERROR on the publishing
+     * session and nothing is spooled: what a shut-down ingress or an exceeded
+     * spool does on a real broker. Sticky until the queue is set back.
+     */
+    PUBLISH_REJECTED: 'publish-rejected',
 } as const;
 export type QueueState = typeof QUEUE_STATE[keyof typeof QUEUE_STATE];
 

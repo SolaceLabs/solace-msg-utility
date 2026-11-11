@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { buildSolaceSdk } from '../../src/mock-broker/sdk';
 import { seed, getQueue } from '../../src/mock-broker/broker/store';
-import { resetScenario, scenario } from '../../src/mock-broker/fixtures';
+import { QUEUE_STATE, resetScenario, scenario } from '../../src/mock-broker/fixtures';
 import { installMockServer } from '../../src/mock-broker/server';
 import { refuseNetwork } from '../../src/mock-broker/network';
 import { createSolacePublisher, type SolacePublisher } from '../../src/core/services/solace-publisher';
@@ -114,34 +114,22 @@ describe('queue-copy engine against the demo broker', () => {
         expect(completed).toEqual([expect.objectContaining({ status: 'completed', copied: before.length, total: before.length })]);
         expect(spooled('vpn-prod', 'Q/ORDER/PROCESS')).toEqual([]);
         expect(payloads('vpn-prod', 'Q/ORDER/ARCHIVE').slice(destBefore)).toEqual(before);
+        // The seeded non-UTF-8 payload crossed the engine as the same bytes.
+        expect(payloads('vpn-prod', 'Q/ORDER/ARCHIVE')).toContain(String.fromCharCode(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0xFE, 0x80));
     });
 
     it('stops a move at the broker\'s rejection, with its reason, and the source keeps every message', async () => {
         const before = payloads('vpn-prod', 'Q/ORDER/PROCESS');
         const destBefore = payloads('vpn-prod', 'Q/ORDER/ARCHIVE');
+        // The destination queue refuses publishes (a shut-down ingress or an exceeded spool):
+        // the demo broker answers each with REJECTED_MESSAGE_ERROR on the session, as solclient does.
+        scenario.queueState.set('vpn-prod/Q/ORDER/ARCHIVE', QUEUE_STATE.PUBLISH_REJECTED);
         const session = await openSession('vpn-prod');
-        // The demo broker acks every publish. A broker that refuses one (a full
-        // or shut destination) answers with REJECTED_MESSAGE_ERROR on the
-        // session instead, carrying the correlation key, as solclient does.
-        // Stand in for it at the session boundary only: keep the listeners the
-        // publisher registers, and answer each send with that event.
-        const rejectListeners: Array<(event: unknown) => void> = [];
-        const on = session.on;
-        session.on = (code: string, fn: (event: unknown) => void) => {
-            if (code === sdk.SessionEventCode.REJECTED_MESSAGE_ERROR) rejectListeners.push(fn);
-            return on(code, fn);
-        };
-        session.send = (msg: any) => {
-            // Read where the demo session's own send reads it.
-            const correlationKey = msg._fields.correlationKey;
-            setTimeout(() => rejectListeners.forEach(fn => fn({ correlationKey, infoStr: 'Spool Over Quota' })), 1);
-        };
 
         const { completed, onProgress } = await run(session,
             { vpn: 'vpn-prod', from: 'Q/ORDER/PROCESS', to: 'Q/ORDER/ARCHIVE', mode: 'move' });
 
-        expect(rejectListeners).toHaveLength(1);
-        expect(completed).toEqual([expect.objectContaining({ status: 'error', copied: 0, lastError: 'Spool Over Quota' })]);
+        expect(completed).toEqual([expect.objectContaining({ status: 'error', copied: 0, lastError: expect.stringContaining('Q/ORDER/ARCHIVE') })]);
         expect(onProgress).not.toHaveBeenCalled();
         expect(payloads('vpn-prod', 'Q/ORDER/PROCESS')).toEqual(before);
         expect(payloads('vpn-prod', 'Q/ORDER/ARCHIVE')).toEqual(destBefore);

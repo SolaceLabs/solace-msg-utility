@@ -330,6 +330,27 @@ describe('core/services/solace-client', () => {
             expect(newSession.disconnect).toHaveBeenCalled();
         });
 
+        // Auto-connect race: the replaced session's DISCONNECTED lands after the
+        // new session is already up, and must not tear it down.
+        it("auto-connect race: the old session's DISCONNECTED after the new one is up leaves the new session connected", () => {
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.init();
+            service.connect(baseCfg({ vpn: 'old' }), 'broker.test', 'admin');
+            const oldSession = solaceMock.SolclientFactory.createSession.mock.results[0].value;
+            handlerFor(oldSession, 'UP_NOTICE')();
+
+            service.connect(baseCfg({ vpn: 'new' }), 'broker.test', 'admin');
+            const newSession = solaceMock.SolclientFactory.createSession.mock.results[1].value;
+            handlerFor(newSession, 'UP_NOTICE')();
+            handlerFor(oldSession, 'DISCONNECTED')();
+
+            expect(newSession.dispose).not.toHaveBeenCalled();
+            expect(hooks.onDisconnected).not.toHaveBeenCalled();
+            service.disconnect();
+            expect(newSession.disconnect).toHaveBeenCalled();
+        });
+
         it('fires onError when solace API not loaded during connect', () => {
             (window as any).solace = undefined;
             const hooks = makeHooks();

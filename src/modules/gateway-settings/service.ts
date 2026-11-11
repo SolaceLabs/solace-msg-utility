@@ -35,8 +35,20 @@ export interface SettingsView {
     catalog: string[];
 }
 
+/** The GET /managed/client body: how the gateway sees this browser. */
+export interface ClientSeen {
+    /** The address the gateway resolved; empty when it could not. */
+    address: string;
+    /** The TCP peer: the browser itself, or the proxy (or Docker) in front of it. */
+    peer: string;
+    /** The address came from a trusted proxy's X-Forwarded-For. */
+    viaProxy: boolean;
+}
+
 export interface SettingsService {
     load(): Promise<ManagedResult<SettingsView>>;
+    /** The caller's address as the gateway resolves it (go-web-proxy/managed.go clientSeen). */
+    client(): Promise<ManagedResult<ClientSeen>>;
     /** PUT the whole file. `restartRequired` lists the saved keys that wait for a restart. */
     save(settings: GatewaySettings): Promise<ManagedResult<{ restartRequired: string[] }>>;
 }
@@ -44,6 +56,7 @@ export interface SettingsService {
 export function createSettingsService(): SettingsService {
     return {
         load: () => managedRequest<SettingsView>('GET', '/managed/settings'),
+        client: () => managedRequest<ClientSeen>('GET', '/managed/client'),
         save: (settings) => managedRequest('PUT', '/managed/settings', settings),
     };
 }

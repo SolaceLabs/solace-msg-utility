@@ -35,7 +35,7 @@
  * gateway advertised managed mode via `/hosted`, so this panel never needs its
  * own "gateway required" gate.
  */
-import { required } from '../../core/dom';
+import { required, setError } from '../../core/dom';
 import { createAccountControl } from './account';
 import { createServiceSolace, type SolaceConnectionHooks } from '../../core/services/solace-client';
 import { createServiceSemp, type SempConnectionHooks } from '../../core/services/semp-client';
@@ -125,10 +125,6 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         els.loginView.classList.toggle('hidden', view !== 'login');
         els.selectView.classList.toggle('hidden', view !== 'select');
         els.connectedView.classList.toggle('hidden', view !== 'connected');
-    }
-    function setError(el: HTMLElement, msg: string | null): void {
-        el.textContent = msg ?? '';
-        el.classList.toggle('hidden', !msg);
     }
 
     // --- bridging hooks → global AppState + bus events ---

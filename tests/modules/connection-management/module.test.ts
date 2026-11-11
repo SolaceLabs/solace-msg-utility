@@ -207,9 +207,68 @@ describe('connection-management — create / edit form', () => {
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Connection saved', 'ok'));
         expect(svcMock.saveConnection).toHaveBeenCalledWith({
             broker: 'b9', hostname: 'h9',
-            semp: { port: '1943', user: 'mon', pass: 'secret' },
-            client: { port: '1443', msgVpns: [{ name: 'v1', user: 'u1', pass: 'vpnpw' }] },
+            semp: { scheme: 'https', port: '1943', user: 'mon', pass: 'secret' },
+            client: { scheme: 'wss', port: '1443', msgVpns: [{ name: 'v1', user: 'u1', pass: 'vpnpw' }] },
         });
+    });
+
+    it('sends the plain schemes when the operator picks http and ws', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue({ ok: true });
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'b8';
+        el<HTMLSelectElement>(container, '#conn-mgmt-semp-scheme').value = 'http';
+        el<HTMLSelectElement>(container, '#conn-mgmt-client-scheme').value = 'ws';
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
+        const sent = svcMock.saveConnection.mock.calls[0][0];
+        expect([sent.semp.scheme, sent.client.scheme]).toEqual(['http', 'ws']);
+    });
+
+    it('loads the stored schemes on Edit; a blank or missing scheme shows TLS', async () => {
+        const container = loadModuleDOM('connection-management');
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: [
+            { broker: 'p1', hostname: 'h', semp: { scheme: 'http', port: '8080', user: 'u', pass: '' }, client: { scheme: 'ws', port: '8008', msgVpns: [] } },
+            { broker: 'p2', hostname: 'h', semp: { scheme: 'https', port: '1943', user: 'u', pass: '' }, client: { scheme: 'wss', port: '1443', msgVpns: [] } },
+            { broker: 'p3', hostname: 'h', semp: { port: '1943', user: 'u', pass: '' }, client: { port: '1443', msgVpns: [] } },
+        ] });
+        await ConnectionManagementModule.install(makeCtx(container, ADMIN));
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').children.length).toBe(3));
+        const edit = (i: number) => el(container, '#conn-mgmt-rows').querySelectorAll('tr')[i]
+            .querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
+        const shown = () => [
+            el<HTMLSelectElement>(container, '#conn-mgmt-semp-scheme').value,
+            el<HTMLSelectElement>(container, '#conn-mgmt-client-scheme').value,
+        ];
+        edit(0);
+        expect(shown()).toEqual(['http', 'ws']);
+        edit(1);
+        expect(shown()).toEqual(['https', 'wss']);
+        edit(2);
+        expect(shown()).toEqual(['https', 'wss']);
+    });
+
+    it('Add starts on the TLS schemes even after editing a plain connection', async () => {
+        const container = loadModuleDOM('connection-management');
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: [
+            { broker: 'p1', hostname: 'h', semp: { scheme: 'http', port: '8080', user: 'u', pass: '' }, client: { scheme: 'ws', port: '8008', msgVpns: [] } },
+        ] });
+        await ConnectionManagementModule.install(makeCtx(container, ADMIN));
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').children.length).toBe(1));
+        el(container, '#conn-mgmt-rows').querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        expect(el<HTMLSelectElement>(container, '#conn-mgmt-semp-scheme').value).toBe('https');
+        expect(el<HTMLSelectElement>(container, '#conn-mgmt-client-scheme').value).toBe('wss');
+    });
+
+    it('shows the gateway 422 for a refused scheme through the form error', async () => {
+        const { container } = await setup();
+        const reason = 'broker "bX": semp.scheme "ftp" must be "https" or "http"';
+        svcMock.saveConnection.mockResolvedValue({ ok: false, status: 422, code: 'invalid', field: 'connection', reason });
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'bX';
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe(reason));
     });
 
     it('keeps blank SEMP + VPN passwords blank on edit, so the gateway keeps the stored ones', async () => {

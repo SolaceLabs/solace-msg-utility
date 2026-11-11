@@ -13,7 +13,7 @@
  * (or a saved backup's name) each time. Imports only from `src/core/*` and
  * its own service.
  */
-import { required } from '../../core/dom';
+import { required, setError } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { downloadBlob } from '../../core/download';
@@ -123,11 +123,6 @@ export const BackupModule = {
         let source: ImportSource | null = null;
         /** The last preview's sign-out flags, for the warning under the users choice. */
         let signsOut: ImportPreview['signsOutCaller'] = { replace: false, merge: false };
-
-        function setError(el: HTMLElement, msg: string | null): void {
-            el.textContent = msg ?? '';
-            el.classList.toggle('hidden', !msg);
-        }
 
         const fail = (el: HTMLElement) => (msg: string) => setError(el, msg);
 

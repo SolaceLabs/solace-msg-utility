@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { required, attachBackdropClose } from '../../src/core/dom';
+import { required, setError, attachBackdropClose } from '../../src/core/dom';
 
 describe('core/dom', () => {
     describe('required()', () => {
@@ -16,6 +16,30 @@ describe('core/dom', () => {
             // The throw is the contract: install-time fast-fail with a descriptive
             // message instead of silent partial wiring downstream.
             expect(() => required(root, '#missing')).toThrow(/Required element missing: #missing/);
+        });
+    });
+
+    describe('setError()', () => {
+        it('shows the message and unhides the element', () => {
+            const el = document.createElement('div');
+            el.classList.add('hidden');
+            setError(el, 'Boom');
+            expect(el.textContent).toBe('Boom');
+            expect(el.classList.contains('hidden')).toBe(false);
+        });
+
+        it('clears and hides the element for null', () => {
+            const el = document.createElement('div');
+            el.textContent = 'old';
+            setError(el, null);
+            expect(el.textContent).toBe('');
+            expect(el.classList.contains('hidden')).toBe(true);
+        });
+
+        it('hides the element for an empty string', () => {
+            const el = document.createElement('div');
+            setError(el, '');
+            expect(el.classList.contains('hidden')).toBe(true);
         });
     });
 

@@ -49,7 +49,7 @@
             <div class="flex-row justify-between items-center mb-4">
                 <h2 class="m-0">Destination Broker</h2>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="copy-dest-host-group">
                 <label>Broker Host (IP or Hostname)</label>
                 <input type="text" id="copy-dest-host" class="form-control">
                 <div class="invalid-feedback">Invalid hostname or IP address.</div>
@@ -61,35 +61,6 @@
                 <label class="flex-row items-center gap-2 font-normal cursor-pointer">
                     <input type="checkbox" id="copy-toggle-same-vpn" checked> Same Message VPN as source
                 </label>
-            </div>
-
-            <!-- Credential source for the secondary connection. Shown only when a
-                 secondary connection is needed AND the deployment offers a choice;
-                 a managed-only deployment pins this to Provisioned. -->
-            <div class="form-group flex-row gap-4 items-center hidden" id="copy-dest-cred-mode-row" role="radiogroup"
-                aria-label="Destination credentials">
-                <span class="text-secondary">Destination credentials:</span>
-                <label class="flex-row items-center gap-2 font-normal cursor-pointer">
-                    <input type="radio" name="copy-dest-cred-mode" value="provisioned"
-                        id="copy-dest-cred-provisioned"> Provisioned
-                </label>
-                <label class="flex-row items-center gap-2 font-normal cursor-pointer">
-                    <input type="radio" name="copy-dest-cred-mode" value="manual" id="copy-dest-cred-manual" checked>
-                    Manual
-                </label>
-            </div>
-
-            <!-- Provisioned selection. Replaces every typed credential field: the
-                 core managed store dials the connection, so no password is entered. -->
-            <div class="form-group flex-row hidden" id="copy-dest-provisioned-block">
-                <div class="w-full">
-                    <label for="copy-dest-prov-broker">Broker</label>
-                    <select id="copy-dest-prov-broker" class="form-control"></select>
-                </div>
-                <div class="w-full">
-                    <label for="copy-dest-prov-vpn">Message VPN</label>
-                    <select id="copy-dest-prov-vpn" class="form-control" disabled></select>
-                </div>
             </div>
         </div>
 
@@ -129,7 +100,7 @@
             </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="copy-dest-semp-card">
             <div class="flex-row justify-between items-center mb-4">
                 <h2 class="m-0">Solace SEMP (Management)</h2>
             </div>
@@ -172,6 +143,18 @@
             <div id="copy-dest-semp-error" class="copy-dest-connect-error hidden"></div>
         </div>
 
+        <!-- Provisioned destination (the primary is a Provisioned connection): ONE
+             shared connection card replaces the destination SEMP and Client cards
+             above and below. It spans both rows so the Source / Destination pairing
+             of the grid holds. Built at install by createProvisionedConnectionCard
+             (see ui-events.ts); hidden while the primary is a Direct connection. -->
+        <div class="copy-dest-prov hidden" id="copy-dest-prov">
+            <div id="copy-dest-prov-card"></div>
+            <div class="card text-secondary hidden" id="copy-dest-prov-same">
+                The destination is the source connection (same broker and Message VPN): nothing to connect.
+            </div>
+        </div>
+
         <!-- ===== Pair 3: Client ===== -->
         <div class="card">
             <div class="flex-row justify-between items-center mb-4">
@@ -211,7 +194,7 @@
             </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="copy-dest-sol-card">
             <div class="flex-row justify-between items-center mb-4">
                 <h2 class="m-0">Solace Messaging (Client)</h2>
             </div>
