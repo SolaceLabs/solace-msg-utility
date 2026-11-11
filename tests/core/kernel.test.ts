@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Kernel } from '../../src/core/kernel';
 import { getLogLevel, setLogLevel } from '../../src/core/logger';
-import { setHosted } from '../../src/core/hosted';
+import { REQUEST_TIMEOUT_MS } from '../../src/core/timing';
+import { showToast } from '../../src/core/toast';
 import { LogLevel, DEFAULT_LOG_LEVEL } from '../../src/core/constants';
 import type { PwaModule, RegisteredModule, AppContext, ManagedSession } from '../../src/core/types';
 
@@ -501,8 +502,9 @@ describe('Kernel', () => {
             // The kernel applies this transformation uniformly for every
             // SEMP call, regardless of which path the caller asked for —
             // including paths extracted from a broker-emitted nextPageUri.
-            setHosted(true);
-            try {
+            // The hosted verdict's one home is AppState.connConfig, which the
+            // connections module publishes from its /hosted probe.
+            {
                 let capturedCtx: AppContext | null = null;
                 const mod = createMockModule({
                     id: 'test-module',
@@ -514,6 +516,7 @@ describe('Kernel', () => {
 
                 (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
 
+                capturedCtx!.setState('connConfig', { connModes: 'direct', defaultConn: 'direct', hosted: true });
                 capturedCtx!.setState('sempCredentials', {
                     user: 'admin', pass: 'admin', baseUrl: '(diagnostic)',
                     protocol: 'https', host: 'broker-internal', port: '943', urlPath: '',
@@ -527,9 +530,54 @@ describe('Kernel', () => {
                 // exact host so the assertion is robust to test-runner config.
                 const calledWith = (globalThis.fetch as any).mock.calls[0][0] as string;
                 expect(calledWith).toMatch(/^https?:\/\/[^/]+\/https\/943\/broker-internal\/SEMP\/v2\/monitor\/msgVpns\?cursor=xyz$/);
-            } finally {
-                setHosted(false);
             }
+        });
+
+        describe('sempFetch deadline', () => {
+            async function directCtx(): Promise<AppContext> {
+                let capturedCtx: AppContext | null = null;
+                const mod = createMockModule({
+                    id: 'test-module',
+                    install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
+                });
+                setupDOM(['test-module']);
+                await new Kernel([reg(mod)]).start();
+                capturedCtx!.setState('sempCredentials', {
+                    user: 'admin', pass: 'admin', baseUrl: 'http://test:8080',
+                    protocol: 'http', host: 'test', port: '8080', urlPath: '',
+                });
+                return capturedCtx!;
+            }
+
+            it("gives every request a REQUEST_TIMEOUT_MS deadline joined to the caller's own signal", async () => {
+                const ctx = await directCtx();
+                const timeout = vi.spyOn(AbortSignal, 'timeout');
+                const cancel = new AbortController();
+                (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
+
+                await ctx.sempFetch('/SEMP', { method: 'POST', signal: cancel.signal });
+
+                expect(timeout).toHaveBeenCalledWith(REQUEST_TIMEOUT_MS);
+                const { signal } = (globalThis.fetch as any).mock.calls[0][1];
+                expect(signal.aborted).toBe(false);
+                cancel.abort();
+                expect(signal.aborted).toBe(true);
+            });
+
+            it('a broker that never answers rejects the request with a TimeoutError', async () => {
+                const ctx = await directCtx();
+                const deadline = new AbortController();
+                vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal);
+                (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+                    init.signal!.addEventListener('abort', () => reject(init.signal!.reason));
+                }));
+
+                const pending = ctx.sempFetch('/SEMP/v2/monitor/msgVpns');
+                deadline.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+
+                await expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+                expect(ctx.appState.sempCredentials).not.toBeNull();
+            });
         });
 
         it('sempFetch handles 401 by disconnecting SEMP', async () => {
@@ -1059,6 +1107,113 @@ describe('Kernel', () => {
             // The only module is now hidden; sidebar empties and there's nowhere
             // to navigate — the kernel leaves the (now-hidden) view as-is without throwing.
             expect(nav().innerHTML).toBe('');
+        });
+    });
+
+    // The notification center behind the header bell (AppContext.notifications).
+    describe('notification center', () => {
+        beforeEach(() => {
+            sessionStorage.clear();
+        });
+
+        /** setupDOM plus the shell's toast container and, optionally, the bell slot. */
+        function setupShell(moduleIds: string[], withSlot = true) {
+            setupDOM(moduleIds);
+            document.body.insertAdjacentHTML('beforeend',
+                `${withSlot ? '<div id="notification-bell-slot"></div>' : ''}<div id="toast-container"></div>`);
+        }
+
+        it('mounts the bell into #notification-bell-slot and hands every module the same center', async () => {
+            const seen: AppContext[] = [];
+            const a = createMockModule({ id: 'a', name: 'A', install: vi.fn(async c => { seen.push(c); }) });
+            const b = createMockModule({ id: 'b', name: 'B', install: vi.fn(async c => { seen.push(c); }) });
+            setupShell(['a', 'b']);
+            await new Kernel([reg(a), reg(b)]).start();
+
+            expect(document.querySelector('#notification-bell-slot .notif-bell')).not.toBeNull();
+            expect(document.querySelector('dialog.notif-drawer')).not.toBeNull();
+            expect(seen[0].notifications).toBe(seen[1].notifications);
+            seen[0].notifications.add('warn', 'A', 'from a module, no toast');
+            expect(document.querySelector('.notif-badge')!.textContent).toBe('1');
+        });
+
+        it('mounts no bell when the shell has no slot', async () => {
+            setupShell(['a'], false);
+            await new Kernel([reg(createMockModule({ id: 'a' }))]).start();
+            expect(document.querySelector('.notif-bell')).toBeNull();
+            expect(document.querySelector('dialog.notif-drawer')).toBeNull();
+        });
+
+        it('records ok/warn/error toasts tagged with the module the user is on (App during install), and skips info toasts', async () => {
+            let ctx: AppContext | null = null;
+            const mod = createMockModule({
+                id: 'queue-browser', name: 'Queue Browser',
+                install: vi.fn(async c => { ctx = c; showToast('Saved scheme moved to wss', 'warn'); }),
+            });
+            setupShell(['queue-browser']);
+            await new Kernel([reg(mod)]).start();
+
+            showToast('Queue "orders" bound', 'ok');
+            showToast('Loading saved config', 'info');
+            showToast('Broker rejected message', 'error');
+
+            expect(ctx!.notifications.entries().map(e => [e.level, e.module, e.text])).toEqual([
+                ['warn', 'App', 'Saved scheme moved to wss'],
+                ['ok', 'Queue Browser', 'Queue "orders" bound'],
+                ['error', 'Queue Browser', 'Broker rejected message'],
+            ]);
+        });
+
+        it('records the connection lifecycle from the bus, naming broker and VPN', async () => {
+            let ctx: AppContext | null = null;
+            const mod = createMockModule({ id: 'connections', install: vi.fn(async c => { ctx = c; }) });
+            setupShell(['connections']);
+            await new Kernel([reg(mod)]).start();
+            const c = ctx!;
+
+            // Events with no published identity still read sensibly. First, so
+            // the empty broker is not a "new broker" that clears the list.
+            c.eventBus.emit('client:connected', { session: {} });
+            c.eventBus.emit('semp:connected');
+            c.setState('solaceConnection', { host: 'b1', protocol: 'wss', port: '443', urlPath: '', vpn: 'v1', user: 'u', pass: 'p' });
+            c.eventBus.emit('client:connected', { session: {} });
+            c.setState('solaceConnection', null);
+            c.eventBus.emit('client:disconnected');
+            c.setState('sempCredentials', { user: 'u', pass: 'p', baseUrl: 'https://b1:943', protocol: 'https', host: 'b1', port: '943', urlPath: '' });
+            c.eventBus.emit('semp:connected');
+            c.setState('sempCredentials', null);
+            c.eventBus.emit('semp:disconnected');
+
+            expect(c.notifications.entries().map(e => [e.level, e.module, e.text])).toEqual([
+                ['info', 'Connections', 'Connected to broker "", VPN "".'],
+                ['info', 'Connections', 'SEMP connected to "".'],
+                ['info', 'Connections', 'Connected to broker "b1", VPN "v1".'],
+                ['info', 'Connections', 'Disconnected from broker "b1", VPN "v1".'],
+                ['info', 'Connections', 'SEMP connected to "b1".'],
+                ['info', 'Connections', 'SEMP disconnected.'],
+            ]);
+        });
+
+        it('a Direct connect to a new broker starts a fresh list; a Provisioned session keeps it', async () => {
+            let ctx: AppContext | null = null;
+            const mod = createMockModule({ id: 'connections', install: vi.fn(async c => { ctx = c; }) });
+            setupShell(['connections']);
+            await new Kernel([reg(mod)]).start();
+            const c = ctx!;
+            const connect = (host: string) => {
+                c.setState('solaceConnection', { host, protocol: 'wss', port: '443', urlPath: '', vpn: 'v1', user: 'u', pass: '' });
+                c.eventBus.emit('client:connected', { session: {} });
+            };
+
+            connect('b1');
+            c.notifications.add('ok', 'Queue Browser', 'bound on b1');
+            c.setState('managed', managedSession({ broker: 'b2' }));
+            connect('b2');
+            expect(c.notifications.entries().map(e => e.text)).toContain('bound on b1');
+
+            c.setState('managed', null);
+            connect('b3');
+            expect(c.notifications.entries().map(e => e.text)).toEqual(['Connected to broker "b3", VPN "v1".']);
         });
     });
 });

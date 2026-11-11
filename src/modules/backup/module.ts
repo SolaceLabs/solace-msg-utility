@@ -15,6 +15,7 @@
  */
 import { required } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
+import { confirmDialog } from '../../core/components/confirm-dialog';
 import { downloadBlob } from '../../core/download';
 import { iconButton } from '../../core/icons';
 import { logger } from '../../core/logger';
@@ -320,7 +321,7 @@ export const BackupModule = {
                 settings: els.choiceSettings.value as 'replace' | 'skip',
             };
             const chosen = Object.entries(choices).filter(([, v]) => v !== 'skip').map(([k, v]) => `${k} (${v})`);
-            if (chosen.length && !confirm(`Import ${chosen.join(', ')} from this backup? The gateway applies it at once.`)) return;
+            if (chosen.length && !(await confirmDialog(`Import ${chosen.join(', ')} from this backup? The gateway applies it at once.`, { confirmLabel: 'Import' }))) return;
             els.btnImport.disabled = true;
             const res = await service.importFile(source as ImportSource, els.importPass.value, choices);
             els.btnImport.disabled = false;
@@ -386,7 +387,7 @@ export const BackupModule = {
 
         async function removeSchedule(): Promise<void> {
             setError(els.scheduleError, null);
-            if (!confirm('Remove the backup schedule? The saved backups stay.')) return;
+            if (!(await confirmDialog('Remove the backup schedule? The saved backups stay.', { confirmLabel: 'Remove' }))) return;
             const res = await service.removeSchedule();
             if (!res.ok) {
                 reportManagedFailure(res, eventBus, fail(els.scheduleError));

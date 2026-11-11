@@ -27,7 +27,7 @@ func TestDial_IssuesTheVPNCredential(t *testing.T) {
 		t.Errorf("headers: %v", rec.Header())
 	}
 	log := e.log.String()
-	if !strings.Contains(log, `msg="dial issued" user=viewer broker=b1 vpn=v1`) || strings.Contains(log, "cli-b1v1-pw") {
+	if !strings.Contains(log, `msg="dial issued" component=dial user=viewer broker=b1 vpn=v1`) || strings.Contains(log, "cli-b1v1-pw") {
 		t.Errorf("log must record the dial without the password:\n%s", log)
 	}
 }
@@ -68,7 +68,7 @@ func TestDial_Refusals(t *testing.T) {
 			t.Errorf("%v: the 404 differs: %q", bv, rec.Body.String())
 		}
 	}
-	if !strings.Contains(e.log.String(), `msg="dial denied" user=viewer broker=b2 vpn=v9`) {
+	if !strings.Contains(e.log.String(), `msg="dial denied" component=dial user=viewer broker=b2 vpn=v9`) {
 		t.Errorf("a denied dial must be logged:\n%s", e.log.String())
 	}
 	for _, tc := range []struct {
@@ -93,7 +93,9 @@ func TestDial_Refusals(t *testing.T) {
 func TestDial_ConnectsAreRateLimitedPerUser(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	viewer := e.cookie("viewer", false)
-	dial := func(c *http.Cookie) *httptest.ResponseRecorder { return e.do("POST", "/managed/dial", dialBody("b1", "v1"), c) }
+	dial := func(c *http.Cookie) *httptest.ResponseRecorder {
+		return e.do("POST", "/managed/dial", dialBody("b1", "v1"), c)
+	}
 	for range connectsPerWindow {
 		expect(t, dial(viewer), http.StatusOK, "")
 	}

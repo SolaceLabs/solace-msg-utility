@@ -1,0 +1,3612 @@
+{
+  "version": 1,
+  "updated": "2026-11-10",
+  "next_id": 136,
+  "runs": [
+    {
+      "date": "2026-11-10",
+      "commit": "d2751b1",
+      "report": "docs/review/2026-11-10-critical-review.md",
+      "areas": [
+        "all"
+      ],
+      "new": 135,
+      "open": 0,
+      "fixed": 0,
+      "reopened": 0,
+      "accepted": 0
+    }
+  ],
+  "findings": [
+    {
+      "id": "CR-0001",
+      "fingerprint": "50e96259febf",
+      "title": "Sign-in throttle is check-then-act: parallel guesses all pass loginWait before any failure is recorded",
+      "area": "correctness",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/pages.go:162-200",
+        "go-web-proxy/pages.go:229-243",
+        "go-web-proxy/throttle.go:86-95",
+        "go-web-proxy/throttle.go:121-130"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0002",
+      "fingerprint": "4751c893b862",
+      "title": "A half-supplied TLS pair (only tls.key or only tls.crt) is overwritten by a generated pair: deliberate in code and pinned by a test, but docs/deployment.md:154 says a pair is generated only 'With neither'",
+      "area": "resilience",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/tls.go:24-48",
+        "go-web-proxy/tls.go:104-114",
+        "go-web-proxy/tls.go:123-133"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0003",
+      "fingerprint": "73be24fbbb54",
+      "title": "Backup directory check cannot tell an unmounted /backup: scheduled backups silently land in the container layer",
+      "area": "resilience",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/backup.go:724-742",
+        "go-web-proxy/backup.go:627-643",
+        "go-web-proxy/backup_api.go:80-97"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0004",
+      "fingerprint": "f5024e80dbbd",
+      "title": "A full throttle table refuses every legitimate sign-in, and the table is filled by attacker-chosen usernames",
+      "area": "resilience",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "accepted",
+      "locations": [
+        "go-web-proxy/throttle.go:11-14",
+        "go-web-proxy/throttle.go:86-119",
+        "go-web-proxy/throttle.go:135-146"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": "2026-11-11: Documented fail-closed design; attack needs ~170-1,000 client /64s because each address is also blocked after 5 failures. Follow-up question from the user on client-IP correctness in container deployments recorded under CR-0004 (see notes in plan)."
+    },
+    {
+      "id": "CR-0005",
+      "fingerprint": "bcf186c6bc0d",
+      "title": "Hasher concurrency is runtime.NumCPU(), so a burst of sign-ins can take every CPU, contrary to its stated purpose",
+      "area": "resilience",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/managed_routing.go:26",
+        "go-web-proxy/password.go:41-52",
+        "go-web-proxy/backup.go:126-134"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0006",
+      "fingerprint": "3b53d3d56d7c",
+      "title": "Import that fails after an earlier section was written answers a bare 500, so the admin cannot tell what was applied",
+      "area": "resilience",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/backup_api.go:357-386",
+        "go-web-proxy/managed.go:190-193"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0007",
+      "fingerprint": "d39b86422046",
+      "title": "A session created after a concurrent revocation (password reset, demotion, deletion) survives it; for a deleted user /solAdmin loops",
+      "area": "correctness",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/pages.go:176-193",
+        "go-web-proxy/managed.go:373-387",
+        "go-web-proxy/managed.go:391-404",
+        "go-web-proxy/session.go:94-108",
+        "go-web-proxy/pages.go:297-322",
+        "go-web-proxy/pages.go:147-157"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0008",
+      "fingerprint": "39a939a70993",
+      "title": "SEMP relay forwards If-None-Match/If-Match but turns the broker's 304 into a 502 upstream_unavailable",
+      "area": "correctness",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/relay.go:36-48",
+        "go-web-proxy/relay.go:172-191"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0009",
+      "fingerprint": "38e996266bbc",
+      "title": "Shutdown ignores hijacked SMF/Direct WebSockets, waits on the backup loop with no deadline, and ignores a second signal",
+      "area": "resilience",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "accepted",
+      "locations": [
+        "go-web-proxy/main.go:275-291",
+        "go-web-proxy/main.go:410-450",
+        "go-web-proxy/smf.go:139-149",
+        "go-web-proxy/main.go:267-273",
+        "go-web-proxy/main.go:437-449",
+        "go-web-proxy/smf.go:139-150",
+        "go-web-proxy/sockets.go:20-83",
+        "go-web-proxy/managed_routing.go:53-58",
+        "go-web-proxy/proxy.go:362-371"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": "2026-11-11: Process exit tears the hijacked sockets down the same way on the wire; the backup wait only stalls on a hung mount; second-signal handling not needed. Accepted."
+    },
+    {
+      "id": "CR-0010",
+      "fingerprint": "b22ca8cc9f76",
+      "title": "Store, key, backup and TLS writes are not crash-durable: no directory fsync after rename or create; writePEM ignores Close and never syncs",
+      "area": "resilience",
+      "severity": "minor",
+      "confidence": "suspected",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/fileutil.go:14-41",
+        "go-web-proxy/backup.go:627-643",
+        "go-web-proxy/keyfile.go:96-110",
+        "go-web-proxy/tls.go:123-133"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0011",
+      "fingerprint": "2ee16686a499",
+      "title": "Generated self-signed certificate expires after 365 days and is never renewed or warned about",
+      "area": "resilience",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/tls.go:30-41",
+        "go-web-proxy/tls.go:86-92"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0012",
+      "fingerprint": "ff1677706ffa",
+      "title": "A missing app bundle starts the gateway anyway and serves 404s, and serveIndex logs nothing",
+      "area": "resilience",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/proxy.go:121-140",
+        "go-web-proxy/proxy.go:177-185",
+        "go-web-proxy/main.go:380"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0013",
+      "fingerprint": "b9a9a601c2e8",
+      "title": "Import merge reads the stores outside their lock, so a concurrent admin edit before replaceUsers/replaceConnections is lost",
+      "area": "correctness",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/backup_api.go:318-347",
+        "go-web-proxy/backup_api.go:359-375",
+        "go-web-proxy/store.go:707-739"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0014",
+      "fingerprint": "29a2165d5cd7",
+      "title": "Concurrent schedule saves can leave the in-memory schedule different from backup.yaml",
+      "area": "correctness",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/backup.go:538-581"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0015",
+      "fingerprint": "cbac34f1fe02",
+      "title": "solace-client: a connect() on a client with a session lets the old session's DISCONNECTED handler dispose the new session",
+      "area": "correctness",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/services/solace-client.ts:102-110",
+        "src/core/services/solace-client.ts:193-211",
+        "src/core/services/solace-client.ts:264-279",
+        "src/modules/connections/module.ts:471-518",
+        "src/modules/connections/module.ts:644-650",
+        "src/modules/connections/ui.js:127-129",
+        "src/core/services/solace-client.ts:102-117",
+        "src/core/services/solace-client.ts:264-280",
+        "src/modules/connections/module.ts:471-517",
+        "src/mock-broker/sdk/session.ts:127-131"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0016",
+      "fingerprint": "67f681a17dcd",
+      "title": "The VPN-switch flow is implemented twice and the managed copy has already drifted from the documented navigation contract",
+      "area": "design",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/connections/module.ts:604-687",
+        "src/modules/connections/managed-panel.ts:415-484",
+        "src/modules/connections/managed-panel.ts:131-161",
+        "src/modules/connections/managed-panel.ts:215-224",
+        "src/modules/connections/managed-panel.ts:62",
+        "docs/architecture.md:191-198",
+        "src/modules/connections/module.ts:456-459",
+        "src/core/services/managed-profile.ts:91-94",
+        "src/modules/connections/module.ts:604-686",
+        "src/modules/connections/module.ts:63-696"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0017",
+      "fingerprint": "b2f3be65dc41",
+      "title": "The production SEMP client contains a hard-coded demo branch that rejects any host containing 'untrust.com'",
+      "area": "correctness",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/services/semp-client.ts:98-102",
+        "src/mock-broker/fixtures.ts:27-28",
+        "src/mock-broker/fixtures.ts:28",
+        "src/mock-broker/sdk/session.ts:114",
+        "src/mock-broker/fixtures.ts:23-28"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0018",
+      "fingerprint": "df7986082a7f",
+      "title": "docs/architecture.md (and matching code comments) describe mechanisms the code no longer has",
+      "area": "design",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "docs/architecture.md:98-104",
+        "docs/architecture.md:132",
+        "docs/architecture.md:168",
+        "docs/architecture.md:179",
+        "docs/architecture.md:664",
+        "docs/architecture.md:783",
+        "src/core/kernel.ts:10-15",
+        "src/core/types.ts:1-9",
+        "src/modules/queue-copy/module.ts:15-16",
+        "src/core/managed-semp-filter.ts:16-18",
+        "go-web-proxy/proxy.go:435"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0019",
+      "fingerprint": "4ce9922dbb55",
+      "title": "Core keeps runtime-written module-level singletons (hosted mode, queue-picker cache/state) instead of AppContext state",
+      "area": "design",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/hosted.ts:18-32",
+        "src/core/hosted.ts:94-96",
+        "src/core/hosted.ts:140-157",
+        "src/modules/connections/module.ts:710-719",
+        "src/modules/connections/module.managed.ts:71-73",
+        "src/core/components/queue-picker/index.ts:75-96"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0020",
+      "fingerprint": "fc36b0e6bfdd",
+      "title": "Module CSS selection is a hand-kept list separate from the variant manifests; the kitchen-sink build ships the admin modules unstyled",
+      "area": "design",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "vite.config.ts:51-74",
+        "src/variants/all-for-testing-only.ts:15-30",
+        "src/css/main-admin.css:1-22",
+        "src/css/main.css:16-22"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0021",
+      "fingerprint": "7ee5a14f84b1",
+      "title": "The variant manifest is parsed by a regex stricter than TypeScript; an unquoted module id compiles but is never bundled",
+      "area": "design",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "scripts/module-registry-plugin.mjs:46-56",
+        "scripts/module-registry-plugin.mjs:63-70",
+        "src/registry.ts:27-42"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0022",
+      "fingerprint": "7a5b3ba51b74",
+      "title": "Docs instruct operators to set CONN_MODES=managed, a value the gateway rejects at startup",
+      "area": "interfaces",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "docs/architecture.md:693",
+        "docs/rbac-variant-plan.md:57",
+        "docs/rbac-variant-plan.md:122",
+        "docs/rbac-variant-plan.md:160",
+        "go-web-proxy/main.go:212-227"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0023",
+      "fingerprint": "b0586054b3e0",
+      "title": "Provisioned broker connections are hard-wired to TLS (https SEMP, wss SMF), but the connection record and the docs never say so",
+      "area": "interfaces",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/relay.go:145-151",
+        "go-web-proxy/smf.go:117-123",
+        "go-web-proxy/managed.go:255-272",
+        "docs/user-guide.md:489"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0024",
+      "fingerprint": "339e97de0072",
+      "title": "SSL_INSECURE_SKIP_VERIFY is parsed leniently while HOSTED and LOG_LEVEL are strict; a typo is silently ignored",
+      "area": "interfaces",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/main.go:177",
+        "go-web-proxy/main.go:190-201",
+        "go-web-proxy/main.go:236-250",
+        "go-web-proxy/configfile.go:178-201"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0025",
+      "fingerprint": "4f679f63d273",
+      "title": "AppContext.config is an untyped, unused field sourced from a global that nothing sets",
+      "area": "design",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/types.ts:268-269",
+        "src/core/kernel.ts:34",
+        "src/core/kernel.ts:179"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0026",
+      "fingerprint": "082d101d2057",
+      "title": "The SSL_CERT_FILE name collides with Go's own trust-store variable, so 'env var ignored, config.yaml wins' is not true for it",
+      "area": "interfaces",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/main.go:174",
+        "go-web-proxy/configfile.go:192",
+        "go-web-proxy/tls.go:150-155",
+        "go-web-proxy/main.go:328-330",
+        "docs/deployment.md:166"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0027",
+      "fingerprint": "5a549391c846",
+      "title": "Live vs restart-only config keys are two independent hand lists with no check that every key is in one of them",
+      "area": "design",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/live.go:8-45",
+        "go-web-proxy/live.go:52-70",
+        "go-web-proxy/configfile.go:54-72",
+        "go-web-proxy/settings.go:74-81"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0028",
+      "fingerprint": "5251e356058a",
+      "title": "Kernel.sempFetch encodes Basic auth differently from the semp-client probe (a second SEMP client): non-Latin-1 credentials throw, Latin-1 ones change bytes after connect, and its 401 teardown bypasses the connections module",
+      "area": "correctness",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/kernel.ts:316-321",
+        "src/core/services/semp-client.ts:88-93",
+        "src/modules/connections/module.ts:160-173",
+        "src/core/kernel.ts:309-343",
+        "src/core/services/semp-client.ts:83-93",
+        "src/core/services/semp-client.ts:121-132",
+        "src/core/services/sempContext.ts:45-52",
+        "src/modules/connections/module.ts:159-193",
+        "src/modules/connections/module.ts:585-588",
+        "src/modules/connections/ui.js:168-204"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0029",
+      "fingerprint": "489898e8f9cb",
+      "title": "Queue-browser decodes binary payloads as Latin-1 strings (SDK version10 profile): UTF-8 text is garbled, the body filter misses non-ASCII terms, and every download of a payload with bytes >= 0x80 (PDF, PNG, UTF-8 text) is corrupted",
+      "area": "correctness",
+      "severity": "blocker",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/services/solace-client.ts:91-92",
+        "src/modules/queue-browser/service-events.ts:134-160",
+        "src/modules/queue-browser/ui-details.ts:25-30",
+        "src/modules/queue-browser/state.js:125-129",
+        "src/modules/queue-browser/ui-table.ts:244",
+        "docs/user-guide.md:266"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0030",
+      "fingerprint": "1f16d72761e0",
+      "title": "publisher.send throws synchronously on an invalid destination instead of settling { ok:false }; queue-copy then browses the whole queue and reports 'drained mid-run'",
+      "area": "resilience",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/services/solace-publisher.ts:102-108",
+        "src/core/services/solace-publisher.ts:206-222",
+        "src/modules/queue-copy/service-copy.ts:451-470",
+        "src/modules/queue-copy/service-copy.ts:513-546",
+        "src/modules/queue-browser/ui-events.ts:84-94"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0031",
+      "fingerprint": "eda778a8caf4",
+      "title": "QueueBrowser-fallback verify fails any queue that takes over 10 s to browse: the bind timer is never cleared on UP",
+      "area": "correctness",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-copy/service-verify.ts:393-398",
+        "src/modules/queue-copy/service-verify.ts:415-430",
+        "src/modules/queue-copy/service-verify.ts:452-467",
+        "src/modules/queue-copy/service-verify.ts:472-483",
+        "src/modules/queue-copy/service-verify.ts:393-430",
+        "src/modules/queue-copy/service-verify.ts:466",
+        "tests/modules/queue-copy/service-verify.test.ts:740-764",
+        "docs/improvement-plan.md:12",
+        "tests/modules/queue-copy/service-verify.test.ts:740-750",
+        "tests/modules/queue-copy/service-verify.test.ts:752-764"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0032",
+      "fingerprint": "744e906eafef",
+      "title": "Esc closes the Confirm Queue Copy dialog without cancelling: a running copy/move continues with no visible Cancel, and an un-aborted verify can overwrite a later one",
+      "area": "resilience",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-copy/ui-events.ts:236-239",
+        "src/modules/queue-copy/ui-modal.ts:404-419",
+        "src/modules/queue-copy/ui-modal.ts:139-176",
+        "src/modules/queue-copy/ui.ts:572-587"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0033",
+      "fingerprint": "1afd5f9574b5",
+      "title": "Copy engine publishes through whichever destination session exists, not the one the form names: a connect that lands after the target changed redirects the run and dodges the destination gate",
+      "area": "correctness",
+      "severity": "blocker",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-copy/service-copy.ts:92",
+        "src/modules/queue-copy/module.ts:153-162",
+        "src/modules/queue-copy/module.ts:249-268",
+        "src/modules/queue-copy/ui-events.ts:95-116",
+        "src/modules/queue-copy/ui-events.ts:340-344",
+        "src/modules/queue-copy/ui-modal.ts:296-316"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0034",
+      "fingerprint": "5f6d11e7ca29",
+      "title": "SEMP and gateway requests after the connect probe have no deadline; startup awaits /hosted and /managed/me serially with the event bus held",
+      "area": "resilience",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/kernel.ts:309-343",
+        "src/core/services/semp-client.ts:121-130",
+        "src/core/services/managed-api.ts:33-43",
+        "src/core/services/semp-discovery.ts:43-49",
+        "src/modules/queue-subscription-explorer/module.ts:134-158",
+        "src/core/kernel.ts:106-110",
+        "src/modules/connections/module.managed.ts:71-98",
+        "src/core/hosted.ts:52-55"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0035",
+      "fingerprint": "b89da1223af5",
+      "title": "Queue picker's fetch generation counters reset on every open, so a fetch from a closed picker writes into the next one",
+      "area": "correctness",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/components/queue-picker/index.ts:98-121",
+        "src/core/components/queue-picker/index.ts:169-198",
+        "src/core/components/queue-picker/index.ts:214-239",
+        "src/core/components/queue-picker/index.ts:274-281"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0036",
+      "fingerprint": "be140bb135d1",
+      "title": "Move mode counts a message as moved when removeMessageFromQueue throws, and still reports 'completed'",
+      "area": "resilience",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "accepted",
+      "locations": [
+        "src/modules/queue-copy/service-copy.ts:477-501",
+        "src/modules/queue-copy/service-copy.ts:197-205",
+        "tests/modules/queue-copy/service-copy.test.ts:887-917",
+        "src/modules/queue-copy/service-copy.ts:484-501"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": "2026-11-11: The SDK's removeMessageFromQueue is a fire-and-forget client ack the broker never confirms, so a broker-side removal failure cannot be detected; accepted. Docs: user-guide note under Move that removal is a client acknowledgement the broker does not confirm and that the source queue's count should be checked afterwards."
+    },
+    {
+      "id": "CR-0037",
+      "fingerprint": "248cc4fa812b",
+      "title": "queue-copy `state.job` is never reset (resetTransientState is dead code), so after the first run the rbac:changed destination teardown never runs",
+      "area": "correctness",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-copy/module.ts:405-441",
+        "src/modules/queue-copy/state.ts:184-195"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0038",
+      "fingerprint": "478a6d5330fc",
+      "title": "alert() is used for user-facing errors and results, against the error-handling rule, and one message tells the user to check the console",
+      "area": "quality",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-browser/ui-events.ts:322-350",
+        "src/modules/queue-browser/service.ts:204-208",
+        "src/modules/queue-browser/ui-table.ts:215-226",
+        "src/modules/queue-browser/ui-table.ts:255-261",
+        "src/modules/queue-browser/ui-table.ts:215-262",
+        "src/modules/queue-browser/ui-events.ts:322-349",
+        "src/modules/queue-discovery/module.ts:241-247"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0039",
+      "fingerprint": "922092018280",
+      "title": "Delete converts 64-bit guaranteed message IDs to Number before acking them; at or above 2^32 the SDK's ack encoder mangles a Number, so the ack targets a non-existent ID while the row disappears and the UI reports success",
+      "area": "correctness",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-browser/service.ts:168-181",
+        "src/modules/queue-copy/service-verify.ts:456-458"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0040",
+      "fingerprint": "b504562dbdc9",
+      "title": "A browser that goes DOWN after UP stays registered: it holds one of the 3 binding slots and blocks re-binding the queue",
+      "area": "resilience",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-browser/service-events.ts:105-110",
+        "src/modules/queue-browser/service.ts:46-50",
+        "src/modules/queue-browser/ui-events.ts:146-150"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0041",
+      "fingerprint": "27dd39d081cb",
+      "title": "matchString caches one compiled RegExp per distinct pattern with no bound",
+      "area": "resilience",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/utils.ts:40-57",
+        "src/core/utils.ts:66-70"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0042",
+      "fingerprint": "724cfe36eb38",
+      "title": "net/http server errors, handler panics included, are logged at INFO and dropped at the default WARN level",
+      "area": "observability",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/main.go:135-157",
+        "go-web-proxy/main.go:320-323",
+        "go-web-proxy/main.go:397-408"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0043",
+      "fingerprint": "05c9cbbf225c",
+      "title": "User and connection changes in the admin API leave no log line naming who did it or to what, unlike settings, backups and imports",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/managed.go:350-389",
+        "go-web-proxy/managed.go:391-405",
+        "go-web-proxy/managed.go:415-430",
+        "go-web-proxy/managed.go:432-442",
+        "go-web-proxy/managed.go:190-193",
+        "go-web-proxy/settings.go:110",
+        "go-web-proxy/backup_api.go:384-385"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0044",
+      "fingerprint": "7a13e525aecb",
+      "title": "At the default WARN level the gateway logs none of its effective configuration, not even its version, and the access list is never logged at any level",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/main.go:141",
+        "go-web-proxy/main.go:335-343",
+        "go-web-proxy/main.go:357",
+        "go-web-proxy/main.go:378",
+        "go-web-proxy/main.go:428",
+        "go-web-proxy/managed_routing.go:78-79"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0045",
+      "fingerprint": "b1d121576f3b",
+      "title": "WARN serves as the 'always show' audit level for routine successes, while equivalent security events stay at INFO",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/backup_api.go:112",
+        "go-web-proxy/backup_api.go:140",
+        "go-web-proxy/backup_api.go:152",
+        "go-web-proxy/backup_api.go:167",
+        "go-web-proxy/backup_api.go:191",
+        "go-web-proxy/backup.go:622",
+        "go-web-proxy/settings.go:110",
+        "go-web-proxy/pages.go:194",
+        "go-web-proxy/pages.go:263",
+        "go-web-proxy/dial.go:77",
+        "go-web-proxy/smf.go:148"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0046",
+      "fingerprint": "5707d910d194",
+      "title": "Gateway refusal logging differs across equivalent paths: some denials and rate limits are silent, and some error lines omit the user and client",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/relay.go:134-142",
+        "go-web-proxy/dial.go:66-75",
+        "go-web-proxy/smf.go:90-99",
+        "go-web-proxy/pages.go:177-187",
+        "go-web-proxy/pages.go:210-243",
+        "go-web-proxy/managed.go:190-193"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0047",
+      "fingerprint": "a93b9551530b",
+      "title": "The access log names the TCP peer instead of the resolved client, and records hijacked sockets as status 200 with 0 bytes",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/proxy.go:433-452",
+        "go-web-proxy/main.go:391-395",
+        "go-web-proxy/access.go:31-36",
+        "go-web-proxy/access.go:63-67",
+        "go-web-proxy/smf.go:139-150"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0048",
+      "fingerprint": "893f00b352b6",
+      "title": "The documented health probe (/hosted) answers 200 while the app bundle cannot be served, and a missing index file returns 404 without a log line",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/proxy.go:46-60",
+        "go-web-proxy/proxy.go:121-145",
+        "go-web-proxy/proxy.go:177-185",
+        "go-web-proxy/proxy.go:89-95",
+        "docs/deployment.md:174"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0049",
+      "fingerprint": "b065d9c2c755",
+      "title": "The sign-in and unauthenticated-request throttles fail closed silently when their tracking tables are full",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/throttle.go:97-105",
+        "go-web-proxy/throttle.go:109-119",
+        "go-web-proxy/throttle.go:140-143",
+        "go-web-proxy/throttle.go:183-192"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0050",
+      "fingerprint": "8ca57339e683",
+      "title": "Failed SEMP list calls drop the HTTP status and the gateway's error code, and non-OK SEMP responses are rendered four different ways",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/services/semp-discovery.ts:58-65",
+        "src/modules/queue-subscription-explorer/service.ts:62-65",
+        "src/core/services/semp-client.ts:71-81",
+        "src/core/services/semp-client.ts:134-146",
+        "src/modules/queue-copy/service-verify.ts:173",
+        "src/modules/queue-discovery/module.ts:89-92"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0051",
+      "fingerprint": "be66c82575c7",
+      "title": "SDK error text bypasses solaceErrorText in the queue browser and in parts of queue-copy and the publisher",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-browser/service-events.ts:87-110",
+        "src/modules/queue-browser/service.ts:75-81",
+        "src/modules/queue-browser/ui-forward.js:145-149",
+        "src/modules/queue-copy/service-copy.ts:490",
+        "src/modules/queue-copy/service-verify.ts:485-488",
+        "src/core/services/solace-publisher.ts:249-256"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0052",
+      "fingerprint": "36b97e982ec1",
+      "title": "Error and warning toasts disappear after the 1-second default, and for several failures the toast is the only signal",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "accepted",
+      "locations": [
+        "src/core/toast.ts:25-58",
+        "src/modules/connection-management/module.ts:240-245",
+        "src/modules/user-management/module.ts:298-309",
+        "src/modules/connections/module.ts:249-251",
+        "src/modules/connections/module.ts:399",
+        "src/core/toast.ts:25-31"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": "2026-11-11: Keep the 1 s toast default; the notification panel (NEW-3) keeps every toast, which is the persistent signal. Accepted."
+    },
+    {
+      "id": "CR-0053",
+      "fingerprint": "8d468229f695",
+      "title": "Several failure paths swallow the cause without a developer log, or fall back silently",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/services/managed-api.ts:33-43",
+        "src/modules/queue-browser/ui-events.ts:83-94",
+        "src/core/hosted.ts:52-73",
+        "src/modules/connections/config.js:46-64",
+        "src/modules/connections/module.ts:403-410",
+        "src/modules/queue-browser/service-events.ts:150-153",
+        "src/modules/queue-browser/service-events.ts:206-222"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0054",
+      "fingerprint": "8eb0b4cdde43",
+      "title": "Open-in-Browser and VPN-switch timeouts end with no signal to the user",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/connections/module.ts:604-642",
+        "src/modules/connections/module.ts:666-684",
+        "src/modules/connections/managed-panel.ts:415-446",
+        "src/modules/connections/managed-panel.ts:461-483"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0055",
+      "fingerprint": "e35402647513",
+      "title": "Bulk delete reports a partial failure as full success, and its failure text sends the user to the console",
+      "area": "observability",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-browser/service.ts:166-208",
+        "src/modules/queue-browser/ui-events.ts:335-349"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0056",
+      "fingerprint": "d2889250aa94",
+      "title": "Browser log lines have no consistent module tag and often omit the broker, VPN or queue they concern",
+      "area": "observability",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/services/solace-client.ts:196-209",
+        "src/core/services/semp-client.ts:107",
+        "src/core/services/semp-client.ts:134-148",
+        "src/modules/queue-browser/service.ts:39-49",
+        "src/modules/queue-browser/service.ts:97-105",
+        "src/modules/queue-discovery/module.ts:73-92"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0057",
+      "fingerprint": "05243302c2ae",
+      "title": "queue-browser's forward modal reaches the DOM through document.getElementById instead of its container, because the module keeps module-scoped singletons",
+      "area": "quality",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-browser/ui-forward.js:150-176",
+        "src/modules/queue-browser/ui-core.js:7-16",
+        "src/modules/queue-browser/state.js:23-35"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0058",
+      "fingerprint": "de84bcca28a4",
+      "title": "Dead production code: an unused config module, a probe only tests call, an unused cap constant and unreachable branches",
+      "area": "quality",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/connections/defaults.ts:1-98",
+        "src/core/hosted.ts:57-60",
+        "src/core/hosted.ts:75-82",
+        "src/modules/queue-browser/constants.js:2",
+        "src/modules/queue-browser/ui-events.ts:335-349",
+        "src/modules/queue-browser/ui-forward.js:145-149"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0059",
+      "fingerprint": "ca3ee5c9832c",
+      "title": "Commented-out defensive guards from the 2026-05-26 audit are still in three services",
+      "area": "quality",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-copy/service-copy.ts:119-124",
+        "src/modules/queue-copy/service-copy.ts:165-171",
+        "src/modules/queue-copy/service-copy.ts:282-295",
+        "src/modules/queue-copy/service-copy.ts:322-331",
+        "src/modules/queue-copy/service-verify.ts:474-481",
+        "src/core/services/solace-publisher.ts:226-234"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0060",
+      "fingerprint": "2ef79574fe99",
+      "title": "Admin list plumbing is copy-pasted between connection-management and user-management, and setError exists six times",
+      "area": "quality",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/connection-management/module.ts:94-152",
+        "src/modules/user-management/module.ts:115-175",
+        "src/modules/backup/module.ts:126-129",
+        "src/modules/connections/managed-panel.ts:125-128",
+        "src/modules/gateway-settings/module.ts:98-101",
+        "src/modules/queue-copy/ui.ts:505-513"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0061",
+      "fingerprint": "17ebdcd9352c",
+      "title": "Protocol limits and connection defaults are repeated as literals in several places",
+      "area": "quality",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-browser/constants.js:1-2",
+        "src/modules/connections/module.ts:270-271",
+        "src/core/connections/defaults.ts:26-30",
+        "src/core/connections/defaults.ts:93-94",
+        "src/modules/connections/index.html:161",
+        "src/core/services/managed-profile.ts:167-170",
+        "src/modules/connections/module.ts:499",
+        "src/core/services/semp-client.ts:96",
+        "src/core/services/semp-client.ts:155"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0062",
+      "fingerprint": "ae653c0f0f54",
+      "title": "Comments point at files, lines or siblings that no longer exist",
+      "area": "quality",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/services/solace-publisher.ts:118-123",
+        "src/modules/queue-browser/service.ts:129-131",
+        "src/modules/queue-subscription-explorer/module.ts:158-165",
+        "src/modules/queue-browser/constants.js:4",
+        "src/core/connections/defaults.ts:8-11",
+        "src/css/components.css:184",
+        "scripts/vite-build.mjs:2-16",
+        "go-web-proxy/proxy.go:224"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0063",
+      "fingerprint": "17a50dee7e5a",
+      "title": "No linter or formatter is configured or gated, and the .js modules are not type-checked",
+      "area": "quality",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tsconfig.json:2-10",
+        "scripts/dev.sh:151-157"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0064",
+      "fingerprint": "a09ac356f514",
+      "title": "Redundant !important declarations on hover rules and module-only selectors kept in the shared stylesheet",
+      "area": "quality",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/css/components.css:222-233",
+        "src/css/components.css:139-148",
+        "src/modules/queue-browser/styles.css:52-59",
+        "src/css/components.css:469-521"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0065",
+      "fingerprint": "566faf1cf0da",
+      "title": "The 100% web coverage thresholds are never enforced by CI or the tag pipeline; only a local `cov` run checks them",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "scripts/dev.sh:276-277",
+        ".github/workflows/ci.yml:73-78",
+        ".github/workflows/tag.yml:9",
+        ".github/workflows/tag.yml:139",
+        "vitest.config.ts:45-50",
+        "docs/contributing.md:71"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0066",
+      "fingerprint": "ad4e9595d516",
+      "title": "The Go race detector is never run, so the gateway's only race test asserts nothing",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "scripts/dev.sh:169",
+        "scripts/dev.ps1:224",
+        "go-web-proxy/store_test.go:994-1010",
+        "docs/test-report.md:974"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0067",
+      "fingerprint": "189edf5cdfc2",
+      "title": "Verify and copy are never tested with createQueueBrowser throwing; the call is unguarded and the modal drops the rejection",
+      "area": "tests",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-copy/service-verify.ts:377-391",
+        "src/modules/queue-copy/service-copy.ts:116",
+        "src/modules/queue-copy/service-copy.ts:250",
+        "src/modules/queue-copy/ui-modal.ts:139-176",
+        "src/modules/queue-copy/ui-modal.ts:358-391",
+        "tests/modules/queue-copy/service-copy.test.ts:547-578",
+        "tests/modules/queue-copy/service-verify.test.ts:767-776",
+        "src/modules/connections/managed-panel.ts:232-246"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0068",
+      "fingerprint": "09f020f2f8d3",
+      "title": "The copy/move engine is never run against a realistic SDK (neither the demo broker nor the real SDK); its tests hand-drive mock handlers",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-copy/service-copy.test.ts:38-86",
+        "scripts/e2e.mjs:13-16",
+        "tests/mock-broker/sdk.test.ts:109-160",
+        "tests/mock-broker/sdk.test.ts:195-213",
+        "tests/mock-broker/sdk.test.ts:260-272",
+        "tests/mock-broker/demo-flow.test.ts:131-273"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0069",
+      "fingerprint": "0bc4e64a232b",
+      "title": "The global fetch mock keeps its implementation and unconsumed *Once values across tests; setup.ts re-installs every other global but this one",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/setup.ts:38",
+        "tests/setup.ts:259-300",
+        "tests/modules/connections/module.test.ts:1715-1786"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0070",
+      "fingerprint": "2edf63da5179",
+      "title": "resetQueueBrowserState() misses runtime-added state fields, and ui-forward.test.ts hand-resets instead of calling it",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/helpers/resetQueueBrowserState.ts:13-23",
+        "src/modules/queue-browser/ui-details.ts:78",
+        "src/modules/queue-browser/ui-forward.js:138",
+        "src/modules/queue-browser/ui-events.ts:17",
+        "tests/modules/queue-browser/ui-forward.test.ts:11-23",
+        "tests/modules/queue-browser/module.test.ts:311"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0071",
+      "fingerprint": "c8eb0be40776",
+      "title": "The gateway contract pins only refusals and admin CRUD: no successful relay, no 429/5xx, no sign-in, no headers",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "go-web-proxy/testdata/contract/cases.json",
+        "go-web-proxy/contract_test.go:191-227",
+        "tests/mock-broker/gateway/contract.test.ts:66-81",
+        "tests/mock-broker/gateway/error-codes.test.ts:36-55",
+        "tests/mock-broker/gateway/throttle.test.ts:1-11"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0072",
+      "fingerprint": "9f72b76e509d",
+      "title": "The RBAC glob conformance vector is copied by hand into two tables and has already drifted",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/core/rbac.test.ts:6-27",
+        "go-web-proxy/rbac_test.go:5-34",
+        "go-web-proxy/rbac_test.go:36-48",
+        "go-web-proxy/contract_test.go:261-321"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0073",
+      "fingerprint": "4fa7f7c5c949",
+      "title": "routes.test.ts completeness check keys on the first path segment, so new routes under an existing segment need no row",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/mock-broker/gateway/routes.test.ts:154-160"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0074",
+      "fingerprint": "b5d497cb3450",
+      "title": "Two shipped code sets are outside any coverage measurement: the demo tree (Release bundles) and the gate scripts",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "vitest.config.ts:34-44",
+        "scripts/check-bundles.mjs",
+        "scripts/module-registry-plugin.mjs",
+        "scripts/npm-audit-gate.mjs"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0075",
+      "fingerprint": "4e42bf275a7f",
+      "title": "docs-links test fails on a fresh checkout because docs/improvement-plan.md is git-ignored, so the next tag's gates go red on both runners",
+      "area": "cicd",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        ".gitignore:40-42",
+        "docs/test-report.md:3-28",
+        "tests/build/docs-links.test.ts:76-84",
+        "package.json:22"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0076",
+      "fingerprint": "6898c2f03267",
+      "title": "Tag format is never validated: any v* tag (pre-release or malformed) moves `latest`, is marked the Latest GitHub release and redeploys Pages; the no-tags guard can never fire",
+      "area": "cicd",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        ".github/workflows/tag.yml:69-71",
+        ".github/workflows/tag.yml:174-182",
+        ".github/workflows/tag.yml:397-400",
+        ".github/workflows/tag.yml:418-458",
+        ".github/workflows/tag.yml:536-540",
+        "docs/git.md:99"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0077",
+      "fingerprint": "476d41f369d1",
+      "title": "SCA workflow calls a reusable workflow at mutable `@main`, handing it FOSSA_API_KEY and broad top-level write and OIDC permissions; runner is ubuntu-latest",
+      "area": "cicd",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "accepted",
+      "locations": [
+        ".github/workflows/sca-scan-and-guard.yml:9-26",
+        ".github/workflows/sca-scan-and-guard.yml:36",
+        ".github/workflows/sca-scan-and-guard.yml:49"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": "2026-11-11: Accept the org decision to track the reusable SCA workflow by branch (commit bb300f7, org ticket): mark accepted in docs/review/findings.json with that note; correct docs/git.md:194 to state the exception; pin the update_manifest runner to ubuntu-24.04; scope the top-level permissions to the sca_scan job."
+    },
+    {
+      "id": "CR-0078",
+      "fingerprint": "3e17a4e3dada",
+      "title": "Compose posture tests do not forbid every widening token, let extra security_opt entries through, and leave the e2e `gateway` service unpinned",
+      "area": "build",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/build/compose-files.test.ts:20-42",
+        "tests/build/e2e-lib.test.ts:251-260",
+        "tests/build/e2e-lib.test.ts:293-300",
+        "docker/docker-compose.e2e.yaml:18-57"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0079",
+      "fingerprint": "cd22a7dcf6b9",
+      "title": "README and deployment.md quick starts give operators commands that fail or skip a required step (no SMU_VERSION, wrong file path, no backup dir, `:latest`)",
+      "area": "conventions",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "README.md:12-13",
+        "README.md:38-41",
+        "README.md:45-51",
+        "docs/deployment.md:46",
+        "docs/deployment.md:121-125",
+        "docs/provisioned-mode.md:57",
+        "docker/compose.gateway.yaml:19",
+        "docker/compose.provisioned.yaml:10-13,69",
+        ".github/workflows/tag.yml:82,508-540"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0080",
+      "fingerprint": "daf3f105eb6a",
+      "title": "Release artifacts are rebuilt in each stage instead of promoted; the image's own index.html and provisioned.html never pass check:bundles",
+      "area": "cicd",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        ".github/workflows/tag.yml:323-328",
+        "docker/Dockerfile:110",
+        "docker/Dockerfile:131-135",
+        "scripts/dev.sh:137-141"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0081",
+      "fingerprint": "5ff37fcf06bd",
+      "title": "Dockerfile base images and syntax frontend are pinned by tag, not digest",
+      "area": "build",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "docker/Dockerfile:1",
+        "docker/Dockerfile:71",
+        "docker/Dockerfile:99"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0082",
+      "fingerprint": "3c7806847135",
+      "title": "Every compose file uses the deprecated `no-new-privileges:true` colon form instead of `no-new-privileges=true`",
+      "area": "build",
+      "severity": "nit",
+      "confidence": "suspected",
+      "status": "open",
+      "locations": [
+        "docker/docker-compose.yaml:43-44",
+        "docker/docker-compose.yaml:89-90",
+        "docker/compose.gateway.yaml:25-26",
+        "docker/compose.provisioned.yaml:41-42",
+        "docker/docker-compose.e2e.yaml:27-28",
+        "docker/docker-compose.e2e.yaml:73-74",
+        "docker/docker-compose.e2e.yaml:114-115",
+        "tests/build/compose-files.test.ts:22"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0083",
+      "fingerprint": "a08f7db4b416",
+      "title": "vite-build.mjs exits 0 when vite is killed by a signal, and emptyOutDir:false keeps a stale bundle for check:bundles to pass on",
+      "area": "build",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "scripts/vite-build.mjs:60-64",
+        "vite.config.ts:239",
+        "package.json:8"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0084",
+      "fingerprint": "e727888327b6",
+      "title": "The `vet` gate type-checks src/**/*.ts only: tests/, vite/vitest configs and the src .js files are never type-checked, so test fixtures typed as production types drift silently",
+      "area": "build",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tsconfig.json:7",
+        "tsconfig.json:25-28",
+        "package.json:18",
+        "tsconfig.json:25-28",
+        "scripts/dev.sh:151-157",
+        "tests/modules/queue-copy/service-copy.test.ts:17-33",
+        "tests/mock-broker/gateway/contract.test.ts:34"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0085",
+      "fingerprint": "6f4d14402c7d",
+      "title": "dev.ps1 buffers each command's output until it exits and validates task names with wildcard-tolerant, case-insensitive Get-Command -- both prescribed by the dev-script contract, so a cancelled Windows run can lose its log and `dev.ps1 b*` passes the upfront check",
+      "area": "build",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "scripts/dev.ps1:88-98",
+        "scripts/dev.ps1:376-378",
+        "scripts/dev.sh:62-67",
+        "scripts/dev.sh:309-311"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0086",
+      "fingerprint": "702e32b9fad6",
+      "title": "setup.sh is an unreferenced, unhardened script that downloads an unpinned SDK with no checksum and reports success even when nothing was extracted",
+      "area": "build",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "accepted",
+      "locations": [
+        "setup.sh:1-20"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": "2026-11-11: User: ignore. setup.sh stays as is; recorded as accepted."
+    },
+    {
+      "id": "CR-0087",
+      "fingerprint": "b1e2de5cb2b2",
+      "title": "Per-machine graphify artifacts and a stale nested graph are tracked in git",
+      "area": "conventions",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "graphify-out/.graphify_python",
+        "graphify-out/.graphify_step_ast.py",
+        "go-web-proxy/graphify-out/.graphify_root",
+        ".gitignore:50-55"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0088",
+      "fingerprint": "f38ef8b1d018",
+      "title": "Stale developer docs: contributing.md describes Go build-tag test variants that no longer exist; developer-guide.md says priority is set in src/registry.ts",
+      "area": "conventions",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "docs/contributing.md:394",
+        "docs/developer-guide.md:248",
+        "src/registry.ts:27",
+        "scripts/dev.sh:169"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0089",
+      "fingerprint": "0fc817d4dd26",
+      "title": "test-report.md's 'Current files in the test tree' list is stale after the backup, icons, download and access-test suites were added",
+      "area": "conventions",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "docs/test-report.md:167",
+        "docs/test-report.md:946-970"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0090",
+      "fingerprint": "2ba47c561929",
+      "title": "Test titles and comments cite improvement-plan item IDs and plan scenario numbers (COV-5/6/10/11/12, scenario #n)",
+      "area": "conventions",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/core/kernel.test.ts:66",
+        "tests/core/components/queue-picker/picker.test.ts:686",
+        "tests/core/components/queue-picker/picker.test.ts:717",
+        "tests/modules/connections/module.test.ts:153",
+        "tests/modules/queue-browser/module.test.ts:197",
+        "tests/modules/queue-subscription-explorer/parse.test.ts:127",
+        "tests/integration/module-events.test.ts:133",
+        "tests/integration/module-events.test.ts:172",
+        "tests/integration/module-events.test.ts:202",
+        "tests/integration/module-events.test.ts:225"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0091",
+      "fingerprint": "f8e2885d54e8",
+      "title": "`any` used outside the Solace SDK boundary in core (managed-semp-filter, event-bus, queue-picker, semp-discovery, semp-client)",
+      "area": "conventions",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/managed-semp-filter.ts:85-86",
+        "src/core/event-bus.ts:17-19",
+        "src/core/components/queue-picker/index.ts:206",
+        "src/core/components/queue-picker/index.ts:246",
+        "src/core/services/semp-discovery.ts:38",
+        "src/core/services/semp-discovery.ts:63-82",
+        "src/core/services/semp-client.ts:147"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0092",
+      "fingerprint": "763208b86472",
+      "title": "Lines edited in recent commits kept non-ASCII em dashes (docs)",
+      "area": "conventions",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "docs/user-guide.md:129",
+        "docs/architecture.md",
+        "docs/developer-guide.md"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0093",
+      "fingerprint": "708db1a93189",
+      "title": "Property filter turns 0 and false values into '' so they never match",
+      "area": "correctness",
+      "severity": "major",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-browser/state.js:178-195",
+        "src/modules/queue-browser/service-events.ts:32-35",
+        "src/modules/queue-browser/service-events.ts:193-222",
+        "src/core/utils.ts:42-57",
+        "tests/modules/queue-browser/state.test.ts:316-334"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0094",
+      "fingerprint": "883965d95435",
+      "title": "queue-browser hides untested SDK event wiring behind a v8 ignore the house rules ban",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-browser/service.ts:61-68",
+        "tests/modules/queue-browser/service.test.ts:153-165",
+        "tests/setup.ts:162-167"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0095",
+      "fingerprint": "ae913c7f5ef6",
+      "title": "solace-client ignores two SDK catches over test cost; the sibling catch is tested with the same mock",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/services/solace-client.ts:102-117",
+        "src/core/services/solace-client.ts:264-280",
+        "src/core/services/solace-client.ts:245-252",
+        "tests/core/services/solace-client.test.ts:369-392"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0096",
+      "fingerprint": "056efb86027a",
+      "title": "solace-publisher safeSet catch is ignored but reachable; the comment is stale and test-report says the ignore is gone",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/services/solace-publisher.ts:110-129",
+        "src/core/services/solace-publisher.ts:154-156",
+        "tests/core/services/solace-publisher.test.ts:268-354",
+        "docs/test-report.md:886-907"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0097",
+      "fingerprint": "d0e4719b132e",
+      "title": "registry setup checks are ignored with an unsanctioned category but can be reached with vi.doMock",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "suspected",
+      "status": "open",
+      "locations": [
+        "src/registry.ts:27-58",
+        "tests/registry.test.ts:1-106",
+        "tests/main.test.ts:4-28",
+        "vitest.config.ts:11-13"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0098",
+      "fingerprint": "ea656f5671da",
+      "title": "main.ts readyState branch is dead in every build, not just untestable in jsdom",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/main.ts:21-28",
+        "src/index.html:279",
+        "CLAUDE.md:41",
+        "docs/contributing.md:378",
+        "docs/test-report.md:844-856",
+        "docs/test-report.md:917"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0099",
+      "fingerprint": "4d193543dbf3",
+      "title": "queue-picker post-loop supersession guards are reachable through its QueueSource input; the ignore comment is wrong",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/core/components/queue-picker/index.ts:169-201",
+        "src/core/components/queue-picker/index.ts:214-244",
+        "src/core/services/queue-source.ts:26-36",
+        "src/modules/queue-subscription-explorer/module.ts:159-168"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0100",
+      "fingerprint": "ed03067e4bfa",
+      "title": "ui-modal rAF guard is dead, and its ignore also hides the covered renderProgress call",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-copy/ui-modal.ts:355-372",
+        "tests/modules/queue-copy/ui-modal.test.ts:936-1030"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0101",
+      "fingerprint": "d365e955008a",
+      "title": "DOMParser try/catch: ignored in parse.ts, but service-verify's copies are kept green by impossible throwing-parser stubs",
+      "area": "quality",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-subscription-explorer/parse.ts:40-54",
+        "src/modules/queue-copy/service-verify.ts:252-259",
+        "src/modules/queue-copy/service-verify.ts:301-313",
+        "tests/modules/queue-copy/service-verify.test.ts:443-469",
+        "tests/modules/queue-copy/service-verify.test.ts:831-861"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0102",
+      "fingerprint": "dff1632263dc",
+      "title": "try/catch around SDK message getters that only read fields: ignored in one helper, tested with a throwing fake in its sibling",
+      "area": "quality",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-copy/service.ts:9-23",
+        "src/modules/queue-copy/service-verify.ts:501-511",
+        "tests/modules/queue-copy/service.test.ts:39-42",
+        "tests/modules/queue-copy/service-verify.test.ts:874-888"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0103",
+      "fingerprint": "ca009ebdd68a",
+      "title": "Dead fallbacks and presence guards on stored-message fields that ingest always sets",
+      "area": "quality",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-browser/state.js:128",
+        "src/modules/queue-browser/state.js:154",
+        "src/modules/queue-browser/state.js:179",
+        "src/modules/queue-browser/state.js:189",
+        "src/modules/queue-browser/ui-events.ts:19",
+        "src/modules/queue-browser/ui-details.ts:28",
+        "src/modules/queue-browser/ui-forward.js:109",
+        "src/modules/queue-copy/service-verify.ts:173",
+        "tests/modules/queue-browser/ui-events.test.ts:88-92",
+        "tests/modules/queue-browser/state.test.ts:306-344"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0104",
+      "fingerprint": "4a204ae02d35",
+      "title": "Kept ignores carry stale or inaccurate justification text",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "src/modules/queue-subscription-explorer/module.ts:159-168",
+        "src/core/services/solace-publisher.ts:274-284"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0105",
+      "fingerprint": "6aa31d801fe1",
+      "title": "tests/modules/queue-copy/ui-modal.test.ts: 6 weak tests -- destination-gate wiring never proves the run did not start; closed-modal tests assert a value they set",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-copy/ui-modal.test.ts:1293-1300",
+        "tests/modules/queue-copy/ui-modal.test.ts:248-267",
+        "tests/modules/queue-copy/ui-modal.test.ts:269-287",
+        "tests/modules/queue-copy/ui-modal.test.ts:1236-1248",
+        "tests/modules/queue-copy/ui-modal.test.ts:655-692",
+        "tests/modules/queue-copy/ui-modal.test.ts:223-246"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0106",
+      "fingerprint": "d79a6c3023f3",
+      "title": "tests/modules/queue-browser/ui-table.test.ts: 8 weak tests -- three have no expect; ZIP tests check that calls happened, not their arguments",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-browser/ui-table.test.ts:186-193",
+        "tests/modules/queue-browser/ui-table.test.ts:453-467",
+        "tests/modules/queue-browser/ui-table.test.ts:566-582",
+        "tests/modules/queue-browser/ui-table.test.ts:386-409",
+        "tests/modules/queue-browser/ui-table.test.ts:434-451",
+        "tests/modules/queue-browser/ui-table.test.ts:163-172",
+        "tests/modules/queue-browser/ui-table.test.ts:584-598",
+        "tests/modules/queue-browser/ui-table.test.ts:44-52"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0107",
+      "fingerprint": "b63ce22af934",
+      "title": "tests/modules/queue-browser/ui-details.test.ts: 10 weak or duplicate tests -- download and copy tests check calls only; 3 duplicate its",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-browser/ui-details.test.ts:44-65",
+        "tests/modules/queue-browser/ui-details.test.ts:70-85",
+        "tests/modules/queue-browser/ui-details.test.ts:187-191",
+        "tests/modules/queue-browser/ui-details.test.ts:315-346",
+        "tests/modules/queue-browser/ui-details.test.ts:348-352",
+        "tests/modules/queue-browser/ui-details.test.ts:640-676"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0108",
+      "fingerprint": "e1a4fc01fe00",
+      "title": "tests/modules/queue-browser/ui-events.test.ts: 12 weak or duplicate tests -- one no-expect, half-asserted titles, 5 duplicates, numeral substring alerts",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-browser/ui-events.test.ts:427-437",
+        "tests/modules/queue-browser/ui-events.test.ts:504-515",
+        "tests/modules/queue-browser/ui-events.test.ts:360-375",
+        "tests/modules/queue-browser/ui-events.test.ts:755-765",
+        "tests/modules/queue-browser/ui-events.test.ts:1027-1034",
+        "tests/modules/queue-browser/ui-events.test.ts:1001-1006",
+        "tests/modules/queue-browser/ui-events.test.ts:1038-1045",
+        "tests/modules/queue-browser/ui-events.test.ts:1115-1126",
+        "tests/modules/queue-browser/ui-events.test.ts:870-880",
+        "tests/modules/queue-browser/ui-events.test.ts:922-938",
+        "tests/modules/queue-browser/ui-events.test.ts:1049-1067",
+        "tests/modules/queue-browser/ui-events.test.ts:1130-1140",
+        "tests/modules/queue-browser/ui-events.test.ts:669-674",
+        "tests/modules/queue-browser/ui-events.test.ts:138-152"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0109",
+      "fingerprint": "c4ebfaefbd9e",
+      "title": "tests/modules/queue-browser/ui-core.test.ts: 6 ceremonial tests -- formatBytes/generateUuid re-test core aliases; cache test checks truthiness only",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-browser/ui-core.test.ts:36-46",
+        "tests/modules/queue-browser/ui-core.test.ts:79-109",
+        "tests/modules/queue-browser/ui-core.test.ts:210-214",
+        "tests/modules/queue-browser/ui-core.test.ts:154-170"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0110",
+      "fingerprint": "0cc2dd683db0",
+      "title": "tests/modules/queue-browser/module.test.ts: 7 weak tests -- 5 wiring tests with no expect, relying on a throw that click()/emit never surface",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-browser/module.test.ts:82-93",
+        "tests/modules/queue-browser/module.test.ts:320-333",
+        "tests/modules/queue-browser/module.test.ts:364-380",
+        "tests/modules/queue-browser/module.test.ts:677-688",
+        "tests/modules/queue-browser/module.test.ts:548-558",
+        "tests/modules/queue-browser/module.test.ts:49-58",
+        "tests/modules/queue-browser/module.test.ts:197"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0111",
+      "fingerprint": "20aef8c2aa68",
+      "title": "tests/modules/queue-browser/service-events.test.ts: 3 weak tests -- one no-expect, two check only that a warning was logged",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-browser/service-events.test.ts:671-682",
+        "tests/modules/queue-browser/service-events.test.ts:415-441"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0112",
+      "fingerprint": "cd64186e58b9",
+      "title": "tests/modules/queue-browser/no-payload.test.ts: 6 weak tests -- bare or default-state assertions on stateful flag-off handlers",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-browser/no-payload.test.ts:176-197",
+        "tests/modules/queue-browser/no-payload.test.ts:160-163",
+        "tests/modules/queue-browser/no-payload.test.ts:119-133",
+        "tests/modules/queue-browser/no-payload.test.ts:201-214"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0113",
+      "fingerprint": "fdb45b933d07",
+      "title": "tests/core/kernel.test.ts: 8 weak tests -- 2 with no expect, install-failure path checks only the log, 1 duplicate",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/core/kernel.test.ts:912-934",
+        "tests/core/kernel.test.ts:315-332",
+        "tests/core/kernel.test.ts:243-254",
+        "tests/core/kernel.test.ts:233-241",
+        "tests/core/kernel.test.ts:285-297",
+        "tests/core/kernel.test.ts:1048-1062",
+        "tests/core/kernel.test.ts:66"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0114",
+      "fingerprint": "7306eca86d96",
+      "title": "tests/core/event-bus.test.ts: 4 ceremonial tests -- type-guarantee check and 3 duplicates",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/core/event-bus.test.ts:5-10",
+        "tests/core/event-bus.test.ts:93-101",
+        "tests/core/event-bus.test.ts:103-118"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0115",
+      "fingerprint": "ca985bc15c38",
+      "title": "tests/core/utils.test.ts: 2 weak tests -- the regex-escaping test passes with escaping removed",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/core/utils.test.ts:58-61",
+        "tests/core/utils.test.ts:446-450"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0116",
+      "fingerprint": "786e4be6e85f",
+      "title": "tests/core/logger.test.ts: 2 weak assertions -- default-arg test passes either way; constant self-check",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/core/logger.test.ts:173-176",
+        "tests/core/logger.test.ts:31-34"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0117",
+      "fingerprint": "1298a0cbe12a",
+      "title": "tests/main.test.ts: 2 weak tests -- the deferred boot is not shown to wait for script load; limited mode not shown to start the kernel",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/main.test.ts:49-73",
+        "tests/main.test.ts:36-47"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0118",
+      "fingerprint": "a0b68b11c7bf",
+      "title": "tests/variants.test.ts: 1 weak test -- _active is not pinned to the standard variant",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/variants.test.ts:161-163"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0119",
+      "fingerprint": "49e22f1c1210",
+      "title": "tests/registry.test.ts: 1 duplicate test -- priority ordering re-tests the kernel sort",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/registry.test.ts:84-103"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0120",
+      "fingerprint": "883ea8ee31ae",
+      "title": "tests/modules/queue-copy/ui.test.ts: 4 weak tests -- toBeDefined on required() elements and loose byte/count matches",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-copy/ui.test.ts:55-74",
+        "tests/modules/queue-copy/ui.test.ts:424-429",
+        "tests/modules/queue-copy/ui.test.ts:449-460",
+        "tests/modules/queue-copy/ui.test.ts:489-494"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0121",
+      "fingerprint": "ff841c1888db",
+      "title": "tests/modules/queue-copy/service-copy.test.ts: 2 weak tests and dead code -- a title claims a lastError guarantee nothing asserts",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-copy/service-copy.test.ts:1018-1057",
+        "tests/modules/queue-copy/service-copy.test.ts:993-1016",
+        "tests/modules/queue-copy/service-copy.test.ts:477"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0122",
+      "fingerprint": "bbbe5359446f",
+      "title": "tests/modules/queue-copy/ui-events.test.ts: 2 weak tests -- the dest picker's queue source is never checked",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-copy/ui-events.test.ts:304-326"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0123",
+      "fingerprint": "de362b81240f",
+      "title": "tests/modules/connections/ui.test.ts: 6 weak or duplicate tests -- a phantom-fallback test, missing precondition, 3 duplicates",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/connections/ui.test.ts:44-49",
+        "tests/modules/connections/ui.test.ts:65-72",
+        "tests/modules/connections/ui.test.ts:257-270",
+        "tests/modules/connections/ui.test.ts:292-305"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0124",
+      "fingerprint": "867f9400df0f",
+      "title": "tests/modules/connections/module.test.ts: 8 weak tests -- 2 no-expect, 2 vacuous bus no-throw checks, call-only connect/save checks",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/connections/module.test.ts:926-941",
+        "tests/modules/connections/module.test.ts:776-784",
+        "tests/modules/connections/module.test.ts:1691-1703",
+        "tests/modules/connections/module.test.ts:1030-1049",
+        "tests/modules/connections/module.test.ts:571-585",
+        "tests/modules/connections/module.test.ts:109-128",
+        "tests/modules/connections/module.test.ts:691-697",
+        "tests/modules/connections/module.test.ts:256-271",
+        "tests/modules/connections/module.test.ts:153"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0125",
+      "fingerprint": "a49a094f02fd",
+      "title": "tests/modules/connections/managed-panel.test.ts: 3 weak tests -- entitlement-wrap tests run under operate '*', so name resolution is never tested",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/connections/managed-panel.test.ts:654-665",
+        "tests/modules/connections/managed-panel.test.ts:634-640"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0126",
+      "fingerprint": "ea49f0ea11c2",
+      "title": "tests/core/components/queue-picker/picker.test.ts: 1 vacuous guard test -- not.toThrow around dispatchEvent cannot fail",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/core/components/queue-picker/picker.test.ts:1498-1535",
+        "tests/core/components/queue-picker/picker.test.ts:686",
+        "tests/core/components/queue-picker/picker.test.ts:717"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0127",
+      "fingerprint": "50b1d66771f8",
+      "title": "tests/modules/queue-discovery/module.test.ts: 7 weak tests -- 5 have no expect; the copy-button test ignores the payload",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-discovery/module.test.ts:188-197",
+        "tests/modules/queue-discovery/module.test.ts:295-328",
+        "tests/modules/queue-discovery/module.test.ts:377-397",
+        "tests/modules/queue-discovery/module.test.ts:471-486",
+        "tests/modules/queue-discovery/module.test.ts:330-361"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0128",
+      "fingerprint": "d893f5d9f4e2",
+      "title": "tests/modules/user-management/module.test.ts: 2 weak tests -- reload paths check that the list was fetched, not re-rendered",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/user-management/module.test.ts:114-119",
+        "tests/modules/user-management/module.test.ts:149-154"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0129",
+      "fingerprint": "2b351143b452",
+      "title": "tests/integration/message-pipeline.test.ts: 2 weak tests -- one checks only that assigning a variable does not re-render; one cannot see the filter",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/integration/message-pipeline.test.ts:127-141",
+        "tests/integration/message-pipeline.test.ts:156-167"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0130",
+      "fingerprint": "e304fee06cd2",
+      "title": "tests/integration/full-flow.test.ts: 1 ceremonial test -- asserts event delivery only",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/integration/full-flow.test.ts:86-113"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0131",
+      "fingerprint": "86076943f7a4",
+      "title": "tests/modules/queue-subscription-explorer/module.test.ts: 1 weak test -- its wait does not gate on the late page, so the no-clobber checks run too early",
+      "area": "tests",
+      "severity": "minor",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/queue-subscription-explorer/module.test.ts:449-499"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0132",
+      "fingerprint": "aca3791d220d",
+      "title": "tests/core/services/solace-publisher.test.ts: 2 weak tests -- binary payload not checked; correlation-before-beforeSend order not proven",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/core/services/solace-publisher.test.ts:321-338",
+        "tests/core/services/solace-publisher.test.ts:128-144"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0133",
+      "fingerprint": "d70518a38664",
+      "title": "tests/core/services/solace-client.test.ts: 1 weak test -- the factory init profile is never checked",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/core/services/solace-client.test.ts:53-57"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0134",
+      "fingerprint": "aece3dc3083b",
+      "title": "tests/modules/connections/config.test.ts: 1 test's comment claims silence it does not assert",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/modules/connections/config.test.ts:69-77"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    },
+    {
+      "id": "CR-0135",
+      "fingerprint": "7131621a8c47",
+      "title": "tests/mock-broker/sdk.test.ts: 1 ceremonial test -- 'above the shell floor' compares a literal with itself",
+      "area": "tests",
+      "severity": "nit",
+      "confidence": "verified",
+      "status": "open",
+      "locations": [
+        "tests/mock-broker/sdk.test.ts:300-302"
+      ],
+      "first_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "last_seen": {
+        "date": "2026-11-10",
+        "commit": "d2751b1"
+      },
+      "resolved": null,
+      "history": [],
+      "notes": ""
+    }
+  ]
+}

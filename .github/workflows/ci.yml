@@ -15,14 +15,16 @@ on:
   workflow_dispatch:
   # Deliberately narrow. Nothing runs on a normal push or PR, but a PR that
   # touches CI config gets the full gate -- which is what validates Dependabot's
-  # action bumps. Without this they would merge with zero verification, since
-  # everything else only runs on a tag.
+  # action bumps, and its builder-image digest bumps in docker/Dockerfile.
+  # Without this they would merge with zero verification, since everything
+  # else only runs on a tag.
   pull_request:
     paths:
       - ".github/workflows/**"
       - ".github/dependabot.yml"
       - "scripts/dev.sh"
       - "scripts/dev.ps1"
+      - "docker/Dockerfile"
 
 permissions:
   contents: read
@@ -68,14 +70,17 @@ jobs:
 
       # A task that does not fit the stack warns and skips, so this line is
       # the same whether the project is compiled, interpreted, or mixed.
+      # `cov` is here so the coverage thresholds gate every release, not only
+      # a local sweep; with cov queued, `test` and `mock` leave the web suites
+      # to it, so they still run once.
       - name: Gates (POSIX)
         if: runner.os != 'Windows'
-        run: ./scripts/dev.sh all scan
+        run: ./scripts/dev.sh all cov scan
 
       - name: Gates (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/dev.ps1 all scan
+        run: ./scripts/dev.ps1 all cov scan
 
       # Same log files the dev scripts write locally -- your evidence when a
       # tag fails and no release appears.

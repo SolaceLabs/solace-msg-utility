@@ -33,6 +33,8 @@ vi.mock('../../src/core/toast', () => ({ showToast }));
 // Import AFTER the mocks are registered.
 import { AdminLoginModule } from '../../src/modules/admin-login/module';
 import { UserManagementModule } from '../../src/modules/user-management/module';
+import { completeContext } from '../helpers/appContext';
+import { answerConfirm } from '../helpers/confirmDialog';
 
 const USERS = [
     { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null },
@@ -61,11 +63,11 @@ async function installAdminApp(list: unknown = { ok: true, data: { users: USERS,
         selectedVpn: null, solaceConnection: null, sempCredentials: null, managed: null,
     };
     const managedProfile = createManagedProfile();
-    const ctxFor = (container: HTMLElement): AppContext => ({
+    const ctxFor = (container: HTMLElement): AppContext => (completeContext({
         container, appState, eventBus, managedProfile,
         setState: (k, v) => { (appState as any)[k] = v; eventBus.emit('app:state-change', { key: k, value: v }); },
         loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(), config: {},
-    });
+    }));
     const login = loadModuleDOM('admin-login');
     const users = loadModuleDOM('user-management');
     const loginCtx = ctxFor(login);
@@ -134,6 +136,7 @@ describe('integration — admin app session lifecycle', () => {
         umSvc.deleteUser.mockResolvedValue({ ok: true });
 
         rowButton(app.users, 0, '.user-mgmt-delete').click();
+        await answerConfirm(true);
         await vi.waitFor(() => expect(app.appState.managed).toBeNull());
 
         expectSignedOut(app);

@@ -11,6 +11,7 @@ import {
     sealedHeaderProblem, sessionCookieProblems, sweepSecrets,
 } from '../../scripts/e2e-lib.mjs';
 import { REPO_ROOT } from '../helpers/sources';
+import { WIDENING, securityOpt, serviceBlock } from '../helpers/compose';
 
 // The gateway's own Set-Cookie for a sign-in (go-web-proxy/session.go).
 const GATEWAY_COOKIE = `${SESSION_COOKIE}=c2Vzc2lvbi12YWx1ZQ; Path=/; HttpOnly; Secure; SameSite=Lax`;
@@ -103,6 +104,12 @@ describe('e2e-lib -- host roots', () => {
         const bundles: Record<string, string> = { [HOST_ROOT_FILES[1]]: rhel, [HOST_ROOT_FILES[5]]: roots[0] };
         expect(hostRootBundle((file: string) => bundles[file] ?? null, tls.rootCertificates))
             .toEqual({ from: '/etc/pki/tls/certs/ca-bundle.crt', text: rhel, count: 3 });
+    });
+
+    // Go loads an empty bundle file too, and then trusts no root from it.
+    it('takes a bundle file that holds no certificate, counting none', () => {
+        expect(hostRootBundle((file: string) => (file === HOST_ROOT_FILES[0] ? '' : null), roots))
+            .toEqual({ from: HOST_ROOT_FILES[0], text: '', count: 0 });
     });
 
     it("falls back to Node's bundled roots on a host with no bundle, as on Windows", () => {
@@ -245,7 +252,7 @@ describe('e2e stack -- broker verification', () => {
 // Docker.
 describe('e2e stack -- browser', () => {
     const read = (rel: string) => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf-8');
-    const block = read('docker/docker-compose.e2e.yaml').match(/^ {2}browser:\n((?: {4}.*\n|\n)*)/m)?.[1] ?? '';
+    const block = serviceBlock(read('docker/docker-compose.e2e.yaml'), 'browser');
     const count = (text: string, part: string) => text.split(part).length - 1;
 
     it('runs locked down: non-root, read-only, no capability or new privilege, one client, its port on loopback', () => {
@@ -255,7 +262,8 @@ describe('e2e stack -- browser', () => {
             '    security_opt:\n      - no-new-privileges:true', '    tmpfs:\n      - /tmp',
             '      - ../node_modules/playwright-core:/pw:ro', '"--max-clients", "1"', '      - "127.0.0.1:39444:3000"',
         ]) expect(count(block, line), line).toBe(1);
-        expect(block).not.toMatch(/^ {4}(?:ipc|pid|network_mode|cap_add|devices|privileged: true)\b/m);
+        expect(block).not.toMatch(WIDENING);
+        expect(securityOpt(block), 'security_opt holds no-new-privileges and nothing else').toBe('      - no-new-privileges:true\n');
         expect(block).not.toContain('--unsafe');
     });
 
@@ -286,7 +294,7 @@ describe('e2e stack -- browser', () => {
 // mode's settings, secrets and data, are held here.
 describe('e2e stack -- Gateway mode', () => {
     const text = fs.readFileSync(path.join(REPO_ROOT, 'docker/docker-compose.e2e.yaml'), 'utf-8');
-    const block = (name: string) => text.match(new RegExp(`^ {2}${name}:\\n((?: {4}.*\\n|\\n)*)`, 'm'))?.[1] ?? '';
+    const block = (name: string) => serviceBlock(text, name);
     const count = (t: string, part: string) => t.split(part).length - 1;
     const direct = block('direct');
 
@@ -296,7 +304,8 @@ describe('e2e stack -- Gateway mode', () => {
             '    user: "65532:65532"', '    privileged: false', '    read_only: true', '    cap_drop:\n      - ALL',
             '    security_opt:\n      - no-new-privileges:true', '    pull_policy: never', '      - "127.0.0.1:39445:9443"',
         ]) expect(count(direct, line), line).toBe(1);
-        expect(direct).not.toMatch(/^ {4}(?:ipc|pid|network_mode|cap_add|devices|privileged: true|userns_mode)\b/m);
+        expect(direct).not.toMatch(WIDENING);
+        expect(securityOpt(direct), 'security_opt holds no-new-privileges and nothing else').toBe('      - no-new-privileges:true\n');
     });
 
     it("runs the gateway's image in Gateway mode, on its own volume, with none of Provisioned mode's settings or secrets", () => {

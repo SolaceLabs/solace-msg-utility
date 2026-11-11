@@ -1,0 +1,17 @@
+/* Confirm dialog (src/core/components/confirm-dialog): a short question and
+ * its two buttons, on the shared <dialog> styles from components.css. */
+
+.confirm-dialog {
+    max-width: 440px;
+}
+
+.confirm-dialog-message {
+    margin: 0 0 1.25rem;
+    line-height: 1.5;
+}
+
+.confirm-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}

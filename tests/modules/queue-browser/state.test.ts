@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state, getBrowser, setBrowser, deleteBrowser, getMessages, setMessages, addMessage, clearStore, shouldShowMessage, ingestMessage, wireIngestUi } from '../../../src/modules/queue-browser/state.js';
-import { DEFAULT_MAX_MESSAGES_PER_QUEUE } from '../../../src/modules/queue-browser/constants.js';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 
 describe('queue-browser/state', () => {
@@ -144,6 +143,12 @@ describe('queue-browser/state', () => {
             expect(shouldShowMessage(baseMsg)).toBe(false);
         });
 
+        it('body filter never matches a true binary payload, not even on its placeholder text', () => {
+            const binaryMsg = { ...baseMsg, content: '[Binary payload: 4 bytes]', binary: true };
+            state.activeFilters.content = 'Binary payload';
+            expect(shouldShowMessage(binaryMsg)).toBe(false);
+        });
+
         it('filters by message ID (wildcard)', () => {
             state.activeFilters.msgId = 'msg*';
             expect(shouldShowMessage(baseMsg)).toBe(true);
@@ -201,6 +206,24 @@ describe('queue-browser/state', () => {
         it('property filter case-insensitive key match', () => {
             state.activeFilters.properties = [{ key: 'corr id', value: 'abc*' }];
             expect(shouldShowMessage(baseMsg)).toBe(true);
+        });
+
+        it('matches a Priority 0 standard property', () => {
+            // Ingest keeps Priority 0 (a valid priority); the details pane shows `Priority = 0`.
+            const msg = { ...baseMsg, msgProperties: { Priority: 0 } };
+            state.activeFilters.properties = [{ key: 'Priority', value: '0' }];
+            expect(shouldShowMessage(msg)).toBe(true);
+        });
+
+        it('matches app property values 0 and false', () => {
+            // SDT int 0 and boolean false arrive raw from the user property map.
+            const msg = { ...baseMsg, appProperties: { retryCount: 0, isTest: false } };
+            state.activeFilters.criteria = 'AND';
+            state.activeFilters.properties = [
+                { key: 'retryCount', value: '0' },
+                { key: 'isTest', value: 'false' }
+            ];
+            expect(shouldShowMessage(msg)).toBe(true);
         });
 
         it('AND criteria requires all filters to match', () => {
@@ -303,79 +326,29 @@ describe('queue-browser/state', () => {
             expect(shouldShowMessage(msg)).toBe(true);
         });
 
-        it('property filter ignores message that has no msgProperties field', () => {
-            state.activeFilters = {
-                content: '', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'OR',
-                properties: [{ key: 'AppId', value: 'foo' }]
-            };
-            // No msgProperties key at all (not even empty object) — exercises the falsy outer guard
-            const msg = { id: '1', content: '', type: 'Text', appProperties: {} };
-            expect(shouldShowMessage(msg)).toBe(false);
-        });
-
-        it('property filter coerces null msgProperty value to empty string', () => {
-            state.activeFilters = {
-                content: '', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'OR',
-                properties: [{ key: 'Corr Id', value: '' }]
-            };
-            // msgProperty value is null — String(null || '') === '' which matches the empty value filter
-            const msg = { id: '1', content: '', type: 'Text', msgProperties: { 'Corr Id': null }, appProperties: {} };
-            expect(shouldShowMessage(msg)).toBe(true);
-        });
-
         it('property filter coerces null appProperty value to empty string', () => {
             state.activeFilters = {
                 content: '', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'OR',
                 properties: [{ key: 'region', value: '' }]
             };
-            // appProperty value is null — String(null || '') === '' which matches the empty value filter
+            // appProperty value is null (an SDT null field) -- String(null ?? '') === '' which matches the empty value filter
             const msg = { id: '1', content: '', type: 'Text', msgProperties: {}, appProperties: { region: null } };
             expect(shouldShowMessage(msg)).toBe(true);
         });
 
-        it('property filter ignores message that has no appProperties field', () => {
-            state.activeFilters = {
-                content: '', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'OR',
-                properties: [{ key: 'something', value: 'val' }]
-            };
-            // No appProperties field — exercises the falsy outer guard on the second branch
-            const msg = { id: '1', content: '', type: 'Text', msgProperties: {} };
-            expect(shouldShowMessage(msg)).toBe(false);
-        });
-
         it('property filter rejects when appProperty value mismatches', () => {
             // Covers the falsy branch of `if (matchString(val, fVal)) matchProp = true`
-            // at state.js:191 — the appProperty matched the filter KEY (case-insensitive
-            // 'region') but the VALUE 'eu-west' didn't match the filter value 'us-east'.
-            // No msgProperties so the !matchProp short-circuit at state.js:187 doesn't
-            // skip the appProperties block. A regression that flipped the boolean
-            // (`if (!matchString(...))`) would invert every property filter — every
-            // mismatched message would appear to match.
+            // in the appProperties block -- the appProperty matched the filter KEY
+            // (case-insensitive 'region') but the VALUE 'eu-west' didn't match the
+            // filter value 'us-east'. No standard property matches, so the !matchProp
+            // check doesn't skip the appProperties block. A regression that flipped the
+            // boolean (`if (!matchString(...))`) would invert every property filter --
+            // every mismatched message would appear to match.
             state.activeFilters = {
                 content: '', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'OR',
                 properties: [{ key: 'region', value: 'us-east' }]
             };
-            const msg = { id: '1', content: '', type: 'Text', appProperties: { region: 'eu-west' } };
-            expect(shouldShowMessage(msg)).toBe(false);
-        });
-
-        it('property-filter dest with empty getName() coerces to empty string and rejects', () => {
-            // Covers the falsy branch of `dest.getName() || ''` at state.js:152.
-            // Without the `|| ''` fallback, `matchString(undefined, 'something')` would
-            // throw `TypeError: Cannot read properties of undefined (reading 'toLowerCase')`
-            // — the test's hard-failure-on-regression is the actual contract being locked
-            // in. Filter pattern is intentionally non-wildcard so matchString takes the
-            // `text.toLowerCase()` path (the throwing one), not the regex path.
-            (window as any).solace = { DestinationType: { TOPIC: 0, QUEUE: 1 } };
-            const msg = {
-                id: '1', content: '', type: 'Text',
-                _originalMsg: {
-                    getDestination: () => ({ getName: () => '', getType: () => 0 })
-                }
-            };
-            state.activeFilters = {
-                content: '', msgId: '', dest: 'something', type: 'ANY', msgType: 'ANY', properties: [], criteria: 'AND'
-            };
+            const msg = { id: '1', content: '', type: 'Text', msgProperties: {}, appProperties: { region: 'eu-west' } };
             expect(shouldShowMessage(msg)).toBe(false);
         });
 

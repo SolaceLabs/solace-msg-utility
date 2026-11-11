@@ -1,5 +1,4 @@
-export const DEFAULT_MAX_MESSAGES_PER_QUEUE = 100;
-export const MAX_MESSAGES_PER_QUEUE_LIMIT = 10000;
+export { DEFAULT_MAX_MESSAGES_PER_QUEUE } from '../../core/connections/defaults';
 
 // Max concurrent queue bindings. Enforced by service.createBrowser and its mock sibling.
 export const MAX_BROWSER_BINDINGS = 3;

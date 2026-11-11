@@ -150,6 +150,32 @@ describe('logger', () => {
         });
     });
 
+    describe('withTag', () => {
+        it('prefixes a text first argument with [tag] and keeps the rest', () => {
+            const err = new Error('boom');
+            const log = logger.withTag('Connections');
+            log.warn('VPN "v1" switch timed out', err);
+            log.error('failed');
+            expect(warnSpy).toHaveBeenCalledWith('[Connections] VPN "v1" switch timed out', err);
+            expect(errorSpy).toHaveBeenCalledWith('[Connections] failed');
+        });
+
+        it('puts [tag] first when the first argument is not text', () => {
+            const payload = { vpn: 'v1' };
+            logger.withTag('semp-client').info(payload);
+            expect(infoSpy).toHaveBeenCalledWith('[semp-client]', payload);
+        });
+
+        it('follows the shared level filter', () => {
+            const log = logger.withTag('t');
+            log.debug('hidden at INFO');
+            expect(debugSpy).not.toHaveBeenCalled();
+            setLogLevel(LogLevel.DEBUG);
+            log.debug('shown');
+            expect(debugSpy).toHaveBeenCalledWith('[t] shown');
+        });
+    });
+
     describe('readLogLevelFromUrl', () => {
         it('parses a valid ?logLevel param', () => {
             expect(readLogLevelFromUrl('?logLevel=DEBUG')).toBe(LogLevel.DEBUG);

@@ -5,6 +5,7 @@
       "steps": [
         {
           "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,
+          "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": {
             "username": "admin", "admin": true,
             "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }],
@@ -321,18 +322,18 @@
             "connections": [
               {
                 "broker": "b1", "hostname": "host1",
-                "semp": { "port": "1943", "user": "mon", "pass": "" },
-                "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }
+                "semp": { "scheme": "https", "port": "1943", "user": "mon", "pass": "" },
+                "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }
               },
               {
                 "broker": "b2", "hostname": "host2",
-                "semp": { "port": "1943", "user": "mon", "pass": "" },
-                "client": { "port": "1443", "msgVpns": [{ "name": "v9", "user": "u9", "pass": "" }] }
+                "semp": { "scheme": "http", "port": "1943", "user": "mon", "pass": "" },
+                "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v9", "user": "u9", "pass": "" }] }
               },
               {
                 "broker": "b3", "hostname": "host3",
-                "semp": { "port": "", "user": "", "pass": "" },
-                "client": { "port": "1443", "msgVpns": [{ "name": "v3", "user": "u3", "pass": "" }] }
+                "semp": { "scheme": "https", "port": "", "user": "", "pass": "" },
+                "client": { "scheme": "ws", "port": "1443", "msgVpns": [{ "name": "v3", "user": "u3", "pass": "" }] }
               }
             ]
           }
@@ -376,6 +377,16 @@
           "as": "admin", "method": "PUT", "path": "/managed/connections/bad%20broker",
           "body": { "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"bad broker\" must be 1 to 64 characters from A-Z a-z 0-9 . _ -, not only dots" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "hostname": "host4", "semp": { "scheme": "ftp", "port": "21", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": semp.scheme \"ftp\" must be \"https\" or \"http\"" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "scheme": "https", "port": "1443", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": client.scheme \"https\" must be \"wss\" or \"ws\"" }
         },
         { "as": "admin", "method": "DELETE", "path": "/managed/connections/ghost", "status": 404, "response": { "error": "not_found" } }
       ]
@@ -1199,11 +1210,13 @@
                 "broker": "b1",
                 "hostname": "host1",
                 "semp": {
+                  "scheme": "https",
                   "port": "1943",
                   "user": "mon",
                   "pass": ""
                 },
                 "client": {
+                  "scheme": "wss",
                   "port": "1443",
                   "msgVpns": [
                     {
@@ -1223,11 +1236,13 @@
                 "broker": "b2",
                 "hostname": "host2-dr",
                 "semp": {
+                  "scheme": "https",
                   "port": "1943",
                   "user": "mon",
                   "pass": ""
                 },
                 "client": {
+                  "scheme": "wss",
                   "port": "1443",
                   "msgVpns": [
                     {
@@ -1242,11 +1257,13 @@
                 "broker": "b4",
                 "hostname": "host4",
                 "semp": {
+                  "scheme": "https",
                   "port": "",
                   "user": "",
                   "pass": ""
                 },
                 "client": {
+                  "scheme": "wss",
                   "port": "1443",
                   "msgVpns": [
                     {
@@ -1398,6 +1415,149 @@
             "error": "unauthenticated"
           }
         }
+      ]
+    },
+    {
+      "name": "relay: a broker's answer passes through with the allowed headers only",
+      "steps": [
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/relay/b1/SEMP/v2/monitor/msgVpns?count=10",
+          "upstream": {
+            "url": "https://host1:1943/SEMP/v2/monitor/msgVpns?count=10",
+            "status": 200,
+            "headers": { "Content-Type": "application/json", "ETag": "\"e1\"", "Set-Cookie": "broker=1", "Last-Modified": "Mon, 09 Nov 2026 02:00:00 GMT" },
+            "body": "{\"data\":[{\"msgVpnName\":\"v1\"}],\"meta\":{\"responseCode\":200}}"
+          },
+          "status": 200,
+          "headers": {
+            "Content-Type": "application/json", "Cache-Control": "no-store", "Last-Modified": "Mon, 09 Nov 2026 02:00:00 GMT",
+            "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox", "ETag": "", "Set-Cookie": ""
+          },
+          "response": { "data": [{ "msgVpnName": "v1" }], "meta": { "responseCode": 200 } }
+        },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/relay/b1/SEMP/v2/monitor/about",
+          "upstream": {
+            "url": "https://host1:1943/SEMP/v2/monitor/about",
+            "status": 500,
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"meta\":{\"responseCode\":500}}"
+          },
+          "status": 500, "headers": { "Content-Type": "application/json" },
+          "response": { "meta": { "responseCode": 500 } }
+        },
+        {
+          "as": "operator", "method": "GET", "path": "/managed/relay/b2/SEMP/v2/monitor/msgVpns",
+          "upstream": {
+            "url": "http://host2:1943/SEMP/v2/monitor/msgVpns",
+            "status": 200,
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"data\":[],\"meta\":{\"responseCode\":200}}"
+          },
+          "status": 200, "response": { "data": [], "meta": { "responseCode": 200 } }
+        },
+        {
+          "as": "viewer", "method": "POST", "path": "/managed/relay/b1/SEMP",
+          "raw": "<rpc><show><queue><name>q</name></queue></show></rpc>",
+          "upstream": { "url": "https://host1:1943/SEMP", "status": 204 },
+          "status": 204, "headers": { "Content-Type": "" }, "response": null
+        }
+      ]
+    },
+    {
+      "name": "relay: a broker the gateway cannot use is a 502, whatever it says",
+      "steps": [
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/relay/b1/SEMP/v2/monitor/about",
+          "upstream": { "url": "https://host1:1943/SEMP/v2/monitor/about", "error": "dial tcp: connection refused" },
+          "status": 502, "response": { "error": "upstream_unavailable" }
+        },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/relay/b1/SEMP/v2/monitor/about",
+          "upstream": { "url": "https://host1:1943/SEMP/v2/monitor/about", "status": 302, "headers": { "Location": "https://elsewhere.invalid/" } },
+          "status": 502, "headers": { "Location": "" }, "response": { "error": "upstream_unavailable" }
+        },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/relay/b1/SEMP/v2/monitor/about",
+          "upstream": { "url": "https://host1:1943/SEMP/v2/monitor/about", "status": 401, "headers": { "WWW-Authenticate": "Basic realm=\"semp\"" } },
+          "status": 502, "headers": { "WWW-Authenticate": "" }, "response": { "error": "upstream_auth" }
+        },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/relay/b1/SEMP/v2/monitor/about",
+          "upstream": { "url": "https://host1:1943/SEMP/v2/monitor/about", "status": 407 },
+          "status": 502, "response": { "error": "upstream_auth" }
+        },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/relay/b1/SEMP/v2/monitor/about",
+          "upstream": { "url": "https://host1:1943/SEMP/v2/monitor/about", "status": 101, "headers": { "Upgrade": "websocket" } },
+          "status": 502, "headers": { "Upgrade": "" }, "response": { "error": "upstream_unavailable" }
+        }
+      ]
+    },
+    {
+      "name": "dial: a connection on a plain scheme dials like any other",
+      "steps": [
+        {
+          "as": "admin", "method": "POST", "path": "/managed/dial", "body": { "broker": "b3", "vpn": "v3" }, "status": 200,
+          "response": { "smfPath": "/managed/smf/b3/v3", "vpn": "v3", "user": "u3", "pass": "cli-b3v3-pw" }
+        }
+      ]
+    },
+    {
+      "name": "connections: a plain scheme is kept, and TLS is the default",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "hostname": "host4", "semp": { "scheme": "http", "port": "8080", "user": "mon", "pass": "p" }, "client": { "scheme": "ws", "port": "8008", "msgVpns": [{ "name": "v4", "user": "u4", "pass": "p4" }] } },
+          "status": 204, "response": null
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b5",
+          "body": { "hostname": "host5", "semp": { "scheme": "https", "port": "1943", "user": "", "pass": "" }, "client": { "port": "1443", "msgVpns": [] } },
+          "status": 204, "response": null
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/connections", "status": 200,
+          "response": {
+            "connections": [
+              {
+                "broker": "b1", "hostname": "host1",
+                "semp": { "scheme": "https", "port": "1943", "user": "mon", "pass": "" },
+                "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }
+              },
+              {
+                "broker": "b2", "hostname": "host2",
+                "semp": { "scheme": "http", "port": "1943", "user": "mon", "pass": "" },
+                "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v9", "user": "u9", "pass": "" }] }
+              },
+              {
+                "broker": "b3", "hostname": "host3",
+                "semp": { "scheme": "https", "port": "", "user": "", "pass": "" },
+                "client": { "scheme": "ws", "port": "1443", "msgVpns": [{ "name": "v3", "user": "u3", "pass": "" }] }
+              },
+              {
+                "broker": "b4", "hostname": "host4",
+                "semp": { "scheme": "http", "port": "8080", "user": "mon", "pass": "" },
+                "client": { "scheme": "ws", "port": "8008", "msgVpns": [{ "name": "v4", "user": "u4", "pass": "" }] }
+              },
+              {
+                "broker": "b5", "hostname": "host5",
+                "semp": { "scheme": "https", "port": "1943", "user": "", "pass": "" },
+                "client": { "scheme": "wss", "port": "1443", "msgVpns": [] }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "client: an administrator sees the address the gateway took the browser for",
+      "steps": [
+        {
+          "as": "admin", "method": "GET", "path": "/managed/client", "status": 200,
+          "response": { "address": "192.0.2.10", "peer": "192.0.2.10", "viaProxy": false }
+        },
+        { "as": "viewer", "method": "GET", "path": "/managed/client", "status": 403, "response": { "error": "forbidden" } }
       ]
     }
   ]

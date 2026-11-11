@@ -47,13 +47,13 @@ func (h *managedHandler) registerBackupRoutes(mux *http.ServeMux) {
 
 // writeBackupProblem answers a *backupProblem as a 422; anything else is a
 // server error.
-func (h *managedHandler) writeBackupProblem(w http.ResponseWriter, op string, err error) {
+func (h *managedHandler) writeBackupProblem(w http.ResponseWriter, r *http.Request, op string, err error) {
 	var p *backupProblem
 	if errors.As(err, &p) {
 		writeInvalid(w, p.field, p.reason)
 		return
 	}
-	h.serverError(w, op, err)
+	h.serverError(w, r, op, err)
 }
 
 // ----- status and schedule ----------------------------------------------------------
@@ -107,9 +107,9 @@ func (h *managedHandler) downloadBackup(w http.ResponseWriter, r *http.Request) 
 	case errors.Is(err, fs.ErrNotExist):
 		writeError(w, http.StatusNotFound, "not_found")
 	case err != nil:
-		h.writeBackupProblem(w, "downloadBackup", err)
+		h.writeBackupProblem(w, r, "downloadBackup", err)
 	default:
-		h.logger.Warn("backup downloaded", "by", sessionOf(r).user, "file", name)
+		h.log(r).Info("backup downloaded", "file", name)
 		writeJSON(w, http.StatusOK, map[string]string{"filename": name, "content": string(data)})
 	}
 }
@@ -134,10 +134,10 @@ func (h *managedHandler) saveBackupSchedule(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := h.backups.setSchedule(r.Context(), body.backupSchedule, body.Keep, body.Passphrase); err != nil {
-		h.writeBackupProblem(w, "saveBackupSchedule", err)
+		h.writeBackupProblem(w, r, "saveBackupSchedule", err)
 		return
 	}
-	h.logger.Warn("backup schedule saved", "by", sessionOf(r).user, "kind", body.Kind, "keep", body.Keep, "new_passphrase", body.Passphrase != "")
+	h.log(r).Info("backup schedule saved", "kind", body.Kind, "keep", body.Keep, "new_passphrase", body.Passphrase != "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -145,11 +145,11 @@ func (h *managedHandler) deleteBackupSchedule(w http.ResponseWriter, r *http.Req
 	found, err := h.backups.removeSchedule()
 	switch {
 	case err != nil:
-		h.serverError(w, "deleteBackupSchedule", err)
+		h.serverError(w, r, "deleteBackupSchedule", err)
 	case !found:
 		writeError(w, http.StatusNotFound, "not_found")
 	default:
-		h.logger.Warn("backup schedule removed", "by", sessionOf(r).user)
+		h.log(r).Info("backup schedule removed")
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -164,7 +164,7 @@ func (h *managedHandler) runBackup(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeJSON(w, http.StatusConflict, apiError{Error: "backup_unavailable", Reason: err.Error()})
 	default:
-		h.logger.Warn("backup run by an administrator", "by", sessionOf(r).user, "file", name)
+		h.log(r).Info("backup run by an administrator", "file", name)
 		writeJSON(w, http.StatusOK, map[string]string{"file": name})
 	}
 }
@@ -180,15 +180,15 @@ func (h *managedHandler) exportBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	k, err := newBackupKey(r.Context(), h.backups.hasher, body.Passphrase)
 	if err != nil {
-		h.writeBackupProblem(w, "exportBackup", err)
+		h.writeBackupProblem(w, r, "exportBackup", err)
 		return
 	}
 	data, err := sealBackup(k, h.backups.snapshot())
 	if err != nil {
-		h.serverError(w, "exportBackup", err)
+		h.serverError(w, r, "exportBackup", err)
 		return
 	}
-	h.logger.Warn("configuration exported", "by", sessionOf(r).user)
+	h.log(r).Info("configuration exported")
 	writeJSON(w, http.StatusOK, map[string]string{"filename": backupName(h.backups.now()), "content": string(data)})
 }
 
@@ -215,14 +215,14 @@ func (h *managedHandler) openSource(w http.ResponseWriter, r *http.Request, src 
 			if errors.Is(err, fs.ErrNotExist) {
 				writeInvalid(w, "backup", "There is no backup named "+strconv.Quote(src.Backup)+".")
 			} else {
-				h.writeBackupProblem(w, "readBackup", err)
+				h.writeBackupProblem(w, r, "readBackup", err)
 			}
 			return backupDoc{}, false
 		}
 	}
 	doc, err := openBackup(r.Context(), h.backups.hasher, data, src.Passphrase)
 	if err != nil {
-		h.writeBackupProblem(w, "openBackup", err)
+		h.writeBackupProblem(w, r, "openBackup", err)
 		return backupDoc{}, false
 	}
 	return doc, true
@@ -283,10 +283,13 @@ type importResultJSON struct {
 }
 
 // importBackup applies the chosen sections. Everything is validated before
-// anything is written; the writes then go users, connections, settings, each
-// file atomic. Refusals: 422 invalid (a choice, the file, the passphrase, or
-// records the gateway would not load), 409 last_admin (no administrator
-// would remain), and checkSettings' refusals for the settings.
+// anything is written; the files (config.yaml, users, connections) are then
+// staged and renamed together (fileTx), and memory and the live settings
+// change only after all of them are in place: a failed write leaves the
+// deployment exactly as it was, and the 500 means nothing was imported.
+// Refusals: 422 invalid (a choice, the file, the passphrase, or records the
+// gateway would not load), 409 last_admin (no administrator would remain),
+// and checkSettings' refusals for the settings.
 func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request) {
 	var body importJSON
 	if !decodeJSONLimit(w, r, &body, maxImportBytes) {
@@ -354,34 +357,37 @@ func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request) {
 		cfg = &c
 	}
 
-	result := importResultJSON{RestartRequired: []string{}}
-	caller := sessionOf(r).user
-	if users != nil {
-		drop, err := h.store.replaceUsers(users)
-		if err != nil {
-			h.serverError(w, "importUsers", err)
-			return
-		}
-		for _, name := range drop {
-			h.sessions.dropUser(name)
-		}
-		result.SignedOut = slices.Contains(drop, caller)
-	}
-	if conns != nil {
-		if err := h.store.replaceConnections(conns); err != nil {
-			h.serverError(w, "importConnections (users already imported)", err)
-			return
-		}
-	}
+	tx := &fileTx{}
+	defer tx.abort()
+	var change *settingsChange
 	if cfg != nil {
-		restart, err := sf.commit(*cfg)
+		ch, err := sf.stage(tx, *cfg)
 		if err != nil {
-			h.serverError(w, "importSettings (users and connections already imported)", err)
+			h.serverError(w, r, "importBackup", err)
 			return
 		}
-		result.RestartRequired = restart
+		change = &ch
 	}
-	h.logger.Warn("configuration imported", "by", caller, "users", body.Users, "connections", body.Connections,
+	var drop []string
+	var err error
+	if users != nil || conns != nil {
+		drop, err = h.store.replaceStores(tx, users, conns)
+	} else {
+		err = tx.commit()
+	}
+	if err != nil {
+		h.serverError(w, r, "importBackup", err)
+		return
+	}
+	result := importResultJSON{RestartRequired: []string{}}
+	if change != nil {
+		result.RestartRequired = sf.apply(*change)
+	}
+	for _, name := range drop {
+		h.sessions.dropUser(name)
+	}
+	result.SignedOut = slices.Contains(drop, sessionOf(r).user)
+	h.log(r).Info("configuration imported", "users", body.Users, "connections", body.Connections,
 		"settings", body.Settings, "from", doc.Created, "restart_required", result.RestartRequired)
 	writeJSON(w, http.StatusOK, result)
 }

@@ -327,6 +327,17 @@
         style="max-height: calc(90vh - 120px); overflow: auto; background: var(--bg-tertiary); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);"></pre>
 </dialog>
 
+<!-- Delete Confirmation Modal (native <dialog>). The question is set per delete;
+     Delete closes it with 'delete', Cancel / Escape / backdrop close it without. -->
+<dialog id="browser-confirm-delete-modal" aria-labelledby="browser-confirm-delete-modal-title" style="max-width: 480px;">
+    <h3 id="browser-confirm-delete-modal-title" class="mb-4">Delete Messages</h3>
+    <p id="browser-confirm-delete-message" class="mt-0 mb-4"></p>
+    <div class="flex-row justify-end gap-2 mt-4">
+        <button id="btn-confirm-delete-cancel" class="btn btn-secondary">Cancel</button>
+        <button id="btn-confirm-delete" class="btn btn-danger">Delete</button>
+    </div>
+</dialog>
+
 <!-- Forward Message Modal (native <dialog>) -->
 <dialog id="browser-forward-modal" class="modal-lg" aria-labelledby="browser-forward-modal-title">
     <div class="flex-row justify-between items-center mb-4">

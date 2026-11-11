@@ -6,6 +6,7 @@ import { ui, els } from '../../../src/modules/queue-browser/ui-core.js';
 import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import type { AppContext, EventBus } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 function createBrowserDOM() {
     // Load the real queue-browser template so the test DOM matches what ships.
@@ -22,7 +23,7 @@ describe('queue-browser/module', () => {
         document.body.appendChild(container);
 
         eventBus = createEventBus();
-        ctx = {
+        ctx = completeContext({
             container,
             appState: { activeModuleId: null, isConnected: false, selectedVpn: null, solaceConnection: null, sempCredentials: null, isSempConnected: false },
             eventBus,
@@ -31,7 +32,7 @@ describe('queue-browser/module', () => {
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
             config: { useMocks: false }
-        };
+        });
 
         resetQueueBrowserState();
     });
@@ -229,13 +230,12 @@ describe('queue-browser/module', () => {
             // Direct spy on the distinguishing downstream effect:
             // handleBulkForward → ui.showForwardModal(messages). A regression
             // that wires this button to handleBulkDelete would not call
-            // showForwardModal — it would call window.confirm + service.deleteMessages.
+            // showForwardModal -- it would open the delete confirm dialog.
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             await QueueBrowserModule.install(ctx);
             // Spy AFTER install — initTable() assigns ui.getSelectedMessageIds during install.
             vi.spyOn(ui, 'getSelectedMessageIds').mockReturnValue(['msg-1']);
             const showForwardSpy = vi.spyOn(ui, 'showForwardModal').mockImplementation(() => {});
-            const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
             state.displayedMessages = [{ id: 'msg-1' } as any];
 
             els.btnBrowserForward.disabled = false;
@@ -245,37 +245,34 @@ describe('queue-browser/module', () => {
             expect(showForwardSpy).toHaveBeenCalledWith([{ id: 'msg-1' }]);
             // Forward must NOT invoke the delete-side machinery — proves the
             // forward/delete wiring isn't crossed.
-            expect(confirmSpy).not.toHaveBeenCalled();
+            expect(els.modalConfirmDelete.open).toBe(false);
 
             showForwardSpy.mockRestore();
-            confirmSpy.mockRestore();
             consoleSpy.mockRestore();
         });
 
-        it('btnBrowserDelete click wires to handleBulkDelete (prompts via window.confirm)', async () => {
+        it('btnBrowserDelete click wires to handleBulkDelete (asks in the delete confirm dialog)', async () => {
             // Direct spy on the distinguishing downstream effect:
-            // handleBulkDelete → window.confirm('Are you sure...'). A regression
-            // that wires this button to handleBulkForward would not prompt;
+            // handleBulkDelete opens the delete confirm dialog. A regression
+            // that wires this button to handleBulkForward would not ask;
             // it would open the forward modal.
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             await QueueBrowserModule.install(ctx);
             vi.spyOn(ui, 'getSelectedMessageIds').mockReturnValue(['msg-1', 'msg-2']);
-            // Return false so the test doesn't progress into service.deleteMessages.
-            const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
             const showForwardSpy = vi.spyOn(ui, 'showForwardModal').mockImplementation(() => {});
 
             els.btnBrowserDelete.disabled = false;
             els.btnBrowserDelete.click();
 
-            expect(confirmSpy).toHaveBeenCalledTimes(1);
-            expect(confirmSpy).toHaveBeenCalledWith(
-                expect.stringContaining('delete 2 selected message(s)'),
-            );
+            expect(els.modalConfirmDelete.open).toBe(true);
+            expect(els.confirmDeleteMessage.textContent).toBe('Delete 2 selected message(s)?');
             // Delete must NOT invoke the forward modal — proves the wiring
             // isn't crossed.
             expect(showForwardSpy).not.toHaveBeenCalled();
+            // Cancel so the test doesn't progress into service.deleteMessages.
+            els.btnConfirmDeleteCancel.click();
+            expect(els.modalConfirmDelete.open).toBe(false);
 
-            confirmSpy.mockRestore();
             showForwardSpy.mockRestore();
             consoleSpy.mockRestore();
         });
@@ -549,11 +546,12 @@ describe('queue-browser/module', () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             await QueueBrowserModule.install(ctx);
 
-            // Emit delete event — should trigger confirm dialog
-            (globalThis.confirm as any).mockReturnValue(false);
+            // Emit delete event -- should open the delete confirm dialog
             eventBus.emit('app:message-delete', { id: 'msg-1' });
 
-            expect(globalThis.confirm).toHaveBeenCalled();
+            expect(els.modalConfirmDelete.open).toBe(true);
+            expect(els.confirmDeleteMessage.textContent).toBe('Delete message msg-1?');
+            els.btnConfirmDeleteCancel.click();
             consoleSpy.mockRestore();
         });
 
@@ -709,7 +707,7 @@ describe('queue-browser/module', () => {
             `;
             document.body.appendChild(minContainer);
 
-            const minCtx: AppContext = {
+            const minCtx: AppContext = completeContext({
                 container: minContainer,
                 appState: { activeModuleId: null, isConnected: false, selectedVpn: null, solaceConnection: null, sempCredentials: null, isSempConnected: false },
                 eventBus,
@@ -718,7 +716,7 @@ describe('queue-browser/module', () => {
                 sempFetch: vi.fn(),
                 copyToClipboard: vi.fn(),
                 config: { useMocks: false }
-            };
+            });
 
             await expect(QueueBrowserModule.install(minCtx)).rejects.toThrow(/Required element missing/);
             consoleSpy.mockRestore();

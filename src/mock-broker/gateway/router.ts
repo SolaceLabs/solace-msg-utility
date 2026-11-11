@@ -17,12 +17,12 @@
  * Mock-only.
  */
 import { BadRequest, boolean, list, nullableList, object, parseBody, string } from './strict';
-import { CATALOG, connectionProblem, moduleIdsProblem, passwordOk, PASSWORD_MAX, PASSWORD_MIN, USERNAME_RULE, validUsername } from './validate';
-import { relay, RELAY_PREFIX } from './relay';
+import { canonScheme, CATALOG, connectionProblem, moduleIdsProblem, passwordOk, PASSWORD_MAX, PASSWORD_MIN, USERNAME_RULE, validUsername } from './validate';
+import { relay, RELAY_PREFIX, type Upstream } from './relay';
 import type { GatewayStore } from './store';
 import type { GatewaySessions, Session } from './sessions';
 import type { GatewaySettingsFile } from './settings';
-import type { ConnRec, DialResponse, GatewayRequest, GatewayResponse, UserList } from './types';
+import type { ClientSeen, ConnRec, DialResponse, GatewayRequest, GatewayResponse, UserList } from './types';
 import type { QGlob } from '../../core/types';
 
 /** The control panel's gateway faults. */
@@ -40,6 +40,10 @@ export interface RouterDeps {
     faults: () => RouterFaults;
     /** Backup & Restore's routes (backup.ts), admin only like the editors'. */
     backupRoutes: [string, string, Handler][];
+    /** The browser's address as the gateway sees it (the seed's `client`). */
+    client: string;
+    /** The broker behind the relay, when a test scripts one; the demo broker otherwise. */
+    upstream?: Upstream;
 }
 
 const ok = (json: unknown): GatewayResponse => ({ status: 200, json });
@@ -62,7 +66,7 @@ const glob = (x: unknown): QGlob => {
 
 export type Handler = (req: GatewayRequest, s: Session, sid: string, params: string[]) => GatewayResponse | Promise<GatewayResponse>;
 
-export function createRouter({ store, sessions, settings, faults, backupRoutes }: RouterDeps) {
+export function createRouter({ store, sessions, settings, faults, backupRoutes, client, upstream }: RouterDeps) {
     const adminOnly = (fn: Handler): Handler => (req, s, sid, params) => {
         const admin = store.isAdmin(s.user);
         if (admin === null) return error(401, 'unauthenticated');
@@ -127,17 +131,21 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes }
 
     const listConnections: Handler = () => ok({ connections: store.listConnections() });
 
+    /** saveConnection: a scheme left out, or the TLS one, is stored as the default (canonScheme). */
     const saveConnection: Handler = (req, _s, _sid, [broker]) => {
         const b = object(parseBody(req.body), ['hostname', 'semp', 'client']);
-        const semp = object(b.semp, ['port', 'user', 'pass']);
-        const client = object(b.client, ['port', 'msgVpns']);
+        const semp = object(b.semp, ['scheme', 'port', 'user', 'pass']);
+        const cl = object(b.client, ['scheme', 'port', 'msgVpns']);
+        const sempScheme = canonScheme(string(semp.scheme), 'https');
+        const clientScheme = canonScheme(string(cl.scheme), 'wss');
         const rec: ConnRec = {
             broker,
             hostname: string(b.hostname),
-            semp: { port: string(semp.port), username: string(semp.user), password: string(semp.pass) },
+            semp: { ...(sempScheme ? { scheme: sempScheme } : {}), port: string(semp.port), username: string(semp.user), password: string(semp.pass) },
             client: {
-                port: string(client.port),
-                msgVpns: list(client.msgVpns, x => {
+                ...(clientScheme ? { scheme: clientScheme } : {}),
+                port: string(cl.port),
+                msgVpns: list(cl.msgVpns, x => {
                     const v = object(x, ['name', 'user', 'pass']);
                     return { name: string(v.name), username: string(v.user), password: string(v.pass) };
                 }),
@@ -167,6 +175,12 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes }
         return r.ok ? ok({ restartRequired: r.restartRequired }) : refusal(r);
     };
 
+    /** clientSeen: the demo has one browser, seen directly. */
+    const clientSeen: Handler = () => {
+        const body: ClientSeen = { address: client, peer: client, viaProxy: false };
+        return ok(body);
+    };
+
     /** The mux (managedHandler's routes); `{}` is one path segment, unescaped. */
     const ROUTES: [string, string, Handler][] = [
         ['GET', '/managed/me', me],
@@ -180,6 +194,7 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes }
         ['DELETE', '/managed/connections/{}', adminOnly(deleteConnection)],
         ['GET', '/managed/settings', adminOnly(getSettings)],
         ['PUT', '/managed/settings', adminOnly(saveSettings)],
+        ['GET', '/managed/client', adminOnly(clientSeen)],
         ...backupRoutes.map(([m, p, fn]): [string, string, Handler] => [m, p, adminOnly(fn)]),
     ];
 
@@ -210,7 +225,7 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes }
         if (!s || !req.session) return error(401, 'unauthenticated');
         if (s.mustChange && req.path !== '/managed/logout') return error(403, 'password_change_required');
         if (req.path.startsWith(RELAY_PREFIX)) {
-            return relay(req, broker => store.sempTarget(s.user, broker), faults().relayUnreachable);
+            return relay(req, broker => store.sempTarget(s.user, broker), faults().relayUnreachable, upstream);
         }
         const route = match(req.method.toUpperCase(), req.path);
         if (!route) return error(404, 'not_found');

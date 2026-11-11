@@ -619,7 +619,7 @@ func (b *backupService) run() (string, error) {
 		b.logger.Error("backup failed", "dir", b.dir, "err", err)
 		return "", err
 	}
-	b.logger.Warn("backup written", "file", filepath.Join(b.dir, name))
+	b.logger.Info("backup written", "file", filepath.Join(b.dir, name))
 	b.prune(sd.Keep)
 	return name, nil
 }

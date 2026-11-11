@@ -113,7 +113,7 @@ const testStoreKeyHex = "00112233445566778899aabbccddeeff102132435465768798a9bac
 // writes them.
 type storeFixture struct {
 	usersPath, connsPath, keyPath string
-	h                                       *hasher
+	h                             *hasher
 }
 
 func newStoreFixture(t *testing.T) storeFixture {
@@ -769,7 +769,7 @@ func TestStore_PersistErrorLeavesMemoryUnchanged(t *testing.T) {
 	if _, err := s.upsertUser(context.Background(), userRec{Username: "bob"}, "bob-password-1"); err == nil {
 		t.Fatal("expected a persist error")
 	}
-	if err := s.setPassword(context.Background(), "viewer", "viewer-new-pw-1"); err == nil {
+	if err := s.setPassword(context.Background(), "viewer", "viewer-new-pw-1", storedHash(s, "viewer"), func() {}); err == nil {
 		t.Fatal("expected a persist error")
 	}
 	if len(s.listUsers()) != before || !signsIn(t, s, "viewer", viewerPW) {
@@ -814,12 +814,22 @@ func TestStore_OnChangeFiresAfterACommittedEdit(t *testing.T) {
 	}
 }
 
+// storedHash is the user's stored password hash, "" for no such user.
+func storedHash(s *store, user string) string {
+	u, _ := s.findUser(user)
+	return u.Password
+}
+
 func TestStore_SetPassword(t *testing.T) {
 	f := newStoreFixture(t)
 	s := f.load(t)
 	s.users[0].MustChangePassword = true
-	if err := s.setPassword(context.Background(), "admin", "admin-new-pw-1"); err != nil {
+	committed := 0
+	if err := s.setPassword(context.Background(), "admin", "admin-new-pw-1", storedHash(s, "admin"), func() { committed++ }); err != nil {
 		t.Fatal(err)
+	}
+	if committed != 1 {
+		t.Errorf("committed must run once with the new hash stored, ran %d times", committed)
 	}
 	mustChange, ok, _ := s.checkPassword(context.Background(), "admin", "admin-new-pw-1")
 	if !ok || mustChange {
@@ -828,15 +838,72 @@ func TestStore_SetPassword(t *testing.T) {
 	if !signsIn(t, f.load(t), "admin", "admin-new-pw-1") {
 		t.Error("the change must persist")
 	}
-	if err := s.setPassword(context.Background(), "ghost", "ghost-password"); !errors.Is(err, errUserNotFound) {
+	if err := s.setPassword(context.Background(), "ghost", "ghost-password", "", func() { committed++ }); !errors.Is(err, errUserNotFound) {
 		t.Errorf("unknown user: want errUserNotFound, got %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	s.hasher = &hasher{iter: 1, slots: make(chan struct{}, 1)}
 	s.hasher.slots <- struct{}{}
-	if err := s.setPassword(ctx, "admin", "admin-other-pw"); !errors.Is(err, context.Canceled) {
+	if err := s.setPassword(ctx, "admin", "admin-other-pw", storedHash(s, "admin"), func() { committed++ }); !errors.Is(err, context.Canceled) {
 		t.Errorf("hash failure: want context.Canceled, got %v", err)
+	}
+	if committed != 1 {
+		t.Errorf("a refused change must not run committed (%d runs)", committed)
+	}
+}
+
+// A user's own change is checked against the hash their current password
+// matched: an administrator's reset that landed in between wins, and nothing
+// is written.
+func TestStore_SetPasswordRefusesAChangedAccount(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	checked := storedHash(s, "viewer")
+	if _, err := s.upsertUser(context.Background(), userRec{Username: "viewer", ReadOnly: []permRow{}}, "reset-by-admin-1"); err != nil {
+		t.Fatal(err)
+	}
+	ran := false
+	if err := s.setPassword(context.Background(), "viewer", "viewer-new-pw-1", checked, func() { ran = true }); !errors.Is(err, errAccountChanged) {
+		t.Fatalf("want errAccountChanged, got %v", err)
+	}
+	if ran || !signsIn(t, f.load(t), "viewer", "reset-by-admin-1") {
+		t.Error("the administrator's reset must stand, on disk and without a session")
+	}
+}
+
+// ifUnchanged ties a sign-in's session to the record its password matched.
+func TestStore_IfUnchanged(t *testing.T) {
+	cases := []struct {
+		name  string
+		edit  func(t *testing.T, s *store)
+		wants bool
+	}{
+		{"the record stands", func(*testing.T, *store) {}, true},
+		{"an administrator reset the password", func(t *testing.T, s *store) {
+			if _, err := s.upsertUser(context.Background(), userRec{Username: "viewer", ReadOnly: []permRow{}}, "reset-by-admin-1"); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"the user was deleted", func(t *testing.T, s *store) {
+			if _, err := s.deleteUser("viewer"); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := newStoreWithFixtures(t)
+			check, err := s.verifyPassword(context.Background(), "viewer", viewerPW)
+			if err != nil || !check.ok || check.hash == "" {
+				t.Fatalf("verify: %+v %v", check, err)
+			}
+			c.edit(t, s)
+			ran := false
+			if got := s.ifUnchanged("viewer", check.hash, func() { ran = true }); got != c.wants || ran != c.wants {
+				t.Errorf("ifUnchanged = %v (fn ran %v), want %v", got, ran, c.wants)
+			}
+		})
 	}
 }
 
@@ -1018,11 +1085,11 @@ func TestStore_ReplaceRefusesAnInvalidList(t *testing.T) {
 	usersFile, _ := os.ReadFile(f.usersPath)
 	connsFile, _ := os.ReadFile(f.connsPath)
 
-	if _, err := s.replaceUsers(append(append([]userRec{}, s.users...), s.users[0])); err == nil || !strings.Contains(err.Error(), "appears more than once") {
-		t.Errorf("replaceUsers with a duplicate: want a refusal, got %v", err)
+	if _, err := s.replaceStores(&fileTx{}, append(append([]userRec{}, s.users...), s.users[0]), nil); err == nil || !strings.Contains(err.Error(), "appears more than once") {
+		t.Errorf("replaceStores with a duplicate user: want a refusal, got %v", err)
 	}
-	if err := s.replaceConnections(append(append([]connRec{}, s.conns...), s.conns[0])); err == nil || !strings.Contains(err.Error(), "appears more than once") {
-		t.Errorf("replaceConnections with a duplicate: want a refusal, got %v", err)
+	if _, err := s.replaceStores(&fileTx{}, nil, append(append([]connRec{}, s.conns...), s.conns[0])); err == nil || !strings.Contains(err.Error(), "appears more than once") {
+		t.Errorf("replaceStores with a duplicate connection: want a refusal, got %v", err)
 	}
 	if len(s.users) != usersBefore || len(s.conns) != connsBefore {
 		t.Error("a refused replace changed the store in memory")
@@ -1032,5 +1099,87 @@ func TestStore_ReplaceRefusesAnInvalidList(t *testing.T) {
 	}
 	if now, _ := os.ReadFile(f.connsPath); !bytes.Equal(now, connsFile) {
 		t.Error("a refused replace rewrote the connections file")
+	}
+}
+
+// An import writes the users and the connections together: when the second
+// file cannot be replaced, the first is put back and memory keeps both lists.
+func TestStore_ReplaceStoresIsAllOrNothing(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	usersFile, _ := os.ReadFile(f.usersPath)
+	// The connections file's place is a directory with something in it: the
+	// rename onto it fails after the users file was renamed.
+	s.connsPath = filepath.Join(t.TempDir(), "conns.yaml")
+	if err := os.MkdirAll(filepath.Join(s.connsPath, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	users := append([]userRec{}, s.users[0])
+	drop, err := s.replaceStores(&fileTx{}, users, []connRec{{Broker: "b9", Hostname: "host9"}})
+	if err == nil || !strings.Contains(err.Error(), "nothing was changed") || drop != nil {
+		t.Fatalf("want a failure that changed nothing, got %v %v", drop, err)
+	}
+	if now, _ := os.ReadFile(f.usersPath); !bytes.Equal(now, usersFile) {
+		t.Error("the users file must be put back")
+	}
+	if len(s.users) != 2 || len(s.conns) != 2 {
+		t.Errorf("memory must keep both lists: %d users, %d connections", len(s.users), len(s.conns))
+	}
+
+	// With both files writable the two lists change together.
+	s.connsPath = f.connsPath
+	drop, err = s.replaceStores(&fileTx{}, users, []connRec{{Broker: "b9", Hostname: "host9"}})
+	if err != nil || !reflect.DeepEqual(drop, []string{"viewer"}) {
+		t.Fatalf("want the viewer signed out, got %v %v", drop, err)
+	}
+	if l := f.load(t); len(l.users) != 1 || len(l.conns) != 1 || l.conns[0].Broker != "b9" {
+		t.Errorf("both files must hold the import: %d users, %+v", len(l.users), l.conns)
+	}
+}
+
+// A connection names its schemes or leaves them blank for TLS; the targets
+// carry the scheme each side is reached with.
+func TestStore_ConnectionSchemes(t *testing.T) {
+	cases := []struct {
+		name       string
+		semp, smf  string
+		sempScheme string
+		smfScheme  string
+	}{
+		{"blank is TLS", "", "", "https", "wss"},
+		{"plain on both sides", sempPlain, clientPlain, "http", "ws"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := newStoreWithFixtures(t)
+			rec := connRec{Broker: "b1", Hostname: "host1",
+				Semp:   sempRec{Scheme: c.semp, Port: "8080", Username: "mon"},
+				Client: clientRec{Scheme: c.smf, Port: "8008", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}},
+			}
+			if err := validateConn(rec); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.upsertConnection(rec); err != nil {
+				t.Fatal(err)
+			}
+			if st, ok := s.sempTarget("viewer", "b1"); !ok || st.scheme != c.sempScheme {
+				t.Errorf("SEMP target: %+v %v, want scheme %s", st, ok, c.sempScheme)
+			}
+			if mt, ok := s.smfTarget("viewer", "b1", "v1"); !ok || mt.scheme != c.smfScheme {
+				t.Errorf("SMF target: %+v %v, want scheme %s", mt, ok, c.smfScheme)
+			}
+		})
+	}
+	for _, bad := range []struct{ semp, smf, want string }{
+		{"ftp", "", `broker "b1": semp.scheme "ftp" must be "https" or "http"`},
+		{"", "http", `broker "b1": client.scheme "http" must be "wss" or "ws"`},
+	} {
+		err := validateConn(connRec{Broker: "b1", Hostname: "host1", Semp: sempRec{Scheme: bad.semp}, Client: clientRec{Scheme: bad.smf}})
+		if err == nil || err.Error() != bad.want {
+			t.Errorf("want %q, got %v", bad.want, err)
+		}
+	}
+	if canonScheme(sempTLS, sempTLS) != "" || canonScheme(sempPlain, sempTLS) != sempPlain {
+		t.Error("a save stores TLS as blank and keeps the plain scheme")
 	}
 }

@@ -17,6 +17,7 @@
 import { required } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import { createRowList } from '../../core/components/row-list';
+import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
 import { escapeHtml, matchContains } from '../../core/utils';
 import { ICONS, iconButton } from '../../core/icons';
@@ -238,7 +239,7 @@ export const ConnectionManagementModule = {
         }
 
         async function removeConn(broker: string): Promise<void> {
-            if (!confirm(`Delete connection "${broker}"?`)) return;
+            if (!(await confirmDialog(`Delete connection "${broker}"?`, { confirmLabel: 'Delete' }))) return;
             const res = await service.deleteConnection(broker);
             if (!res.ok) {
                 reportManagedFailure(res, eventBus, msg => showToast(msg, 'error'));

@@ -1,6 +1,7 @@
 import { unfilteredPrimarySempContext } from '../../core/services/sempContext';
 import { visibleQueueRows } from '../../core/managed-semp-filter';
 import { PAGE_DELAY_MS } from '../../core/services/semp-discovery';
+import { sempErrorText, sempFailureText } from '../../core/services/semp-errors';
 import type { AppContext } from '../../core/types';
 import { parseSubscriptionsResponse, type SubscriptionRow } from './parse';
 
@@ -14,6 +15,9 @@ export type SubFetchPage =
 /** Page size used for the initial RPC. The broker keeps echoing `<more-cookie>`
  *  pages with the same chunking, so this only governs the first request. */
 export const PAGE_SIZE = 100;
+
+/** What a failed page says before its detail (HTTP status, gateway code, timeout). */
+const FETCH_ERROR = 'Error fetching subscriptions';
 
 const INITIAL_BODY =
     `<rpc><show><queue><name>*</name><vpn-name>*</vpn-name>` +
@@ -60,7 +64,7 @@ export function createService(ctx: AppContext) {
                     body,
                 });
                 if (!res.ok) {
-                    yield { ok: false, error: res.statusText || 'Error fetching subscriptions' };
+                    yield { ok: false, error: await sempErrorText(res, FETCH_ERROR) };
                     return;
                 }
                 const text = await res.text();
@@ -71,8 +75,8 @@ export function createService(ctx: AppContext) {
                 }
                 yield { ok: true, data: visibleQueueRows(ctx.appState.managed, parsed.page.rows) };
                 body = parsed.page.nextPageBody;
-            } catch (e: any) {
-                yield { ok: false, error: e?.message || 'Error fetching subscriptions' };
+            } catch (e: unknown) {
+                yield { ok: false, error: sempFailureText(e, FETCH_ERROR) };
                 return;
             }
             pageNum++;

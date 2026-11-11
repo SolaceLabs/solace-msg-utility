@@ -1,8 +1,8 @@
 /**
  * Connection-mode deployment config: which connection tabs the app offers
  * (Direct / Provisioned) and which is shown first. Distinct from the form-level
- * `ConnectionConfig` defaults in `./defaults.ts` -- this is per-deployment UI
- * config, not broker credentials.
+ * `ConnectionConfig` (`./types.ts`) -- this is per-deployment UI config, not
+ * broker credentials.
  *
  * Source of truth by deployment context:
  *   - Standalone (static HTML, no gateway): no `/hosted` -> `DEFAULT_CONN_CONFIG`
@@ -24,6 +24,15 @@ export interface ConnDeploymentConfig {
     connModes: ConnModes;
     /** Which tab is active first -- only meaningful when `connModes === 'both'`. */
     defaultConn: ConnMode;
+}
+
+/**
+ * What the connections module publishes as `AppState.connConfig` after its
+ * `/hosted` probe: the tabs config plus the probe's hosted verdict, the single
+ * home of that fact (read it with `isHostedDeployment` in `core/hosted.ts`).
+ */
+export interface DeploymentConfig extends ConnDeploymentConfig {
+    hosted: boolean;
 }
 
 /** App default when no `/hosted` config is available: Direct only. */

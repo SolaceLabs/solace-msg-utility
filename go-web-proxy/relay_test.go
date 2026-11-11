@@ -88,7 +88,8 @@ func TestRelay_AddsTheStoredCredentialAndDropsTheBrowsers(t *testing.T) {
 	path := "/managed/relay/b1/SEMP/v2/monitor/msgVpns/v1/queues/a%2Fb?count=10&where=x"
 	rec := e.do("GET", path, "", e.cookie("viewer", false),
 		"Authorization", "Basic Zm9yZ2VkOmZvcmdlZA==", "Origin", "https://gw.example", "Referer", "https://gw.example/",
-		"X-Forwarded-For", "203.0.113.9", "Accept", "application/json", "Sec-Fetch-Site", "same-origin")
+		"X-Forwarded-For", "203.0.113.9", "Accept", "application/json", "Sec-Fetch-Site", "same-origin",
+		"If-None-Match", `"e0"`, "If-Match", `"e0"`)
 	expect(t, rec, http.StatusOK, "")
 	if rec.Body.String() != `{"data":[]}` {
 		t.Errorf("body: %q", rec.Body.String())
@@ -101,7 +102,9 @@ func TestRelay_AddsTheStoredCredentialAndDropsTheBrowsers(t *testing.T) {
 	if want := "Basic " + base64.StdEncoding.EncodeToString([]byte("mon:semp-pw")); up.header.Get("Authorization") != want {
 		t.Errorf("upstream Authorization: want the stored credential, got %q", up.header.Get("Authorization"))
 	}
-	for _, k := range []string{"Cookie", "Origin", "Referer", "X-Forwarded-For", "Sec-Fetch-Site"} {
+	// No conditional request either: the relay would answer the broker's 304
+	// as a 502.
+	for _, k := range []string{"Cookie", "Origin", "Referer", "X-Forwarded-For", "Sec-Fetch-Site", "If-None-Match", "If-Match"} {
 		if v := up.header.Get(k); v != "" {
 			t.Errorf("%s reached the broker: %q", k, v)
 		}
@@ -111,7 +114,7 @@ func TestRelay_AddsTheStoredCredentialAndDropsTheBrowsers(t *testing.T) {
 	}
 
 	h := rec.Header()
-	for _, k := range []string{"Set-Cookie", "WWW-Authenticate", "Server", "Location", "X-Custom"} {
+	for _, k := range []string{"Set-Cookie", "WWW-Authenticate", "Server", "Location", "X-Custom", "ETag"} {
 		if v := h.Get(k); v != "" {
 			t.Errorf("%s reached the browser: %q", k, v)
 		}
@@ -119,7 +122,7 @@ func TestRelay_AddsTheStoredCredentialAndDropsTheBrowsers(t *testing.T) {
 	if cc := h.Values("Cache-Control"); len(cc) != 1 || cc[0] != "no-store" {
 		t.Errorf("Cache-Control: want exactly no-store, got %q", cc)
 	}
-	if h.Get("Content-Type") != "application/json" || h.Get("ETag") != `"e1"` ||
+	if h.Get("Content-Type") != "application/json" ||
 		h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Content-Security-Policy") != "default-src 'none'; sandbox" {
 		t.Errorf("response headers: %v", h)
 	}
@@ -325,6 +328,53 @@ func TestRelay_EntitlementIsTheBrokers(t *testing.T) {
 	if fb.hits() != 1 {
 		t.Errorf("only the entitled call may reach the broker, got %d calls", fb.hits())
 	}
+	if line := logLine(e.log.String(), "semp relay denied", "user=viewer", "broker=b2"); !strings.Contains(line, "level=INFO") {
+		t.Errorf("a refusal is logged at info with the user and the broker: %s", e.log.String())
+	}
+}
+
+// urlRecorder is a broker transport that notes the URL it was asked for and
+// fails: enough to see where the gateway would have gone.
+type urlRecorder struct {
+	mu   sync.Mutex
+	urls []string
+}
+
+func (u *urlRecorder) RoundTrip(r *http.Request) (*http.Response, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.urls = append(u.urls, r.URL.String())
+	return nil, errors.New("recorded, not sent")
+}
+
+func (u *urlRecorder) last(t *testing.T) string {
+	t.Helper()
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if len(u.urls) == 0 {
+		t.Fatal("the broker transport was never called")
+	}
+	return u.urls[len(u.urls)-1]
+}
+
+// The relay reaches the broker over the connection's SEMP scheme: https by
+// default, http when the record says so.
+func TestRelay_UsesTheConnectionsScheme(t *testing.T) {
+	for scheme, want := range map[string]string{"": "https://host1:8080/SEMP/v2/monitor/msgVpns", sempPlain: "http://host1:8080/SEMP/v2/monitor/msgVpns"} {
+		up := &urlRecorder{}
+		e := newManagedEnvWith(t, nil, up)
+		if err := e.api.store.upsertConnection(connRec{
+			Broker: "b1", Hostname: "host1",
+			Semp:   sempRec{Scheme: scheme, Port: "8080", Username: "mon"},
+			Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		expect(t, e.do("GET", "/managed/relay/b1/SEMP/v2/monitor/msgVpns", "", e.cookie("viewer", false)), http.StatusBadGateway, "upstream_unavailable")
+		if got := up.last(t); got != want {
+			t.Errorf("scheme %q: the relay asked for %s, want %s", scheme, got, want)
+		}
+	}
 }
 
 func TestRelay_RefusesCrossSiteUpgradesAndForcedChange(t *testing.T) {
@@ -364,6 +414,9 @@ func TestRelay_InFlightCapPerUser(t *testing.T) {
 	expect(t, rec, http.StatusTooManyRequests, "rate_limited")
 	if rec.Header().Get("Retry-After") == "" {
 		t.Error("want Retry-After")
+	}
+	if logLine(e.log.String(), "semp relay limited", "user=viewer", "broker=b1") == "" {
+		t.Errorf("the cap is logged with the user and the broker: %s", e.log.String())
 	}
 	close(release)
 	wg.Wait()

@@ -32,7 +32,7 @@ function stubbedSempCtx(vpns: string[], queues: string[], baseUrl = 'http://b:80
 
 /** A SempContext whose list fetch fails, to prove error pages survive filtering. */
 function failingSempCtx(): SempContext {
-    return { fetch: vi.fn(async () => ({ ok: false, statusText: 'Forbidden' }) as any), baseUrl: 'http://b:8080' };
+    return { fetch: vi.fn(async () => ({ ok: false, status: 403, statusText: 'Forbidden' }) as any), baseUrl: 'http://b:8080' };
 }
 
 const ALLOW_ALL: QGlob[] = [{ brokers: '*', msgVpns: '*', queues: '*' }];
@@ -100,8 +100,23 @@ describe('core/services/queue-source — sempQueueSource', () => {
 
     it('passes error pages through the filter untouched', async () => {
         const src = sempQueueSource(failingSempCtx(), { session: SCOPED, broker: 'b1', scope: 'operate' });
-        expect(await collect(src.listQueues('v1'))).toEqual([{ ok: false, error: 'Forbidden' }]);
-        expect(await collect(src.listVpns())).toEqual([{ ok: false, error: 'Forbidden' }]);
+        for (const pages of [await collect(src.listQueues('v1')), await collect(src.listVpns())]) {
+            expect(pages).toHaveLength(1);
+            expect(pages[0].ok).toBe(false);
+            expect((pages[0] as { error: string }).error).toContain('Forbidden');
+        }
+    });
+
+    it("carries the caller's AbortSignal on every SEMP request, so aborting stops the listing", async () => {
+        const sempCtx = stubbedSempCtx(['v1'], ['q1']);
+        const src = sempQueueSource(sempCtx, 'unmanaged');
+        const ctrl = new AbortController();
+        await collect(src.listVpns(ctrl.signal));
+        await collect(src.listQueues('v1', ctrl.signal));
+        for (const call of (sempCtx.fetch as any).mock.calls) {
+            expect(call[1]).toEqual({ signal: ctrl.signal });
+        }
+        expect((sempCtx.fetch as any).mock.calls).toHaveLength(2);
     });
 
     it('keys differ per scope so a browse cache is never reused for operate', () => {
@@ -142,6 +157,14 @@ describe('core/services/queue-source — queueSourceFrom', () => {
 
         expect(await collect(source.listVpns())).toEqual([{ ok: true, data: ['prov-1', 'prov-2'] }]);
         expect(sempFetch).not.toHaveBeenCalled(); // provisioned set, no broker round-trip
+    });
+
+    it('managed: a queue listing carries the caller\'s AbortSignal', async () => {
+        const sempFetch = stubbedSempCtx([], ['ops.a']).fetch;
+        const source = queueSourceFrom(makeCtx({ managed: SCOPED, sempFetch }), 'browse')!;
+        const ctrl = new AbortController();
+        await collect(source.listQueues('v1', ctrl.signal));
+        expect((sempFetch as any).mock.calls[0][1]).toEqual({ signal: ctrl.signal });
     });
 
     it('managed: queues come from live SEMP, filtered by the requested scope', async () => {

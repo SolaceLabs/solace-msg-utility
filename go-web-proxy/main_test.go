@@ -132,6 +132,25 @@ func TestLoadConfig_HostedIsTrueUnlessFalse(t *testing.T) {
 	}
 }
 
+// SSL_INSECURE_SKIP_VERIFY is read as strictly as HOSTED: it is written into
+// config.yaml on the first start, so a typo must stop the start, not turn
+// verification silently on.
+func TestLoadConfig_InsecureSkipVerifyIsStrict(t *testing.T) {
+	for v, want := range map[string]bool{"": false, "false": false, "true": true} {
+		t.Setenv("SSL_INSECURE_SKIP_VERIFY", v)
+		cfg, err := loadConfig()
+		if err != nil || cfg.insecureSkipVerify != want {
+			t.Errorf("SSL_INSECURE_SKIP_VERIFY=%q: want %v, got %v (%v)", v, want, cfg.insecureSkipVerify, err)
+		}
+	}
+	for _, v := range []string{"TRUE", "1", "yes", "False"} {
+		t.Setenv("SSL_INSECURE_SKIP_VERIFY", v)
+		if _, err := loadConfig(); err == nil || !strings.Contains(err.Error(), `SSL_INSECURE_SKIP_VERIFY="`+v+`"`) || !strings.Contains(err.Error(), `"true" or "false"`) {
+			t.Errorf("SSL_INSECURE_SKIP_VERIFY=%q: want an error naming the variable and the accepted values, got %v", v, err)
+		}
+	}
+}
+
 func TestLoadConfig_InvalidLogLevelFails(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "verbose")
 	_, err := loadConfig()
@@ -301,6 +320,9 @@ func startServe(t *testing.T, p process) *serveRun {
 	}
 	if p.shutdown == 0 {
 		p.shutdown = shutdownTimeout
+	}
+	if p.appDir == "" {
+		p.appDir = writeBundles(t)
 	}
 	p.log, p.signals = r.log, r.signals
 	go func() {
@@ -581,6 +603,39 @@ func (l *acceptWatch) Accept() (net.Conn, error) {
 		close(l.tracked)
 	}
 	return l.Listener.Accept()
+}
+
+// A gateway that cannot serve its mode's bundle does not start: the log names
+// the file and what to do.
+func TestServe_MissingAppBundleStopsTheStart(t *testing.T) {
+	dir := gatewayDir(t)
+	r := startServe(t, process{configFile: writeServeConfig(t, dir, ""), appDir: t.TempDir()})
+	if err := r.result(t); err == nil {
+		t.Fatalf("serve returned nil; log:\n%s", r.log)
+	}
+	expectLogged(t, r.log.String(), "app bundle check failed", "index.html", "mount a build that holds index.html")
+}
+
+// The startup summary shows even at logLevel error, where every other start
+// line is hidden.
+func TestServe_SummaryShowsAtEveryLevel(t *testing.T) {
+	dir := gatewayDir(t)
+	configFile := filepath.Join(dir, "config.yaml")
+	writeFile(t, configFile, "version: 1\ntls:\n  certFile: "+yamlPath(dir, "tls.crt")+"\n  keyFile: "+yamlPath(dir, "tls.key")+
+		"\n  trustDir: "+yamlPath(dir, "trust")+"\nlogLevel: error\naccess:\n  allow: [127.0.0.0/8, '::1/128']\n")
+	r := startServe(t, process{configFile: configFile})
+	if code, _ := r.get(t, gatewayClient(t, dir), "/robots.txt"); code != http.StatusOK {
+		t.Errorf("/robots.txt: %d", code)
+	}
+	r.signals <- syscall.SIGTERM
+	if err := r.result(t); err != nil {
+		t.Fatalf("serve after SIGTERM: %v", err)
+	}
+	log := r.log.String()
+	expectLogged(t, log, `msg="gateway starting"`, "mode=gateway", "log_level=error", "access.allow=\"[127.0.0.0/8 ::1/128]\"")
+	if strings.Contains(log, "listening") {
+		t.Errorf("info lines stay hidden at error: %s", log)
+	}
 }
 
 // Files only (hosted: false): /hosted is a 404, so the app connects to brokers

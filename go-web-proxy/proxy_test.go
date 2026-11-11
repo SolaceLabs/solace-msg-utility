@@ -20,16 +20,16 @@ import (
 
 func TestIsProxyPath(t *testing.T) {
 	cases := map[string]bool{
-		"/http/8080/host":     true,
-		"/https/443/host":     true,
-		"/ws/8008/host":       true,
-		"/wss/1443/host":      true,
-		"/hosted":             false,
-		"/index.html":         false,
-		"/assets/foo.js":      false,
-		"/":                   false,
-		"/httpish/8080/host":  false, // not exactly "http"
-		"/HTTP/8080/host":     false, // case-sensitive
+		"/http/8080/host":    true,
+		"/https/443/host":    true,
+		"/ws/8008/host":      true,
+		"/wss/1443/host":     true,
+		"/hosted":            false,
+		"/index.html":        false,
+		"/assets/foo.js":     false,
+		"/":                  false,
+		"/httpish/8080/host": false, // not exactly "http"
+		"/HTTP/8080/host":    false, // case-sensitive
 	}
 	for in, want := range cases {
 		if got := isProxyPath(in); got != want {
@@ -102,14 +102,14 @@ func TestParseProxyPath_IPv6(t *testing.T) {
 
 func TestParseProxyPath_BadInput(t *testing.T) {
 	bad := []string{
-		"/http/abc/host/x",       // port not numeric
-		"/http/0/host/x",         // port out of range
-		"/http/70000/host/x",     // port out of range
-		"/http/-1/host/x",        // negative port
-		"/ftp/21/host/x",         // unknown scheme
-		"/http",                  // missing port + host
-		"/http/8080",             // missing host
-		"/http/8080/",            // empty host segment
+		"/http/abc/host/x",   // port not numeric
+		"/http/0/host/x",     // port out of range
+		"/http/70000/host/x", // port out of range
+		"/http/-1/host/x",    // negative port
+		"/ftp/21/host/x",     // unknown scheme
+		"/http",              // missing port + host
+		"/http/8080",         // missing host
+		"/http/8080/",        // empty host segment
 	}
 	for _, in := range bad {
 		if _, err := parseProxyPath(in); err == nil {
@@ -145,7 +145,7 @@ func TestJoinHostPort(t *testing.T) {
 func TestHostedHandler_Enabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(true, liveWith(func(c *config) { c.connModes, c.defaultConn = connBoth, connProvisioned })).ServeHTTP(rec, r)
+	newHostedHandler(true, liveWith(func(c *config) { c.connModes, c.defaultConn = connBoth, connProvisioned }), bundleReady).ServeHTTP(rec, r)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: want 200, got %d", rec.Code)
@@ -171,7 +171,7 @@ func TestHostedHandler_Enabled(t *testing.T) {
 func TestHostedHandler_EnabledDirectOnlyDefault(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(true, liveWith(nil)).ServeHTTP(rec, r)
+	newHostedHandler(true, liveWith(nil), bundleReady).ServeHTTP(rec, r)
 
 	var got hostedInfo
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -185,7 +185,7 @@ func TestHostedHandler_EnabledDirectOnlyDefault(t *testing.T) {
 func TestHostedHandler_Disabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(false, liveWith(nil)).ServeHTTP(rec, r)
+	newHostedHandler(false, liveWith(nil), bundleReady).ServeHTTP(rec, r)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: want 404, got %d", rec.Code)
@@ -200,7 +200,7 @@ func TestHostedHandler_Disabled(t *testing.T) {
 func TestHostedHandler_ReadsLiveSettings(t *testing.T) {
 	cfg := defaultConfig()
 	lv := newLive(cfg)
-	h := newHostedHandler(true, lv)
+	h := newHostedHandler(true, lv, bundleReady)
 	cfg.connModes, cfg.defaultConn = connBoth, connProvisioned
 	lv.apply(cfg)
 	rec := httptest.NewRecorder()
@@ -211,6 +211,25 @@ func TestHostedHandler_ReadsLiveSettings(t *testing.T) {
 	}
 	if got.ConnModes != connBoth || got.DefaultConn != connProvisioned {
 		t.Errorf("want the applied modes, got %+v", got)
+	}
+}
+
+// bundleReady is the app bundle check of a deployment whose bundle is there.
+func bundleReady() error { return nil }
+
+// /hosted is the health probe: once the app bundle cannot be served it
+// answers 503, so an orchestrator sees the gateway as unhealthy.
+func TestHostedHandler_UnusableBundleIs503(t *testing.T) {
+	dir := writeBundles(t)
+	pwa := mustPWA(t, dir, directIndexFile)
+	h := newHostedHandler(true, liveWith(nil), pwa.ready)
+	if err := os.Remove(filepath.Join(dir, directIndexFile)); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/hosted", nil))
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("want an uncached 503, got %d %v", rec.Code, rec.Header())
 	}
 }
 
@@ -282,21 +301,47 @@ func TestLoadConfig_ConnModesLowercased(t *testing.T) {
 
 // ----- pwaHandler -------------------------------------------------------------
 
-func TestPWAHandler_MissingDir(t *testing.T) {
-	h := newPWAHandler(filepath.Join(t.TempDir(), "absent"), directIndexFile, quietLogger())
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("missing dir: want 404, got %d", rec.Code)
+// mustPWA is newPWAHandler over a directory that holds the bundle.
+func mustPWA(t *testing.T, dir, index string) *pwaHandler {
+	t.Helper()
+	h, err := newPWAHandler(dir, index, quietLogger())
+	if err != nil {
+		t.Fatal(err)
 	}
+	return h
 }
 
-func TestPWAHandler_EmptyDir(t *testing.T) {
-	h := newPWAHandler(t.TempDir(), directIndexFile, quietLogger()) // empty dir
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("empty dir: want 404, got %d", rec.Code)
+// A deployment that cannot serve the mode's bundle does not start: a missing
+// or empty app directory, a path that is a file, a bundle that is missing or
+// is a directory. The error names the file and what to do.
+func TestPWAHandler_UnusableBundleStopsTheStart(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "SolaceMsgUtility")
+	writeFile(t, file, "not a directory")
+	directOnly := t.TempDir()
+	writeFile(t, filepath.Join(directOnly, directIndexFile), "<html>direct</html>")
+	bundleIsADir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(bundleIsADir, directIndexFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ name, dir, index, want string }{
+		{"the directory is missing", filepath.Join(t.TempDir(), "absent"), directIndexFile, "cannot be read"},
+		{"the directory is empty", t.TempDir(), directIndexFile, "cannot be read"},
+		{"the path is a file", file, directIndexFile, "cannot be read"},
+		{"the Provisioned bundle is missing", directOnly, provisionedIndexFile, "cannot be read"},
+		{"the bundle is a directory", bundleIsADir, directIndexFile, "is not a regular file"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, err := newPWAHandler(c.dir, c.index, quietLogger())
+			if h != nil || err == nil {
+				t.Fatalf("want the start refused, got %v %v", h, err)
+			}
+			for _, want := range []string{c.want, filepath.Join(c.dir, c.index), "mount a build that holds " + c.index} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the error lacks %q: %v", want, err)
+				}
+			}
+		})
 	}
 }
 
@@ -305,7 +350,7 @@ func TestPWAHandler_ServesIndex(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>hi</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := newPWAHandler(dir, directIndexFile, quietLogger())
+	h := mustPWA(t, dir, directIndexFile)
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -322,7 +367,7 @@ func TestPWAHandler_SPAFallback_NoExtension(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>SPA</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := newPWAHandler(dir, directIndexFile, quietLogger())
+	h := mustPWA(t, dir, directIndexFile)
 
 	// /queue-browser/some/deep/route has no file extension → fallback to index.html.
 	rec := httptest.NewRecorder()
@@ -352,7 +397,7 @@ func writeBundles(t *testing.T) string {
 func TestPWAHandler_ServesTheModesBundle(t *testing.T) {
 	dir := writeBundles(t)
 	for provisioned, want := range map[bool]string{false: "direct", true: "provisioned"} {
-		h := newPWAHandler(dir, appIndexFile(provisioned), quietLogger())
+		h := mustPWA(t, dir, appIndexFile(provisioned))
 		for _, p := range []string{"/", "/queue-browser/deep/route"} {
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
@@ -368,7 +413,7 @@ func TestPWAHandler_ServesTheModesBundle(t *testing.T) {
 func TestPWAHandler_NeverServesTheAdminOrProvisionedBundleByName(t *testing.T) {
 	dir := writeBundles(t)
 	for _, provisioned := range []bool{false, true} {
-		h := newPWAHandler(dir, appIndexFile(provisioned), quietLogger())
+		h := mustPWA(t, dir, appIndexFile(provisioned))
 		for _, p := range []string{"/solAdmin.html", "/SOLADMIN.HTML", "/x/../solAdmin.html", "/solAdmin.html/", "/provisioned.html", "/Provisioned.HTML"} {
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
@@ -379,17 +424,29 @@ func TestPWAHandler_NeverServesTheAdminOrProvisionedBundleByName(t *testing.T) {
 	}
 }
 
-// A deployment missing the mode's bundle says which file it lacks.
-func TestPWAHandler_MissingIndexNamesTheFile(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, directIndexFile), []byte("<html>direct</html>"), 0o644); err != nil {
+// A bundle that goes away under a running gateway (a mount changed) is a 404
+// naming the file, and a warn line naming it and the request.
+func TestPWAHandler_BundleGoneAtRequestTimeIsLogged(t *testing.T) {
+	dir := writeBundles(t)
+	var buf strings.Builder
+	h, err := newPWAHandler(dir, appIndexFile(true), newCapturingLogger(&buf))
+	if err != nil {
 		t.Fatal(err)
 	}
-	h := newPWAHandler(dir, appIndexFile(true), quietLogger())
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "provisioned.html not found") {
-		t.Errorf("want 404 naming provisioned.html, got %d %q", rec.Code, rec.Body.String())
+	if err := os.Remove(filepath.Join(dir, provisionedIndexFile)); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/", "/queue-browser/deep/route"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "provisioned.html not found") {
+			t.Errorf("%s: want 404 naming provisioned.html, got %d %q", p, rec.Code, rec.Body.String())
+		}
+	}
+	for _, want := range []string{"level=WARN", "app bundle missing", "file=" + filepath.Join(dir, provisionedIndexFile), "path=/queue-browser/deep/route"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("log lacks %q: %s", want, buf.String())
+		}
 	}
 }
 
@@ -398,7 +455,7 @@ func TestPWAHandler_MissingAsset_404(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html></html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := newPWAHandler(dir, directIndexFile, quietLogger())
+	h := mustPWA(t, dir, directIndexFile)
 
 	// Anything with a file extension should NOT fall back — it's an asset request.
 	rec := httptest.NewRecorder()
@@ -633,6 +690,64 @@ func TestAccessLog_RecordsStatusAndBytes(t *testing.T) {
 	}
 }
 
+// The access log runs inside withClient: behind a trusted proxy it names the
+// client X-Forwarded-For gives, the one the access list and the throttle use,
+// and the signed-in user a gate recorded.
+func TestAccessLog_NamesTheResolvedClientAndUser(t *testing.T) {
+	var buf strings.Builder
+	lv := liveWith(func(c *config) { c.access.trustedProxies = prefixes(t, "10.0.0.0/8") })
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setRequestUser(r, "viewer")
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/managed/me", nil)
+	req.RemoteAddr = "10.1.1.1:5000"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	withClient(lv, accessLog(inner, newCapturingLogger(&buf))).ServeHTTP(httptest.NewRecorder(), req)
+	for _, want := range []string{"client=203.0.113.9", "user=viewer", "status=204", "path=/managed/me"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("access log lacks %q: %s", want, buf.String())
+		}
+	}
+	if strings.Contains(buf.String(), "10.1.1.1") {
+		t.Errorf("the proxy is not the client: %s", buf.String())
+	}
+}
+
+// A handler that takes the connection over (a WebSocket) is logged as a 101
+// with hijacked=true, not as a 200 with no bytes.
+func TestAccessLog_RecordsAHijackAsA101(t *testing.T) {
+	var buf strings.Builder
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, brw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		defer conn.Close()
+		_, _ = brw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: test\r\n\r\n")
+		_ = brw.Flush()
+	})
+	logged := accessLog(inner, newCapturingLogger(&buf))
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logged.ServeHTTP(w, r)
+		close(done)
+	}))
+	defer srv.Close()
+	if status := rawStatusLine(t, srv.Listener.Addr().String(), "GET /ws HTTP/1.1\r\nHost: gateway\r\nConnection: Upgrade\r\nUpgrade: test\r\n\r\n"); !strings.HasPrefix(status, "HTTP/1.1 101") {
+		t.Fatalf("want the handler's 101, got %q", status)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the handler never returned")
+	}
+	if !strings.Contains(buf.String(), "status=101") || !strings.Contains(buf.String(), "hijacked=true") {
+		t.Errorf("want a 101 marked hijacked: %s", buf.String())
+	}
+}
+
 func TestAccessLog_SkipsHosted(t *testing.T) {
 	var buf strings.Builder
 	logger := newCapturingLogger(&buf)
@@ -752,7 +867,7 @@ func TestPWAHandler_FilesAndDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(dir, "guide", "index.html"), "<html>guide</html>")
-	h := newPWAHandler(dir, directIndexFile, quietLogger())
+	h := mustPWA(t, dir, directIndexFile)
 
 	cases := []struct{ path, want, never string }{
 		{"/solclient.js", "// solclient", ""},
@@ -769,24 +884,6 @@ func TestPWAHandler_FilesAndDirectories(t *testing.T) {
 		if c.never != "" && strings.Contains(body, c.never) {
 			t.Errorf("%s: a directory must never be listed, got %q", c.path, body)
 		}
-	}
-}
-
-// An app path that is a file, not a directory (a mount gone wrong), leaves
-// the handler answering 404, as a missing one does.
-func TestPWAHandler_NotADirectory(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "SolaceMsgUtility")
-	writeFile(t, file, "not a directory")
-	var buf strings.Builder
-	h := newPWAHandler(file, directIndexFile, newCapturingLogger(&buf))
-
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("want 404, got %d", rec.Code)
-	}
-	if !strings.Contains(buf.String(), "app directory is not a directory") {
-		t.Errorf("the start must say why: %s", buf.String())
 	}
 }
 

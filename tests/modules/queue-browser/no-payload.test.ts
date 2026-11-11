@@ -9,6 +9,7 @@ import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 import type { AppContext } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 /**
  * Spec for the no-payload build flavor (`VITE_SHOW_PAYLOAD=false`).
@@ -31,7 +32,7 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
         container = loadModuleDOM('queue-browser');
         document.body.appendChild(container);
 
-        ctx = {
+        ctx = completeContext({
             container,
             appState: { activeModuleId: null, isConnected: false, selectedVpn: null, solaceConnection: null, sempCredentials: null, isSempConnected: false },
             eventBus: createEventBus(),
@@ -40,7 +41,7 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
             config: { useMocks: false }
-        };
+        });
 
         resetQueueBrowserState();
         // Real install performs the payload-DOM removal, the conditional required()
@@ -104,6 +105,24 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
             expect(stored.size).toBe(42);               // size comes from smfHeader, not the body
             expect(stored.type).toBe('Text');
             expect(stored._originalMsg).toBe(msg);       // raw SDK msg retained for Forward/Delete
+        });
+
+        it('keeps a binary attachment off the stored message: no text, no bytes', () => {
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            state.currentQueue = 'q1';
+            const msg = {
+                ...makeSdkMessage(),
+                getType: () => 1,
+                getSdtContainer: () => null,
+                getBinaryAttachment: () => '\x89PNG secret bytes'
+            };
+
+            se.onMessage('q1', msg);
+
+            const stored = state.messageStore.get('q1')![0];
+            expect(['content', 'bytes', 'binary'].filter(k => k in stored)).toEqual([]);
+            expect(stored.type).toBe('Binary');
         });
     });
 

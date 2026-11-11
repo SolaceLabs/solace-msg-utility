@@ -102,12 +102,13 @@ func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	changed := settingsChanges(sf.saved, fileConfigFromConfig(cfg))
 	restart, err := sf.commit(cfg)
 	if err != nil {
-		h.serverError(w, "saveSettings", err)
+		h.serverError(w, r, "saveSettings", err)
 		return
 	}
-	h.logger.Warn("gateway settings saved", "by", sessionOf(r).user, "path", sf.path, "restart_required", restart)
+	h.log(r).Info("gateway settings saved", "file", sf.path, "changed", changed, "restart_required", restart)
 	writeJSON(w, http.StatusOK, map[string]any{"restartRequired": restart})
 }
 
@@ -161,18 +162,48 @@ func (h *managedHandler) checkSettings(w http.ResponseWriter, r *http.Request, b
 	return cfg, true
 }
 
-// commit writes cfg as config.yaml and applies its live keys, returning the
-// restart-only keys now pending. sf.mu must be held.
-func (sf *settingsFile) commit(cfg config) ([]string, error) {
+// settingsChange is a config.yaml staged in a fileTx, and what apply needs
+// once that commits.
+type settingsChange struct {
+	cfg   config
+	saved fileConfig
+	sum   [32]byte
+}
+
+// stage encodes cfg as config.yaml into tx. Nothing changes until tx commits
+// and apply runs. sf.mu must be held.
+func (sf *settingsFile) stage(tx *fileTx, cfg config) (settingsChange, error) {
 	saved := fileConfigFromConfig(cfg)
 	data, err := encodeConfigFile(saved)
 	if err == nil {
-		err = writeFileAtomic(sf.path, data, 0o644)
+		err = tx.stage(sf.path, data, 0o644)
+	}
+	if err != nil {
+		return settingsChange{}, err
+	}
+	return settingsChange{cfg: cfg, saved: saved, sum: sha256.Sum256(data)}, nil
+}
+
+// apply takes a committed change in: the saved file and its fingerprint, and
+// the live keys at once. It returns the restart-only keys now pending.
+// sf.mu must be held.
+func (sf *settingsFile) apply(ch settingsChange) []string {
+	sf.saved, sf.sum = ch.saved, ch.sum
+	sf.live.apply(ch.cfg)
+	return pendingRestart(sf.boot, ch.saved)
+}
+
+// commit writes cfg as config.yaml and applies its live keys, returning the
+// restart-only keys now pending. sf.mu must be held.
+func (sf *settingsFile) commit(cfg config) ([]string, error) {
+	tx := &fileTx{}
+	defer tx.abort()
+	ch, err := sf.stage(tx, cfg)
+	if err == nil {
+		err = tx.commit()
 	}
 	if err != nil {
 		return nil, err
 	}
-	sf.saved, sf.sum = saved, sha256.Sum256(data)
-	sf.live.apply(cfg)
-	return pendingRestart(sf.boot, saved), nil
+	return sf.apply(ch), nil
 }

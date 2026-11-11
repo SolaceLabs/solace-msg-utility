@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -33,14 +34,17 @@ type hostedInfo struct {
 }
 
 // hostedHandler reads connModes and defaultConn from live per request: both
-// keys apply without a restart.
+// keys apply without a restart. It is also the documented health probe, so it
+// answers 503 while ready (the app bundle check) fails: an orchestrator then
+// sees a gateway that cannot serve the app as unhealthy.
 type hostedHandler struct {
 	hosted bool
 	live   *live
+	ready  func() error
 }
 
-func newHostedHandler(hosted bool, lv *live) *hostedHandler {
-	return &hostedHandler{hosted: hosted, live: lv}
+func newHostedHandler(hosted bool, lv *live, ready func() error) *hostedHandler {
+	return &hostedHandler{hosted: hosted, live: lv, ready: ready}
 }
 
 func (h *hostedHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
@@ -48,8 +52,12 @@ func (h *hostedHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+	if err := h.ready(); err != nil {
+		http.Error(w, "503 the app bundle cannot be served", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	cur := h.live.get()
 	_ = json.NewEncoder(w).Encode(hostedInfo{
@@ -106,7 +114,6 @@ type pwaHandler struct {
 	index  string // the bundle served at / and as the history-mode fallback
 	fs     http.Handler
 	logger *slog.Logger
-	usable bool
 }
 
 // appIndexFile is the bundle the app is served from: the Direct-only one, or
@@ -118,32 +125,34 @@ func appIndexFile(provisioned bool) string {
 	return directIndexFile
 }
 
-func newPWAHandler(appDir, index string, logger *slog.Logger) *pwaHandler {
+// newPWAHandler serves the app from appDir. The mode's bundle must be there:
+// without it every page would be a 404, so a missing or unreadable one stops
+// the start, naming the file and what to do.
+func newPWAHandler(appDir, index string, logger *slog.Logger) (*pwaHandler, error) {
 	h := &pwaHandler{root: appDir, index: index, logger: logger}
-	info, err := os.Stat(appDir)
-	if err != nil {
-		logger.Warn("app directory missing; PWA handler will return 404", "app_dir", appDir, "err", err)
-		return h
-	}
-	if !info.IsDir() {
-		logger.Warn("app directory is not a directory; PWA handler will return 404", "app_dir", appDir)
-		return h
-	}
-	entries, err := os.ReadDir(appDir)
-	if err != nil || len(entries) == 0 {
-		logger.Warn("app directory empty or unreadable; PWA handler will return 404", "app_dir", appDir, "err", err)
-		return h
+	if err := h.ready(); err != nil {
+		return nil, fmt.Errorf("%w. The gateway serves the app from %s: run the image's own files, or mount a build that holds %s there", err, appDir, index)
 	}
 	h.fs = http.FileServer(http.FS(os.DirFS(appDir)))
-	h.usable = true
-	return h
+	return h, nil
+}
+
+// ready reports whether the mode's bundle can be served: a regular file the
+// gateway can open. Checked at start, and by /hosted on every probe.
+func (h *pwaHandler) ready() error {
+	p := filepath.Join(h.root, h.index)
+	f, err := os.Open(p)
+	if err != nil {
+		return fmt.Errorf("app bundle %s cannot be read: %w", p, err)
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("app bundle %s is not a regular file", p)
+	}
+	return nil
 }
 
 func (h *pwaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !h.usable {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
 	clean := path.Clean(r.URL.Path)
 	if clean == "." {
 		clean = "/"
@@ -160,7 +169,7 @@ func (h *pwaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// (anything with a file extension) skip the fallback so a missing asset
 	// still 404s loudly.
 	if clean == "/" {
-		serveIndex(w, h.root, h.index)
+		h.serveIndex(w, r)
 		return
 	}
 	if !fileResolvable(h.root, clean) {
@@ -168,16 +177,21 @@ func (h *pwaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		serveIndex(w, h.root, h.index)
+		h.serveIndex(w, r)
 		return
 	}
 	h.fs.ServeHTTP(w, r)
 }
 
-func serveIndex(w http.ResponseWriter, root, name string) {
-	data, err := os.ReadFile(root + "/" + name)
+// serveIndex answers with the mode's bundle. The start checked it, so a
+// missing one went away under a running gateway (a mount changed): the 404
+// names it and so does a warn line.
+func (h *pwaHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
+	p := filepath.Join(h.root, h.index)
+	data, err := os.ReadFile(p)
 	if err != nil {
-		http.Error(w, name+" not found", http.StatusNotFound)
+		requestLogger(h.logger, r).Warn("app bundle missing; answered 404", "file", p, "err", err)
+		http.Error(w, h.index+" not found", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -430,9 +444,15 @@ func joinHostPort(host string, port int) string {
 
 // ----- Access log middleware --------------------------------------------------
 
+// accessLog records one INFO line per request: the client withClient
+// resolved (it runs inside withClient), the signed-in user once a gate found
+// one, the status, the bytes and the time. A handler that takes over the
+// connection (a WebSocket) is logged as 101 with hijacked=true, and the time
+// is the socket's lifetime.
 func accessLog(next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// /hosted is polled frequently by the PWA — skip to avoid log spam.
+		// /hosted is skipped: the app asks it once per page load and a health
+		// probe asks it every few seconds, so its lines would drown the rest.
 		if r.URL.Path == "/hosted" {
 			next.ServeHTTP(w, r)
 			return
@@ -440,14 +460,11 @@ func accessLog(next http.Handler, logger *slog.Logger) http.Handler {
 		start := time.Now()
 		rec := &recordingResponseWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(rec, r)
-		logger.Info("request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"remote", r.RemoteAddr,
-			"status", rec.status,
-			"bytes", rec.bytes,
-			"duration_ms", time.Since(start).Milliseconds(),
-		)
+		attrs := []any{"status", rec.status, "bytes", rec.bytes, "duration_ms", time.Since(start).Milliseconds()}
+		if rec.hijacked {
+			attrs = append(attrs, "hijacked", true)
+		}
+		requestLogger(logger, r).Info("request", attrs...)
 	})
 }
 
@@ -456,6 +473,7 @@ type recordingResponseWriter struct {
 	status      int
 	bytes       int64
 	wroteHeader bool
+	hijacked    bool
 }
 
 func (r *recordingResponseWriter) WriteHeader(code int) {
@@ -478,12 +496,17 @@ func (r *recordingResponseWriter) Write(b []byte) (int, error) {
 
 // Hijack lets the WebSocket upgrade path keep working when the underlying
 // ResponseWriter supports it (httputil.ReverseProxy requires Hijacker for ws).
+// From then on the handler answers on the raw connection, with a 101.
 func (r *recordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	h, ok := r.ResponseWriter.(http.Hijacker)
 	if !ok {
 		return nil, nil, errors.New("response writer does not support hijack")
 	}
-	return h.Hijack()
+	conn, brw, err := h.Hijack()
+	if err == nil {
+		r.status, r.wroteHeader, r.hijacked = http.StatusSwitchingProtocols, true, true
+	}
+	return conn, brw, err
 }
 
 func (r *recordingResponseWriter) Flush() {
@@ -491,4 +514,3 @@ func (r *recordingResponseWriter) Flush() {
 		f.Flush()
 	}
 }
-

@@ -68,7 +68,7 @@
 #               lost it looks wrong rather than merely out of date.
 
 # ---- Stage 1: build the static Go gateway ------------------------------------
-FROM golang:1.27.3-alpine AS gateway-builder
+FROM golang:1.27.4-alpine AS gateway-builder
 WORKDIR /src
 # pages/ holds the sign-in page the binary embeds (go:embed).
 COPY go-web-proxy/go.mod go-web-proxy/go.sum ./
@@ -108,6 +108,11 @@ COPY src/ ./src/
 # `npm ci`. vite.config.ts reads APP_VERSION into __APP_VERSION__.
 ARG APP_VERSION="0.0.0-dev"
 RUN APP_VERSION="$APP_VERSION" npm run build
+# The bundles this image ships pass the isolation check on this build, not only
+# on the separate one in CI: index.html carries no Provisioned UI, and
+# provisioned.html carries it without the demo's fake gateway
+# (scripts/check-bundles.mjs).
+RUN npm run check:bundles
 
 # Stage exactly what the image serves, rather than copying all of dist/. The
 # build emits every variant, and the image has no business shipping bundles it

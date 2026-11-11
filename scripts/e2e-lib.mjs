@@ -24,18 +24,24 @@ function tlv(tag, ...parts) {
 
 const seq = (...parts) => tlv(0x30, ...parts);
 const set = (...parts) => tlv(0x31, ...parts);
-const bool = (v) => tlv(0x01, Buffer.from([v ? 0xff : 0x00]));
+// DER BOOLEAN TRUE. There is no FALSE: the two fields that take it (an
+// extension's critical, basicConstraints' cA) DEFAULT FALSE, and DER omits a
+// value equal to its default.
+const TRUE = tlv(0x01, Buffer.from([0xff]));
 const octets = (buf) => tlv(0x04, buf);
 const bitString = (buf, unusedBits = 0) => tlv(0x03, Buffer.from([unusedBits]), buf);
 const utf8 = (s) => tlv(0x0c, Buffer.from(s, 'utf8'));
 const NULL = Buffer.from([0x05, 0x00]);
 
-/** An unsigned big-endian number as a DER INTEGER (a leading 0x00 keeps it positive). */
+/**
+ * A DER INTEGER from big-endian bytes that are already its minimal positive
+ * form: a first byte from 0x01 to 0x7f, or the single byte of a small number.
+ * The two callers give exactly that (the version, 2, and the serial, whose
+ * first byte `certificate` masks into 0x40-0x7f), so there is no sign byte to
+ * add and no leading zero to drop.
+ */
 function integer(buf) {
-    let b = buf;
-    while (b.length > 1 && b[0] === 0x00 && b[1] < 0x80) b = b.subarray(1);
-    if (b[0] & 0x80) b = Buffer.concat([Buffer.from([0x00]), b]);
-    return tlv(0x02, b);
+    return tlv(0x02, buf);
 }
 
 function oid(dotted) {
@@ -65,7 +71,7 @@ function ipv4(ip) {
 
 const SHA256_WITH_RSA = seq(oid('1.2.840.113549.1.1.11'), NULL);
 const commonName = (cn) => seq(set(seq(oid('2.5.4.3'), utf8(cn))));
-const extension = (id, critical, value) => seq(oid(id), ...(critical ? [bool(true)] : []), octets(value));
+const extension = (id, critical, value) => seq(oid(id), ...(critical ? [TRUE] : []), octets(value));
 
 function pem(label, der) {
     return `-----BEGIN ${label}-----\n${der.toString('base64').match(/.{1,64}/g).join('\n')}\n-----END ${label}-----\n`;
@@ -75,7 +81,7 @@ function certificate({ subject, issuer, publicKey, signingKey, ca, dns, ip, now,
     const serial = randomBytes(16);
     serial[0] = (serial[0] & 0x7f) | 0x40; // positive and never zero
     const exts = [
-        extension('2.5.29.19', true, ca ? seq(bool(true)) : seq()),                   // basicConstraints
+        extension('2.5.29.19', true, ca ? seq(TRUE) : seq()),                   // basicConstraints
         extension('2.5.29.15', true, ca ? bitString(Buffer.from([0x06]), 1)            // keyCertSign, cRLSign
             : bitString(Buffer.from([0xa0]), 5)),                                       // digitalSignature, keyEncipherment
     ];
@@ -100,14 +106,22 @@ function certificate({ subject, issuer, publicKey, signingKey, ca, dns, ip, now,
 
 const rsaKeyPair = () => generateKeyPairSync('rsa', { modulusLength: 2048 });
 
-/** A self-signed RSA CA, valid from an hour before `now` for `days`. */
+/**
+ * A self-signed RSA CA, valid from an hour before `now` for `days`.
+ * @param {string} cn
+ * @param {{ now?: Date, days?: number }} [validity]
+ */
 export function makeCA(cn, { now = new Date(), days = 7 } = {}) {
     const { publicKey, privateKey } = rsaKeyPair();
     const certPem = certificate({ subject: cn, issuer: cn, publicKey, signingKey: privateKey, ca: true, dns: [], ip: [], now, days });
     return { cn, certPem, privateKey };
 }
 
-/** A TLS server certificate signed by `ca`, with its PKCS#1 key, for the given names. */
+/**
+ * A TLS server certificate signed by `ca`, with its PKCS#1 key, for the given names.
+ * @param {ReturnType<typeof makeCA>} ca
+ * @param {{ cn: string, dns?: string[], ip?: string[], now?: Date, days?: number }} names
+ */
 export function issueCert(ca, { cn, dns = [], ip = [], now = new Date(), days = 7 }) {
     const { publicKey, privateKey } = rsaKeyPair();
     const certPem = certificate({ subject: cn, issuer: ca.cn, publicKey, signingKey: ca.privateKey, ca: false, dns, ip, now, days });
@@ -241,6 +255,7 @@ export function parseDetailsFile(text, name) {
  * names where each refused value came from.
  */
 export function resolveDetails(env, file = { values: {}, lines: {} }, fileName = 'the details file') {
+    /** @type {Record<string, string>} */
     const values = {};
     const missing = [];
     const errors = [];
@@ -398,6 +413,8 @@ export function maskSecrets(text, secrets, { min = MIN_MASKED } = {}) {
 /**
  * Where a JSON text carries a forbidden key, or a string value equal to a
  * forbidden one, at any depth: ['key "pass"', 'value "host"'], each once.
+ * @param {string} text
+ * @param {{ keys?: string[], values?: string[] }} [forbidden]
  */
 export function jsonFindings(text, { keys = [], values = [] } = {}) {
     const found = new Set();
@@ -427,6 +444,9 @@ export function findTokens(text, tokens) {
  * Every place a secret occurs in the recorded responses, as "<name> in the
  * <headers|body> of <label>", except where allow(record, name, where) says it
  * belongs. A record is { label, headers, body } with the headers as raw text.
+ * @param {Array<{ label: string, headers?: string, body?: string }>} records
+ * @param {Record<string, string | undefined>} secrets
+ * @param {(record: { label: string, headers?: string, body?: string }, name: string, where: string) => boolean} [allow]
  */
 export function sweepSecrets(records, secrets, allow = () => false) {
     const hits = [];

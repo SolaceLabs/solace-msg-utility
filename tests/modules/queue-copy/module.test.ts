@@ -6,6 +6,9 @@ import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { createSessionMock, createBrowserMock } from '../../setup';
 import type { AppContext, AppState, EventBus } from '../../../src/core/types';
 import type { VerifyResult } from '../../../src/modules/queue-copy/state';
+import { DEST_TARGET_LOCKED_TITLE } from '../../../src/modules/queue-copy/ui';
+import { DEFAULT_CONN_CONFIG } from '../../../src/core/connections/conn-modes';
+import { completeContext } from '../../helpers/appContext';
 
 vi.mock('../../../src/core/components/queue-picker', () => ({
     pickQueue: vi.fn(async () => ({ vpn: 'default', queue: 'picked' })),
@@ -39,9 +42,10 @@ vi.mock('../../../src/modules/queue-copy/service-verify', async () => {
 // We also capture the hooks object the install handed to each factory so
 // tests can drive onConnected / onDisconnected / onError directly without
 // going through the real SDK.
-const { destSempConnect, destSolConnect, capturedSempHooks, capturedSolHooks } = vi.hoisted(() => ({
+const { destSempConnect, destSolConnect, destSolDisconnect, capturedSempHooks, capturedSolHooks } = vi.hoisted(() => ({
     destSempConnect: vi.fn(),
     destSolConnect: vi.fn(),
+    destSolDisconnect: vi.fn(),
     capturedSempHooks: { current: null as any },
     capturedSolHooks: { current: null as any },
 }));
@@ -54,7 +58,7 @@ vi.mock('../../../src/core/services/semp-client', () => ({
 vi.mock('../../../src/core/services/solace-client', () => ({
     createServiceSolace: vi.fn((hooks: any) => {
         capturedSolHooks.current = hooks;
-        return { init: vi.fn(), connect: destSolConnect, disconnect: vi.fn() };
+        return { init: vi.fn(), connect: destSolConnect, disconnect: destSolDisconnect };
     }),
 }));
 
@@ -74,7 +78,7 @@ function sempCreds(baseUrl: string, user = 'admin', pass = 'p'): NonNullable<App
 }
 
 function makeCtx(eventBus: EventBus, container: HTMLElement, overrides: Partial<AppContext['appState']> = {}): AppContext {
-    return {
+    return completeContext({
         container,
         appState: {
             activeModuleId: null,
@@ -92,7 +96,7 @@ function makeCtx(eventBus: EventBus, container: HTMLElement, overrides: Partial<
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: {},
-    };
+    });
 }
 
 /** Build a populated solaceConnection AppState slot used by tests that exercise prefill. */
@@ -118,6 +122,7 @@ describe('queue-copy/module', () => {
         eventBus = createEventBus();
         destSempConnect.mockClear();
         destSolConnect.mockClear();
+        destSolDisconnect.mockClear();
         verifySourceMock.mockClear();
     });
 
@@ -446,7 +451,7 @@ describe('queue-copy/module', () => {
             const btnSemp = container.querySelector<HTMLButtonElement>('#copy-btn-dest-semp-connect')!;
             btnSemp.click();
             expect(destSempConnect).toHaveBeenCalledWith(
-                expect.objectContaining({ port: '1943', urlPath: '/SEMP/v2' }),
+                expect.objectContaining({ port: '1943', urlPath: '/SEMP/v2', hosted: false }),
                 'b1.example',
                 expect.any(String),
             );
@@ -470,10 +475,40 @@ describe('queue-copy/module', () => {
             const btnSol = container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!;
             btnSol.click();
             expect(destSolConnect).toHaveBeenCalledWith(
-                expect.objectContaining({ vpn: 'default', user: 'admin' }),
+                expect.objectContaining({ vpn: 'default', user: 'admin', hosted: false }),
                 'b2.example',
                 expect.any(String),
             );
+            consoleSpy.mockRestore();
+        });
+    });
+
+    describe('hosted deployment: the /hosted verdict reaches the destination configs', () => {
+        // The connections module fills AppState.connConfig from the /hosted
+        // probe; this module only reads it, so behind the gateway a Direct
+        // destination connect must carry hosted: true (the services then route
+        // the broker URLs through the gateway) and outside it hosted: false.
+        it('marks both destination configs hosted when AppState.connConfig says so', async () => {
+            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            const ctx = makeCtx(eventBus, container, {
+                isConnected: true,
+                selectedVpn: 'default',
+                solaceConnection: makeSolaceConnection({ host: 'b1.example' }),
+                sempCredentials: sempCreds('https://b1.example:1943/SEMP/v2'),
+                connConfig: { ...DEFAULT_CONN_CONFIG, hosted: true },
+            });
+            await QueueCopyModule.install(ctx);
+
+            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
+            toggle.checked = false;
+            toggle.dispatchEvent(new Event('change'));
+
+            container.querySelector<HTMLButtonElement>('#copy-btn-dest-semp-connect')!.click();
+            container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!.click();
+            expect(destSempConnect).toHaveBeenCalledWith(
+                expect.objectContaining({ hosted: true }), 'b1.example', expect.any(String));
+            expect(destSolConnect).toHaveBeenCalledWith(
+                expect.objectContaining({ hosted: true }), 'b1.example', expect.any(String));
             consoleSpy.mockRestore();
         });
     });
@@ -488,6 +523,7 @@ describe('queue-copy/module', () => {
             await QueueCopyModule.install(ctx);
             const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-vpn')!;
             toggle.checked = false; toggle.dispatchEvent(new Event('change'));
+            container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!.click();
             const fakeSession = { _live: true, on: vi.fn() };
             capturedSolHooks.current.onConnected(fakeSession, 'vpn-x');
             const status = container.querySelector('#copy-dest-sol-status')!;
@@ -504,6 +540,7 @@ describe('queue-copy/module', () => {
             await QueueCopyModule.install(ctx);
             const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-vpn')!;
             toggle.checked = false; toggle.dispatchEvent(new Event('change'));
+            container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!.click();
             capturedSolHooks.current.onConnected({ on: vi.fn() }, 'vpn-x');
             capturedSolHooks.current.onDisconnected();
             const status = container.querySelector('#copy-dest-sol-status')!;
@@ -575,6 +612,116 @@ describe('queue-copy/module', () => {
         });
     });
 
+    describe('destination Client connect in flight (target lock + late-session guard)', () => {
+        /** Same broker, a typed destination VPN, and Connect Client clicked: the connect is in flight. */
+        async function connectingManual() {
+            await QueueCopyModule.install(makeCtx(eventBus, container, {
+                isConnected: true,
+                selectedVpn: 'default',
+                solaceConnection: makeSolaceConnection(),
+                sempCredentials: sempCreds('https://broker.solace.com:1943/SEMP/v2'),
+            }));
+            const el = <T extends HTMLElement>(sel: string): T => container.querySelector(sel) as T;
+            const sameVpn = el<HTMLInputElement>('#copy-toggle-same-vpn');
+            sameVpn.checked = false;
+            sameVpn.dispatchEvent(new Event('change'));
+            const vpn = el<HTMLInputElement>('#copy-dest-sol-vpn');
+            vpn.value = 'vpn-b';
+            vpn.dispatchEvent(new Event('input'));
+            el<HTMLButtonElement>('#copy-btn-dest-sol-connect').click();
+            return { el, sameVpn, vpn, sameBroker: el<HTMLInputElement>('#copy-toggle-same-broker') };
+        }
+
+        it('locks the destination toggles while connecting, with a title, and unlocks them once UP lands', async () => {
+            const { el, sameVpn, sameBroker } = await connectingManual();
+            expect(destSolConnect).toHaveBeenCalledWith(
+                expect.objectContaining({ vpn: 'vpn-b' }), 'broker.solace.com', expect.any(String));
+            expect(sameBroker.disabled).toBe(true);
+            expect(sameVpn.disabled).toBe(true);
+            expect(sameVpn.title).toBe(DEST_TARGET_LOCKED_TITLE);
+
+            capturedSolHooks.current.onConnected({ on: vi.fn() }, 'vpn-b');
+
+            expect(el('#copy-dest-sol-status').textContent).toBe('Connected (vpn-b)');
+            expect(sameBroker.disabled).toBe(false);
+            expect(sameVpn.disabled).toBe(false);
+            expect(sameVpn.title).toBe('');
+        });
+
+        it('a failed connect unlocks the toggles again', async () => {
+            const { sameVpn, sameBroker } = await connectingManual();
+            capturedSolHooks.current.onConnectFailed({ infoStr: 'auth fail' });
+            expect(sameVpn.disabled).toBe(false);
+            expect(sameBroker.disabled).toBe(false);
+        });
+
+        it('switching Same VPN on mid-connect cancels it: the late session is discarded, not installed', async () => {
+            const { el, sameVpn } = await connectingManual();
+            // The toggle is locked; dispatching the change models the race the lock closes.
+            sameVpn.checked = true;
+            sameVpn.dispatchEvent(new Event('change'));
+            expect(destSolDisconnect).toHaveBeenCalledTimes(1);
+
+            capturedSolHooks.current.onConnected({ on: vi.fn() }, 'vpn-b');
+
+            expect(destSolDisconnect).toHaveBeenCalledTimes(2);
+            expect(el('#copy-dest-sol-status').textContent).toBe('Not connected');
+            expect(el('#copy-dest-sol-error').textContent).toMatch(/changed while connecting/);
+        });
+
+        it('a VPN typed over the form mid-connect makes the late session stale: it is dropped', async () => {
+            const { el, vpn } = await connectingManual();
+            vpn.value = 'vpn-c';
+            vpn.dispatchEvent(new Event('input'));
+
+            capturedSolHooks.current.onConnected({ on: vi.fn() }, 'vpn-b');
+
+            expect(destSolDisconnect).toHaveBeenCalledTimes(1);
+            expect(el('#copy-dest-sol-status').textContent).toBe('Not connected');
+            expect(el<HTMLButtonElement>('#copy-btn-dest-sol-connect').textContent).toBe('Connect');
+        });
+    });
+
+    describe('destination name checked against the SDK rules before Next', () => {
+        async function withSource() {
+            await QueueCopyModule.install(makeCtx(eventBus, container, { isConnected: true }));
+            const el = <T extends HTMLElement>(sel: string): T => container.querySelector(sel) as T;
+            el<HTMLInputElement>('#copy-source-input').value = 's';
+            el<HTMLInputElement>('#copy-source-input').dispatchEvent(new Event('input'));
+            const dest = el<HTMLInputElement>('#copy-dest-input');
+            const type = (name: string) => { dest.value = name; dest.dispatchEvent(new Event('input')); };
+            return { el, dest, type };
+        }
+
+        it('a name the SDK refuses shows why under the field and keeps Next off; fixing it clears both', async () => {
+            const { el, dest, type } = await withSource();
+            type('orders//in');
+            expect(el('#copy-dest-error').textContent).toMatch(/Empty level/);
+            expect(el('#copy-dest-error').classList.contains('copy-feedback-visible')).toBe(true);
+            expect(dest.classList.contains('is-invalid')).toBe(true);
+            expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(true);
+
+            type('orders/in');
+            expect(el('#copy-dest-error').textContent).toBe('');
+            expect(dest.classList.contains('is-invalid')).toBe(false);
+            expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(false);
+        });
+
+        it('the length limit follows the type: 245 bytes is a valid topic but too long for a queue', async () => {
+            const { el, type } = await withSource();
+            const toggle = el<HTMLInputElement>('#copy-dest-type-toggle');
+            toggle.checked = true;
+            toggle.dispatchEvent(new Event('change'));
+            type('t'.repeat(245));
+            expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(false);
+
+            toggle.checked = false;
+            toggle.dispatchEvent(new Event('change'));
+            expect(el('#copy-dest-error').textContent).toBe('Too long: at most 241 bytes.');
+            expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(true);
+        });
+    });
+
     describe('disconnect dispatch (button label "Disconnect" routes through factory)', () => {
         it('SEMP Connect button when label is Disconnect calls disconnect on the factory', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -600,10 +747,12 @@ describe('queue-copy/module', () => {
             await QueueCopyModule.install(ctx);
             const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-vpn')!;
             toggle.checked = false; toggle.dispatchEvent(new Event('change'));
-            capturedSolHooks.current.onConnected({ on: vi.fn() }, 'v');
             const btn = container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!;
+            btn.click();
+            capturedSolHooks.current.onConnected({ on: vi.fn() }, 'v');
             expect(btn.textContent).toBe('Disconnect');
             btn.click();
+            expect(destSolDisconnect).toHaveBeenCalledTimes(1);
             capturedSolHooks.current.onDisconnected();
             expect(btn.textContent).toBe('Connect');
             consoleSpy.mockRestore();

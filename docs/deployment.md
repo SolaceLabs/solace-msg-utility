@@ -20,6 +20,8 @@ This guide covers **deploying** the prebuilt application. To build from source, 
   - [TLS and trusted CAs](#tls-and-trusted-cas)
   - [Settings](#settings)
   - [In production](#in-production)
+  - [Client addresses behind Docker and proxies](#client-addresses-behind-docker-and-proxies)
+  - [Logs](#logs)
 - [Provisioned mode](#provisioned-mode)
 - [External Runtime Dependencies](#external-runtime-dependencies)
   - [1. Solace JavaScript SDK (`solclient.js`)](#1-solace-javascript-sdk-solclientjs)
@@ -43,7 +45,7 @@ The app runs in one of three modes. They differ in where the app is served from,
 | Served from | GitHub Pages, any web server, the broker's web UI | the container image | the container image |
 | Connects to the broker | the browser | the gateway, for the browser | the gateway, for the browser |
 | Broker credentials | each user types them | each user types them | an administrator stores them; users sign in |
-| Start | open the page, or host the files | `docker compose -f compose.gateway.yaml up -d` | `docker compose -f compose.provisioned.yaml up -d` |
+| Start | open the page, or host the files | `SMU_VERSION=<release> docker compose -f docker/compose.gateway.yaml up -d` | `SMU_VERSION=<release> docker compose -f docker/compose.provisioned.yaml up -d` |
 | Try it offline | `demo.html` | `demo.html` | `provisioned-demo.html` |
 
 - **Standalone** needs nothing but a browser that can reach your broker, and a broker that allows CORS for SEMP.
@@ -151,7 +153,7 @@ Use named volumes: they take the image's UID `65532` ownership. A bind-mounted d
 
 ### TLS and trusted CAs
 
-- **The gateway's certificate:** put yours at `/tls/tls.crt` and `/tls/tls.key`. With neither, the gateway generates a self-signed one (`CN=localhost`, valid 365 days) on its first start and logs its SHA-256 fingerprint. A pair that does not load stops the start.
+- **The gateway's certificate:** put yours at `/tls/tls.crt` and `/tls/tls.key`. A pair that does not load stops the start, and so does half a pair (only the key, or only the certificate): the gateway never writes over a file it did not make. Add the missing file, or remove the one that is there. With neither, the gateway generates a self-signed **bootstrap** pair (`CN=localhost`, valid **7 days**) on its first start and logs its SHA-256 fingerprint. It is a convenience for the first sign-in only: it is never renewed, and once it expires browsers refuse it, so put your own certificate in place before then.
 - **Brokers' certificates:** the gateway verifies every broker it connects to, and the image ships no root CAs. Put each CA your brokers' certificates chain to, a public root included, in `/tls/trust/` as a `*.crt` or `*.pem` file (`SSL_TRUST_DIR`). They are read at start, so restart after adding one. `SSL_INSECURE_SKIP_VERIFY=true` turns verification off: lab use only.
 
 ### Settings
@@ -166,15 +168,35 @@ The gateway keeps its settings in `config.yaml`. The variables below seed it on 
 | `SSL_CERT_FILE` | `/tls/tls.crt` | The gateway's TLS certificate (PEM). Go also reads this variable to find a system CA bundle, so a container that sets it ignores any bundle mounted at Go's default path: add CAs through `SSL_TRUST_DIR`. |
 | `SSL_KEY_FILE` | `/tls/tls.key` | Its private key (PEM). |
 | `SSL_TRUST_DIR` | `/tls/trust` | The CAs trusted for broker connections (`*.crt`, `*.pem`); see [TLS and trusted CAs](#tls-and-trusted-cas). |
-| `SSL_INSECURE_SKIP_VERIFY` | `false` | `true` skips verifying brokers' certificates, with a warning at start. Lab use only. |
-| `LOG_LEVEL` | `warn` | `debug`, `info`, `warn` or `error`. |
+| `SSL_INSECURE_SKIP_VERIFY` | `false` | `true` skips verifying brokers' certificates (`tls.insecureSkipVerify` in `config.yaml`), with a warning at every start. Lab use only. Any value other than `true` or `false` stops the start. |
+| `LOG_LEVEL` | `warn` | `debug`, `info`, `warn` or `error`. See [Logs](#logs). |
 
 ### In production
 
-- **Health check:** the image has no shell, so it declares no `HEALTHCHECK`. Probe `https://<host>:9443/hosted` from outside (`200` while `HOSTED=true`), with the certificate pinned or verification off. A client access list must allow the prober.
-- **Behind a reverse proxy:** pass the original `Host` header through, allow WebSocket upgrades, and list the proxy in `access.trustedProxies` so the gateway sees each client's own address.
-- **Network:** browsers need to reach only the gateway; the gateway needs the brokers' SEMP and secured web messaging (`wss`) ports.
+- **Health check:** the image has no shell, so it declares no `HEALTHCHECK`. Probe `https://<host>:9443/hosted` from outside (`200` while `HOSTED=true`; `503` once the app bundle can no longer be served, say a mounted build went away), with the certificate pinned or verification off. A client access list must allow the prober.
+- **Your own build:** mount it at `/SolaceMsgUtility`. It must hold the mode's bundle (`index.html` in Gateway mode, `provisioned.html` in Provisioned mode): without it the gateway does not start, and the log names the file.
+- **Behind a reverse proxy:** pass the original `Host` header through, allow WebSocket upgrades, and list the proxy in `access.trustedProxies` so the gateway sees each client's own address. See [Client addresses behind Docker and proxies](#client-addresses-behind-docker-and-proxies).
+- **Network:** browsers need to reach only the gateway; the gateway needs the brokers' SEMP and web messaging ports. In Gateway mode the user picks `https`/`wss` or `http`/`ws` per connection; in Provisioned mode each stored connection uses TLS (`https` for SEMP, `wss` for messaging) unless an administrator gave it the plain scheme (`http`, `ws`).
 - **Stopping:** on `SIGTERM` the gateway finishes requests in flight for up to 10 seconds. A restart signs every Provisioned user out.
+
+### Client addresses behind Docker and proxies
+
+The gateway keys three things on the client's address: the access list (`access.allow`), the per-client sign-in failure count and the per-client budget for requests without a session (`login.*`). It takes that address from the TCP connection, unless the connection comes from a proxy listed in `access.trustedProxies`; then it takes the rightmost address in `X-Forwarded-For` that is not itself a listed proxy. When something between the browsers and the gateway hides their addresses, every user looks like that one address: the access list can only allow or deny all of them, and one user's failed sign-ins throttle everyone.
+
+- **A reverse proxy** (nginx, Traefik, a load balancer): list its address, or its network, in `access.trustedProxies`, and have it set `X-Forwarded-For`. Never list a range browsers can connect from: a listed address can claim to be any client.
+- **Docker's port forwarding:** depending on how the port is published, the container may see one address for every client. Docker Desktop (Mac, Windows), rootless Docker with its builtin port driver, and Docker's userland proxy (`docker-proxy`, which carries connections to `localhost` on the host, and every connection when Docker does not manage the host's firewall rules) hand the gateway each connection from their own address, such as the bridge gateway `172.17.0.1`. A Linux host where Docker forwards the port through its firewall rules keeps the browsers' addresses, and so does `--network host`. Do not list that address in `access.trustedProxies` to work around it: no `X-Forwarded-For` comes through these, so nothing changes, and anything else on that network could then claim to be any client.
+- **How to check:** in Provisioned mode the admin console's Gateway Settings page shows your address as the gateway sees it, and whether a trusted proxy decided it (`GET /managed/client`). With `LOG_LEVEL=info` each request line names the client, and when the last 50 sign-ins all came from one private address the gateway logs a warning that says so.
+
+### Logs
+
+The gateway logs to standard error, one `key=value` line per event, at the level `LOG_LEVEL` sets (`logLevel` in `config.yaml`, changed live in Provisioned mode from Gateway Settings):
+
+- **error:** something failed and needs attention: a start that cannot proceed, a request the gateway could not serve (a handler that crashed is answered `500` and logged here, with a stack trace at `debug`), a failed backup.
+- **warn:** a recoverable problem: a denied client, a burst of failed sign-ins, a broker the relay could not reach, a full throttle table, a setting that is ignored.
+- **info:** what happened: each request (with the resolved client and the signed-in user), sign-ins, dials, every administrator's change to users, connections and settings, backups written, imports and exports.
+- **debug:** traces.
+
+Each line names its `component` and what it concerns (`user`, `client`, `broker`, `vpn`, `path`, `target`); no password or key is ever logged. One line, `gateway starting`, is written at every level: the version, the mode, the files, the access list, the trusted proxies, the TLS settings and, in Provisioned mode, the sign-in and session limits the gateway runs with.
 
 ---
 
@@ -265,7 +287,7 @@ Connection profiles are stored in the browser's `localStorage`. They persist acr
 | Key | Default | Purpose |
 | --- | --- | --- |
 | `access.allow` | `[]` | CIDR list of clients allowed to reach the gateway at all. Empty means everyone. A denied client gets `403`, and the log names its address. |
-| `access.trustedProxies` | `[]` | CIDR list of your reverse proxies. From one of them the client's address is taken from `X-Forwarded-For`; from any other peer that header is ignored. |
+| `access.trustedProxies` | `[]` | CIDR list of your reverse proxies. From one of them the client's address is taken from `X-Forwarded-For`; from any other peer that header is ignored. See [Client addresses behind Docker and proxies](#client-addresses-behind-docker-and-proxies). |
 | `session.*`, `login.*`, `modules.*` | see [provisioned-mode.md](provisioned-mode.md#configure) | Provisioned mode only: session lengths, the sign-in limits and the modules users may be given. |
 
 Missing keys take the built-in defaults, never an environment value; an unknown key, an empty file, a missing `version: 1` or a value out of range stops the start, naming the key and the value. `STORE_KEY_FILE` is never in the file. In Provisioned mode the admin console's Gateway Settings page edits this file too.

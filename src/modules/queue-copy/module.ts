@@ -31,10 +31,13 @@ import {
     setDestSempFormLocked,
     setDestSolFormLocked,
     setDestBrokerLocked,
+    setDestNameError,
+    setDestTargetLocked,
 } from './ui';
 import type { PrimarySnapshot } from './ui';
 import { wireUiEvents } from './ui-events';
-import { createInitialState, syncDestFormFromSnapshot } from './state';
+import { destNameProblem } from './service';
+import { createInitialState, syncDestFormFromSnapshot, destTargetKey } from './state';
 import {
     createServiceSolace,
     type SolaceConnectionHooks,
@@ -46,7 +49,7 @@ import {
 import { createSolacePublisher } from '../../core/services/solace-publisher';
 import { createGate } from '../../core/components/module-gate';
 import { logger } from '../../core/logger';
-import { limitSchemeOptions } from '../../core/hosted';
+import { isHostedDeployment, limitSchemeOptions } from '../../core/hosted';
 import { isQueueVisible, canOperate } from '../../core/rbac';
 import { errMessage } from '../../core/utils';
 import { isSessionEnded } from '../../core/services/managed-profile';
@@ -65,9 +68,13 @@ export const QueueCopyModule = {
         const state = createInitialState();
         const els = cacheElements(container);
         // Without the gateway, an https page cannot open ws:// or http://. The
-        // source fields mirror the primary connection and keep its scheme.
-        limitSchemeOptions(els.destSempProtocol);
-        limitSchemeOptions(els.destSolProtocol);
+        // source fields mirror the primary connection and keep its scheme. The
+        // /hosted verdict has one home, AppState.connConfig (set by the
+        // connections module before this install runs); the destination
+        // configs carry it so the services route through the gateway.
+        const hosted = isHostedDeployment(appState);
+        limitSchemeOptions(els.destSempProtocol, hosted);
+        limitSchemeOptions(els.destSolProtocol, hosted);
 
         // Connection-required gate (created by the shared component) vs the
         // content panel — the module owns the mutual exclusion.
@@ -151,10 +158,27 @@ export const QueueCopyModule = {
         // the global bus. Mirrors the connections module's primary bridging.
         const destSolHooks: SolaceConnectionHooks = {
             onConnected: (session, vpn) => {
+                const target = state.destSolPending;
+                state.destSolPending = null;
+                // Install the session only if the form still names the
+                // destination its connect was started for. A connect is a dial
+                // plus the SDK handshake, long enough for the target to move or
+                // the connect to be cancelled; a late session is dropped, never
+                // handed to the engine.
+                if (target !== destTargetKey(state.destForm)) {
+                    logger.warn(`[QueueCopy] discarding the destination session for VPN "${vpn}": the destination changed while it connected`);
+                    destSolClient.disconnect();
+                    setDestSolStatus(els, 'disconnected');
+                    setDestSolError(els, 'The destination changed while connecting. Connect again.');
+                    destUi.refreshDestTarget();
+                    return;
+                }
                 state.destSession = session;
+                state.destSessionTarget = target;
                 state.destPublisher = createSolacePublisher(session);
                 setDestSolStatus(els, 'connected', vpn);
                 setDestSolError(els, null);
+                destUi.refreshDestTarget();
                 setDestSolFormLocked(els, true);
                 setDestBrokerLocked(els, true);
                 refreshStartEnabled();
@@ -164,22 +188,30 @@ export const QueueCopyModule = {
                 state.destPublisher?.dispose('Destination disconnected');
                 state.destPublisher = null;
                 state.destSession = null;
+                state.destSessionTarget = null;
+                // A connect in flight ends here too: its SDK session is gone.
+                state.destSolPending = null;
                 setDestSolStatus(els, 'disconnected');
                 setDestSolFormLocked(els, false);
                 // Re-derive broker-host lock from toggle state — Same-broker
                 // dictates whether the host stays locked even with no live
                 // dest connection.
                 applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, getPrimarySnapshot());
+                destUi.refreshDestTarget();
                 refreshStartEnabled();
                 refreshDestPickVisible();
             },
             onConnectFailed: ({ infoStr }) => {
+                state.destSolPending = null;
                 setDestSolStatus(els, 'disconnected');
                 setDestSolError(els, `Connection failed: ${infoStr}`);
+                destUi.refreshDestTarget();
             },
             onError: (err) => {
+                state.destSolPending = null;
                 setDestSolStatus(els, 'disconnected');
                 setDestSolError(els, err.message);
+                destUi.refreshDestTarget();
             },
         };
 
@@ -242,12 +274,18 @@ export const QueueCopyModule = {
                 port: f.semp.port,
                 urlPath: f.semp.urlPath,
                 user: f.semp.user,
+                hosted,
             };
             void destSempClient.connect(cfg, f.host, state.destSempPass);
         }
 
         function connectDestSol(): void {
             const f = state.destForm;
+            // The destination this connect is for: onConnected installs the
+            // session only if the form still names it, and the controls that
+            // choose it stay locked until the connect ends.
+            state.destSolPending = destTargetKey(f);
+            setDestTargetLocked(els, true);
             if (f.credMode === 'provisioned') {
                 destSolClient.init();
                 setDestSolStatus(els, 'connecting');
@@ -260,8 +298,10 @@ export const QueueCopyModule = {
                         connect: (c) => { destSolClient.connect(c.cfg, c.broker, c.pass, c.clientName); },
                     })
                     .catch((e) => {
+                        state.destSolPending = null;
                         setDestSolStatus(els, 'disconnected');
                         setDestSolError(els, errMessage(e));
+                        destUi.refreshDestTarget();
                         if (isSessionEnded(e)) eventBus.emit('rbac:sign-out-requested');
                     });
                 return;
@@ -278,6 +318,7 @@ export const QueueCopyModule = {
                 reconnectRetries: 1,
                 reconnectWait: 3000,
                 maxMessagesPerQueue: 100,
+                hosted,
                 // Dest connect() takes its clientName as a separate 4th arg and
                 // never reads cfg.clientNameId, so this satisfies the required
                 // SolaceConfig field without affecting the dest connection.
@@ -293,7 +334,16 @@ export const QueueCopyModule = {
         // same button triggers either connect or disconnect depending on the
         // active state. We dispatch from the click handler in ui-events.
         function disconnectDestSemp(): void { void destSempClient.disconnect(); }
-        function disconnectDestSol(): void { destSolClient.disconnect(); }
+        function disconnectDestSol(): void {
+            if (state.destSolPending !== null) {
+                // Cancels a connect still in flight: onConnected discards its
+                // late session, and the destination controls unlock now.
+                state.destSolPending = null;
+                setDestSolStatus(els, 'disconnected');
+                destUi.refreshDestTarget();
+            }
+            destSolClient.disconnect();
+        }
 
         // -------- Cross-cutting gate refreshers --------
         // Both Next-button enablement and destination-picker visibility depend
@@ -306,7 +356,11 @@ export const QueueCopyModule = {
             // dest Solace session. Dest SEMP is NOT gated here — it's only
             // needed for the destination queue picker, not at copy time.
             const destReady = state.destForm.sameVpn || state.destSession !== null;
-            const ok = !!state.sourceQueue && !!state.dest.name && destReady;
+            // A name the SDK refuses would fail every publish of the run: say
+            // why next to the field and keep Next off until it is fixed.
+            const nameProblem = destNameProblem(state.dest.type, state.dest.name);
+            setDestNameError(els, nameProblem);
+            const ok = !!state.sourceQueue && !!state.dest.name && nameProblem === null && destReady;
             setStartEnabled(els, ok);
         }
 
@@ -333,7 +387,9 @@ export const QueueCopyModule = {
         // current state, so no explicit initial-disabled call is needed.
         refreshFromPrimary();
 
-        wireUiEvents(app, els, state, {
+        // destSolHooks and the connect/disconnect helpers above reach this only
+        // after install has returned, once wireUiEvents has run.
+        const destUi = wireUiEvents(app, els, state, {
             getPrimarySnapshot,
             getPrimarySession: () => primarySession,
             connectDestSemp,

@@ -22,3 +22,24 @@ updates:
         update-types:
           - minor
           - patch
+
+  # The builder images and the Dockerfile syntax frontend, pinned tag@digest in
+  # docker/Dockerfile: a re-pushed tag must not change the build, so the digest
+  # only moves through one of these PRs. ci.yml's PR trigger covers
+  # docker/Dockerfile, so each runs the full gate, image build and scan
+  # included. A golang or node bump moves with go-web-proxy/go.mod's toolchain
+  # and .tool-versions (docs/git.md). Majors are ignored: a deliberate change.
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+    groups:
+      docker-images:
+        patterns:
+          - "*"

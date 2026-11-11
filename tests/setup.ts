@@ -34,8 +34,10 @@ Object.defineProperty(navigator, 'clipboard', {
     writable: true
 });
 
-// Mock fetch
-(globalThis as any).fetch = vi.fn();
+// Mock fetch. beforeEach resets it and puts it back, so every test starts
+// from this bare vi.fn() (resolving undefined).
+const fetchMock = vi.fn();
+(globalThis as any).fetch = fetchMock;
 
 // Mock btoa (jsdom may not have it)
 if (typeof globalThis.btoa === 'undefined') {
@@ -49,8 +51,8 @@ if (typeof globalThis.atob === 'undefined') {
 URL.createObjectURL = vi.fn(() => 'blob:mock-url');
 URL.revokeObjectURL = vi.fn();
 
-// Mock confirm/alert
-globalThis.confirm = vi.fn(() => true);
+// Mock alert. No confirm mock: src code never calls confirm() (eslint no-alert); a yes/no
+// question is src/core/components/confirm-dialog, answered in tests via tests/helpers/confirmDialog.ts.
 globalThis.alert = vi.fn();
 
 // Polyfill HTMLDialogElement imperative methods. jsdom (as of v22/v23) creates
@@ -181,7 +183,9 @@ function createBrowserMock() {
     };
 }
 
-function createMessageMock() {
+// `any`: the SDK message surface is far wider than this base, so a test adds
+// the getters it exercises (isRedelivered, smfHeader, ...) on top of it.
+function createMessageMock(): any {
     const props: Record<string, any> = {};
     // All setters use .mockReturnThis() so `msg.setDestination(...).setBinaryAttachment(...)`
     // chaining works transparently. The real SDK returns `this` from setters; without
@@ -269,14 +273,19 @@ beforeEach(() => {
     localStorageMock.clear();
 
     // Same re-install pattern for the other global mocks — a test that calls
-    // `confirm.mockReturnValue(false)` or `URL.createObjectURL.mockReturnValueOnce(null)`
+    // `URL.createObjectURL.mockReturnValueOnce(null)`
     // would otherwise leak its override into the next test where a different
     // default is assumed.
-    (globalThis.confirm as any).mockImplementation(() => true);
     (globalThis.alert as any).mockImplementation(() => {});
     (URL.createObjectURL as any).mockImplementation(() => 'blob:mock-url');
     (URL.revokeObjectURL as any).mockImplementation(() => {});
     (navigator.clipboard.writeText as any).mockResolvedValue(undefined);
+    // clearAllMocks leaves a vi.fn()'s implementation and any unconsumed *Once
+    // values in place, so a test's `fetch.mockImplementation(...)` would answer
+    // the next test's requests. Reset it, and reinstall it over whatever a test
+    // assigned to fetch, so no test passes on another's stub.
+    fetchMock.mockReset();
+    (globalThis as any).fetch = fetchMock;
 
     // Fresh Solace SDK mock every test — stale `_handlers` entries from a prior
     // test's `mockSession._handlers[UP_NOTICE] = …` assignments cannot fire in

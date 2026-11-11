@@ -150,10 +150,25 @@ task_build() {
 
 task_vet() {
   ensure_deps vet || return $?
-  # The build strips types without checking them, so tsc --noEmit is the only
-  # thing that catches a type error.
+  # The build strips types without checking them, so tsc is the only thing that
+  # catches a type error: src/ with its .js modules (checkJs), then tests/ and
+  # the vite/vitest configs (tsconfig.test.json).
   run vet npm run typecheck || return $?
+  run vet npm run typecheck:tests || return $?
+  # The house rules a linter can hold (eslint.config.mjs).
+  run vet npm run lint || return $?
   run vet go -C "$GO_DIR" vet ./... || return $?
+  # gofmt -l lists the files gofmt would rewrite and exits 0 either way, so a
+  # listed file is the failure. The selected toolchain's own gofmt (its
+  # GOROOT), like every other Go tool here.
+  local goroot unformatted
+  goroot="$(go -C "$GO_DIR" env GOROOT)" || return $?
+  unformatted="$("$goroot/bin/gofmt" -l "$GO_DIR" 2>&1)" || { note vet "$unformatted"; return 1; }
+  if [ -n "$unformatted" ]; then
+    note vet "gofmt would rewrite these (gofmt -w <file>):"
+    note vet "$unformatted"
+    return 1
+  fi
 }
 
 task_test() {
@@ -166,7 +181,14 @@ task_test() {
   else
     run test npm run test:app || return $?
   fi
-  run test go -C "$GO_DIR" test -count=1 ./... || return $?
+  # The race detector needs cgo, so a C compiler: gcc is on both CI runners.
+  # Without one the Go suite still runs, without -race, and the log says so.
+  if command -v gcc >/dev/null 2>&1; then
+    run test env CGO_ENABLED=1 go -C "$GO_DIR" test -race -count=1 ./... || return $?
+  else
+    note test "go test: -race skipped, no gcc on PATH"
+    run test go -C "$GO_DIR" test -count=1 ./... || return $?
+  fi
 }
 
 # The demo broker and the Provisioned demo's fake gateway (tests/mock-broker/):
@@ -179,7 +201,12 @@ task_mock() {
     note mock "mock suite: skipped here, cov runs it in this invocation"
     return 0
   fi
-  run mock npm run test:mock
+  # With coverage over src/mock-broker/ (vitest.mock.config.ts), reported and
+  # not gated: the demo tree has no threshold yet, but a drop is visible.
+  run mock npm run test:mock:coverage || return $?
+  local total
+  total="$(grep -m1 'All files' "$LOG_DIR/mock.log" | tr -s '[:blank:]' ' ')"
+  note mock "coverage total (src/mock-broker, no threshold): ${total:-unavailable}"
 }
 
 task_cov() {
@@ -281,7 +308,7 @@ usage() {
 usage: $(basename "$0") <task>...
 
   build vet test mock cov scan image up down graphify e2e
-  all   = $ALL       (what CI runs, as: all scan)
+  all   = $ALL       (what CI runs, as: all cov scan)
   full  = $FULL      (pre-tag sweep)
   mock  = the demo broker and fake-gateway suites (tests/mock-broker/)
   e2e   = the gateway in Gateway and Provisioned mode against an existing broker (local only, standalone)

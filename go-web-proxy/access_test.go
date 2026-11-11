@@ -292,7 +292,7 @@ func rawStatusLine(t *testing.T, addr, request string) string {
 // /hosted is behind the ACL like every other route, and its payload is
 // untouched for an allowed client.
 func TestClientACL_HostedPayloadUnchanged(t *testing.T) {
-	hh := newHostedHandler(true, liveWith(func(c *config) { c.connModes, c.defaultConn = connBoth, connProvisioned }))
+	hh := newHostedHandler(true, liveWith(func(c *config) { c.connModes, c.defaultConn = connBoth, connProvisioned }), bundleReady)
 	h := aclChain(accessConfig{allow: prefixes(t, "10.0.0.0/8")}, hh, quietLogger())
 
 	direct := httptest.NewRecorder()

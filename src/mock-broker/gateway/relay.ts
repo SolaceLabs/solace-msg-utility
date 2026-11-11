@@ -3,7 +3,9 @@
  * broker instead of a real one. Same refusals in the same order: the path,
  * the query, the read-only rule, then the broker; a broker that refuses the
  * stored credential is a `502 upstream_auth`, never a `401` (which would sign
- * the user out).
+ * the user out). When a test scripts the broker (`upstream`, the gateway
+ * contract does), the broker's answer is mapped as relay.go's `forward` maps
+ * it: the allowed headers only, a redirect or interim answer a `502`.
  *
  * Not simulated: the cross-site read check, the in-flight cap and the body cap.
  *
@@ -110,6 +112,33 @@ export function isShowRpc(body: string): boolean {
 
 const refuse = (status: number, error: string): GatewayResponse => ({ status, json: { error } });
 
+/** A scripted broker's answer: a status, headers and a body, or an error in place of an answer. */
+export interface UpstreamAnswer { status?: number; headers?: Record<string, string>; body?: string; error?: string }
+
+/** The broker a test scripts: it is told the request the relay would send. */
+export type Upstream = (call: { method: string; url: string; body: string }) => UpstreamAnswer;
+
+/** relayResponseHeaders: what of the broker's answer reaches the browser. */
+const RELAY_RESPONSE_HEADERS = ['Content-Type', 'Content-Length', 'Content-Encoding', 'Last-Modified'];
+
+const headerOf = (h: Record<string, string> | undefined, name: string): string | undefined =>
+    Object.entries(h ?? {}).find(([k]) => k.toLowerCase() === name.toLowerCase())?.[1];
+
+/** forward: a failure, a redirect or an interim answer is upstream_unavailable, a 401 or 407 upstream_auth. */
+function forward(a: UpstreamAnswer): GatewayResponse {
+    const status = a.status ?? 0;
+    if (a.error !== undefined || status < 200 || (status >= 300 && status < 400)) return refuse(502, 'upstream_unavailable');
+    if (status === 401 || status === 407) return refuse(502, 'upstream_auth');
+    const headers: Record<string, string> = {};
+    for (const k of RELAY_RESPONSE_HEADERS) {
+        const v = headerOf(a.headers, k);
+        if (v !== undefined) headers[k] = v;
+    }
+    headers['X-Content-Type-Options'] = 'nosniff';
+    headers['Content-Security-Policy'] = "default-src 'none'; sandbox";
+    return { status, text: a.body ?? '', headers };
+}
+
 /**
  * Answer one relayed request for a signed-in user. `target` finds the broker
  * the user may use (null: the same 404 as an unknown one); `unreachable` is the
@@ -119,6 +148,7 @@ export async function relay(
     req: GatewayRequest,
     target: (broker: string) => BrokerTarget | null,
     unreachable: boolean,
+    upstream?: Upstream,
 ): Promise<GatewayResponse> {
     const p = parseRelayPath(req.path);
     if (!p) return refuse(404, 'not_found');
@@ -129,6 +159,8 @@ export async function relay(
     }
     const t = target(p.broker);
     if (!t) return refuse(404, 'not_found');
+    const url = `${t.scheme}://${t.host}:${t.port}${p.rawTail}${req.query ? `?${req.query}` : ''}`;
+    if (upstream) return forward(upstream({ method, url, body: p.v1 ? req.body : '' }));
 
     await delay();
     // What the broker would answer, mapped as the gateway maps it.
@@ -137,7 +169,6 @@ export async function relay(
     if (scenario.fault === FAULT.SEMP_ERROR) return { status: 500, text: 'Internal error', contentType: 'text/plain' };
 
     if (p.v1) return { status: 200, text: handleSempV1(req.body, p.broker), contentType: 'application/xml' };
-    const url = new URL(`https://${t.host}:${t.port}${p.rawTail}${req.query ? `?${req.query}` : ''}`);
-    const page = handleSempV2(url, p.broker) ?? { data: [], meta: {} };
+    const page = handleSempV2(new URL(url), p.broker) ?? { data: [], meta: {} };
     return method === 'HEAD' ? { status: 200, contentType: 'application/json' } : { status: 200, json: page };
 }

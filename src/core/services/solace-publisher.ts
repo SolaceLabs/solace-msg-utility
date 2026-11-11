@@ -1,4 +1,4 @@
-import { generateUuid } from '../utils';
+import { generateUuid, solaceErrorText } from '../utils';
 import { logger } from '../logger';
 
 declare const solace: any;
@@ -49,7 +49,8 @@ export interface SolacePublisher {
      * Clone an original SDK message, stamp destination + PERSISTENT delivery
      * mode + correlation key, send it, and await the broker's ACK/REJECT.
      * Settles with `{ ok: true }` on ACK, `{ ok: false, error }` on REJECT,
-     * synchronous send failure, or timeout.
+     * a destination the SDK refuses to address, synchronous send failure, or
+     * timeout.
      */
     send(originalMsg: any, dest: DestTarget, opts?: SendOptions): Promise<SendResult>;
 
@@ -210,28 +211,30 @@ export function createSolacePublisher(session: any, opts?: PublisherOptions): So
             return Promise.resolve({ ok: false, error });
         }
 
-        const newMsg = cloneMessage(originalMsg, dest);
         const correlationValue = sendOpts.correlationKey ?? generateUuid();
         const timeoutMs = sendOpts.ackTimeoutMs ?? defaultTimeoutMs;
 
-        newMsg.setCorrelationKey({
-            Solace_Msg_Utility_Seq_Num: correlationValue,
-            Original_Msg_ID: sendOpts.originalIdHint ?? '',
-        });
-
-        sendOpts.beforeSend?.(newMsg);
+        let newMsg: any;
+        try {
+            newMsg = cloneMessage(originalMsg, dest);
+            newMsg.setCorrelationKey({
+                Solace_Msg_Utility_Seq_Num: correlationValue,
+                Original_Msg_ID: sendOpts.originalIdHint ?? '',
+            });
+            sendOpts.beforeSend?.(newMsg);
+        } catch (e) {
+            // e.g. an invalid topic or queue name: the SDK throws while
+            // addressing it. Settle like any other failed send, never reject.
+            const error = solaceErrorText(e, `Cannot send to ${dest.type} "${dest.name}".`);
+            sendOpts.onReject?.(error);
+            return Promise.resolve({ ok: false, error });
+        }
 
         return new Promise<SendResult>((resolve) => {
             const timer = setTimeout(() => {
-                // Defensive guard kept commented in case future code changes
-                // allow the timer to fire after the entry has been removed.
-                // Currently unreachable: every removal path (ack/reject
-                // listeners, rejectAllPending, dispose, sync-send catch)
-                // calls clearTimeout(entry.timer) before pending.delete(),
-                // so the timer cannot fire against a missing entry. The `!`
-                // assertion below reflects that invariant.
+                // Every removal path clears this timer before deleting the
+                // entry, so it is still pending when the timer fires.
                 const entry = pending.get(correlationValue)!;
-                // if (!entry) return;
                 pending.delete(correlationValue);
                 const result: SendResult = { ok: false, error: 'Timed out waiting for broker acknowledgement.' };
                 entry.resolve(result);
@@ -248,10 +251,10 @@ export function createSolacePublisher(session: any, opts?: PublisherOptions): So
 
             try {
                 session.send(newMsg);
-            } catch (e: any) {
+            } catch (e) {
                 clearTimeout(timer);
                 pending.delete(correlationValue);
-                const error = e?.message ?? 'Send failed';
+                const error = solaceErrorText(e, 'Send failed');
                 resolve({ ok: false, error });
                 sendOpts.onReject?.(error);
             }

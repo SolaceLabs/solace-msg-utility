@@ -224,6 +224,59 @@ describe('check-bundles — main', () => {
     it('resolves the repo root from its own location', () => {
         expect(fs.existsSync(path.join(repoRoot(), 'scripts', 'check-bundles.mjs'))).toBe(true);
     });
+
+    it("checks the repo's own dist/ when given no root, as npm run check:bundles does", () => {
+        vi.spyOn(console, 'log').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        expect(main()).toBe(checkBundles(path.join(repoRoot(), 'dist')).length ? 1 : 0);
+    });
+});
+
+// The file is both the gate's CLI and a module the tests import: it runs only
+// when node started it, and then the exit code is the verdict.
+describe('check-bundles -- run as a script', () => {
+    const argv = process.argv;
+    const exitCode = process.exitCode;
+    afterEach(() => {
+        process.argv = argv;
+        process.exitCode = exitCode;
+    });
+    async function load(script?: string) {
+        process.argv = script === undefined ? [process.execPath] : [process.execPath, script];
+        vi.resetModules();
+        return import('../../scripts/check-bundles.mjs');
+    }
+
+    it("checks the repo's dist/ and sets the exit code when node runs it, by any path", async () => {
+        vi.spyOn(console, 'log').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const mod = await load(path.join('.', 'scripts', 'check-bundles.mjs'));
+        expect(process.exitCode).toBe(mod.checkBundles(path.join(repoRoot(), 'dist')).length ? 1 : 0);
+    });
+
+    it('does nothing when imported, or when node runs another file', async () => {
+        const log = vi.spyOn(console, 'log');
+        const err = vi.spyOn(console, 'error');
+        await load();
+        await load(path.join('node_modules', 'vitest', 'vitest.mjs'));
+        expect(process.exitCode).toBe(exitCode);
+        expect(log).not.toHaveBeenCalled();
+        expect(err).not.toHaveBeenCalled();
+    });
+});
+
+describe('check-bundles -- the image', () => {
+    // The image builds its own bundles (docker/Dockerfile's pwa-builder stage),
+    // so the check must run there too, on the files the image copies.
+    it('checks the bundles it builds before it copies them into the image', () => {
+        const dockerfile = fs.readFileSync(path.join(repoRoot(), 'docker/Dockerfile'), 'utf-8');
+        const build = dockerfile.indexOf('RUN APP_VERSION="$APP_VERSION" npm run build\n');
+        const check = dockerfile.indexOf('RUN npm run check:bundles\n');
+        const copy = dockerfile.indexOf('cp /pwa/dist/index.html /pwa/dist/provisioned.html');
+        expect(build).toBeGreaterThan(-1);
+        expect(check).toBeGreaterThan(build);
+        expect(copy).toBeGreaterThan(check);
+    });
 });
 
 describe('check-bundles — the Release upload list', () => {

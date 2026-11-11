@@ -457,6 +457,34 @@ export function setDestBrokerLocked(els: CopyUiElements, eitherConnected: boolea
     // unlock here — applyDestPrefill is called from the hook side too.
 }
 
+/** Tooltip on the destination-choosing controls while they are locked. */
+export const DEST_TARGET_LOCKED_TITLE = 'Locked while the destination connects.';
+
+/**
+ * Lock the controls that choose where the destination session lands -- the
+ * Same-broker / Same-VPN toggles, the credential source and the provisioned
+ * broker and VPN -- while a destination connect is in flight, with a title
+ * saying why. Unlocking re-enables only the controls this lock disabled; the
+ * caller then re-renders them so each owning renderer re-applies its own rule
+ * (applyDestPrefill, applyDestCredMode, the provisioned lists).
+ */
+export function setDestTargetLocked(els: CopyUiElements, locked: boolean): void {
+    const controls: (HTMLInputElement | HTMLSelectElement)[] = [
+        els.toggleSameBroker, els.toggleSameVpn,
+        els.destCredProvisioned, els.destCredManual,
+        els.destProvBroker, els.destProvVpn,
+    ];
+    for (const el of controls) {
+        if (locked) {
+            el.disabled = true;
+            el.title = DEST_TARGET_LOCKED_TITLE;
+        } else if (el.title === DEST_TARGET_LOCKED_TITLE) {
+            el.disabled = false;
+            el.title = '';
+        }
+    }
+}
+
 /** Possible destination connect status. */
 export type DestConnStatus = 'connected' | 'connecting' | 'disconnected';
 
@@ -539,6 +567,18 @@ export function applyDestType(els: CopyUiElements, type: DestType): void {
         els.destNameLabel.textContent = 'Queue name';
         els.destInput.placeholder = 'Destination queue name';
     }
+}
+
+/**
+ * Show (`message`) or clear (`null`) the inline error under the destination
+ * name. The input sits inside `.copy-input-with-search`, so the design
+ * system's `.is-invalid + .invalid-feedback` rule cannot reach the feedback
+ * line; `copy-feedback-visible` (styles.css) shows it instead.
+ */
+export function setDestNameError(els: CopyUiElements, message: string | null): void {
+    els.destInput.classList.toggle('is-invalid', message !== null);
+    els.destError.classList.toggle('copy-feedback-visible', message !== null);
+    els.destError.textContent = message ?? '';
 }
 
 /**

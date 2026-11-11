@@ -32,8 +32,8 @@ type managedHandler struct {
 	settings *settingsFile
 	backups  *backupService // /managed/backup* (backup_api.go)
 	relay    http.Handler   // /managed/relay/*, dispatched before the mux (relay.go)
-	smf      http.Handler // /managed/smf/*, dispatched before the mux (smf.go)
-	dial     http.Handler // POST /managed/dial (dial.go)
+	smf      http.Handler   // /managed/smf/*, dispatched before the mux (smf.go)
+	dial     http.Handler   // POST /managed/dial (dial.go)
 	cop      *http.CrossOriginProtection
 	logger   *slog.Logger
 	mux      *http.ServeMux
@@ -63,6 +63,7 @@ func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *sett
 	mux.HandleFunc("DELETE /managed/connections/{broker}", h.adminOnly(h.deleteConnection))
 	mux.HandleFunc("GET /managed/settings", h.adminOnly(h.getSettings))
 	mux.HandleFunc("PUT /managed/settings", h.adminOnly(h.saveSettings))
+	mux.HandleFunc("GET /managed/client", h.adminOnly(h.clientSeen))
 	h.registerBackupRoutes(mux)
 	// Anything else, including a known path with the wrong method, is a 404:
 	// a signed-in client learns nothing a 405 would add.
@@ -89,6 +90,7 @@ func (h *managedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "cross_origin")
 		return
 	}
+	setRequestUser(r, as.user)
 	if as.mustChange && r.URL.Path != "/managed/logout" {
 		writeError(w, http.StatusForbidden, "password_change_required")
 		return
@@ -187,9 +189,21 @@ func decodeJSONLimit(w http.ResponseWriter, r *http.Request, dst any, limit int6
 	return true
 }
 
-func (h *managedHandler) serverError(w http.ResponseWriter, op string, err error) {
-	h.logger.Error("managed: "+op+" failed", "err", err)
+// log is the handler's logger with the request's client, method, path and
+// signed-in user (the acting administrator, on an admin route).
+func (h *managedHandler) log(r *http.Request) *slog.Logger { return requestLogger(h.logger, r) }
+
+// serverError answers 500 server_error and logs what failed: the operation,
+// the user or broker the path names (target) and the cause.
+func (h *managedHandler) serverError(w http.ResponseWriter, r *http.Request, op string, err error) {
+	h.log(r).Error("admin request failed", "op", op, "target", pathTarget(r), "err", err)
 	writeError(w, http.StatusInternalServerError, "server_error")
+}
+
+// pathTarget is the user or broker a request's path names, "" for none. No
+// route has both, so the two values never mix.
+func pathTarget(r *http.Request) string {
+	return r.PathValue("name") + r.PathValue("broker")
 }
 
 // ----- session endpoints ----------------------------------------------------------
@@ -252,13 +266,18 @@ type vpnJSON struct {
 	Pass string `json:"pass"` // plaintext over TLS; "" = keep on edit; never listed
 }
 
+// sempJSON and clientJSON carry the scheme the gateway reaches the broker
+// with. A list always names it (https or http, wss or ws); on a save it may
+// be left out, which means TLS.
 type sempJSON struct {
-	Port string `json:"port"`
-	User string `json:"user"`
-	Pass string `json:"pass"` // plaintext over TLS; "" = keep on edit; never listed
+	Scheme string `json:"scheme"`
+	Port   string `json:"port"`
+	User   string `json:"user"`
+	Pass   string `json:"pass"` // plaintext over TLS; "" = keep on edit; never listed
 }
 
 type clientJSON struct {
+	Scheme  string    `json:"scheme"`
 	Port    string    `json:"port"`
 	MsgVpns []vpnJSON `json:"msgVpns"`
 }
@@ -303,8 +322,8 @@ func (c connSaveJSON) toRec(broker string) connRec {
 	return connRec{
 		Broker:   broker,
 		Hostname: c.Hostname,
-		Semp:     sempRec{Port: flexStr(c.Semp.Port), Username: c.Semp.User, Password: c.Semp.Pass},
-		Client:   clientRec{Port: flexStr(c.Client.Port), MsgVpns: vpns},
+		Semp:     sempRec{Scheme: canonScheme(c.Semp.Scheme, sempTLS), Port: flexStr(c.Semp.Port), Username: c.Semp.User, Password: c.Semp.Pass},
+		Client:   clientRec{Scheme: canonScheme(c.Client.Scheme, clientTLS), Port: flexStr(c.Client.Port), MsgVpns: vpns},
 	}
 }
 
@@ -318,8 +337,10 @@ func userToOutput(u userRec) userJSON {
 // connToOutput leaves the passwords out.
 func connToOutput(c connRec) connJSON {
 	out := connJSON{Broker: c.Broker, Hostname: c.Hostname}
+	out.Semp.Scheme = orTLS(c.Semp.Scheme, sempTLS)
 	out.Semp.Port = string(c.Semp.Port)
 	out.Semp.User = c.Semp.Username
+	out.Client.Scheme = orTLS(c.Client.Scheme, clientTLS)
 	out.Client.Port = string(c.Client.Port)
 	// Initialise so a VPN-less connection serialises "msgVpns":[] (not null),
 	// matching the non-nullable client type the frontend declares.
@@ -370,6 +391,7 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	rec := userRec{Username: name, Admin: body.Admin, Operate: permsToRows(body.Operate), ReadOnly: permsToRows(body.ReadOnly), Modules: body.Modules}
+	_, existed := h.store.isAdmin(name)
 	drop, err := h.store.upsertUser(r.Context(), rec, body.Password)
 	switch {
 	case errors.Is(err, errBlankNewUserPassword):
@@ -379,13 +401,25 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "last_admin")
 		return
 	case err != nil:
-		h.serverError(w, "saveUser", err)
+		h.serverError(w, r, "saveUser", err)
 		return
 	}
 	if drop {
 		h.sessions.dropUser(name)
 	}
+	h.log(r).Info("user saved", "target", name, "created", !existed, "admin", body.Admin,
+		"password_set", body.Password != "", "operate_rows", len(body.Operate), "read_only_rows", len(body.ReadOnly),
+		"modules", modulesAttr(body.Modules), "sessions_ended", drop)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// modulesAttr is a user's module list for a log line: "default" when the
+// user has no list of their own.
+func modulesAttr(m *[]string) any {
+	if m == nil {
+		return "default"
+	}
+	return *m
 }
 
 func (h *managedHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
@@ -395,11 +429,12 @@ func (h *managedHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errLastAdmin):
 		writeError(w, http.StatusConflict, "last_admin")
 	case err != nil:
-		h.serverError(w, "deleteUser", err)
+		h.serverError(w, r, "deleteUser", err)
 	case !found:
 		writeError(w, http.StatusNotFound, "not_found")
 	default:
 		h.sessions.dropUser(name)
+		h.log(r).Info("user deleted", "target", name)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -422,10 +457,22 @@ func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request) 
 		writeInvalid(w, "connection", err.Error())
 		return
 	}
+	created := !h.store.hasConnection(rec.Broker)
 	if err := h.store.upsertConnection(rec); err != nil {
-		h.serverError(w, "saveConnection", err)
+		h.serverError(w, r, "saveConnection", err)
 		return
 	}
+	vpns, newPasswords := make([]string, 0, len(body.Client.MsgVpns)), 0
+	for _, v := range body.Client.MsgVpns {
+		vpns = append(vpns, v.Name)
+		if v.Pass != "" {
+			newPasswords++
+		}
+	}
+	h.log(r).Info("connection saved", "target", rec.Broker, "created", created, "hostname", rec.Hostname,
+		"semp_scheme", orTLS(rec.Semp.Scheme, sempTLS), "semp_port", string(rec.Semp.Port), "semp_password_set", body.Semp.Pass != "",
+		"client_scheme", orTLS(rec.Client.Scheme, clientTLS), "client_port", string(rec.Client.Port),
+		"vpns", vpns, "vpn_passwords_set", newPasswords)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -433,10 +480,32 @@ func (h *managedHandler) deleteConnection(w http.ResponseWriter, r *http.Request
 	found, err := h.store.deleteConnection(r.PathValue("broker"))
 	switch {
 	case err != nil:
-		h.serverError(w, "deleteConnection", err)
+		h.serverError(w, r, "deleteConnection", err)
 	case !found:
 		writeError(w, http.StatusNotFound, "not_found")
 	default:
+		h.log(r).Info("connection deleted", "target", r.PathValue("broker"))
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// clientSeenJSON is GET /managed/client.
+type clientSeenJSON struct {
+	Address  string `json:"address"`  // the client address the gateway resolved; "" when it could not
+	Peer     string `json:"peer"`     // the TCP peer: the browser itself, or a proxy in front of it
+	ViaProxy bool   `json:"viaProxy"` // the address came from a trusted proxy's X-Forwarded-For
+}
+
+// clientSeen answers with the address the gateway resolved for this browser
+// and how: the settings page shows it, so an administrator behind Docker's
+// userland proxy or a proxy missing from access.trustedProxies sees that the
+// gateway takes every user for that one address (docs/deployment.md).
+func (h *managedHandler) clientSeen(w http.ResponseWriter, r *http.Request) {
+	peer, _ := clientIP(r.RemoteAddr, nil, nil)
+	addr, ok := clientOf(r)
+	out := clientSeenJSON{Peer: peer.String(), ViaProxy: ok && addr != peer}
+	if ok {
+		out.Address = addr.String()
+	}
+	writeJSON(w, http.StatusOK, out)
 }

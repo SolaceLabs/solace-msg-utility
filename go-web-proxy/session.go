@@ -94,10 +94,14 @@ func (s *sessions) drop(id string) {
 // dropUser ends every session of one user: their password, admin flag or
 // account changed. onDropUser fires even when no session was left, so a
 // socket that outlived its session is still closed.
-func (s *sessions) dropUser(user string) {
+func (s *sessions) dropUser(user string) { s.dropOthers(user, "") }
+
+// dropOthers is dropUser sparing the session keep: the browser that changed
+// the user's own password keeps the session it was just given. No id is "".
+func (s *sessions) dropOthers(user, keep string) {
 	s.mu.Lock()
 	for k, ss := range s.byID {
-		if ss.user == user {
+		if ss.user == user && k != keep {
 			delete(s.byID, k)
 		}
 	}

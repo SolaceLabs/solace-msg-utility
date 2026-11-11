@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -295,8 +298,202 @@ func TestGateAdmin(t *testing.T) {
 	expectPage(t, e.do("GET", "/solAdmin", "", nil), http.StatusTooManyRequests, "Too many requests")
 	expectRedirect(t, e.do("GET", "/solAdmin", "", e.cookie("admin", true)), "/login/password?next=%2FsolAdmin")
 	expectPage(t, e.do("GET", "/solAdmin", "", e.cookie("viewer", false)), http.StatusForbidden, "signed in as viewer, which is not an administrator")
-	expectRedirect(t, e.do("GET", "/solAdmin", "", e.cookie("ghost", false)), "/login?next=%2FsolAdmin")
+	// A deleted user's session ends here; /login would bounce it straight back.
+	ghost := e.cookie("ghost", false)
+	rec := e.do("GET", "/solAdmin", "", ghost)
+	expectRedirect(t, rec, "/login?next=%2FsolAdmin")
+	if cs := rec.Result().Cookies(); len(cs) != 1 || cs[0].Name != sessionCookie || cs[0].MaxAge >= 0 {
+		t.Errorf("the cookie must be cleared: %v", cs)
+	}
+	if _, ok := e.api.sessions.lookup(ghost.Value); ok {
+		t.Error("a deleted user's session must end at /solAdmin")
+	}
 	if rec := e.do("GET", "/solAdmin/", "", e.cookie("admin", false)); rec.Body.String() != "admin" {
 		t.Errorf("an admin reaches the admin app, got %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+// formFrom posts a form as the client at remote (host:port), with ctx.
+func (e *managedEnv) formFrom(ctx context.Context, remote, path string, v url.Values, c *http.Cookie) *httptest.ResponseRecorder {
+	req := httptest.NewRequest("POST", "https://gw.example"+path, strings.NewReader(v.Encode())).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = remote
+	if c != nil {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	e.root.ServeHTTP(rec, req)
+	return rec
+}
+
+// Guesses for one account sent all at once, each from its own address, are
+// checked one at a time: the first maxFailures fail and block the account,
+// and every guess queued behind them meets the block before its password is
+// looked at.
+func TestLogin_ParallelGuessesForOneAccountQueue(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.login = testLoginLimits; c.login.unauthPerMinute = 1000 })
+	const guesses = 12
+	codes := make([]int, guesses)
+	var wg sync.WaitGroup
+	for i := range guesses {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			remote := fmt.Sprintf("198.51.100.%d:5000", i+1)
+			codes[i] = e.formFrom(context.Background(), remote, "/login", signInForm("viewer", "wrong-password", "/"), nil).Code
+		}()
+	}
+	wg.Wait()
+	failed, throttled := 0, 0
+	for _, c := range codes {
+		switch c {
+		case http.StatusUnauthorized:
+			failed++
+		case http.StatusTooManyRequests:
+			throttled++
+		}
+	}
+	if failed != testLoginLimits.maxFailures || throttled != guesses-failed {
+		t.Fatalf("want %d checked and the rest throttled, got %d checked, %d throttled: %v", testLoginLimits.maxFailures, failed, throttled, codes)
+	}
+	if n := strings.Count(e.log.String(), "sign-in failed"); n != failed {
+		t.Errorf("each checked guess logs one failure: want %d, got %d", failed, n)
+	}
+	if len(e.pages.throttle.turns) != 0 {
+		t.Error("every turn must be given back")
+	}
+}
+
+// A request queued behind another sign-in for the same account that goes
+// away while it waits gets the 503, on either form, and never reaches the
+// password check.
+func TestLogin_QueuedRequestThatGoesAwayIs503(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	release, wait, err := e.pages.throttle.loginTurn(context.Background(), "viewer")
+	if err != nil || wait != 0 {
+		t.Fatalf("take the turn: %v %v", wait, err)
+	}
+	defer release()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	expectPage(t, e.formFrom(ctx, "192.0.2.10:5000", "/login", signInForm("viewer", viewerPW, "/"), nil),
+		http.StatusServiceUnavailable, "could not be checked")
+	expectPage(t, e.formFrom(ctx, "192.0.2.10:5000", "/login/password", passwordForm(viewerPW, "viewer-new-pw-1", "viewer-new-pw-1"), e.cookie("viewer", false)),
+		http.StatusServiceUnavailable, "could not be checked")
+	if !strings.Contains(e.log.String(), "sign-in check failed") || !strings.Contains(e.log.String(), "user=viewer") {
+		t.Errorf("the failure names the account: %s", e.log.String())
+	}
+}
+
+// With the table of accounts being signed in to full, a new account waits a
+// back-off, as a full failure table makes it.
+func TestLogin_FullTurnTableIs429(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.login = testLoginLimits; c.login.unauthPerMinute = 1000 })
+	th := e.pages.throttle
+	th.maxTracked = 1
+	th.turns["someone-else"] = &turn{token: make(chan struct{}, 1), refs: 1}
+	rec := e.form("/login", signInForm("viewer", viewerPW, "/"), nil)
+	expectPage(t, rec, http.StatusTooManyRequests, "Too many attempts. Try again in 30 seconds.")
+	if !strings.Contains(e.log.String(), "throttle table full") || !strings.Contains(e.log.String(), "table=turns") {
+		t.Errorf("a full table is named in the log: %s", e.log.String())
+	}
+}
+
+// slowHasher makes every hash wait on its unbuffered slots channel: a test
+// receives to let one start and sends to let it finish, so it can act while a
+// sign-in is between reading the record and creating the session.
+func slowHasher(e *managedEnv) chan struct{} {
+	slots := make(chan struct{})
+	e.api.store.hasher = &hasher{iter: 1, slots: slots}
+	return slots
+}
+
+// A password reset that lands while a sign-in's hash runs wins: the sign-in
+// matched the old password, so it gets the generic failure and no session.
+func TestLogin_AccountChangedDuringTheCheckIsRefused(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	reset := mustHash(t, e.f.h, "reset-by-admin-1")
+	slots := slowHasher(e)
+	done := make(chan *httptest.ResponseRecorder)
+	go func() { done <- e.form("/login", signInForm("viewer", viewerPW, "/"), nil) }()
+	<-slots // the sign-in has read the record and starts its hash
+	e.api.store.mu.Lock()
+	e.api.store.users[1].Password = reset
+	e.api.store.mu.Unlock()
+	slots <- struct{}{} // and finishes it
+	rec := <-done
+	expectPage(t, rec, http.StatusUnauthorized, "Sign-in failed. Check the username and password.")
+	if len(rec.Result().Cookies()) != 0 {
+		t.Error("no session may be created over a reset")
+	}
+	if !strings.Contains(e.log.String(), "the account changed while its password was checked") {
+		t.Errorf("the refusal is logged: %s", e.log.String())
+	}
+}
+
+// The same race on the password page: the administrator's reset stands and
+// the user is told to sign in again.
+func TestPasswordChange_AccountChangedDuringTheCheckIs409(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	reset := mustHash(t, e.f.h, "reset-by-admin-1")
+	c := e.cookie("viewer", false)
+	slots := slowHasher(e)
+	done := make(chan *httptest.ResponseRecorder)
+	go func() {
+		done <- e.form("/login/password", passwordForm(viewerPW, "viewer-new-pw-1", "viewer-new-pw-1"), c)
+	}()
+	<-slots // the current password's check starts
+	e.api.store.mu.Lock()
+	e.api.store.users[1].Password = reset
+	e.api.store.mu.Unlock()
+	slots <- struct{}{}
+	<-slots // the new password's hash
+	slots <- struct{}{}
+	rec := <-done
+	expectPage(t, rec, http.StatusConflict, "Sign in again")
+	if storedHash(e.api.store, "viewer") != reset {
+		t.Error("the administrator's reset must stand")
+	}
+}
+
+// Every recent sign-in from one private address means a proxy the gateway
+// does not trust sits in front of it: one warning says so.
+func TestLogin_WarnsWhenEverySignInLooksLikeOneClient(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	e.pages.watch = newClientWatch(2)
+	for range 3 {
+		expectRedirect(t, e.formFrom(context.Background(), "172.17.0.1:40000", "/login", signInForm("viewer", viewerPW, "/"), nil), "/")
+	}
+	if n := strings.Count(e.log.String(), "every recent sign-in came from this one private address"); n != 1 {
+		t.Errorf("want one warning, got %d: %s", n, e.log.String())
+	}
+	if !strings.Contains(e.log.String(), "client=172.17.0.1") || !strings.Contains(e.log.String(), "sign_ins=2") {
+		t.Errorf("the warning names the address and the window: %s", e.log.String())
+	}
+}
+
+func TestClientWatch(t *testing.T) {
+	private, public, other := netip.MustParseAddr("10.0.0.7"), netip.MustParseAddr("203.0.113.9"), netip.MustParseAddr("10.0.0.8")
+	cases := []struct {
+		name string
+		seq  []netip.Addr
+		ok   []bool // resolved, per entry
+		want []bool
+	}{
+		{"one private address fills the window", []netip.Addr{private, private, private}, []bool{true, true, true}, []bool{false, true, false}},
+		{"a public address never warns", []netip.Addr{public, public}, []bool{true, true}, []bool{false, false}},
+		{"two addresses do not warn", []netip.Addr{private, other, private}, []bool{true, true, true}, []bool{false, false, false}},
+		{"an unresolved client says nothing", []netip.Addr{{}, private, private}, []bool{false, true, true}, []bool{false, false, true}},
+		{"loopback counts as private", []netip.Addr{netip.MustParseAddr("127.0.0.1"), netip.MustParseAddr("127.0.0.1")}, []bool{true, true}, []bool{false, true}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cw := newClientWatch(2)
+			for i, a := range c.seq {
+				if got := cw.seen(a, c.ok[i]); got != c.want[i] {
+					t.Errorf("sign-in %d: warn %v, want %v", i+1, got, c.want[i])
+				}
+			}
+		})
 	}
 }

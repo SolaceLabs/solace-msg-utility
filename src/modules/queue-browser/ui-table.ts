@@ -1,7 +1,8 @@
-import { ui } from './ui-core.js';
+import { ui, NOTICE_TOAST_MS } from './ui-core.js';
 import { state, getBrowser } from './state.js';
 import { icons } from './constants.js';
-import { escapeHtml } from '../../core/utils';
+import { escapeHtml, solaceErrorText } from '../../core/utils';
+import { showToast } from '../../core/toast';
 import { required } from '../../core/dom';
 import { showPayload } from './features.js';
 import { logger } from '../../core/logger';
@@ -214,16 +215,14 @@ export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}
 
     ui.downloadMessagesZip = async function (type: string) {
         if (!(window as any).JSZip) {
-            alert('JSZip library not loaded. Cannot create ZIP.');
+            showToast('Cannot create the ZIP: the JSZip library is not loaded.', 'error', NOTICE_TOAST_MS);
             return;
         }
 
-        // Get Checked Messages
+        // Get Checked Messages. The download buttons stay disabled until a row is
+        // selected (updateCounts), so an empty match only follows a row that left
+        // the view after it was checked.
         const ids = ui.getSelectedMessageIds();
-        if (ids.length === 0) {
-            alert('No messages selected.');
-            return;
-        }
         const msgs = state.displayedMessages.filter((m: any) => ids.includes(String(m.id)));
 
         if (msgs.length === 0) return;
@@ -234,14 +233,14 @@ export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}
         const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
 
         // type is one of 'content' | 'full' — only call sites are ui-events.ts which
-        // pass those literals. msg.content is always a string by the time it reaches
-        // here (set in service-events.onMessage; '' when no payload, never null).
+        // pass those literals. A binary attachment goes in as its original bytes; any
+        // other body as its text (set in service-events.onMessage; '' when empty).
         let zipFilename = '';
         if (type === 'content') {
             zipFilename = `solace-messages-content-${timestamp}.zip`;
             msgs.forEach((msg: any) => {
                 const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}`;
-                zip.file(filename, msg.content);
+                zip.file(filename, msg.bytes ?? msg.content);
             });
         } else {
             zipFilename = `solace-messages-full-${timestamp}.zip`;
@@ -257,7 +256,7 @@ export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}
             ui.triggerDownloadBlob(content, zipFilename);
         } catch (err) {
             logger.error('Failed to generate ZIP:', err);
-            alert('Failed to generate ZIP file.');
+            showToast(`Could not create the ZIP: ${solaceErrorText(err, 'unknown error')}`, 'error', NOTICE_TOAST_MS);
         }
     };
 }

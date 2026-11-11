@@ -75,13 +75,14 @@ Then open the admin console at `https://<host>:9443/solAdmin` to add brokers and
 
 **Without the password file**, the gateway generates a password for `admin` and prints it **once** in its log (`docker compose logs gateway`). Lost it before signing in? Delete `users.yaml` and restart.
 
-**Using `docker run` instead:** set `CONN_MODES=provisioned`. The users and connections stay with the container: before replacing it (an upgrade), export a backup and import it into the new one. The compose file keeps them across upgrades.
+**Using `docker run` instead:** set `CONN_MODES=provisioned`, and mount a host directory at `/backup` (prepared as in step 2) so scheduled backups outlive the container. Without that mount they are written inside the container and the Backup & Restore page still looks healthy, but recreating the container (an upgrade) deletes them. The users and connections stay with the container too: before replacing it, export a backup and import it into the new one. The compose file keeps both across upgrades.
 
 ```bash
 docker run -d -p 9443:9443 \
   -e CONN_MODES=provisioned \
   -e ADMIN_PASSWORD_FILE=/run/secrets/admin-password \
   -v "$PWD/admin-password:/run/secrets/admin-password:ro" \
+  -v "$PWD/backup:/backup" \
   -v solace-tls:/tls \
   ghcr.io/solacelabs/solace-msg-utility:3.6.0
 ```
@@ -152,8 +153,10 @@ The rest (TLS, log level) are the same as in Gateway mode: see [Settings](deploy
 The admin console is at `https://<host>:9443/solAdmin`, for administrator accounts only.
 
 - **User Management:** add users, reset passwords, make someone an administrator, and grant brokers, VPNs and queues. A grant can use `*` wildcards, for example queues `orders.*`.
-- **Connection Management:** add brokers, their SEMP account and their VPNs' client credentials. Leave a password blank to keep the stored one.
-- **Gateway Settings:** the settings above. Each save is logged with the administrator's name.
+- **Connection Management:** add brokers, their SEMP account and their VPNs' client credentials. Leave a password blank to keep the stored one. The gateway reaches each broker over TLS (`https` for SEMP, `wss` for messaging), so the ports are the broker's TLS ports, unless the connection's `scheme` names the plain one (`http` for SEMP, `ws` for messaging; each side set on its own). A connection stored before the field existed stays on TLS.
+- **Gateway Settings:** the settings above, and your own address as the gateway sees it (see [Client addresses behind Docker and proxies](deployment.md#client-addresses-behind-docker-and-proxies)).
+
+Every change to a user, a connection or the settings is logged at `info` with the administrator's name and what changed (never a password): set `LOG_LEVEL=info` (or `logLevel: info` on Gateway Settings) to keep that record.
 - **Backup & Restore:** export the configuration to a file, import one, and schedule backups. See [Back up and restore](#back-up-and-restore).
 
 Changes apply at once. Revoking a user's access closes their broker connections. A restart signs everyone out.
@@ -176,7 +179,7 @@ mkdir -p backup && chmod 700 backup && sudo chown 65532 backup
 # docker run: -v "$PWD/backup:/backup"
 ```
 
-The path is fixed; no setting moves it. On the page, choose how often (hourly at a minute, daily at a time, weekly on a day, or monthly on a day, all in UTC; a month without the chosen day backs up on its last day), how many files to keep, and the passphrase. The gateway keeps a key derived from that passphrase, encrypted with the store key in `backup.yaml` beside the stores, so it can write backups unattended; it never stores the passphrase. A backup is written as `smu-backup-<UTC time>.partial` and renamed to `.json` only once all of it is on disk, so anything that copies `*.json` from the directory never takes a half-written file; a `.partial` that a crash or a full disk left behind is deleted by the next run. After each backup it deletes the oldest beyond the number to keep, and only files it named (`smu-backup-<UTC time>.json`). **Back up now** writes one at once. A backup missed while the gateway was down is not caught up. The page shows the next and last backup, and why `/backup` cannot be written to when it cannot (most often: the host directory is not owned by UID `65532`). Each backup, and each failure, is logged.
+The path is fixed; no setting moves it. On the page, choose how often (hourly at a minute, daily at a time, weekly on a day, or monthly on a day, all in UTC; a month without the chosen day backs up on its last day), how many files to keep, and the passphrase. The gateway keeps a key derived from that passphrase, encrypted with the store key in `backup.yaml` beside the stores, so it can write backups unattended; it never stores the passphrase. A backup is written as `smu-backup-<UTC time>.partial` and renamed to `.json` only once all of it is on disk, so anything that copies `*.json` from the directory never takes a half-written file; a `.partial` that a crash or a full disk left behind is deleted by the next run. After each backup it deletes the oldest beyond the number to keep, and only files it named (`smu-backup-<UTC time>.json`). **Back up now** writes one at once. A backup missed while the gateway was down is not caught up. The page shows the next and last backup, and why `/backup` cannot be written to when it cannot (most often: the host directory is not owned by UID `65532`). Each backup is logged at `info`, each failure at `error`.
 
 Each saved backup's download icon saves the file as the gateway wrote it, to keep a copy off the host; it opens with the schedule's passphrase.
 
@@ -188,7 +191,7 @@ Each saved backup's download icon saves the file as the gateway wrote it, to kee
 | Connections | **Skip**, **Merge**, **Replace**, by broker name |
 | Settings | **Skip**, **Replace** (the file paths stay this deployment's own) |
 
-The gateway checks everything before it writes anything: an import that would leave no administrator is refused, and imported settings get the same checks as a save on Gateway Settings (an access list that would lock you out, or `connModes: direct`, is refused). Users removed, or whose password or administrator flag changed, are signed out, you included: the page warns you before you import. A setting that applies only at restart is reported.
+The gateway checks everything before it writes anything: an import that would leave no administrator is refused, and imported settings get the same checks as a save on Gateway Settings (an access list that would lock you out, or `connModes: direct`, is refused). The chosen sections are then written together: if any file cannot be written, none is changed and the page reports a server error, so nothing was imported. Users removed, or whose password or administrator flag changed, are signed out, you included: the page warns you before you import. A setting that applies only at restart is reported.
 
 To move a deployment: export (or copy a file from `/backup`), start the new gateway, sign in with its bootstrap admin, and import with **Replace**. The imported users sign in with their old passwords.
 

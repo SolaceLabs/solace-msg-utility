@@ -16,6 +16,8 @@ vi.mock('../../../src/modules/user-management/service', () => ({
 
 // Import AFTER the mocks are registered.
 import { NO_OPERATE, NO_READ_ONLY, UserManagementModule } from '../../../src/modules/user-management/module';
+import { completeContext } from '../../helpers/appContext';
+import { answerConfirm } from '../../helpers/confirmDialog';
 
 const ADMIN: ManagedSession = {
     admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
@@ -39,11 +41,11 @@ function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppCon
         activeModuleId: null, isConnected: false, selectedVpn: null,
         solaceConnection: null, sempCredentials: null, isSempConnected: false, managed,
     };
-    return {
+    return completeContext({
         container, appState, eventBus,
         setState: (k, v) => { (appState as any)[k] = v; eventBus.emit('app:state-change', { key: k, value: v }); },
         loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(), config: {},
-    } as AppContext;
+    });
 }
 
 async function setup(managed: ManagedSession | null = ADMIN) {
@@ -147,7 +149,7 @@ describe('user-management — list', () => {
     });
 
     it('reloads the list on rbac:changed', async () => {
-        const { container, ctx } = await setup();
+        const { ctx } = await setup();
         svcMock.listUsers.mockClear();
         ctx.eventBus.emit('rbac:changed');
         await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalled());
@@ -457,28 +459,27 @@ describe('user-management — delete', () => {
     it('deletes a user after confirmation', async () => {
         const { container } = await setup();
         svcMock.deleteUser.mockResolvedValue({ ok: true });
-        (globalThis.confirm as any).mockReturnValue(true);
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
             .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
+        expect(await answerConfirm(true)).toBe('Delete user "viewer"?');
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('User deleted', 'ok'));
         expect(svcMock.deleteUser).toHaveBeenCalledWith('viewer');
     });
 
     it('does nothing when the delete is cancelled', async () => {
         const { container } = await setup();
-        (globalThis.confirm as any).mockReturnValue(false);
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
             .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
-        await Promise.resolve();
+        await answerConfirm(false);
         expect(svcMock.deleteUser).not.toHaveBeenCalled();
     });
 
     it("toasts the gateway's reason when the delete is rejected", async () => {
         const { container } = await setup();
         svcMock.deleteUser.mockResolvedValue({ ok: false, status: 404, code: 'not_found' });
-        (globalThis.confirm as any).mockReturnValue(true);
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
             .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
+        await answerConfirm(true);
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Not found. It may already have been removed.', 'error'));
     });
 
@@ -583,9 +584,9 @@ describe('user-management — your own session', () => {
         svcMock.deleteUser.mockResolvedValue({ ok: true });
         svcMock.listUsers.mockClear();
         clickRow(container, 0, '.user-mgmt-delete');
+        expect(await answerConfirm(true)).toBe('Delete your own account "admin"? You will be signed out.');
         await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
 
-        expect(globalThis.confirm).toHaveBeenCalledWith(expect.stringMatching(/your own account.*signed out/i));
         expect(svcMock.deleteUser).toHaveBeenCalledWith('admin');
         expect(toastMock.showToast).toHaveBeenCalledWith('Account deleted. You have been signed out.', 'ok', 5000);
         expect(svcMock.listUsers).not.toHaveBeenCalled();
@@ -597,6 +598,7 @@ describe('user-management — your own session', () => {
         const signOut = answerSignOut(ctx);
         svcMock.deleteUser.mockResolvedValue({ ok: false, status: 409, code: 'last_admin' });
         clickRow(container, 0, '.user-mgmt-delete');
+        await answerConfirm(true);
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('At least one administrator must remain.', 'error'));
 
         expect(signOut).not.toHaveBeenCalled();

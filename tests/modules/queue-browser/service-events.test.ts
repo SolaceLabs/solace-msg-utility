@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createServiceEvents } from '../../../src/modules/queue-browser/service-events';
-import { state, setBrowser, addMessage } from '../../../src/modules/queue-browser/state.js';
+import { state, shouldShowMessage } from '../../../src/modules/queue-browser/state.js';
 import { ui } from '../../../src/modules/queue-browser/ui-core.js';
 import '../../../src/modules/queue-browser/ui-forward.js';
 import { initTable } from '../../../src/modules/queue-browser/ui-table';
@@ -15,6 +15,24 @@ function setupBrowserDOM() {
     // Pre-populate the bind input with the value the existing tests assume.
     (container.querySelector('#browser-bind-input') as HTMLInputElement).value = 'test-queue';
     ui.initElements(container);
+}
+
+// The toast container is declared once in src/index.html; the module test DOM
+// lacks it. Returns it emptied so a test reads only its own toasts.
+function freshToasts(): HTMLElement {
+    let c = document.getElementById('toast-container');
+    if (!c) {
+        c = document.createElement('div');
+        c.id = 'toast-container';
+        document.body.appendChild(c);
+    }
+    c.innerHTML = '';
+    return c;
+}
+
+// What the SDK's version10 profile hands getBinaryAttachment(): one char per byte.
+function latin1(bytes: Uint8Array): string {
+    return String.fromCharCode(...bytes);
 }
 
 describe('queue-browser/service-events', () => {
@@ -143,36 +161,59 @@ describe('queue-browser/service-events', () => {
     });
 
     describe('onBrowserDown()', () => {
-        it('shows error when active queue goes down', () => {
+        // The broker ended the binding for good (DOWN_ERROR): the queue must leave
+        // the bound list and free its slot so the user can bind it again.
+        it('drops the on-screen queue: frees its slot, leaves the bound list, clears its view and warns', () => {
             const se = createServiceEvents();
-            state.currentQueue = 'test-queue';
-            se.onBrowserDown('test-queue', { message: 'Down error' });
+            const disconnect = vi.fn();
+            se.wire({ disconnectBrowser: disconnect });
+            state.browserInstances.set('orders', {});
+            ui.addQueueToDropdown('orders');
+            state.currentQueue = 'orders';
+            const toasts = freshToasts();
 
-            const errorEl = document.querySelector('#browser-connect-error') as HTMLElement;
-            expect(errorEl.style.display).toBe('block');
+            se.onBrowserDown('orders', { message: 'Permission Not Allowed' });
+
+            const select = ui.getElements().selectBound as HTMLSelectElement;
+            expect(disconnect).toHaveBeenCalledWith('orders');
+            expect(Array.from(select.options).map(o => o.value)).toEqual(['']);
+            expect(state.currentQueue).toBe('');
+            expect(toasts.querySelector('.toast--warn')!.textContent)
+                .toBe('Queue "orders" was disconnected: Permission Not Allowed. Bind it again to continue.');
         });
 
-        it('does nothing for non-active queue', () => {
-            const showSpy = vi.spyOn(ui, 'showBrowserError');
-            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        it('drops an off-screen queue from the bound list and warns, leaving the queue on screen alone', () => {
             const se = createServiceEvents();
-            state.currentQueue = 'other-queue';
-            se.onBrowserDown('test-queue', { message: 'err' });
-            expect(showSpy).not.toHaveBeenCalled();
-            // Anchor: handler ran, just took the non-active branch
-            expect(errSpy).toHaveBeenCalled();
-            showSpy.mockRestore();
-            errSpy.mockRestore();
+            const disconnect = vi.fn();
+            se.wire({ disconnectBrowser: disconnect });
+            state.browserInstances.set('audit', {});
+            state.browserInstances.set('orders', {});
+            ui.addQueueToDropdown('audit');
+            ui.addQueueToDropdown('orders');   // auto-selects: orders is on screen
+            state.currentQueue = 'orders';
+            const toasts = freshToasts();
+
+            se.onBrowserDown('audit', {});
+
+            const select = ui.getElements().selectBound as HTMLSelectElement;
+            expect(disconnect).toHaveBeenCalledWith('audit');
+            expect(Array.from(select.options).map(o => o.value)).toEqual(['', 'orders']);
+            expect([select.value, state.currentQueue]).toEqual(['orders', 'orders']);
+            expect(toasts.querySelector('.toast--warn')!.textContent)
+                .toBe('Queue "audit" was disconnected: no reason given. Bind it again to continue.');
         });
 
-        it('handles error object without message', () => {
+        it('ignores a DOWN for a queue that is no longer bound', () => {
+            vi.spyOn(console, 'error').mockImplementation(() => {});
             const se = createServiceEvents();
-            state.currentQueue = 'test-queue';
-            se.onBrowserDown('test-queue', 'raw error string');
+            const disconnect = vi.fn();
+            se.wire({ disconnectBrowser: disconnect });
+            const toasts = freshToasts();
 
-            const errorEl = document.querySelector('#browser-connect-error') as HTMLElement;
-            // Proves the `${err}` template fallback rendered when `err.message` is undefined.
-            expect(errorEl.textContent).toContain('raw error string');
+            se.onBrowserDown('gone', { message: 'Unknown Queue' });
+
+            expect(disconnect).not.toHaveBeenCalled();
+            expect(toasts.children.length).toBe(0);
         });
     });
 
@@ -204,7 +245,8 @@ describe('queue-browser/service-events', () => {
     // tests/core/services/solace-publisher.test.ts.
 
     describe('onMessage()', () => {
-        function createSolaceMessage(overrides: any = {}) {
+        // `any`: tests override the SDK getters they exercise on the returned object.
+        function createSolaceMessage(overrides: any = {}): any {
             return {
                 getType: () => overrides.type ?? 0,
                 getBinaryAttachment: () => overrides.binaryAttachment ?? null,
@@ -284,16 +326,57 @@ describe('queue-browser/service-events', () => {
             expect(stored.content).toBe('Hello');
         });
 
-        it('handles unknown binary type', () => {
+        it('decodes a UTF-8 binary attachment from the SDK Latin-1 string: shown as text, filterable, saved byte for byte', async () => {
             const se = createServiceEvents();
             state.messageStore.set('q1', []);
             state.currentQueue = 'q1';
-            state.allMessages = [];
-            state.displayedMessages = [];
+            const utf8 = new TextEncoder().encode('Gr\u00fc\u00dfe: 5 \u20ac');
+            se.onMessage('q1', createSolaceMessage({ type: 1, binaryAttachment: latin1(utf8), gmid: 300 }));
 
-            const msg = createSolaceMessage({ binaryAttachment: { someObj: true }, gmid: 103 });
+            const stored = state.messageStore.get('q1')![0];
+            expect([stored.content, stored.binary]).toEqual(['Gr\u00fc\u00dfe: 5 \u20ac', false]);
+
+            ui.selectMessage('300');
+            expect(ui.getElements().detailContent.textContent).toBe('Gr\u00fc\u00dfe: 5 \u20ac');
+            expect(ui.getElements().btnCopyContent.disabled).toBe(false);
+
+            state.activeFilters.content = 'gr\u00fc\u00dfe';
+            expect(shouldShowMessage(stored)).toBe(true);
+
+            const saved = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
+            ui.downloadMessageContent(stored);
+            const blob = saved.mock.calls[0][0] as Blob;
+            expect(blob.type).toBe('application/octet-stream');
+            expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual(Array.from(utf8));
+        });
+
+        it('shows a non-UTF-8 binary attachment as a size placeholder the body filter never matches, and saves its original bytes', async () => {
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            state.currentQueue = 'q1';
+            // A PNG signature byte (0x89) next to a multi-byte UTF-8 character: not valid UTF-8.
+            const bytes = new Uint8Array([0x89, 0x50, 0x4E, 0x47, ...new TextEncoder().encode('\u20ac')]);
+            const msg = createSolaceMessage({ type: 1, binaryAttachment: latin1(bytes), gmid: 301 });
+            msg.getHttpContentType = () => 'image/png';
             se.onMessage('q1', msg);
-            expect(state.messageStore.get('q1')![0].content).toContain('Unknown Binary');
+
+            const stored = state.messageStore.get('q1')![0];
+            expect([stored.content, stored.binary]).toEqual(['[Binary payload: 7 bytes]', true]);
+
+            ui.selectMessage('301');
+            expect(ui.getElements().detailContent.textContent).toBe('[Binary payload: 7 bytes]');
+            expect(ui.getElements().detailTypeBadge.textContent).toBe('Binary');
+            expect(ui.getElements().btnCopyContent.disabled).toBe(true);
+
+            // The placeholder text is not the payload: a search for it finds nothing.
+            state.activeFilters.content = 'binary';
+            expect(shouldShowMessage(stored)).toBe(false);
+
+            const saved = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
+            ui.downloadMessageContent(stored);
+            const blob = saved.mock.calls[0][0] as Blob;
+            expect(blob.type).toBe('image/png');
+            expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual(Array.from(bytes));
         });
 
         it('handles SDT Map and Stream types', () => {
@@ -486,6 +569,7 @@ describe('queue-browser/service-events', () => {
         });
 
         it('handles property extraction errors', () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
             const se = createServiceEvents();
             state.messageStore.set('q1', []);
             state.currentQueue = 'q1';
@@ -499,6 +583,9 @@ describe('queue-browser/service-events', () => {
 
             se.onMessage('q1', msg);
             expect(state.messageStore.get('q1')!.length).toBe(1);
+            // The user-properties failure names the queue and message and keeps its cause.
+            expect(state.messageStore.get('q1')![0].appProperties).toEqual({});
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[q1] Failed to read the user properties of message 114'), expect.any(Error));
         });
 
         it('handles all delivery mode values', () => {
@@ -679,65 +766,6 @@ describe('queue-browser/service-events', () => {
 
             const msg = createSolaceMessage({ gmid: 121, xmlContent: 'test content' });
             se.onMessage('q1', msg);
-        });
-
-        it('handles Uint8Array decode error', () => {
-            const se = createServiceEvents();
-            state.messageStore.set('q1', []);
-            state.currentQueue = 'q1';
-            state.allMessages = [];
-            state.displayedMessages = [];
-
-            // ArrayBuffer
-            const msg = createSolaceMessage({
-                binaryAttachment: new ArrayBuffer(4),
-                gmid: 122
-            });
-            se.onMessage('q1', msg);
-            expect(state.messageStore.get('q1')!.length).toBe(1);
-        });
-
-        it('handles TextDecoder failure with Binary Data Error', () => {
-            const se = createServiceEvents();
-            state.messageStore.set('q1', []);
-            state.currentQueue = 'q1';
-            state.allMessages = [];
-            state.displayedMessages = [];
-
-            const origDecoder = globalThis.TextDecoder;
-            globalThis.TextDecoder = vi.fn(function() {
-                return { decode: () => { throw new Error('decode error'); } };
-            }) as any;
-
-            const msg = createSolaceMessage({
-                binaryAttachment: new Uint8Array([0xFF, 0xFE]),
-                gmid: 123
-            });
-            se.onMessage('q1', msg);
-
-            const stored = state.messageStore.get('q1')!;
-            expect(stored.length).toBe(1);
-            expect(stored[0].content).toBe('[Binary Data Error]');
-
-            globalThis.TextDecoder = origDecoder;
-        });
-
-        it('handles unknown binary data type', () => {
-            const se = createServiceEvents();
-            state.messageStore.set('q1', []);
-            state.currentQueue = 'q1';
-            state.allMessages = [];
-            state.displayedMessages = [];
-
-            const msg = createSolaceMessage({
-                binaryAttachment: { weird: 'object' },
-                gmid: 124
-            });
-            se.onMessage('q1', msg);
-
-            const stored = state.messageStore.get('q1')!;
-            expect(stored.length).toBe(1);
-            expect(stored[0].content).toBe('[Unknown Binary Data]');
         });
 
         it('handles SDT Map message type via createMessageMock', () => {

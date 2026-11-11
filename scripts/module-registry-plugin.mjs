@@ -21,6 +21,12 @@
  *
  * The emitted `moduleFiles` map is keyed by module id; `src/registry.ts` finds
  * the module object in each namespace by its `.id`.
+ *
+ * Stylesheets follow the manifest the same way: the virtual module also
+ * imports each active module's `styles.css` (where it has one), after the
+ * module code, so a variant's bundle carries exactly its modules' CSS and no
+ * other's. `src/css/main.css` keeps the design system and the core components'
+ * stylesheets, which `src/main.ts` imports ahead of the registry.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,7 +47,9 @@ function stripComments(src) {
  * Extract the module ids declared in a variant manifest's `ACTIVE_MODULES`
  * object literal. Comments are stripped first so commented-out lines or quotes
  * inside comments can't pollute the result. Manifests are a controlled, flat
- * `Record<string, number>`, so a tolerant key scan is reliable.
+ * `Record<string, number>`, so a tolerant key scan is reliable. A key may be
+ * quoted or not, as TypeScript (and `extractModuleEntries`) allows: an
+ * unquoted id that compiled but was never bundled would fail only at run time.
  */
 export function extractModuleIds(src) {
     const block = stripComments(src).match(/ACTIVE_MODULES[^=]*=\s*\{([\s\S]*?)\}/);
@@ -49,7 +57,7 @@ export function extractModuleIds(src) {
         throw new Error('[module-registry] could not locate the ACTIVE_MODULES object literal');
     }
     const ids = [];
-    const re = /['"]([\w-]+)['"]\s*:/g;
+    const re = /['"]?([\w-]+)['"]?\s*:/g;
     let m;
     while ((m = re.exec(block[1])) !== null) ids.push(m[1]);
     return ids;
@@ -88,6 +96,7 @@ export function activeModuleIds(root, variant) {
  * Resolve the active variant's entry overrides. An override for a module the
  * variant does not list is a typo, so it fails the build instead of being
  * silently ignored.
+ * @returns {Record<string, string>} module id -> entry name
  */
 export function activeModuleEntries(root, variant) {
     const { name, src } = readVariant(root, variant);
@@ -108,6 +117,12 @@ export function activeModuleEntries(root, variant) {
 export function moduleEntryFile(root, id, entry) {
     const file = entry ? `module.${entry}.ts` : 'module.ts';
     return path.resolve(root, 'src/modules', id, file);
+}
+
+/** Absolute path of a module's stylesheet, `src/modules/<id>/styles.css`, or `null` when it has none. */
+export function moduleStylesheet(root, id) {
+    const file = path.resolve(root, 'src/modules', id, 'styles.css');
+    return fs.existsSync(file) ? file : null;
 }
 
 /**
@@ -134,6 +149,12 @@ export function readModuleTemplate(root, id, entry) {
     return html.replace(MODULE_BASE_MARKER, () => base.replace(/\n$/, ''));
 }
 
+/**
+ * The Vite plugin behind `virtual:module-registry`: the active variant's
+ * module imports, entries and stylesheets (see the file header).
+ * @param {{ root?: string, variant?: string }} [opts]
+ * @returns {{ name: string, enforce: 'pre', resolveId(id: string): string | null, load(id: string): string | null }} a Vite plugin
+ */
 export function moduleRegistryPlugin({ root, variant } = {}) {
     const projectRoot = root || process.cwd();
     return {
@@ -147,6 +168,7 @@ export function moduleRegistryPlugin({ root, variant } = {}) {
             const ids = activeModuleIds(projectRoot, variant);
             const entries = activeModuleEntries(projectRoot, variant);
             const imports = [];
+            const styles = [];
             const map = [];
             ids.forEach((mid, i) => {
                 const abs = moduleEntryFile(projectRoot, mid, entries[mid]).replace(/\\/g, '/');
@@ -159,8 +181,10 @@ export function moduleRegistryPlugin({ root, variant } = {}) {
                 }
                 imports.push(`import * as m${i} from ${JSON.stringify(abs)};`);
                 map.push(`  ${JSON.stringify(mid)}: m${i},`);
+                const css = moduleStylesheet(projectRoot, mid);
+                if (css) styles.push(`import ${JSON.stringify(css.replace(/\\/g, '/'))};`);
             });
-            return `${imports.join('\n')}\nexport const moduleFiles = {\n${map.join('\n')}\n};\n`;
+            return `${[...imports, ...styles].join('\n')}\nexport const moduleFiles = {\n${map.join('\n')}\n};\n`;
         },
     };
 }

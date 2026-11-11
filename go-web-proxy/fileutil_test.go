@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -86,4 +88,106 @@ func assertNoTempFiles(t *testing.T, dir string) {
 	if len(matches) != 0 {
 		t.Errorf("temp files left behind: %v", matches)
 	}
+}
+
+// readOr is path's content, or "<absent>".
+func readOr(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "<absent>"
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// renameFailing renames as os.Rename does, except on the given call numbers.
+func renameFailing(calls ...int) func(string, string) error {
+	n := 0
+	return func(oldpath, newpath string) error {
+		n++
+		for _, c := range calls {
+			if n == c {
+				return errors.New("rename refused")
+			}
+		}
+		return os.Rename(oldpath, newpath)
+	}
+}
+
+// A group write changes every file or none: a rename that fails puts back
+// the files renamed before it (their old contents, or gone when the write
+// created them), and abort leaves no temp file behind.
+func TestFileTx_AllOrNothing(t *testing.T) {
+	cases := []struct {
+		name    string
+		oldA    string // "" leaves a absent at the start
+		rename  func(string, string) error
+		wantErr string // "" for none
+		a, b    string // a and b afterwards
+	}{
+		{"every rename works", "old a", nil, "", "new a", "new b"},
+		{"the second rename fails: the first file is put back", "old a", renameFailing(2), "nothing was changed", "old a", "<absent>"},
+		{"the second rename fails: a file the write created goes", "", renameFailing(2), "nothing was changed", "<absent>", "<absent>"},
+		{"putting back fails too: the error says so", "old a", renameFailing(2, 3), "putting back the files replaced before it failed too", "new a", "<absent>"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+			if c.oldA != "" {
+				writeFile(t, a, c.oldA)
+			}
+			tx := &fileTx{rename: c.rename}
+			defer tx.abort()
+			if err := tx.stage(a, []byte("new a"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.stage(b, []byte("new b"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := tx.commit()
+			switch {
+			case c.wantErr == "" && err != nil:
+				t.Fatalf("want no error, got %v", err)
+			case c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)):
+				t.Fatalf("want an error with %q, got %v", c.wantErr, err)
+			}
+			tx.abort()
+			if got := readOr(t, a); got != c.a {
+				t.Errorf("a: want %q, got %q", c.a, got)
+			}
+			if got := readOr(t, b); got != c.b {
+				t.Errorf("b: want %q, got %q", c.b, got)
+			}
+			assertNoTempFiles(t, dir)
+		})
+	}
+}
+
+// A target commit cannot read before replacing it stops the commit before
+// any rename: there would be nothing to put back.
+func TestFileTx_UnreadableTargetChangesNothing(t *testing.T) {
+	dir := t.TempDir()
+	unreadable, b := filepath.Join(dir, "is-a-directory"), filepath.Join(dir, "b")
+	if err := os.Mkdir(unreadable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tx := &fileTx{}
+	defer tx.abort()
+	for _, p := range []string{unreadable, b} {
+		if err := tx.stage(p, []byte("new"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.commit(); err == nil || !strings.Contains(err.Error(), "cannot read "+unreadable+" before replacing it") {
+		t.Fatalf("want the read failure naming the file, got %v", err)
+	}
+	tx.abort()
+	if got := readOr(t, b); got != "<absent>" {
+		t.Errorf("no file may change: b holds %q", got)
+	}
+	assertNoTempFiles(t, dir)
 }

@@ -7,10 +7,12 @@
   - [End-to-end run](#end-to-end-run)
 - [Code Standards](#code-standards)
   - [TypeScript / JavaScript](#typescript--javascript)
+  - [Linting](#linting)
   - [DOM Access](#dom-access)
   - [Modals](#modals)
   - [Event Handling](#event-handling)
   - [Error Handling](#error-handling)
+  - [Logging standard](#logging-standard)
   - [File Organization](#file-organization)
 - [Testing Requirements](#testing-requirements)
   - [Coverage Threshold](#coverage-threshold)
@@ -46,7 +48,7 @@ npm install && npm test
 1. Create a branch for your change
 2. Make your changes in `src/`
 3. Write or update tests in `tests/`
-4. Run `./scripts/dev.sh all` (or `./scripts/dev.ps1 all` on Windows) — `build vet test mock`, the fast inner loop (CI runs `all scan`)
+4. Run `./scripts/dev.sh all` (or `./scripts/dev.ps1 all` on Windows) -- `build vet test mock`, the fast inner loop (CI runs `all cov scan`)
 5. Run `./scripts/dev.sh cov` — coverage must not regress; target is 100% on all four metrics, and `vitest.config.ts` fails the run below that
 6. Run `./scripts/dev.sh scan` before opening the PR if you touched a dependency, the Dockerfile, or `go-web-proxy/`
 7. Open a pull request with a clear description
@@ -56,9 +58,9 @@ npm install && npm test
 | Task | What it runs |
 | --- | --- |
 | `build` | `npm run build` (every variant), `npm run check:bundles` (no Direct bundle carries Provisioned UI; the Provisioned demo has no way out to a network), plus the gateway binary, version-stamped, into `dist/` (a compile check: it ships only inside the image) |
-| `vet` | `npm run typecheck`, `go vet ./...` |
-| `test` | `npm run test:app` (the web suite without `tests/mock-broker/`), `go test ./...`. When `cov` is in the same invocation (`full`, `all cov`), the web suite runs once, in `cov`, and `test.log` says so |
-| `mock` | `npm run test:mock`: `tests/mock-broker/`, the suites behind `demo.html` and the Provisioned demo, the gateway contract included. Skipped, like `test`'s web suite, when `cov` is in the same invocation |
+| `vet` | `npm run typecheck` (`src/`, its `.js` modules included: `checkJs`), `npm run typecheck:tests` (`tests/` and the vite/vitest configs, through `tsconfig.test.json`), `npm run lint` (ESLint, see [Linting](#linting)), `go vet ./...`, and `gofmt -l` on `go-web-proxy/` (any file it lists fails the task) |
+| `test` | `npm run test:app` (the web suite without `tests/mock-broker/`), `go test -race ./...` (`CGO_ENABLED=1`; without gcc on PATH it runs without `-race` and `test.log` says so). When `cov` is in the same invocation (`full`, `all cov`), the web suite runs once, in `cov`, and `test.log` says so |
+| `mock` | `npm run test:mock:coverage`: `tests/mock-broker/`, the suites behind `demo.html` and the Provisioned demo, the gateway contract included, with the coverage of `src/mock-broker/` printed (reported, no threshold). Skipped, like `test`'s web suite, when `cov` is in the same invocation |
 | `cov` | `npm run test:coverage` plus a Go coverage profile; prints both totals |
 | `scan` | `npm run audit:gate` (`npm audit`, fatal on fixable HIGH/CRITICAL advisories, warns on unfixable ones), `go tool govulncheck ./...`, then a Trivy scan of the freshly-built image with the pinned Trivy container (never a `trivy` on PATH; see [git.md](git.md#keeping-the-workflow-pins-current)) |
 | `image` | Builds the container image via `docker/docker-compose.yaml` |
@@ -68,7 +70,7 @@ npm install && npm test
 | `all` | `build vet test mock` |
 | `full` | `all` + `cov image scan graphify` — the pre-tag sweep |
 
-Every task name is checked before any task runs, so a typo fails at once. Each task writes `scripts/logs/<task>.log` with a timestamped footer, and a run of more than one task ends with a console-only `timing:` line giving each task's seconds. `logs/cov.log` holds the previous coverage totals, which are the local floor — CI is a fresh checkout with no prior log, so it cannot catch a coverage regression.
+Every task name is checked before any task runs, so a typo fails at once. Each task writes `scripts/logs/<task>.log` with a timestamped footer, and a run of more than one task ends with a console-only `timing:` line giving each task's seconds. CI runs `all cov scan`, so the 100% thresholds in `vitest.config.ts` gate every release. `logs/cov.log` holds the previous coverage totals, which are the local floor for what has no threshold (the Go total) -- CI is a fresh checkout with no prior log, so that comparison is yours.
 
 The image half of `image` and `scan` warn-skips when Docker is absent or running Windows containers, since a Linux image cannot be built there. The `ubuntu-24.04` CI leg still enforces it.
 
@@ -156,7 +158,21 @@ The pure helpers (certificate issuing and reading, the broker details and their 
 - **ES modules** (`import`/`export`). No CommonJS.
 - **Factory functions** over classes for services. State lives in closure scope.
 - **No global variables**. Modules receive dependencies via `AppContext`.
-- Mixed TS/JS codebase: new files should be TypeScript. Existing `.js` files are acceptable.
+- Mixed TS/JS codebase: new files should be TypeScript. Existing `.js` files are acceptable, and `tsc` checks them (`checkJs`): give a parameter a JSDoc type where it cannot be inferred.
+
+### Linting
+
+`npm run lint` ([eslint.config.mjs](../eslint.config.mjs), run by `vet`) holds the rules above that a linter can see, and nothing else: type errors are `tsc`'s, and there are no style rules.
+
+| Rule | Where | Why |
+| --- | --- | --- |
+| `@typescript-eslint/no-unused-vars` | `src/`, `tests/`, `scripts/`, the configs | Dead code hides intent and drifts. A leading `_` marks a parameter kept for its position. |
+| `no-alert` | `src/` | `alert()`, `confirm()` and `prompt()` block the page; use the app's toast, or `confirmDialog()` from `src/core/components/confirm-dialog` for a yes/no question. |
+| `no-restricted-properties`: `document.getElementById` | `src/`, except the shell (`core/kernel.ts`, `core/toast.ts`, `mock-broker/shell.ts`) | Module code reaches only its own container (see [DOM Access](#dom-access)). |
+| `no-restricted-properties`: `console.*` | `src/`, except `core/logger.ts` | Logs go through `logger.withTag(<component>)`, which applies the level and the tag. `src/index.html`'s inline script is not linted. |
+| `no-restricted-syntax`: `e.message \|\| fallback` | `src/` | The SDK puts the reason in `.message` or `.infoStr`; `solaceErrorText(e, fallback)` reads both (see [Error Handling](#error-handling)). |
+
+A finding is fixed, not silenced. Where one must stay for now, an `// eslint-disable-next-line <rule> -- <date>: <reason>` comment names it; ESLint reports a disable comment that no longer suppresses anything.
 
 ### DOM Access
 
@@ -195,6 +211,15 @@ The pure helpers (certificate issuing and reading, the broker details and their 
 - Show user-facing errors in dedicated error elements, not `alert()`.
 - Log developer-facing diagnostics through `logger.*` from [src/core/logger.ts](../src/core/logger.ts) — never raw `console.*`. The only exception is the inline `<script>` in `src/index.html`, which runs before any module loads. Pick the level by intent: `debug` for fine-grained internal trace, `info` for lifecycle/state-change banners, `warn` for recoverable mismatches, `error` for failures. The default boot level is `INFO`; override at runtime with `?logLevel=DEBUG` (or `WARN`, `ERROR`, `SILENT`).
 
+### Logging standard
+
+The full text is in [developer-guide.md -> Logging standard](developer-guide.md#logging-standard); a reviewer checks that each new log line:
+
+- has the level its meaning calls for: `error` needs attention, `warn` is a recoverable problem, `info` a lifecycle, state-change or audit event, `debug` trace;
+- names its component (a `logger.withTag(...)` tag in the app; `requestLogger(base, r)` attributes in the gateway) and the user, client, broker, VPN, queue or path it concerns;
+- carries operations, error codes and counts as attributes (the gateway) or `key=value` after a fixed phrase (the app), not woven into prose;
+- holds no secret at any level: no password, passphrase, store key, session cookie or `Authorization` header.
+
 ### File Organization
 
 - One concern per file (not one class per file — there are no classes).
@@ -203,7 +228,7 @@ The pure helpers (certificate issuing and reading, the broker details and their 
 - State: `state.js`
 - Orchestrator: `module.ts`
 - Template: `index.html` (lives next to the code; the build plugin injects it into the shell)
-- Styles: `styles.css` (module-scoped; imported from `src/css/main.css`)
+- Styles: `styles.css` (module-scoped; the registry plugin imports it for every variant that lists the module, never `src/css/main.css`)
 - Constants / icons: `constants.js`
 
 ---
@@ -212,7 +237,7 @@ The pure helpers (certificate issuing and reading, the broker details and their 
 
 ### Coverage Threshold
 
-`vitest.config.ts` sets a **100% threshold** on all four metrics (Statements, Branches, Functions, Lines). When coverage drops below 100% on any metric, `npm run test:coverage` reports `ERROR: Coverage for … does not meet global threshold (100%)` at the end of the run. As of the May 2026 sweep the target is met (100% / 100% / 100% / 100%) — see [test-report.md](test-report.md) for the per-file confirmation.
+`vitest.config.ts` sets a **100% threshold** on all four metrics (Statements, Branches, Functions, Lines), over `src/` (the demo tree `src/mock-broker/` aside: `mock` reports its coverage without a threshold) and the four gate scripts `scripts/check-bundles.mjs`, `module-registry-plugin.mjs`, `npm-audit-gate.mjs` and `e2e-lib.mjs`. When coverage drops below 100% on any metric, `npm run test:coverage` reports `ERROR: Coverage for ... does not meet global threshold (100%)` at the end of the run. As of the May 2026 sweep the target is met (100% / 100% / 100% / 100%) -- see [test-report.md](test-report.md) for the per-file confirmation.
 
 A PR should not regress coverage. A PR that restores a previously-covered file or branch is always welcome.
 
@@ -391,7 +416,7 @@ Use `/* v8 ignore start */` / `/* v8 ignore stop */` **only** for code that is a
 ### Running Tests
 
 ```bash
-./scripts/dev.sh test  # Web + Go, both build-tag variants
+./scripts/dev.sh test  # Web (without tests/mock-broker/, which `mock` runs) + Go
 ./scripts/dev.sh cov   # With coverage report (text + HTML in coverage/)
 npm run test:watch     # Watch mode — the one case where the npm script is the right entry point
 ```
@@ -405,7 +430,7 @@ The `--pool=threads` flag is included in the npm scripts the tasks call; the wor
 - [ ] `./scripts/dev.sh all` is green (build, vet, test — both the web and Go halves — and mock)
 - [ ] New code has corresponding tests
 - [ ] Coverage does not regress (`./scripts/dev.sh cov`); targets 100% per `vitest.config.ts` thresholds
-- [ ] Type-check passes — `vet` runs it, because the build uses esbuild and does **not** type-check, so `tsc --noEmit` is a separate gate
+- [ ] `vet` passes: both type-checks (the build uses esbuild and does **not** type-check, so `tsc` over `src/` and over `tests/` + the configs is a separate gate), `npm run lint`, `go vet` and `gofmt -l`
 - [ ] If you changed a build command, it went into **both** `scripts/dev.sh` and `scripts/dev.ps1` — never into workflow YAML
 - [ ] No new `any` types (except Solace SDK interface)
 - [ ] DOM access is container-scoped

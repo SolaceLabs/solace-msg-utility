@@ -25,6 +25,7 @@
   - [DOM Access](#dom-access)
   - [Event Handling](#event-handling)
   - [Error Handling](#error-handling)
+  - [Logging standard](#logging-standard)
   - [TypeScript](#typescript)
 
 ---
@@ -58,9 +59,9 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 
 `dist/` is git-ignored build output; nothing in it is committed. Tagged Releases publish the Direct-only bundles, and the offline Provisioned demo (`provisioned-demo.html`), never `solAdmin.html` or `provisioned.html`, which ship only inside the image (see [git.md -> Release assets](git.md#release-assets)). For local runs, drop `solclient.js` / `jszip.min.js` in beside the bundles (see [deployment.md -> External Runtime Dependencies](deployment.md#external-runtime-dependencies)).
 
-**The gates are `scripts/dev.sh` / `scripts/dev.ps1`, not the npm scripts.** The table above is the variant reference — reach for an individual `build:*` script when iterating on one variant. For anything you would call a gate, use the task: `./scripts/dev.sh all` (`build vet test mock`; CI runs `all scan`), `cov`, `scan`, `image`, or `full` for the pre-tag sweep. The tasks call the npm scripts above plus the Go halves, and they are the only place a build command lives — see [contributing.md](contributing.md#development-workflow) for the task table and [git.md](git.md) for how a tag turns into a release.
+**The gates are `scripts/dev.sh` / `scripts/dev.ps1`, not the npm scripts.** The table above is the variant reference -- reach for an individual `build:*` script when iterating on one variant. For anything you would call a gate, use the task: `./scripts/dev.sh all` (`build vet test mock`; CI runs `all cov scan`), `cov`, `scan`, `image`, or `full` for the pre-tag sweep. The tasks call the npm scripts above plus the Go halves, and they are the only place a build command lives -- see [contributing.md](contributing.md#development-workflow) for the task table and [git.md](git.md) for how a tag turns into a release.
 
-The npm scripts the tasks wrap: `typecheck` (`tsc --noEmit`), `check:bundles` (the Direct bundles carry no Provisioned UI or gateway calls, `provisioned.html` does, and `provisioned-demo.html` does against the fake gateway with no network: [scripts/check-bundles.mjs](../scripts/check-bundles.mjs), run by `build`), `audit:gate` (the npm half of `scan`: [scripts/npm-audit-gate.mjs](../scripts/npm-audit-gate.mjs) runs `npm audit` and fails only on fixable HIGH/CRITICAL advisories), `test` / `test:coverage`, and `build`. The `image` and `scan` tasks otherwise run their commands directly (`docker compose build`, `go tool govulncheck`, and the pinned Trivy container, see [git.md](git.md#keeping-the-workflow-pins-current)); there are deliberately no `image:*` / `scan:*` npm scripts, so each gate has one definition. `scan` runs `go tool govulncheck`, which resolves through the `tool` directive pinned in [go-web-proxy/go.mod](../go-web-proxy/go.mod) -- never `go run pkg@version`, which runs module-less and ignores the toolchain pin.
+The npm scripts the tasks wrap: `typecheck` (`tsc --noEmit` over `src/`), `typecheck:tests` (`tsc -p tsconfig.test.json --noEmit`: `tests/`, `vite.config.ts`, `vitest.config.ts`), `lint` (ESLint with the house rules, [eslint.config.mjs](../eslint.config.mjs)), `check:bundles` (the Direct bundles carry no Provisioned UI or gateway calls, `provisioned.html` does, and `provisioned-demo.html` does against the fake gateway with no network: [scripts/check-bundles.mjs](../scripts/check-bundles.mjs), run by `build`), `audit:gate` (the npm half of `scan`: [scripts/npm-audit-gate.mjs](../scripts/npm-audit-gate.mjs) runs `npm audit` and fails only on fixable HIGH/CRITICAL advisories), `test` / `test:coverage`, and `build`. The `image` and `scan` tasks otherwise run their commands directly (`docker compose build`, `go tool govulncheck`, and the pinned Trivy container, see [git.md](git.md#keeping-the-workflow-pins-current)); there are deliberately no `image:*` / `scan:*` npm scripts, so each gate has one definition. `scan` runs `go tool govulncheck`, which resolves through the `tool` directive pinned in [go-web-proxy/go.mod](../go-web-proxy/go.mod) -- never `go run pkg@version`, which runs module-less and ignores the toolchain pin.
 
 Custom variants are built via the `scripts/vite-build.mjs` wrapper, which surfaces `--variant=<name>`, `--out-filename=<name>`, and `--show-payload=<bool>` because Vite's CLI parser (CAC) rejects unknown flags. The wrapper forwards them to `vite.config.ts` via private env vars. Example: `node scripts/vite-build.mjs --variant=min --out-filename=min.html`. The dev server reads the same variant from the environment: `__VITE_VARIANT=managed npm run dev` serves the managed bundle (Provisioned tab included; it needs a managed gateway behind `/hosted` and `/managed/*` to sign in).
 
@@ -149,9 +150,8 @@ src/
     layout.css         # Shell chrome — app container, sidebar, top bar, status
     components.css     # Generic UI — buttons, cards, forms, modals, tables, badges
     utilities.css      # Atomic helpers — flex, gap, spacing, sizing
-    main.css           # @import entry — imported by main.ts (also imports core/components/queue-picker/styles.css)
-    main-admin.css     # Admin-build entry — main.css + the admin modules' styles; the
-                       # css-variant-redirect plugin swaps it in for --variant=admin
+    main.css           # @import entry -- imported by main.ts: the design system and the core components' styles.css
+                       # (a module's styles.css comes with its manifest line, through virtual:module-registry)
   modules/
     connections/       # Priority 100. Owns the PRIMARY connection lifecycle.
       module.ts        # Release entry (Direct only). Exports installDirect, which defines
@@ -245,7 +245,7 @@ interface PwaModule {
 }
 ```
 
-Priority (install order + sidebar position) is **not** a module property — it's set in `src/registry.ts` alongside the module reference, so the full ordering is visible in one file. The kernel takes `RegisteredModule[]` (`{ module, priority }` tuples) and sorts them descending before calling `install()`.
+Priority (install order + sidebar position) is **not** a module property -- it's the value beside the module id in the variant manifest (`src/variants/<name>.ts`), which `src/registry.ts` reads, so a variant's full ordering is visible in one file. The kernel takes `RegisteredModule[]` (`{ module, priority }` tuples) and sorts them descending before calling `install()`.
 
 ### AppContext (Dependency Injection)
 
@@ -356,7 +356,7 @@ serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser });
    src/modules/your-module/
      module.ts      # PwaModule implementation
      index.html     # Module HTML template (lives next to the code)
-     styles.css     # Optional — module-scoped styles, imported via src/css/main.css
+     styles.css     # Optional -- module-scoped styles, imported by the registry wherever the module is active
    ```
 
 2. **Implement the module:**
@@ -403,11 +403,7 @@ serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser });
 
    > **Gating a module in Provisioned deployments:** a module in the `managed` variant is under module control: a signed-in user sees it only if an administrator grants it, so add its id to `moduleCatalog()` in [go-web-proxy/configfile.go](../go-web-proxy/configfile.go) (`tests/variants.test.ts` fails until you do). To keep it out of Provisioned sessions instead, add it to `MODULE_REQUIREMENTS` in [src/core/rbac.ts](../src/core/rbac.ts): `'admin'` for admin-only CRUD (like the editors, which ship only in `src/variants/admin.ts`), or `'unfiltered-semp'` for a module that reaches the broker over a path RBAC cannot filter, which hides it in **every** Provisioned session and keeps it out of the catalog. The kernel hides the sidebar entry and re-evaluates on `rbac:changed`. See [architecture.md -> Provisioned Connections](architecture.md#provisioned-connections-rbac).
 
-5. **Import the module's CSS** (if you added `styles.css`) from `src/css/main.css`:
-
-   ```css
-   @import '../modules/your-module/styles.css';
-   ```
+5. **Nothing to import for the module's CSS.** If you added `styles.css`, the registry plugin imports it into every variant that lists the module (and no other), after the design system. Never `@import` a module stylesheet from `src/css/main.css`: it would ship in every bundle, the variants without the module included.
 
 6. **Write tests** in `tests/modules/your-module/module.test.ts`. Use `loadModuleDOM('your-module')` from `tests/helpers/loadModuleDOM.ts` to load the real template in tests.
 
@@ -520,11 +516,23 @@ Use `/* v8 ignore start */` / `/* v8 ignore stop */` only for architecturally un
 
 - Return `{ ok: boolean; error?: string }` result objects from services
 - Wrap Solace SDK calls in try/catch
-- Log errors to console, show user-facing messages in the UI
+- Log through the tagged logger (see [Logging standard](#logging-standard)), show user-facing messages in the UI
+
+### Logging standard
+
+One standard for the web app and the gateway, so a line can be read, filtered and tied to the others for the same user or request without the source at hand.
+
+- **Levels by meaning.** `error`: something failed and needs attention (a request answered with a 5xx, a store that will not load, a run that ended in error). `warn`: a recoverable problem the code handled (a refused request, a fallback taken, a value ignored). `info`: lifecycle, state changes and audit events (start and stop, connect and disconnect, a sign-in, an administrator's change, a setting applied). `debug`: trace for a developer (each step, each message, request detail).
+- **Every line names its component and what it concerns.** The component is the tag (`[Connections]`, `[Copy]`) in the web app and the logger's attributes in the gateway; then the identifiers the event is about, as they apply: user, client, broker, VPN, queue, path.
+- **Facts as attributes, not prose.** In the gateway an operation, an error code or a count is a key-value attribute (`"code", "read_only"`), and the message stays a fixed sentence, so a line filters without a regular expression. In the web app the values follow a fixed phrase, as `key=value` where there are several.
+- **No secrets, at any level.** Never a password, a passphrase, a store key, a session cookie or an `Authorization` header: leave it out or mask it. A broker's address is not a secret; its credential is.
+- **Web app.** `const log = logger.withTag('<Component>')` from [src/core/logger.ts](../src/core/logger.ts), never `console.*`: ESLint holds it, and the inline script in `src/index.html`, which runs before any module, is the one exception. The level is set at boot; `?logLevel=DEBUG` (or `WARN`, `ERROR`, `SILENT`) overrides it.
+- **Gateway.** A request's lines go through `requestLogger(base, r)` ([go-web-proxy/logging.go](../go-web-proxy/logging.go)), which carries the client, the method, the path and, once a gate has recorded one, the user. `LOG_LEVEL` sets the level, and one summary line at startup is always written whatever the level: the version, the mode and the settings in force, never a secret.
 
 ### TypeScript
 
 - Strict mode enabled (`strict: true` in tsconfig)
-- `allowJs: true` — mixed TS/JS codebase (legacy JS files coexist with new TS)
+- `allowJs: true` with `checkJs: true` -- mixed TS/JS codebase (legacy JS files coexist with new TS, and `tsc` checks them; JSDoc types where inference falls short)
+- `tsconfig.test.json` extends the base for `tests/**` and the vite/vitest configs (`vitest/globals` and Node types): a test fixture typed as a production type breaks `vet` when the type changes, instead of running on stale fields
 - `declare const solace: any` in files that access the global Solace SDK
-- Run `npm run typecheck` (`tsc --noEmit`) to check types — the build (Vite/esbuild) strips types **without** checking them, so `tsc` is the only thing that catches type errors. It's a separate gate from `npm run build`, enforced in CI.
+- Run `npm run typecheck` (`tsc --noEmit`) and `npm run typecheck:tests` to check types -- the build (Vite/esbuild) and vitest strip types **without** checking them, so `tsc` is the only thing that catches type errors. Both are part of `vet`, a separate gate from `build`, enforced in CI.

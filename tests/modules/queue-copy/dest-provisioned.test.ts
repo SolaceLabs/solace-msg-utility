@@ -19,18 +19,23 @@ const { pickQueueMock } = vi.hoisted(() => ({
 vi.mock('../../../src/core/components/queue-picker', () => ({ pickQueue: pickQueueMock }));
 
 // Capture what reaches the destination connection factories.
-const { destSempConnect, destSolConnect } = vi.hoisted(() => ({
-    destSempConnect: vi.fn(), destSolConnect: vi.fn(),
+const { destSempConnect, destSempDisconnect, destSolConnect, destSolDisconnect } = vi.hoisted(() => ({
+    destSempConnect: vi.fn(), destSempDisconnect: vi.fn(), destSolConnect: vi.fn(), destSolDisconnect: vi.fn(),
 }));
-const { destSempHooks } = vi.hoisted(() => ({ destSempHooks: { current: null as any } }));
+const { destSempHooks, destSolHooks } = vi.hoisted(() => ({
+    destSempHooks: { current: null as any }, destSolHooks: { current: null as any },
+}));
 vi.mock('../../../src/core/services/semp-client', () => ({
     createServiceSemp: vi.fn((hooks: any) => {
         destSempHooks.current = hooks;
-        return { connect: destSempConnect, disconnect: vi.fn() };
+        return { connect: destSempConnect, disconnect: destSempDisconnect };
     }),
 }));
 vi.mock('../../../src/core/services/solace-client', () => ({
-    createServiceSolace: vi.fn(() => ({ init: vi.fn(), connect: destSolConnect, disconnect: vi.fn() })),
+    createServiceSolace: vi.fn((hooks: any) => {
+        destSolHooks.current = hooks;
+        return { init: vi.fn(), connect: destSolConnect, disconnect: destSolDisconnect };
+    }),
 }));
 
 // Stub verify so clicking Next reaches an enabled Start without touching SEMP.
@@ -58,6 +63,8 @@ vi.mock('../../../src/modules/queue-copy/service-copy', async () => {
 import { QueueCopyModule } from '../../../src/modules/queue-copy/module';
 import { destinationRefusal } from '../../../src/modules/queue-copy/ui-modal';
 import { createInitialState } from '../../../src/modules/queue-copy/state';
+import { DEST_TARGET_LOCKED_TITLE } from '../../../src/modules/queue-copy/ui';
+import { completeContext } from '../../helpers/appContext';
 
 /** The /managed/me profile: names only, as the gateway sends it. */
 const PROFILE: any = {
@@ -86,7 +93,9 @@ beforeEach(() => {
     container = loadModuleDOM('queue-copy');
     eventBus = createEventBus();
     destSempConnect.mockClear();
+    destSempDisconnect.mockClear();
     destSolConnect.mockClear();
+    destSolDisconnect.mockClear();
     pickQueueMock.mockClear();
     dialMock.mockReset();
     dialMock.mockImplementation(async (broker: string, vpn: string) => ({
@@ -110,10 +119,10 @@ async function setupProvisioned(over: Partial<AppState> = {}, signIn = true) {
             protocol: 'https', host: 'host1', port: '1943', urlPath: '/SEMP/v2',
         },
         managed: SESSION,
-        connConfig: { connModes: 'both', defaultConn: 'direct' },
+        connConfig: { hosted: true, connModes: 'both', defaultConn: 'direct' },
         ...over,
     };
-    const ctx: AppContext = {
+    const ctx: AppContext = completeContext({
         container, appState, eventBus,
         setState: vi.fn((k, v) => { (appState as any)[k] = v; }),
         loadSelf: vi.fn(),
@@ -121,7 +130,7 @@ async function setupProvisioned(over: Partial<AppState> = {}, signIn = true) {
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: {},
-    };
+    });
     ctx.managedProfile.attachDialer(DIALER);
     if (signIn) ctx.managedProfile.setProfile(PROFILE);
     await QueueCopyModule.install(ctx);
@@ -192,7 +201,7 @@ describe('queue-copy — provisioned destination: credential-source control', ()
     });
 
     it('pins Provisioned with no control (and no Manual escape) in a managed-only deployment', async () => {
-        const { el, hidden } = await setupProvisioned({ connConfig: { connModes: 'provisioned', defaultConn: 'provisioned' } });
+        const { el, hidden } = await setupProvisioned({ connConfig: { hosted: true, connModes: 'provisioned', defaultConn: 'provisioned' } });
         needSecondary(el);
         expect(hidden('#copy-dest-cred-mode-row')).toBe(true);
         expect(hidden('#copy-dest-provisioned-block')).toBe(false);
@@ -201,7 +210,7 @@ describe('queue-copy — provisioned destination: credential-source control', ()
 
     it('offers Manual only in a direct deployment', async () => {
         const { el, hidden } = await setupProvisioned({
-            connConfig: { connModes: 'direct', defaultConn: 'direct' }, managed: null,
+            connConfig: { hosted: false, connModes: 'direct', defaultConn: 'direct' }, managed: null,
         });
         needSecondary(el);
         expect(hidden('#copy-dest-cred-mode-row')).toBe(true);
@@ -227,7 +236,7 @@ describe('queue-copy — provisioned destination: credential-source control', ()
         // Filtering by "signed in" would leave nothing — and falling back to
         // Manual would hand out the very bypass this deployment forbids.
         const { el, hidden } = await setupProvisioned(
-            { connConfig: { connModes: 'provisioned', defaultConn: 'provisioned' }, managed: null }, false);
+            { connConfig: { hosted: true, connModes: 'provisioned', defaultConn: 'provisioned' }, managed: null }, false);
         needSecondary(el);
         expect(hidden('#copy-dest-provisioned-block')).toBe(false);
         expect(el<HTMLSelectElement>('#copy-dest-prov-broker').options.length).toBe(0);
@@ -333,6 +342,98 @@ describe('queue-copy -- provisioned destination: connecting through the profile'
             expect(el('#copy-dest-sol-error').textContent).toMatch(/requires a sign-in session/i));
         expect(destSolConnect).not.toHaveBeenCalled();
         expect(signOut).not.toHaveBeenCalled();
+    });
+});
+
+describe('queue-copy -- provisioned destination: a connect in flight', () => {
+    const DIALLED_V1 = { ok: true, data: { smfPath: '/managed/smf/b1/v1', vpn: 'v1', user: 'u-v1', pass: 'pw-v1' } };
+
+    /** Provisioned b1/v1 chosen and Connect Client clicked, with a dial the test answers by hand. */
+    async function dialling() {
+        const h = await setupProvisioned();
+        needSecondary(h.el);
+        chooseProvisioned(h.el);
+        let answer: (v: any) => void = () => {};
+        dialMock.mockImplementationOnce(() => new Promise((r) => { answer = r; }));
+        h.el<HTMLButtonElement>('#copy-btn-dest-sol-connect').click();
+        await vi.waitFor(() => expect(dialMock).toHaveBeenCalledWith('b1', 'v1'));
+        return { ...h, answerDial: (v: any) => answer(v) };
+    }
+
+    /** Fill both names so Next is gated only on the destination connection. */
+    function names(el: El): void {
+        for (const [sel, v] of [['#copy-source-input', 'ops.src'], ['#copy-dest-input', 'ops.dest']]) {
+            el<HTMLInputElement>(sel).value = v;
+            el<HTMLInputElement>(sel).dispatchEvent(new Event('input'));
+        }
+    }
+
+    it('locks what chooses the destination while dialling; a refused dial unlocks it', async () => {
+        const { el, answerDial } = await dialling();
+        const locked = ['#copy-dest-prov-broker', '#copy-dest-prov-vpn',
+            '#copy-dest-cred-provisioned', '#copy-dest-cred-manual', '#copy-toggle-same-broker'];
+        for (const sel of locked) {
+            expect(el<HTMLInputElement>(sel).disabled).toBe(true);
+            expect(el<HTMLInputElement>(sel).title).toBe(DEST_TARGET_LOCKED_TITLE);
+        }
+
+        answerDial({ ok: false, status: 503, code: 'upstream_unavailable' });
+        await vi.waitFor(() => expect(el('#copy-dest-sol-status').textContent).toBe('Not connected'));
+
+        for (const sel of locked) expect(el<HTMLInputElement>(sel).disabled).toBe(false);
+        // Same VPN keeps its own rule: it means nothing without Same broker.
+        expect(el<HTMLInputElement>('#copy-toggle-same-vpn').disabled).toBe(true);
+        expect(destSolConnect).not.toHaveBeenCalled();
+    });
+
+    it('a refresh while dialling re-renders the selectors but keeps them locked', async () => {
+        const { ctx, el } = await dialling();
+        ctx.managedProfile.setProfile(PROFILE);
+        eventBus.emit('rbac:changed');
+        expect(el<HTMLSelectElement>('#copy-dest-prov-vpn').disabled).toBe(true);
+        expect(el<HTMLInputElement>('#copy-dest-cred-manual').disabled).toBe(true);
+    });
+
+    it('a VPN changed during the dial: the late session is discarded and nothing can start', async () => {
+        const { el, answerDial } = await dialling();
+        // The selector is locked; dispatching the change models the race the lock closes.
+        const vpnSel = el<HTMLSelectElement>('#copy-dest-prov-vpn');
+        vpnSel.value = 'v2';
+        vpnSel.dispatchEvent(new Event('change'));
+        expect(destSolDisconnect).toHaveBeenCalledTimes(1);
+
+        answerDial(DIALLED_V1);
+        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
+        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
+
+        expect(destSolDisconnect).toHaveBeenCalledTimes(2);
+        expect(el('#copy-dest-sol-status').textContent).toBe('Not connected');
+        names(el);
+        expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(true);
+    });
+
+    it('a refresh that moves the VPN under a live destination session: Start is refused', async () => {
+        const { ctx, el, answerDial } = await dialling();
+        answerDial(DIALLED_V1);
+        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
+        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
+        expect(el('#copy-dest-sol-status').textContent).toBe('Connected (v1)');
+
+        // v1 is withdrawn, v2 stays: the selector moves to v2 while the v1 session lives on.
+        ctx.managedProfile.setProfile({
+            ...PROFILE, brokers: [{ broker: 'b1', msgVpns: [{ name: 'v2' }] }, PROFILE.brokers[1]],
+        } as any);
+        eventBus.emit('rbac:changed');
+        expect(el<HTMLSelectElement>('#copy-dest-prov-vpn').value).toBe('v2');
+
+        eventBus.emit('client:connected', { session: { on: vi.fn() } });
+        names(el);
+        el<HTMLButtonElement>('#copy-btn-start').click();
+        await vi.waitFor(() => expect(el<HTMLButtonElement>('#copy-modal-start').disabled).toBe(false));
+        el<HTMLButtonElement>('#copy-modal-start').click();
+
+        expect(el('#copy-run-error').textContent).toMatch(/does not match the destination selected/);
+        expect(runCopyJobMock).not.toHaveBeenCalled();
     });
 });
 
@@ -534,6 +635,40 @@ describe('queue-copy — provisioned destination: rbac:changed lifecycle', () =>
         eventBus.emit('rbac:changed');
         expect(appState.isConnected).toBe(true);
         expect(appState.isSempConnected).toBe(true);
+    });
+
+    it('a finished run no longer blocks tearing down a destination whose provisioning was revoked', async () => {
+        const { ctx, el } = await setupProvisioned();
+        needSecondary(el);
+        chooseProvisioned(el);
+        el<HTMLButtonElement>('#copy-btn-dest-sol-connect').click();
+        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
+        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
+
+        // The run settles at once through the module's own onComplete.
+        runCopyJobMock.mockImplementation((state: any, _session: any, hooks: any) => {
+            state.job = { total: 5, copied: 5, cancelRequested: false, lastError: null, status: 'completed' };
+            hooks.onComplete(state.job);
+            return Promise.resolve();
+        });
+        eventBus.emit('client:connected', { session: { on: vi.fn() } });
+        for (const [sel, v] of [['#copy-source-input', 'ops.src'], ['#copy-dest-input', 'ops.dest']]) {
+            el<HTMLInputElement>(sel).value = v;
+            el<HTMLInputElement>(sel).dispatchEvent(new Event('input'));
+        }
+        el<HTMLButtonElement>('#copy-btn-start').click();
+        await vi.waitFor(() => expect(el<HTMLButtonElement>('#copy-modal-start').disabled).toBe(false));
+        el<HTMLButtonElement>('#copy-modal-start').click();
+        expect(el('#copy-modal-title').textContent).toBe('Completed');
+
+        // v1 is revoked after the run finished: the destination connections go.
+        ctx.managedProfile.setProfile({
+            ...PROFILE, brokers: [{ broker: 'b1', msgVpns: [] }, PROFILE.brokers[1]],
+        } as any);
+        eventBus.emit('rbac:changed');
+
+        expect(destSolDisconnect).toHaveBeenCalledTimes(1);
+        expect(destSempDisconnect).toHaveBeenCalledTimes(1);
     });
 
     it('drops the chosen target when the provisioned VPN disappears', async () => {

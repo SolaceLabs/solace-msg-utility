@@ -14,7 +14,7 @@
 
 import { required } from '../../core/dom';
 import { logger } from '../../core/logger';
-import { probeDeployment, setHosted } from '../../core/hosted';
+import { probeDeployment } from '../../core/hosted';
 import { resolveConnTabs, type ConnMode } from '../../core/connections/conn-modes';
 import { CONNECTIONS_ICON, installDirect } from './module';
 import { createManagedPanel } from './managed-panel';
@@ -66,11 +66,11 @@ export const ConnectionsModule = {
         const { container, appState, eventBus, loadSelf } = app;
 
         // 0. Probe `/hosted` (see module.ts) and publish the deployment's
-        //    connection config, so other modules derive what they may offer for
-        //    their own secondary connections without re-probing the gateway.
+        //    connection config with the hosted verdict (its one home), so other
+        //    modules derive what they may offer for their own secondary
+        //    connections, and route their URLs, without re-probing the gateway.
         const { hosted, conn } = await probeDeployment();
-        setHosted(hosted);
-        app.setState('connConfig', conn);
+        app.setState('connConfig', { ...conn, hosted });
         logger.info(`[Connections] mode = ${hosted ? 'hosted' : 'browser'}`);
 
         // 1. Tabs. resolveConnTabs yields Direct-only unless the gateway

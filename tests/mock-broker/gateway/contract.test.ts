@@ -2,10 +2,12 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createGateway } from '../../../src/mock-broker/gateway';
+import { createGateway, responseHeaders } from '../../../src/mock-broker/gateway';
 import {
-    moduleIdsProblem, passwordOk, portProblem, validBroker, validHost, validUsername,
+    CLIENT_SCHEMES, moduleIdsProblem, passwordOk, portProblem, schemeOk, SEMP_SCHEMES, validBroker, validHost, validUsername,
 } from '../../../src/mock-broker/gateway/validate';
+import { matchGlob } from '../../../src/core/rbac';
+import type { UpstreamAnswer } from '../../../src/mock-broker/gateway/relay';
 import { scenario } from '../../../src/mock-broker/fixtures';
 import type { GatewaySeed } from '../../../src/mock-broker/gateway/types';
 
@@ -15,7 +17,9 @@ import type { GatewaySeed } from '../../../src/mock-broker/gateway/types';
  * proves the real gateway answers exactly; this suite proves the fake gives
  * the same answers from the same seed. A gateway change that alters an answer
  * fails the Go test first (its -update rewrites cases.json), then this one,
- * until the fake follows.
+ * until the fake follows. A step compares the status, the body, the headers it
+ * lists ("" for one that must be absent) and, where it reaches a broker, the
+ * URL the relay asked the scripted broker for.
  */
 const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../go-web-proxy/testdata/contract');
 const read = (name: string) => JSON.parse(readFileSync(path.join(DIR, name), 'utf-8'));
@@ -27,9 +31,15 @@ interface Step {
     path: string;
     body?: unknown;
     raw?: string;
+    upstream?: UpstreamAnswer & { url: string };
     status: number;
+    headers?: Record<string, string>;
     response: unknown;
 }
+
+/** A header by name, any case; "" when absent. */
+const header = (h: Record<string, string>, name: string): string =>
+    Object.entries(h).find(([k]) => k.toLowerCase() === name.toLowerCase())?.[1] ?? '';
 
 const seed: GatewaySeed = read('seed.json');
 const cases: { name: string; steps: Step[] }[] = read('cases.json').cases;
@@ -56,7 +66,17 @@ describe('mock-broker/gateway -- the gateway contract', () => {
 
     for (const c of cases) {
         it(c.name, async () => {
-            const gw = createGateway({ seed: JSON.parse(JSON.stringify(seed)), backupIter: 1000 });
+            // The scripted broker: the step being run says what it answers.
+            let script: Step['upstream'];
+            let asked = '';
+            const gw = createGateway({
+                seed: JSON.parse(JSON.stringify(seed)),
+                backupIter: 1000,
+                upstream: call => {
+                    asked = call.url;
+                    return script ?? { error: 'contract: the step scripts no broker answer' };
+                },
+            });
             // Every session the case names is open before its first step.
             const sid = new Map<string, string>();
             for (const s of c.steps) {
@@ -64,6 +84,8 @@ describe('mock-broker/gateway -- the gateway contract', () => {
                 if (s.as && !sid.has(key)) sid.set(key, gw.openSession(s.as, !!s.mustChange));
             }
             for (const [i, s] of c.steps.entries()) {
+                script = s.upstream;
+                asked = '';
                 const [p, q = ''] = s.path.split('?');
                 const res = await gw.handle({
                     method: s.method,
@@ -72,9 +94,13 @@ describe('mock-broker/gateway -- the gateway contract', () => {
                     body: s.raw ?? (s.body === undefined ? '' : JSON.stringify(s.body)),
                     session: s.as ? sid.get(`${s.as}/${!!s.mustChange}`)! : null,
                 });
-                const got = res.json === undefined ? null : normalize(JSON.parse(JSON.stringify(res.json)));
-                expect({ step: i + 1, status: res.status, body: got })
-                    .toEqual({ step: i + 1, status: s.status, body: s.response });
+                // A relayed answer is the broker's text; the contract's bodies are JSON.
+                const sent = res.json !== undefined ? res.json : res.text ? JSON.parse(res.text) : undefined;
+                const got = sent === undefined ? null : normalize(JSON.parse(JSON.stringify(sent)));
+                const hs = responseHeaders(res);
+                const headers = Object.fromEntries(Object.keys(s.headers ?? {}).map(k => [k, header(hs, k)]));
+                expect({ step: i + 1, status: res.status, body: got, headers, url: s.upstream ? asked : undefined })
+                    .toEqual({ step: i + 1, status: s.status, body: s.response, headers: s.headers ?? {}, url: s.upstream?.url });
             }
         });
     }
@@ -102,5 +128,22 @@ describe('mock-broker/gateway -- the validation vectors', () => {
     it('modules: each vector as the gateway judges it', () => {
         for (const ids of v.modules.valid) expect(moduleIdsProblem('modules', ids)).toBeNull();
         for (const ids of v.modules.invalid) expect(moduleIdsProblem('modules', ids)).not.toBeNull();
+    });
+
+    for (const [side, [tls, plain]] of [['semp', SEMP_SCHEMES], ['client', CLIENT_SCHEMES]] as const) {
+        it(`scheme.${side}: each vector as the gateway judges it`, () => {
+            const vec: { valid: string[]; invalid: string[] } = v.scheme[side];
+            expect(vec.valid.length * vec.invalid.length).toBeGreaterThan(0);
+            for (const s of vec.valid) expect({ s, ok: schemeOk(s, tls, plain) }).toEqual({ s, ok: true });
+            for (const s of vec.invalid) expect({ s, ok: schemeOk(s, tls, plain) }).toEqual({ s, ok: false });
+        });
+    }
+
+    it('glob: the entitlement match the fake uses (src/core/rbac.ts) answers each row as the gateway does', () => {
+        const rows: [string, string, boolean][] = v.glob;
+        expect(rows.length).toBeGreaterThan(0);
+        for (const [pattern, value, expected] of rows) {
+            expect({ pattern, value, match: matchGlob(pattern, value) }).toEqual({ pattern, value, match: expected });
+        }
     });
 });

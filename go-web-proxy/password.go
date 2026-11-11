@@ -39,9 +39,11 @@ func checkPasswordPolicy(pw string) error {
 }
 
 // hasher makes and checks password hashes. iter is the cost of new hashes;
-// slots bounds how many run at once, so a burst of sign-ins cannot take every
-// CPU. dummy is checked for an unknown username, so the response time does not
-// say whether the user exists.
+// slots bounds how many run at once (half of GOMAXPROCS, newManagedRouting),
+// so a burst of sign-ins, exports or imports leaves the other half of the
+// CPU to the relay, the sockets and the files. dummy is checked for an
+// unknown username, so the response time does not say whether the user
+// exists.
 type hasher struct {
 	iter  int
 	slots chan struct{}

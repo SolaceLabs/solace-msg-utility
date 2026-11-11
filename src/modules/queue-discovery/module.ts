@@ -9,6 +9,7 @@ import { createService } from './service.js';
 import { ui } from './ui.js';
 import { required } from '../../core/dom';
 import { logger } from '../../core/logger';
+import { showToast } from '../../core/toast';
 import type { AppContext } from '../../core/types';
 
 export const QueueDiscoveryModule = {
@@ -243,7 +244,7 @@ export const QueueDiscoveryModule = {
                 logger.info(`[Discovery] Requesting Open in Browser: VPN=${selectedVpn}, Queue=${selectedQueue}`);
                 eventBus.emit('connection:check-connection', { vpn: selectedVpn, queue: selectedQueue });
             } else {
-                alert('Please select a VPN and Queue first.');
+                showToast('Select a Message VPN and a queue first.', 'warn');
             }
         });
 

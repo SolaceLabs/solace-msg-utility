@@ -3,13 +3,12 @@ import { state } from './state.js';
 import { escapeHtml } from '../../core/utils';
 import { logger } from '../../core/logger';
 import { showPayload } from './features.js';
+import { bytesToBase64 } from './payload.js';
 import { downloadBlob } from '../../core/download';
 import type { AppContext } from '../../core/types';
 
 // ui-details.ts - Message Details & Properties
 // Initialized via initDetails(ctx) which closes over AppContext for copyToClipboard.
-
-declare const JSZip: any;
 
 export function initDetails(ctx: AppContext) {
 
@@ -25,8 +24,13 @@ export function initDetails(ctx: AppContext) {
     ui.downloadMessageContent = function (msg: any) {
         if (!msg) return;
         const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}`;
-        const content = msg.content || '';
-        ui.triggerDownload(filename, content);
+        if (msg.bytes) {
+            // A binary attachment: its original bytes, typed by the publisher's HTTP Content-Type.
+            const type = msg.msgProperties['HTTP Type'] || 'application/octet-stream';
+            ui.triggerDownloadBlob(new Blob([msg.bytes], { type }), filename);
+        } else {
+            ui.triggerDownload(filename, msg.content);
+        }
     };
 
     ui.getFullMessageJson = function (msg: any) {
@@ -38,8 +42,10 @@ export function initDetails(ctx: AppContext) {
                 messageType: msg.type
             },
             applicationProperties: msg.appProperties,
-            payload: msg.content
+            // A binary payload rides as base64, flagged so a reader can decode it; text stays text.
+            payload: msg.binary ? bytesToBase64(msg.bytes) : msg.content
         };
+        if (msg.binary) fullObj.payloadEncoding = 'base64';
 
         // _originalMsg is set by service-events.onMessage for every broker-delivered
         // message and is always present here. getDestination() can still return null
@@ -116,11 +122,12 @@ export function initDetails(ctx: AppContext) {
 
             // Payload preview + raw/copy-content actions exist only in the show-payload
             // flavor; their elements were removed in the no-payload flavor.
+            // A true binary payload shows its size placeholder; there is no text to copy.
             if (showPayload()) {
                 els.detailContent.textContent = msg.content;
                 els.btnShowRaw.disabled = false;
                 els.btnShowRaw.onclick = () => ui.showRawContent(msg);
-                els.btnCopyContent.disabled = false;
+                els.btnCopyContent.disabled = msg.binary === true;
             }
 
             els.btnCopyDest.disabled = false;

@@ -48,32 +48,6 @@ function injectModuleTemplates(variant: string | undefined): PluginOption {
     };
 }
 
-/** The variants that carry the admin editors, and so their stylesheets. */
-const ADMIN_CSS_VARIANTS = new Set(['admin', 'managed-demo']);
-
-/**
- * Admin variant CSS swap: the app statically imports `./css/main.css` from
- * `src/main.ts`. For a build with the admin editors (`ADMIN_CSS_VARIANTS`),
- * redirect that import to `./css/main-admin.css` (which `@import`s main.css
- * plus the admin module stylesheets) so admin CSS ships only in solAdmin.html
- * and the managed demo. The CSS-level `@import './main.css'` inside
- * main-admin.css is resolved by Vite's CSS pipeline (not this resolver), so
- * there's no redirect loop.
- */
-function cssVariantRedirect(variant: string | undefined): PluginOption {
-    return {
-        name: 'css-variant-redirect',
-        enforce: 'pre',
-        resolveId(source, importer) {
-            if (!variant || !ADMIN_CSS_VARIANTS.has(variant) || !importer) return null;
-            const cleaned = source.replace(/\.css$/, '');
-            if (!cleaned.endsWith('/css/main') && cleaned !== './css/main') return null;
-            const target = path.resolve(__dirname, 'src/css/main-admin.css');
-            return this.resolve(target, importer, { skipSelf: true });
-        }
-    };
-}
-
 /**
  * Variant selection: when a non-empty `variant` is passed, redirect the
  * registry's `import { ACTIVE_MODULES } from './variants/_active'` to
@@ -222,8 +196,9 @@ export default defineConfig(({ mode }) => {
         root: 'src',
         plugins: [
             variantRedirect(variant),
+            // Also imports each active module's styles.css, so CSS follows
+            // the variant manifest like the code and the templates do.
             moduleRegistryPlugin({ root: __dirname, variant }) as PluginOption,
-            cssVariantRedirect(variant),
             isDemo && serviceDemoRedirect(demoRedirects(variant)),
             injectModuleTemplates(variant),
             viteSingleFile(),

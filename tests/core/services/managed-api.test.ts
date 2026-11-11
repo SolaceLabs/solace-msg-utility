@@ -3,6 +3,7 @@ import {
     managedRequest, managedErrorMessage, reportManagedFailure, SIGNED_OUT_TOAST_MS, type ManagedError,
 } from '../../../src/core/services/managed-api';
 import { createEventBus } from '../../../src/core/event-bus';
+import { REQUEST_TIMEOUT_MS } from '../../../src/core/timing';
 
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
 vi.mock('../../../src/core/toast', () => toastMock);
@@ -61,9 +62,22 @@ describe('core/services/managed-api — managedRequest', () => {
         expect(await managedRequest('GET', '/managed/me')).toEqual(expect.objectContaining({ ok: false, status: 502, code: 'http_502' }));
     });
 
-    it('resolves a network failure as code network, status 0', async () => {
-        fetchMock().mockRejectedValue(new TypeError('Failed to fetch'));
+    it('resolves a network failure as code network, status 0, and logs the call it lost', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
+        const cause = new TypeError('Failed to fetch');
+        fetchMock().mockRejectedValue(cause);
         expect(await managedRequest('GET', '/managed/me')).toEqual({ ok: false, status: 0, code: 'network' });
+        expect(warn).toHaveBeenCalledWith(
+            `[managed-api] GET /managed/me got no answer from the gateway (network error or ${REQUEST_TIMEOUT_MS / 1000} s timeout):`, cause);
+    });
+
+    it('resolves as code network when the gateway does not answer within REQUEST_TIMEOUT_MS', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => { });
+        vi.useFakeTimers();
+        fetchMock().mockImplementation(() => new Promise(() => { }));
+        const pending = managedRequest('GET', '/managed/me');
+        await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+        expect(await pending).toEqual({ ok: false, status: 0, code: 'network' });
     });
 });
 

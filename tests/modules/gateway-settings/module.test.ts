@@ -12,6 +12,7 @@ vi.mock('../../../src/modules/gateway-settings/service', () => ({
 }));
 
 import { GatewaySettingsModule } from '../../../src/modules/gateway-settings/module';
+import { completeContext } from '../../helpers/appContext';
 
 const ADMIN: ManagedSession = {
     admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
@@ -46,11 +47,11 @@ function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppCon
         activeModuleId: null, isConnected: false, selectedVpn: null,
         solaceConnection: null, sempCredentials: null, isSempConnected: false, managed,
     };
-    return {
+    return completeContext({
         container, appState, eventBus,
         setState: (k, v) => { (appState as any)[k] = v; },
         loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(), config: {},
-    } as unknown as AppContext;
+    });
 }
 
 async function setup(managed: ManagedSession | null = ADMIN, loaded: unknown = view()) {

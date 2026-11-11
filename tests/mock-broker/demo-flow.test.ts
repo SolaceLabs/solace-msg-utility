@@ -13,6 +13,7 @@ import { ConnectionManagementModule } from '../../src/modules/connection-managem
 import { GatewaySettingsModule } from '../../src/modules/gateway-settings/module';
 import { BackupModule } from '../../src/modules/backup/module';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
+import { answerConfirm } from '../helpers/confirmDialog';
 import type { AppContext, PwaModule } from '../../src/core/types';
 
 /**
@@ -238,6 +239,7 @@ describe('managed demo end to end', () => {
     it('signs an administrator out at once for deleting their own account', async () => {
         const row = await openOwnRow();
         row.querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
+        await answerConfirm(true);
         const demo = demos[demos.length - 1];
         await expectSignedOut(demo);
         expect(demo.gateway.store.findUser('admin')).toBeFalsy();
@@ -267,6 +269,7 @@ describe('managed demo end to end', () => {
 
         q<HTMLSelectElement>('#backup-choice-users').value = 'merge';
         q<HTMLButtonElement>('#btn-backup-import').click();
+        await answerConfirm(true);
         await vi.waitFor(() => expect(demo.gateway.store.findUser('viewer')).toBeTruthy(), { timeout: 5000 });
         expect(demo.gateway.signIn('viewer', 'demo-viewer-0001').ok).toBe(true);
     }, 20_000);

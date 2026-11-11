@@ -13,7 +13,11 @@
  * three admin modules all talk to the gateway through it.
  */
 import { showToast } from '../toast';
+import { logger } from '../logger';
+import { raceDeadline, REQUEST_TIMEOUT_MS } from '../timing';
 import type { EventBus } from '../types';
+
+const log = logger.withTag('managed-api');
 
 /** A failed call: the HTTP status (0 when the gateway was unreachable) and its code. */
 export interface ManagedError {
@@ -30,15 +34,21 @@ export type ManagedResult<T> = { ok: true; data: T } | ManagedError;
 
 type Method = 'GET' | 'PUT' | 'POST' | 'DELETE';
 
+/**
+ * One gateway call. A gateway that does not answer within `REQUEST_TIMEOUT_MS`
+ * is reported like an unreachable one (`network`), so a stalled `/managed/me`
+ * at startup ends in the signed-out view with an error instead of a blank page.
+ */
 export async function managedRequest<T = void>(method: Method, path: string, body?: unknown): Promise<ManagedResult<T>> {
     let res: Response;
     try {
-        res = await fetch(path, {
+        res = await raceDeadline(fetch(path, {
             method,
             credentials: 'same-origin',
             ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-        });
-    } catch {
+        }));
+    } catch (e) {
+        log.warn(`${method} ${path} got no answer from the gateway (network error or ${REQUEST_TIMEOUT_MS / 1000} s timeout):`, e);
         return { ok: false, status: 0, code: 'network' };
     }
     if (res.ok) {

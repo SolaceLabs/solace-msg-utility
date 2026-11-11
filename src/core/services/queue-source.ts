@@ -31,8 +31,12 @@ export interface QueueSource {
      * post-Refresh reopen re-read instead of replaying a stale list.
      */
     key: string;
-    listVpns(): AsyncGenerator<FetchPage>;
-    listQueues(vpn: string): AsyncGenerator<FetchPage>;
+    /**
+     * `signal`, when given, rides on every request the listing makes, so
+     * aborting it stops a paged fetch (the picker aborts on close).
+     */
+    listVpns(signal?: AbortSignal): AsyncGenerator<FetchPage>;
+    listQueues(vpn: string, signal?: AbortSignal): AsyncGenerator<FetchPage>;
 }
 
 /**
@@ -85,6 +89,12 @@ function accessKey(access: Access): string {
     return `|${scope}|${broker}|${fingerprint}`;
 }
 
+/** `sempCtx` with `signal` on every request, or `sempCtx` itself without one. */
+function withSignal(sempCtx: SempContext, signal: AbortSignal | undefined): SempContext {
+    if (!signal) return sempCtx;
+    return { ...sempCtx, fetch: (path, opts) => sempCtx.fetch(path, { ...opts, signal }) };
+}
+
 /** Drop names the access doesn't permit, preserving the page/error stream shape. */
 async function* filterPages(
     pages: AsyncGenerator<FetchPage>,
@@ -105,11 +115,11 @@ async function* filterPages(
  * because that wrapper cannot express the `operate` scope.
  */
 export function sempQueueSource(sempCtx: SempContext, access: Access): QueueSource {
-    const disco = createSempDiscovery(sempCtx);
+    const disco = (signal?: AbortSignal) => createSempDiscovery(withSignal(sempCtx, signal));
     return {
         key: `${sempCtx.baseUrl}${accessKey(access)}`,
-        listVpns: () => filterPages(disco.fetchVpns(), v => permitsVpn(access, v)),
-        listQueues: (vpn: string) => filterPages(disco.fetchQueues(vpn), q => permitsQueue(access, vpn, q)),
+        listVpns: (signal) => filterPages(disco(signal).fetchVpns(), v => permitsVpn(access, v)),
+        listQueues: (vpn, signal) => filterPages(disco(signal).fetchQueues(vpn), q => permitsQueue(access, vpn, q)),
     };
 }
 
@@ -132,7 +142,6 @@ export function queueSourceFrom(ctx: AppContext, scope: Scope): QueueSource | nu
     if (!managed) return sempQueueSource(sempCtx, 'unmanaged');
 
     const access: Access = { session: managed, broker: managed.broker, scope };
-    const disco = createSempDiscovery(sempCtx);
     const vpns = managed.vpns;
     return {
         key: `${sempCtx.baseUrl}${accessKey(access)}`,
@@ -141,6 +150,9 @@ export function queueSourceFrom(ctx: AppContext, scope: Scope): QueueSource | nu
             // no entitlement-glob over-matching.
             yield { ok: true, data: [...vpns] };
         },
-        listQueues: (vpn: string) => filterPages(disco.fetchQueues(vpn), q => permitsQueue(access, vpn, q)),
+        listQueues: (vpn, signal) => filterPages(
+            createSempDiscovery(withSignal(sempCtx, signal)).fetchQueues(vpn),
+            q => permitsQueue(access, vpn, q),
+        ),
     };
 }

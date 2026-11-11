@@ -7,6 +7,7 @@ import {
 import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import type { AppContext, AppState } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 function createDOM() {
     return loadModuleDOM('queue-subscription-explorer');
@@ -28,7 +29,7 @@ function createTestContext(container: HTMLElement, overrides: Partial<AppState> 
         isSempConnected: true,
         ...overrides,
     };
-    const ctx: AppContext = {
+    const ctx: AppContext = completeContext({
         container,
         appState,
         eventBus,
@@ -37,7 +38,7 @@ function createTestContext(container: HTMLElement, overrides: Partial<AppState> 
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
         config: {},
-    };
+    });
     return { ctx, eventBus, appState };
 }
 

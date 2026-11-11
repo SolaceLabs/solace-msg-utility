@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { unfilteredPrimarySempContext } from '../../../src/core/services/sempContext';
 import type { AppContext, AppState } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 function makeCtx(overrides: Partial<AppState> = {}): AppContext {
     const appState: AppState = {
@@ -12,7 +13,7 @@ function makeCtx(overrides: Partial<AppState> = {}): AppContext {
         isSempConnected: false,
         ...overrides,
     };
-    return {
+    return completeContext({
         container: document.createElement('div'),
         appState,
         eventBus: { on: vi.fn(), off: vi.fn(), emit: vi.fn(), hold: vi.fn(), release: vi.fn() } as any,
@@ -21,7 +22,7 @@ function makeCtx(overrides: Partial<AppState> = {}): AppContext {
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
         config: {},
-    };
+    });
 }
 
 describe('core/services/sempContext — unfilteredPrimarySempContext', () => {

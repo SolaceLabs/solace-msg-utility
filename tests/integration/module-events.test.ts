@@ -75,6 +75,7 @@ import { QueueBrowserModule } from '../../src/modules/queue-browser/module';
 import { QueueDiscoveryModule } from '../../src/modules/queue-discovery/module';
 import { state, ingestMessage } from '../../src/modules/queue-browser/state.js';
 import { resetQueueBrowserState } from '../helpers/resetQueueBrowserState';
+import { completeContext } from '../helpers/appContext';
 
 // ---- Helpers ----
 
@@ -84,7 +85,7 @@ function makeCtx(overrides: Partial<AppContext> = {}): AppContext {
         activeModuleId: null, isConnected: false, selectedVpn: null,
         solaceConnection: null, sempCredentials: null, isSempConnected: false
     };
-    const ctx: AppContext = {
+    const ctx: AppContext = completeContext({
         container: document.createElement('div'),
         appState,
         eventBus,
@@ -98,7 +99,7 @@ function makeCtx(overrides: Partial<AppContext> = {}): AppContext {
         copyToClipboard: vi.fn(),
         config: { useMocks: false },
         ...overrides
-    };
+    });
     return ctx;
 }
 

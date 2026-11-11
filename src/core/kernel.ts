@@ -1,17 +1,21 @@
 import type { PwaModule, RegisteredModule, AppContext, AppState, EventBus } from './types';
 import { createEventBus } from './event-bus';
-import { escapeHtml, normalizeUrlPath } from './utils';
-import { buildBrokerUrl } from './hosted';
+import { basicAuthHeader, escapeHtml, normalizeUrlPath } from './utils';
+import { buildBrokerUrl, isHostedDeployment } from './hosted';
+import { deadlineSignal } from './timing';
 import { isModuleVisible } from './rbac';
 import { createManagedProfile, type ManagedProfileStore } from './services/managed-profile';
 import { logger, setLogLevel, getLogLevel, readLogLevelFromUrl } from './logger';
 import { LogLevel } from './constants';
+import { TOAST_EVENT, type ToastEventDetail } from './toast';
+import { createNotificationCenter, mountNotificationBell, type NotificationCenter } from './components/notification-center';
 
 /**
  * Application Kernel
  *
  * Orchestrates module loading with priority-based ordering. Priority is set
- * in `src/registry.ts` (not on the module itself) so the entire ordering is
+ * in the active variant's manifest (`src/variants/<name>.ts`, read by
+ * `src/registry.ts`), not on the module itself, so the entire ordering is
  * visible in one place; the kernel sorts by it before installing.
  *
  * Provides AppContext (eventBus, appState, setState, sempFetch, copyToClipboard)
@@ -31,6 +35,12 @@ export class Kernel {
      * deployments are unaffected.
      */
     private managedProfile: ManagedProfileStore = createManagedProfile();
+    /**
+     * The app's notification record (AppContext.notifications), one per
+     * kernel, fed by every ok/warn/error toast and the connection lifecycle
+     * (`wireNotifications`) and shown by the header bell.
+     */
+    private notifications: NotificationCenter = createNotificationCenter();
     private config: Record<string, any> = (window as any).APP_CONFIG || { useMocks: false };
     private moduleContainer: HTMLElement | null = null;
     private sidebarNav: HTMLElement | null = null;
@@ -88,6 +98,10 @@ export class Kernel {
 
         // Clear initial static content
         if (this.moduleContainer) this.moduleContainer.innerHTML = '';
+
+        // Before any module installs, so a toast or a connection event raised
+        // during install is recorded too.
+        this.wireNotifications();
 
         // Sidebar toggle
         const mainSidebar = document.getElementById('main-sidebar');
@@ -174,6 +188,7 @@ export class Kernel {
             // One profile shared by every module: the module owning the managed
             // login writes it, others read provisioned names and dial through it.
             managedProfile: this.managedProfile,
+            notifications: this.notifications,
             copyToClipboard: this.copyToClipboard.bind(this),
             mountSidebarAccount: this.mountSidebarAccount.bind(this),
             config: this.config
@@ -186,6 +201,44 @@ export class Kernel {
         } catch (err) {
             logger.error(`[Kernel] ✗ Failed to install module "${mod.name}":`, err);
         }
+    }
+
+    /**
+     * Feed the notification center and mount its bell. Toasts arrive as
+     * `TOAST_EVENT` on the shell's `#toast-container` (info toasts are not
+     * recorded) and are tagged with the module the user is on. The connection
+     * lifecycle comes from the bus: the connections module sets
+     * `solaceConnection` before it emits `client:connected`, and clears it
+     * before `client:disconnected`, so the identity is remembered at connect.
+     * Both shell elements are optional (the kernel owns the shell).
+     */
+    private wireNotifications(): void {
+        const center = this.notifications;
+        document.getElementById('toast-container')?.addEventListener(TOAST_EVENT, (e) => {
+            const { message, type } = (e as CustomEvent<ToastEventDetail>).detail;
+            if (type === 'info') return;
+            const active = this.loadedModules.get(this.state.activeModuleId ?? '');
+            center.add(type, active?.mod.name ?? 'App', message);
+        });
+        const slot = document.getElementById('notification-bell-slot');
+        if (slot) mountNotificationBell(slot, center);
+
+        let last = { host: '', vpn: '' };
+        this.eventBus.on('client:connected', () => {
+            const conn = this.state.solaceConnection;
+            last = { host: conn?.host ?? '', vpn: conn?.vpn ?? '' };
+            center.noteConnected({ broker: last.host, provisioned: !!this.state.managed });
+            center.add('info', 'Connections', `Connected to broker "${last.host}", VPN "${last.vpn}".`);
+        });
+        this.eventBus.on('client:disconnected', () => {
+            center.add('info', 'Connections', `Disconnected from broker "${last.host}", VPN "${last.vpn}".`);
+        });
+        this.eventBus.on('semp:connected', () => {
+            center.add('info', 'Connections', `SEMP connected to "${this.state.sempCredentials?.host ?? ''}".`);
+        });
+        this.eventBus.on('semp:disconnected', () => {
+            center.add('info', 'Connections', 'SEMP disconnected.');
+        });
     }
 
     /**
@@ -298,7 +351,11 @@ export class Kernel {
      * source of truth, run through `buildBrokerUrl()` so hosted-mode gateway
      * routing is applied uniformly. Broker-emitted URLs (e.g. nextPageUri)
      * never reach the wire — callers extract pathname+search from them
-     * before calling here. Basic auth is auto-injected.
+     * before calling here. Basic auth is auto-injected, built by the same
+     * `basicAuthHeader` as the connect probe so both send the same bytes.
+     * Every request has a deadline (`REQUEST_TIMEOUT_MS`), joined to the
+     * caller's own signal when it passes one; a timeout rejects with a
+     * `TimeoutError` like any other fetch failure.
      *
      * A managed session (`sempCredentials.relay`) goes to the gateway's SEMP
      * relay instead, with no Authorization header: the gateway adds the
@@ -315,10 +372,9 @@ export class Kernel {
             url = creds.relay + path;
         } else if (creds) {
             const { user, pass, protocol, host, port, urlPath } = creds;
-            const token = btoa(`${user}:${pass}`);
-            (defaults.headers as Record<string, string>)['Authorization'] = `Basic ${token}`;
+            (defaults.headers as Record<string, string>)['Authorization'] = basicAuthHeader(user, pass);
             const fullPath = normalizeUrlPath(urlPath) + path;
-            url = buildBrokerUrl(protocol, host, port, fullPath, false);
+            url = buildBrokerUrl(protocol, host, port, fullPath, false, isHostedDeployment(this.state));
         }
 
         const finalOptions: RequestInit = {
@@ -326,14 +382,15 @@ export class Kernel {
             headers: {
                 ...(defaults.headers as Record<string, string>),
                 ...(options.headers as Record<string, string>)
-            }
+            },
+            signal: deadlineSignal(options.signal),
         };
 
-        // Errors (network failures, synchronous URL construction throws, etc.) propagate
-        // to the caller unchanged — no local logging or transformation adds value here.
+        // Errors (network failures, timeouts, synchronous URL construction throws, etc.)
+        // propagate to the caller unchanged -- no local logging or transformation adds value here.
         const response = await fetch(url, finalOptions);
         if (response.status === 401) {
-            logger.warn('[Kernel] SEMP 401 Unauthorized — terminating connection');
+            logger.warn(`[Kernel] SEMP 401 Unauthorized from ${url} -- terminating connection`);
             this.appSetState('isSempConnected', false);
             this.appSetState('sempCredentials', null);
             this.eventBus.emit('semp:disconnected');

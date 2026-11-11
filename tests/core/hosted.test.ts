@@ -1,73 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-    isHosted, setHosted, probeHosted, probeDeployment, buildBrokerUrl, gatewayWsUrl,
+    isHostedDeployment, probeDeployment, buildBrokerUrl, gatewayWsUrl,
     plainSchemesUsable, usableScheme, limitSchemeOptions,
 } from '../../src/core/hosted';
 import { DEFAULT_CONN_CONFIG } from '../../src/core/connections/conn-modes';
+import { HOSTED_PROBE_TIMEOUT_MS } from '../../src/core/timing';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
 
-// Reset the singleton between tests so a leftover flag from one test can't
-// silently affect another. Mirrors the pattern used for the logger
-// singleton in `tests/core/logger.test.ts`.
-afterEach(() => {
-    setHosted(false);
-});
-
-describe('core/hosted — isHosted / setHosted', () => {
-    it('defaults to false at module load', () => {
-        expect(isHosted()).toBe(false);
-    });
-
-    it('flips with setHosted', () => {
-        setHosted(true);
-        expect(isHosted()).toBe(true);
-        setHosted(false);
-        expect(isHosted()).toBe(false);
-    });
-});
-
-describe('core/hosted — probeHosted', () => {
-    beforeEach(() => {
-        vi.stubGlobal('fetch', vi.fn());
-    });
-
-    afterEach(() => {
-        vi.unstubAllGlobals();
-    });
-
-    it('returns true for HTTP 200 with body "true"', async () => {
-        (globalThis.fetch as any).mockResolvedValue({ ok: true, text: () => Promise.resolve('true') });
-        await expect(probeHosted()).resolves.toBe(true);
-        expect(globalThis.fetch).toHaveBeenCalledWith('/hosted', expect.objectContaining({ method: 'GET' }));
-    });
-
-    it('is case-insensitive and tolerates surrounding whitespace', async () => {
-        (globalThis.fetch as any).mockResolvedValueOnce({ ok: true, text: () => Promise.resolve('TRUE') });
-        await expect(probeHosted()).resolves.toBe(true);
-
-        (globalThis.fetch as any).mockResolvedValueOnce({ ok: true, text: () => Promise.resolve(' True \n') });
-        await expect(probeHosted()).resolves.toBe(true);
-    });
-
-    it('returns false for HTTP 200 with body "false" or anything else', async () => {
-        (globalThis.fetch as any).mockResolvedValueOnce({ ok: true, text: () => Promise.resolve('false') });
-        await expect(probeHosted()).resolves.toBe(false);
-
-        (globalThis.fetch as any).mockResolvedValueOnce({ ok: true, text: () => Promise.resolve('') });
-        await expect(probeHosted()).resolves.toBe(false);
-
-        (globalThis.fetch as any).mockResolvedValueOnce({ ok: true, text: () => Promise.resolve('<html>not-the-gateway</html>') });
-        await expect(probeHosted()).resolves.toBe(false);
-    });
-
-    it('returns false for non-OK HTTP responses (e.g. 404 from a standalone PWA)', async () => {
-        (globalThis.fetch as any).mockResolvedValue({ ok: false, text: () => Promise.resolve('true') });
-        await expect(probeHosted()).resolves.toBe(false);
-    });
-
-    it('returns false when fetch throws (network error, blocked, etc.)', async () => {
-        (globalThis.fetch as any).mockRejectedValue(new Error('Failed to fetch'));
-        await expect(probeHosted()).resolves.toBe(false);
+// The /hosted verdict has one home, AppState.connConfig.hosted: this file
+// holds no state, and every reader passes the verdict in.
+describe('core/hosted -- isHostedDeployment', () => {
+    it('reads the published verdict, false before the probe has answered', () => {
+        expect(isHostedDeployment({})).toBe(false);
+        expect(isHostedDeployment({ connConfig: { ...DEFAULT_CONN_CONFIG, hosted: false } })).toBe(false);
+        expect(isHostedDeployment({ connConfig: { ...DEFAULT_CONN_CONFIG, hosted: true } })).toBe(true);
     });
 });
 
@@ -80,10 +26,12 @@ describe('core/hosted — probeDeployment', () => {
     });
 
     const ok = (body: string) => ({ ok: true, text: () => Promise.resolve(body) });
+    const notHosted = { hosted: false, conn: DEFAULT_CONN_CONFIG };
 
     it('parses the JSON contract into hosted + connection config', async () => {
         (globalThis.fetch as any).mockResolvedValue(ok(JSON.stringify({ hosted: true, connModes: 'both', defaultConn: 'provisioned' })));
         await expect(probeDeployment()).resolves.toEqual({ hosted: true, conn: { connModes: 'both', defaultConn: 'provisioned' } });
+        expect(globalThis.fetch).toHaveBeenCalledWith('/hosted', { method: 'GET', cache: 'no-store' });
     });
 
     it('coerces invalid config fields to the Direct-only default', async () => {
@@ -92,46 +40,74 @@ describe('core/hosted — probeDeployment', () => {
     });
 
     it('treats legacy plaintext "true" as hosted with the Direct-only default (Managed needs the JSON contract)', async () => {
-        (globalThis.fetch as any).mockResolvedValue(ok('true'));
+        (globalThis.fetch as any).mockResolvedValueOnce(ok('true'));
+        await expect(probeDeployment()).resolves.toEqual({ hosted: true, conn: DEFAULT_CONN_CONFIG });
+        // Case-insensitive, surrounding whitespace tolerated.
+        (globalThis.fetch as any).mockResolvedValueOnce(ok(' True \n'));
         await expect(probeDeployment()).resolves.toEqual({ hosted: true, conn: DEFAULT_CONN_CONFIG });
     });
 
-    it('returns not-hosted (Direct only) for "false", empty body, non-OK, non-JSON, JSON without hosted:true, and throws', async () => {
-        const notHosted = { hosted: false, conn: DEFAULT_CONN_CONFIG };
+    it('an ordinary no-gateway answer ("false", empty, non-OK, hosted:false) is Direct only, logged at info', async () => {
+        const info = vi.spyOn(console, 'info').mockImplementation(() => { });
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
 
         (globalThis.fetch as any).mockResolvedValueOnce(ok('false'));
         await expect(probeDeployment()).resolves.toEqual(notHosted);
-
         (globalThis.fetch as any).mockResolvedValueOnce(ok(''));
         await expect(probeDeployment()).resolves.toEqual(notHosted);
-
-        (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, text: () => Promise.resolve('{"hosted":true}') });
+        (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, status: 404, text: () => Promise.resolve('{"hosted":true}') });
         await expect(probeDeployment()).resolves.toEqual(notHosted);
-
-        (globalThis.fetch as any).mockResolvedValueOnce(ok('<html>not-the-gateway</html>'));
-        await expect(probeDeployment()).resolves.toEqual(notHosted);
-
         (globalThis.fetch as any).mockResolvedValueOnce(ok(JSON.stringify({ hosted: false, connModes: 'both' })));
         await expect(probeDeployment()).resolves.toEqual(notHosted);
 
-        (globalThis.fetch as any).mockRejectedValueOnce(new Error('Failed to fetch'));
+        expect(info.mock.calls.map(c => c[0])).toEqual([
+            '[hosted] /hosted answered "false": not hosted, Direct only',
+            '[hosted] /hosted answered "": not hosted, Direct only',
+            '[hosted] /hosted answered HTTP 404: no gateway, Direct only',
+            '[hosted] /hosted answered hosted:false: Direct only',
+        ]);
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('an answer that looks broken (not JSON, a network error) is Direct only, with a warn saying why', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
+        const cause = new Error('Failed to fetch');
+
+        (globalThis.fetch as any).mockResolvedValueOnce(ok('<html>not-the-gateway</html>'));
         await expect(probeDeployment()).resolves.toEqual(notHosted);
+        (globalThis.fetch as any).mockRejectedValueOnce(cause);
+        await expect(probeDeployment()).resolves.toEqual(notHosted);
+
+        expect(warn.mock.calls[0][0]).toBe('[hosted] /hosted answered neither JSON nor true/false; treating the page as not hosted (Direct only). Body starts: <html>not-the-gateway</html>');
+        expect(warn.mock.calls[1]).toEqual(['[hosted] /hosted probe failed (network error or no answer in time); treating the page as not hosted (Direct only):', cause]);
+    });
+
+    it('a /hosted that never answers resolves Direct only after HOSTED_PROBE_TIMEOUT_MS, so the app still renders', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
+        vi.useFakeTimers();
+        (globalThis.fetch as any).mockImplementation(() => new Promise(() => { }));
+
+        const probe = probeDeployment();
+        await vi.advanceTimersByTimeAsync(HOSTED_PROBE_TIMEOUT_MS);
+
+        await expect(probe).resolves.toEqual(notHosted);
+        expect(warn.mock.calls[0][1]).toMatchObject({ name: 'TimeoutError' });
     });
 });
 
 describe('core/hosted — buildBrokerUrl', () => {
-    describe('direct mode (default)', () => {
+    describe('direct mode (not hosted)', () => {
         it('builds the original ${scheme}://${host}:${port}${urlPath} shape', () => {
-            expect(buildBrokerUrl('wss', 'broker.test', '8080', '/solace', true))
+            expect(buildBrokerUrl('wss', 'broker.test', '8080', '/solace', true, false))
                 .toBe('wss://broker.test:8080/solace');
-            expect(buildBrokerUrl('https', 'broker.test', 1943, '/api', false))
+            expect(buildBrokerUrl('https', 'broker.test', 1943, '/api', false, false))
                 .toBe('https://broker.test:1943/api');
         });
 
         it('omits the path when blank, and normalises a missing leading slash', () => {
-            expect(buildBrokerUrl('wss', 'broker.test', '8080', '', true))
+            expect(buildBrokerUrl('wss', 'broker.test', '8080', '', true, false))
                 .toBe('wss://broker.test:8080');
-            expect(buildBrokerUrl('wss', 'broker.test', '8080', 'solace', true))
+            expect(buildBrokerUrl('wss', 'broker.test', '8080', 'solace', true, false))
                 .toBe('wss://broker.test:8080/solace');
         });
     });
@@ -140,21 +116,17 @@ describe('core/hosted — buildBrokerUrl', () => {
         // jsdom's default window.location is http://localhost/, so the
         // wire-scheme branches default to ws / http. The https/wss branches
         // are exercised by overriding location below.
-        beforeEach(() => {
-            setHosted(true);
-        });
-
         it('rewrites to {pageOrigin}/{scheme}/{port}/{host}{urlPath} for WebSocket on an http page (plain ws)', () => {
-            expect(buildBrokerUrl('wss', 'broker.example.com', '8443', '/path', true))
+            expect(buildBrokerUrl('wss', 'broker.example.com', '8443', '/path', true, true))
                 .toBe('ws://localhost:3000/wss/8443/broker.example.com/path');
-            expect(buildBrokerUrl('ws', 'broker.example.com', '8443', '', true))
+            expect(buildBrokerUrl('ws', 'broker.example.com', '8443', '', true, true))
                 .toBe('ws://localhost:3000/ws/8443/broker.example.com');
         });
 
         it('rewrites to plain http for SEMP on an http page', () => {
-            expect(buildBrokerUrl('https', 'broker.example.com', '1943', '/api', false))
+            expect(buildBrokerUrl('https', 'broker.example.com', '1943', '/api', false, true))
                 .toBe('http://localhost:3000/https/1943/broker.example.com/api');
-            expect(buildBrokerUrl('http', 'broker.example.com', '80', '', false))
+            expect(buildBrokerUrl('http', 'broker.example.com', '80', '', false, true))
                 .toBe('http://localhost:3000/http/80/broker.example.com');
         });
 
@@ -180,12 +152,12 @@ describe('core/hosted — buildBrokerUrl', () => {
             });
 
             it('upgrades the wire scheme to wss for WebSocket connections', () => {
-                expect(buildBrokerUrl('wss', 'broker.example.com', '8443', '/path', true))
+                expect(buildBrokerUrl('wss', 'broker.example.com', '8443', '/path', true, true))
                     .toBe('wss://gateway:9443/wss/8443/broker.example.com/path');
             });
 
             it('upgrades the wire scheme to https for SEMP HTTP requests', () => {
-                expect(buildBrokerUrl('https', 'broker.example.com', '1943', '/api', false))
+                expect(buildBrokerUrl('https', 'broker.example.com', '1943', '/api', false, true))
                     .toBe('https://gateway:9443/https/1943/broker.example.com/api');
             });
 
@@ -238,11 +210,11 @@ describe('core/hosted -- plain schemes', () => {
     it.each(['http:', 'file:'])('keeps every scheme on a %s page without the gateway', (protocol) => {
         servedOver(protocol);
         const { sol, semp } = selects('ws', 'http');
-        limitSchemeOptions(sol);
-        limitSchemeOptions(semp);
+        limitSchemeOptions(sol, false);
+        limitSchemeOptions(semp, false);
 
-        expect(plainSchemesUsable()).toBe(true);
-        expect(usableScheme('ws')).toBe('ws');
+        expect(plainSchemesUsable(false)).toBe(true);
+        expect(usableScheme('ws', false)).toBe('ws');
         expect([sol.value, semp.value]).toEqual(['ws', 'http']);
         expect(option(sol, 'ws').hidden || option(sol, 'ws').disabled).toBe(false);
         expect(option(semp, 'http').hidden || option(semp, 'http').disabled).toBe(false);
@@ -252,11 +224,12 @@ describe('core/hosted -- plain schemes', () => {
     it('hides ws and http on an https page without the gateway and moves a selected one to TLS', () => {
         servedOver('https:');
         const { sol, semp } = selects('ws', 'http');
+        // No verdict passed is Direct (queue-copy's destination form calls it so).
         limitSchemeOptions(sol);
-        limitSchemeOptions(semp);
+        limitSchemeOptions(semp, false);
 
-        expect(plainSchemesUsable()).toBe(false);
-        expect([usableScheme('ws'), usableScheme('http'), usableScheme('wss'), usableScheme('https')])
+        expect(plainSchemesUsable(false)).toBe(false);
+        expect([usableScheme('ws', false), usableScheme('http', false), usableScheme('wss', false), usableScheme('https', false)])
             .toEqual(['wss', 'https', 'wss', 'https']);
         expect([sol.value, semp.value]).toEqual(['wss', 'https']);
         for (const [sel, value] of [[sol, 'ws'], [sol, 'http'], [semp, 'http']] as const) {
@@ -268,13 +241,12 @@ describe('core/hosted -- plain schemes', () => {
 
     it('keeps every scheme on an https page behind the gateway', () => {
         servedOver('https:');
-        setHosted(true);
         const { sol, semp } = selects('ws', 'http');
-        limitSchemeOptions(sol);
-        limitSchemeOptions(semp);
+        limitSchemeOptions(sol, true);
+        limitSchemeOptions(semp, true);
 
-        expect(plainSchemesUsable()).toBe(true);
-        expect(usableScheme('http')).toBe('http');
+        expect(plainSchemesUsable(true)).toBe(true);
+        expect(usableScheme('http', true)).toBe('http');
         expect([sol.value, semp.value]).toEqual(['ws', 'http']);
         expect(option(sol, 'ws').hidden || option(sol, 'ws').disabled).toBe(false);
     });

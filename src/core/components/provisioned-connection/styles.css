@@ -1,0 +1,36 @@
+/* Provisioned connection card (src/core/components/provisioned-connection).
+ * Component-prefixed (.prov-conn-*); layout from the shared .card,
+ * .form-group, .form-control and .btn primitives. */
+
+.prov-conn-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.prov-conn-title {
+    margin: 0;
+}
+
+.prov-conn-empty {
+    line-height: 1.5;
+}
+
+.prov-conn-fields {
+    display: flex;
+    gap: 1rem;
+}
+
+.prov-conn-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+}
+
+.prov-conn-status,
+.prov-conn-error {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+}

@@ -1,0 +1,23 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "types": [
+            "vite/client",
+            "vitest/globals",
+            "node"
+        ],
+        "checkJs": false
+    },
+    "include": [
+        "src/**/*.ts",
+        "src/**/*.js",
+        "tests/**/*.ts",
+        "vite.config.ts",
+        "vitest.config.ts",
+        "vitest.mock.config.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
+}

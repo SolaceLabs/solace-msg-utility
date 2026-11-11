@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The /managed/backup* routes over the managed gateway fixture (admin and
@@ -440,5 +442,57 @@ func TestBackupAPI_ImportWriteFailures(t *testing.T) {
 			}), e.admin())
 			expect(t, rec, http.StatusInternalServerError, "server_error")
 		})
+	}
+}
+
+// An import whose last file cannot be written applies nothing: config.yaml
+// and the users file, already replaced, are put back, the users keep their
+// passwords and sessions, and the live settings stay as they were. The
+// answer is a 500 that means nothing was imported.
+func TestBackupAPI_ImportIsAllOrNothing(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	viewer := e.cookie("viewer", false)
+	file := e.exported(t, func(d *backupDoc) {
+		d.Users[1].Password = mustHash(t, e.f.h, "viewer password two")
+		d.Settings.Session.IdleMinutes = 5
+	})
+	usersBefore, _ := os.ReadFile(e.f.usersPath)
+	configBefore, _ := os.ReadFile(e.cfgPath)
+	connsPath := e.api.store.connsPath
+	// The connections file's place is a directory with something in it, so
+	// its rename, the last of the three, fails.
+	e.api.store.connsPath = filepath.Join(t.TempDir(), "conns.yaml")
+	if err := os.MkdirAll(filepath.Join(e.api.store.connsPath, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.do("POST", "/managed/backup/import", jsonBody(t, map[string]string{
+		"file": file, "passphrase": testPassphrase, "users": "replace", "connections": "replace", "settings": "replace",
+	}), e.admin())
+	expect(t, rec, http.StatusInternalServerError, "server_error")
+	if now, _ := os.ReadFile(e.f.usersPath); !bytes.Equal(now, usersBefore) {
+		t.Error("the users file must be put back")
+	}
+	if now, _ := os.ReadFile(e.cfgPath); !bytes.Equal(now, configBefore) {
+		t.Error("config.yaml must be put back")
+	}
+	if !signsIn(t, e.api.store, "viewer", viewerPW) {
+		t.Error("the viewer keeps the old password")
+	}
+	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusOK, "")
+	if got := e.settings(t); e.live.get().session.idle != 10*time.Minute || got.Settings.Session.IdleMinutes != 10 || got.ChangedOnDisk {
+		t.Errorf("the settings must stay as they were: live idle %v, file %+v", e.live.get().session.idle, got)
+	}
+	if log := e.log.String(); strings.Contains(log, "configuration imported") || !strings.Contains(log, "op=importBackup") {
+		t.Errorf("the failure is logged and no import is: %s", log)
+	}
+
+	// The settings alone commit on their own.
+	e.api.store.connsPath = connsPath
+	rec = e.do("POST", "/managed/backup/import", jsonBody(t, map[string]string{
+		"file": file, "passphrase": testPassphrase, "users": "skip", "connections": "skip", "settings": "replace",
+	}), e.admin())
+	expect(t, rec, http.StatusOK, "")
+	if e.live.get().session.idle != 5*time.Minute {
+		t.Errorf("a settings-only import applies at once: idle %v", e.live.get().session.idle)
 	}
 }

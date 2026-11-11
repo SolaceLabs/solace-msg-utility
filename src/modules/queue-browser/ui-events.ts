@@ -1,9 +1,11 @@
 import { state, shouldShowMessage, defaultActiveFilters } from './state.js';
-import { ui } from './ui-core.js';
+import { ui, NOTICE_TOAST_MS } from './ui-core.js';
 import { showPayload } from './features.js';
-import type { createService } from './service.js';
+import type { createService, DeleteResult } from './service.js';
 import { pickQueue } from '../../core/components/queue-picker';
 import { queueSourceFrom } from '../../core/services/queue-source';
+import { showToast } from '../../core/toast';
+import { logger } from '../../core/logger';
 import type { AppContext } from '../../core/types';
 
 /**
@@ -16,7 +18,7 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         const els = ui.getElements();
         if (!state.selectedMessage) return;
 
-        const content = state.selectedMessage.content || '';
+        const content = state.selectedMessage.content;
         await ctx.copyToClipboard(content, els.btnCopyContent);
     }
 
@@ -89,7 +91,8 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
                         ui.updateForwardItemStatus(item.correlationValue, 'FAILED', result.error);
                     }
                 })
-                .catch(() => {
+                .catch((e) => {
+                    logger.warn(`[queue-browser] Forward of message ${item.id} to ${itemDestType} "${itemDestName}" failed to send:`, e);
                     ui.updateForwardItemStatus(item.correlationValue, 'FAILED', 'Unable to send message.');
                 });
 
@@ -158,23 +161,12 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
 
     function handleUnbindClick() {
         const els = ui.getElements();
-        const selectedIndex = els.selectBound.selectedIndex;
-        if (selectedIndex > 0) {
+        if (els.selectBound.selectedIndex > 0) {
             const qName = els.selectBound.value;
 
-            // Disconnect
+            // Disconnect, then drop it from the dropdown and move the view on.
             service.disconnectBrowser(qName);
-
-            els.selectBound.remove(selectedIndex);
-
-            // Reset state
-            if (els.selectBound.options.length > 1) {
-                els.selectBound.selectedIndex = 1;
-                els.selectBound.dispatchEvent(new Event('change'));
-            } else {
-                ui.resetQueueSelection();
-                els.selectBound.selectedIndex = 0;
-            }
+            ui.removeBoundQueue(qName);
         }
     }
 
@@ -319,34 +311,45 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         ui.downloadMessagesZip('full');
     }
 
+    /**
+     * Ask before a delete in the module's confirm dialog. Resolves true on
+     * Delete; false on Cancel, Escape or a backdrop click (attachBackdropClose
+     * closes with 'backdrop').
+     */
+    function confirmDelete(question: string): Promise<boolean> {
+        const els = ui.getElements();
+        const dialog = els.modalConfirmDelete;
+        els.confirmDeleteMessage.textContent = question;
+        dialog.returnValue = '';
+        els.btnConfirmDelete.onclick = () => dialog.close('delete');
+        els.btnConfirmDeleteCancel.onclick = () => dialog.close();
+        dialog.showModal();
+        return new Promise((resolve) => {
+            dialog.addEventListener('close', () => resolve(dialog.returnValue === 'delete'), { once: true });
+        });
+    }
+
+    // The broker does not confirm a removal, so the toast says what was requested,
+    // and how many could not be requested, with the first reason.
+    function reportDelete(result: DeleteResult) {
+        const parts: string[] = [];
+        if (result.requested > 0) parts.push(`Removal requested for ${result.requested} message(s).`);
+        if (result.failed > 0) parts.push(`${result.failed} could not be requested: ${result.error}`);
+        showToast(parts.join(' '), result.ok ? 'ok' : 'error', NOTICE_TOAST_MS);
+    }
+
     async function handleDelete(msgId: string) {
         if (!msgId) return;
-        const confirmed = window.confirm(`Are you sure you want to delete message ${msgId}?`);
-        if (confirmed) {
-            const result = service.deleteMessages(state.currentQueue, [msgId]);
-            if (!result.ok) {
-                window.alert(result.error || 'Delete failed.');
-            } else if (result.count > 0) {
-                window.alert(`Successfully deleted ${result.count} message(s).`);
-            }
-        }
+        if (!(await confirmDelete(`Delete message ${msgId}?`))) return;
+        reportDelete(service.deleteMessages(state.currentQueue, [msgId]));
     }
 
     async function handleBulkDelete() {
         const selectedIds = ui.getSelectedMessageIds();
         if (selectedIds.length === 0) return;
 
-        const confirmed = window.confirm(`Are you sure you want to delete ${selectedIds.length} selected message(s)?`);
-        if (confirmed) {
-            const result = service.deleteMessages(state.currentQueue, selectedIds);
-            if (!result.ok) {
-                window.alert(result.error || 'Delete failed.');
-            } else if (result.count > 0) {
-                window.alert(`Successfully deleted ${result.count} message(s).`);
-            } else {
-                window.alert('No messages were deleted. Check console for errors.');
-            }
-        }
+        if (!(await confirmDelete(`Delete ${selectedIds.length} selected message(s)?`))) return;
+        reportDelete(service.deleteMessages(state.currentQueue, selectedIds));
     }
 
     // Pre-fill an empty datetime-local input with today's date at 00:00:00 so the

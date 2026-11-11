@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createManagedProfile, isSessionEnded, type ManagedDialer } from '../../../src/core/services/managed-profile';
 import type { ManagedProfile } from '../../../src/core/services/managed-service';
+import { DEFAULT_MAX_MESSAGES_PER_QUEUE, PROVISIONED_SDK_CONNECT } from '../../../src/core/connections/defaults';
 
 /**
  * The core managed profile: provisioned names in, connection payloads out.
@@ -78,6 +79,7 @@ describe('core/services/managed-profile -- dial', () => {
         expect(conn).toMatchObject({ kind: 'solace', broker: 'b1', pass: 'pw-v2' });
         expect(conn.cfg).toMatchObject({
             protocol: 'wss', vpn: 'v2', user: 'u-v2', authMode: 'basic', smfPath: '/managed/smf/b1/v2',
+            ...PROVISIONED_SDK_CONNECT, maxMessagesPerQueue: DEFAULT_MAX_MESSAGES_PER_QUEUE,
         });
         // The clientName embeds the cfg's own id, so the two always match.
         expect(conn.clientName).toMatch(new RegExp(`^SolMsgUtil/\\d{14}/${conn.cfg.clientNameId}$`));

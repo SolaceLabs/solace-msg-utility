@@ -132,7 +132,9 @@ type loginLimits struct {
 // left out: nothing filters it, so it stays hidden in every Provisioned
 // session (src/core/rbac.ts). tests/variants.test.ts parses this line and
 // checks it against the managed variant.
-func moduleCatalog() []string { return []string{"queue-browser", "queue-copy", "queue-subscription-explorer"} }
+func moduleCatalog() []string {
+	return []string{"queue-browser", "queue-copy", "queue-subscription-explorer"}
+}
 
 // modules.userDefault values: what a user without a list of their own gets.
 const (
@@ -177,8 +179,8 @@ func checkModuleIDs(key string, ids []string) error {
 
 // seedVar maps one environment variable to its config.yaml key. fromEnv
 // normalises the raw env string the way loadConfig parses it, so the override
-// comparison is on effective values (SSL_INSECURE_SKIP_VERIFY=TRUE parses to
-// false and therefore agrees with `insecureSkipVerify: false`).
+// comparison is on effective values; a value loadConfig would refuse (such as
+// SSL_INSECURE_SKIP_VERIFY=TRUE) stays as typed and is reported as differing.
 type seedVar struct {
 	env, key  string
 	fromEnv   func(raw string) string
@@ -192,13 +194,20 @@ var seedVars = []seedVar{
 	{"SSL_CERT_FILE", "tls.certFile", identity, func(c config) string { return c.certFile }},
 	{"SSL_KEY_FILE", "tls.keyFile", identity, func(c config) string { return c.keyFile }},
 	{"SSL_TRUST_DIR", "tls.trustDir", identity, func(c config) string { return c.trustDir }},
-	{"SSL_INSECURE_SKIP_VERIFY", "tls.insecureSkipVerify", boolEnv, func(c config) string { return strconv.FormatBool(c.insecureSkipVerify) }},
+	{"SSL_INSECURE_SKIP_VERIFY", "tls.insecureSkipVerify", insecureEnv, func(c config) string { return strconv.FormatBool(c.insecureSkipVerify) }},
 	{"LOG_LEVEL", "logLevel", strings.ToLower, func(c config) string { return levelName(c.logLevel) }},
 	{"USERS_FILE", "usersFile", identity, func(c config) string { return c.usersFile }},
 	{"CONNECTIONS_FILE", "connectionsFile", identity, func(c config) string { return c.connectionsFile }},
 }
 
-func boolEnv(raw string) string { return strconv.FormatBool(raw == "true") }
+// insecureEnv mirrors parseInsecureSkipVerify for the override comparison,
+// as hostedEnv mirrors parseHosted.
+func insecureEnv(raw string) string {
+	if b, err := parseInsecureSkipVerify(raw); err == nil {
+		return strconv.FormatBool(b)
+	}
+	return raw
+}
 
 // hostedEnv mirrors parseHosted for the override comparison: unset or "true" is
 // true, "false" is false, and any other value stays as typed, so it is

@@ -25,6 +25,12 @@
  * ended (idle or absolute limit, or an admin changed the account) and the
  * panel drops its local state to match.
  *
+ * The broker/VPN choice and its Connect button are the shared provisioned
+ * connection card (`src/core/components/provisioned-connection/`), which
+ * queue-copy's provisioned destination uses too; this panel keeps the sign-in
+ * and connected views around it. A VPN switch requested by another module runs
+ * through the shared `vpn-switch.ts`, the same flow as the Direct form.
+ *
  * Visibility is decided by the caller: the Managed tab is only rendered when the
  * gateway advertised managed mode via `/hosted`, so this panel never needs its
  * own "gateway required" gate.
@@ -39,7 +45,12 @@ import { isSessionEnded } from '../../core/services/managed-profile';
 import { isQueueVisible } from '../../core/rbac';
 import { logger } from '../../core/logger';
 import { errMessage } from '../../core/utils';
+import { DEFAULT_MAX_MESSAGES_PER_QUEUE } from '../../core/connections/defaults';
+import { createProvisionedConnectionCard, type ProvisionedTarget } from '../../core/components/provisioned-connection';
+import { createVpnSwitch, type CheckConnectionRequest } from './vpn-switch';
 import type { AppContext, SolaceConfig, SempConfig } from '../../core/types';
+
+const log = logger.withTag('Connections');
 
 /** Controller returned to the module shell so it can drive the panel. */
 export interface ManagedPanel {
@@ -59,7 +70,7 @@ export interface ManagedPanel {
     /** Re-show the panel's own view for the current state (used on tab activate). */
     refreshView(): void;
     /** Cross-module VPN-switch / browse request, routed here for a managed session. */
-    handleCheckConnection(p: { vpn: string; queue: string; returnTo?: 'queue-browser' | 'queue-copy' }): void;
+    handleCheckConnection(p: CheckConnectionRequest): void;
     /** Cross-module "edit connection" request. */
     handleEditRequested(): void;
 }
@@ -81,13 +92,8 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         btnLogin: required<HTMLAnchorElement>(container, '#btn-managed-login'),
         loginError: required<HTMLElement>(container, '#managed-login-error'),
 
+        // The card's host; the card takes the Refresh button into its header.
         selectView: required<HTMLElement>(container, '#managed-select-view'),
-        emptyState: required<HTMLElement>(container, '#managed-empty-state'),
-        connectControls: required<HTMLElement>(container, '#managed-connect-controls'),
-        brokerSelect: required<HTMLSelectElement>(container, '#managed-broker-select'),
-        vpnSelect: required<HTMLSelectElement>(container, '#managed-vpn-select'),
-        btnConnect: required<HTMLButtonElement>(container, '#btn-managed-connect'),
-        connectError: required<HTMLElement>(container, '#managed-connect-error'),
         btnRefresh: required<HTMLButtonElement>(container, '#btn-managed-refresh'),
 
         connectedView: required<HTMLElement>(container, '#managed-connected-view'),
@@ -106,8 +112,6 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     const signedIn = (): boolean => profile.isActive();
 
     // --- panel state ---
-    // Guards the multi-step VPN-switch dance against duplicate cross-module requests.
-    let opInProgress = false;
     // The broker name of the live (or in-progress) connection — set when a
     // Solace connect is initiated, read back when building the connected
     // summary so we don't have to null-guard appState.managed there.
@@ -139,7 +143,9 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             });
             wrapManagedBrowser(session, vpn);
             eventBus.emit('client:connected', { session });
-            els.connectedSummary.textContent = `Broker "${connectedBroker}" · VPN "${vpn}"`;
+            const summary = `Broker "${connectedBroker}", VPN "${vpn}"`;
+            els.connectedSummary.textContent = summary;
+            card.setStatus('connected', summary);
             showView('connected');
         },
         onDisconnected: () => {
@@ -148,15 +154,14 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             app.setState('solaceConnection', null);
             lastSolaceAttempt = null;
             eventBus.emit('client:disconnected');
+            card.setStatus('disconnected');
             if (signedIn()) showView('select');
         },
         onConnectFailed: ({ infoStr }) => {
-            setError(els.connectError, `Connection failed: ${infoStr}`);
-            showView('select');
+            connectError(`Connection failed: ${infoStr}`);
         },
         onError: (err) => {
-            setError(els.connectError, err.message);
-            showView('select');
+            connectError(err.message);
         },
     };
 
@@ -182,7 +187,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             clearSession();
             showSignedOut(managedErrorMessage({ ok: false, status: 401, code: 'unauthenticated' }));
         },
-        onError: ({ message }) => setError(els.connectError, `SEMP error: ${message}`),
+        onError: ({ message }) => card.setStatus('error', `SEMP error: ${message}`),
     };
 
     const serviceSolace = createServiceSolace(solaceHooks);
@@ -212,6 +217,13 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         });
     }
 
+    /** The SDK could not connect: the reason on the selection view, and a VPN switch waiting on it ends. */
+    function connectError(message: string): void {
+        card.setStatus('error', message);
+        showView('select');
+        vpnSwitch.connectFailed(message);
+    }
+
     /** A failed connect: a dial refused because the gateway session ended
      *  signs out; anything else is shown on the selection view. */
     function connectFailed(e: unknown): void {
@@ -220,7 +232,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             showSignedOut(errMessage(e));
             return;
         }
-        setError(els.connectError, errMessage(e));
+        card.setStatus('error', errMessage(e));
     }
 
     // Inject the managed guardrail into the SDK session WITHOUT touching
@@ -246,42 +258,21 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         };
     }
 
-    // --- selection UI (provisioned names read back from the profile) ---
-    function populateVpns(brokerName: string): void {
-        const vpns = profile.vpnsFor(brokerName);
-        els.vpnSelect.innerHTML = '';
-        vpns.forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            els.vpnSelect.appendChild(opt);
-        });
-        els.vpnSelect.disabled = vpns.length === 0;
-        updateConnectEnabled();
-    }
-
-    function updateConnectEnabled(): void {
-        els.btnConnect.disabled = !(els.brokerSelect.value && els.vpnSelect.value);
-    }
-
-    function populateSelect(): void {
-        const brokers = profile.brokers();
-        if (brokers.length === 0) {
-            els.emptyState.classList.remove('hidden');
-            els.connectControls.classList.add('hidden');
-            return;
-        }
-        els.emptyState.classList.add('hidden');
-        els.connectControls.classList.remove('hidden');
-        els.brokerSelect.innerHTML = '';
-        brokers.forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            els.brokerSelect.appendChild(opt);
-        });
-        populateVpns(els.brokerSelect.value);
-    }
+    // --- selection UI: the shared card, reading the names from the profile ---
+    const disconnectBoth = (): void => {
+        serviceSolace.disconnect();
+        void serviceSemp.disconnect();
+    };
+    const card = createProvisionedConnectionCard(els.selectView, {
+        profile,
+        onConnect: doConnect,
+        onDisconnect: disconnectBoth,
+        headerActions: els.btnRefresh,
+        ids: {
+            broker: 'managed-broker-select', vpn: 'managed-vpn-select', action: 'btn-managed-connect',
+            error: 'managed-connect-error', empty: 'managed-empty-state', controls: 'managed-connect-controls',
+        },
+    });
 
     // --- session: restore / sign out / refresh ---
     /**
@@ -300,7 +291,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             modules: p.modules, broker, vpns: broker ? profile.vpnsFor(broker) : [],
         });
         eventBus.emit('rbac:changed');
-        populateSelect();
+        card.setChoices();
     }
 
     /**
@@ -323,7 +314,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         account.show(null);
         app.setState('managed', null);
         eventBus.emit('rbac:changed');
-        setError(els.connectError, null);
+        card.setStatus('disconnected');
     }
 
     async function restore(): Promise<boolean> {
@@ -358,18 +349,17 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
                 showSignedOut(managedErrorMessage(res), res.code === 'password_change_required');
                 return;
             }
-            setError(els.connectError, managedErrorMessage(res));
+            card.setStatus('error', managedErrorMessage(res));
             return;
         }
         adopt(res.data);
-        setError(els.connectError, null);
+        // A refresh that worked clears the last one's error, never a live status.
+        if (card.status() === 'error') card.setStatus('disconnected');
     }
 
-    // --- connect (initial) ---
-    async function doConnect(): Promise<void> {
-        const brokerName = els.brokerSelect.value;
-        const vpnName = els.vpnSelect.value;
-        if (!brokerName || !vpnName) return;
+    // --- connect (initial): the card's Connect, which has already gone
+    //     'connecting'; the hooks report the outcome back to it ---
+    async function doConnect({ broker: brokerName, vpn: vpnName }: ProvisionedTarget): Promise<void> {
         // Only one connection mode may be live — drop any Direct session first.
         opts.tearDownOther();
         // Publish the connected broker's PROVISIONED VPN names so the queue
@@ -378,26 +368,20 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         app.setState('managed', {
             ...appState.managed!, broker: brokerName, vpns: profile.vpnsFor(brokerName),
         });
-        setError(els.connectError, null);
-        els.btnConnect.disabled = true;
+        log.info(`connecting to broker "${brokerName}" VPN "${vpnName}"`);
         try {
             await connectSemp(brokerName);
             // A relay 401 (the gateway session ended) has already signed out.
             if (!signedIn()) return;
             await connectSolace(brokerName, vpnName);
-            eventBus.emit('config:max-messages-changed', { value: 100 });
+            eventBus.emit('config:max-messages-changed', { value: DEFAULT_MAX_MESSAGES_PER_QUEUE });
         } catch (e) {
             connectFailed(e);
-        } finally {
-            els.btnConnect.disabled = false;
         }
     }
 
     // --- wire UI events ---
-    els.brokerSelect.addEventListener('change', () => populateVpns(els.brokerSelect.value));
-    els.vpnSelect.addEventListener('change', updateConnectEnabled);
-    els.btnConnect.addEventListener('click', () => void doConnect());
-    els.btnDisconnect.addEventListener('click', () => { serviceSolace.disconnect(); void serviceSemp.disconnect(); });
+    els.btnDisconnect.addEventListener('click', disconnectBoth);
     els.btnRefresh.addEventListener('click', () => void doRefresh());
 
     // --- cross-module handlers (routed here by the module shell while a
@@ -412,79 +396,40 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         showView('select');
     }
 
-    function handleCheckConnection(
-        { vpn: targetVpn, queue: targetQueue, returnTo }:
-        { vpn: string; queue: string; returnTo?: 'queue-browser' | 'queue-copy' },
-    ): void {
-        if (opInProgress) return;
-
-        const finish = () => {
-            if (returnTo === 'queue-copy') {
-                eventBus.emit('copy:vpn-switched', { vpn: targetVpn, queue: targetQueue });
-            } else {
-                eventBus.emit('browser:browse-queue', { queue: targetQueue });
-            }
-        };
-
-        // Wait for the next client:connected (→ finish) or client:disconnected
-        // (→ give up). 30s timeout so listeners can't leak. Clears opInProgress
-        // on every exit path; the returned cleanup ends the wait early.
-        function waitForConnect(): () => void {
-            let onSuccess: () => void;
-            let onFail: () => void;
-            const cleanup = () => {
-                clearTimeout(timer);
-                eventBus.off('client:connected', onSuccess);
-                eventBus.off('client:disconnected', onFail);
-                opInProgress = false;
-            };
-            onSuccess = () => { cleanup(); finish(); };
-            onFail = () => { cleanup(); };
-            const timer = setTimeout(cleanup, 30_000);
-            eventBus.on('client:connected', onSuccess);
-            eventBus.on('client:disconnected', onFail);
-            return cleanup;
-        }
-
-        if (!appState.isConnected) {
-            // Managed mode needs an explicit broker+VPN selection — send the
-            // user to the selection view to connect.
-            app.loadSelf();
-            showView('select');
-            return;
-        }
-        if (appState.selectedVpn === targetVpn) {
-            finish();
-            return;
-        }
-        const brokerName = appState.managed!.broker;
-        if (!confirm(`Current VPN is "${appState.selectedVpn}". Switch to "${targetVpn}"?`)) return;
-        opInProgress = true;
-        let disconnectTimer: ReturnType<typeof setTimeout>;
-        const onDisconnected = () => {
-            clearTimeout(disconnectTimer);
-            eventBus.off('client:disconnected', onDisconnected);
-            const stopWaiting = waitForConnect();
-            // The profile rejects an unprovisioned target, and the gateway may
-            // refuse the dial -- surface either rather than leaving an
-            // unhandled rejection. Either ends the switch: a later connect is
-            // not this switch's, so it must not finish it.
-            void connectSolace(brokerName, targetVpn).catch((e) => {
-                stopWaiting();
-                connectFailed(e);
-            });
-        };
-        eventBus.on('client:disconnected', onDisconnected);
-        disconnectTimer = setTimeout(() => {
-            eventBus.off('client:disconnected', onDisconnected);
-            opInProgress = false;
-            logger.warn('[Connections] Disconnect timed out (10s); aborting VPN switch');
-        }, 10_000);
-        serviceSolace.disconnect();
-    }
+    // The shared VPN switch with this panel's own actions: a reconnect dials
+    // the same broker again, and with no live session the request shows the
+    // broker/VPN choice (a managed connect needs an explicit choice).
+    const vpnSwitch = createVpnSwitch({
+        eventBus, loadSelf: () => app.loadSelf(), log,
+        mode: {
+            isConnected: () => appState.isConnected,
+            currentVpn: () => appState.selectedVpn as string,
+            isConnecting: () => card.status() === 'connecting',
+            async connect(vpn: string): Promise<void> {
+                try {
+                    await connectSolace(connectedBroker, vpn);
+                } catch (e) {
+                    // The gateway session ended: sign out, and still fail the switch.
+                    if (isSessionEnded(e)) {
+                        clearSession();
+                        showSignedOut(errMessage(e));
+                    }
+                    throw e;
+                }
+            },
+            disconnect: () => serviceSolace.disconnect(),
+            showError(message: string): void {
+                // Signed out meanwhile: the sign-in view already says why.
+                if (!signedIn()) return;
+                card.setStatus('error', message);
+                showView('select');
+            },
+            showConnectView: () => showView('select'),
+        },
+    });
 
     showView('login');
-    logger.info('Managed connection panel ready');
+    log.info('managed connection panel ready');
 
     return {
         restore,
@@ -494,7 +439,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             else if (appState.isConnected) showView('connected');
             else showView('select');
         },
-        handleCheckConnection,
+        handleCheckConnection: vpnSwitch.request,
         handleEditRequested,
     };
 }

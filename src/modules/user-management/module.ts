@@ -30,6 +30,7 @@
 import { required } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import { createRowList } from '../../core/components/row-list';
+import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
 import { escapeHtml, matchContains, moduleLabel } from '../../core/utils';
 import { ICONS, iconButton } from '../../core/icons';
@@ -302,7 +303,7 @@ export const UserManagementModule = {
             const question = own
                 ? `Delete your own account "${username}"? You will be signed out.`
                 : `Delete user "${username}"?`;
-            if (!confirm(question)) return;
+            if (!(await confirmDialog(question, { confirmLabel: 'Delete' }))) return;
             const res = await service.deleteUser(username);
             if (!res.ok) {
                 reportManagedFailure(res, eventBus, msg => showToast(msg, 'error'));

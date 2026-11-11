@@ -4,8 +4,9 @@ import "strings"
 
 // matchGlob reports whether value matches a case-sensitive glob pattern where
 // '*' matches any run of characters (including empty) and every other character
-// is literal. Mirrors src/core/rbac.ts matchGlob exactly — a shared conformance
-// vector (rbac_test.go <-> tests/core/rbac.test.ts) keeps them in lockstep.
+// is literal. Mirrors src/core/rbac.ts matchGlob exactly: the glob vectors in
+// testdata/contract/validation.json, which both sides run, keep them in
+// lockstep.
 func matchGlob(pattern, value string) bool {
 	parts := strings.Split(pattern, "*")
 	if len(parts) == 1 {

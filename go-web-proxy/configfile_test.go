@@ -196,7 +196,7 @@ func TestToConfig_InvalidValues(t *testing.T) {
 func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 	fc := defaultFileConfig()
 	fc.ConnModes = "Both" // a hand-edited file is lowercased like the env
-	fc.Hosted = false // HOSTED=false: the files only, so no gateway for sign-in
+	fc.Hosted = false     // HOSTED=false: the files only, so no gateway for sign-in
 	if _, err := fc.toConfig(secretPaths{}); err == nil || !strings.Contains(err.Error(), "hosted is false") {
 		t.Fatalf("both without hosted must fail the cross check, got %v", err)
 	}
@@ -479,7 +479,7 @@ func TestResolveConfig_FileWinsAndReportsOverrides(t *testing.T) {
 	}
 	t.Setenv("CONN_MODES", "both")
 	t.Setenv("LOG_LEVEL", "debug")
-	t.Setenv("HOSTED", "true")                        // the file's default: nothing to report
+	t.Setenv("HOSTED", "true")                         // the file's default: nothing to report
 	t.Setenv("USERS_FILE", "/data/users.yaml")         // equal to the file: nothing to report
 	t.Setenv("STORE_KEY_FILE", "/elsewhere/store.key") // env-only: applied, never compared
 
@@ -594,9 +594,13 @@ func TestEnvOverrides_EveryVariableAndBoolParsing(t *testing.T) {
 		t.Errorf("HOSTED=TRUE: want it reported as typed, got %v", o)
 	}
 	t.Setenv("HOSTED", "")
-	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "TRUE") // loadConfig reads this as false, so it agrees with the file
+	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "false") // agrees with the default file
 	if o := envOverrides(file); len(o) != 0 {
-		t.Errorf("SSL_INSECURE_SKIP_VERIFY=TRUE must not be reported, got %v", o)
+		t.Errorf("SSL_INSECURE_SKIP_VERIFY=false must not be reported, got %v", o)
+	}
+	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "TRUE") // not a value loadConfig takes: reported as typed
+	if o := envOverrides(file); len(o) != 1 || o[0].EnvValue != "TRUE" || o[0].Key != "tls.insecureSkipVerify" {
+		t.Errorf("SSL_INSECURE_SKIP_VERIFY=TRUE: want it reported as typed, got %v", o)
 	}
 	t.Setenv("SSL_INSECURE_SKIP_VERIFY", "")
 

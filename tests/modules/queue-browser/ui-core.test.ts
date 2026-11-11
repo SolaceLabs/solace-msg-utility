@@ -109,6 +109,17 @@ describe('queue-browser/ui-core', () => {
     });
 
     describe('updateVisibility()', () => {
+        it('names the missing ui.setGate() wiring instead of dereferencing null', () => {
+            // module.ts wires the gate at install; a module that forgot would
+            // otherwise die with "Cannot read properties of null".
+            ui.setGate(null);
+            els.hdrVpnName.textContent = 'vpn-before';
+            expect(() => ui.updateVisibility(false))
+                .toThrow('queue-browser: ui.setGate() must run before ui.updateVisibility()');
+            // Refused before touching the view.
+            expect(els.hdrVpnName.textContent).toBe('vpn-before');
+        });
+
         it('shows gate and hides view when disconnected', () => {
             ui.updateVisibility(false);
             expect(gateStub.show).toHaveBeenCalled();
@@ -182,6 +193,55 @@ describe('queue-browser/ui-core', () => {
             expect(count).toBe(1);
         });
 
+    });
+
+    describe('removeBoundQueue()', () => {
+        // The template DOM here holds the placeholder and q1; add q2 as a second bound queue.
+        function bindSecondQueue() {
+            const opt = document.createElement('option');
+            opt.value = 'q2';
+            opt.textContent = 'q2';
+            els.selectBound.appendChild(opt);
+        }
+        const values = () => Array.from(els.selectBound.options).map((o: any) => o.value);
+
+        it('removing the queue on screen moves the view to the next bound queue', () => {
+            bindSecondQueue();
+            els.selectBound.value = 'q1';
+            const onChange = vi.fn();
+            els.selectBound.addEventListener('change', onChange);
+
+            ui.removeBoundQueue('q1');
+
+            expect(values()).toEqual(['', 'q2']);
+            expect(els.selectBound.value).toBe('q2');
+            expect(onChange).toHaveBeenCalledTimes(1);
+        });
+
+        it('removing the last bound queue clears the view', () => {
+            els.selectBound.value = 'q1';
+            state.currentQueue = 'q1';
+
+            ui.removeBoundQueue('q1');
+
+            expect(values()).toEqual(['']);
+            expect(els.selectBound.selectedIndex).toBe(0);
+            expect(state.currentQueue).toBe('');
+        });
+
+        it('removing a queue off screen leaves the view as it is', () => {
+            bindSecondQueue();
+            els.selectBound.value = 'q1';
+            state.currentQueue = 'q1';
+            const onChange = vi.fn();
+            els.selectBound.addEventListener('change', onChange);
+
+            ui.removeBoundQueue('q2');
+
+            expect(values()).toEqual(['', 'q1']);
+            expect([els.selectBound.value, state.currentQueue]).toEqual(['q1', 'q1']);
+            expect(onChange).not.toHaveBeenCalled();
+        });
     });
 
     describe('resetQueueSelection edge cases', () => {

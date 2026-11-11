@@ -9,17 +9,28 @@ export const ui = {};
 /** @type {any} */
 export const els = {};
 
+// How long an outcome toast (a delete result, a lost binding, a ZIP failure)
+// stays up: long enough to read a sentence that carries a reason.
+export const NOTICE_TOAST_MS = 6000;
+
 // The connection gate is the shared module-gate component, injected by module.ts
 // at install via ui.setGate(). updateVisibility() drives it (the module owns the
 // gate-vs-active-view mutual exclusion).
 /** @type {{ show(): void; hide(): void } | null} */
 let gate = null;
+/** @param {{ show(): void; hide(): void }} g */
 ui.setGate = function (g) { gate = g; };
+/** The injected gate; a loud error names the missing wiring instead of a null dereference. */
+function activeGate() {
+    if (!gate) throw new Error('queue-browser: ui.setGate() must run before ui.updateVisibility()');
+    return gate;
+}
 
 // Delegate to core/utils — keeps ui.formatBytes() / ui.generateUuid() call sites working
 ui.formatBytes = formatBytes;
 ui.generateUuid = generateUuid;
 
+/** @param {HTMLElement} container */
 ui.initElements = function (container) {
     els.container = container;
 
@@ -73,6 +84,12 @@ ui.initElements = function (container) {
     els.listForwardMsgs = container.querySelector('#forward-msg-list');
     els.elForwardQueueCount = container.querySelector('#forward-queue-count');
 
+    // Delete Confirmation Modal
+    els.modalConfirmDelete = required(container, '#browser-confirm-delete-modal');
+    els.confirmDeleteMessage = required(container, '#browser-confirm-delete-message');
+    els.btnConfirmDelete = required(container, '#btn-confirm-delete');
+    els.btnConfirmDeleteCancel = required(container, '#btn-confirm-delete-cancel');
+
     // Filter Controls
     els.btnFilter = container.querySelector('#btn-browser-filter');
     els.modalFilter = container.querySelector('#browser-filter-modal');
@@ -109,6 +126,7 @@ ui.getElements = function () {
     return els;
 };
 
+/** @param {string | null} [msg] empty, null or missing hides the error */
 ui.showBrowserError = function (msg) {
     if (msg) {
         els.elBrowserError.textContent = msg;
@@ -118,6 +136,7 @@ ui.showBrowserError = function (msg) {
     }
 };
 
+/** @param {string | null} [msg] empty, null or missing hides the error */
 ui.showBindError = function (msg) {
     if (msg) {
         els.elBindError.textContent = msg;
@@ -131,13 +150,18 @@ ui.showBindError = function (msg) {
 };
 
 
+/**
+ * @param {boolean} isConnected
+ * @param {string} [vpnName]
+ */
 ui.updateVisibility = function (isConnected, vpnName) {
+    const g = activeGate();
     if (!isConnected) {
-        gate.show();
+        g.show();
         els.elActiveView.classList.add('hidden');
         els.hdrVpnName.textContent = '';
     } else {
-        gate.hide();
+        g.hide();
         els.elActiveView.classList.remove('hidden');
         els.hdrVpnName.textContent = vpnName;
 
@@ -177,7 +201,7 @@ ui.resetQueueSelection = function () {
     els.inputFilterMsgType.value = 'ANY';
     els.inputFilterNewerThan.value = '';
     els.inputFilterOlderThan.value = '';
-    els.radFilterCriteria.forEach(r => r.checked = (r.value === 'OR'));
+    els.radFilterCriteria.forEach((/** @type {HTMLInputElement} */ r) => r.checked = (r.value === 'OR'));
 
     els.btnFilter.classList.remove('filter-active');
     els.btnFilter.disabled = true;
@@ -188,6 +212,26 @@ ui.resetQueueSelection = function () {
     if (ui.clearDetails) ui.clearDetails();
 };
 
+// Drop a bound queue from the dropdown (Unbind, or the broker ending the binding).
+// When it is the queue on screen, show the next bound queue, or clear the view
+// when none is left; a queue off screen leaves the view as it is.
+/** @param {string} queueName */
+ui.removeBoundQueue = function (queueName) {
+    const onScreen = els.selectBound.value === queueName;
+    Array.from(els.selectBound.options).forEach(opt => {
+        if (opt.value === queueName) opt.remove();
+    });
+    if (!onScreen) return;
+    if (els.selectBound.options.length > 1) {
+        els.selectBound.selectedIndex = 1;
+        els.selectBound.dispatchEvent(new Event('change'));
+    } else {
+        ui.resetQueueSelection();
+        els.selectBound.selectedIndex = 0;
+    }
+};
+
+/** @param {string} queueName */
 ui.addQueueToDropdown = function (queueName) {
     let exists = false;
     for (let i = 0; i < els.selectBound.options.length; i++) {

@@ -8,9 +8,23 @@ import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 import type { EventBus, AppContext, AppState } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 function createBrowserDOM() {
     return loadModuleDOM('queue-browser');
+}
+
+// The toast container is declared once in src/index.html; the module test DOM
+// lacks it. Returns it emptied so a test reads only its own toasts.
+function freshToasts(): HTMLElement {
+    let c = document.getElementById('toast-container');
+    if (!c) {
+        c = document.createElement('div');
+        c.id = 'toast-container';
+        document.body.appendChild(c);
+    }
+    c.innerHTML = '';
+    return c;
 }
 
 describe('queue-browser/ui-table', () => {
@@ -23,7 +37,7 @@ describe('queue-browser/ui-table', () => {
 
         eventBus = createEventBus();
 
-        const ctx: AppContext = {
+        const ctx: AppContext = completeContext({
             container,
             appState: { activeModuleId: null, isConnected: false, selectedVpn: null, solaceConnection: null, sempCredentials: null, isSempConnected: false },
             eventBus,
@@ -32,7 +46,7 @@ describe('queue-browser/ui-table', () => {
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
             config: {}
-        };
+        });
 
         initDetails(ctx);
         initTable(eventBus);
@@ -238,6 +252,8 @@ describe('queue-browser/ui-table', () => {
             ui.updateCounts();
 
             expect(ui.getElements().btnBrowserForward.disabled).toBe(false);
+            expect(ui.getElements().btnBrowserDownloadContent.disabled).toBe(false);
+            expect(ui.getElements().btnBrowserDownloadFull.disabled).toBe(false);
         });
 
         it('hides delete button when read-only', () => {
@@ -255,6 +271,9 @@ describe('queue-browser/ui-table', () => {
             ui.updateCounts();
             expect(ui.getElements().btnBrowserDelete.classList.contains('hidden')).toBe(false);
             expect(ui.getElements().btnBrowserDelete.disabled).toBe(true);
+            // The ZIP downloads wait for a selection too.
+            expect(ui.getElements().btnBrowserDownloadContent.disabled).toBe(true);
+            expect(ui.getElements().btnBrowserDownloadFull.disabled).toBe(true);
         });
     });
 
@@ -369,18 +388,12 @@ describe('queue-browser/ui-table', () => {
     });
 
     describe('downloadMessagesZip()', () => {
-        it('alerts when JSZip not loaded', async () => {
+        it('reports a missing JSZip in an error toast', async () => {
+            const toasts = freshToasts();
             (window as any).JSZip = undefined;
             await ui.downloadMessagesZip('content');
-            expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('JSZip'));
-        });
-
-        it('alerts when no messages selected', async () => {
-            (window as any).JSZip = vi.fn();
-            state.displayedMessages = [];
-
-            await ui.downloadMessagesZip('content');
-            expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('No messages'));
+            expect(toasts.querySelector('.toast--error')!.textContent)
+                .toBe('Cannot create the ZIP: the JSZip library is not loaded.');
         });
 
         it('creates content ZIP for selected messages', async () => {
@@ -404,8 +417,29 @@ describe('queue-browser/ui-table', () => {
 
             await ui.downloadMessagesZip('content');
 
-            expect(fileFn).toHaveBeenCalled();
+            expect(fileFn).toHaveBeenCalledWith('solace-message-1', 'Hello');
             expect(generateAsyncFn).toHaveBeenCalledWith({ type: 'blob' });
+        });
+
+        it('puts a binary attachment in the content ZIP as its original bytes', async () => {
+            const fileFn = vi.fn();
+            (window as any).JSZip = vi.fn(function(this: any) {
+                this.file = fileFn;
+                this.generateAsync = vi.fn().mockResolvedValue(new Blob(['zip']));
+            });
+            const bytes = new Uint8Array([0x89, 0x50, 0x4E, 0x47]);
+            state.displayedMessages = [
+                { id: '7', content: '[Binary payload: 4 bytes]', bytes, binary: true, date: '', size: 0, type: 'Binary' }
+            ];
+            state.allMessages = state.displayedMessages;
+            ui.renderList();
+            (document.querySelector('.msg-check') as HTMLInputElement).checked = true;
+
+            await ui.downloadMessagesZip('content');
+
+            expect(fileFn).toHaveBeenCalledTimes(1);
+            expect(fileFn.mock.calls[0][0]).toBe('solace-message-7');
+            expect(fileFn.mock.calls[0][1]).toBe(bytes);
         });
 
         it('creates full JSON ZIP for selected messages', async () => {
@@ -433,6 +467,7 @@ describe('queue-browser/ui-table', () => {
 
         it('handles ZIP generation error', async () => {
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            const toasts = freshToasts();
 
             (window as any).JSZip = vi.fn(function(this: any) {
                 this.file = vi.fn();
@@ -448,10 +483,12 @@ describe('queue-browser/ui-table', () => {
 
             await ui.downloadMessagesZip('content');
             expect(consoleSpy).toHaveBeenCalled();
+            expect(toasts.querySelector('.toast--error')!.textContent).toBe('Could not create the ZIP: zip error');
         });
 
         it('returns early if no matching messages after filter', async () => {
-            (window as any).JSZip = vi.fn();
+            const zipCtor = vi.fn();
+            (window as any).JSZip = zipCtor;
 
             state.displayedMessages = [{ id: '1', content: 'test' }];
             state.allMessages = state.displayedMessages;
@@ -464,6 +501,7 @@ describe('queue-browser/ui-table', () => {
             // Swap displayedMessages to have different IDs so filter returns 0
             state.displayedMessages = [{ id: '999', content: 'other' }];
             await ui.downloadMessagesZip('content');
+            expect(zipCtor).not.toHaveBeenCalled();
         });
     });
 
@@ -555,7 +593,7 @@ describe('queue-browser/ui-table', () => {
             // Filename: full JSON downloads end in -full.json.
             expect(triggerSpy.mock.calls[0][0]).toMatch(/-full\.json$/);
             // Content: parses as JSON and contains the expected top-level keys.
-            const parsed = JSON.parse(triggerSpy.mock.calls[0][1]);
+            const parsed = JSON.parse(triggerSpy.mock.calls[0][1] as string);
             expect(parsed).toHaveProperty('payload', 'payload');
             expect(parsed).toHaveProperty('messageProperties');
             expect(parsed).toHaveProperty('applicationProperties');

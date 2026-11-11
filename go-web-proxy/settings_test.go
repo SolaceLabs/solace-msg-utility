@@ -93,8 +93,10 @@ func TestSettings_SaveAppliesLiveKeysAtOnce(t *testing.T) {
 	if disk.ConnModes != connProvisioned || disk.Session.IdleMinutes != 1 || disk.UsersFile != e.cfg.usersFile {
 		t.Errorf("file: %+v", disk)
 	}
-	if !strings.Contains(e.log.String(), "gateway settings saved") || !strings.Contains(e.log.String(), "by=admin") {
-		t.Errorf("a save must be logged with who made it: %s", e.log.String())
+	line := logLine(e.log.String(), `msg="gateway settings saved"`)
+	if !strings.Contains(line, "level=INFO") || !strings.Contains(line, "user=admin") ||
+		!strings.Contains(line, `changed="[connModes logLevel modules.offered modules.userDefault session.idleMinutes]"`) {
+		t.Errorf("a save must be logged at info with who made it and what changed: %s", e.log.String())
 	}
 	if got := e.settings(t); got.Settings.ConnModes != connProvisioned || got.ChangedOnDisk {
 		t.Errorf("GET after save: %+v", got)
@@ -273,7 +275,7 @@ func TestSettings_WriteFailureIs500AndChangesNothing(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 	expect(t, e.saveSettings(t, `{"logLevel":"info"}`), http.StatusInternalServerError, "server_error")
-	if e.live.level.Level() != slog.LevelWarn || !strings.Contains(e.log.String(), "managed: saveSettings failed") {
+	if e.live.level.Level() != slog.LevelWarn || !strings.Contains(e.log.String(), "op=saveSettings") {
 		t.Errorf("a failed write must apply nothing and log the cause: %s", e.log.String())
 	}
 }

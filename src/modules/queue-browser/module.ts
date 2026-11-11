@@ -158,6 +158,7 @@ export const QueueBrowserModule = {
         els.inputFilterOlderThan.addEventListener('focus', prefillOlder);
         attachBackdropClose(els.modalFilter as HTMLDialogElement);
         attachBackdropClose(els.modalForward as HTMLDialogElement);
+        attachBackdropClose(els.modalConfirmDelete as HTMLDialogElement);
         // Raw modal exists only in the show-payload flavor.
         if (showPayload()) attachBackdropClose(els.modalRaw as HTMLDialogElement);
 

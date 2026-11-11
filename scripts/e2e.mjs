@@ -1274,8 +1274,8 @@ async function runDirectChecks() {
             expect(r.status === 404 && r.body === '404 page not found\n', `${p}: want a plain 404, got ${r.status} ${r.body.slice(0, 120)}`);
         }
         const log = compose(['logs', '--no-color', 'direct'], { quiet: true }).out;
-        expect(/conn_modes=direct\b/.test(log) && !log.includes('provisioned mode enabled'),
-            'the direct log does not say conn_modes=direct, or says provisioned mode enabled');
+        expect(/conn_modes=direct\b/.test(log) && !/\bmode=provisioned\b/.test(log),
+            'the direct log does not say conn_modes=direct, or its startup summary says mode=provisioned');
     });
 
     await check('D2', "the Direct relay forwards a SEMP GET with the caller's own credentials, passes the broker's 401 through, and answers a bad path 400 and an unknown host 502", async () => {

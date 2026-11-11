@@ -15,6 +15,8 @@ import {
     setDestSempFormLocked,
     setDestSolFormLocked,
     setDestBrokerLocked,
+    setDestTargetLocked,
+    DEST_TARGET_LOCKED_TITLE,
     renderModalInitial,
     renderDestSummary,
     renderVerifyProgress,
@@ -255,6 +257,29 @@ describe('queue-copy/ui', () => {
         });
     });
 
+    describe('setDestTargetLocked', () => {
+        it('locks every control that chooses the destination, with a title saying why', () => {
+            const e = elsHolder.els;
+            setDestTargetLocked(e, true);
+            for (const el of [e.toggleSameBroker, e.toggleSameVpn, e.destCredProvisioned, e.destCredManual, e.destProvBroker, e.destProvVpn]) {
+                expect(el.disabled).toBe(true);
+                expect(el.title).toBe(DEST_TARGET_LOCKED_TITLE);
+            }
+        });
+
+        it('unlocking re-enables only what the lock disabled', () => {
+            const e = elsHolder.els;
+            setDestTargetLocked(e, true);
+            // Disabled by its own renderer, not by the lock: unlocking leaves it alone.
+            e.destCredManual.title = '';
+            setDestTargetLocked(e, false);
+            expect(e.toggleSameBroker.disabled).toBe(false);
+            expect(e.toggleSameBroker.title).toBe('');
+            expect(e.destProvVpn.disabled).toBe(false);
+            expect(e.destCredManual.disabled).toBe(true);
+        });
+    });
+
     describe('in-modal Refresh button lifecycle', () => {
         it('renderModalInitial resets the Refresh button to visible+disabled', () => {
             // Simulate prior-run state: hidden + enabled
@@ -276,6 +301,7 @@ describe('queue-copy/ui', () => {
                 sourceOk: true, via: 'semp', errors: [],
                 messageVpn: 'v', messageCount: 5, spoolUsageBytes: 1024, quotaBytes: 1024 * 1024 * 1024,
                 maxMessageSize: 10_000_000, oldestMsgId: '1', newestMsgId: '5',
+                accessType: 'read-write', owner: 'admin',
             });
             expect(elsHolder.els.btnModalSourceRefresh.disabled).toBe(false);
         });
@@ -286,6 +312,7 @@ describe('queue-copy/ui', () => {
                 sourceOk: false, via: 'queue-browser', errors: ['not found'],
                 messageVpn: null, messageCount: null, spoolUsageBytes: null, quotaBytes: null,
                 maxMessageSize: null, oldestMsgId: null, newestMsgId: null,
+                accessType: null, owner: null,
             });
             expect(elsHolder.els.btnModalSourceRefresh.disabled).toBe(false);
         });

@@ -73,6 +73,27 @@ func TestSessions_LimitsAreReadLive(t *testing.T) {
 	}
 }
 
+// A password changed in one browser ends the user's other sessions and keeps
+// the one that browser was just given; the socket hook still fires.
+func TestSessions_DropOthersKeepsOne(t *testing.T) {
+	s := newSessions(fixed(testSessionLimits), newFakeClock().now)
+	var hooked []string
+	s.onDropUser = func(user string) { hooked = append(hooked, user) }
+	old, keep, other := s.create("alice", false), s.create("alice", false), s.create("bob", false)
+	s.dropOthers("alice", keep)
+	if _, ok := s.lookup(old); ok {
+		t.Error("the user's other session must end")
+	}
+	for _, id := range []string{keep, other} {
+		if _, ok := s.lookup(id); !ok {
+			t.Errorf("session %s must survive", id)
+		}
+	}
+	if len(hooked) != 1 || hooked[0] != "alice" {
+		t.Errorf("onDropUser: %v", hooked)
+	}
+}
+
 func TestSessions_DropAndDropUser(t *testing.T) {
 	s := newSessions(fixed(testSessionLimits), newFakeClock().now)
 	a1, a2, b := s.create("alice", false), s.create("alice", true), s.create("bob", false)

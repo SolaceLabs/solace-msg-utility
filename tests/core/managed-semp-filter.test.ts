@@ -59,6 +59,17 @@ describe('core/managed-semp-filter', () => {
         expect(json.data.map((q: any) => q.queueName)).toEqual(['keep1']);
     });
 
+    it('drops a row whose name is missing or not text, as no named entitlement matches it', async () => {
+        const m = managed({ vpns: ['vpn1'], readOnly: [{ brokers: 'b1', msgVpns: 'vpn1', queues: 'orders.*' }] });
+        const queues = vi.fn(async () => jsonResponse({ data: [{ queueName: 'orders.new' }, {}, null, { queueName: 7 }] }));
+        const q = await (await filterSempFetch(queues, m)('/SEMP/v2/monitor/msgVpns/vpn1/queues')).json();
+        expect(q.data).toEqual([{ queueName: 'orders.new' }]);
+
+        const vpns = vi.fn(async () => jsonResponse({ data: [{ msgVpnName: 'vpn1' }, { msgVpnName: 1 }, 'vpn1'] }));
+        const v = await (await filterSempFetch(vpns, m)('/SEMP/v2/monitor/msgVpns')).json();
+        expect(v.data).toEqual([{ msgVpnName: 'vpn1' }]);
+    });
+
     it('passes a non-discovery call (v1 RPC) through untouched', async () => {
         const original = jsonResponse({ rpc: 'reply' });
         const res = await filterSempFetch(vi.fn(async () => original), managed())('/SEMP', { method: 'POST' });

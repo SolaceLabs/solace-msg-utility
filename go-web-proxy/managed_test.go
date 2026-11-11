@@ -276,7 +276,9 @@ func TestManagedAPI_ListUsersNeverSendsHashes(t *testing.T) {
 func TestManagedAPI_SaveUser_CreateAndValidate(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	c := e.cookie("admin", false)
-	put := func(name, body string) *httptest.ResponseRecorder { return e.do("PUT", "/managed/users/"+name, body, c) }
+	put := func(name, body string) *httptest.ResponseRecorder {
+		return e.do("PUT", "/managed/users/"+name, body, c)
+	}
 
 	expect(t, put("bob", `{"password":"bob-password-1","admin":false,"operate":[],"readOnly":[{"brokers":"b1","msgVpns":"*","queues":"*"}]}`), http.StatusNoContent, "")
 	if !signsIn(t, e.api.store, "bob", "bob-password-1") {
@@ -366,8 +368,10 @@ func TestManagedAPI_SaveAndDeleteUser_PersistErrorIs500(t *testing.T) {
 	blockWrites(t, &e.api.store.usersPath)
 	expect(t, e.do("PUT", "/managed/users/bob", `{"password":"bob-password-1"}`, c), http.StatusInternalServerError, "server_error")
 	expect(t, e.do("DELETE", "/managed/users/viewer", "", c), http.StatusInternalServerError, "server_error")
-	if !strings.Contains(e.log.String(), "managed: saveUser failed") {
-		t.Errorf("the cause must reach the log: %s", e.log.String())
+	for _, want := range []string{"admin request failed", "op=saveUser", "target=bob", "user=admin", "op=deleteUser", "target=viewer"} {
+		if !strings.Contains(e.log.String(), want) {
+			t.Errorf("the failure must name %q in the log: %s", want, e.log.String())
+		}
 	}
 }
 
@@ -433,4 +437,121 @@ func TestWriteJSON_EncodeFailureKeepsStatus(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("status already sent must stand, got %d", rec.Code)
 	}
+}
+
+// Each user and connection change logs one INFO line naming the acting
+// administrator (user), the target and what changed, never a password.
+func TestManagedAPI_ChangesAreLoggedWithActorAndTarget(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	expect(t, e.do("PUT", "/managed/users/carol", `{"password":"carol-password-1","modules":["queue-browser"]}`, c), http.StatusNoContent, "")
+	expect(t, e.do("PUT", "/managed/users/viewer", `{"readOnly":[]}`, c), http.StatusNoContent, "")
+	expect(t, e.do("DELETE", "/managed/users/carol", "", c), http.StatusNoContent, "")
+	expect(t, e.do("PUT", "/managed/connections/b3", `{"hostname":"h3","semp":{"port":"1943","user":"mon","pass":"semp-new-pw"},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u","pass":"vpn-new-pw"},{"name":"v2","user":"u","pass":""}]}}`, c), http.StatusNoContent, "")
+	expect(t, e.do("DELETE", "/managed/connections/b3", "", c), http.StatusNoContent, "")
+	log := e.log.String()
+	lines := []struct {
+		msg, target string
+		wants       []string
+	}{
+		{"user saved", "carol", []string{"user=admin", "created=true", "password_set=true", "modules=[queue-browser]"}},
+		{"user saved", "viewer", []string{"created=false", "password_set=false", "modules=default", "sessions_ended=false"}},
+		{"user deleted", "carol", []string{"user=admin"}},
+		{"connection saved", "b3", []string{"created=true", "semp_scheme=https", "client_scheme=wss", "semp_password_set=true", "vpns=\"[v1 v2]\"", "vpn_passwords_set=1"}},
+		{"connection deleted", "b3", []string{"user=admin"}},
+	}
+	for _, l := range lines {
+		line := logLine(log, `msg="`+l.msg+`"`, "target="+l.target)
+		if line == "" {
+			t.Errorf("no %q line for %s in %s", l.msg, l.target, log)
+			continue
+		}
+		for _, w := range l.wants {
+			if !strings.Contains(line, w) {
+				t.Errorf("%s %s: want %q in %s", l.msg, l.target, w, line)
+			}
+		}
+	}
+	for _, secret := range []string{"carol-password-1", "semp-new-pw", "vpn-new-pw"} {
+		if strings.Contains(log, secret) {
+			t.Errorf("a password reached the log: %s", secret)
+		}
+	}
+}
+
+// logLine is the first line of log containing every one of want, or "".
+func logLine(log string, want ...string) string {
+	for _, l := range strings.Split(log, "\n") {
+		all := true
+		for _, w := range want {
+			all = all && strings.Contains(l, w)
+		}
+		if all {
+			return l
+		}
+	}
+	return ""
+}
+
+// A connection's schemes: a save may name the plain one, leave the field out
+// or name TLS (both stored as the default), and the list always says which.
+func TestManagedAPI_ConnectionSchemes(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	plain := `{"hostname":"h3","semp":{"scheme":"http","port":"8080","user":"","pass":""},"client":{"scheme":"ws","port":"8008","msgVpns":[]}}`
+	tls := `{"hostname":"h4","semp":{"scheme":"https","port":"1943","user":"","pass":""},"client":{"scheme":"wss","port":"1443","msgVpns":[]}}`
+	expect(t, e.do("PUT", "/managed/connections/b3", plain, c), http.StatusNoContent, "")
+	expect(t, e.do("PUT", "/managed/connections/b4", tls, c), http.StatusNoContent, "")
+	rec := e.do("GET", "/managed/connections", "", c)
+	expect(t, rec, http.StatusOK, "")
+	var list struct{ Connections []connJSON }
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][2]string{"b1": {"https", "wss"}, "b2": {"https", "wss"}, "b3": {"http", "ws"}, "b4": {"https", "wss"}}
+	for _, conn := range list.Connections {
+		if got := [2]string{conn.Semp.Scheme, conn.Client.Scheme}; got != want[conn.Broker] {
+			t.Errorf("%s: schemes %v, want %v", conn.Broker, got, want[conn.Broker])
+		}
+	}
+	for _, rc := range e.api.store.listConnections() {
+		if rc.Broker == "b4" && (rc.Semp.Scheme != "" || rc.Client.Scheme != "") {
+			t.Errorf("TLS is stored as the default: %+v", rc)
+		}
+	}
+	bad := e.do("PUT", "/managed/connections/b5", `{"hostname":"h5","semp":{"scheme":"ftp"},"client":{}}`, c)
+	expect(t, bad, http.StatusUnprocessableEntity, "invalid")
+	if r := errorCode(t, bad); r.Field != "connection" || r.Reason != `broker "b5": semp.scheme "ftp" must be "https" or "http"` {
+		t.Errorf("want the field and reason, got %+v", r)
+	}
+}
+
+// GET /managed/client says which address the gateway took this browser for,
+// and whether a trusted proxy's X-Forwarded-For decided it.
+func TestManagedAPI_ClientSeen(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.access.trustedProxies = prefixes(t, "192.0.2.10/32") })
+	admin := e.cookie("admin", false)
+	cases := []struct {
+		name string
+		xff  []string
+		want clientSeenJSON
+	}{
+		{"direct", nil, clientSeenJSON{Address: "192.0.2.10", Peer: "192.0.2.10"}},
+		{"through a trusted proxy", []string{"X-Forwarded-For", "203.0.113.9"}, clientSeenJSON{Address: "203.0.113.9", Peer: "192.0.2.10", ViaProxy: true}},
+		{"a proxy header that does not parse", []string{"X-Forwarded-For", "not-an-address"}, clientSeenJSON{Peer: "192.0.2.10"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := e.do("GET", "/managed/client", "", admin, c.xff...)
+			expect(t, rec, http.StatusOK, "")
+			var got clientSeenJSON
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got != c.want {
+				t.Errorf("got %+v, want %+v", got, c.want)
+			}
+		})
+	}
+	expect(t, e.do("GET", "/managed/client", "", e.cookie("viewer", false)), http.StatusForbidden, "forbidden")
 }

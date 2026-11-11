@@ -16,6 +16,8 @@ vi.mock('../../../src/core/download', () => ({ downloadBlob: downloadMock.downlo
 vi.mock('../../../src/modules/backup/service', () => ({ createBackupService: () => svc }));
 
 import { BackupModule, describeSchedule, diffLines, formatUtc, MAX_IMPORT_BYTES } from '../../../src/modules/backup/module';
+import { completeContext } from '../../helpers/appContext';
+import { answerConfirm, confirmOpen } from '../../helpers/confirmDialog';
 
 const ADMIN: ManagedSession = { admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [] };
 const NONE: BackupStatus = { schedule: null, nextRun: null, lastRun: null, dirProblem: '', files: [] };
@@ -47,6 +49,12 @@ const click = async (c: HTMLElement, sel: string) => {
     el<HTMLButtonElement>(c, sel).click();
     await flush();
 };
+/** Answer the open confirm dialog, then let the handler finish (the call, the reload, the toast). */
+const answer = async (yes: boolean) => {
+    const question = await answerConfirm(yes);
+    await flush();
+    return question;
+};
 const type = (c: HTMLElement, sel: string, v: string) => {
     el<HTMLInputElement>(c, sel).value = v;
 };
@@ -61,11 +69,11 @@ function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppCon
         activeModuleId: null, isConnected: false, selectedVpn: null,
         solaceConnection: null, sempCredentials: null, isSempConnected: false, managed,
     };
-    return {
+    return completeContext({
         container, appState, eventBus,
         setState: (k, v) => { (appState as any)[k] = v; },
         loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(), config: {},
-    } as unknown as AppContext;
+    });
 }
 
 async function setup(status: BackupStatus = NONE, managed: ManagedSession | null = ADMIN) {
@@ -310,9 +318,8 @@ describe('backup -- import', () => {
     it('asks before importing and sends nothing when declined', async () => {
         const { c } = await previewed();
         choose(c, '#backup-choice-users', 'merge');
-        (globalThis.confirm as any).mockReturnValueOnce(false);
         await click(c, '#btn-backup-import');
-        expect(globalThis.confirm).toHaveBeenCalledWith('Import users (merge) from this backup? The gateway applies it at once.');
+        expect(await answer(false)).toBe('Import users (merge) from this backup? The gateway applies it at once.');
         expect(svc.importFile).not.toHaveBeenCalled();
     });
 
@@ -320,7 +327,7 @@ describe('backup -- import', () => {
         const { c } = await previewed();
         svc.importFile.mockResolvedValue(refused('invalid', 'Choose at least one section to import.', 'sections'));
         await click(c, '#btn-backup-import');
-        expect(globalThis.confirm).not.toHaveBeenCalled();
+        expect(confirmOpen()).toBe(false);
         expect(text(c, '#backup-import-error')).toBe('Choose at least one section to import.');
     });
 
@@ -330,6 +337,7 @@ describe('backup -- import', () => {
         choose(c, '#backup-choice-settings', 'replace');
         svc.importFile.mockResolvedValue(ok({ restartRequired: ['tls.insecureSkipVerify'], signedOut: false }));
         await click(c, '#btn-backup-import');
+        await answer(true);
         expect(svc.importFile).toHaveBeenCalledWith({ file: '{"format":"smu-backup"}' }, 'the passphrase!',
             { users: 'skip', connections: 'replace', settings: 'replace' });
         expect(toastMock.showToast).toHaveBeenCalledWith('Imported. Restart the gateway to apply: tls.insecureSkipVerify.', 'ok');
@@ -343,6 +351,7 @@ describe('backup -- import', () => {
         await click(c, '#btn-backup-preview');
         choose(c, '#backup-choice-settings', 'replace');
         await click(c, '#btn-backup-import');
+        await answer(true);
         expect(toastMock.showToast).toHaveBeenLastCalledWith('Imported', 'ok');
     });
 
@@ -353,6 +362,7 @@ describe('backup -- import', () => {
         choose(c, '#backup-choice-users', 'replace');
         svc.importFile.mockResolvedValue(ok({ restartRequired: [], signedOut: true }));
         await click(c, '#btn-backup-import');
+        await answer(true);
         expect(signOut).toHaveBeenCalled();
         expect(toastMock.showToast).toHaveBeenCalledWith('Imported. Your own account changed: sign in again.', 'ok', expect.any(Number));
     });
@@ -362,6 +372,7 @@ describe('backup -- import', () => {
         choose(c, '#backup-choice-users', 'replace');
         svc.importFile.mockResolvedValue({ ok: false, status: 409, code: 'last_admin' });
         await click(c, '#btn-backup-import');
+        await answer(true);
         expect(text(c, '#backup-import-error')).toBe('At least one administrator must remain.');
     });
 });
@@ -428,14 +439,16 @@ describe('backup -- schedule', () => {
 
     it('removes the schedule once confirmed', async () => {
         const { c } = await setup(WEEKLY);
-        (globalThis.confirm as any).mockReturnValueOnce(false);
         await click(c, '#btn-backup-remove-schedule');
+        expect(await answer(false)).toBe('Remove the backup schedule? The saved backups stay.');
         expect(svc.removeSchedule).not.toHaveBeenCalled();
         svc.removeSchedule.mockResolvedValue({ ok: false, status: 404, code: 'not_found' });
         await click(c, '#btn-backup-remove-schedule');
+        await answer(true);
         expect(text(c, '#backup-schedule-error')).toBe('Not found. It may already have been removed.');
         svc.removeSchedule.mockResolvedValue(ok());
         await click(c, '#btn-backup-remove-schedule');
+        await answer(true);
         expect(toastMock.showToast).toHaveBeenCalledWith('Schedule removed', 'ok');
     });
 

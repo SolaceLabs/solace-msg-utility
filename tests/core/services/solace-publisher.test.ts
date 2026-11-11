@@ -265,6 +265,31 @@ describe('core/services/solace-publisher', () => {
         });
     });
 
+    describe('send() -- a destination the SDK refuses', () => {
+        it('settles {ok:false} with the SDK reason instead of throwing, and never sends', async () => {
+            const reason = "Invalid TOPIC: Empty level(s) in 'a//b'@1.";
+            solaceMock.SolclientFactory.createTopicDestination.mockImplementation(() => { throw new Error(reason); });
+            const publisher = createSolacePublisher(session);
+            const onReject = vi.fn();
+
+            const result = await publisher.send(createMessageMock(), { type: 'topic', name: 'a//b' }, { onReject, correlationKey: 'k1' });
+
+            expect(result).toEqual({ ok: false, error: reason });
+            expect(onReject).toHaveBeenCalledWith(reason);
+            expect(session.send).not.toHaveBeenCalled();
+            expect(publisher.isPending('k1')).toBe(false);
+        });
+
+        it('a throwing beforeSend settles too, naming the destination when the throw carries no text', async () => {
+            const publisher = createSolacePublisher(session);
+            const result = await publisher.send(createMessageMock(), queueDest, {
+                beforeSend: () => { throw {}; },
+            });
+            expect(result).toEqual({ ok: false, error: 'Cannot send to queue "my-queue".' });
+            expect(session.send).not.toHaveBeenCalled();
+        });
+    });
+
     describe('clone behavior', () => {
         it('runs each safeSet getter and skips writes when the original returns null/undefined', async () => {
             const publisher = createSolacePublisher(session);

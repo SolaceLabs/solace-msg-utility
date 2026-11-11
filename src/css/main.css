@@ -4,7 +4,11 @@
  *   3. shell layout
  *   4. generic components
  *   5. utilities (last among the design system so utility `!important` wins)
- *   6. module-specific styles (can reference any of the above)
+ *   6. reusable components (src/core/components/<name>/styles.css)
+ *
+ * Module stylesheets are not imported here: virtual:module-registry
+ * (scripts/module-registry-plugin.mjs) imports each active module's
+ * styles.css after its code, so a variant ships exactly its own modules' CSS.
  */
 
 @import './variables.css';
@@ -14,9 +18,7 @@
 @import './utilities.css';
 
 @import '../core/components/queue-picker/styles.css';
-
-@import '../modules/connections/styles.css';
-@import '../modules/queue-discovery/styles.css';
-@import '../modules/queue-subscription-explorer/styles.css';
-@import '../modules/queue-browser/styles.css';
-@import '../modules/queue-copy/styles.css';
+@import '../core/components/row-list/styles.css';
+@import '../core/components/notification-center/styles.css';
+@import '../core/components/provisioned-connection/styles.css';
+@import '../core/components/confirm-dialog/styles.css';

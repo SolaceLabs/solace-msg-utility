@@ -36,7 +36,7 @@ hardening items" section of [rbac-variant-plan.md](rbac-variant-plan.md) when ad
 |---|---|---|
 | Where SMF connects | Browser, via the SDK | Server-side browsing needs Node (130+ MB), Java (35+ MB) or the C API (C parser, bundled TLS invisible to scanners). C API stays the fallback: est. 16-20 MB, needs a spike. |
 | Login | Password over TLS; gateway stores a slow password hash with a per-user random value, constant-time compare, `HttpOnly` `Secure` `SameSite=Lax` cookie | `stamp()`, the resend-token scheme and the bearer token in `users.yaml` go. Nothing used to check a password leaves the gateway. `Lax`, not `Strict`: a link from another site opens the app signed in; cross-site POSTs are blocked either way, and every state change also checks `Sec-Fetch-Site`. |
-| Login UI | Gateway-served page: `GET /login` form, `POST /login`, redirect to the app; `/login` with a valid session redirects to `/` | Smaller bundle; one plain HTML page to style and test in Go. Under `CONN_MODES=managed` the bundle itself is served only with a valid session (`/` redirects to `/login`), so nothing of the app reaches an unauthenticated client; under `both` the bundle loads without one, for the Direct tab. |
+| Login UI | Gateway-served page: `GET /login` form, `POST /login`, redirect to the app; `/login` with a valid session redirects to `/` | Smaller bundle; one plain HTML page to style and test in Go. Under `CONN_MODES=provisioned` the bundle itself is served only with a valid session (`/` redirects to `/login`), so nothing of the app reaches an unauthenticated client; under `both` the bundle loads without one, for the Direct tab. |
 | Session | In memory, single replica. Defaults 10 min idle, 30 min absolute, in `config.yaml` | Gateway invalidates on password change, delete, self-demotion; browser sees 401. |
 | Store encryption | `users.yaml` and `connections.yaml` are stored encrypted as whole files with a key file only the gateway reads. The gateway generates the key on first run if absent (path from env, replaces `SITE_SEED_FILE`, owner-only permissions). SEMP: gateway injects the credential. SMF: `POST /managed/dial` returns the VPN's client credential to an entitled user on each connect (see the SMF dial row) | Site seed and `unpack` leave the browser. SEMP password never reaches it. No operator step for the key; losing it means re-provisioning users and connections. Encrypted store present but key missing: the gateway refuses to start and says so. `config.yaml` stays readable because the standard image has no admin UI and is hand-edited. The key file and its path never live in `config.yaml`: `STORE_KEY_FILE` (named so to stay distinct from the TLS key's `SSL_KEY_FILE`; default `/managed/store.key`) is environment-only like `SITE_SEED_FILE`, so the settings file can never redirect the gateway to another secret. The key is generated only on a fresh volume (key and both stores absent); a plaintext store from an earlier build is refused, never converted. |
 | SEMP relay | Gateway injects the credential and forwards **reads only** (decided 2026-11-01): `GET`/`HEAD` under `/SEMP/v2/`, and `POST /SEMP` only for a single `<rpc><show>`; everything else under `/SEMP` is `403 read_only`, any other path `404`. Paths are checked per decoded segment, because the router leaves encoded dot segments in place | VPN/queue filtering stays in the PWA (`managed-semp-filter.ts`), so queue globs remain a UI filter on both planes. Protection is credential custody plus a session-bound relay keyed by broker name: an entitled user can read any VPN/queue on a provisioned broker, not other brokers, and the stored SEMP account can never write through the gateway. |
@@ -69,7 +69,7 @@ Nothing. The module-control and config-editing rows above closed the last two.
 client CIDR access list (every route; default allow-all)
                  |
 managed.html (browser)                 Go gateway (managed image)
-  no session   ---- GET /login ------------>  HTML form (CONN_MODES=managed: / redirects here)
+  no session   ---- GET /login ------------>  HTML form (CONN_MODES=provisioned: / redirects here)
   sign-in      ---- POST /login ----------->  hash check, throttle, cookie, redirect to /
   profile      <--- GET  /managed/me -------  admin, modules, brokers/VPNs, globs (UI filtering)
   SEMP calls   ---- /managed/relay/{broker}/SEMP/... -> inject credential, forward as-is
@@ -166,7 +166,7 @@ on-disk refusals), `moduleCatalog()` and `modules.*` in `configfile.go`, per-use
 `gateway-settings` module, and the catalog drift guard in `tests/variants.test.ts`. The catalog is
 Queue Browser and Queue Copy; the SEMP v1 modules keep their `unfiltered-semp` rule.
 - `/login` page, `/managed/logout`, `/managed/me`; cookie sessions with the 10/30 min defaults;
-  bundle served only with a session under `CONN_MODES=managed`; password hashing; throttle; body
+  bundle served only with a session under `CONN_MODES=provisioned`; password hashing; throttle; body
   caps; random bootstrap with forced change; session invalidation; uniform responses; module
   control (config ceiling, per-user list, deployment default); `/managed/settings` with the
   lock-out refusal; `/managed/reload` removed.
@@ -183,7 +183,7 @@ SEMP relay; `newUpstreamTransport` shared with the Direct relay, with a 10 s con
 (`dial.go`, `smf.go`, `sockets.go`: the dial endpoint, the SMF WebSocket gate and socket revocation)
 code on `feature/rbac` 2026-11-02. Step 3E, the browser cutover, code on `feature/rbac` 2026-11-02:
 `/managed/me` names brokers and VPNs only and the site seed is gone (`SITE_SEED_FILE`,
-`loadOrGenerateSeed`); the Direct relay answers `404` under `CONN_MODES=managed`; the browser's
+`loadOrGenerateSeed`); the Direct relay answers `404` under `CONN_MODES=provisioned`; the browser's
 `managed-profile.ts` (`ctx.managedProfile`, names only, `dial(target, {connect})`) replaces
 `encode.ts` and `managed-session-store.ts`; SEMP goes through the relay (`SempConfig.relayBase`,
 no Authorization header; a relay `401` signs out) and SMF through dial and the gate

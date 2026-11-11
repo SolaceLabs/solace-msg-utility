@@ -1,3 +1,4 @@
+// @ts-nocheck -- 2026-11-11: checkJs backlog (JSDoc types for this file are pending; remove this line once they are in).
 import { isValidHost, isValidPort } from '../../core/utils';
 import { required, attachBackdropClose } from '../../core/dom';
 

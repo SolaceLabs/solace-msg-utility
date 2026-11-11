@@ -274,6 +274,57 @@ export function normalizeUrlPath(val: string | null | undefined): string {
     return withLeading.replace(/\/+$/, '');
 }
 
+/**
+ * The HTTP Basic `Authorization` value for a SEMP account. The one place the
+ * header is built: the SEMP connect probe (`services/semp-client.ts`) and the
+ * kernel's `sempFetch` both call it, so the probe and every later request send
+ * the same bytes. Plain `btoa` is exact for the ASCII the connection forms
+ * accept (`sempAccountError`); it throws on a character above U+00FF.
+ */
+export function basicAuthHeader(user: string, pass: string): string {
+    return `Basic ${btoa(`${user}:${pass}`)}`;
+}
+
+/** Symbols a Solace CLI password may not contain. */
+const SEMP_PASSWORD_FORBIDDEN = /[:()";'<>,`\\*&|]/;
+
+/**
+ * Why a SEMP username/password pair breaks the Solace CLI user-account rules
+ * (docs.solace.com, Configuring Internal CLI User Accounts), or `null` when it
+ * is valid. Username: 1-32 letters and digits. Password: 1-128 printable ASCII
+ * characters (no spaces), none of `: ( ) " ; ' < > , \` \\ * & |`. The page
+ * states no encoding, so ASCII is the rule: it is also what `basicAuthHeader`
+ * encodes exactly. `field` names the input to mark.
+ */
+export function sempAccountError(user: string, pass: string): { field: 'user' | 'pass'; message: string } | null {
+    if (!user) return { field: 'user', message: 'SEMP username is required.' };
+    if (user.length > 32) return { field: 'user', message: 'SEMP username must not exceed 32 characters.' };
+    if (!/^[A-Za-z0-9]+$/.test(user)) {
+        return { field: 'user', message: 'SEMP username may contain only letters and digits (A-Z, a-z, 0-9).' };
+    }
+    if (!pass) return { field: 'pass', message: 'SEMP password is required.' };
+    if (pass.length > 128) return { field: 'pass', message: 'SEMP password must not exceed 128 characters.' };
+    if (!/^[\x21-\x7e]+$/.test(pass)) {
+        return { field: 'pass', message: 'SEMP password may contain only printable ASCII characters: no spaces or accented letters.' };
+    }
+    if (SEMP_PASSWORD_FORBIDDEN.test(pass)) {
+        return { field: 'pass', message: 'SEMP password must not contain any of : ( ) " ; \' < > , ` \\ * & |' };
+    }
+    return null;
+}
+
+/**
+ * The SDK `clientName` for a connection started at `at`:
+ * `SolMsgUtil/YYYYMMDDHHMMSS/{clientNameId}`, in local time (what the user's
+ * own clock shows when they read it in broker tooling). The Direct form and
+ * the managed profile's dial both compose it here.
+ */
+export function sdkClientName(clientNameId: string, at: Date = new Date()): string {
+    const p = (n: number) => n.toString().padStart(2, '0');
+    const stamp = `${at.getFullYear()}${p(at.getMonth() + 1)}${p(at.getDate())}${p(at.getHours())}${p(at.getMinutes())}${p(at.getSeconds())}`;
+    return `SolMsgUtil/${stamp}/${clientNameId}`;
+}
+
 /** Modules whose sidebar name is not their id title-cased. */
 const MODULE_LABELS: Record<string, string> = { 'queue-subscription-explorer': 'Queue Subscriptions' };
 

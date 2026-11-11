@@ -25,17 +25,20 @@ import { createServiceSemp, type SempConnectionHooks } from '../../core/services
 import { showToast } from '../../core/toast';
 import { INPUT_DEBOUNCE_MS } from '../../core/timing';
 import { logger } from '../../core/logger';
-import { normalizeUrlPath, generateUuid } from '../../core/utils';
+import { normalizeUrlPath, generateUuid, sdkClientName, sempAccountError } from '../../core/utils';
 import { createOptionalField } from './optional-field';
-import { isHosted, limitSchemeOptions, probeDeployment, setHosted, usableScheme } from '../../core/hosted';
+import { isHostedDeployment, limitSchemeOptions, probeDeployment, usableScheme } from '../../core/hosted';
 import { DEFAULT_CONN_CONFIG } from '../../core/connections/conn-modes';
-import type { AppContext, BusEvents, ConnectionConfig, SolaceConfig, SempConfig } from '../../core/types';
+import { DEFAULT_MAX_MESSAGES_PER_QUEUE, MAX_MESSAGES_PER_QUEUE } from '../../core/connections/defaults';
+import { createVpnSwitch, type CheckConnectionRequest } from './vpn-switch';
+import type { AppContext, ConnectionConfig, SolaceConfig, SempConfig } from '../../core/types';
+
+const log = logger.withTag('Connections');
 
 /** Sidebar icon, shared with the managed entry (`module.managed.ts`). */
 export const CONNECTIONS_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>';
 
-/** A request to open a queue on a given VPN (`connection:check-connection`). */
-export type CheckConnectionRequest = BusEvents['connection:check-connection'];
+export type { CheckConnectionRequest };
 
 export interface DirectConnectionOptions {
     /**
@@ -57,19 +60,22 @@ export interface DirectConnection {
 /**
  * Wire the Direct form: element cache, service factories bridged to global
  * AppState + bus, saved settings, validation, Connect/Save/Load/Reset, and the
- * Direct VPN-switch dance. Shared by both entry files. It registers no
- * cross-module router; each entry routes `connection:*` requests itself.
+ * Direct side of the shared VPN switch (`vpn-switch.ts`). Shared by both entry
+ * files. It registers no cross-module router; each entry routes
+ * `connection:*` requests itself. Runs after the entry published the
+ * `/hosted` verdict (`AppState.connConfig`), which it reads once here.
  */
 export function installDirect(app: AppContext, opts: DirectConnectionOptions = {}): DirectConnection {
     const { container, appState, eventBus, loadSelf } = app;
+    const hosted = isHostedDeployment(appState);
 
     // 1. Initialize UI (Cache Elements)
     ui.cacheElements(container);
     ui.initEvents();
     const els = ui.getElements();
     // Without the gateway, an https page cannot open ws:// or http://.
-    limitSchemeOptions(els.elSolProtocol);
-    limitSchemeOptions(els.elSempProtocol);
+    limitSchemeOptions(els.elSolProtocol, hosted);
+    limitSchemeOptions(els.elSempProtocol, hosted);
 
     // The URL Path fields open on demand; sync() after any write in code.
     const urlPaths = [
@@ -84,11 +90,25 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
     //    Future secondary-connection modules (queue-copy) will define their
     //    own hooks that target module-scoped state instead.
 
+    // True from a Connect click until the SDK reports up, failed or down. The
+    // Connect button stays disabled meanwhile, so no second connect can race
+    // the first (solace-client refuses one anyway).
+    let solaceConnecting = false;
+
     function resetSolaceButton() {
+        solaceConnecting = false;
         els.btnSolace.textContent = 'Connect';
         els.btnSolace.classList.remove('btn-danger');
         els.btnSolace.classList.add('btn-primary');
         els.btnSolace.disabled = false;
+    }
+
+    /** The SEMP button and attempt after any SEMP teardown -- ours, or the kernel's on a 401. */
+    function resetSempUi() {
+        lastSempAttempt = null;
+        els.btnSemp.textContent = 'Connect';
+        els.btnSemp.classList.remove('btn-danger');
+        els.btnSemp.classList.add('btn-primary');
     }
 
     // Captured per Connect-click so the async hook can publish the
@@ -103,6 +123,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
 
     const solaceHooks: SolaceConnectionHooks = {
         onConnected: (session, vpn) => {
+            solaceConnecting = false;
             ui.showConnectError(els.elSolError, null);
             els.btnSolace.textContent = 'Disconnect';
             els.btnSolace.classList.remove('btn-primary');
@@ -140,19 +161,21 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
             // broker is internal-only — the user can't reach it, so
             // suppress the link.
             let helpUrl: string | null = null;
-            if (infoStr && infoStr.includes('Connection error') && !isHosted()) {
+            if (infoStr && infoStr.includes('Connection error') && !hosted) {
                 helpUrl = `${els.elSempProtocol.value}://${els.elHost.value}:${els.elSempPort.value}${normalizeUrlPath(els.elSempUrlPath.value)}`;
             }
             ui.showConnectError(els.elSolError, `Connection Failed: ${infoStr}`, helpUrl);
             resetSolaceButton();
+            vpnSwitch.connectFailed(`Connection Failed: ${infoStr}`);
         },
         onError: (err) => {
             let helpUrl: string | null = null;
-            if (err.message && err.message.includes('Certificate') && !isHosted()) {
+            if (err.message && err.message.includes('Certificate') && !hosted) {
                 helpUrl = `${els.elSempProtocol.value}://${els.elHost.value}:${els.elSempPort.value}`;
             }
             ui.showConnectError(els.elSolError, err.message, helpUrl);
             resetSolaceButton();
+            vpnSwitch.connectFailed(err.message);
         },
     };
 
@@ -184,12 +207,8 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         onDisconnected: () => {
             app.setState('isSempConnected', false);
             app.setState('sempCredentials', null);
-            lastSempAttempt = null;
+            // The semp:disconnected listener below resets the button.
             eventBus.emit('semp:disconnected');
-
-            els.btnSemp.textContent = 'Connect';
-            els.btnSemp.classList.remove('btn-danger');
-            els.btnSemp.classList.add('btn-primary');
         },
         onAuthFailed: () => {
             ui.showConnectError(els.elSempError, 'Authentication Failed (401). Check username/password.');
@@ -213,7 +232,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         // warning: the saved port is most likely the plain one.
         const moved: string[] = [];
         const scheme = (saved: string): string => {
-            const s = usableScheme(saved);
+            const s = usableScheme(saved, hosted);
             if (s !== saved) moved.push(`${saved}:// is now ${s}://`);
             return s;
         };
@@ -255,7 +274,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
     const cfg = config.load();
     if (cfg) {
         applyConfig(cfg);
-        logger.info('Settings loaded via config.js');
+        log.info('settings loaded from saved config');
     }
 
     // Autofill the Client Name Identifier if the user has no saved value.
@@ -267,8 +286,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
 
     // 5. Wire Click Handlers
 
-    // Max-messages cap: integer, 1..10000. Inline error on blur + blocks save.
-    const MAX_MESSAGES_LIMIT = 10000;
+    // Max-messages cap: integer, 1..MAX_MESSAGES_PER_QUEUE. Inline error on blur + blocks save.
     function validateMaxMessages(): number | null {
         const raw = els.elMaxMessages.value.trim();
         const n = Number(raw);
@@ -277,8 +295,8 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
             err = 'Must be a whole number.';
         } else if (n < 1) {
             err = 'Must be at least 1.';
-        } else if (n > MAX_MESSAGES_LIMIT) {
-            err = `Must not exceed ${MAX_MESSAGES_LIMIT}.`;
+        } else if (n > MAX_MESSAGES_PER_QUEUE) {
+            err = `Must not exceed ${MAX_MESSAGES_PER_QUEUE}.`;
         }
         if (err) {
             els.elMaxMessages.classList.add('is-invalid');
@@ -450,21 +468,75 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         return valid;
     }
 
-    // Build a YYYYMMDDHHMMSS local-time stamp for the SDK clientName property.
-    // Local time mirrors what the user sees on their own clock when reading
-    // a clientName in broker tooling.
-    function formatConnectTimestamp(d: Date): string {
-        const p = (n: number) => n.toString().padStart(2, '0');
-        return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-    }
-
+    // The SEMP account must meet the Solace CLI user-account rules
+    // (sempAccountError): the Basic header is plain ASCII btoa, built the same
+    // way for the probe and every later request, and a credential outside the
+    // rules is refused here with the reason, before any request is sent.
     function validateSemp() {
         let valid = true;
         if (!ui.isValidHost(els.elHost.value)) { ui.showError(els.elHost, true); valid = false; } else ui.showError(els.elHost, false);
         if (!ui.isValidPort(els.elSempPort.value)) { ui.showError(els.elSempPort, true); valid = false; } else ui.showError(els.elSempPort, false);
-        if (!els.elSempUser.value.trim()) { ui.showError(els.elSempUser, true); valid = false; } else ui.showError(els.elSempUser, false);
-        if (!els.elSempPass.value.trim()) { ui.showError(els.elSempPass, true); valid = false; } else ui.showError(els.elSempPass, false);
+        const account = sempAccountError(els.elSempUser.value, els.elSempPass.value);
+        ui.showError(els.elSempUser, account?.field === 'user');
+        ui.showError(els.elSempPass, account?.field === 'pass');
+        ui.showConnectError(els.elSempError, account ? account.message : null);
+        if (account) valid = false;
         return valid;
+    }
+
+    /**
+     * Start a Direct Solace connect from the form. False when the form does
+     * not validate (the fields say why); otherwise the outcome arrives through
+     * the hooks. The Connect click and the VPN switch both start here.
+     */
+    function connectSolace(): boolean {
+        if (!validateSolace()) return false;
+        opts.onBeforeConnect?.();
+        // Match the other Advanced Settings fields: read live from input at
+        // connect time. A separate Save click persists to localStorage, but
+        // the *current session* uses whatever the modal shows right now.
+        const maxMessages = validateMaxMessages();
+        if (maxMessages !== null) {
+            eventBus.emit('config:max-messages-changed', { value: maxMessages });
+        }
+
+        // Trim defensively -- Enter-to-connect can fire without a prior
+        // blur, in which case the normalize-on-blur handler hasn't run.
+        const clientNameId = els.elSolClientNameId.value.trim();
+        const cfg: SolaceConfig = {
+            protocol: els.elSolProtocol.value,
+            port: els.elSolPort.value,
+            urlPath: els.elSolUrlPath.value,
+            vpn: els.elSolVpn.value,
+            user: els.elSolUser.value,
+            authMode: ui.getAuthMode() as 'basic' | 'oauth',
+            connectRetries: parseInt(els.elConnectRetries.value, 10),
+            connectTimeout: parseInt(els.elConnectTimeout.value, 10),
+            reconnectRetries: parseInt(els.elReconnectRetries.value, 10),
+            reconnectWait: parseInt(els.elReconnectWait.value, 10),
+            maxMessagesPerQueue: maxMessages ?? DEFAULT_MAX_MESSAGES_PER_QUEUE,
+            clientNameId,
+            hosted,
+        };
+
+        // Compose the SDK clientName at connect initiation time so the
+        // embedded timestamp reflects when this session started.
+        const clientName = sdkClientName(clientNameId);
+
+        // Pre-connect UI: clear error, button feedback. Hooks handle the rest.
+        ui.showConnectError(els.elSolError, null);
+        ui.showFeedback(els.btnSolace, 'Connecting...');
+        els.btnSolace.disabled = true;
+        solaceConnecting = true;
+
+        // Stash the cfg + host + password so onConnected can publish
+        // them into AppState.solaceConnection for cross-module consumers
+        // (queue-copy mirrors the password into its source-side panel).
+        lastSolaceAttempt = { host: els.elHost.value, cfg, pass: els.elSolPass.value };
+
+        log.info(`connecting to ${els.elHost.value} VPN "${cfg.vpn}"`);
+        serviceSolace.connect(cfg, els.elHost.value, els.elSolPass.value, clientName);
+        return true;
     }
 
     // Connect Solace
@@ -472,48 +544,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         if (appState.isConnected) {
             serviceSolace.disconnect();
         } else {
-            if (!validateSolace()) return;
-            opts.onBeforeConnect?.();
-            // Match the other Advanced Settings fields: read live from input at
-            // connect time. A separate Save click persists to localStorage, but
-            // the *current session* uses whatever the modal shows right now.
-            const maxMessages = validateMaxMessages();
-            if (maxMessages !== null) {
-                eventBus.emit('config:max-messages-changed', { value: maxMessages });
-            }
-
-            // Trim defensively — Enter-to-connect can fire without a prior
-            // blur, in which case the normalize-on-blur handler hasn't run.
-            const clientNameId = els.elSolClientNameId.value.trim();
-            const cfg: SolaceConfig = {
-                protocol: els.elSolProtocol.value,
-                port: els.elSolPort.value,
-                urlPath: els.elSolUrlPath.value,
-                vpn: els.elSolVpn.value,
-                user: els.elSolUser.value,
-                authMode: ui.getAuthMode() as 'basic' | 'oauth',
-                connectRetries: parseInt(els.elConnectRetries.value, 10),
-                connectTimeout: parseInt(els.elConnectTimeout.value, 10),
-                reconnectRetries: parseInt(els.elReconnectRetries.value, 10),
-                reconnectWait: parseInt(els.elReconnectWait.value, 10),
-                maxMessagesPerQueue: maxMessages ?? 100,
-                clientNameId
-            };
-
-            // Compose the SDK clientName at connect initiation time so the
-            // embedded timestamp reflects when this session started.
-            const clientName = `SolMsgUtil/${formatConnectTimestamp(new Date())}/${clientNameId}`;
-
-            // Pre-connect UI: clear error, button feedback. Hooks handle the rest.
-            ui.showConnectError(els.elSolError, null);
-            ui.showFeedback(els.btnSolace, 'Connecting...');
-
-            // Stash the cfg + host + password so onConnected can publish
-            // them into AppState.solaceConnection for cross-module consumers
-            // (queue-copy mirrors the password into its source-side panel).
-            lastSolaceAttempt = { host: els.elHost.value, cfg, pass: els.elSolPass.value };
-
-            serviceSolace.connect(cfg, els.elHost.value, els.elSolPass.value, clientName);
+            connectSolace();
         }
     });
 
@@ -543,6 +574,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
                 port: els.elSempPort.value,
                 urlPath: els.elSempUrlPath.value,
                 user: els.elSempUser.value,
+                hosted,
             };
 
             // Pre-connect UI: button spinner state, clear error. The factory's
@@ -582,116 +614,43 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         logger.debug('EventBus: semp:connected -> Updating Input State');
         ui.updateInputState(appState);
     });
+    // Every SEMP teardown resets the button: this form's own disconnect, and
+    // the kernel's when a request gets a 401 (kernel.ts sempFetch), which
+    // clears AppState and emits this without going through the hooks.
     eventBus.on('semp:disconnected', () => {
         logger.debug('EventBus: semp:disconnected -> Updating Input State');
+        resetSempUi();
         ui.updateInputState(appState);
     });
 
     ui.updateInputState(appState);
 
-    // Cross-Module: Handle "Open in Browser" request via EventBus.
-    // A VPN switch is a multi-step async dance: disconnect → wait for teardown →
-    // reconnect → wait for UP. We guard against rapid duplicate clicks with
-    // `opInProgress`; the flag is set when we begin async work and cleared by
-    // every terminal path (success, failure, timeout, disconnect-timeout).
-    let opInProgress = false;
-
-    // Routes the connection to the caller-selected downstream event once
-    // the VPN is live. `returnTo='queue-browser'` (default) emits
-    // `browser:browse-queue`; `returnTo='queue-copy'` emits
-    // `copy:vpn-switched` so queue-copy can navigate back and rewrite
-    // the source queue field.
-    function checkConnection(payload: CheckConnectionRequest): void {
-        const { vpn: targetVpn, queue: targetQueue, returnTo } = payload;
-        logger.info('[Connections] Received Open Request:', targetVpn, targetQueue, returnTo ?? 'queue-browser');
-
-        if (opInProgress) {
-            logger.warn('[Connections] Operation already in progress, ignoring duplicate request');
-            return;
-        }
-
-        const navigateToConnections = () => { if (loadSelf) loadSelf(); };
-
-        const finish = () => {
-            if (returnTo === 'queue-copy') {
-                logger.info('[Connections] Connection Ready. Returning to queue-copy…');
-                eventBus.emit('copy:vpn-switched', { vpn: targetVpn, queue: targetQueue });
-            } else {
-                logger.info('[Connections] Connection Ready. Requesting Browse...');
-                eventBus.emit('browser:browse-queue', { queue: targetQueue });
-            }
-        };
-
-        // Wait for the next `client:connected` (success → finish) or `client:disconnected`
-        // (failure → give up). A 30 s timeout ensures listeners can't leak if the broker
-        // stalls and neither event fires. Clears `opInProgress` on every exit path.
-        function waitForConnect(): void {
-            let onSuccess: () => void;
-            let onFail: () => void;
-            const cleanup = () => {
-                clearTimeout(timer);
-                eventBus.off('client:connected', onSuccess);
-                eventBus.off('client:disconnected', onFail);
-                opInProgress = false;
-            };
-            onSuccess = () => { cleanup(); finish(); };
-            onFail = () => { cleanup(); };
-            const timer = setTimeout(cleanup, 30_000);
-            eventBus.on('client:connected', onSuccess);
-            eventBus.on('client:disconnected', onFail);
-        }
-
-        if (!appState.isConnected) {
-            logger.info('[Connections] Not connected. Auto-connecting...');
-            navigateToConnections();
-            opInProgress = true;
-            els.elSolVpn.value = targetVpn;
-            waitForConnect();
-            els.btnSolace.click();
-        } else if (els.elSolVpn.value === targetVpn) {
-            // Already on the right VPN — synchronous path, no async gate needed.
-            // No navigation: there's nothing to do on the connections page, and
-            // a flicker would be jarring. The caller stays where it is and
-            // receives the finish event in-place.
-            finish();
-        } else {
-            const doSwitch = confirm(`Current VPN is "${els.elSolVpn.value}". Switch to "${targetVpn}" to browse queue?`);
-            if (doSwitch) {
-                // Navigate AFTER the user confirms — otherwise a Cancel
-                // click would strand the user on the connections page
-                // even though they declined the switch.
-                navigateToConnections();
-                opInProgress = true;
-                // Replace the previous arbitrary 500 ms delay with an event-driven
-                // handoff: wait for the actual `client:disconnected` signal (SDK
-                // finished teardown) before initiating the reconnect. 10 s safety
-                // timeout in case the broker hangs on disconnect.
-                let disconnectTimer: ReturnType<typeof setTimeout>;
-                const onDisconnected = () => {
-                    clearTimeout(disconnectTimer);
-                    eventBus.off('client:disconnected', onDisconnected);
-                    els.elSolVpn.value = targetVpn;
-                    waitForConnect();
-                    els.btnSolace.click();
-                };
-                eventBus.on('client:disconnected', onDisconnected);
-                disconnectTimer = setTimeout(() => {
-                    eventBus.off('client:disconnected', onDisconnected);
-                    opInProgress = false;
-                    logger.warn('[Connections] Disconnect timed out (10s); aborting VPN switch');
-                }, 10_000);
-
-                serviceSolace.disconnect();
-            }
-        }
-    }
+    // Cross-module "open this queue" requests: the shared VPN switch, with the
+    // Direct form's own connect. A form that does not validate fails the
+    // switch at once with the reason, rather than waiting out the timeout.
+    const vpnSwitch = createVpnSwitch({
+        eventBus, loadSelf: () => loadSelf?.(), log,
+        mode: {
+            isConnected: () => appState.isConnected,
+            currentVpn: () => els.elSolVpn.value,
+            isConnecting: () => solaceConnecting,
+            connect(vpn: string): void {
+                els.elSolVpn.value = vpn;
+                if (!connectSolace()) {
+                    throw new Error('Fix the highlighted fields in the connection form, then connect again.');
+                }
+            },
+            disconnect: () => serviceSolace.disconnect(),
+            showError: (message: string) => ui.showConnectError(els.elSolError, message),
+        },
+    });
 
     return {
         disconnect() {
             if (appState.isConnected) serviceSolace.disconnect();
             if (appState.isSempConnected) void serviceSemp.disconnect();
         },
-        checkConnection,
+        checkConnection: vpnSwitch.request,
     };
 }
 
@@ -707,17 +666,19 @@ export const ConnectionsModule = {
         //    URL (Solace WebSocket + SEMP HTTP) must route via the gateway proxy
         //    path `/{scheme}/{port}/{host}{urlPath}`. Awaited so the flag is set
         //    before any Connect click can race the probe.
+        //    The verdict's one home is AppState.connConfig.hosted (read with
+        //    isHostedDeployment); the probe has its own deadline, so a stalled
+        //    /hosted cannot keep the page blank.
         const { hosted, conn } = await probeDeployment();
-        setHosted(hosted);
         // This bundle offers Direct only, whatever the gateway advertises. Publish
         // that, so modules deriving their own connection choices (queue-copy's
         // destination) never offer a provisioned mode no session can back.
         if (conn.connModes !== 'direct') {
-            logger.warn(`[Connections] the gateway offers Provisioned sign-in (connModes=${conn.connModes}), `
+            log.warn(`the gateway offers Provisioned sign-in (connModes=${conn.connModes}), `
                 + 'but this bundle is Direct-only. Serve provisioned.html for the sign-in (the gateway does in Provisioned mode).');
         }
-        app.setState('connConfig', DEFAULT_CONN_CONFIG);
-        logger.info(`[Connections] mode = ${hosted ? 'hosted' : 'browser'}`);
+        app.setState('connConfig', { ...DEFAULT_CONN_CONFIG, hosted });
+        log.info(`mode = ${hosted ? 'hosted' : 'browser'}`);
 
         const direct = installDirect(app);
 

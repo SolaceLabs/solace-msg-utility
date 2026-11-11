@@ -76,6 +76,20 @@ export function portProblem(p: string): string | null {
     return /^[0-9]+$/.test(p) && n >= 1 && n <= 65535 ? null : `${quote(p)} is not a port (1 to 65535)`;
 }
 
+/** The schemes a connection may name, TLS first (store.go). */
+export const SEMP_SCHEMES = ['https', 'http'] as const;
+export const CLIENT_SCHEMES = ['wss', 'ws'] as const;
+
+/** schemeOK: blank (TLS), the TLS scheme or the plain one. */
+export function schemeOk(s: string, tls: string, plain: string): boolean {
+    return s === '' || s === tls || s === plain;
+}
+
+/** canonScheme: a save stores the TLS scheme as blank. */
+export function canonScheme(s: string, tls: string): string {
+    return s === tls ? '' : s;
+}
+
 /** checkPasswordPolicy, counted in runes. */
 export function passwordOk(pw: string): boolean {
     const n = [...pw].length;
@@ -101,6 +115,9 @@ export function connectionProblem(c: ConnRec): string | null {
     for (const [key, port] of [['semp.port', c.semp.port], ['client.port', c.client.port]] as const) {
         const p = portProblem(port);
         if (p) return `broker ${b}: ${key} ${p}`;
+    }
+    for (const [key, got, [tls, plain]] of [['semp.scheme', c.semp.scheme ?? '', SEMP_SCHEMES], ['client.scheme', c.client.scheme ?? '', CLIENT_SCHEMES]] as const) {
+        if (!schemeOk(got, tls, plain)) return `broker ${b}: ${key} ${quote(got)} must be ${quote(tls)} or ${quote(plain)}`;
     }
     const seen = new Set<string>();
     for (const v of c.client.msgVpns) {

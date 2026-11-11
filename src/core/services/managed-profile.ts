@@ -25,7 +25,8 @@
  * session ended asks that owner via `rbac:sign-out-requested` rather than
  * clearing the profile itself. See docs/architecture.md.
  */
-import { generateUuid } from '../utils';
+import { generateUuid, sdkClientName } from '../utils';
+import { DEFAULT_MAX_MESSAGES_PER_QUEUE, PROVISIONED_SDK_CONNECT } from '../connections/defaults';
 import { managedErrorMessage, type ManagedResult } from './managed-api';
 import type { DialResponse, ManagedProfile } from './managed-service';
 // Straight from the connection-domain source rather than the `../types` barrel,
@@ -85,12 +86,6 @@ const SMF_PREFIX = '/managed/smf/';
 /** True when `e` is a dial the gateway refused because its session ended. */
 export function isSessionEnded(e: unknown): boolean {
     return Object(e).code === 'unauthenticated';
-}
-
-/** Local-time YYYYMMDDHHMMSS stamp for the SDK clientName. */
-function formatConnectTimestamp(d: Date): string {
-    const p = (n: number) => n.toString().padStart(2, '0');
-    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
 export function createManagedProfile(): ManagedProfileStore {
@@ -166,10 +161,10 @@ export function createManagedProfile(): ManagedProfileStore {
             const clientNameId = generateUuid();
             const cfg: SolaceConfig = {
                 protocol: 'wss', port: '', urlPath: '', vpn: res.data.vpn, user: res.data.user,
-                authMode: 'basic', connectRetries: 1, connectTimeout: 3000, reconnectRetries: 1, reconnectWait: 3000,
-                maxMessagesPerQueue: 100, clientNameId, smfPath: res.data.smfPath,
+                authMode: 'basic', ...PROVISIONED_SDK_CONNECT,
+                maxMessagesPerQueue: DEFAULT_MAX_MESSAGES_PER_QUEUE, clientNameId, smfPath: res.data.smfPath,
             };
-            const clientName = `SolMsgUtil/${formatConnectTimestamp(new Date())}/${clientNameId}`;
+            const clientName = sdkClientName(clientNameId);
             await cb.connect({ kind: 'solace', cfg, broker: target.broker, pass: res.data.pass, clientName });
         },
     };

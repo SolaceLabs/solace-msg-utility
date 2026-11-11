@@ -18,9 +18,22 @@
  * `durationMs` is the time the toast remains fully visible; after it expires we
  * run a short fade-out transition and then remove the node. The container is
  * positioned top-right; additional toasts append below the existing stack.
+ *
+ * Every toast also dispatches `TOAST_EVENT` on `#toast-container` with its
+ * message and type, so the kernel's notification center keeps a record of it
+ * (src/core/components/notification-center/) without any state here.
  */
 
 export type ToastType = 'ok' | 'warn' | 'error' | 'info';
+
+/** Dispatched on `#toast-container` for every toast shown. */
+export const TOAST_EVENT = 'app:toast';
+
+/** The `detail` of a `TOAST_EVENT`. */
+export interface ToastEventDetail {
+    message: string;
+    type: ToastType;
+}
 
 const DEFAULT_DURATION_MS = 1000;
 const FADE_OUT_MS = 200;
@@ -40,6 +53,7 @@ export function showToast(
     toast.textContent = message;
 
     container.appendChild(toast);
+    container.dispatchEvent(new CustomEvent<ToastEventDetail>(TOAST_EVENT, { detail: { message, type } }));
 
     // Next frame: flip to visible so the CSS transition (opacity + translate) runs.
     requestAnimationFrame(() => {

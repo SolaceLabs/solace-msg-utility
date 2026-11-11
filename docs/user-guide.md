@@ -156,6 +156,8 @@ You can bind up to **3 queues simultaneously**. Switch between them using the dr
 
 To stop receiving messages, select a queue and click **Unbind**.
 
+If the broker ends a binding for good (the queue is deleted or its egress is disabled, your permissions change, or an administrator unbinds the client), a toast says `Queue "<name>" was disconnected: <reason>. Bind it again to continue.` The queue leaves the Bound Queues dropdown and frees its slot; if it was on screen, the view moves to the next bound queue. Bind it again once the cause is fixed.
+
 ### Message Table
 
 Messages are displayed in a scrollable table:
@@ -181,7 +183,7 @@ Click any row to see its details in the panel below:
 - **Replication Group Message ID** — If available from the broker
 - **Message Properties** — Standard Solace properties (Delivery Mode, TTL, Priority, Correlation ID, etc.)
 - **Application Properties** — User-defined key/value properties set by the publisher
-- **Content Preview** — The message payload (text, binary, SDT)
+- **Content Preview** -- The message payload as text: TEXT messages, XML content, and binary attachments that hold UTF-8 text. A binary attachment that is not text shows only its size, for example `[Binary payload: 1,234 bytes]`, next to the **Binary** type badge, and its Copy button stays disabled; use **Download Content** to get its bytes.
 - **Show Raw Content** — Opens a modal with the full raw message dump
 
 Copy buttons next to Destination, Repl Grp Msg Id, and Content allow one-click clipboard copy.
@@ -201,7 +203,7 @@ Click the **filter icon** in the header bar to open the filter modal.
 | Message Type | Any, Text, Binary, Map, or Stream |
 | Destination Name | Filter by destination (contains, supports `*` wildcard) |
 | Destination Type | Any, Topic, or Queue |
-| Body Content | Filter by payload content (contains, supports `*` wildcard) |
+| Body Content | Filter by payload content (contains, supports `*` wildcard). Never matches a binary payload that is not text |
 | Properties Filter | Add key/value rows to filter by standard or application properties |
 
 The property filter supports autocomplete for standard Solace properties (App Msg Id, Cache Id, Corr Id, Delivery Count, Delivery Mode, HTTP Encoding, HTTP Type, Priority, Reply To, Sender Id, SeqNumber, TTL, TopicSeqNum).
@@ -216,7 +218,7 @@ The property filter supports autocomplete for standard Solace properties (App Ms
 - **Clear Filter** — Removes all filters and shows all messages
 - **Cancel** — Closes the modal without applying
 
-Modals (filter, forward, raw content, settings, certificate trust helper) can also be dismissed by pressing **Escape** or clicking outside the modal box.
+Modals (filter, forward, raw content, delete confirmation, settings, certificate trust helper) can also be dismissed by pressing **Escape** or clicking outside the modal box.
 
 ### Forwarding Messages
 
@@ -254,16 +256,16 @@ Forwarded messages preserve all original properties (application message ID, cor
 > [!IMPORTANT]
 > Delete is available only when the queue binding has **read-write** permissions (Consume, Modify, Delete, Owner). On read-only queues the delete button is hidden from each row entirely.
 
-- **Single delete**: Click the delete button on a message row. A confirmation dialog appears.
-- **Bulk delete**: Select messages with checkboxes, then click **Delete** in the toolbar. A confirmation dialog shows the count.
+- **Single delete**: Click the delete button on a message row. A confirmation dialog asks `Delete message <id>?`.
+- **Bulk delete**: Select messages with checkboxes, then click **Delete** in the toolbar. The confirmation dialog shows the count.
 
-Deleted messages are removed from the broker queue and the UI immediately.
+**Delete** in the dialog sends the removal; **Cancel**, Escape or a click outside the dialog sends nothing. A toast then reports `Removal requested for N message(s).` and those rows leave the table. The broker does not confirm a removal: a message it did not remove shows up again the next time you bind the queue. If a removal could not be requested, the toast is red and adds `M could not be requested: <reason>`; those rows stay in the table.
 
 ### Downloading Messages
 
 Two download formats are available:
 
-- **Download Content** — Exports only the message payload. Each message becomes a separate file in a ZIP archive named `solace-message-{id}`. If the payload is a known binary format (PDF, PNG, DOCX, etc.) the saved file has no extension — rename it before opening.
+- **Download Content** -- Exports only the message payload. Each message becomes a separate file in a ZIP archive named `solace-message-{id}`. A binary attachment is saved byte for byte (a per-row download is typed with the publisher's HTTP Content-Type, else `application/octet-stream`); TEXT and XML messages are saved as UTF-8 text. The saved file has no extension: rename it (for example to `.pdf` or `.png`) before opening.
 - **Download Full** — Exports the complete message as JSON including all properties, headers, destination, timestamp, and content. Each message becomes `solace-message-{id}-full.json` in a ZIP archive. The JSON shape is:
 
   ```json
@@ -277,9 +279,11 @@ Two download formats are available:
   > [!IMPORTANT]
   > This JSON structure is proprietary to this tool and may change in future releases. If you build automation against it, version-pin the tool or migrate when the format changes.
 
+  A binary payload that is not text is carried as base64, with `"payloadEncoding": "base64"` next to `"payload"`. A text payload stays text and has no `payloadEncoding`.
+
 Both are available as per-row buttons and as bulk toolbar buttons (when messages are selected).
 
-Requires `jszip.min.js` to be present next to the app (see [Shipped Variants](#shipped-variants) for where to get it). Without it the app still runs — only the ZIP download is disabled.
+Requires `jszip.min.js` to be present next to the app (see [Shipped Variants](#shipped-variants) for where to get it). Without it the app still runs -- only the ZIP download is disabled. If a ZIP cannot be built, a red toast says why.
 
 ### Keyboard Shortcuts
 
@@ -301,11 +305,13 @@ Queue Copy moves or copies messages from a source queue to a destination queue (
 The form is split into Source (left, read-only mirror of the primary connection) and Destination (right, editable):
 
 - **Source** cards mirror the primary Broker / SEMP / Client values. Only the Source Queue field is editable. Each card has an **Edit in Connections** button that jumps to the Connections module for credential changes.
-- **Destination** cards accept broker host, SEMP creds, Solace client creds, and the destination target. Two shortcuts live at the top of the Destination Broker card:
+- **Destination** cards accept broker host, SEMP creds, Solace client creds, and the destination target. As in the Connections form, a page served over `https://` without the gateway offers only `wss://` and `https://` there. Two shortcuts live at the top of the Destination Broker card:
   - **Same Solace Broker as source** — destination reuses the primary host + SEMP creds.
   - **Same Message VPN as source** — destination reuses the primary VPN + Solace creds (implies Same Broker).
 
 When Same-VPN is enabled, the destination uses the primary Solace session directly — no second connection is needed.
+
+While the destination Client connection is connecting, the Same Broker / Same VPN shortcuts, the credential choice and the provisioned Broker and Message VPN are locked (hover them for the reason). If the destination changes anyway before the connection comes up -- for example a refresh of your entitlements moves the Message VPN -- the late connection is dropped with "The destination changed while connecting. Connect again.", and a run whose destination connection no longer matches the destination shown is refused at Start.
 
 ### Destination credentials (Provisioned sessions)
 
@@ -325,7 +331,11 @@ Choose one of two targets:
 - **Queue** -- point-to-point delivery; pick an existing destination queue (or type the name). A **Pick** button opens a queue selector populated via SEMP. In a Provisioned session it lists only queues you may **write** to on the destination broker.
 - **Topic** — fan-out to subscribers of the named topic.
 
+The destination name is checked as you type against the rules the messaging API applies: no empty level (a `/` at the start, at the end, or doubled), a `*` only at the end of a level, no reserved `#P2P/` prefix, and at most 250 bytes for a topic or 241 for a queue. A name that breaks one shows the reason under the field and keeps **Next** disabled.
+
 Each run is either a **Copy** (messages stay on the source) or a **Move** (messages are removed from the source after successful publish).
+
+**Move removals are not confirmed by the broker.** Each removal is a client acknowledgement the broker does not answer, so a removal that fails on the broker side cannot be detected. After a Move, check the source queue's message count (in the Queue Browser, or with **Refresh** in the modal) to confirm the messages are gone.
 
 ### Important considerations
 
@@ -342,6 +352,7 @@ The modal's top card lists operational constraints:
 Clicking **Start Copy** opens a two-phase modal:
 
 1. **Verify** — SEMP v1 is probed for the source queue's count, size, quota, max-msg-size, oldest-msg-id, newest-msg-id, and access-type. If SEMP is unavailable, the module falls back to a temporary QueueBrowser bind that accumulates count + oldest/newest IDs from the browsed messages and reads the access-type from the SDK.
+   The temporary bind must answer within 10 s; once bound it keeps counting until no message has arrived for 2 s, however deep the queue. On a queue that is still being fed, stop it with **Cancel** or Esc.
 2. **Run** — after you confirm, messages stream from source to destination. Progress counters update live; a per-message ACK is awaited before the next publish. In Move mode, each source message is removed immediately after its publish ACK lands (not batched at the end). The run stops when the recorded newest-msg-id is reached, then completes.
 
 The snapshot taken in step 1 is treated as immutable — the engine copies oldest → newest in one pass, then stops. Messages that arrive on the source *after* verify are out of scope for the current run.
@@ -357,7 +368,7 @@ The snapshot taken in step 1 is treated as immutable — the engine copies oldes
 **Stop conditions and statuses.** The run reports one of three final statuses:
 
 - **Completed** — every message from oldest to newest was copied/moved successfully.
-- **Cancelled** — you clicked Cancel; the modal shows the partial count.
+- **Cancelled** -- you clicked Cancel or pressed Esc; the modal shows the partial count. Esc behaves exactly like Cancel: during Verify it stops the probe and closes the dialog; during a run it asks the run to stop, and the dialog stays open until it has.
 - **Failed** — surfaces with a specific error message. The most common causes:
   - *Source drift:* the first browsed message ID doesn't match the recorded oldest. The queue contents changed between verify and run.
   - *Recorded newest consumed:* a message ID greater than the recorded newest arrived before the engine reached the recorded newest itself, implying someone else consumed the recorded newest message before our run.
@@ -485,10 +496,10 @@ Administration is a **separate app**, not a pair of extra sidebar entries in the
 
 Signed in there, you get four modules:
 
-- **User Management** -- list, add, edit, and delete users. Each row's pencil icon edits the user and the red bin icon deletes them (hover for the name). For each user you set the username (letters, digits and `. _ @ -`, up to 64, not only dots), password (12 to 128 characters), the **Administrator** flag, and the **Operate** / **Read-only** entitlement rows (each row is a *brokers / msgVpns / queues* glob, e.g. `* / vpn-prod / orders.*`, under the column names **Brokers**, **Message VPNs** and **Queues**). An empty list says what it means: with no Operate rows the user changes no queue, and with no Read-only rows either they can sign in but reach no broker. The **Administrator** flag gives no broker access by itself; an administrator needs rows like anyone else. Leave the password blank when editing to keep the current one. **Add user** refuses a username that already exists; use that user's pencil icon to change them. The last remaining administrator cannot be deleted or have the flag removed (to avoid locking everyone out). Setting a user's password, changing their Administrator flag or deleting them signs that user out everywhere. Under **Modules this user may open**, **Deployment default** (ticked for new users) gives the user whatever the gateway settings give everyone, shown greyed out; untick it to choose their own modules. A module tagged *(not offered)* is switched off for the whole deployment in Gateway Settings, so giving it has no effect until it is offered. The **Permission test** card under the list shows what a saved user gets: pick the user, type a broker, Message VPN and queue, and it shows **Operate** (browse, forward, delete, copy into the queue), **Read-only** (browse and forward), **Queue hidden** (the VPN is reachable but no row's queue pattern matches) or **No access**, with the row that decides it and the modules the user may open. It matches names exactly, the way the gateway and the app do (case-sensitive; `*` is a wildcard only in the rows). The broker's own queue permissions still apply, and the broker and VPN must be in Connection Management to be reached.
+- **User Management** -- list, add, edit, and delete users. Each row's pencil icon edits the user and the red bin icon deletes them after a confirmation (hover for the name). For each user you set the username (letters, digits and `. _ @ -`, up to 64, not only dots), password (12 to 128 characters), the **Administrator** flag, and the **Operate** / **Read-only** entitlement rows (each row is a *brokers / msgVpns / queues* glob, e.g. `* / vpn-prod / orders.*`, under the column names **Brokers**, **Message VPNs** and **Queues**). An empty list says what it means: with no Operate rows the user changes no queue, and with no Read-only rows either they can sign in but reach no broker. The **Administrator** flag gives no broker access by itself; an administrator needs rows like anyone else. Leave the password blank when editing to keep the current one. **Add user** refuses a username that already exists; use that user's pencil icon to change them. The last remaining administrator cannot be deleted or have the flag removed (to avoid locking everyone out). Setting a user's password, changing their Administrator flag or deleting them signs that user out everywhere. Under **Modules this user may open**, **Deployment default** (ticked for new users) gives the user whatever the gateway settings give everyone, shown greyed out; untick it to choose their own modules. A module tagged *(not offered)* is switched off for the whole deployment in Gateway Settings, so giving it has no effect until it is offered. The **Permission test** card under the list shows what a saved user gets: pick the user, type a broker, Message VPN and queue, and it shows **Operate** (browse, forward, delete, copy into the queue), **Read-only** (browse and forward), **Queue hidden** (the VPN is reachable but no row's queue pattern matches) or **No access**, with the row that decides it and the modules the user may open. It matches names exactly, the way the gateway and the app do (case-sensitive; `*` is a wildcard only in the rows). The broker's own queue permissions still apply, and the broker and VPN must be in Connection Management to be reached.
 - **Connection Management** -- list, add, edit, and delete broker connections, with the same pencil and bin icons on each row. For each connection you set the broker name, hostname, the **SEMP** account (port / username / password), the **client** port, and one or more **Message VPNs** (columns **Message VPN**, **Client username**, **Client password**; a broker with none is reachable by no one). Use a **read-only or least-privilege SEMP account**. Passwords are sent to the gateway over TLS and kept in its encrypted store; they are never shown again. Leave a password field blank when editing to keep the stored one. A Message VPN's stored password is matched by its name, so a VPN you add or rename needs its password typed in; **Add connection** refuses a broker name that already exists. The hostname is a bare host name or IP address (no `https://`, port or path), the SEMP port is required once a SEMP username is set, and the client port once a Message VPN is listed; the gateway refuses a save that breaks these rules and says which.
 - **Settings** -- the gateway's own settings (its `config.yaml`): which connection tabs the app offers (Provisioned only, or Direct and Provisioned; leaving Provisioned mode is done in `config.yaml` on the host), the client access list, session limits, the sign-in throttle, which modules signed-in users may be given and what a user without their own list gets, the log level, and the file and TLS paths. **Save** applies most changes at once; settings tagged **restart** are saved but take effect only when the gateway restarts, and a banner lists the saved ones still waiting. The file and TLS paths, tagged **edit on host**, are shown but cannot be changed here: edit `config.yaml` on the gateway host and restart. If the gateway cannot read its `config.yaml`, the page says so instead of showing the settings. The gateway refuses an access list that would shut out your own address (the error names it), and refuses any save after someone edited the file directly on the gateway host: a banner says so and Save stays off until the gateway is restarted.
-- **Backup & Restore** -- copies of the users, connections and settings, each encrypted with a passphrase (12 to 128 characters) that you need again to restore it. **Export** downloads one. In **Saved backups**, each backup's download icon saves it as written (it opens with the schedule's passphrase). **Import** takes a file, or a saved backup's restore icon, and its passphrase; **Preview** lists what each section would add, change and remove, and you choose per section: **Skip**, **Merge** (add and update, keep the rest), or **Replace** (settings: Skip or Replace). Every choice starts at Skip, and **Import** asks before it applies anything. A warning shows when the users choice would change your own account; the import then signs you out. **Scheduled backup** sets how often the gateway writes a backup into its backup directory (hourly, daily, weekly or monthly, in UTC), how many to keep, and the passphrase (leave it blank when editing to keep the current one); **Back up now** writes one at once, and **Remove schedule** stops them (saved backups stay). The page shows the next and last backup, and a banner when the gateway cannot write to the directory. See [Back up and restore](provisioned-mode.md#back-up-and-restore).
+- **Backup & Restore** -- copies of the users, connections and settings, each encrypted with a passphrase (12 to 128 characters) that you need again to restore it. **Export** downloads one. In **Saved backups**, each backup's download icon saves it as written (it opens with the schedule's passphrase). **Import** takes a file, or a saved backup's restore icon, and its passphrase; **Preview** lists what each section would add, change and remove, and you choose per section: **Skip**, **Merge** (add and update, keep the rest), or **Replace** (settings: Skip or Replace). Every choice starts at Skip, and **Import** asks before it applies anything. A warning shows when the users choice would change your own account; the import then signs you out. **Scheduled backup** sets how often the gateway writes a backup into its backup directory (hourly, daily, weekly or monthly, in UTC), how many to keep, and the passphrase (leave it blank when editing to keep the current one); **Back up now** writes one at once, and **Remove schedule** stops them after a confirmation (saved backups stay). The page shows the next and last backup, and a banner when the gateway cannot write to the directory. See [Back up and restore](provisioned-mode.md#back-up-and-restore).
 
 **Searching the lists.** The search box above the users list (by username) and the connections list (by broker or hostname) narrows it as you type. It finds the text anywhere in the name, ignores case, and `*` matches any run of characters in between: `ops*prod` finds `ops-eu-prod` but not `prod-ops`. The search keeps its text across **Refresh**. It only narrows what is shown; it is not the stricter matching used by entitlement rows.
 

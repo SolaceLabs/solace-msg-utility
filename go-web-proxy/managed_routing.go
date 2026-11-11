@@ -23,7 +23,9 @@ func newManagedRouting(cfg config, lv *live, src configSource, upstream http.Rou
 	if !cfg.provisioned() {
 		return nil, nil
 	}
-	h, err := newHasher(passwordIter, runtime.NumCPU())
+	// GOMAXPROCS honours the container's CPU quota (NumCPU does not); half of
+	// it leaves the rest for the relay, the sockets and the files.
+	h, err := newHasher(passwordIter, max(runtime.GOMAXPROCS(0)/2, 1))
 	if err != nil {
 		return nil, fmt.Errorf("password hasher: %w", err)
 	}
@@ -37,27 +39,27 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	st, err := loadStore(storeOptions{
 		usersPath: cfg.usersFile, connsPath: cfg.connectionsFile, keyPath: cfg.storeKeyFile,
 		schedulePath: schedulePath, hasher: h, getenv: getenv,
-	}, logger)
+	}, logger.With("component", "store"))
 	if err != nil {
 		return nil, err
 	}
-	sf := newSettingsFile(src, cfg, lv, logger)
-	backups, err := newBackupService(cfg.backupDir, schedulePath, st, sf, h, now, logger)
+	sf := newSettingsFile(src, cfg, lv, logger.With("component", "settings"))
+	backups, err := newBackupService(cfg.backupDir, schedulePath, st, sf, h, now, logger.With("component", "backup"))
 	if err != nil {
 		return nil, err
 	}
 	ss := newSessions(lv.sessionLimits, now)
-	th := newThrottle(lv.loginLimits, now, logger)
+	th := newThrottle(lv.loginLimits, now, logger.With("component", "throttle"))
 	// Revocation: open SMF sockets close when their session is ended, their
 	// user changes, or a store edit takes their VPN away (sockets.go).
 	sockets := newSocketRegistry(func(user, broker, vpn string) bool {
 		_, ok := st.smfTarget(user, broker, vpn)
 		return ok
-	}, logger)
+	}, logger.With("component", "smf"))
 	ss.onDrop, ss.onDropUser = sockets.closeSession, sockets.closeUser
 	st.onChange = sockets.recheck
 	connects := newRateWindow(connectsPerWindow, connectWindow, now)
-	pages, err := newAuthPages(st, ss, th, lv, logger)
+	pages, err := newAuthPages(st, ss, th, lv, logger.With("component", "signin"))
 	if err != nil {
 		return nil, fmt.Errorf("sign-in page template: %w", err)
 	}
@@ -65,18 +67,16 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	// it reads per request: the settings page can change it.
 	routes := &managedRoutes{
 		api: newManagedHandler(st, ss, th, lv, sf, backups, managedEndpoints{
-			relay: newSEMPRelay(st, upstream, logger),
-			smf:   newSMFGate(st, ss, sockets, connects, upstream, logger),
-			dial:  newDialer(st, connects, logger),
-		}, logger),
+			relay: newSEMPRelay(st, upstream, logger.With("component", "relay")),
+			smf:   newSMFGate(st, ss, sockets, connects, upstream, logger.With("component", "smf")),
+			dial:  newDialer(st, connects, logger.With("component", "dial")),
+		}, logger.With("component", "managed")),
 		pages:     pages,
 		gateApp:   pages.gateApp,
 		gateAdmin: pages.gateAdmin,
 		gateRelay: gateDirect(lv),
 		backups:   backups,
 	}
-	logger.Info("provisioned mode enabled", "users", cfg.usersFile, "connections", cfg.connectionsFile,
-		"session_idle", cfg.session.idle, "session_absolute", cfg.session.absolute, "app_gated", cfg.connModes == connProvisioned)
 	return routes, nil
 }
 

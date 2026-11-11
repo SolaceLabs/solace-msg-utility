@@ -1,7 +1,9 @@
 import { state, ingestMessage, getMessages, shouldShowMessage } from './state.js';
-import { ui } from './ui-core.js';
+import { ui, NOTICE_TOAST_MS } from './ui-core.js';
 import { showPayload } from './features.js';
+import { attachmentBytes, classifyAttachment } from './payload.js';
 import { showToast } from '../../core/toast';
+import { solaceErrorText } from '../../core/utils';
 import { logger } from '../../core/logger';
 
 declare const solace: any;
@@ -51,6 +53,32 @@ const STANDARD_PROPERTY_GETTERS: Array<[string, (m: any) => unknown]> = [
 ];
 
 /**
+ * The body as the payload flavor stores it: `content` is what the details pane
+ * shows; a binary attachment also keeps its original `bytes`, and `binary`
+ * marks a payload that is not text (see payload.ts). `contentType` is the
+ * publisher's HTTP Content-Type, a hint for the text/binary verdict.
+ */
+function extractPayload(msg: any, contentType: string | undefined): { content: string; bytes?: Uint8Array; binary: boolean } {
+    const sdtCnt = msg.getSdtContainer();
+    if (sdtCnt !== null) {
+        let content: string;
+        if (sdtCnt.getType() === solace.SDTFieldType.STRING) {
+            content = sdtCnt.getValue();
+        } else if (sdtCnt.getType() === solace.SDTFieldType.MAP) {
+            content = '[SDT Map Data - Not Supported Yet]';
+        } else if (sdtCnt.getType() === solace.SDTFieldType.STREAM) {
+            content = '[SDT Stream Data - Not Supported Yet]';
+        } else {
+            content = '[SDT Unknown Data - Not Supported Yet]';
+        }
+        return { content, binary: false };
+    }
+    const attachment = msg.getBinaryAttachment();
+    if (attachment) return classifyAttachment(attachmentBytes(attachment), contentType);
+    return { content: msg.getXmlContent() || '', binary: false };
+}
+
+/**
  * Queue Browser service events.
  * Factory — no window.App references.
  * Uses wire() to receive a reference to service.disconnectBrowser (breaks circular dep).
@@ -84,29 +112,48 @@ export function createServiceEvents() {
         showToast(`Queue "${queueName}" bound`, 'ok');
     }
 
+    // Free a binding's slot through the service (disconnect + drop its store).
+    // wire() is always called before any browser can connect, so _disconnectBrowser
+    // is guaranteed non-null here. Throw to surface missing wire() calls early.
+    function dropBrowser(queueName: string) {
+        if (!_disconnectBrowser) throw new Error('wire() not called before a browser event');
+        _disconnectBrowser(queueName);
+    }
+
     function onConnectFailed(queueName: string, err: any) {
         logger.error(`[${queueName}] Connect Failed:`, err);
+        const reason = solaceErrorText(err, 'Unknown Error');
 
         // Show Inline Error for binding
-        ui.showBindError(`Connection Failed: ${err.message || 'Unknown Error'}`);
+        ui.showBindError(`Connection Failed: ${reason}`);
 
         // If active view
         if (state.currentQueue === queueName) {
-            ui.showBrowserError(`Connection Failed: ${err.message || 'Unknown Error'}`);
+            ui.showBrowserError(`Connection Failed: ${reason}`);
         }
 
         // Cleanup browser instance so it can be retried.
-        // wire() is always called before any browser can connect, so _disconnectBrowser
-        // is guaranteed non-null here. Throw to surface missing wire() calls early.
-        if (!_disconnectBrowser) throw new Error('wire() not called before onConnectFailed');
-        _disconnectBrowser(queueName);
+        dropBrowser(queueName);
     }
 
     function onBrowserDown(queueName: string, err: any) {
         logger.error(`[${queueName}] Browser Down:`, err);
-        if (state.currentQueue === queueName) {
-            ui.showBrowserError(`Browser connection error: ${err.message || err}`);
-        }
+        // A DOWN for a queue that is no longer bound (unbound, or cleared with the
+        // session) is stale: there is no slot to free and nothing to tell the user.
+        if (!state.browserInstances.has(queueName)) return;
+
+        // The SDK re-binds by itself on retryable conditions and fires UP again.
+        // DOWN_ERROR means the broker ended the binding for good (permissions
+        // changed, egress disabled, queue deleted, admin unbind): free its slot,
+        // drop it from the bound list (moving the view on if it is on screen) and
+        // tell the user to bind it again.
+        dropBrowser(queueName);
+        ui.removeBoundQueue(queueName);
+        showToast(
+            `Queue "${queueName}" was disconnected: ${solaceErrorText(err, 'no reason given')}. Bind it again to continue.`,
+            'warn',
+            NOTICE_TOAST_MS,
+        );
     }
 
     function onGmDisabled(queueName: string) {
@@ -125,38 +172,6 @@ export function createServiceEvents() {
             else if (msg.getType() === solace.MessageType.STREAM) typeStr = 'Stream';
         } catch (e) {
             logger.warn('Failed to determine message type', e);
-        }
-
-        // Safely extract content — payload flavor only. In the no-payload flavor the body
-        // is never decoded, so it can never reach the message object stored in state; it
-        // stays completely inaccessible. Forward/Delete operate on _originalMsg, not this string.
-        let contentStr = '';
-        if (showPayload()) {
-            const attachment = msg.getBinaryAttachment();
-            const sdtCnt = msg.getSdtContainer();
-            if (sdtCnt !== null) {
-                if (sdtCnt.getType() === solace.SDTFieldType.STRING) {
-                    contentStr = sdtCnt.getValue();
-                } else if (sdtCnt.getType() === solace.SDTFieldType.MAP) {
-                    contentStr = '[SDT Map Data - Not Supported Yet]';
-                } else if (sdtCnt.getType() === solace.SDTFieldType.STREAM) {
-                    contentStr = '[SDT Stream Data - Not Supported Yet]';
-                } else {
-                    contentStr = '[SDT Unknown Data - Not Supported Yet]';
-                }
-            } else if (attachment) {
-                if (typeof attachment === 'string') {
-                    contentStr = attachment;
-                } else if (attachment instanceof Uint8Array || attachment instanceof ArrayBuffer) {
-                    try {
-                        contentStr = new TextDecoder().decode(attachment);
-                    } catch (e) { contentStr = '[Binary Data Error]'; }
-                } else {
-                    contentStr = '[Unknown Binary Data]';
-                }
-            } else {
-                contentStr = msg.getXmlContent() || '';
-            }
         }
 
         // TIMESTAMP Handling - Sender Timestamp preference
@@ -183,8 +198,9 @@ export function createServiceEvents() {
             logger.warn('Failed to extract timestamp', e);
         }
 
+        const id = msg.getGuaranteedMessageId() ? msg.getGuaranteedMessageId().toString() : 'N/A';
         const m: any = {
-            id: msg.getGuaranteedMessageId() ? msg.getGuaranteedMessageId().toString() : 'N/A',
+            id,
             date: dateStr,
             dateMs,
             size: msg.smfHeader ? msg.smfHeader.messageLength : 0,
@@ -218,16 +234,19 @@ export function createServiceEvents() {
                         }
                     });
                     return obj;
-                } catch (e) { return {}; }
+                } catch (e) {
+                    logger.warn(`[${queueName}] Failed to read the user properties of message ${id}; showing none:`, e);
+                    return {};
+                }
             })(),
             _originalMsg: msg // Store original for details
         };
 
-        // Payload flavor only: attach the decoded body. The no-payload flavor leaves
-        // `content` off the stored object entirely, so the body is never accessible
-        // through app state.
+        // Payload flavor only: decode the body onto the stored message. The no-payload
+        // flavor never decodes it, so neither its text nor its bytes ever reach app
+        // state. Forward/Delete operate on _originalMsg, not on these fields.
         if (showPayload()) {
-            m.content = contentStr;
+            Object.assign(m, extractPayload(msg, m.msgProperties['HTTP Type']));
         }
 
         // Store in State — atomic ingest enforces the moving-window cap and keeps

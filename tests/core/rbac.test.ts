@@ -1,30 +1,19 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { matchGlob, isModuleVisible, isVpnVisible, isQueueVisible, canOperate, explainAccess } from '../../src/core/rbac';
 import type { ManagedSession, QGlob } from '../../src/core/types';
+import { REPO_ROOT } from '../helpers/sources';
 
 /**
- * Cross-language conformance vector for matchGlob. This MUST stay in lockstep
- * with go-web-proxy/rbac_test.go's equivalent table so the client re-filter and
- * the proxy entitlement filter agree byte-for-byte. Globs are case-sensitive.
+ * Cross-language conformance vector for matchGlob, kept once: the `glob` rows
+ * of go-web-proxy/testdata/contract/validation.json, which
+ * go-web-proxy/rbac_test.go reads too. So the client re-filter, the demo's fake
+ * gateway (src/mock-broker/gateway/store.ts, which uses this matchGlob) and the
+ * gateway's entitlement filter agree byte-for-byte. Globs are case-sensitive.
  */
-const GLOB_CONFORMANCE: ReadonlyArray<[pattern: string, value: string, expected: boolean]> = [
-    ['*', 'anything', true],
-    ['*', '', true],
-    ['', '', true],
-    ['', 'x', false],
-    ['queue1', 'queue1', true],
-    ['queue1', 'queue2', false],
-    ['broker-group*', 'broker-group-prod', true],
-    ['broker-group*', 'other', false],
-    ['*prod', 'us-prod', true],
-    ['*prod', 'prod-us', false],
-    ['orders.*', 'orders.new', true],
-    ['orders.*', 'ordersXnew', false],   // '.' is literal, not regex-any
-    ['a*b*c', 'aXXbYYc', true],
-    ['a*b*c', 'aXXc', false],
-    ['Order*', 'order-secret', false],   // case-sensitive: must not leak
-    ['Order*', 'Order-1', true],
-];
+const SHARED = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'go-web-proxy/testdata/contract/validation.json'), 'utf-8')).glob;
+const GLOB_CONFORMANCE: [pattern: string, value: string, expected: boolean][] = Array.isArray(SHARED) ? SHARED : [];
 
 function session(over: Partial<ManagedSession> = {}): ManagedSession {
     return {
@@ -42,6 +31,15 @@ function session(over: Partial<ManagedSession> = {}): ManagedSession {
 const ALL: QGlob = { brokers: '*', msgVpns: '*', queues: '*' };
 
 describe('core/rbac — matchGlob', () => {
+    it('reads the shared vector: [pattern, value, expected] rows, matches and misses alike', () => {
+        expect(SHARED, 'validation.json carries the "glob" rows go-web-proxy/rbac_test.go reads too').toBeInstanceOf(Array);
+        expect(GLOB_CONFORMANCE.length).toBeGreaterThan(0);
+        for (const row of GLOB_CONFORMANCE) {
+            expect([row.length, typeof row[0], typeof row[1], typeof row[2]]).toEqual([3, 'string', 'string', 'boolean']);
+        }
+        expect(new Set(GLOB_CONFORMANCE.map(([, , expected]) => expected))).toEqual(new Set([true, false]));
+    });
+
     it.each(GLOB_CONFORMANCE)('matchGlob(%j, %j) === %j', (pattern, value, expected) => {
         expect(matchGlob(pattern, value)).toBe(expected);
     });

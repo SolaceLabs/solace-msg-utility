@@ -1,34 +1,34 @@
 /**
- * Hosted-mode singleton.
+ * Hosted-mode URL routing.
  *
  * When the PWA is deployed behind the Go gateway in `go-web-proxy/`, the
- * gateway exposes `/hosted` returning `true`. The connections module probes
- * this endpoint at startup and flips the singleton on; URL builders below
- * then route every broker-bound URL through the gateway proxy path scheme:
+ * gateway exposes `/hosted` returning `{ hosted: true, ... }`. The connections
+ * module probes it once at install and publishes the verdict as
+ * `AppState.connConfig.hosted` -- the single home of that fact. Every reader
+ * passes it in explicitly (`isHostedDeployment(appState)`, or a connection
+ * config's `hosted` field for the pure service factories), so this file holds
+ * no state. In hosted mode every broker-bound URL is routed through the gateway
+ * proxy path scheme:
  *
  *     {pageOrigin}/{scheme}/{port}/{host}{urlPath}
  *
- * scheme ∈ { http, https, ws, wss } and the page-origin scheme is upgraded
+ * scheme in { http, https, ws, wss } and the page-origin scheme is upgraded
  * to wss/ws for WebSocket connections (when the page is https/http).
  *
- * Direct mode (`hostedMode === false`, the default) preserves the original
- * `${scheme}://${host}:${port}${urlPath}` shape — same as a standalone
+ * Direct mode (not hosted, the default) preserves the original
+ * `${scheme}://${host}:${port}${urlPath}` shape -- same as a standalone
  * deployment without a gateway.
- *
- * Module-scoped state mirrors the precedent in `./logger.ts` (`let
- * currentLevel` + setter/getter pair).
  */
 import { normalizeUrlPath } from './utils';
-import { coerceConnConfig, DEFAULT_CONN_CONFIG, type ConnDeploymentConfig } from './connections/conn-modes';
+import { logger } from './logger';
+import { HOSTED_PROBE_TIMEOUT_MS, raceDeadline } from './timing';
+import { coerceConnConfig, DEFAULT_CONN_CONFIG, type ConnDeploymentConfig, type DeploymentConfig } from './connections/conn-modes';
 
-let hostedMode = false;
+const log = logger.withTag('hosted');
 
-export function isHosted(): boolean {
-    return hostedMode;
-}
-
-export function setHosted(v: boolean): void {
-    hostedMode = v;
+/** The published `/hosted` verdict: false until the probe has answered, and outside a gateway. */
+export function isHostedDeployment(state: { connConfig?: DeploymentConfig }): boolean {
+    return state.connConfig?.hosted === true;
 }
 
 /** Result of probing the gateway `/hosted` endpoint. */
@@ -43,42 +43,46 @@ export interface DeploymentInfo {
  *
  * The current gateway returns JSON `{ hosted:true, connModes, defaultConn }`; a
  * legacy gateway may return plaintext `'true'`/`'false'`. Any non-200,
- * non-hosted, malformed, or network-error outcome resolves to
- * `{ hosted:false, conn: DEFAULT_CONN_CONFIG }` (Direct only) — so a
- * static/non-hosted deployment never surfaces Managed. A legacy plaintext
+ * non-hosted, malformed, timed-out (`HOSTED_PROBE_TIMEOUT_MS`) or network-error
+ * outcome resolves to `{ hosted:false, conn: DEFAULT_CONN_CONFIG }` (Direct
+ * only) -- so a static/non-hosted deployment never surfaces Managed, and a
+ * stalled answer cannot keep the app from rendering. A legacy plaintext
  * `'true'` is treated as hosted with the Direct-only default (Managed requires
- * the JSON contract).
+ * the JSON contract). Each fallback logs why: info for the ordinary no-gateway
+ * answers, warn for an answer that looks broken.
  */
 export async function probeDeployment(): Promise<DeploymentInfo> {
     const notHosted: DeploymentInfo = { hosted: false, conn: DEFAULT_CONN_CONFIG };
     try {
-        const res = await fetch('/hosted', { method: 'GET', cache: 'no-store' });
-        if (!res.ok) return notHosted;
+        const res = await raceDeadline(fetch('/hosted', { method: 'GET', cache: 'no-store' }), HOSTED_PROBE_TIMEOUT_MS);
+        if (!res.ok) {
+            log.info(`/hosted answered HTTP ${res.status}: no gateway, Direct only`);
+            return notHosted;
+        }
         const text = (await res.text()).trim();
         const lower = text.toLowerCase();
         if (lower === 'true') return { hosted: true, conn: DEFAULT_CONN_CONFIG }; // legacy plaintext
-        if (lower === 'false' || lower === '') return notHosted;
+        if (lower === 'false' || lower === '') {
+            log.info(`/hosted answered "${text}": not hosted, Direct only`);
+            return notHosted;
+        }
         let json: unknown;
         try {
             json = JSON.parse(text);
         } catch {
+            log.warn(`/hosted answered neither JSON nor true/false; treating the page as not hosted (Direct only). Body starts: ${text.slice(0, 80)}`);
             return notHosted; // not the legacy contract and not JSON
         }
         const hosted = !!(json && typeof json === 'object' && (json as Record<string, unknown>).hosted === true);
-        if (!hosted) return notHosted;
+        if (!hosted) {
+            log.info('/hosted answered hosted:false: Direct only');
+            return notHosted;
+        }
         return { hosted: true, conn: coerceConnConfig(json) };
-    } catch {
+    } catch (e) {
+        log.warn('/hosted probe failed (network error or no answer in time); treating the page as not hosted (Direct only):', e);
         return notHosted;
     }
-}
-
-/**
- * Back-compat boolean probe (hosted-mode only). Callers that also need the
- * connection-tab config should use `probeDeployment`. Any non-hosted outcome
- * resolves `false` so callers can blindly `setHosted(await probeHosted())`.
- */
-export async function probeHosted(): Promise<boolean> {
-    return (await probeDeployment()).hosted;
 }
 
 /** The plain broker schemes, each with the TLS scheme that replaces it. */
@@ -91,32 +95,33 @@ const TLS_FORM: ReadonlyMap<string, string> = new Map([['ws', 'wss'], ['http', '
  * a page that is not https: a browser blocks an https page's `ws://` and
  * `http://` requests as mixed content.
  */
-export function plainSchemesUsable(): boolean {
-    return hostedMode || window.location.protocol !== 'https:';
+export function plainSchemesUsable(hosted: boolean): boolean {
+    return hosted || window.location.protocol !== 'https:';
 }
 
 /** `scheme`, or its TLS form when this page cannot use the plain one. */
-export function usableScheme(scheme: string): string {
-    return plainSchemesUsable() ? scheme : (TLS_FORM.get(scheme) ?? scheme);
+export function usableScheme(scheme: string, hosted: boolean): string {
+    return plainSchemesUsable(hosted) ? scheme : (TLS_FORM.get(scheme) ?? scheme);
 }
 
 /**
  * Hides the plain options (`ws`, `http`) of an editable protocol select when
  * this page cannot use them, and moves a selected one to its TLS form. Call it
- * after the `/hosted` probe: neither input changes while the page is open. The
+ * after the `/hosted` probe, with its verdict (`isHostedDeployment`): neither
+ * input changes while the page is open. The
  * options are disabled as well, so a browser that still lists a hidden option
  * cannot pick it. Options are never re-enabled: the select's own disabled
  * placeholders stay as the template has them.
  */
-export function limitSchemeOptions(select: HTMLSelectElement): void {
-    if (plainSchemesUsable()) return;
+export function limitSchemeOptions(select: HTMLSelectElement, hosted = false): void {
+    if (plainSchemesUsable(hosted)) return;
     for (const opt of Array.from(select.options)) {
         if (TLS_FORM.has(opt.value)) {
             opt.hidden = true;
             opt.disabled = true;
         }
     }
-    select.value = usableScheme(select.value);
+    select.value = usableScheme(select.value, hosted);
 }
 
 /**
@@ -130,7 +135,8 @@ export function gatewayWsUrl(path: string): string {
 }
 
 /**
- * Build a broker URL appropriate for the current mode.
+ * Build a broker URL appropriate for the deployment (`hosted`, from
+ * `AppState.connConfig`).
  *
  * Direct: `${scheme}://${host}:${port}${normalizedUrlPath}`.
  * Hosted: `${wireScheme}://${pageHost}/${scheme}/${port}/${host}${normalizedUrlPath}`,
@@ -142,10 +148,11 @@ export function buildBrokerUrl(
     host: string,
     port: string | number,
     urlPath: string,
-    isWebSocket = false,
+    isWebSocket: boolean,
+    hosted: boolean,
 ): string {
     const normalized = normalizeUrlPath(urlPath);
-    if (!hostedMode) {
+    if (!hosted) {
         return `${scheme}://${host}:${port}${normalized}`;
     }
     const loc = window.location;

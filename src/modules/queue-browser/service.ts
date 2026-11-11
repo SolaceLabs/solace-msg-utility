@@ -2,10 +2,24 @@ import { state, setBrowser, deleteBrowser } from './state.js';
 import { ui } from './ui-core.js';
 import { MAX_BROWSER_BINDINGS } from './constants.js';
 import { createSolacePublisher, type SolacePublisher, type SendResult } from '../../core/services/solace-publisher';
+import { solaceErrorText } from '../../core/utils';
 import { logger } from '../../core/logger';
 import type { AppContext } from '../../core/types';
 
 declare const solace: any;
+
+/**
+ * Outcome of a delete. The broker does not confirm a removal, so `requested`
+ * counts the removals sent, not the messages gone. `failed` counts the ones
+ * that could not be requested; `error` is the first reason. `ok` is true when
+ * none failed.
+ */
+export interface DeleteResult {
+    ok: boolean;
+    requested: number;
+    failed: number;
+    error?: string;
+}
 
 /**
  * Queue Browser service.
@@ -77,7 +91,7 @@ export function createService(ctx: AppContext, serviceEvents: any) {
             // Clean up state so the queue can be retried
             deleteBrowser(queueName);
             state.messageStore.delete(queueName);
-            return { ok: false, error: `Error creating queue browser: ${e.message}` };
+            return { ok: false, error: `Error creating queue browser: ${solaceErrorText(e, 'Unknown error')}` };
         }
     }
 
@@ -138,19 +152,19 @@ export function createService(ctx: AppContext, serviceEvents: any) {
         return publisher?.isPending(correlationValue) ?? false;
     }
 
-    function deleteMessages(queueName: string, msgIds: string[]): { ok: boolean; count: number; error?: string } {
+    function deleteMessages(queueName: string, msgIds: string[]): DeleteResult {
         if (!queueName || !msgIds || msgIds.length === 0) {
-            return { ok: true, count: 0 };
+            return { ok: true, requested: 0, failed: 0 };
         }
 
         if (!session) {
-            return { ok: false, count: 0, error: 'No active session.' };
+            return { ok: false, requested: 0, failed: msgIds.length, error: 'No active session.' };
         }
 
         const browser = state.browserInstances.get(queueName);
         if (!browser) {
             logger.error('No active browser found for queue', queueName);
-            return { ok: false, count: 0, error: 'Delete failed: Browser not active for this queue.' };
+            return { ok: false, requested: 0, failed: msgIds.length, error: 'Browser not active for this queue.' };
         }
 
         // `browserInstances` and `messageStore` are populated together by createBrowser
@@ -158,38 +172,40 @@ export function createService(ctx: AppContext, serviceEvents: any) {
         // remove the store between the browser-check above and the state write-back
         // below. Bail early instead of letting the final set() silently install a
         // stale array under a key the rest of the module has already abandoned.
-        if (!state.messageStore.has(queueName)) {
+        const store = state.messageStore.get(queueName);
+        if (!store) {
             logger.error('No message store found for queue', queueName);
-            return { ok: false, count: 0, error: 'Delete failed: Message store not available for this queue.' };
+            return { ok: false, requested: 0, failed: msgIds.length, error: 'Message store not available for this queue.' };
         }
 
         logger.info(`[Delete] Starting removal of ${msgIds.length} messages from ${queueName}`);
 
-        // 1. Sort IDs (Smallest to Largest)
-        const sortedIds = msgIds.map(id => Number(id)).sort((a, b) => a - b);
+        // 1. The stored messages to remove, oldest first: the order the browser
+        //    delivered them. An id no longer in the store (the moving window dropped
+        //    it while the user confirmed) cannot be acked.
+        const wanted = new Set(msgIds);
+        const targets = store.filter((m: any) => wanted.has(m.id));
+        let failed = msgIds.length - targets.length;
+        let reason: string | undefined = failed > 0 ? 'No longer in the message list' : undefined;
 
-        // 2. Loop through sorted IDs and Remove
+        // 2. Ack each one by the SDK's own 64-bit id object (a Long), never a JS
+        //    Number: at or above 2^32 the SDK's ack encoder mangles a Number, so the
+        //    ack would name a message that does not exist.
         const removedIds = new Set<string>();
-
-        sortedIds.forEach(id => {
-            const idStr = id.toString();
+        targets.forEach((target: any) => {
             try {
                 const msg = solace.SolclientFactory.createMessage();
-                msg.setGuaranteedMessageId(id);
+                msg.setGuaranteedMessageId(target._originalMsg.getGuaranteedMessageId());
+                browser.removeMessageFromQueue(msg);
 
-                try {
-                    browser.removeMessageFromQueue(msg);
-
-                    // Update UI immediately per row
-                    ui.removeMessageRow(idStr);
-                    removedIds.add(idStr);
-                    logger.debug(`[Delete] Triggered remove for ${idStr}`);
-                } catch (ex) {
-                    logger.error(`[Delete] Remove API call failed for ${idStr}`, ex);
-                }
-
-            } catch (err) {
-                logger.error(`[Delete] Failed to prepare msg ${idStr}`, err);
+                // Update UI immediately per row
+                ui.removeMessageRow(target.id);
+                removedIds.add(target.id);
+                logger.debug(`[Delete] Requested removal of ${target.id}`);
+            } catch (e) {
+                logger.error(`[Delete] Removal request failed for ${target.id} on ${queueName}`, e);
+                failed++;
+                reason ??= solaceErrorText(e, 'Unknown error');
             }
         });
 
@@ -201,11 +217,7 @@ export function createService(ctx: AppContext, serviceEvents: any) {
             ui.updateCounts();
         }
 
-        return {
-            ok: removedIds.size > 0,
-            count: removedIds.size,
-            error: removedIds.size === 0 ? 'No messages were deleted. Check console for errors.' : undefined
-        };
+        return { ok: failed === 0, requested: removedIds.size, failed, error: reason };
     }
 
     return { createBrowser, disconnectBrowser, disconnectAll, forwardMessage, hasInFlightForward, deleteMessages };

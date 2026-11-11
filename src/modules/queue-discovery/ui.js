@@ -1,3 +1,4 @@
+// @ts-nocheck -- 2026-11-11: checkJs backlog (JSDoc types for this file are pending; remove this line once they are in).
 import { INPUT_DEBOUNCE_MS } from '../../core/timing';
 
 /** @type {any} */

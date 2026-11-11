@@ -34,10 +34,12 @@ const savedSettings = async (gw: Gw) => {
 };
 
 /**
- * Codes the fake sends only in a state the contract cannot pin: once a
+ * Codes the fake sends in a state the contract cannot pin: once a
  * control-panel fault is armed, or (backup_unavailable) for a second backup
  * in the same second, which a fixed clock makes certain. Each row sets the
- * state and asks.
+ * state and asks. The relay's upstream_* codes are pinned by the contract
+ * too (the broker's own odd answers); the switches here stand for a broker
+ * the gateway cannot reach or that refuses its credential.
  */
 const FAULTS: Record<string, { status: number; ask: (gw: Gw) => ReturnType<Gw['handle']> }> = {
     backup_unavailable: { status: 409, ask: async () => {
@@ -75,7 +77,9 @@ afterEach(() => {
 
 describe('mock-broker/gateway -- the error codes', () => {
     it('places every code the app has a message for exactly once', () => {
-        const groups = [[...GOLDEN].filter(c => c !== REASON_ONLY), Object.keys(FAULTS), CLIENT, NOT_SIMULATED];
+        // A code the contract pins is placed by the contract, switch or not.
+        const armedOnly = Object.keys(FAULTS).filter(c => !GOLDEN.has(c));
+        const groups = [[...GOLDEN].filter(c => c !== REASON_ONLY), armedOnly, CLIENT, NOT_SIMULATED];
         const placed = groups.flat();
         expect([...placed].sort()).toEqual([...MANAGED_ERROR_CODES].sort());
         expect(new Set(placed).size).toBe(placed.length);

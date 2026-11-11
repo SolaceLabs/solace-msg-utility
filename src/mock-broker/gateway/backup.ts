@@ -171,12 +171,15 @@ function docOf(raw: unknown): BackupDoc {
         }),
         connections: list(o['msg-utility-connections'], x => {
             const c = object(x, ['broker', 'hostname', 'semp', 'client']);
-            const semp = object(c.semp, ['port', 'username', 'password']);
-            const client = object(c.client, ['port', 'msgVpns']);
+            const semp = object(c.semp, ['scheme', 'port', 'username', 'password']);
+            const client = object(c.client, ['scheme', 'port', 'msgVpns']);
+            const sempScheme = string(semp.scheme);
+            const clientScheme = string(client.scheme);
             return {
                 broker: string(c.broker), hostname: string(c.hostname),
-                semp: { port: port(semp.port), username: string(semp.username), password: string(semp.password) },
+                semp: { ...(sempScheme ? { scheme: sempScheme } : {}), port: port(semp.port), username: string(semp.username), password: string(semp.password) },
                 client: {
+                    ...(clientScheme ? { scheme: clientScheme } : {}),
                     port: port(client.port),
                     msgVpns: list(client.msgVpns, v => {
                         const r = object(v, ['name', 'username', 'password']);
@@ -241,8 +244,8 @@ export interface NameDiff { added: string[]; changed: string[]; removed: string[
 
 const canonRows = (rs: QGlob[]) => rs.map(r => [r.brokers, r.msgVpns, r.queues]);
 const canonUser = (u: UserRec) => JSON.stringify([u.username, u.password, u.mustChangePassword, u.admin, canonRows(u.operate), canonRows(u.readOnly), u.modules]);
-const canonConn = (c: ConnRec) => JSON.stringify([c.broker, c.hostname, c.semp.port, c.semp.username, c.semp.password, c.client.port,
-    c.client.msgVpns.map(v => [v.name, v.username, v.password])]);
+const canonConn = (c: ConnRec) => JSON.stringify([c.broker, c.hostname, c.semp.scheme ?? '', c.semp.port, c.semp.username, c.semp.password,
+    c.client.scheme ?? '', c.client.port, c.client.msgVpns.map(v => [v.name, v.username, v.password])]);
 
 /** diffByName with sameRecord: the records as the store file holds them. */
 export function diffByName<T>(cur: T[], next: T[], name: (x: T) => string, canon: (x: T) => string): NameDiff {

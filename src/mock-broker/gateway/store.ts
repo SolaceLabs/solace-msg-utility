@@ -8,7 +8,7 @@
  */
 import { matchGlob } from '../../core/rbac';
 import type { QGlob } from '../../core/types';
-import type { ConnRec, GatewaySeed, ListedUser, ManagedConnRecord, ManagedProfile, UserRec } from './types';
+import type { ConnRec, GatewaySeed, ListedConn, ListedUser, ManagedProfile, UserRec } from './types';
 
 /** The modules block a profile is computed with (configfile.go moduleSettings). */
 export interface ModuleSettings {
@@ -37,13 +37,14 @@ const cloneConn = (c: ConnRec): ConnRec => ({
     broker: c.broker,
     hostname: c.hostname,
     semp: { ...c.semp },
-    client: { port: c.client.port, msgVpns: c.client.msgVpns.map(v => ({ ...v })) },
+    client: { ...c.client, msgVpns: c.client.msgVpns.map(v => ({ ...v })) },
 });
 
 export type UpsertUserResult = { ok: true; dropSessions: boolean } | { ok: false; error: 'blank_password' | 'last_admin' };
 export type DeleteUserResult = 'deleted' | 'not_found' | 'last_admin';
 
-export interface BrokerTarget { host: string; port: string; user: string; pass: string }
+/** A broker address, the scheme to reach it with (https or http, wss or ws) and the credential. */
+export interface BrokerTarget { scheme: string; host: string; port: string; user: string; pass: string }
 
 export function createStore(seed: GatewaySeed, onChange: () => void) {
     let users: UserRec[] = seed['msg-utility-users'].map(u => ({
@@ -85,7 +86,7 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
             const u = findUser(name);
             const c = conns.find(x => x.broker === broker);
             if (!u || !c || c.semp.port === '' || entitledVpns(u, c).length === 0) return null;
-            return { host: c.hostname, port: c.semp.port, user: c.semp.username, pass: c.semp.password };
+            return { scheme: c.semp.scheme || 'https', host: c.hostname, port: c.semp.port, user: c.semp.username, pass: c.semp.password };
         },
 
         /** smfTarget: the VPN's client credential when the user may reach it. */
@@ -93,7 +94,7 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
             const u = findUser(name);
             const c = conns.find(x => x.broker === broker);
             const v = u && c ? entitledVpns(u, c).find(x => x.name === vpn) : undefined;
-            return c && v ? { host: c.hostname, port: c.client.port, user: v.username, pass: v.password } : null;
+            return c && v ? { scheme: c.client.scheme || 'wss', host: c.hostname, port: c.client.port, user: v.username, pass: v.password } : null;
         },
 
         /** isAdmin: null for a deleted user. */
@@ -145,13 +146,17 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
             return 'deleted';
         },
 
-        /** The list the admin app shows: no password. */
-        listConnections(): ManagedConnRecord[] {
+        /** The list the admin app shows: no password, the schemes named. */
+        listConnections(): ListedConn[] {
             return conns.map(c => ({
                 broker: c.broker,
                 hostname: c.hostname,
-                semp: { port: c.semp.port, user: c.semp.username, pass: '' },
-                client: { port: c.client.port, msgVpns: c.client.msgVpns.map(v => ({ name: v.name, user: v.username, pass: '' })) },
+                semp: { scheme: c.semp.scheme || 'https', port: c.semp.port, user: c.semp.username, pass: '' },
+                client: {
+                    scheme: c.client.scheme || 'wss',
+                    port: c.client.port,
+                    msgVpns: c.client.msgVpns.map(v => ({ name: v.name, user: v.username, pass: '' })),
+                },
             }));
         },
 

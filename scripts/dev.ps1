@@ -205,10 +205,29 @@ function Task-build {
 
 function Task-vet {
   $c = Install-Deps 'vet'; if ($c -ne 0) { return $c }
-  # The build strips types without checking them, so tsc --noEmit is the only
-  # thing that catches a type error.
+  # The build strips types without checking them, so tsc is the only thing that
+  # catches a type error: src/ with its .js modules (checkJs), then tests/ and
+  # the vite/vitest configs (tsconfig.test.json).
   $c = Invoke-Logged 'vet' 'npm' @('run','typecheck'); if ($c -ne 0) { return $c }
-  return (Invoke-Logged 'vet' 'go' @('-C',$GoDir,'vet','./...'))
+  $c = Invoke-Logged 'vet' 'npm' @('run','typecheck:tests'); if ($c -ne 0) { return $c }
+  # The house rules a linter can hold (eslint.config.mjs).
+  $c = Invoke-Logged 'vet' 'npm' @('run','lint'); if ($c -ne 0) { return $c }
+  $c = Invoke-Logged 'vet' 'go' @('-C',$GoDir,'vet','./...'); if ($c -ne 0) { return $c }
+  # gofmt -l lists the files gofmt would rewrite and exits 0 either way, so a
+  # listed file is the failure. The selected toolchain's own gofmt (its
+  # GOROOT), like every other Go tool here.
+  $goroot = "$(& go -C $GoDir env GOROOT 2>$null)".Trim()
+  if ($LASTEXITCODE -ne 0 -or -not $goroot) { Write-Note 'vet' 'go env GOROOT failed'; return 1 }
+  $exe = if ((Get-HostOs) -eq 'windows') { 'gofmt.exe' } else { 'gofmt' }
+  $gofmt = Join-Path (Join-Path $goroot 'bin') $exe
+  $unformatted = (& $gofmt -l $GoDir 2>&1 | ForEach-Object { "$_" } | Out-String -Width 4096).Trim()
+  if ($LASTEXITCODE -ne 0) { Write-Note 'vet' $unformatted; return 1 }
+  if ($unformatted) {
+    Write-Note 'vet' 'gofmt would rewrite these (gofmt -w <file>):'
+    Write-Note 'vet' $unformatted
+    return 1
+  }
+  return 0
 }
 
 function Task-test {
@@ -221,6 +240,17 @@ function Task-test {
   } else {
     $c = Invoke-Logged 'test' 'npm' @('run','test:app'); if ($c -ne 0) { return $c }
   }
+  # The race detector needs cgo, so a C compiler: gcc is on both CI runners.
+  # Without one the Go suite still runs, without -race, and the log says so.
+  if (Get-Command gcc -ErrorAction SilentlyContinue) {
+    $env:CGO_ENABLED = '1'
+    try {
+      return (Invoke-Logged 'test' 'go' @('-C',$GoDir,'test','-race','-count=1','./...'))
+    } finally {
+      Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+    }
+  }
+  Write-Note 'test' 'go test: -race skipped, no gcc on PATH'
   return (Invoke-Logged 'test' 'go' @('-C',$GoDir,'test','-count=1','./...'))
 }
 
@@ -234,7 +264,13 @@ function Task-mock {
     Write-Note 'mock' 'mock suite: skipped here, cov runs it in this invocation'
     return 0
   }
-  return (Invoke-Logged 'mock' 'npm' @('run','test:mock'))
+  # With coverage over src/mock-broker/ (vitest.mock.config.ts), reported and
+  # not gated: the demo tree has no threshold yet, but a drop is visible.
+  $c = Invoke-Logged 'mock' 'npm' @('run','test:mock:coverage'); if ($c -ne 0) { return $c }
+  $total = (Select-String -Path (Get-Log 'mock') -Pattern 'All files' | Select-Object -First 1)
+  $totalText = if ($total) { ($total.Line -replace '\s+',' ').Trim() } else { 'unavailable' }
+  Write-Note 'mock' "coverage total (src/mock-broker, no threshold): $totalText"
+  return 0
 }
 
 function Task-cov {
@@ -357,7 +393,7 @@ function Show-Usage {
 usage: dev.ps1 <task>...
 
   build vet test mock cov scan image up down graphify e2e
-  all   = $($All -join ' ')       (what CI runs, as: all scan)
+  all   = $($All -join ' ')       (what CI runs, as: all cov scan)
   full  = $($Full -join ' ')      (pre-tag sweep)
   mock  = the demo broker and fake-gateway suites (tests/mock-broker/)
   e2e   = the gateway in Gateway and Provisioned mode against an existing broker (local only, standalone)

@@ -188,12 +188,11 @@ describe('core/components/queue-picker', () => {
 
         it('surfaces SEMP error pages in the status line', async () => {
             const sempCtx = makeSempCtx();
-            (sempCtx.fetch as any).mockResolvedValue({ ok: false, statusText: 'Forbidden' });
+            (sempCtx.fetch as any).mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden' });
 
             const p = pickQueue(src(sempCtx));
-            await flushAsync();
-
-            expect($<HTMLDivElement>('.picker-status').textContent).toContain('Failed to load VPNs');
+            await vi.waitFor(() =>
+                expect($<HTMLDivElement>('.picker-status').textContent).toContain('Failed to load VPNs'));
             expect($<HTMLDivElement>('.picker-status').textContent).toContain('Forbidden');
 
             $<HTMLButtonElement>('.picker-cancel').click();
@@ -319,7 +318,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['empty-vpn'], { 'empty-vpn': [] });
 
-            const p = pickQueue(src(sempCtx));
+            pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -392,7 +391,7 @@ describe('core/components/queue-picker', () => {
             // VPNs ok; queues fail.
             (sempCtx.fetch as any).mockImplementation(async (url: string) => {
                 if (/\/msgVpns\/[^/]+\/queues/.test(url)) {
-                    return { ok: false, statusText: 'Server Error' };
+                    return { ok: false, status: 500, statusText: 'Server Error' };
                 }
                 return { ok: true, json: async () => ({ data: [{ msgVpnName: 'v' }] }) };
             });
@@ -401,9 +400,8 @@ describe('core/components/queue-picker', () => {
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
-            await flushAsync();
-
-            expect($<HTMLDivElement>('.picker-status').textContent).toContain('Failed to load queues');
+            await vi.waitFor(() =>
+                expect($<HTMLDivElement>('.picker-status').textContent).toContain('Failed to load queues'));
 
             $<HTMLButtonElement>('.picker-cancel').click();
             await p;
@@ -953,11 +951,11 @@ describe('core/components/queue-picker', () => {
             // by `source.key`, so a managed permission/provisioning change — which
             // flips `queueSourceFrom`'s key while the broker baseUrl is unchanged —
             // invalidates the cache and forces a re-read. Same key → cache hit.
-            const listVpns = vi.fn(async function* () { yield { ok: true, data: ['v-only'] }; });
+            const listVpns = vi.fn(async function* () { yield { ok: true as const, data: ['v-only'] }; });
             const keyedSource = (key: string) => ({
                 key,
                 listVpns,
-                listQueues: async function* () { yield { ok: true, data: [] as string[] }; },
+                listQueues: async function* () { yield { ok: true as const, data: [] as string[] }; },
             });
 
             // First open at key 'rbac-1' → fetches.
@@ -1223,9 +1221,10 @@ describe('core/components/queue-picker', () => {
             await Promise.resolve();
 
             // Refresh before first fetch resolves — increments vpnFetchGen,
-            // starts a new fetch that wins.
+            // aborts the first request and starts a new fetch that wins.
             $<HTMLButtonElement>('.picker-vpn-refresh').click();
             await flushAsync();
+            expect((sempCtx.fetch as any).mock.calls[0][1].signal.aborted).toBe(true);
 
             // Resolve the abandoned first fetch with a different result.
             resolveFirst({ ok: true, json: async () => ({ data: [{ msgVpnName: 'stale' }] }) });
@@ -1336,6 +1335,40 @@ describe('core/components/queue-picker', () => {
             resolveQueues({ ok: true, json: async () => ({ data: [{ queueName: 'late-q' }] }) });
             await flushAsync();
             expect(getDialog().hasAttribute('open')).toBe(false);
+        });
+
+        it("a fetch left running by a closed picker is aborted and never writes into the next picker's list or cache", async () => {
+            const ctxA = makeSempCtx({ baseUrl: 'http://broker-a:8080' });
+            let answerA: (v: any) => void = () => {};
+            (ctxA.fetch as any).mockImplementation(() => new Promise<any>(r => { answerA = r; }));
+            const ctxB = makeSempCtx({ baseUrl: 'http://broker-b:8080' });
+            stubVpnsAndQueues(ctxB, ['b-vpn'], {});
+
+            const pA = pickQueue(src(ctxA));
+            await flushAsync();
+            $<HTMLButtonElement>('.picker-cancel').click();
+            expect(await pA).toBeNull();
+            expect((ctxA.fetch as any).mock.calls[0][1].signal.aborted).toBe(true);
+
+            const pB = pickQueue(src(ctxB));
+            await flushAsync();
+            // A's answer was already on its way: it lands while B is open, with
+            // B's generation counters equal to the ones A's loop captured.
+            answerA({ ok: true, json: async () => ({ data: [{ msgVpnName: 'a-vpn' }] }) });
+            await flushAsync();
+
+            $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
+            expect(visibleOptions('.picker-vpn-list')).toEqual(['b-vpn']);
+            $<HTMLButtonElement>('.picker-cancel').click();
+            await pB;
+
+            // B's cache survived: reopening B lists from it without a request.
+            const callsBefore = (ctxB.fetch as any).mock.calls.length;
+            const pB2 = pickQueue(src(ctxB));
+            await flushAsync();
+            expect((ctxB.fetch as any).mock.calls.length).toBe(callsBefore);
+            $<HTMLButtonElement>('.picker-cancel').click();
+            await pB2;
         });
 
         it('VPN fetch that throws after close does not surface a status update', async () => {

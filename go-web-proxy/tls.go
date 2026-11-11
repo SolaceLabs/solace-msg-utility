@@ -21,12 +21,21 @@ import (
 	"time"
 )
 
-// loadOrGenerateServerCert returns the TLS keypair to serve from :443.
-//   - If both files exist, parse them. On parse failure, return an error (do NOT
-//     regenerate over user-supplied material).
-//   - If either file is missing, generate a self-signed ECDSA P-256 cert valid
-//     for 365 days with CN=localhost and SANs DNS:localhost, IP:::1, IP:127.0.0.1.
-//     Write cert (0644) and key (0600), creating parent directories as needed.
+// bootstrapCertValidity is how long a generated pair lasts: long enough to
+// reach the admin console and put a real certificate in place, short enough
+// that no deployment runs on it. It is never renewed.
+const bootstrapCertValidity = 7 * 24 * time.Hour
+
+// loadOrGenerateServerCert returns the TLS keypair the gateway serves.
+//   - Both files exist: parse them. A pair that does not parse stops the
+//     start; the gateway never writes over material it did not make.
+//   - Exactly one exists: stop the start too. Half a pair is the operator's
+//     (a key whose certificate is not issued yet, say), and generating would
+//     replace it.
+//   - Neither: generate a self-signed ECDSA P-256 bootstrap pair, valid for
+//     bootstrapCertValidity, with CN=localhost and SANs DNS:localhost,
+//     IP:::1, IP:127.0.0.1. Write cert (0644) and key (0600), creating parent
+//     directories as needed.
 func loadOrGenerateServerCert(certFile, keyFile string, logger *slog.Logger) (tls.Certificate, error) {
 	certExists := fileExists(certFile)
 	keyExists := fileExists(keyFile)
@@ -39,10 +48,16 @@ func loadOrGenerateServerCert(certFile, keyFile string, logger *slog.Logger) (tl
 		logger.Info("loaded TLS server certificate", "cert_file", certFile, "key_file", keyFile)
 		return cert, nil
 	}
+	if certExists != keyExists {
+		present, missing := certFile, keyFile
+		if keyExists {
+			present, missing = keyFile, certFile
+		}
+		return tls.Certificate{}, fmt.Errorf("TLS material incomplete: %s exists but %s does not. Add the missing file, or remove %s so the gateway generates a self-signed bootstrap pair", present, missing, present)
+	}
 
-	logger.Warn("TLS material missing — generating self-signed certificate",
-		"cert_file", certFile, "cert_exists", certExists,
-		"key_file", keyFile, "key_exists", keyExists,
+	logger.Warn("TLS material missing: generating a self-signed bootstrap certificate",
+		"cert_file", certFile, "key_file", keyFile,
 	)
 
 	cert, err := generateSelfSigned(certFile, keyFile)
@@ -51,11 +66,11 @@ func loadOrGenerateServerCert(certFile, keyFile string, logger *slog.Logger) (tl
 	}
 
 	fp := sha256.Sum256(cert.Certificate[0])
-	logger.Warn("self-signed certificate generated",
+	logger.Warn("self-signed bootstrap certificate generated; it expires and is never renewed: put your own certificate and key in place before then",
 		"cert_file", certFile,
 		"key_file", keyFile,
 		"sha256_fingerprint", formatFingerprint(fp[:]),
-		"validity_days", 365,
+		"validity_days", int(bootstrapCertValidity/(24*time.Hour)),
 	)
 	return cert, nil
 }
@@ -88,7 +103,7 @@ func generateSelfSigned(certFile, keyFile string) (tls.Certificate, error) {
 		SerialNumber:          serial,
 		Subject:               pkix.Name{CommonName: "localhost"},
 		NotBefore:             now.Add(-time.Minute),
-		NotAfter:              now.Add(365 * 24 * time.Hour),
+		NotAfter:              now.Add(bootstrapCertValidity),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
@@ -120,14 +135,30 @@ func generateSelfSigned(certFile, keyFile string) (tls.Certificate, error) {
 	return cert, nil
 }
 
+// writePEM writes block to path through path.partial: the data is synced
+// and closed, and only then renamed into place, so path is either absent or
+// whole. A failed write removes the partial: a truncated file would make the
+// next start refuse "user-supplied material" the gateway wrote itself.
 func writePEM(path string, mode os.FileMode, block *pem.Block) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	partial := path + ".partial"
+	_ = os.Remove(partial) // left by a write that stopped; created afresh with mode
+	f, err := os.OpenFile(partial, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
-		return fmt.Errorf("open %s: %w", path, err)
+		return fmt.Errorf("open %s: %w", partial, err)
 	}
-	defer f.Close()
-	if err := pem.Encode(f, block); err != nil {
-		return fmt.Errorf("encode %s: %w", path, err)
+	err = pem.Encode(f, block)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(partial, path)
+	}
+	if err != nil {
+		_ = os.Remove(partial)
+		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
 }

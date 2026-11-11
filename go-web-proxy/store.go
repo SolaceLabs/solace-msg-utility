@@ -67,15 +67,51 @@ type vpnRec struct {
 	Password string `yaml:"password"` // inside the sealed file; reaches a browser only through dial
 }
 
+// A record's scheme fields name how the gateway reaches the broker: blank is
+// TLS, the default (https for SEMP, wss for SMF), so every record written
+// before the field existed stays on TLS; the plain scheme is an
+// administrator's choice per connection (http for SEMP, ws for SMF). A save
+// stores the TLS scheme as blank (canonScheme), so a record has one spelling
+// either way.
 type clientRec struct {
+	Scheme  string   `yaml:"scheme,omitempty"`
 	Port    flexStr  `yaml:"port"`
 	MsgVpns []vpnRec `yaml:"msgVpns"`
 }
 
 type sempRec struct {
+	Scheme   string  `yaml:"scheme,omitempty"`
 	Port     flexStr `yaml:"port"`
 	Username string  `yaml:"username"`
 	Password string  `yaml:"password"` // inside the sealed file; never reaches a browser
+}
+
+// The schemes a connection may name, TLS first.
+const (
+	sempTLS, sempPlain     = "https", "http"
+	clientTLS, clientPlain = "wss", "ws"
+)
+
+// orTLS is the scheme a record's field stands for: the field, or tls when
+// it is blank.
+func orTLS(s, tls string) string {
+	if s == "" {
+		return tls
+	}
+	return s
+}
+
+// canonScheme is how a save stores a scheme: the TLS default as blank.
+func canonScheme(s, tls string) string {
+	if s == tls {
+		return ""
+	}
+	return s
+}
+
+// schemeOK reports whether s may be stored: blank (TLS), tls or plain.
+func schemeOK(s, tls, plain string) bool {
+	return s == "" || s == tls || s == plain
 }
 
 type connRec struct {
@@ -283,6 +319,14 @@ func validateConn(c connRec) error {
 			return fmt.Errorf("broker %q: %s %w", c.Broker, key, err)
 		}
 	}
+	for _, s := range []struct{ key, got, tls, plain string }{
+		{"semp.scheme", c.Semp.Scheme, sempTLS, sempPlain},
+		{"client.scheme", c.Client.Scheme, clientTLS, clientPlain},
+	} {
+		if !schemeOK(s.got, s.tls, s.plain) {
+			return fmt.Errorf("broker %q: %s %q must be %q or %q", c.Broker, s.key, s.got, s.tls, s.plain)
+		}
+	}
 	vpns := map[string]bool{}
 	for _, v := range c.Client.MsgVpns {
 		if v.Name == "" {
@@ -394,10 +438,11 @@ func entitledVPNs(u *userRec, c connRec) []vpnRec {
 	return out
 }
 
-// brokerTarget is a broker address and the credential the gateway uses or
+// brokerTarget is a broker address, the scheme to reach it with (https or
+// http for SEMP, wss or ws for SMF) and the credential the gateway uses or
 // hands out there. A copy: the store may change while a request runs.
 type brokerTarget struct {
-	host, port, user, pass string
+	scheme, host, port, user, pass string
 }
 
 // sempTarget returns the broker's SEMP address and credential when the user
@@ -414,7 +459,7 @@ func (s *store) sempTarget(username, broker string) (brokerTarget, bool) {
 	}
 	for _, c := range s.conns {
 		if c.Broker == broker && c.Semp.Port != "" && len(entitledVPNs(&u, c)) > 0 {
-			return brokerTarget{host: c.Hostname, port: string(c.Semp.Port), user: c.Semp.Username, pass: c.Semp.Password}, true
+			return brokerTarget{scheme: orTLS(c.Semp.Scheme, sempTLS), host: c.Hostname, port: string(c.Semp.Port), user: c.Semp.Username, pass: c.Semp.Password}, true
 		}
 	}
 	return brokerTarget{}, false
@@ -437,7 +482,7 @@ func (s *store) smfTarget(username, broker, vpn string) (brokerTarget, bool) {
 		}
 		for _, v := range entitledVPNs(&u, c) {
 			if v.Name == vpn {
-				return brokerTarget{host: c.Hostname, port: string(c.Client.Port), user: v.Username, pass: v.Password}, true
+				return brokerTarget{scheme: orTLS(c.Client.Scheme, clientTLS), host: c.Hostname, port: string(c.Client.Port), user: v.Username, pass: v.Password}, true
 			}
 		}
 	}
@@ -453,18 +498,47 @@ func (s *store) isAdmin(username string) (admin, exists bool) {
 	return u.Admin, ok
 }
 
-// checkPassword verifies a sign-in. An unknown user is checked against the
+// passwordCheck is a sign-in's verdict and the record it was made against:
+// hash is the stored hash pw was checked with, so what follows can insist
+// that the record still stands (ifUnchanged, setPassword).
+type passwordCheck struct {
+	ok, mustChange bool
+	hash           string
+}
+
+// verifyPassword checks a sign-in. An unknown user is checked against the
 // hasher's dummy, so both answers take the same time. The hash runs outside
 // the lock. err is set only when the hash could not run (request gone).
-func (s *store) checkPassword(ctx context.Context, username, pw string) (mustChange, ok bool, err error) {
+func (s *store) verifyPassword(ctx context.Context, username, pw string) (passwordCheck, error) {
 	s.mu.RLock()
 	u, found := s.findUser(username)
 	s.mu.RUnlock()
 	match, err := s.hasher.verify(ctx, u.Password, pw)
 	if err != nil {
-		return false, false, err
+		return passwordCheck{}, err
 	}
-	return u.MustChangePassword, found && match, nil
+	return passwordCheck{ok: found && match, mustChange: u.MustChangePassword, hash: u.Password}, nil
+}
+
+// checkPassword is verifyPassword's verdict alone.
+func (s *store) checkPassword(ctx context.Context, username, pw string) (mustChange, ok bool, err error) {
+	c, err := s.verifyPassword(ctx, username, pw)
+	return c.mustChange, c.ok, err
+}
+
+// ifUnchanged runs fn under the store's read lock when username still
+// exists with the stored hash hash, and reports whether it ran. A sign-in
+// creates its session in fn: an edit that ends sessions (a new password, a
+// deletion, an import) either lands first, and fn never runs, or waits for
+// the lock, and the dropUser after it sees the new session.
+func (s *store) ifUnchanged(username, hash string, fn func()) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if u, ok := s.findUser(username); !ok || u.Password != hash {
+		return false
+	}
+	fn()
+	return true
 }
 
 func toRespPerms(rows []permRow) []respPerm {
@@ -486,6 +560,11 @@ var errBlankNewUserPassword = errors.New("new user requires a password")
 var errLastAdmin = errors.New("cannot remove the last admin")
 
 var errUserNotFound = errors.New("user not found")
+
+// errAccountChanged refuses a user's own password change when the record no
+// longer holds the hash their current password was checked against: an
+// administrator reset it while the check ran.
+var errAccountChanged = errors.New("the account changed while its password was checked")
 
 func countAdmins(users []userRec) int {
 	n := 0
@@ -565,9 +644,14 @@ func (s *store) upsertUser(ctx context.Context, u userRec, password string) (dro
 	return dropSessions, nil
 }
 
-// setPassword is a user changing their own password: it stores the new hash and
-// clears MustChangePassword. The caller drops the user's sessions.
-func (s *store) setPassword(ctx context.Context, username, password string) error {
+// setPassword is a user changing their own password: it stores the new hash
+// and clears MustChangePassword, but only while the record still holds
+// expect, the hash the current password was checked against; otherwise
+// errAccountChanged, and nothing is written (an administrator's reset during
+// the check wins). committed runs under the store lock once the new hash is
+// stored, so the session it creates cannot slip past a revocation. The caller
+// ends the user's other sessions.
+func (s *store) setPassword(ctx context.Context, username, password, expect string, committed func()) error {
 	hash, err := s.hasher.hash(ctx, password)
 	if err != nil {
 		return err
@@ -576,15 +660,20 @@ func (s *store) setPassword(ctx context.Context, username, password string) erro
 	defer s.mu.Unlock()
 	next := append([]userRec(nil), s.users...)
 	for i := range next {
-		if next[i].Username == username {
-			next[i].Password = hash
-			next[i].MustChangePassword = false
-			if err := s.seal.writeDoc(roleUsers, s.usersPath, usersDoc{Users: next}); err != nil {
-				return err
-			}
-			s.users = next
-			return nil
+		if next[i].Username != username {
+			continue
 		}
+		if next[i].Password != expect {
+			return errAccountChanged
+		}
+		next[i].Password = hash
+		next[i].MustChangePassword = false
+		if err := s.seal.writeDoc(roleUsers, s.usersPath, usersDoc{Users: next}); err != nil {
+			return err
+		}
+		s.users = next
+		committed()
+		return nil
 	}
 	return errUserNotFound
 }
@@ -629,6 +718,13 @@ func (s *store) listConnections() []connRec {
 		out[i].Client.MsgVpns = append([]vpnRec(nil), out[i].Client.MsgVpns...)
 	}
 	return out
+}
+
+// hasConnection reports whether broker is stored.
+func (s *store) hasConnection(broker string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.ContainsFunc(s.conns, func(c connRec) bool { return c.Broker == broker })
 }
 
 // upsertConnection replaces the connection with the same broker, or appends a
@@ -704,38 +800,47 @@ func (s *store) deleteConnection(broker string) (found bool, err error) {
 	return true, nil
 }
 
-// replaceUsers swaps the whole user list (an import) and persists. It returns
-// the users whose sessions must end (sessionEnders). next must hold an
-// administrator.
-func (s *store) replaceUsers(next []userRec) (drop []string, err error) {
+// replaceStores swaps the user list, the connection list, or both (an
+// import; nil leaves a list alone), together with whatever the caller staged
+// in tx before (config.yaml): each store file is staged into tx, tx commits
+// them all or none (fileTx), and only then does memory change, so a failure
+// anywhere leaves the files and memory as they were. drop is the users whose
+// sessions must end (sessionEnders). Each list must pass the load rules.
+func (s *store) replaceStores(tx *fileTx, users []userRec, conns []connRec) (drop []string, err error) {
 	defer s.afterWrite(&err)
-	if err := validateUsers(next); err != nil {
-		return nil, err
+	if users != nil {
+		if err := validateUsers(users); err != nil {
+			return nil, err
+		}
+	}
+	if conns != nil {
+		if err := validateConns(conns); err != nil {
+			return nil, err
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.seal.writeDoc(roleUsers, s.usersPath, usersDoc{Users: next}); err != nil {
+	if users != nil {
+		if err := s.seal.stageDoc(tx, roleUsers, s.usersPath, usersDoc{Users: users}); err != nil {
+			return nil, err
+		}
+	}
+	if conns != nil {
+		if err := s.seal.stageDoc(tx, roleConns, s.connsPath, connsDoc{Connections: conns}); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.commit(); err != nil {
 		return nil, err
 	}
-	drop = sessionEnders(s.users, next)
-	s.users = next
+	if users != nil {
+		drop = sessionEnders(s.users, users)
+		s.users = users
+	}
+	if conns != nil {
+		s.conns = conns
+	}
 	return drop, nil
-}
-
-// replaceConnections swaps the whole connection list (an import) and
-// persists.
-func (s *store) replaceConnections(next []connRec) (err error) {
-	defer s.afterWrite(&err)
-	if err := validateConns(next); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.seal.writeDoc(roleConns, s.connsPath, connsDoc{Connections: next}); err != nil {
-		return err
-	}
-	s.conns = next
-	return nil
 }
 
 // ----- bootstrap ----------------------------------------------------------------

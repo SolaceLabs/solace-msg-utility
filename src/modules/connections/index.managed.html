@@ -23,33 +23,11 @@
         <a id="btn-managed-login" class="btn btn-primary" href="/login">Sign in</a>
     </div>
 
-    <!-- Selection view -->
-    <div id="managed-select-view" class="card managed-conn-card hidden">
-        <div class="flex-row justify-between items-center mb-4">
-            <h2 class="m-0">Connect to a broker</h2>
-            <div class="flex-row items-center gap-4">
-                <button id="btn-managed-refresh" class="btn btn-secondary" title="Re-fetch your available connections">Refresh</button>
-            </div>
-        </div>
-
-        <div id="managed-empty-state" class="text-secondary hidden" style="line-height: 1.5;">
-            No connections are available for your account. Ask an administrator to grant access.
-        </div>
-
-        <div id="managed-connect-controls">
-            <div class="form-group flex-row">
-                <div class="w-full">
-                    <label for="managed-broker-select">Broker</label>
-                    <select id="managed-broker-select" class="form-control"></select>
-                </div>
-                <div class="w-full">
-                    <label for="managed-vpn-select">Message VPN</label>
-                    <select id="managed-vpn-select" class="form-control" disabled></select>
-                </div>
-            </div>
-            <button id="btn-managed-connect" class="btn btn-primary" disabled>Connect</button>
-            <div id="managed-connect-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
-        </div>
+    <!-- Selection view: hosts the shared provisioned connection card
+         (src/core/components/provisioned-connection), which managed-panel.ts
+         builds here; the card takes this Refresh button into its header. -->
+    <div id="managed-select-view" class="managed-conn-card hidden">
+        <button id="btn-managed-refresh" class="btn btn-secondary" type="button" title="Re-fetch your available connections">Refresh</button>
     </div>
 
     <!-- Connected view -->

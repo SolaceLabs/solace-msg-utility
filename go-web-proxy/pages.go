@@ -2,12 +2,15 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"path"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -37,6 +40,7 @@ type authPages struct {
 	cop      *http.CrossOriginProtection
 	logger   *slog.Logger
 	tmpl     *template.Template
+	watch    *clientWatch // warns when every recent sign-in looks like one client
 }
 
 func newAuthPages(st *store, ss *sessions, th *throttle, lv *live, logger *slog.Logger) (*authPages, error) {
@@ -44,7 +48,10 @@ func newAuthPages(st *store, ss *sessions, th *throttle, lv *live, logger *slog.
 	if err != nil {
 		return nil, err
 	}
-	return &authPages{store: st, sessions: ss, throttle: th, live: lv, cop: http.NewCrossOriginProtection(), logger: logger, tmpl: tmpl}, nil
+	return &authPages{
+		store: st, sessions: ss, throttle: th, live: lv, cop: http.NewCrossOriginProtection(), logger: logger, tmpl: tmpl,
+		watch: newClientWatch(sameClientWindow),
+	}, nil
 }
 
 // safeNext keeps the post-sign-in redirect on one of the two app entry points,
@@ -127,7 +134,9 @@ func (p *authPages) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	as, signedIn := p.sessions.fromRequest(r)
-	if !signedIn && !p.allowAnon(w, r) {
+	if signedIn {
+		setRequestUser(r, as.user)
+	} else if !p.allowAnon(w, r) {
 		return
 	}
 	switch {
@@ -156,9 +165,39 @@ func (p *authPages) showLogin(w http.ResponseWriter, r *http.Request, as activeS
 	}
 }
 
+// checkTurn takes user's sign-in turn (throttle.loginTurn), then asks the
+// throttle whether the attempt may go ahead. On wait > 0 or err the turn has
+// been given back and the caller answers 429 or 503; otherwise the caller
+// calls release once the attempt is recorded.
+func (p *authPages) checkTurn(r *http.Request, user string, client netip.Addr, resolved bool) (release func(), wait time.Duration, err error) {
+	release, wait, err = p.throttle.loginTurn(r.Context(), user)
+	if err != nil || wait > 0 {
+		return nil, wait, err
+	}
+	if wait = p.throttle.loginWait(user, client, resolved); wait > 0 {
+		release()
+		return nil, wait, nil
+	}
+	return release, 0, nil
+}
+
+// startSession creates the session for a sign-in whose password matched the
+// record check saw, but only while that record still stands
+// (store.ifUnchanged): a reset, deletion or import that landed during the
+// hash either came first, and this refuses, or waits for the store lock and
+// its dropUser then ends the new session. ok is false when the account
+// changed.
+func (p *authPages) startSession(user string, check passwordCheck) (id string, ok bool) {
+	ok = p.store.ifUnchanged(user, check.hash, func() {
+		id = p.sessions.create(user, check.mustChange)
+	})
+	return id, ok
+}
+
 // submitLogin checks a sign-in. Every failure gets the same message and
 // status whatever went wrong; the throttle refuses a blocked user or client
-// before the password is looked at. A previous session in this browser ends.
+// before the password is looked at, and sign-ins for one account are checked
+// one at a time. A previous session in this browser ends.
 func (p *authPages) submitLogin(w http.ResponseWriter, r *http.Request, prior activeSession, hadSession bool) {
 	if !p.readForm(w, r) {
 		return
@@ -167,32 +206,56 @@ func (p *authPages) submitLogin(w http.ResponseWriter, r *http.Request, prior ac
 	user, pw := r.PostFormValue("username"), r.PostFormValue("password")
 	page := pageData{Mode: "login", Title: "Sign in", Next: next}
 	client, resolved := clientOf(r)
-	if wait := p.throttle.loginWait(user, client, resolved); wait > 0 {
+	log := clientLogger(p.logger, r).With("user", userKey(user))
+	unavailable := func(err error) {
+		log.Error("sign-in check failed", "err", err)
+		p.message(w, http.StatusServiceUnavailable, "Sign-in unavailable", "Sign-in could not be checked. Try again.")
+	}
+	refused := func() {
+		page.Error = "Sign-in failed. Check the username and password."
+		p.render(w, http.StatusUnauthorized, page)
+	}
+	release, wait, err := p.checkTurn(r, user, client, resolved)
+	switch {
+	case err != nil:
+		unavailable(err)
+		return
+	case wait > 0:
 		w.Header().Set("Retry-After", strconv.Itoa(retrySeconds(wait)))
 		page.Error = throttledText(wait)
 		p.render(w, http.StatusTooManyRequests, page)
 		return
 	}
-	mustChange, ok, err := p.store.checkPassword(r.Context(), user, pw)
+	defer release()
+	check, err := p.store.verifyPassword(r.Context(), user, pw)
 	if err != nil {
-		p.logger.Error("sign-in check failed", "err", err)
-		p.message(w, http.StatusServiceUnavailable, "Sign-in unavailable", "Sign-in could not be checked. Try again.")
+		unavailable(err)
 		return
 	}
-	if !ok {
+	if !check.ok {
 		p.throttle.loginFailed(user, client, resolved)
-		p.logger.Warn("sign-in failed", "user", userKey(user), "client", client.String())
-		page.Error = "Sign-in failed. Check the username and password."
-		p.render(w, http.StatusUnauthorized, page)
+		log.Warn("sign-in failed")
+		refused()
+		return
+	}
+	id, ok := p.startSession(user, check)
+	if !ok {
+		log.Warn("sign-in refused: the account changed while its password was checked")
+		refused()
 		return
 	}
 	p.throttle.loginSucceeded(user, client, resolved)
 	if hadSession {
 		p.sessions.drop(prior.id)
 	}
-	setSessionCookie(w, p.sessions.create(user, mustChange))
-	p.logger.Info("signed in", "user", user, "client", client.String())
-	if mustChange {
+	setSessionCookie(w, id)
+	setRequestUser(r, user)
+	log.Info("signed in")
+	if p.watch.seen(client, resolved) {
+		log.Warn("every recent sign-in came from this one private address: a reverse proxy or Docker's userland proxy the gateway does not trust is likely in front of it, so all users share one throttle and one access-list entry; list the proxy in access.trustedProxies (config.yaml), see docs/deployment.md",
+			"sign_ins", len(p.watch.recent))
+	}
+	if check.mustChange {
 		http.Redirect(w, r, passwordURL(next), http.StatusSeeOther)
 		return
 	}
@@ -209,8 +272,10 @@ func (p *authPages) showPassword(w http.ResponseWriter, r *http.Request, as acti
 }
 
 // submitPassword is a signed-in user changing their own password. A wrong
-// current password counts as a failed sign-in. On success every session of
-// the user ends and this browser gets a fresh one.
+// current password counts as a failed sign-in, under the same one-at-a-time
+// turn. The new hash is stored only while the record is the one the current
+// password was checked against, and this browser's fresh session is created
+// in the same store write; then every other session of the user ends.
 func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as activeSession, signedIn bool) {
 	if !p.readForm(w, r) {
 		return
@@ -227,19 +292,30 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 		p.render(w, status, page)
 	}
 	client, resolved := clientOf(r)
-	if wait := p.throttle.loginWait(as.user, client, resolved); wait > 0 {
+	log := requestLogger(p.logger, r)
+	unavailable := func(err error) {
+		log.Error("password check failed", "err", err)
+		fail(http.StatusServiceUnavailable, "The password could not be checked. Try again.")
+	}
+	release, wait, err := p.checkTurn(r, as.user, client, resolved)
+	switch {
+	case err != nil:
+		unavailable(err)
+		return
+	case wait > 0:
 		w.Header().Set("Retry-After", strconv.Itoa(retrySeconds(wait)))
 		fail(http.StatusTooManyRequests, throttledText(wait))
 		return
 	}
-	_, ok, err := p.store.checkPassword(r.Context(), as.user, cur)
+	defer release()
+	check, err := p.store.verifyPassword(r.Context(), as.user, cur)
 	switch {
 	case err != nil:
-		p.logger.Error("password check failed", "err", err)
-		fail(http.StatusServiceUnavailable, "The password could not be checked. Try again.")
+		unavailable(err)
 		return
-	case !ok:
+	case !check.ok:
 		p.throttle.loginFailed(as.user, client, resolved)
+		log.Warn("password change refused: the current password is not correct")
 		fail(http.StatusUnauthorized, "The current password is not correct.")
 		return
 	case nw != confirm:
@@ -252,15 +328,22 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 		fail(http.StatusUnprocessableEntity, "The new password must differ from the current one.")
 		return
 	}
-	if err := p.store.setPassword(r.Context(), as.user, nw); err != nil {
-		p.logger.Error("password change failed", "user", as.user, "err", err)
+	var id string
+	err = p.store.setPassword(r.Context(), as.user, nw, check.hash, func() { id = p.sessions.create(as.user, false) })
+	switch {
+	case errors.Is(err, errAccountChanged), errors.Is(err, errUserNotFound):
+		log.Warn("password change refused: the account changed while its password was checked")
+		p.message(w, http.StatusConflict, "Password not changed", "Your account was changed while this request ran. Sign in again.")
+		return
+	case err != nil:
+		log.Error("password change failed", "err", err)
 		fail(http.StatusInternalServerError, "The password could not be saved.")
 		return
 	}
 	p.throttle.loginSucceeded(as.user, client, resolved)
-	p.sessions.dropUser(as.user)
-	setSessionCookie(w, p.sessions.create(as.user, false))
-	p.logger.Info("password changed", "user", as.user, "client", client.String())
+	p.sessions.dropOthers(as.user, id)
+	setSessionCookie(w, id)
+	log.Info("password changed")
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
@@ -275,6 +358,9 @@ func (p *authPages) gateApp(next http.Handler) http.Handler {
 			return
 		}
 		as, ok := p.sessions.fromRequest(r)
+		if ok {
+			setRequestUser(r, as.user)
+		}
 		if ok && !as.mustChange {
 			next.ServeHTTP(w, r)
 			return
@@ -295,7 +381,9 @@ func (p *authPages) gateApp(next http.Handler) http.Handler {
 }
 
 // gateAdmin guards /solAdmin in every mode: it needs an administrator's
-// session. The admin flag is read from the store, so a demotion applies at once.
+// session. The admin flag is read from the store, so a demotion applies at
+// once. The session of a user that no longer exists ends here: /login would
+// otherwise send that browser straight back.
 func (p *authPages) gateAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		as, ok := p.sessions.fromRequest(r)
@@ -305,6 +393,7 @@ func (p *authPages) gateAdmin(next http.Handler) http.Handler {
 			}
 			return
 		}
+		setRequestUser(r, as.user)
 		if as.mustChange {
 			http.Redirect(w, r, passwordURL(adminPath), http.StatusSeeOther)
 			return
@@ -312,6 +401,8 @@ func (p *authPages) gateAdmin(next http.Handler) http.Handler {
 		admin, exists := p.store.isAdmin(as.user)
 		switch {
 		case !exists:
+			p.sessions.drop(as.id)
+			clearSessionCookie(w)
 			http.Redirect(w, r, loginURL(adminPath), http.StatusSeeOther)
 		case !admin:
 			p.message(w, http.StatusForbidden, "Administrator access required", "You are signed in as "+as.user+", which is not an administrator.")
@@ -319,4 +410,48 @@ func (p *authPages) gateAdmin(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
+}
+
+// sameClientWindow is how many recent sign-ins clientWatch compares.
+const sameClientWindow = 50
+
+// clientWatch keeps the client addresses of the last sign-ins. When all of
+// them are one private or loopback address, the gateway is almost certainly
+// behind a proxy it does not trust (a reverse proxy not in
+// access.trustedProxies, or Docker's userland proxy), and every user then
+// shares one throttle bucket, one failure count and one access-list entry.
+// It says so once per process. Its lock is its own.
+type clientWatch struct {
+	mu     sync.Mutex
+	recent []netip.Addr // a ring of the last len(recent) resolved clients
+	next   int
+	filled bool
+	warned bool
+}
+
+func newClientWatch(size int) *clientWatch {
+	return &clientWatch{recent: make([]netip.Addr, size)}
+}
+
+// seen records one successful sign-in's client and reports whether the
+// warning is due now. An unresolved client says nothing either way.
+func (cw *clientWatch) seen(addr netip.Addr, resolved bool) bool {
+	if !resolved {
+		return false
+	}
+	cw.mu.Lock()
+	defer cw.mu.Unlock()
+	cw.recent[cw.next] = addr
+	cw.next = (cw.next + 1) % len(cw.recent)
+	cw.filled = cw.filled || cw.next == 0
+	if cw.warned || !cw.filled || !(addr.IsPrivate() || addr.IsLoopback()) {
+		return false
+	}
+	for _, a := range cw.recent {
+		if a != addr {
+			return false
+		}
+	}
+	cw.warned = true
+	return true
 }

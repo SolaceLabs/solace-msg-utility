@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createService } from '../../../src/modules/queue-discovery/service';
 import { createEventBus } from '../../../src/core/event-bus';
 import type { AppContext, AppState } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 /**
  * After Stage C the queue-discovery service is a thin wrapper around the
@@ -25,7 +26,7 @@ function createTestContext(overrides: Partial<AppContext> = {}): AppContext {
         },
         isSempConnected: true
     };
-    return {
+    return completeContext({
         container: document.createElement('div'),
         appState,
         eventBus,
@@ -35,7 +36,7 @@ function createTestContext(overrides: Partial<AppContext> = {}): AppContext {
         copyToClipboard: vi.fn(),
         config: { useMocks: false },
         ...overrides
-    };
+    });
 }
 
 async function allPages<T>(gen: AsyncGenerator<T>): Promise<T[]> {

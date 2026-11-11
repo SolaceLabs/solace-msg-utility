@@ -421,13 +421,13 @@ func TestBackup_ScheduleDocProblem(t *testing.T) {
 		t.Fatal(p)
 	}
 	for name, f := range map[string]func(*scheduleDoc){
-		"bad schedule":   func(d *scheduleDoc) { d.Schedule.Kind = "" },
-		"keep 0":         func(d *scheduleDoc) { d.Keep = 0 },
-		"keep too many":  func(d *scheduleDoc) { d.Keep = backupKeepMax + 1 },
-		"salt garbage":   func(d *scheduleDoc) { d.Salt = "!" },
-		"key garbage":    func(d *scheduleDoc) { d.Key = "!" },
-		"short key":      func(d *scheduleDoc) { d.Key = "AAAA" },
-		"no iterations":  func(d *scheduleDoc) { d.Iter = 0 },
+		"bad schedule":  func(d *scheduleDoc) { d.Schedule.Kind = "" },
+		"keep 0":        func(d *scheduleDoc) { d.Keep = 0 },
+		"keep too many": func(d *scheduleDoc) { d.Keep = backupKeepMax + 1 },
+		"salt garbage":  func(d *scheduleDoc) { d.Salt = "!" },
+		"key garbage":   func(d *scheduleDoc) { d.Key = "!" },
+		"short key":     func(d *scheduleDoc) { d.Key = "AAAA" },
+		"no iterations": func(d *scheduleDoc) { d.Iter = 0 },
 	} {
 		d := good
 		f(&d)

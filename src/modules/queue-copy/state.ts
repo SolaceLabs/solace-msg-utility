@@ -136,15 +136,29 @@ export interface QueueCopyState {
     destSempCtx: SempContext | null;
 
     /**
+     * The destination a live `destSession` was connected for (`destTargetKey` of
+     * the form when its connect started); null while none is live. The engine
+     * publishes through `destPublisher` only while the form still names this
+     * destination (`selectPublisher` in service-copy).
+     */
+    destSessionTarget: string | null;
+    /**
+     * `destTargetKey` of a destination Client connect still in flight, or null.
+     * Its late UP is installed only if the form still names that destination,
+     * and the controls that choose the destination stay locked meanwhile.
+     */
+    destSolPending: string | null;
+
+    /**
      * Publisher tied to the destination session. Created when destSolHooks.onConnected
-     * fires; disposed on destSolHooks.onDisconnected. Null when the destination is
-     * the primary session (sameVpn path) — the engine falls back to `primaryPublisher`.
+     * installs a session; disposed on destSolHooks.onDisconnected. Used only while
+     * `destSessionTarget` matches the form.
      */
     destPublisher: SolacePublisher | null;
     /**
      * Publisher tied to the primary session. Created on `client:connected`; disposed
-     * on `client:disconnected`. Used as the publish endpoint when destSession is
-     * null (sameVpn path).
+     * on `client:disconnected`. The publish endpoint whenever the form says Same
+     * broker + Same VPN.
      */
     primaryPublisher: SolacePublisher | null;
 
@@ -174,6 +188,8 @@ export function createInitialState(): QueueCopyState {
         mode: 'copy',
         destSession: null,
         destSempCtx: null,
+        destSessionTarget: null,
+        destSolPending: null,
         destPublisher: null,
         primaryPublisher: null,
         verify: null,
@@ -182,9 +198,21 @@ export function createInitialState(): QueueCopyState {
 }
 
 /**
- * Reset state to its initial shape. Called on module install and on a fresh
- * "Start Copy" click after a previous run completed/aborted. Preserves the
- * form values the user last typed so they don't have to re-enter on retry.
+ * Identity of the destination a secondary Client connection reaches: the broker
+ * (provisioned name, or typed host) and the Message VPN. Two forms with the
+ * same key address the same place.
+ */
+export function destTargetKey(f: DestForm): string {
+    return f.credMode === 'provisioned'
+        ? `provisioned|${f.provisioned.broker}|${f.provisioned.vpn}`
+        : `manual|${f.host}|${f.solace.vpn}`;
+}
+
+/**
+ * Drop the verify result and the run. Called when the Confirm modal opens for
+ * a new run and when a run finishes, so a finished job never reads as active.
+ * Preserves the form values the user last typed so they don't have to re-enter
+ * on retry.
  */
 export function resetTransientState(s: QueueCopyState): void {
     s.verify = null;

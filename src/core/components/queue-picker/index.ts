@@ -68,6 +68,9 @@ interface State {
     queueFilterTimer: ReturnType<typeof setTimeout> | null;
     vpnFetchGen: number;
     queueFetchGen: number;
+    /** Aborts the running VPN / queue listing; replaced per fetch, fired on close. */
+    vpnAbort: AbortController | null;
+    queueAbort: AbortController | null;
 }
 
 /**
@@ -118,6 +121,8 @@ export function pickQueue(source: QueueSource, opts: PickQueueOptions = {}): Pro
             queueFilterTimer: null,
             vpnFetchGen: 0,
             queueFetchGen: 0,
+            vpnAbort: null,
+            queueAbort: null,
         };
 
         const r = refs!;
@@ -160,6 +165,9 @@ function resolveAndClose(value: PickQueueResult | null): void {
     const resolve = pendingResolve!;
     if (state!.vpnFilterTimer !== null) clearTimeout(state!.vpnFilterTimer);
     if (state!.queueFilterTimer !== null) clearTimeout(state!.queueFilterTimer);
+    // Stop the paged requests of a listing still running for this picker.
+    state!.vpnAbort?.abort();
+    state!.queueAbort?.abort();
     pendingResolve = null;
     state = null;
     if (refs!.dialog.hasAttribute('open')) refs!.dialog.close();
@@ -169,11 +177,17 @@ function resolveAndClose(value: PickQueueResult | null): void {
 async function fetchVpns(): Promise<void> {
     const source = state!.source;
     const gen = ++state!.vpnFetchGen;
+    // A newer listing replaces this one: abort the old one's requests.
+    state!.vpnAbort?.abort();
+    const abort = new AbortController();
+    state!.vpnAbort = abort;
     setStatus('Loading VPNs…');
     const accumulated: string[] = [];
     try {
-        for await (const page of source.listVpns()) {
-            if (!state || state.vpnFetchGen !== gen) return;
+        for await (const page of source.listVpns(abort.signal)) {
+            // The generation guards a newer listing in this picker; the abort
+            // also covers a later picker, whose generations restart at 0.
+            if (!state || state.vpnFetchGen !== gen || abort.signal.aborted) return;
             if (!page.ok) {
                 setStatus(`Failed to load VPNs: ${page.error}`);
                 return;
@@ -215,12 +229,15 @@ async function fetchQueues(): Promise<void> {
     const source = state!.source;
     const vpn = state!.selectedVpn!;
     const gen = ++state!.queueFetchGen;
+    state!.queueAbort?.abort();
+    const abort = new AbortController();
+    state!.queueAbort = abort;
     setStatus(`Loading queues for ${vpn}…`);
     const accumulated: string[] = [];
     state!.queueCache.delete(vpn);
     try {
-        for await (const page of source.listQueues(vpn)) {
-            if (!state || state.queueFetchGen !== gen) return;
+        for await (const page of source.listQueues(vpn, abort.signal)) {
+            if (!state || state.queueFetchGen !== gen || abort.signal.aborted) return;
             if (!page.ok) {
                 setStatus(`Failed to load queues: ${page.error}`);
                 return;

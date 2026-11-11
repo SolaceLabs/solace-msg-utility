@@ -123,9 +123,15 @@ export function createQueueBrowser(vpn: string, props: any): MockQueueBrowser {
             const id = msg?.getGuaranteedMessageId?.()?.toString?.();
             if (id === undefined) return;
             removeMessage(vpn, queueName, id);
-            // Keep the live snapshot honest so a later re-bind cannot re-deliver
-            // something the user just deleted.
-            snapshot = snapshot.filter(m => String(m.id) !== String(id));
+            // Keep the live snapshot honest (nothing removed is delivered
+            // later) and the cursor on the same next message: dropping an
+            // entry before the cursor would otherwise skip the one after it,
+            // and a move, which removes each message as it is delivered,
+            // would move only every other message.
+            const at = snapshot.findIndex(m => String(m.id) === String(id));
+            if (at === -1) return;
+            snapshot.splice(at, 1);
+            if (at < cursor) cursor--;
         },
 
         dispose(): void {

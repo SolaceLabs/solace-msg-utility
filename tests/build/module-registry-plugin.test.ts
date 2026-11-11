@@ -9,6 +9,7 @@ import {
     activeModuleEntries,
     readModuleTemplate,
     moduleRegistryPlugin,
+    moduleStylesheet,
     MODULE_BASE_MARKER,
 } from '../../scripts/module-registry-plugin.mjs';
 
@@ -47,6 +48,17 @@ describe('moduleRegistryPlugin — extractModuleIds', () => {
             'queue-browser': 80,
         };`;
         expect(extractModuleIds(src)).toEqual(['connections', 'queue-browser']);
+    });
+
+    // TypeScript accepts an unquoted key, so the manifest parser must too: an id
+    // it skipped would compile, never be bundled, and fail only at page load.
+    it('reads unquoted keys as well as quoted ones', () => {
+        const src = `export const ACTIVE_MODULES: Record<string, number> = {
+            connections: 100,
+            'queue-browser': 80,
+            "queue-copy" : 70,
+        };`;
+        expect(extractModuleIds(src)).toEqual(['connections', 'queue-browser', 'queue-copy']);
     });
 
     it('throws when no ACTIVE_MODULES literal is present', () => {
@@ -189,7 +201,7 @@ describe('moduleRegistryPlugin — virtual module', () => {
 
     it('emits static imports + a moduleFiles map keyed by id, for exactly the variant modules', () => {
         const p = moduleRegistryPlugin({ root, variant: 'min' });
-        const code = p.load(p.resolveId('virtual:module-registry'));
+        const code = p.load(p.resolveId('virtual:module-registry')!);
         expect(code).toContain('export const moduleFiles');
         // Keys are emitted via JSON.stringify → double-quoted.
         expect(code).toContain('"connections": m0');
@@ -198,12 +210,12 @@ describe('moduleRegistryPlugin — virtual module', () => {
         // min excludes queue-copy — it must not be imported.
         expect(code).not.toContain('queue-copy');
         // Two modules → two namespace imports.
-        expect(code.match(/import \* as m\d+ from/g)?.length).toBe(2);
+        expect(String(code).match(/import \* as m\d+ from/g)?.length).toBe(2);
     });
 
     it('imports the managed entry, and never the Release entry, for an overridden module', () => {
         const p = moduleRegistryPlugin({ root, variant: 'managed' });
-        const code = p.load(p.resolveId('virtual:module-registry'));
+        const code = p.load(p.resolveId('virtual:module-registry')!);
         expect(code).toMatch(/import \* as m0 from ".*\/connections\/module\.managed\.ts";/);
         expect(code).not.toMatch(/\/connections\/module\.ts"/);
         expect(code).toContain('"connections": m0');
@@ -216,11 +228,67 @@ describe('moduleRegistryPlugin — virtual module', () => {
             'src/modules/m/module.ts': '',
         });
         const p = moduleRegistryPlugin({ root: fake, variant: 'v' });
-        expect(() => p.load(p.resolveId('virtual:module-registry'))).toThrow(/Create src\/modules\/m\/module\.e\.ts/);
+        expect(() => p.load(p.resolveId('virtual:module-registry')!)).toThrow(/Create src\/modules\/m\/module\.e\.ts/);
     });
 
     it('load() ignores non-virtual ids', () => {
         const p = moduleRegistryPlugin({ root });
         expect(p.load('some/other/id')).toBeNull();
+    });
+
+    it('defaults to the working directory and the standard variant', () => {
+        const p = moduleRegistryPlugin();
+        const code = p.load(p.resolveId('virtual:module-registry')!);
+        expect(code).toBe(moduleRegistryPlugin({ root: process.cwd(), variant: 'standard' }).load('\0virtual:module-registry'));
+        expect(code).toContain('"queue-copy": m2');
+    });
+});
+
+// CSS follows the variant manifest like the code and the templates: the
+// virtual module imports each active module's styles.css, and nothing else.
+describe('moduleRegistryPlugin -- module stylesheets', () => {
+    const VIRTUAL = '\0virtual:module-registry';
+    const load = (variant: string, at = root) => moduleRegistryPlugin({ root: at, variant }).load(VIRTUAL) as string;
+    const stylesheets = (code: string) => [...code.matchAll(/^import "(.*)";$/gm)].map(m => m[1]);
+    const VARIANTS = fs.readdirSync(path.join(root, 'src/variants'))
+        .filter(f => f.endsWith('.ts') && f !== '_active.ts')
+        .map(f => f.replace(/\.ts$/, ''));
+
+    it.each(VARIANTS)("the %s bundle imports exactly its modules' stylesheets, after their code", (variant) => {
+        const code = load(variant);
+        const want = activeModuleIds(root, variant)
+            .map((id: string) => moduleStylesheet(root, id))
+            .filter((file: string | null): file is string => file !== null)
+            .map((file: string) => file.replace(/\\/g, '/'));
+        expect(want.length).toBeGreaterThan(0);
+        expect(stylesheets(code)).toEqual(want);
+        const lines = code.split('\n');
+        const firstSheet = lines.findIndex(l => l.startsWith('import "'));
+        expect(lines.slice(firstSheet).some(l => l.startsWith('import * as'))).toBe(false);
+    });
+
+    it('styles the admin editors in every variant that lists them, the kitchen-sink build included', () => {
+        for (const variant of ['admin', 'managed-demo', 'all-for-testing-only']) {
+            const code = load(variant);
+            for (const id of ['user-management', 'connection-management', 'gateway-settings', 'backup']) {
+                expect(code, `${variant}: ${id}`).toMatch(new RegExp(`^import ".*/src/modules/${id}/styles\\.css";$`, 'm'));
+            }
+        }
+    });
+
+    it('carries no stylesheet of a module the variant leaves out', () => {
+        expect(stylesheets(load('min')).map(f => f.split('/').slice(-2, -1)[0])).toEqual(['connections', 'queue-browser']);
+        for (const variant of VARIANTS) expect(load(variant)).not.toContain('/queue-discovery/');
+    });
+
+    it('imports nothing for a module without a stylesheet', () => {
+        const fake = fakeRoot({
+            'src/variants/v.ts': `export const ACTIVE_MODULES = { 'plain': 2, 'styled': 1 };`,
+            'src/modules/plain/module.ts': '',
+            'src/modules/styled/module.ts': '',
+            'src/modules/styled/styles.css': '.styled {}',
+        });
+        expect(moduleStylesheet(fake, 'plain')).toBeNull();
+        expect(stylesheets(load('v', fake))).toEqual([path.join(fake, 'src/modules/styled/styles.css').replace(/\\/g, '/')]);
     });
 });

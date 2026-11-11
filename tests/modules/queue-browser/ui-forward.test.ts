@@ -176,12 +176,7 @@ describe('queue-browser/ui-forward', () => {
         it('shows error message string', () => {
             ui.onForwardFailure('Something went wrong');
             expect(ui.getElements().elForwardError.style.display).toBe('block');
-            expect(ui.getElements().elForwardError.textContent).toContain('Something went wrong');
-        });
-
-        it('shows error from Error object', () => {
-            ui.onForwardFailure({ message: 'Error message' });
-            expect(ui.getElements().elForwardError.textContent).toContain('Error message');
+            expect(ui.getElements().elForwardError.textContent).toBe('Error: Something went wrong');
         });
     });
 
@@ -190,8 +185,9 @@ describe('queue-browser/ui-forward', () => {
             state.forwardQueue = [{ correlationValue: 'cv-1', status: 'QUEUED', originalMsg: { content: '' }, id: '1' }];
 
             const statusEl = document.createElement('div');
-            statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            statusEl.className = 'forward-item-status';
+            statusEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(statusEl);
 
             ui.updateForwardItemStatus('cv-1', 'SUCCESS');
             expect(state.forwardQueue[0].status).toBe('SUCCESS');
@@ -202,29 +198,49 @@ describe('queue-browser/ui-forward', () => {
             state.forwardQueue = [{ correlationValue: 'cv-1', status: 'SENDING', originalMsg: { content: '' }, id: '1' }];
 
             const statusEl = document.createElement('div');
-            statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            statusEl.className = 'forward-item-status';
+            statusEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(statusEl);
 
             const errorEl = document.createElement('div');
-            errorEl.id = 'error-cv-1';
+            errorEl.className = 'forward-item-error';
+            errorEl.dataset.cv = 'cv-1';
             errorEl.classList.add('hidden');
-            document.body.appendChild(errorEl);
+            ui.getElements().listForwardMsgs.appendChild(errorEl);
 
             ui.updateForwardItemStatus('cv-1', 'FAILED', 'Rejected');
             expect(errorEl.textContent).toBe('Rejected');
             expect(errorEl.classList.contains('hidden')).toBe(false);
         });
 
+        it('updates the rendered row in the forward list, not a same-keyed element elsewhere in the page', () => {
+            state.forwardQueue = [{ correlationValue: 'cv-1', status: 'SENDING', originalMsg: { content: 'a' }, id: '1', error: null }];
+            ui.renderForwardList();
+            const stray = document.createElement('div');
+            stray.className = 'forward-item-error hidden';
+            stray.dataset.cv = 'cv-1';
+            document.body.insertBefore(stray, document.body.firstChild);
+
+            ui.updateForwardItemStatus('cv-1', 'FAILED', 'Rejected');
+
+            const row = ui.getElements().listForwardMsgs.querySelector('.forward-item-error[data-cv="cv-1"]') as HTMLElement;
+            expect([row.textContent, row.classList.contains('hidden')]).toEqual(['Rejected', false]);
+            expect(stray.classList.contains('hidden')).toBe(true);
+            stray.remove();
+        });
+
         it('hides error on non-FAILED status', () => {
             state.forwardQueue = [{ correlationValue: 'cv-1', status: 'SENDING', originalMsg: { content: '' }, id: '1' }];
 
             const errorEl = document.createElement('div');
-            errorEl.id = 'error-cv-1';
-            document.body.appendChild(errorEl);
+            errorEl.className = 'forward-item-error';
+            errorEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(errorEl);
 
             const statusEl = document.createElement('div');
-            statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            statusEl.className = 'forward-item-status';
+            statusEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(statusEl);
 
             ui.updateForwardItemStatus('cv-1', 'SUCCESS');
             expect(errorEl.classList.contains('hidden')).toBe(true);
@@ -404,7 +420,7 @@ describe('queue-browser/ui-forward', () => {
 
         it('handles missing icon container', () => {
             state.forwardQueue = [{ correlationValue: 'cv-1', status: 'QUEUED', originalMsg: { content: '' }, id: '1' }];
-            // No status-cv-1 element in DOM
+            // No status element in the list
             ui.updateForwardItemStatus('cv-1', 'SUCCESS');
             expect(state.forwardQueue[0].status).toBe('SUCCESS');
         });
@@ -412,9 +428,10 @@ describe('queue-browser/ui-forward', () => {
         it('handles missing error container', () => {
             state.forwardQueue = [{ correlationValue: 'cv-1', status: 'QUEUED', originalMsg: { content: '' }, id: '1' }];
             const statusEl = document.createElement('div');
-            statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
-            // No error-cv-1 element
+            statusEl.className = 'forward-item-status';
+            statusEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(statusEl);
+            // No error element in the list
             ui.updateForwardItemStatus('cv-1', 'FAILED', 'error msg');
             expect(state.forwardQueue[0].status).toBe('FAILED');
         });

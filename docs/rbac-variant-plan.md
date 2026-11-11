@@ -54,7 +54,7 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
         v
  go-web-proxy (MANAGED mode)
    /hosted {hosted, connModes, defaultConn}, SPA
-   Direct relay /{scheme}/{port}/{host}/... -- 404 under CONN_MODES=managed (open under both)
+   Direct relay /{scheme}/{port}/{host}/... -- 404 under CONN_MODES=provisioned (open under both)
    + users.yaml + connections.yaml sealed whole with the store key (STORE_KEY_FILE),
      loaded strictly; bootstraps an admin who must change the password if absent
    + /login, /login/password -> slow per-user password hash, throttle, session cookie
@@ -119,7 +119,7 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
   Direct only, always.
 - **Managed is a convenience unless the deployment makes it exclusive.** Under `CONN_MODES=both` a
   user may simply switch to the Direct tab and type any credentials they happen to know — every
-  entitlement guarantee in this document holds **only** under `CONN_MODES=managed`. `both` is
+  entitlement guarantee in this document holds **only** under `CONN_MODES=provisioned`. `both` is
   supported deliberately (mixed audiences), and is a documented bypass, not an oversight.
 - **The provisioned profile is core-owned and injected.** The broker and VPN names live in
   [managed-profile.ts](../src/core/services/managed-profile.ts), reached via
@@ -157,7 +157,7 @@ mode, and only in the managed image, which serves the `managed` variant (`manage
   idle or absolute limit.
 - **`CONN_MODES=both` is a full bypass** of everything in this document: the Direct tab and its open
   relay accept any credentials the user can supply. Deployments that need the entitlement model to
-  *hold* must set `CONN_MODES=managed`, under which the Direct relay answers `404`.
+  *hold* must set `CONN_MODES=provisioned`, under which the Direct relay answers `404`.
 - **The filter is per-transport, not per-capability.** `filterSempFetch` rewrites exactly two SEMP
   **v2 monitor list** shapes. Every **SEMP v1 RPC** (`POST /SEMP`), every single-object GET, and every
   non-JSON response passes through untouched. Any code path that reaches the broker another way is

@@ -33,12 +33,31 @@ export interface UserRec {
 
 export interface VpnRec { name: string; username: string; password: string }
 
-/** A connections-file record (store.go `connRec`). */
+/**
+ * A connections-file record (store.go `connRec`). A blank or absent scheme is
+ * TLS (https for SEMP, wss for SMF); a save stores the TLS scheme as absent,
+ * so a record names only the plain one (http, ws).
+ */
 export interface ConnRec {
     broker: string;
     hostname: string;
-    semp: { port: string; username: string; password: string };
-    client: { port: string; msgVpns: VpnRec[] };
+    semp: { scheme?: string; port: string; username: string; password: string };
+    client: { scheme?: string; port: string; msgVpns: VpnRec[] };
+}
+
+/** A connection as `GET /managed/connections` lists it: no password, both schemes named. */
+export interface ListedConn {
+    broker: string;
+    hostname: string;
+    semp: { scheme: string; port: string; user: string; pass: string };
+    client: { scheme: string; port: string; msgVpns: { name: string; user: string; pass: string }[] };
+}
+
+/** `GET /managed/client`: the address the gateway took the browser for, and how. */
+export interface ClientSeen {
+    address: string;
+    peer: string;
+    viaProxy: boolean;
 }
 
 /** A user as the seed holds it: the users file's YAML names. */

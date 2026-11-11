@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatBytes, generateUuid, matchString, matchContains, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText, moduleLabel, errMessage } from '../../src/core/utils';
+import { formatBytes, generateUuid, matchString, matchContains, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText, moduleLabel, errMessage, basicAuthHeader, sempAccountError } from '../../src/core/utils';
 
 describe('core/utils', () => {
 
@@ -457,5 +457,45 @@ describe('core/utils solaceErrorText', () => {
     it('ignores a non-string message or infoStr rather than rendering it', () => {
         expect(solaceErrorText({ message: 500 }, 'fallback')).toBe('fallback');
         expect(solaceErrorText({ message: 500, infoStr: 'real reason' }, 'fallback')).toBe('real reason');
+    });
+});
+
+describe('core/utils basicAuthHeader', () => {
+    it('base64-encodes user:pass as the Basic value', () => {
+        expect(basicAuthHeader('admin', 'p@ss#1')).toBe(`Basic ${btoa('admin:p@ss#1')}`);
+        expect(atob(basicAuthHeader('admin', 'p@ss#1').slice(6))).toBe('admin:p@ss#1');
+    });
+});
+
+describe('core/utils sempAccountError', () => {
+    it('accepts the CLI rules at their limits', () => {
+        expect(sempAccountError('a'.repeat(32), 'x'.repeat(128))).toBeNull();
+        expect(sempAccountError('Admin01', '!#$%+-./09=?@AZ[]^_az{}~')).toBeNull();
+    });
+
+    it.each([
+        ['', 'SEMP username is required.'],
+        ['a'.repeat(33), 'SEMP username must not exceed 32 characters.'],
+        ['admin_1', 'SEMP username may contain only letters and digits (A-Z, a-z, 0-9).'],
+        ['adm\u00efn', 'SEMP username may contain only letters and digits (A-Z, a-z, 0-9).'],
+    ])('rejects the username %j', (user, message) => {
+        expect(sempAccountError(user, 'secret')).toEqual({ field: 'user', message });
+    });
+
+    it.each([
+        ['', 'SEMP password is required.'],
+        ['x'.repeat(129), 'SEMP password must not exceed 128 characters.'],
+        ['two words', 'SEMP password may contain only printable ASCII characters: no spaces or accented letters.'],
+        ['p\u00e4sswort', 'SEMP password may contain only printable ASCII characters: no spaces or accented letters.'],
+        ['euro\u20ac', 'SEMP password may contain only printable ASCII characters: no spaces or accented letters.'],
+    ])('rejects the password %j', (pass, message) => {
+        expect(sempAccountError('admin', pass)).toEqual({ field: 'pass', message });
+    });
+
+    it.each([':', '(', ')', '"', ';', "'", '<', '>', ',', '`', '\\', '*', '&', '|'])('rejects a password containing %s', (ch) => {
+        expect(sempAccountError('admin', `ab${ch}cd`)).toEqual({
+            field: 'pass',
+            message: 'SEMP password must not contain any of : ( ) " ; \' < > , ` \\ * & |',
+        });
     });
 });

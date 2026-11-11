@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,8 @@ func TestNewManagedRouting_DisabledIsNil(t *testing.T) {
 }
 
 // The real constructor, real hashing cost: bootstraps an admin and serves.
+// Hashing may take half the scheduler's threads at most, so a burst of
+// sign-ins leaves the rest to the relay, the sockets and the files.
 func TestNewManagedRouting_Enabled(t *testing.T) {
 	dir := t.TempDir()
 	cfg := defaultConfig()
@@ -30,11 +33,15 @@ func TestNewManagedRouting_Enabled(t *testing.T) {
 	if err != nil || routes == nil {
 		t.Fatalf("want routes, got %v %v", routes, err)
 	}
-	if !strings.Contains(buf.String(), "provisioned mode enabled") || !strings.Contains(buf.String(), "app_gated=false") {
-		t.Errorf("startup log: %s", buf.String())
-	}
-	if !strings.Contains(routes.api.(*managedHandler).store.users[0].Password, "$600000$") {
+	st := routes.api.(*managedHandler).store
+	if !strings.Contains(st.users[0].Password, "$600000$") {
 		t.Error("the bootstrap hash must use the production cost")
+	}
+	if got, want := cap(st.hasher.slots), max(runtime.GOMAXPROCS(0)/2, 1); got != want {
+		t.Errorf("hashing slots: want %d (half of GOMAXPROCS), got %d", want, got)
+	}
+	if !strings.Contains(buf.String(), "component=store") {
+		t.Errorf("the store's lines name their component: %s", buf.String())
 	}
 }
 

@@ -361,6 +361,26 @@ func TestSMF_BrokerFailuresAre502(t *testing.T) {
 		http.StatusBadGateway, "upstream_unavailable")
 }
 
+// The SMF gate dials the broker over the connection's client scheme: TLS
+// (an https upgrade) by default, a plain one for ws.
+func TestSMF_UsesTheConnectionsScheme(t *testing.T) {
+	for scheme, want := range map[string]string{"": "https://host1:8008/", clientPlain: "http://host1:8008/"} {
+		up := &urlRecorder{}
+		e := newManagedEnvWith(t, nil, up)
+		if err := e.api.store.upsertConnection(connRec{
+			Broker: "b1", Hostname: "host1",
+			Client: clientRec{Scheme: scheme, Port: "8008", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		expect(t, e.do("GET", "/managed/smf/b1/v1", "", e.cookie("viewer", false), wsHeaders("https://gw.example")...),
+			http.StatusBadGateway, "upstream_unavailable")
+		if got := up.last(t); got != want {
+			t.Errorf("scheme %q: the gate dialled %s, want %s", scheme, got, want)
+		}
+	}
+}
+
 // A connection that cannot be taken over (here a recorder) is a 500, and the
 // broker side that already upgraded is closed.
 func TestSMF_NoTakeoverClosesTheBrokerSide(t *testing.T) {

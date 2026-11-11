@@ -5,13 +5,15 @@ name: Tag
 # is created ONLY if everything passed:
 #
 #   git tag v1.2.3 && git push origin v1.2.3
-#     -> plan     resolve the project shape once
-#     -> gates    ci.yml's `all scan` (build vet test scan), ubuntu + windows
+#     -> plan     check the tag is vX.Y.Z, resolve the project shape once
+#     -> gates    ci.yml's `all cov scan` (build vet test mock cov scan),
+#                 ubuntu + windows
 #     -> image    multi-arch build of the image, pushed to GHCR by digest
 #                 only, then a trivy gate on every platform -- no tag yet
 #     -> binaries `build` per BUILD_TARGETS (one linux/amd64 leg); uploads
 #                 only the Release bundles, never a gateway binary
-#     -> publish  point the tags (semver, latest) at the scanned digest
+#     -> publish  point the tags (semver; latest only for the highest
+#                 release) at the scanned digest
 #     -> pages    sync dist/index.html into the `dist` branch
 #     -> release  created last, with the bundles, checksums, digests
 #
@@ -94,8 +96,31 @@ jobs:
     outputs:
       ship_image: ${{ steps.shape.outputs.ship_image }}
       ship_binaries: ${{ steps.shape.outputs.ship_binaries }}
+      latest: ${{ steps.tag.outputs.latest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # every tag, to tell whether this one is the highest
+
+      # A release tag is vX.Y.Z and nothing else (docs/git.md). metadata-action
+      # skips a non-semver tag, and a pre-release would still be published as
+      # the current release (Pages, the Latest Release). `latest` -- the image
+      # tag and the Latest Release -- moves only for the highest release, so a
+      # hotfix on an older line leaves it where it is.
+      - id: tag
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::the tag must be vX.Y.Z (docs/git.md), got '$GITHUB_REF_NAME'"
+            exit 1
+          fi
+          # awk, not head: it reads all of git's output, so pipefail never
+          # sees a SIGPIPE. Only vX.Y.Z tags compete; v:refname sorts 3.10 > 3.9.
+          highest="$(git tag --list 'v*' --sort=-v:refname \
+            | awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/ && !seen { print; seen = 1 }')"
+          if [ "$highest" = "$GITHUB_REF_NAME" ]; then latest=true; else latest=false; fi
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "::notice::tag $GITHUB_REF_NAME -- highest release $highest, latest=$latest"
 
       - id: shape
         env:
@@ -171,19 +196,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }} # no PAT for same-repo pushes
 
+      # `latest` only for the highest release (plan). latest=false stops the
+      # action adding its own `latest` to every non-pre-release semver tag.
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ steps.name.outputs.image }}
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ needs.plan.outputs.latest == 'true' }}
 
       # The deliberate divergence from dev.sh: multi-arch buildx, a registry
       # push and the tag move in `publish` cannot run identically on a laptop.
-      # `dev.sh image` is the local single-arch equivalent; note `all scan`
+      # `dev.sh image` is the local single-arch equivalent; note `all cov scan`
       # above did not run it, though `scan` builds an image when the project
       # ships one.
       #
@@ -496,6 +525,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          LATEST: ${{ needs.plan.outputs.latest }} # true or false, from plan
         run: |
           set -euo pipefail
 
@@ -533,8 +563,11 @@ jobs:
             printf '\nPinned by digest -- dependents must redeploy to pick this up.\n' >> notes.md
           fi
 
+          # --latest from plan: an older-line hotfix is not the Latest Release,
+          # which GitHub would otherwise make it.
           gh release create "$TAG" \
             --verify-tag \
             --title "$TAG" \
+            --latest="$LATEST" \
             --notes-file notes.md \
             "${assets[@]}"

@@ -38,17 +38,9 @@ export type ParseResult =
  *    blank — pointless to surface).
  */
 export function parseSubscriptionsResponse(xml: string): ParseResult {
-    /* v8 ignore start -- DOMParser does not throw in browsers or jsdom; it
-     * embeds parser errors as `<parsererror>` nodes which we check below.
-     * This try/catch is defensive against engine quirks and is exercised
-     * only in the (unreachable) failure path. */
-    let doc: XMLDocument;
-    try {
-        doc = new DOMParser().parseFromString(xml, 'text/xml');
-    } catch (e: any) {
-        return { ok: false, error: `SEMP v1 parse error: ${e?.message ?? 'unknown'}` };
-    }
-    /* v8 ignore stop */
+    // parseFromString does not throw for 'text/xml'; malformed input becomes a
+    // <parsererror> document, checked next.
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
     if (doc.querySelector('parsererror')) {
         return { ok: false, error: 'SEMP v1 parse error: malformed XML response.' };
     }

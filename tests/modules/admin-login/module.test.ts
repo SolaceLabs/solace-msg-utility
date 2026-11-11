@@ -15,6 +15,7 @@ vi.mock('../../../src/core/services/managed-service', () => ({
 }));
 
 import { AdminLoginModule } from '../../../src/modules/admin-login/module';
+import { completeContext } from '../../helpers/appContext';
 
 const ADMIN_PROFILE = {
     username: 'admin',
@@ -39,7 +40,7 @@ async function install(meResult: unknown = { ok: true, data: ADMIN_PROFILE }, on
         activeModuleId: null, isConnected: false, isSempConnected: false,
         selectedVpn: null, solaceConnection: null, sempCredentials: null, managed: null,
     };
-    ctx = {
+    ctx = completeContext({
         container, appState, eventBus,
         setState: vi.fn((k, v) => { (appState as any)[k] = v; }),
         loadSelf: vi.fn(),
@@ -47,7 +48,7 @@ async function install(meResult: unknown = { ok: true, data: ADMIN_PROFILE }, on
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: {},
-    };
+    });
     await AdminLoginModule.install(ctx);
     const el = <T extends HTMLElement>(sel: string): T => container.querySelector(sel) as T;
     const hidden = (sel: string) => el(sel).classList.contains('hidden');

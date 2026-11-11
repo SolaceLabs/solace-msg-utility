@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { openCopyModal, cancelCopyModal, evaluateStartGate, destinationRefusal } from '../../../src/modules/queue-copy/ui-modal';
 import { cacheElements } from '../../../src/modules/queue-copy/ui';
-import { createInitialState } from '../../../src/modules/queue-copy/state';
+import { createInitialState, destTargetKey } from '../../../src/modules/queue-copy/state';
 import { ACCUMULATE_IDLE_MS } from '../../../src/modules/queue-copy/service-verify';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { createSessionMock, createBrowserMock } from '../../setup';
@@ -9,6 +9,7 @@ import type { SourceAccess } from '../../../src/modules/queue-copy/ui-modal';
 import type { AppContext, AppState, ManagedSession } from '../../../src/core/types';
 import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import type { CopyJob, VerifyResult } from '../../../src/modules/queue-copy/state';
+import { completeContext } from '../../helpers/appContext';
 
 // Derive the structured sempCredentials fields from a baseUrl shorthand so
 // fixture lines stay readable: `sempCreds('https://broker:1943/SEMP/v2')`.
@@ -24,7 +25,7 @@ function sempCreds(baseUrl: string, user = 'u', pass = 'p'): NonNullable<AppStat
 }
 
 function makeCtx(overrides: Partial<AppContext['appState']> = {}): AppContext {
-    return {
+    return completeContext({
         container: document.createElement('div'),
         appState: {
             activeModuleId: null,
@@ -42,7 +43,7 @@ function makeCtx(overrides: Partial<AppContext['appState']> = {}): AppContext {
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: {},
-    };
+    });
 }
 
 /** Direct mode: no managed session, so every gate degrades to allow-all. */
@@ -840,7 +841,9 @@ describe('queue-copy/ui-modal', () => {
             for (let i = 0; i < 10; i++) await Promise.resolve();
             // total=0 fast-path completes cleanly.
             expect(els.sourceInput.disabled).toBe(false);
-            expect(state.job!.status).toBe('completed');
+            expect(els.modalTitle.textContent).toBe('Completed');
+            // Finished: the job no longer reads as a run in flight.
+            expect(state.job).toBeNull();
         });
 
         it('Start does nothing when primary session is null', async () => {
@@ -893,7 +896,7 @@ describe('queue-copy/ui-modal', () => {
 
             expect(els.modalRunError.classList.contains('hidden')).toBe(false);
             expect(els.modalRunError.textContent).toContain('did not match recorded oldest');
-            expect(state.job!.status).toBe('error');
+            expect(els.modalTitle.textContent).toBe('Failed');
         });
 
         it('publish reject during run surfaces broker reason via renderRunError', async () => {
@@ -930,7 +933,7 @@ describe('queue-copy/ui-modal', () => {
 
             expect(els.modalRunError.classList.contains('hidden')).toBe(false);
             expect(els.modalRunError.textContent).toContain('broker said no');
-            expect(state.job!.status).toBe('error');
+            expect(els.modalTitle.textContent).toBe('Failed');
         });
 
         it('onProgress is coalesced via requestAnimationFrame — multiple ACKs schedule ONE paint', async () => {
@@ -1027,6 +1030,93 @@ describe('queue-copy/ui-modal', () => {
             (browser as any)._handlers.MESSAGE({ getGuaranteedMessageId: () => 102, smfHeader: {} });
             for (let i = 0; i < 10; i++) await Promise.resolve();
             rafSpy.mockRestore();
+        });
+
+        it('refuses to start when the destination session was connected for another destination than the form names', async () => {
+            const ctx = makeCtx();
+            const state = createInitialState();
+            state.sourceQueue = 'q';
+            state.dest = { type: 'queue', name: 'd' };
+            state.destForm.sameBroker = false;
+            state.destForm.sameVpn = false;
+            state.destForm.host = 'b2';
+            state.destForm.solace.vpn = 'v1';
+            const { createSolacePublisher } = await import('../../../src/core/services/solace-publisher');
+            const destSession = createSessionMock();
+            state.destSession = destSession;
+            state.destSessionTarget = destTargetKey(state.destForm);
+            state.destPublisher = createSolacePublisher(destSession);
+            // The VPN field moved after that session connected.
+            state.destForm.solace.vpn = 'v2';
+            const session = createSessionMock();
+            (session.createQueueBrowser as any).mockReturnValue(createBrowserMock());
+
+            openCopyModal(ctx, els, state, () => session);
+            for (let i = 0; i < 5; i++) await Promise.resolve();
+            state.verify!.result = verifyResult({ messageCount: 5 });
+            state.verify!.inProgress = false;
+            els.btnModalStart.disabled = false;
+            els.btnModalStart.click();
+
+            expect(els.modalRunError.textContent).toMatch(/does not match the destination selected/);
+            expect(state.job).toBeNull();
+            expect(els.sourceInput.disabled).toBe(false);
+        });
+
+        it('a verify that rejects shows as a failed verify, not a modal stuck on "Checking..."', async () => {
+            const verifyMod = await import('../../../src/modules/queue-copy/service-verify');
+            const verifySpy = vi.spyOn(verifyMod, 'verifySource').mockRejectedValue(new Error('probe blew up'));
+            const state = createInitialState();
+            state.sourceQueue = 'q';
+            state.dest = { type: 'queue', name: 'd' };
+
+            openCopyModal(makeCtx(), els, state, () => createSessionMock());
+            for (let i = 0; i < 10; i++) await Promise.resolve();
+
+            expect(state.verify!.inProgress).toBe(false);
+            expect(els.modalSourceStatus.textContent).toBe('Not Found');
+            expect(els.modalVerifyError.textContent).toBe('probe blew up');
+            expect(els.btnModalSourceRefresh.disabled).toBe(false);
+            expect(els.btnModalStart.disabled).toBe(true);
+            verifySpy.mockRestore();
+        });
+
+        it('a run that rejects ends as Failed with the reason and gives the form back', async () => {
+            const copyMod = await import('../../../src/modules/queue-copy/service-copy');
+            const copySpy = vi.spyOn(copyMod, 'runCopyJob').mockImplementation((s) => {
+                s.job = job();
+                return Promise.reject(new Error('engine blew up'));
+            });
+            const state = createInitialState();
+            state.sourceQueue = 'q';
+            state.dest = { type: 'queue', name: 'd' };
+            const session = createSessionMock();
+            (session.createQueueBrowser as any).mockReturnValue(createBrowserMock());
+            const { createSolacePublisher } = await import('../../../src/core/services/solace-publisher');
+            state.primaryPublisher = createSolacePublisher(session);
+
+            openCopyModal(makeCtx(), els, state, () => session);
+            for (let i = 0; i < 5; i++) await Promise.resolve();
+            state.verify!.result = verifyResult({ messageCount: 5 });
+            state.verify!.inProgress = false;
+            els.btnModalStart.disabled = false;
+            els.btnModalStart.click();
+            for (let i = 0; i < 5; i++) await Promise.resolve();
+
+            expect(els.modalRunError.textContent).toBe('Error: engine blew up');
+            expect(els.modalTitle.textContent).toBe('Failed');
+            expect(els.btnModalCancel.textContent).toBe('Close');
+            expect(els.sourceInput.disabled).toBe(false);
+            expect(state.job).toBeNull();
+            copySpy.mockRestore();
+        });
+
+        it('opening the modal for a new run drops the previous run', () => {
+            const state = createInitialState();
+            state.sourceQueue = 'q';
+            state.job = job({ status: 'completed', copied: 5 });
+            openCopyModal(makeCtx(), els, state, () => null);
+            expect(state.job).toBeNull();
         });
 
         it('Move mode shows "Move" button label and "Moving…" run title', async () => {

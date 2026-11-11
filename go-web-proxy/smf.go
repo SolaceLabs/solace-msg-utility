@@ -13,7 +13,8 @@ import (
 )
 
 // The SMF gate: GET /managed/smf/{broker}/{vpn}[/tail] upgrades a signed-in,
-// entitled user's WebSocket and joins it to the broker's SMF port over TLS.
+// entitled user's WebSocket and joins it to the broker's SMF port, over TLS
+// (wss) unless the connection record says ws.
 // The SDK then logs in with the credential dial handed out (dial.go). The
 // socket stays open until either side ends it or access is revoked
 // (sockets.go); the gateway sets no timer of its own.
@@ -115,7 +116,7 @@ func (g *smfGate) connect(ctx context.Context, w http.ResponseWriter, r *http.Re
 	header.Set("Upgrade", "websocket")
 	header.Set("User-Agent", relayUserAgent)
 	u := &url.URL{
-		Scheme:   "https",
+		Scheme:   upgradeScheme(target.scheme),
 		Host:     net.JoinHostPort(target.host, target.port),
 		Path:     p.tail,
 		RawPath:  p.rawTail,
@@ -149,6 +150,15 @@ func (g *smfGate) connect(ctx context.Context, w http.ResponseWriter, r *http.Re
 		pipe(ctx, conn, brw.Reader, back)
 	}
 	log.Debug("smf socket ended", "err", err)
+}
+
+// upgradeScheme is the URL scheme the broker transport dials for a WebSocket
+// scheme: the upgrade is an HTTP/1.1 request, plain for ws, TLS for wss.
+func upgradeScheme(ws string) string {
+	if ws == clientPlain {
+		return "http"
+	}
+	return "https"
 }
 
 // writeSwitch sends the browser a 101 carrying only the allow-listed headers

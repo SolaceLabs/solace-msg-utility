@@ -111,13 +111,25 @@ func (s *sealer) open(role storeRole, blob []byte) ([]byte, error) {
 	return plain, nil
 }
 
-// writeDoc persists a store document sealed and owner-only, atomically.
-func (s *sealer) writeDoc(role storeRole, path string, v any) error {
+// stageDoc seals a store document into tx, owner-only, for a write that
+// commits with others (an import) or alone (writeDoc).
+func (s *sealer) stageDoc(tx *fileTx, role storeRole, path string, v any) error {
 	data, err := yaml.Marshal(v)
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(path, s.seal(role, data), 0o600)
+	return tx.stage(path, s.seal(role, data), 0o600)
+}
+
+// writeDoc persists a store document sealed and owner-only, atomically.
+func (s *sealer) writeDoc(role storeRole, path string, v any) error {
+	tx := &fileTx{}
+	defer tx.abort()
+	err := s.stageDoc(tx, role, path, v)
+	if err == nil {
+		err = tx.commit()
+	}
+	return err
 }
 
 // readDoc opens a sealed store document and decodes it strictly, rejecting

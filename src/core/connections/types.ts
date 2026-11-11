@@ -34,6 +34,12 @@ export interface SolaceConfig {
      * it on the page's own host, and `protocol`/`port`/`urlPath` are unused.
      */
     smfPath?: string;
+    /**
+     * The deployment's `/hosted` verdict (`AppState.connConfig.hosted`), set by
+     * the caller from that single home: when true the broker URL is routed
+     * through the gateway's proxy path (`buildBrokerUrl`). Unset means Direct.
+     */
+    hosted?: boolean;
 }
 
 /** SEMP REST management config. */
@@ -49,6 +55,8 @@ export interface SempConfig {
      * account, and the session cookie authenticates the browser.
      */
     relayBase?: string;
+    /** As `SolaceConfig.hosted`: route through the gateway's proxy path. */
+    hosted?: boolean;
 }
 
 /** Full broker connection config. Host is shared between Solace and SEMP. */

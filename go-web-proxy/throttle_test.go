@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
 	"net/netip"
 	"strings"
 	"testing"
@@ -210,5 +214,161 @@ func TestRetrySeconds(t *testing.T) {
 		if got := retrySeconds(d); got != want {
 			t.Errorf("%v: want %d, got %d", d, want, got)
 		}
+	}
+}
+
+// One sign-in per account is checked at a time: a second one for the same
+// account waits for the first to give its turn back, one for another account
+// does not, and the table forgets an account once nobody holds or waits.
+func TestThrottle_LoginTurnSerialisesAnAccount(t *testing.T) {
+	th := newThrottle(fixed(testLoginLimits), newFakeClock().now, quietLogger())
+	release, wait, err := th.loginTurn(context.Background(), "alice")
+	if err != nil || wait != 0 {
+		t.Fatalf("first turn: %v %v", wait, err)
+	}
+	other, _, err := th.loginTurn(context.Background(), "bob")
+	if err != nil {
+		t.Fatalf("another account waits for nobody: %v", err)
+	}
+	other()
+	got := make(chan func(), 1)
+	go func() {
+		r, _, _ := th.loginTurn(context.Background(), "alice")
+		got <- r
+	}()
+	select {
+	case <-got:
+		t.Fatal("a second sign-in for the account must wait for the first")
+	case <-time.After(50 * time.Millisecond):
+	}
+	release()
+	select {
+	case second := <-got:
+		second()
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiting sign-in never got its turn")
+	}
+	th.mu.Lock()
+	n := len(th.turns)
+	th.mu.Unlock()
+	if n != 0 {
+		t.Errorf("the table must forget accounts nobody holds, %d left", n)
+	}
+}
+
+// A sign-in that goes away while it waits for its turn stops waiting; a free
+// turn is taken whatever the request's state.
+func TestThrottle_LoginTurnGivesUpWhenTheRequestGoes(t *testing.T) {
+	th := newThrottle(fixed(testLoginLimits), newFakeClock().now, quietLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	release, _, err := th.loginTurn(ctx, "alice")
+	if err != nil {
+		t.Fatalf("a free turn is taken at once: %v", err)
+	}
+	if _, _, err := th.loginTurn(ctx, "alice"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("queued and gone: want context.Canceled, got %v", err)
+	}
+	release()
+	if len(th.turns) != 0 {
+		t.Errorf("both holds must be given back, %d left", len(th.turns))
+	}
+}
+
+// Each table that fills refuses new keys, and says so at most once a minute,
+// naming itself and its size.
+func TestThrottle_FullTablesWarnOncePerMinute(t *testing.T) {
+	clock := newFakeClock()
+	var buf strings.Builder
+	th := newThrottle(fixed(testLoginLimits), clock.now, newCapturingLogger(&buf))
+	th.maxTracked = 1
+	seen, other := addr(t, "192.0.2.7"), addr(t, "198.51.100.1")
+	th.loginFailed("u1", seen, true)
+	th.allowUnauthenticated(seen, true)
+	hold, _, _ := th.loginTurn(context.Background(), "u1")
+	defer hold()
+	refuse := func() {
+		th.loginWait("u2", other, true) // users and clients
+		th.loginFailed("u2", other, true)
+		th.allowUnauthenticated(other, true)
+		if _, wait, _ := th.loginTurn(context.Background(), "u2"); wait != testLoginLimits.backoff {
+			t.Errorf("a new account while the turn table is full waits one back-off, got %v", wait)
+		}
+	}
+	refuse()
+	refuse()
+	for _, table := range []string{"users", "clients", "buckets", "turns"} {
+		if n := strings.Count(buf.String(), "table="+table+" "); n != 1 {
+			t.Errorf("%s: want one warning, got %d: %s", table, n, buf.String())
+		}
+	}
+	if !strings.Contains(buf.String(), "size=1") {
+		t.Errorf("the warning names the size: %s", buf.String())
+	}
+	clock.advance(time.Minute)
+	th.loginWait("u2", other, true)
+	if n := strings.Count(buf.String(), "table=users "); n != 2 {
+		t.Errorf("a minute later a full table warns again: want 2 warnings, got %d", n)
+	}
+}
+
+// throttleVectors is testdata/contract/throttle.json: the rules the demo's
+// fake throttle (src/mock-broker/gateway/throttle.ts) is held to as well.
+type throttleVectors struct {
+	Comment string `json:"_comment"`
+	Limits  struct {
+		MaxFailures       int `json:"maxFailures"`
+		BackoffSeconds    int `json:"backoffSeconds"`
+		MaxBackoffSeconds int `json:"maxBackoffSeconds"`
+	} `json:"limits"`
+	Cases []struct {
+		Name  string `json:"name"`
+		Steps []struct {
+			Fail    string `json:"fail"`
+			Times   int    `json:"times"`
+			Succeed string `json:"succeed"`
+			Advance int    `json:"advance"`
+			Wait    string `json:"wait"`
+			Want    int    `json:"want"`
+		} `json:"steps"`
+	} `json:"cases"`
+}
+
+func TestThrottle_SharedVectors(t *testing.T) {
+	var v throttleVectors
+	dec := json.NewDecoder(bytes.NewReader(readContract(t, "throttle.json")))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&v); err != nil || len(v.Cases) == 0 {
+		t.Fatalf("throttle.json: %v (%d cases)", err, len(v.Cases))
+	}
+	lim := loginLimits{
+		maxFailures: v.Limits.MaxFailures, unauthPerMinute: 60,
+		backoff:    time.Duration(v.Limits.BackoffSeconds) * time.Second,
+		maxBackoff: time.Duration(v.Limits.MaxBackoffSeconds) * time.Second,
+	}
+	client := addr(t, "192.0.2.10")
+	for _, c := range v.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			clock := newFakeClock()
+			th := newThrottle(fixed(lim), clock.now, quietLogger())
+			for i, s := range c.Steps {
+				switch {
+				case s.Fail != "":
+					for range max(s.Times, 1) {
+						th.loginFailed(s.Fail, client, true)
+					}
+				case s.Succeed != "":
+					th.loginSucceeded(s.Succeed, client, true)
+				case s.Advance > 0:
+					clock.advance(time.Duration(s.Advance) * time.Second)
+				case s.Wait != "":
+					if got := th.loginWait(s.Wait, client, true); got != time.Duration(s.Want)*time.Second {
+						t.Errorf("step %d: %s waits %v, want %ds", i+1, s.Wait, got, s.Want)
+					}
+				default:
+					t.Fatalf("step %d does nothing", i+1)
+				}
+			}
+		})
 	}
 }

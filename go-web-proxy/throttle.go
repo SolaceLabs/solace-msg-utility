@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"math"
 	"net/netip"
@@ -17,7 +18,9 @@ const throttleMaxTracked = 10_000
 // per username and per client; after maxFailures each further failure blocks
 // that key for backoff, doubling up to maxBackoff, and a blocked attempt is
 // refused before any password is checked. Separately, every request without a
-// session draws from a per-client token bucket of unauthPerMinute.
+// session draws from a per-client token bucket of unauthPerMinute. Sign-ins
+// for one account are checked one at a time (loginTurn), so parallel guesses
+// cannot all pass the check before the first failure is counted.
 //
 // Clients are keyed by address, IPv6 by its /64: one host usually owns a whole
 // /64, so rotating within it buys nothing.
@@ -31,6 +34,8 @@ type throttle struct {
 	users      map[string]*failures
 	clients    map[netip.Prefix]*failures
 	buckets    map[netip.Prefix]*bucket
+	turns      map[string]*turn     // accounts with a sign-in being checked (loginTurn)
+	fullWarned map[string]time.Time // when tableFull last warned, per table
 }
 
 type failures struct {
@@ -45,12 +50,23 @@ type bucket struct {
 	limited bool // a warn was logged for this episode
 }
 
+// turn is one account's sign-in slot: token holds a value while a sign-in
+// for the account is being checked, and refs counts the requests holding or
+// waiting for it. The entry goes when the last of them leaves, so the table
+// holds only accounts with a sign-in in flight.
+type turn struct {
+	token chan struct{}
+	refs  int
+}
+
 func newThrottle(limits func() loginLimits, now func() time.Time, logger *slog.Logger) *throttle {
 	return &throttle{
 		limits: limits, now: now, logger: logger, maxTracked: throttleMaxTracked,
-		users:   map[string]*failures{},
-		clients: map[netip.Prefix]*failures{},
-		buckets: map[netip.Prefix]*bucket{},
+		users:      map[string]*failures{},
+		clients:    map[netip.Prefix]*failures{},
+		buckets:    map[netip.Prefix]*bucket{},
+		turns:      map[string]*turn{},
+		fullWarned: map[string]time.Time{},
 	}
 }
 
@@ -83,6 +99,60 @@ func (t *throttle) stale(f *failures, now time.Time) bool {
 	return !now.Before(f.blockedUntil) && now.Sub(f.last) > t.lim.maxBackoff
 }
 
+// loginTurn waits until no other sign-in for user is being checked, then
+// returns release, which the caller calls once the attempt is recorded. One
+// check per account at a time means each guess is looked at only after the
+// one before it was counted: parallel guesses queue behind the first and meet
+// its failure in loginWait, so no more than maxFailures of them reach the
+// password check. A free turn is taken at once, whatever the request's state.
+// When the table of accounts with a sign-in in flight is full, a new account
+// waits one back-off (wait > 0), as failureWait fails closed; err is the
+// request going away while it queued.
+func (t *throttle) loginTurn(ctx context.Context, user string) (release func(), wait time.Duration, err error) {
+	k := userKey(user)
+	t.mu.Lock()
+	tn := t.turns[k]
+	if tn == nil {
+		if len(t.turns) >= t.maxTracked {
+			t.lim = t.limits()
+			t.tableFull("turns", len(t.turns), t.now())
+			wait = t.lim.backoff
+			t.mu.Unlock()
+			return nil, wait, nil
+		}
+		tn = &turn{token: make(chan struct{}, 1)}
+		t.turns[k] = tn
+	}
+	tn.refs++
+	t.mu.Unlock()
+	release = func() {
+		<-tn.token
+		t.leave(k, tn)
+	}
+	select {
+	case tn.token <- struct{}{}:
+		return release, 0, nil
+	default:
+	}
+	select {
+	case tn.token <- struct{}{}:
+		return release, 0, nil
+	case <-ctx.Done():
+		t.leave(k, tn)
+		return nil, 0, ctx.Err()
+	}
+}
+
+// leave drops one request's hold on an account's turn, and the entry with
+// the last one.
+func (t *throttle) leave(k string, tn *turn) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if tn.refs--; tn.refs == 0 {
+		delete(t.turns, k)
+	}
+}
+
 // loginWait is how long a sign-in for user from client must wait; 0 means it
 // may proceed to the password check. A key that is not tracked while its table
 // is full (after pruning) waits one back-off: the throttle fails closed.
@@ -91,17 +161,29 @@ func (t *throttle) loginWait(user string, client netip.Addr, ok bool) time.Durat
 	defer t.mu.Unlock()
 	t.lim = t.limits()
 	now := t.now()
-	return max(failureWait(t, t.users, userKey(user), now), failureWait(t, t.clients, clientKey(client, ok), now))
+	return max(failureWait(t, t.users, userKey(user), now, "users"), failureWait(t, t.clients, clientKey(client, ok), now, "clients"))
 }
 
-func failureWait[K comparable](t *throttle, m map[K]*failures, k K, now time.Time) time.Duration {
+func failureWait[K comparable](t *throttle, m map[K]*failures, k K, now time.Time, table string) time.Duration {
 	if f := m[k]; f != nil {
 		return max(f.blockedUntil.Sub(now), 0)
 	}
 	if !hasRoom(t, m, now) {
+		t.tableFull(table, len(m), now)
 		return t.lim.backoff
 	}
 	return 0
+}
+
+// tableFull warns that a table is full and a new key was refused, at most
+// once a minute per table: the flood that fills a table must not flood the
+// log as well. t.mu must be held.
+func (t *throttle) tableFull(table string, size int, now time.Time) {
+	if last, ok := t.fullWarned[table]; ok && now.Sub(last) < time.Minute {
+		return
+	}
+	t.fullWarned[table] = now
+	t.logger.Warn("throttle table full: new keys are refused until entries expire", "table", table, "size", size)
 }
 
 // hasRoom reports whether m may take a new key, pruning stale records first
@@ -139,7 +221,8 @@ func recordFailure[K comparable](t *throttle, m map[K]*failures, k K, now time.T
 	}
 	if f == nil {
 		if !hasRoom(t, m, now) {
-			return // loginWait already refuses untracked keys while full
+			t.tableFull(kind+"s", len(m), now) // loginWait already refuses untracked keys while full
+			return
 		}
 		f = &failures{}
 		m[k] = f
@@ -188,6 +271,7 @@ func (t *throttle) allowUnauthenticated(client netip.Addr, ok bool) (bool, time.
 				}
 			}
 			if len(t.buckets) >= t.maxTracked {
+				t.tableFull("buckets", len(t.buckets), now)
 				return false, time.Minute
 			}
 		}

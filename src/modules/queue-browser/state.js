@@ -1,6 +1,15 @@
 import { DEFAULT_MAX_MESSAGES_PER_QUEUE } from './constants.js';
 
 /**
+ * A stored message as service-events.ts's ingest builds it: `id`, `content`
+ * (text, or a size placeholder when `binary`), `bytes` (payload flavor),
+ * `type`, `dateMs`, `msgProperties`, `appProperties` and `_originalMsg` (the
+ * SDK message). The shape is owned by that TypeScript ingest, so here it is
+ * an open record rather than a second declaration that could drift.
+ * @typedef {Record<string, any>} StoredMessage
+ */
+
+/**
  * Single source of truth for the activeFilters shape. Every reset site must
  * go through this factory so new fields can't be silently dropped by one of
  * three previously-divergent inline resets. `properties` is included in the
@@ -36,26 +45,41 @@ export const state = {
 
 // No default export needed in closure scope
 
+/** @param {string} queueName */
 export function getBrowser(queueName) {
     return state.browserInstances.get(queueName);
 }
 
+/**
+ * @param {string} queueName
+ * @param {any} browser the SDK's QueueBrowser (the SDK ships no types)
+ */
 export function setBrowser(queueName, browser) {
     state.browserInstances.set(queueName, browser);
 }
 
+/** @param {string} queueName */
 export function deleteBrowser(queueName) {
     state.browserInstances.delete(queueName);
 }
 
+/** @param {string} queueName */
 export function getMessages(queueName) {
     return state.messageStore.get(queueName);
 }
 
+/**
+ * @param {string} queueName
+ * @param {StoredMessage[]} messages
+ */
 export function setMessages(queueName, messages) {
     state.messageStore.set(queueName, messages);
 }
 
+/**
+ * @param {string} queueName
+ * @param {StoredMessage} message
+ */
 export function addMessage(queueName, message) {
     const store = state.messageStore.get(queueName);
     if (store) {
@@ -66,7 +90,9 @@ export function addMessage(queueName, message) {
 // UI sync hook — set once by queue-browser/module.ts so state stays free of direct
 // ui-core coupling. ingestMessage() is the single authoritative entry point for
 // arriving messages and owns the full moving-window invariant atomically.
+/** @type {((id: string) => void) | null} */
 let _uiRemoveRow = null;
+/** @param {((id: string) => void) | null} removeRow null unhooks it (test reset) */
 export function wireIngestUi(removeRow) {
     _uiRemoveRow = removeRow;
 }
@@ -77,6 +103,8 @@ export function wireIngestUi(removeRow) {
  * in one synchronous pass so no intermediate state is observable between them.
  * Invoked from service-events.onMessage — must stay sync (no await) or the moving-
  * window invariant can interleave across arrivals.
+ * @param {string} queueName
+ * @param {StoredMessage} message
  */
 export function ingestMessage(queueName, message) {
     const store = state.messageStore.get(queueName);
@@ -109,6 +137,7 @@ import { matchString } from '../../core/utils';
 export { matchString };
 
 // Logic extracted from ui-events to be shared with service-events
+/** @param {StoredMessage} msg */
 export function shouldShowMessage(msg) {
     // Current Active Filters - DO NOT lower() here, let matchString handle casing
     const fContent = state.activeFilters.content;
@@ -123,10 +152,11 @@ export function shouldShowMessage(msg) {
 
     // 1. Content
     if (fContent) {
-        // Use 'Contains' matching for content/body as per user request
+        // Use 'Contains' matching for content/body as per user request. A true binary
+        // payload holds no text (its content is a size placeholder), so it never matches.
         //if (!fContent.includes('*')) {
-        const content = msg.content || '';
-        conditions.push({ active: true, match: content.toLowerCase().includes(fContent.toLowerCase()) });
+        const match = !msg.binary && msg.content.toLowerCase().includes(fContent.toLowerCase());
+        conditions.push({ active: true, match });
         //} else {
         // Fallback to matchString for wildcards
         //    conditions.push({ active: true, match: matchString(msg.content, fContent) });
@@ -149,14 +179,16 @@ export function shouldShowMessage(msg) {
 
         // _originalMsg is set by service-events.onMessage for every broker-delivered
         // message; shouldShowMessage only runs on messages from that pipeline.
-        // window.solace is a required SDK global loaded before module install.
+        // window.solace is a required SDK global loaded before module install
+        // (untyped: the SDK ships no declarations).
+        const sdk = /** @type {any} */ (window).solace;
         const dest = msg._originalMsg.getDestination();
-        const msgDestName = dest ? (dest.getName() || '') : '';
+        const msgDestName = dest ? dest.getName() : '';
         let msgDestType = '';
         if (dest) {
             const t = dest.getType();
-            if (t === window.solace.DestinationType.TOPIC) msgDestType = 'Topic';
-            else if (t === window.solace.DestinationType.QUEUE) msgDestType = 'Queue';
+            if (t === sdk.DestinationType.TOPIC) msgDestType = 'Topic';
+            else if (t === sdk.DestinationType.QUEUE) msgDestType = 'Queue';
         }
 
         if (fDest && !matchString(msgDestName, fDest)) matchDest = false;
@@ -167,7 +199,7 @@ export function shouldShowMessage(msg) {
 
     // 5. Properties (Multiple) — `properties` is always an array (see defaultActiveFilters)
     if (state.activeFilters.properties.length > 0) {
-        state.activeFilters.properties.forEach(prop => {
+        state.activeFilters.properties.forEach((/** @type {{ key: string, value: string }} */ prop) => {
             const fKey = prop.key.trim();
             // Key is case-insensitive exact match
             const fKeyLower = fKey.toLowerCase();
@@ -175,21 +207,23 @@ export function shouldShowMessage(msg) {
 
             let matchProp = false;
 
-            // Check Standard Properties
-            if (msg.msgProperties) {
-                // Find matching key (case-insensitive)
-                const foundKey = Object.keys(msg.msgProperties).find(k => k.toLowerCase() === fKeyLower);
-                if (foundKey) {
-                    const val = String(msg.msgProperties[foundKey] || '');
-                    if (matchString(val, fVal)) matchProp = true;
-                }
+            // Check Standard Properties. Ingest always sets msgProperties and
+            // appProperties (at least `{}`).
+            // Find matching key (case-insensitive)
+            const foundStdKey = Object.keys(msg.msgProperties).find(k => k.toLowerCase() === fKeyLower);
+            if (foundStdKey) {
+                // Ingest stores only non-null values and keeps Priority 0, so
+                // stringify as-is: '0' must stay matchable.
+                const val = String(msg.msgProperties[foundStdKey]);
+                if (matchString(val, fVal)) matchProp = true;
             }
 
             // Check App Properties
-            if (!matchProp && msg.appProperties) {
+            if (!matchProp) {
                 const foundKey = Object.keys(msg.appProperties).find(k => k.toLowerCase() === fKeyLower);
                 if (foundKey) {
-                    const val = String(msg.appProperties[foundKey] || '');
+                    // User-property values may be 0 or false (keep) or null (an SDT null field).
+                    const val = String(msg.appProperties[foundKey] ?? '');
                     if (matchString(val, fVal)) matchProp = true;
                 }
             }

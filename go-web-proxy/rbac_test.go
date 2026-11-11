@@ -2,49 +2,27 @@ package main
 
 import "testing"
 
-// TestMatchGlob_Conformance MUST stay in lockstep with the GLOB_CONFORMANCE
-// table in tests/core/rbac.test.ts so the proxy entitlement filter and the
-// browser re-filter agree byte-for-byte. Globs are case-sensitive.
+// The glob vectors live in testdata/contract/validation.json ("glob": rows
+// of [pattern, value, expected]), so the gateway's entitlement match and the
+// app's re-filter (src/core/rbac.ts, which the demo's fake gateway uses and
+// tests/mock-broker/gateway/contract.test.ts runs the same rows against) are
+// held to one table. Globs are case-sensitive; a trailing segment may not
+// overlap the consumed prefix ("a*a" does not match "a").
 func TestMatchGlob_Conformance(t *testing.T) {
-	cases := []struct {
-		pattern, value string
-		want           bool
-	}{
-		{"*", "anything", true},
-		{"*", "", true},
-		{"", "", true},
-		{"", "x", false},
-		{"queue1", "queue1", true},
-		{"queue1", "queue2", false},
-		{"broker-group*", "broker-group-prod", true},
-		{"broker-group*", "other", false},
-		{"*prod", "us-prod", true},
-		{"*prod", "prod-us", false},
-		{"orders.*", "orders.new", true},
-		{"orders.*", "ordersXnew", false},
-		{"a*b*c", "aXXbYYc", true},
-		{"a*b*c", "aXXc", false},
-		{"Order*", "order-secret", false},
-		{"Order*", "Order-1", true},
+	rows := readContractVectors(t).Glob
+	if len(rows) == 0 {
+		t.Fatal("validation.json holds no glob vector")
 	}
-	for _, c := range cases {
-		if got := matchGlob(c.pattern, c.value); got != c.want {
-			t.Errorf("matchGlob(%q, %q) = %v, want %v", c.pattern, c.value, got, c.want)
+	for i, row := range rows {
+		pattern, okP := row[0].(string)
+		value, okV := row[1].(string)
+		want, okW := row[2].(bool)
+		if !okP || !okV || !okW {
+			t.Fatalf("glob row %d: want [pattern, value, expected], got %v", i+1, row)
 		}
-	}
-}
-
-func TestMatchGlob_NoOverlap(t *testing.T) {
-	// "a*a" must not match a single "a" (the trailing segment may not overlap
-	// the consumed prefix) but must match "aa" and "aba".
-	if matchGlob("a*a", "a") {
-		t.Error(`"a*a" should not match "a"`)
-	}
-	if !matchGlob("a*a", "aa") {
-		t.Error(`"a*a" should match "aa"`)
-	}
-	if !matchGlob("a*a", "aba") {
-		t.Error(`"a*a" should match "aba"`)
+		if got := matchGlob(pattern, value); got != want {
+			t.Errorf("matchGlob(%q, %q) = %v, want %v", pattern, value, got, want)
+		}
 	}
 }
 

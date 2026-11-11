@@ -95,13 +95,13 @@ The gateway's settings live in `config.yaml` ([go-web-proxy/configfile.go](../go
 
 The connections module probes the gateway-only `/hosted` endpoint at the very start of its `install(app)`. A 200 response carrying JSON `{hosted, connModes, defaultConn}` flips the singleton in `src/core/hosted.ts` **and** resolves the deployment's connection modes (see [Connection modes](#connection-modes)); a gateway older than that contract answers with the plaintext `'true'`, which is still accepted and means *hosted, Direct only*. Any other outcome (404 from a standalone deployment, unrecognised body, network error) leaves hosted mode off and the app Direct-only. The probe is awaited before any service factory is created so a Connect click can't race the flag.
 
-`buildBrokerUrl(scheme, host, port, urlPath, isWebSocket)` in `src/core/hosted.ts` is the single rewrite point. In direct mode it returns the original `${scheme}://${host}:${port}${urlPath}` shape; in hosted mode it returns `${wireScheme}://${pageHost}/${scheme}/${port}/${host}${urlPath}`, with `wireScheme` upgraded to `wss`/`ws` for WebSocket (matching the page's https/http) and `https`/`http` for plain HTTP. Both `solace-client` and `semp-client` route through this builder, so every downstream URL (SEMP v2 fetches, SEMP v1 RPC via `deriveSempV1Url`, the queue-discovery paged fetches, queue-subscription-explorer's RPC POSTs, the queue-picker's caches) inherits the rewrite transparently — they all append paths onto the captured `sempCtx.baseUrl`.
+`buildBrokerUrl(scheme, host, port, urlPath, isWebSocket)` in `src/core/hosted.ts` is the single rewrite point. In direct mode it returns the original `${scheme}://${host}:${port}${urlPath}` shape; in hosted mode it returns `${wireScheme}://${pageHost}/${scheme}/${port}/${host}${urlPath}`, with `wireScheme` upgraded to `wss`/`ws` for WebSocket (matching the page's https/http) and `https`/`http` for plain HTTP. Both `solace-client` and `semp-client` route through this builder. A SEMP caller never builds a URL itself: it passes a path (`/SEMP/v2/monitor/...`, or `/SEMP` for a v1 RPC) to `sempCtx.fetch`, which rebuilds the full URL through `buildBrokerUrl` on every call (or, in a Provisioned session, prefixes the relay base), so every downstream request (SEMP v2 fetches, SEMP v1 RPCs, the queue-discovery paged fetches, queue-subscription-explorer's RPC POSTs, the queue-picker's caches) inherits the rewrite. `sempCtx.baseUrl` is diagnostic only (log lines, error text), never a request base, and a broker-emitted URL such as `nextPageUri` is cut to its path and query before it is fetched.
 
 **Plain schemes on an https page.** A browser blocks an https page's `ws://` and `http://` requests as mixed content, so without the gateway the app offers them only on a page that is not https (an `http://` server, or the Standalone HTML from disk); behind the gateway all four stay, as the browser's hop is to the gateway on the page's own scheme and the gateway makes the plain one. `plainSchemesUsable()` in `src/core/hosted.ts` is the rule. `limitSchemeOptions(select)` hides and disables the plain options of an editable protocol select (the connections form, queue-copy's destination) and moves a selected one to its TLS form; it runs at install, after the `/hosted` probe, as neither input changes while the page is open, and never re-enables an option the template disables. `usableScheme(scheme)` maps a saved scheme the same way: the connections form's `applyConfig` loads a saved `ws`/`http` as `wss`/`https` with a warning toast, since the saved port is most likely the plain one. Queue-copy's source fields mirror the primary connection and are left as they are.
 
 Two related details:
 
-- `deriveSempV1Url` strips path/query/fragment in direct mode (SEMP v1 lives at the broker root `/SEMP`, regardless of any user-supplied urlPath on v2) but preserves the gateway proxy prefix in hosted mode so the v1 POST still routes via the gateway.
+- A SEMP v1 RPC is a `POST` of `/SEMP` through the same `sempCtx.fetch` (the connection's URL path, if any, in front), so in hosted mode it routes through the gateway exactly as a v2 call does.
 - The wss TLS handshake probe in `solace-client.ts` is skipped in hosted mode. The browser only sees the gateway's TLS endpoint (already trusted by the PWA load); probing the internal broker would be wrong. Same reasoning suppresses the "click to trust this URL" help link in connection-error toasts.
 
 `AppState.sempCredentials` carries the user-typed `protocol/host/port/urlPath` alongside the rewritten `baseUrl`, so UI code (queue-copy source/dest readout, modal summary) displays the broker the user reached for — not the gateway-prefixed wire URL.
@@ -129,7 +129,7 @@ The image ([docker/Dockerfile](../docker/Dockerfile), whose header is the author
 | Path | Served by | Gateway mode | Provisioned mode | Files only |
 | --- | --- | --- | --- | --- |
 | `/robots.txt` | `robotsTxt` (main.go) | `Disallow: /` for every crawler | Same | Same |
-| `/hosted` | `hostedHandler` ([proxy.go](../go-web-proxy/proxy.go)) | JSON `{hosted, connModes, defaultConn}`, `no-store`; left out of the access log (the app polls it) | Same | `404`: the app stays Direct and browsers connect to brokers themselves |
+| `/hosted` | `hostedHandler` ([proxy.go](../go-web-proxy/proxy.go)) | JSON `{hosted, connModes, defaultConn}`, `no-store`; left out of the access log (asked on every page load: each connections entry probes it once, at install) | Same | `404`: the app stays Direct and browsers connect to brokers themselves |
 | `/solAdmin`, `/solAdmin/` | `adminHandler` behind `gateAdmin` ([pages.go](../go-web-proxy/pages.go)) | `404` | `solAdmin.html` (`no-store`) for a signed-in administrator. No session -> `/login?next=/solAdmin`, a forced change -> `/login/password`, not an administrator -> a `403` page | `404` |
 | `/managed/...` | `managedHandler` ([managed.go](../go-web-proxy/managed.go)) | `404` | A session (`401 unauthenticated`, throttled per client), same origin (`403 cross_origin`), and under a forced change only `/managed/logout` (`403 password_change_required`). `/managed/relay/...` is the SEMP relay ([relay.go](../go-web-proxy/relay.go)), `/managed/smf/...` the SMF gate ([smf.go](../go-web-proxy/smf.go)), the rest the API mux: `me`, `logout`, `dial`, and through `adminOnly` `users`, `connections`, `settings` and `backup/...`. An unknown path or method is `404 not_found`, never `405`. All `no-store`. | `404` |
 | `/login`, `/login/password` | `authPages` (pages.go) | The app (history fallback) | The sign-in and password-change pages; a cross-site POST is a `403` page | The app |
@@ -165,7 +165,7 @@ src/modules/admin-login/                  Module — /solAdmin entry point (admi
 src/modules/user-management/              Module — admin-only user + entitlement CRUD (admin variant only)
 src/modules/connection-management/        Module — admin-only broker-connection CRUD (admin variant only)
 
-Install order + sidebar order are set in [src/registry.ts](../src/registry.ts) — each registry entry is a `{ module, priority }` tuple, so the entire ordering decision lives in one file.
+Install order + sidebar order are the priorities in the variant manifest ([src/variants/](../src/variants/)), one `'<id>': <priority>` line per module; [src/registry.ts](../src/registry.ts) turns each line into a `{ module, priority }` tuple, so a variant's whole ordering decision lives in its one file.
 ```
 
 There are no `*-mock` service siblings: the demo build (`vite build --mode demo`) runs these same modules against the in-browser broker -- see [The demo broker](#the-demo-broker-demohtml-provisioned-demohtml) and the **Build Modes** section in [CLAUDE.md](../CLAUDE.md).
@@ -176,7 +176,7 @@ All module coordination goes through the EventBus — every module publishes and
 
 Modules install in priority order, so an earlier module that emits during its `install()` could reach later-installing modules that haven't subscribed yet. The kernel wraps the install loop in `eventBus.hold()` / `eventBus.release()` — emits fired while held are queued FIFO and flushed (in order) once every module has finished install. Subscriptions made during install are honoured when the flush runs.
 
-No module emits during install today (the currently live cross-module configs are propagated at user-action time — e.g. Connect — not at install time), so the buffer is a no-op in practice. It's retained as a capability: future initial-state events that need to reach later-priority modules can emit during install and rely on the FIFO flush. No `setTimeout`, no sticky-event semantics — just a single install-phase gate.
+Modules do emit during install, and rely on the flush: queue-browser announces `browser:available` at the end of its install (queue-discovery's "Open in Browser" listens for it); the managed connections entry publishes `connConfig` (an `app:state-change`), and its panel's session restore emits `rbac:changed`, on which the kernel and the session-gated modules settle what they show. A module installing later would otherwise miss each of them. No `setTimeout`, no sticky-event semantics -- just a single install-phase gate.
 
 These methods are kernel-only. Modules never call `hold()`/`release()`.
 
@@ -211,7 +211,7 @@ sequenceDiagram
     alt VPN already matches
         CN-->>QC: emit('copy:vpn-switched', {queue})
     else VPN differs
-        CN->>CN: confirm() dialog
+        CN->>CN: confirm dialog (core component)
         alt user confirms
             CN->>CN: reconnect
             CN->>CN: emit('client:connected')
@@ -661,7 +661,7 @@ The first flavor is the queue-browser **no-payload** build. [src/modules/queue-b
 
 On the gateway side there is **one binary and one image** for every container mode. `main.go` reaches the store and the `/managed/*` handler through `newManagedRouting`, which builds them only when the `connModes` at startup offers Provisioned sign-in (`config.provisioned()`); in Gateway mode it returns nil and `/managed/*`, `/login` and `/solAdmin` are 404s. The image ships both app bundles, and `appIndexFile` picks the one served at `/`: `index.html` (Direct only) in Gateway mode, `provisioned.html` in Provisioned mode; neither file, nor `solAdmin.html`, is served by its own name.
 
-Enforcement is **proxy connection-gating + client guardrails**: the proxy returns only the connections a user is entitled to (plus per-queue permission globs); the client filters discovery and guardrails the UI. The broker relay itself stays ungated, so the client guardrails are UX, not a security boundary.
+Enforcement is **proxy connection-gating + client guardrails**: the proxy returns only the connections a user is entitled to (plus per-queue permission globs), `dial` and the SMF gate open only an entitled VPN, and the SEMP relay is read-only (SEMP v2 `GET`/`HEAD`, a v1 `<show>`) and refuses a broker the user may not use; the client filters discovery and guardrails the UI. Within an entitled broker the relay filters neither VPNs nor queues, so those filters and the per-queue Operate / Read-only split are client guardrails: UX, not a security boundary.
 
 ### Connection modes
 
@@ -690,7 +690,7 @@ Three consequences of running both modes in the managed entry are load-bearing:
 - **Single cross-module router.** In the managed entry, `connection:check-connection` and `connection:edit-requested` route to the Provisioned panel when `appState.managed` is set, else run the Direct form's VPN-switch dance. The Release entry routes both to the Direct form and registers no `rbac:sign-out-requested` listener, since no Provisioned session can exist there. Callers stay mode-agnostic. `rbac:sign-out-requested` is routed the same way, to the Provisioned panel's logout (the Direct-connect interlock's teardown), and is a no-op without a Provisioned session.
 - **The Provisioned tab is offered only when the deployment offers it** -- tab visibility *is* the availability signal, which is why the old "Deployment Gateway Required" gate card was removed.
 
-**The gateway owns the session.** Users sign in on the gateway's own page (`/login`, a form with no script); the gateway checks the password against a slow per-user hash, throttles guessing, and sets an `HttpOnly` `SameSite=Lax` session cookie (go-web-proxy: `pages.go`, `session.go`, `throttle.go`, `password.go`). The bundle never sees a password or a credential for the gateway. At install the Provisioned panel calls `GET /managed/me` (`restore()`): a live session's profile goes to the managed profile (below), `appState.managed` is published and the Provisioned tab opens; `401` leaves the signed-out view, whose **Sign in** button is a plain link to `/login`; `403 password_change_required` points it at `/login/password`. Because the cookie survives a page reload, so does the session. **Refresh** re-reads `/managed/me`; a `401` there means the gateway ended the session (idle or absolute limit, or an admin changed the account) and the panel drops its local state to match. **Sign out** calls `POST /managed/logout` and clears local state. All `/managed/*` calls go through [managed-api.ts](../src/core/services/managed-api.ts) (`managedRequest`, which never rejects, and `managedErrorMessage`, which maps the gateway's JSON error codes to text). A Provisioned session reaches brokers only through the gateway: SEMP through its relay and SMF through its socket gate, both behind the session (see Credential custody below); under `CONN_MODES=managed` the Direct relay answers `404`.
+**The gateway owns the session.** Users sign in on the gateway's own page (`/login`, a form with no script); the gateway checks the password against a slow per-user hash, throttles guessing, and sets an `HttpOnly` `SameSite=Lax` session cookie (go-web-proxy: `pages.go`, `session.go`, `throttle.go`, `password.go`). The bundle never sees a password or a credential for the gateway. At install the Provisioned panel calls `GET /managed/me` (`restore()`): a live session's profile goes to the managed profile (below), `appState.managed` is published and the Provisioned tab opens; `401` leaves the signed-out view, whose **Sign in** button is a plain link to `/login`; `403 password_change_required` points it at `/login/password`. Because the cookie survives a page reload, so does the session. **Refresh** re-reads `/managed/me`; a `401` there means the gateway ended the session (idle or absolute limit, or an admin changed the account) and the panel drops its local state to match. **Sign out** calls `POST /managed/logout` and clears local state. All `/managed/*` calls go through [managed-api.ts](../src/core/services/managed-api.ts) (`managedRequest`, which never rejects, and `managedErrorMessage`, which maps the gateway's JSON error codes to text). A Provisioned session reaches brokers only through the gateway: SEMP through its relay and SMF through its socket gate, both behind the session (see Credential custody below); under `CONN_MODES=provisioned` the Direct relay answers `404`.
 
 ### Managed profile (core-owned, names only)
 
@@ -780,7 +780,7 @@ The source's `key` — the picker's cache identity — folds in scope, broker an
 
 The name is a warning, not a description: **only those two SEMP v2 monitor list shapes are rewritten.** Single-object GETs, non-200s, non-JSON, and **every SEMP v1 RPC (`POST /SEMP`)** pass through untouched; the one v1 lister, `queue-subscription-explorer`, filters its parsed rows itself with `visibleQueueRows`. Treat a context obtained this way as unfiltered unless the call is one of those two shapes. Its docstring lists the sanctioned consumers; a new one needs design sign-off.
 
-**3. Bind + read-only gating.** On connect, the connections module's managed panel monkey-patches the SDK session's `createQueueBrowser`: binding a non-entitled queue **throws** (queue-browser's existing `createBrowser` try/catch surfaces it via `showBindError`), and on the browser's `UP` event the perceived `_messageConsumer._permissions` is overwritten per `canOperate`, so queue-browser's existing badge + Delete-hide logic gates by entitlement with no change to that module. Read-only blocks **Delete** only; Forward stays allowed (broker-consistent). This couples to SDK internals and is validated only by a real-broker E2E.
+**3. Bind + read-only gating.** On connect, the connections module's managed panel monkey-patches the SDK session's `createQueueBrowser`: binding a non-entitled queue **throws** (queue-browser's existing `createBrowser` try/catch surfaces it via `showBindError`). Read-only rows are applied by queue-browser itself: `ui-table.ts` reads `appState.managed` and applies `canOperate`, which only ever downgrades what the broker's own `_messageConsumer._permissions` allows, so the badge + Delete-hide logic gates by entitlement. Read-only blocks **Delete** only; Forward stays allowed (broker-consistent). The bind wrapper couples to the SDK session's shape and is validated by a real-broker E2E.
 
 **4. Module requirements and module control.** `isModuleVisible` + `MODULE_REQUIREMENTS` (above) keep whole modules out of a Provisioned session when they cannot be filtered, and module control hides every other module the user was not granted. Queue Subscriptions is granted like any module and filters its own rows (`visibleQueueRows`, above).
 
@@ -933,7 +933,7 @@ works around — `newest-msg-id` of `0` — so the two-call workaround is exerci
 
 ## CSS Organization
 
-Styles are split by responsibility — design system vs. per-module — and aggregated by one entry point per build (`main.css`, or `main-admin.css` for the admin app).
+Styles are split by responsibility -- design system vs. per-module. The design system and the reusable components' stylesheets have one entry point, `main.css`; each module's stylesheet follows the variant manifest, like its code and its template.
 
 ```text
 src/css/
@@ -943,16 +943,13 @@ src/css/
   components.css    generic UI — buttons, cards, forms, modals, tables, badges,
                     display outputs, scrollbar, spinner
   utilities.css     Tailwind-ish atomics — flex, gap, spacing, sizing, text
-  main.css          @import all of the above + each module's styles.css in order
-  main-admin.css    Second entry point — imports main.css plus the admin modules' styles.
-                    The css-variant-redirect plugin substitutes it for main.css when
-                    building --variant=admin, so admin CSS ships only in solAdmin.html
+  main.css          @import all of the above + each src/core/components/<name>/styles.css
 
 src/modules/<id>/
   styles.css        module-specific selectors only (e.g. `.browser-*`, `.detail-*`)
 ```
 
-`src/main.ts` imports `./css/main.css` (rewritten to `./css/main-admin.css` for the admin build). Vite + `vite-plugin-singlefile` inline everything into `dist/index.html` at build time — no runtime fetch.
+`src/main.ts` imports `./css/main.css`, then `./registry`, whose `virtual:module-registry` ([scripts/module-registry-plugin.mjs](../scripts/module-registry-plugin.mjs)) imports each active module's `styles.css` after the module code. So a variant's bundle carries exactly its modules' stylesheets (the admin editors' only where a variant lists them, `all-test.html` included, and no module's that no variant lists), after the design system, with no hand-kept list to update; `tests/build/module-registry-plugin.test.ts` holds it for every variant. Vite + `vite-plugin-singlefile` inline everything into `dist/index.html` at build time -- no runtime fetch.
 
 **Editing rule:** rules belong to the file whose selectors they match.
 

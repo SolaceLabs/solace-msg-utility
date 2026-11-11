@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ConnectionsModule } from '../../../src/modules/connections/module.managed';
 import { ConnectionsModule as ReleaseEntry } from '../../../src/modules/connections/module';
 import { createEventBus } from '../../../src/core/event-bus';
 import { createManagedProfile } from '../../../src/core/services/managed-profile';
-import { setHosted } from '../../../src/core/hosted';
 import { createSolaceMock } from '../../setup';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import type { AppContext, AppState } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 /**
  * The managed entry of the connections module (`module.managed.ts`, the
@@ -26,7 +26,7 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; appState:
         activeModuleId: null, isConnected: false, selectedVpn: null,
         solaceConnection: null, sempCredentials: null, isSempConnected: false,
     };
-    const ctx: AppContext = {
+    const ctx: AppContext = completeContext({
         container,
         appState,
         eventBus,
@@ -37,7 +37,7 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; appState:
         copyToClipboard: vi.fn(),
         mountSidebarAccount: vi.fn(),
         config: { useMocks: false },
-    };
+    });
     return { ctx, appState };
 }
 
@@ -57,7 +57,6 @@ beforeEach(() => {
     (window as any).solace = createSolaceMock();
     container = loadModuleDOM('connections', 'managed');
 });
-afterEach(() => setHosted(false));
 
 describe('connections/module.managed — identity', () => {
     it('is the same sidebar entry as the Release entry', () => {
@@ -74,7 +73,7 @@ describe('connections/module.managed — identity', () => {
         stubHosted({ hosted: true, connModes: 'both', defaultConn: 'provisioned' });
         const { ctx, appState } = createTestContext(container);
         await ConnectionsModule.install(ctx);
-        expect(appState.connConfig).toEqual({ connModes: 'both', defaultConn: 'provisioned' });
+        expect(appState.connConfig).toEqual({ connModes: 'both', defaultConn: 'provisioned', hosted: true });
     });
 });
 

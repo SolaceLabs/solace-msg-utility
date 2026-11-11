@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 	"net"
@@ -20,10 +21,14 @@ import (
 
 // The contract the demo's fake gateway (src/mock-broker/gateway/) is held to.
 // testdata/contract/ holds a seed (users, connections, the settings the gateway
-// starts with and the client address), request cases with the answers, and
-// validation vectors. These tests prove the real gateway gives exactly those
-// answers; tests/mock-broker/gateway/contract.test.ts proves the fake gives the
-// same ones from the same files. After a deliberate change to the gateway,
+// starts with and the client address), request cases with the answers (the
+// status, the body and, where a step lists them, headers; a step that reaches
+// a broker scripts its answer and pins the URL the gateway asked for),
+// validation vectors (with the glob vectors rbac_test.go runs) and the sign-in
+// throttle vectors (throttle_test.go). These tests prove the real gateway
+// gives exactly those answers; tests/mock-broker/gateway/contract.test.ts
+// proves the fake gives the same ones from the same files. After a deliberate
+// change to the gateway,
 //
 //	go test -run Contract -update .
 //
@@ -47,15 +52,30 @@ type contractEnv struct {
 	Client   string          `json:"client"`
 }
 
+// contractUpstream is the broker's side of a step that reaches one: what it
+// answers (a status, headers and a body, or an error in place of an answer)
+// and the URL the gateway asked it for.
+type contractUpstream struct {
+	URL     string            `json:"url"`
+	Status  int               `json:"status,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    string            `json:"body,omitempty"`
+	Error   string            `json:"error,omitempty"`
+}
+
+// contractStep is one request and the answer. Headers lists response headers
+// to compare, "" for one that must be absent.
 type contractStep struct {
-	As         string          `json:"as,omitempty"`
-	MustChange bool            `json:"mustChange,omitempty"`
-	Method     string          `json:"method"`
-	Path       string          `json:"path"`
-	Body       json.RawMessage `json:"body,omitempty"`
-	Raw        string          `json:"raw,omitempty"`
-	Status     int             `json:"status"`
-	Response   json.RawMessage `json:"response"`
+	As         string            `json:"as,omitempty"`
+	MustChange bool              `json:"mustChange,omitempty"`
+	Method     string            `json:"method"`
+	Path       string            `json:"path"`
+	Body       json.RawMessage   `json:"body,omitempty"`
+	Raw        string            `json:"raw,omitempty"`
+	Upstream   *contractUpstream `json:"upstream,omitempty"`
+	Status     int               `json:"status"`
+	Headers    map[string]string `json:"headers,omitempty"`
+	Response   json.RawMessage   `json:"response"`
 }
 
 type contractCase struct {
@@ -96,8 +116,34 @@ func loadContractSeed(t *testing.T) (contractStores, contractEnv) {
 	return st, env
 }
 
-// newContractEnv is the managed gateway over the seed's stores.
-func newContractEnv(t *testing.T, st contractStores) *managedEnv {
+// scriptedUpstream is the broker behind the contract: the step being run
+// says what it answers (next), and the URL the gateway asked for is kept for
+// the step to check. A call no step scripted answers with an error, which the
+// step's expected answer then does not match.
+type scriptedUpstream struct {
+	next *contractUpstream
+	url  string
+}
+
+func (u *scriptedUpstream) RoundTrip(r *http.Request) (*http.Response, error) {
+	u.url = r.URL.String()
+	a := u.next
+	switch {
+	case a == nil:
+		return nil, errors.New("contract: the step scripts no broker answer")
+	case a.Error != "":
+		return nil, errors.New(a.Error)
+	}
+	h := http.Header{}
+	for k, v := range a.Headers {
+		h.Set(k, v)
+	}
+	return &http.Response{StatusCode: a.Status, Header: h, Body: io.NopCloser(strings.NewReader(a.Body)), Request: r}, nil
+}
+
+// newContractEnv is the managed gateway over the seed's stores, its brokers
+// the scripted one.
+func newContractEnv(t *testing.T, st contractStores) (*managedEnv, *scriptedUpstream) {
 	t.Helper()
 	f := bootstrapFixture(t)
 	if err := os.WriteFile(f.keyPath, []byte(testStoreKeyHex+"\n"), 0o600); err != nil {
@@ -117,7 +163,8 @@ func newContractEnv(t *testing.T, st contractStores) *managedEnv {
 	}
 	f.writeUsers(t, string(u))
 	f.writeConns(t, string(c))
-	return newManagedEnvFrom(t, f, nil, nil)
+	up := &scriptedUpstream{}
+	return newManagedEnvFrom(t, f, nil, up), up
 }
 
 // contractNormalize replaces what differs between runs: the store paths in
@@ -207,7 +254,7 @@ func TestContract_Cases(t *testing.T) {
 		}
 		seen[cs.Name] = true
 		t.Run(cs.Name, func(t *testing.T) {
-			e := newContractEnv(t, st)
+			e, up := newContractEnv(t, st)
 			cookies := map[contractSession]*http.Cookie{}
 			for _, s := range cs.Steps {
 				if k := (contractSession{s.As, s.MustChange}); s.As != "" && cookies[k] == nil {
@@ -216,17 +263,32 @@ func TestContract_Cases(t *testing.T) {
 			}
 			for si := range cs.Steps {
 				s := &cs.Steps[si]
+				up.next, up.url = s.Upstream, ""
 				rec := e.contractDo(*s, env.Client, cookies[contractSession{s.As, s.MustChange}])
 				got := contractNormalize(decodeAny(t, rec.Body.Bytes()))
 				if *updateContract {
 					s.Status = rec.Code
 					s.Response, _ = json.Marshal(got) // nil marshals to null
+					for k := range s.Headers {
+						s.Headers[k] = rec.Header().Get(k)
+					}
+					if s.Upstream != nil {
+						s.Upstream.URL = up.url
+					}
 					continue
 				}
 				want := decodeAny(t, s.Response)
 				if rec.Code != s.Status || !reflect.DeepEqual(got, want) {
 					t.Errorf("step %d, %s %s as %q: want %d %s, got %d %s",
 						si+1, s.Method, s.Path, s.As, s.Status, s.Response, rec.Code, rec.Body.String())
+				}
+				for k, v := range s.Headers {
+					if g := rec.Header().Get(k); g != v {
+						t.Errorf("step %d, %s %s: header %s: want %q, got %q", si+1, s.Method, s.Path, k, v, g)
+					}
+				}
+				if s.Upstream != nil && up.url != s.Upstream.URL {
+					t.Errorf("step %d, %s %s: the broker was asked for %q, want %q", si+1, s.Method, s.Path, up.url, s.Upstream.URL)
 				}
 			}
 		})
@@ -246,7 +308,7 @@ func TestContract_Cases(t *testing.T) {
 // gateway under test runs with.
 func TestContract_SeedSettingsAreTheGateways(t *testing.T) {
 	st, env := loadContractSeed(t)
-	e := newContractEnv(t, st)
+	e, _ := newContractEnv(t, st)
 	rec := e.contractDo(contractStep{Method: http.MethodGet, Path: "/managed/settings"}, env.Client, e.cookie("admin", false))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /managed/settings: %d %s", rec.Code, rec.Body.String())
@@ -257,28 +319,47 @@ func TestContract_SeedSettingsAreTheGateways(t *testing.T) {
 	}
 }
 
-// The checks the fake repeats before it answers 422, as vectors both sides run.
-func TestContract_Validation(t *testing.T) {
-	type vectors struct {
-		Valid   []string `json:"valid"`
-		Invalid []string `json:"invalid"`
-	}
-	var v struct {
-		Username vectors `json:"username"`
-		Broker   vectors `json:"broker"`
-		Host     vectors `json:"host"`
-		Port     vectors `json:"port"`
-		Password vectors `json:"password"`
-		Modules  struct {
-			Valid   [][]string `json:"valid"`
-			Invalid [][]string `json:"invalid"`
-		} `json:"modules"`
-	}
+// contractVectors is the checks the fake repeats before it answers 422, as
+// vectors both sides run (validation.json), and the glob vectors the
+// entitlement match is held to on both sides (rbac_test.go, and the app's
+// src/core/rbac.ts through the fake).
+type contractVectors struct {
+	Username contractVectorList `json:"username"`
+	Broker   contractVectorList `json:"broker"`
+	Host     contractVectorList `json:"host"`
+	Port     contractVectorList `json:"port"`
+	Password contractVectorList `json:"password"`
+	Scheme   struct {
+		Semp   contractVectorList `json:"semp"`
+		Client contractVectorList `json:"client"`
+	} `json:"scheme"`
+	Modules struct {
+		Valid   [][]string `json:"valid"`
+		Invalid [][]string `json:"invalid"`
+	} `json:"modules"`
+	// Glob rows are [pattern, value, expected].
+	Glob [][3]any `json:"glob"`
+}
+
+type contractVectorList struct {
+	Valid   []string `json:"valid"`
+	Invalid []string `json:"invalid"`
+}
+
+func readContractVectors(t *testing.T) contractVectors {
+	t.Helper()
+	var v contractVectors
 	dec := json.NewDecoder(bytes.NewReader(readContract(t, "validation.json")))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&v); err != nil {
 		t.Fatalf("validation.json: %v", err)
 	}
+	return v
+}
+
+func TestContract_Validation(t *testing.T) {
+	v := readContractVectors(t)
+	type vectors = contractVectorList
 	checks := []struct {
 		name string
 		vec  vectors
@@ -289,6 +370,8 @@ func TestContract_Validation(t *testing.T) {
 		{"host", v.Host, validHost},
 		{"port", v.Port, func(s string) bool { return validatePort(s) == nil }},
 		{"password", v.Password, func(s string) bool { return checkPasswordPolicy(s) == nil }},
+		{"scheme.semp", v.Scheme.Semp, func(s string) bool { return schemeOK(s, sempTLS, sempPlain) }},
+		{"scheme.client", v.Scheme.Client, func(s string) bool { return schemeOK(s, clientTLS, clientPlain) }},
 	}
 	for _, c := range checks {
 		if len(c.vec.Valid) == 0 || len(c.vec.Invalid) == 0 {

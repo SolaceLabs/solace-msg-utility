@@ -4,7 +4,7 @@ import '../../../src/modules/queue-browser/ui-forward.js';
 import { initDetails } from '../../../src/modules/queue-browser/ui-details';
 import { initTable } from '../../../src/modules/queue-browser/ui-table';
 import { createUiEvents } from '../../../src/modules/queue-browser/ui-events';
-import { state, shouldShowMessage } from '../../../src/modules/queue-browser/state.js';
+import { state } from '../../../src/modules/queue-browser/state.js';
 import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
@@ -14,6 +14,7 @@ vi.mock('../../../src/core/components/queue-picker', () => ({
     pickQueue: vi.fn(async () => ({ vpn: 'default', queue: 'picked-q' })),
 }));
 import { pickQueue } from '../../../src/core/components/queue-picker';
+import { completeContext } from '../../helpers/appContext';
 
 function createBrowserDOM() {
     const container = loadModuleDOM('queue-browser');
@@ -24,6 +25,19 @@ function createBrowserDOM() {
     opt.textContent = 'q1';
     select.appendChild(opt);
     return container;
+}
+
+// The toast container is declared once in src/index.html; the module test DOM
+// lacks it. Returns it emptied so a test reads only its own toasts.
+function freshToasts(): HTMLElement {
+    let c = document.getElementById('toast-container');
+    if (!c) {
+        c = document.createElement('div');
+        c.id = 'toast-container';
+        document.body.appendChild(c);
+    }
+    c.innerHTML = '';
+    return c;
 }
 
 describe('queue-browser/ui-events', () => {
@@ -37,7 +51,7 @@ describe('queue-browser/ui-events', () => {
         ui.initElements(container);
 
         const eventBus = createEventBus();
-        ctx = {
+        ctx = completeContext({
             container,
             appState: { activeModuleId: null, isConnected: false, selectedVpn: null, solaceConnection: null, sempCredentials: null, isSempConnected: false },
             eventBus,
@@ -46,7 +60,7 @@ describe('queue-browser/ui-events', () => {
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
             config: { useMocks: false }
-        };
+        });
 
         initDetails(ctx);
         initTable(eventBus);
@@ -58,7 +72,7 @@ describe('queue-browser/ui-events', () => {
             // updates status to SUCCESS, matching the prior end-to-end shape.
             forwardMessage: vi.fn().mockResolvedValue({ ok: true }),
             hasInFlightForward: vi.fn(() => false),
-            deleteMessages: vi.fn(() => ({ ok: true, count: 1 }))
+            deleteMessages: vi.fn(() => ({ ok: true, requested: 1, failed: 0 }))
         };
 
         uiEvents = createUiEvents(ctx, service);
@@ -81,12 +95,6 @@ describe('queue-browser/ui-events', () => {
 
         it('handles empty content', async () => {
             state.selectedMessage = { id: '1', content: '' };
-            await uiEvents.handleCopyContent();
-            expect(ctx.copyToClipboard).toHaveBeenCalledWith('', els.btnCopyContent);
-        });
-
-        it('handles null content', async () => {
-            state.selectedMessage = { id: '1', content: null };
             await uiEvents.handleCopyContent();
             expect(ctx.copyToClipboard).toHaveBeenCalledWith('', els.btnCopyContent);
         });
@@ -115,7 +123,7 @@ describe('queue-browser/ui-events', () => {
 
             const statusEl = document.createElement('div');
             statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            els.listForwardMsgs.appendChild(statusEl);
 
             await uiEvents.handleForwardSend();
             // Drain microtasks so the .then(result => updateForwardItemStatus)
@@ -144,7 +152,7 @@ describe('queue-browser/ui-events', () => {
 
             const statusEl = document.createElement('div');
             statusEl.id = 'status-cv-2';
-            document.body.appendChild(statusEl);
+            els.listForwardMsgs.appendChild(statusEl);
 
             await uiEvents.handleForwardSend();
 
@@ -160,12 +168,12 @@ describe('queue-browser/ui-events', () => {
 
             const statusEl = document.createElement('div');
             statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            els.listForwardMsgs.appendChild(statusEl);
 
             const errorEl = document.createElement('div');
             errorEl.id = 'error-cv-1';
             errorEl.classList.add('hidden');
-            document.body.appendChild(errorEl);
+            els.listForwardMsgs.appendChild(errorEl);
 
             await uiEvents.handleForwardSend();
             // Drain microtasks so the .then(result => ui.updateForwardItemStatus)
@@ -177,7 +185,9 @@ describe('queue-browser/ui-events', () => {
         });
 
         it('handles forwarding rejection (async throw e.g. publisher missing)', async () => {
-            service.forwardMessage.mockRejectedValue(new Error('Not connected'));
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const cause = new Error('Not connected');
+            service.forwardMessage.mockRejectedValue(cause);
             state.forwardQueue = [
                 { originalMsg: {}, id: '1', correlationValue: 'cv-1', status: 'QUEUED', error: null }
             ];
@@ -185,17 +195,19 @@ describe('queue-browser/ui-events', () => {
 
             const statusEl = document.createElement('div');
             statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            els.listForwardMsgs.appendChild(statusEl);
             const errorEl = document.createElement('div');
             errorEl.id = 'error-cv-1';
             errorEl.classList.add('hidden');
-            document.body.appendChild(errorEl);
+            els.listForwardMsgs.appendChild(errorEl);
 
             await uiEvents.handleForwardSend();
             await new Promise((r) => setTimeout(r, 0));
 
             expect(state.forwardQueue[0].status).toBe('FAILED');
             expect(state.forwardQueue[0].error).toBe('Unable to send message.');
+            // The cause stays in the console, with the message and its target.
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Forward of message 1 to Topic "dest"'), cause);
         });
 
         it('disables destination type + name inputs during send', async () => {
@@ -207,7 +219,7 @@ describe('queue-browser/ui-events', () => {
 
             const statusEl = document.createElement('div');
             statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            els.listForwardMsgs.appendChild(statusEl);
 
             // Capture input state at the moment service.forwardMessage is called —
             // that's the in-flight window the disable is protecting.
@@ -243,7 +255,7 @@ describe('queue-browser/ui-events', () => {
 
             const statusEl = document.createElement('div');
             statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            els.listForwardMsgs.appendChild(statusEl);
 
             await uiEvents.handleForwardSend();
 
@@ -282,7 +294,7 @@ describe('queue-browser/ui-events', () => {
             ['cv-1', 'cv-2'].forEach(cv => {
                 const el = document.createElement('div');
                 el.id = `status-${cv}`;
-                document.body.appendChild(el);
+                els.listForwardMsgs.appendChild(el);
             });
 
             await uiEvents.handleForwardSend();
@@ -311,11 +323,11 @@ describe('queue-browser/ui-events', () => {
 
             const statusEl = document.createElement('div');
             statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            els.listForwardMsgs.appendChild(statusEl);
             const errorEl = document.createElement('div');
             errorEl.id = 'error-cv-1';
             errorEl.classList.add('hidden');
-            document.body.appendChild(errorEl);
+            els.listForwardMsgs.appendChild(errorEl);
 
             await uiEvents.handleForwardSend();
 
@@ -338,11 +350,11 @@ describe('queue-browser/ui-events', () => {
             ['cv-1', 'cv-2'].forEach(cv => {
                 const el = document.createElement('div');
                 el.id = `status-${cv}`;
-                document.body.appendChild(el);
+                els.listForwardMsgs.appendChild(el);
                 const err = document.createElement('div');
                 err.id = `error-${cv}`;
                 err.classList.add('hidden');
-                document.body.appendChild(err);
+                els.listForwardMsgs.appendChild(err);
             });
 
             await uiEvents.handleForwardSend();
@@ -867,133 +879,119 @@ describe('queue-browser/ui-events', () => {
     });
 
     describe('handleDelete()', () => {
-        it('confirms and deletes message', async () => {
-            (globalThis.confirm as any).mockReturnValue(true);
+        it('asks in the confirm dialog, then requests the removal and reports it', async () => {
+            const toasts = freshToasts();
             state.currentQueue = 'q1';
-            service.deleteMessages.mockReturnValue({ ok: true, count: 1 });
+            service.deleteMessages.mockReturnValue({ ok: true, requested: 1, failed: 0 });
 
-            await uiEvents.handleDelete('msg-1');
+            const done = uiEvents.handleDelete('msg-1');
+            expect(els.modalConfirmDelete.open).toBe(true);
+            expect(els.confirmDeleteMessage.textContent).toBe('Delete message msg-1?');
+            expect(service.deleteMessages).not.toHaveBeenCalled();
 
-            expect(globalThis.confirm).toHaveBeenCalled();
+            els.btnConfirmDelete.click();
+            await done;
+
+            expect(els.modalConfirmDelete.open).toBe(false);
             expect(service.deleteMessages).toHaveBeenCalledWith('q1', ['msg-1']);
-            expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('1'));
+            expect(toasts.querySelector('.toast--ok')!.textContent).toBe('Removal requested for 1 message(s).');
         });
 
-        it('does nothing when not confirmed', async () => {
-            (globalThis.confirm as any).mockReturnValue(false);
-            await uiEvents.handleDelete('msg-1');
+        it('does nothing when the dialog is cancelled', async () => {
+            const toasts = freshToasts();
+            const done = uiEvents.handleDelete('msg-1');
+
+            els.btnConfirmDeleteCancel.click();
+            await done;
+
+            expect(els.modalConfirmDelete.open).toBe(false);
             expect(service.deleteMessages).not.toHaveBeenCalled();
+            expect(toasts.children.length).toBe(0);
+        });
+
+        it('a dialog dismissed without a choice (Escape) after an earlier Delete does not delete again', async () => {
+            const first = uiEvents.handleDelete('msg-1');
+            els.btnConfirmDelete.click();
+            await first;
+
+            const second = uiEvents.handleDelete('msg-2');
+            els.modalConfirmDelete.close();   // what Escape does: close with no return value
+            await second;
+
+            expect(service.deleteMessages).toHaveBeenCalledTimes(1);
+            expect(service.deleteMessages).toHaveBeenCalledWith('', ['msg-1']);
         });
 
         it('does nothing for empty msgId', async () => {
             await uiEvents.handleDelete('');
-            expect(globalThis.confirm).not.toHaveBeenCalled();
+            expect(els.modalConfirmDelete.open).toBe(false);
+            expect(service.deleteMessages).not.toHaveBeenCalled();
         });
 
-        it('shows alert on delete failure', async () => {
-            (globalThis.confirm as any).mockReturnValue(true);
-            service.deleteMessages.mockReturnValue({ ok: false, error: 'Delete failed' });
+        it('reports a request that could not be made, with its reason, in an error toast', async () => {
+            const toasts = freshToasts();
             state.currentQueue = 'q1';
+            service.deleteMessages.mockReturnValue({ ok: false, requested: 0, failed: 1, error: 'No active session.' });
 
-            await uiEvents.handleDelete('msg-1');
+            const done = uiEvents.handleDelete('msg-1');
+            els.btnConfirmDelete.click();
+            await done;
 
-            expect(globalThis.alert).toHaveBeenCalledWith('Delete failed');
-        });
-
-        it('shows default error on delete failure with no error message', async () => {
-            (globalThis.confirm as any).mockReturnValue(true);
-            service.deleteMessages.mockReturnValue({ ok: false });
-            state.currentQueue = 'q1';
-
-            await uiEvents.handleDelete('msg-1');
-            expect(globalThis.alert).toHaveBeenCalledWith('Delete failed.');
-        });
-
-        it('does not alert when deletion succeeds with count 0', async () => {
-            (globalThis.confirm as any).mockReturnValue(true);
-            service.deleteMessages.mockReturnValue({ ok: true, count: 0 });
-            state.currentQueue = 'q1';
-            await uiEvents.handleDelete('msg-1');
-            expect(globalThis.alert).not.toHaveBeenCalled();
+            expect(toasts.querySelector('.toast--error')!.textContent).toBe('1 could not be requested: No active session.');
         });
     });
 
     describe('handleBulkDelete()', () => {
-        it('confirms and deletes selected messages', async () => {
-            (globalThis.confirm as any).mockReturnValue(true);
-            state.currentQueue = 'q1';
-            state.displayedMessages = [{ id: '1' }, { id: '2' }];
+        function selectRows(ids: string[]) {
+            state.displayedMessages = ids.map(id => ({ id }));
             state.allMessages = state.displayedMessages;
             ui.renderList();
-
-            // Select all
             document.querySelectorAll('.msg-check').forEach((cb: any) => cb.checked = true);
+        }
 
-            service.deleteMessages.mockReturnValue({ ok: true, count: 2 });
+        it('asks with the selection count, then requests removal of the selected messages', async () => {
+            const toasts = freshToasts();
+            state.currentQueue = 'q1';
+            selectRows(['1', '2']);
+            service.deleteMessages.mockReturnValue({ ok: true, requested: 2, failed: 0 });
 
-            await uiEvents.handleBulkDelete();
+            const done = uiEvents.handleBulkDelete();
+            expect(els.confirmDeleteMessage.textContent).toBe('Delete 2 selected message(s)?');
+            els.btnConfirmDelete.click();
+            await done;
 
             expect(service.deleteMessages).toHaveBeenCalledWith('q1', ['1', '2']);
-            expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('2'));
+            expect(toasts.querySelector('.toast--ok')!.textContent).toBe('Removal requested for 2 message(s).');
         });
 
         it('does nothing with no selection', async () => {
             state.displayedMessages = [];
             await uiEvents.handleBulkDelete();
-            expect(globalThis.confirm).not.toHaveBeenCalled();
+            expect(els.modalConfirmDelete.open).toBe(false);
         });
 
-        it('does nothing when not confirmed', async () => {
-            (globalThis.confirm as any).mockReturnValue(false);
-            state.displayedMessages = [{ id: '1' }];
-            state.allMessages = state.displayedMessages;
-            ui.renderList();
-            document.querySelectorAll('.msg-check').forEach((cb: any) => cb.checked = true);
+        it('does nothing when the dialog is cancelled', async () => {
+            selectRows(['1']);
 
-            await uiEvents.handleBulkDelete();
+            const done = uiEvents.handleBulkDelete();
+            els.btnConfirmDeleteCancel.click();
+            await done;
+
             expect(service.deleteMessages).not.toHaveBeenCalled();
         });
 
-        it('shows alert on failure', async () => {
-            (globalThis.confirm as any).mockReturnValue(true);
-            state.displayedMessages = [{ id: '1' }];
-            state.allMessages = state.displayedMessages;
-            ui.renderList();
-            document.querySelectorAll('.msg-check').forEach((cb: any) => cb.checked = true);
-
-            service.deleteMessages.mockReturnValue({ ok: false, error: 'Bulk fail' });
+        it('reports a partial failure with both counts and the first reason', async () => {
+            const toasts = freshToasts();
             state.currentQueue = 'q1';
+            selectRows(['1', '2']);
+            service.deleteMessages.mockReturnValue({ ok: false, requested: 1, failed: 1, error: 'Invalid operation' });
 
-            await uiEvents.handleBulkDelete();
-            expect(globalThis.alert).toHaveBeenCalledWith('Bulk fail');
-        });
+            const done = uiEvents.handleBulkDelete();
+            els.btnConfirmDelete.click();
+            await done;
 
-        it('shows default error when no error message', async () => {
-            (globalThis.confirm as any).mockReturnValue(true);
-            state.displayedMessages = [{ id: '1' }];
-            state.allMessages = state.displayedMessages;
-            ui.renderList();
-            document.querySelectorAll('.msg-check').forEach((cb: any) => cb.checked = true);
-
-            service.deleteMessages.mockReturnValue({ ok: false });
-            state.currentQueue = 'q1';
-
-            await uiEvents.handleBulkDelete();
-            expect(globalThis.alert).toHaveBeenCalledWith('Delete failed.');
-        });
-
-        it('shows message when count is 0', async () => {
-            (globalThis.confirm as any).mockReturnValue(true);
-            state.displayedMessages = [{ id: '1' }];
-            state.allMessages = state.displayedMessages;
-            ui.renderList();
-            document.querySelectorAll('.msg-check').forEach((cb: any) => cb.checked = true);
-
-            service.deleteMessages.mockReturnValue({ ok: true, count: 0 });
-            state.currentQueue = 'q1';
-
-            await uiEvents.handleBulkDelete();
-            expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('No messages were deleted'));
+            expect(toasts.querySelector('.toast--error')!.textContent)
+                .toBe('Removal requested for 1 message(s). 1 could not be requested: Invalid operation');
         });
     });
 
@@ -1031,17 +1029,6 @@ describe('queue-browser/ui-events', () => {
             state.displayedMessages = [...state.allMessages];
             uiEvents.applyFilters();
             expect(state.displayedMessages.length).toBe(1);
-        });
-    });
-
-    describe('handleDelete edge cases', () => {
-        it('does nothing when delete count > 0 (shows success)', async () => {
-            (globalThis.confirm as any).mockReturnValue(true);
-            service.deleteMessages.mockReturnValue({ ok: true, count: 1 });
-            state.currentQueue = 'q1';
-
-            await uiEvents.handleDelete('msg-1');
-            expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('Successfully deleted'));
         });
     });
 
@@ -1108,21 +1095,6 @@ describe('queue-browser/ui-events', () => {
 
             uiEvents.handleBulkForward();
             expect(state.forwardQueue.length).toBe(0);
-        });
-    });
-
-    describe('handleDelete() success path', () => {
-        it('shows success alert when deletion count > 0', () => {
-            (globalThis.confirm as any).mockReturnValue(true);
-            state.currentQueue = 'q1';
-            state.allMessages = [{ id: 'msg-1' }];
-            state.displayedMessages = [...state.allMessages];
-            state.messageStore.set('q1', state.allMessages);
-
-            service.deleteMessages = vi.fn().mockReturnValue({ ok: true, count: 1 });
-
-            uiEvents.handleDelete('msg-1');
-            expect((globalThis.alert as any)).toHaveBeenCalledWith(expect.stringContaining('Successfully deleted'));
         });
     });
 

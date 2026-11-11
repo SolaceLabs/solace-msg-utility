@@ -33,12 +33,23 @@ export interface CopyUiServices {
     refreshDestPickVisible: () => void;
 }
 
+/** What `wireUiEvents` hands back to module.ts. */
+export interface CopyUiApi {
+    /**
+     * Re-derive the controls that choose the destination (the toggles, the
+     * credential source, the provisioned broker and VPN), locked while
+     * `state.destSolPending` names a connect in flight. module.ts locks them
+     * when a destination connect starts and calls this whenever one ends.
+     */
+    refreshDestTarget: () => void;
+}
+
 export function wireUiEvents(
     ctx: AppContext,
     els: CopyUiElements,
     state: QueueCopyState,
     services: CopyUiServices,
-): void {
+): CopyUiApi {
     // ===== Source =====
     els.sourceInput.addEventListener('input', () => {
         state.sourceQueue = els.sourceInput.value.trim();
@@ -108,7 +119,9 @@ export function wireUiEvents(
     }
 
     function disposeDestSolConnection(): void {
-        if (state.destSession) services.disconnectDestSol();
+        // A connect still in flight is cancelled too, so its late session
+        // cannot land on a target the form no longer names.
+        if (state.destSession || state.destSolPending !== null) services.disconnectDestSol();
         state.destSolacePass = '';
         els.destSolPass.value = '';
         ui.setDestSolStatus(els, 'disconnected');
@@ -184,6 +197,8 @@ export function wireUiEvents(
         state.dest.type = type;
         ui.applyDestType(els, type);
         services.refreshDestPickVisible();
+        // The name limit depends on the type (a queue name carries the SDK's prefix).
+        services.refreshStartEnabled();
     });
 
     els.destInput.addEventListener('input', () => {
@@ -237,6 +252,14 @@ export function wireUiEvents(
     els.btnModalCancel.addEventListener('click', () => {
         cancelCopyModal(els, state);
     });
+    // Esc fires `cancel` on a modal <dialog> and would close it outright:
+    // route it through the same handler, so a verify is aborted and a running
+    // copy is flagged to cancel (the dialog stays open until it ends) rather
+    // than continuing behind a closed dialog.
+    els.modal.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        cancelCopyModal(els, state);
+    });
 
     // Modal Start is wired inside ui-modal so it has access to the verify
     // result + dest-connection orchestration. No event listener here.
@@ -279,6 +302,18 @@ export function wireUiEvents(
         // topic entitlement, so the type is forced to Queue (the run-start gate
         // refuses topics on that path regardless — this keeps the UI honest).
         refreshDestTypeAvailability();
+        // The renders above re-enable what they own; a connect in flight keeps
+        // the destination locked until it ends.
+        if (state.destSolPending !== null) ui.setDestTargetLocked(els, true);
+    }
+
+    function refreshDestTarget(): void {
+        ui.setDestTargetLocked(els, false);
+        // Hand each unlocked control back to its own rule: Same VPN means
+        // nothing without Same broker (applyDestPrefill), and refreshDestCredUi
+        // re-renders the credential source and the provisioned lists.
+        if (!state.destForm.sameBroker) els.toggleSameVpn.disabled = true;
+        refreshDestCredUi();
     }
 
     function refreshDestProvisionedVpns(): void {
@@ -385,6 +420,7 @@ export function wireUiEvents(
     refreshDestCredUi();
     services.refreshStartEnabled();
     services.refreshDestPickVisible();
+    return { refreshDestTarget };
 }
 
 /**

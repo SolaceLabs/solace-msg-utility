@@ -114,8 +114,8 @@ describe('variants', () => {
         // what makes it visible: not connections (always shown), not one
         // rbac.ts denies in every managed session (queue-discovery).
         const go = readFileSync(path.join(REPO, 'go-web-proxy/configfile.go'), 'utf-8');
-        const literal = go.match(/^func moduleCatalog\(\) \[\]string \{ return \[\]string\{([^}]*)\} \}$/m);
-        expect(literal, 'moduleCatalog() must stay a one-line literal').not.toBeNull();
+        const literal = go.match(/^func moduleCatalog\(\) \[\]string \{\s*return \[\]string\{([^}]*)\}\s*\}/m);
+        expect(literal, 'moduleCatalog() must stay a literal []string{...}').not.toBeNull();
         const catalog = literal![1].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
 
         const base = { admin: false, username: 'u', broker: '', vpns: [], operate: [], readOnly: [] };

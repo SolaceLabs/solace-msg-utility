@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { QueueDiscoveryModule } from '../../../src/modules/queue-discovery/module';
 import { ui as discoveryUi } from '../../../src/modules/queue-discovery/ui.js';
-import { PAGE_DELAY_MS } from '../../../src/core/services/semp-discovery';
 import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import type { AppContext, AppState, EventBus } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 function createDiscoveryDOM() {
     // Use the real per-module template so the test DOM can't drift from the
@@ -24,7 +24,7 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; eventBus:
         },
         isSempConnected: false
     };
-    const ctx: AppContext = {
+    const ctx: AppContext = completeContext({
         container,
         appState,
         eventBus,
@@ -38,7 +38,7 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; eventBus:
         }),
         copyToClipboard: vi.fn(),
         config: {}
-    };
+    });
     return { ctx, eventBus, appState };
 }
 
@@ -134,7 +134,7 @@ describe('QueueDiscoveryModule', () => {
                     meta: { paging: { nextPageUri: 'http://broker:8080/next' } }
                 })
             })
-            .mockResolvedValueOnce({ ok: false, statusText: 'Server Error' });
+            .mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Server Error' });
 
         await QueueDiscoveryModule.install(ctx);
 
@@ -149,7 +149,7 @@ describe('QueueDiscoveryModule', () => {
 
         // Error surfaces as placeholder; partial list stays rendered.
         await vi.waitFor(() => {
-            expect(vpnInput.placeholder).toBe('Server Error');
+            expect(vpnInput.placeholder).toBe('Error fetching VPNs (HTTP 500 Server Error)');
         });
         expect(vpnList.querySelectorAll('.dropdown-option').length).toBe(1);
         vi.useRealTimers();
@@ -360,9 +360,12 @@ describe('QueueDiscoveryModule', () => {
         expect(handler).toHaveBeenCalled();
     });
 
-    it('copy button alerts when no VPN/queue selected', async () => {
+    it('copy button warns in a toast when no VPN/queue is selected', async () => {
         const container = createDiscoveryDOM();
         document.body.appendChild(container);
+        const toasts = document.createElement('div');
+        toasts.id = 'toast-container';
+        document.body.appendChild(toasts);
         const { ctx } = createTestContext(container);
 
         await QueueDiscoveryModule.install(ctx);
@@ -371,7 +374,8 @@ describe('QueueDiscoveryModule', () => {
         btnCopy.disabled = false;
         btnCopy.click();
 
-        expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('select'));
+        expect(toasts.querySelector('.toast--warn')!.textContent).toBe('Select a Message VPN and a queue first.');
+        expect(globalThis.alert).not.toHaveBeenCalled();
     });
 
     it('enter key on VPN input triggers refresh', async () => {

@@ -2,10 +2,11 @@
  * PwaModule Contract
  *
  * Every module in the application must implement this interface.
- * Modules are registered in `src/registry.ts` alongside their priority; the
- * Kernel receives `{ module, priority }` tuples and installs in descending
- * priority order. `priority` is intentionally NOT on the module itself — it's
- * a registry-level decision so the full ordering is visible in one file.
+ * Modules and their priorities are listed in the active variant's manifest
+ * (`src/variants/<name>.ts`), which `src/registry.ts` resolves; the Kernel
+ * receives `{ module, priority }` tuples and installs in descending priority
+ * order. `priority` is intentionally NOT on the module itself -- it is a
+ * variant-level decision so the full ordering is visible in one file.
  */
 
 // Re-export connection-domain types so consumers can import them alongside
@@ -21,7 +22,8 @@ export type {
 // Type-only (erased at build time, so no runtime import cycle) — AppContext
 // carries the managed profile defined alongside the managed API client.
 import type { ManagedProfileStore } from './services/managed-profile';
-import type { ConnDeploymentConfig } from './connections/conn-modes';
+import type { NotificationCenter } from './components/notification-center';
+import type { DeploymentConfig } from './connections/conn-modes';
 
 /* ------------------------------------------------------------------ */
 /*  Managed (RBAC) session                                             */
@@ -137,12 +139,15 @@ export interface AppState {
      */
     managed?: ManagedSession | null;
     /**
-     * The deployment's connection-mode config, published once by the connections
-     * module from its `/hosted` probe. Other modules read it to derive what they
-     * may offer for a SECONDARY connection (see `resolveDestCredModes`) rather
-     * than probing the gateway again.
+     * The deployment's connection-mode config and `/hosted` verdict, published
+     * once by the connections module from its probe -- the single home of the
+     * hosted flag (`isHostedDeployment` in `core/hosted.ts`). Other modules read
+     * it to derive what they may offer for a SECONDARY connection (see
+     * `resolveDestCredModes`) and to route a secondary connection's URLs
+     * (`SolaceConfig.hosted` / `SempConfig.hosted`) rather than probing the
+     * gateway again.
      */
-    connConfig?: ConnDeploymentConfig;
+    connConfig?: DeploymentConfig;
 }
 
 /* ------------------------------------------------------------------ */
@@ -255,6 +260,14 @@ export interface AppContext {
      * a managed session.
      */
     managedProfile: ManagedProfileStore;
+    /**
+     * The app's notification record, behind the header bell. Every ok / warn /
+     * error toast and the connection lifecycle are recorded automatically; a
+     * module records something without a toast with
+     * `ctx.notifications.add(level, module, text)` (`module` as the sidebar
+     * names it). See src/core/components/notification-center/.
+     */
+    notifications: NotificationCenter;
     /** Helper for clipboard copy with visual feedback */
     copyToClipboard: (text: string, btnElement?: HTMLElement) => Promise<void>;
     /**

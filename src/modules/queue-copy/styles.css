@@ -140,6 +140,11 @@
     width: 100%;
     padding-right: 2.5rem;
 }
+/* The wrapper sits between an input and its .invalid-feedback line, so the
+   design system's adjacent-sibling rule cannot show it; ui.ts toggles this. */
+.copy-feedback-visible {
+    display: block;
+}
 .copy-search-btn {
     position: absolute;
     top: 50%;

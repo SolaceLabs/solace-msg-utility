@@ -169,12 +169,16 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, fmt.Errorf("HOSTED=%q: %w", os.Getenv("HOSTED"), err)
 	}
+	insecure, err := parseInsecureSkipVerify(os.Getenv("SSL_INSECURE_SKIP_VERIFY"))
+	if err != nil {
+		return config{}, fmt.Errorf("SSL_INSECURE_SKIP_VERIFY=%q: %w", os.Getenv("SSL_INSECURE_SKIP_VERIFY"), err)
+	}
 	return config{
 		hosted:             hosted,
 		certFile:           envOr("SSL_CERT_FILE", d.certFile),
 		keyFile:            envOr("SSL_KEY_FILE", d.keyFile),
 		trustDir:           envOr("SSL_TRUST_DIR", d.trustDir),
-		insecureSkipVerify: os.Getenv("SSL_INSECURE_SKIP_VERIFY") == "true",
+		insecureSkipVerify: insecure,
 		logLevel:           level,
 		usersFile:          envOr("USERS_FILE", d.usersFile),
 		connectionsFile:    envOr("CONNECTIONS_FILE", d.connectionsFile),
@@ -196,6 +200,20 @@ func parseHosted(raw string) (bool, error) {
 		return true, nil
 	case "false":
 		return false, nil
+	}
+	return false, errors.New(`must be "true" or "false"`)
+}
+
+// parseInsecureSkipVerify reads SSL_INSECURE_SKIP_VERIFY as strictly as
+// parseHosted: unset or "false" verifies brokers' certificates, "true" turns
+// that off, and anything else (TRUE, 1, yes) is refused rather than guessed,
+// since the value is written into config.yaml on the first start.
+func parseInsecureSkipVerify(raw string) (bool, error) {
+	switch raw {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
 	}
 	return false, errors.New(`must be "true" or "false"`)
 }
@@ -280,6 +298,7 @@ func main() {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	err := serve(process{
 		configFile: configFilePath,
+		appDir:     appRoot,
 		log:        os.Stderr,
 		listen:     func() (net.Listener, error) { return net.Listen("tcp", listenAddr) },
 		signals:    signals,
@@ -296,6 +315,7 @@ func main() {
 // overrun it, a short deadline, so a whole start and shutdown runs in a test.
 type process struct {
 	configFile string                       // config.yaml: configFilePath
+	appDir     string                       // the app's files: appRoot
 	log        io.Writer                    // every log line
 	listen     func() (net.Listener, error) // listenAddr
 	signals    <-chan os.Signal             // SIGINT or SIGTERM: a graceful shutdown
@@ -332,36 +352,30 @@ func serve(p process) error {
 		logger.Warn("setting no longer used, ignored: remove it", "setting", s.name, "instead", s.instead)
 	}
 
-	logger.Info("gateway starting",
-		"version", version,
-		"config_file", configFile,
-		"hosted", cfg.hosted,
-		"app_dir", appRoot,
-		"cert_file", cfg.certFile,
-		"trust_dir", cfg.trustDir,
-		"insecure_skip_verify", cfg.insecureSkipVerify,
-	)
+	// The summary shows at every level: an operator diagnosing a denied
+	// client or the wrong mode needs it without raising the level first.
+	logStartup(p.log, cfg, configFile, p.appDir)
 
-	serverCert, err := loadOrGenerateServerCert(cfg.certFile, cfg.keyFile, logger)
+	serverCert, err := loadOrGenerateServerCert(cfg.certFile, cfg.keyFile, logger.With("component", "tls"))
 	if err != nil {
 		logger.Error("server certificate setup failed", "err", err)
 		return err
 	}
 
-	trustPool, err := buildTrustPool(cfg.trustDir, logger)
+	trustPool, err := buildTrustPool(cfg.trustDir, logger.With("component", "tls"))
 	if err != nil {
 		logger.Error("trust pool setup failed", "err", err)
 		return err
 	}
 	if cfg.insecureSkipVerify {
-		logger.Warn("SSL_INSECURE_SKIP_VERIFY=true — upstream certificates will NOT be validated")
+		logger.Warn("tls.insecureSkipVerify is true (config.yaml; seeded by SSL_INSECURE_SKIP_VERIFY): upstream certificates will NOT be validated",
+			"component", "tls")
 	}
 
-	hh := newHostedHandler(cfg.hosted, lv)
 	upstream := newUpstreamTransport(trustPool, cfg.insecureSkipVerify)
 	// Files only (hosted: false): browsers reach brokers themselves, so the
 	// relay paths are refused, not left open.
-	var relay http.Handler = newReverseProxy(upstream, logger)
+	var relay http.Handler = newReverseProxy(upstream, logger.With("component", "direct-relay"))
 	if !cfg.hosted {
 		relay = http.HandlerFunc(refuseRelay)
 	}
@@ -375,13 +389,20 @@ func serve(p process) error {
 		logger.Error("provisioned store load failed", "err", err)
 		return err
 	}
-	logger.Info("connection modes", "conn_modes", cfg.connModes, "default_conn", cfg.defaultConn)
 
-	pwa := newPWAHandler(appRoot, appIndexFile(mr != nil), logger)
+	// The mode's bundle must be there, or every page would be a 404: a
+	// packaging or mount fault stops the start, naming the file.
+	pwa, err := newPWAHandler(p.appDir, appIndexFile(mr != nil), logger.With("component", "app"))
+	if err != nil {
+		logger.Error("app bundle check failed", "err", err)
+		return err
+	}
+	// /hosted, the health probe, answers 503 once the bundle is unusable.
+	hh := newHostedHandler(cfg.hosted, lv, pwa.ready)
 
 	// The admin console edits the stores, so it only exists in Provisioned
 	// mode, where they are served.
-	admin := newAdminHandler(appRoot, cfg.hosted && mr != nil, logger)
+	admin := newAdminHandler(p.appDir, cfg.hosted && mr != nil, logger.With("component", "app"))
 	if admin.enabled {
 		logger.Info("administration app enabled", "path", adminPath)
 	}
@@ -389,10 +410,12 @@ func serve(p process) error {
 	root := newRootHandler(hh, admin, pwa, relay, mr)
 
 	// The client address is resolved once (trusted proxies) for the access
-	// list and the sign-in throttle. The access list sits inside the access
-	// log, so a denial is logged as a 403 like any other response (the ACL
-	// adds its own warn line with the reason).
-	handler := accessLog(withClient(lv, clientACL(lv, root, logger)), logger)
+	// log, the access list and the sign-in throttle, so every line names the
+	// same client. The access list sits inside the access log, so a denial is
+	// logged as a 403 like any other response (the ACL adds its own warn line
+	// with the reason), and so does a recovered handler panic (a 500).
+	accessLogger := logger.With("component", "access")
+	handler := withClient(lv, accessLog(recoverPanics(clientACL(lv, root, accessLogger), logger.With("component", "http")), accessLogger))
 
 	srv := &http.Server{
 		Handler:           handler,
@@ -402,9 +425,10 @@ func serve(p process) error {
 			MinVersion:   tls.VersionTLS12,
 			Certificates: []tls.Certificate{serverCert},
 		},
-		// net/http's own errors (a failed TLS handshake, a panicking handler)
-		// go to the same log, at info.
-		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelInfo),
+		// net/http's own errors go to the same log, at info: they are mostly
+		// TLS handshakes a client gave up on. A handler panic never gets here
+		// (recoverPanics logs it at error).
+		ErrorLog: slog.NewLogLogger(logger.With("component", "http").Handler(), slog.LevelInfo),
 	}
 
 	// The backup schedule runs in the gateway: the image has no cron. It

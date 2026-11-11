@@ -1,0 +1,133 @@
+/* Notification center: the header bell, its unread badge, and the right-side
+ * drawer (a native <dialog>) listing what the app told the user.
+ * Owned by src/core/components/notification-center/index.ts. */
+
+.notification-bell-slot {
+    display: flex;
+    align-items: center;
+}
+
+.notif-bell {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background-color: var(--bg-card);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.notif-bell:hover {
+    color: var(--accent-secondary);
+    border-color: var(--accent-secondary);
+}
+
+.notif-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 9px;
+    background-color: var(--status-error);
+    color: var(--solace-white);
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 18px;
+    text-align: center;
+}
+
+/* Right-side drawer: full height, pinned to the right edge. Overrides the
+ * centred box of the shared `dialog` rule in components.css. */
+dialog.notif-drawer {
+    width: 420px;
+    max-width: 90vw;
+    height: 100vh;
+    max-height: 100vh;
+    margin: 0 0 0 auto;
+    border-radius: 0;
+    border-width: 0 0 0 1px;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+dialog.notif-drawer:not([open]) {
+    display: none;
+}
+
+.notif-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.notif-title {
+    margin: 0;
+}
+
+.notif-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.notif-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.notif-item {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    gap: 0.25rem 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-left: 4px solid var(--accent-secondary);
+    border-radius: var(--radius-md);
+    background-color: var(--bg-input);
+    font-size: 0.85rem;
+}
+
+.notif-item--ok {
+    border-left-color: var(--status-connected);
+}
+
+.notif-item--warn {
+    border-left-color: var(--status-warning);
+}
+
+.notif-item--error {
+    border-left-color: var(--status-error);
+}
+
+.notif-time,
+.notif-level {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.notif-level {
+    text-transform: uppercase;
+}
+
+.notif-module {
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.notif-text {
+    grid-column: 1 / -1;
+    color: var(--text-primary);
+    word-break: break-word;
+}

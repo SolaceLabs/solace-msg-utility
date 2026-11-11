@@ -6,17 +6,23 @@ on:
   push:
     branches: [main]
 
+# Read-only by default; each job asks for what it needs.
 permissions:
   contents: read
-  id-token: write
-  packages: read
-  actions: read
-  statuses: write
-  checks: write
-  pull-requests: write
 
 jobs:
   sca_scan:
+    # Tracked by branch, not by commit SHA: an organisation decision (commit
+    # bb300f7), the one exception to docs/git.md's SHA-pin rule. The write and
+    # OIDC rights below are the reusable workflow's, scoped to this job.
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
+      actions: read
+      statuses: write
+      checks: write
+      pull-requests: write
     uses: SolaceDev/solace-public-workflows/.github/workflows/sca-scan-and-guard.yaml@main
     with:
       # Root package.json plus a second module in go-web-proxy/; Go needs no
@@ -33,7 +39,7 @@ jobs:
       needs.sca_scan.result == 'success'
       && github.event_name == 'push'
       && github.ref_name == github.event.repository.default_branch
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned; see ci.yml
     permissions:
       id-token: write
       contents: read

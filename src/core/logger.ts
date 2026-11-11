@@ -4,6 +4,9 @@
  *     import { logger } from './core/logger';
  *     logger.info('[Kernel] Starting');
  *
+ *     const log = logger.withTag('Connections');
+ *     log.warn(`VPN "${vpn}" switch timed out`);   // -> "[Connections] VPN ..."
+ *
  * The current level is a module-scoped variable, set once at boot by the
  * Kernel after parsing the `?logLevel=…` URL parameter. Defaults to
  * `DEFAULT_LOG_LEVEL` from `./constants`.
@@ -15,6 +18,20 @@
 import { LogLevel, DEFAULT_LOG_LEVEL } from './constants';
 
 let currentLevel: LogLevel = DEFAULT_LOG_LEVEL;
+
+/** The four level methods, on `logger` and on every tagged logger. */
+export interface TaggedLogger {
+    debug: (...args: unknown[]) => void;
+    info: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+    error: (...args: unknown[]) => void;
+}
+
+/** `[tag] text` when the first argument is text, else `[tag]` as its own first argument. */
+function tagged(tag: string, args: unknown[]): unknown[] {
+    const [first, ...rest] = args;
+    return typeof first === 'string' ? [`[${tag}] ${first}`, ...rest] : [`[${tag}]`, ...args];
+}
 
 export const logger = {
     debug: (...args: unknown[]): void => {
@@ -28,6 +45,20 @@ export const logger = {
     },
     error: (...args: unknown[]): void => {
         if (currentLevel <= LogLevel.ERROR) console.error(...args);
+    },
+    /**
+     * A logger that prefixes every line with `[tag]` -- the component that
+     * wrote it (`Connections`, `semp-client`, ...). The level filter is the
+     * shared one. See "Logging" in docs/developer-guide.md for what each level
+     * means and what a line must name.
+     */
+    withTag(tag: string): TaggedLogger {
+        return {
+            debug: (...args: unknown[]): void => logger.debug(...tagged(tag, args)),
+            info: (...args: unknown[]): void => logger.info(...tagged(tag, args)),
+            warn: (...args: unknown[]): void => logger.warn(...tagged(tag, args)),
+            error: (...args: unknown[]): void => logger.error(...tagged(tag, args)),
+        };
     },
 };
 

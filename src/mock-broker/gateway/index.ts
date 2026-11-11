@@ -19,6 +19,7 @@ import { delay } from '../fixtures';
 import { BACKUP_ITER, createBackups, type BackupsState } from './backup';
 import type { MockRoute } from '../server';
 import { createRouter, type RouterFaults } from './router';
+import type { Upstream } from './relay';
 import { createSessions } from './sessions';
 import { createSettings, type SettingsFaults } from './settings';
 import { createSockets } from './sockets';
@@ -48,35 +49,44 @@ export interface GatewaySnapshot {
     backups?: BackupsState;
 }
 
-function toResponse(r: GatewayResponse): Response {
+/** The headers an answer goes out with (the gateway contract compares them). */
+export function responseHeaders(r: GatewayResponse): Record<string, string> {
     const headers: Record<string, string> = {
         'Cache-Control': 'no-store',
         'X-Demo-Gateway': DEMO_GATEWAY_MARKER,
         ...r.headers,
     };
+    if (r.json !== undefined) headers['Content-Type'] = 'application/json';
+    if (r.contentType) headers['Content-Type'] = r.contentType;
+    return headers;
+}
+
+function toResponse(r: GatewayResponse): Response {
     let body: string | null = null;
     if (r.json !== undefined) {
         body = JSON.stringify(r.json);
-        headers['Content-Type'] = 'application/json';
     } else if (r.text !== undefined) {
         body = r.text;
     }
-    if (r.contentType) headers['Content-Type'] = r.contentType;
-    return new Response(r.status === 204 ? null : body, { status: r.status, headers });
+    return new Response(r.status === 204 ? null : body, { status: r.status, headers: responseHeaders(r) });
 }
 
 /**
  * `backupIter` is the PBKDF2 cost of a new backup key (the gateway's own by
- * default; tests pass a lower one), `now` the clock backups are named by.
+ * default; tests pass a lower one), `now` the clock backups are named by, and
+ * `upstream` a scripted broker behind the relay (the gateway contract's; the
+ * demo broker answers without one).
  */
-export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new Date() }: { seed: GatewaySeed; backupIter?: number; now?: () => Date }) {
+export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new Date(), upstream }: {
+    seed: GatewaySeed; backupIter?: number; now?: () => Date; upstream?: Upstream;
+}) {
     const faults: GatewayFaults = { relayUnreachable: false, dialRateLimited: false, changedOnDisk: false, unreadable: false };
     const changeListeners: (() => void)[] = [];
     const store = createStore(seed, () => changeListeners.forEach(fn => fn()));
     const sessions = createSessions();
     const settings = createSettings(seed.settings, seed.client, () => faults);
     const backups = createBackups({ store, settings, sessions, iter: backupIter, now });
-    const router = createRouter({ store, sessions, settings, faults: () => faults, backupRoutes: backups.routes });
+    const router = createRouter({ store, sessions, settings, faults: () => faults, backupRoutes: backups.routes, client: seed.client, upstream });
     let cookie: string | null = null;
     const sockets = createSockets(store, sessions, () => cookie);
     changeListeners.push(() => sockets.recheck());

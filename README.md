@@ -9,8 +9,8 @@ A browser-based tool for managing Solace PubSub+ Event Brokers events/messages. 
 | Mode | What it is | Broker credentials | Start | Try it offline |
 | --- | --- | --- | --- | --- |
 | **Standalone** | The app as a single HTML file, from GitHub Pages or any web server. Your browser connects to the broker. | each user types them | open the page | `demo.html` |
-| **Gateway** | The app served by the gateway container, which connects to your brokers for it. Browsers reach and trust only the gateway. | each user types them | `docker compose -f compose.gateway.yaml up -d` | `demo.html` |
-| **Provisioned** | Gateway mode plus sign-in. An administrator stores the broker credentials and grants each user brokers, VPNs and queues. | stored on the gateway; users sign in | `docker compose -f compose.provisioned.yaml up -d` | `provisioned-demo.html` |
+| **Gateway** | The app served by the gateway container, which connects to your brokers for it. Browsers reach and trust only the gateway. | each user types them | `SMU_VERSION=<release> docker compose -f docker/compose.gateway.yaml up -d` | `demo.html` |
+| **Provisioned** | Gateway mode plus sign-in. An administrator stores the broker credentials and grants each user brokers, VPNs and queues. | stored on the gateway; users sign in | `SMU_VERSION=<release> docker compose -f docker/compose.provisioned.yaml up -d`, after [its setup](#provisioned----sign-in-and-administration) | `provisioned-demo.html` |
 
 Both container modes run the same image: Gateway mode by default, Provisioned mode with `CONN_MODES=provisioned`. [deployment.md](docs/deployment.md#choosing-a-mode) compares them; [provisioned-mode.md](docs/provisioned-mode.md) covers Provisioned mode in full.
 
@@ -33,24 +33,27 @@ Take `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs
 
 ### Gateway -- one container
 
-The image includes the Solace JavaScript API and JSZip, so nothing else is needed:
+The image includes the Solace JavaScript API and JSZip, so nothing else is needed. To try it with the newest release:
 
 ```bash
 docker run --rm -p 9443:9443 -v solace-tls:/tls \
   ghcr.io/solacelabs/solace-msg-utility:latest
 ```
 
-Then open <https://localhost:9443/>. The container connects to your broker for the app, so the browser needs to reach and trust only the container. For production, use [`docker/compose.gateway.yaml`](docker/compose.gateway.yaml) with a pinned release; see [deployment.md -> Gateway mode](docs/deployment.md#gateway-mode).
+Then open <https://localhost:9443/>. The container connects to your broker for the app, so the browser needs to reach and trust only the container. For production, pin a release, never `latest`: `SMU_VERSION=<release> docker compose -f docker/compose.gateway.yaml up -d` from a checkout of that release (compose refuses to start without `SMU_VERSION`); see [deployment.md -> Gateway mode](docs/deployment.md#gateway-mode).
 
 ### Provisioned -- sign-in and administration
 
-Put the first administrator's password in a file named `admin-password`, then:
+From a checkout of the release you deploy, put the first administrator's password (12 to 128 characters) in `docker/admin-password`, then give it and the backup directory to the gateway's UID (65532) alone, and start it:
 
 ```bash
+cd docker
+chmod 400 admin-password && sudo chown 65532 admin-password
+mkdir -p backup && chmod 700 backup && sudo chown 65532 backup
 SMU_VERSION=<release> docker compose -f compose.provisioned.yaml up -d
 ```
 
-Open `https://<host>:9443/`, sign in as `admin`, and add brokers and users at `/solAdmin`. The steps, settings and recommended values are in [provisioned-mode.md](docs/provisioned-mode.md).
+Left to Docker, `backup/` would be root's and the scheduled backups could not be written. Open `https://<host>:9443/`, sign in as `admin` and change the password, add brokers and users at `/solAdmin`, and set a backup schedule and passphrase on its Backup & Restore page. The steps, settings and recommended values are in [provisioned-mode.md -> Start it](docs/provisioned-mode.md#start-it).
 
 ## Connecting to a broker
 

@@ -8,6 +8,7 @@ import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 import type { AppContext } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 function createBrowserDOM() {
     return loadModuleDOM('queue-browser');
@@ -23,7 +24,7 @@ describe('queue-browser/ui-details', () => {
         ui.initElements(container);
 
         const eventBus = createEventBus();
-        ctx = {
+        ctx = completeContext({
             container,
             appState: { activeModuleId: null, isConnected: false, selectedVpn: null, solaceConnection: null, sempCredentials: null, isSempConnected: false },
             eventBus,
@@ -32,7 +33,7 @@ describe('queue-browser/ui-details', () => {
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
             config: {}
-        };
+        });
 
         initDetails(ctx);
         initTable(eventBus);
@@ -95,6 +96,29 @@ describe('queue-browser/ui-details', () => {
             expect(triggerSpy.mock.calls[0][1]).toBe('test');
             triggerSpy.mockRestore();
         });
+
+        it('saves a binary attachment byte for byte, typed by its HTTP Content-Type', async () => {
+            const saved = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
+            const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0xE2, 0xE3]);
+            ui.downloadMessageContent({
+                id: 'msg-3', content: '[Binary payload: 6 bytes]', bytes, binary: true,
+                msgProperties: { 'HTTP Type': 'application/pdf' }
+            });
+
+            const [blob, filename] = saved.mock.calls[0] as [Blob, string];
+            expect([filename, blob.type]).toEqual(['solace-message-msg-3', 'application/pdf']);
+            expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual(Array.from(bytes));
+        });
+
+        it('saves a binary attachment without an HTTP Content-Type as application/octet-stream', () => {
+            const saved = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
+            ui.downloadMessageContent({
+                id: 'msg-4', content: '[Binary payload: 1 byte]', bytes: new Uint8Array([0x00]), binary: true,
+                msgProperties: {}
+            });
+
+            expect((saved.mock.calls[0][0] as Blob).type).toBe('application/octet-stream');
+        });
     });
 
     describe('getFullMessageJson()', () => {
@@ -114,7 +138,19 @@ describe('queue-browser/ui-details', () => {
             expect(result.messageProperties.messageType).toBe('Text');
             expect(result.applicationProperties).toEqual({ app: 'prop' });
             expect(result.payload).toBe('payload');
+            expect(result).not.toHaveProperty('payloadEncoding');
             expect(result.messageProperties.destination.name).toBe('Unknown');
+        });
+
+        it('carries a binary payload as base64, flagged with payloadEncoding', () => {
+            const msg = {
+                id: 'msg-1', type: 'Binary', content: '[Binary payload: 4 bytes]',
+                bytes: new Uint8Array([0x89, 0x50, 0x4E, 0x47]), binary: true,
+                msgProperties: {}, appProperties: {},
+                _originalMsg: { getDestination: () => null }
+            };
+            const result = ui.getFullMessageJson(msg);
+            expect([result.payload, result.payloadEncoding]).toEqual(['iVBORw==', 'base64']);
         });
 
         it('extracts destination from _originalMsg with Topic type', () => {

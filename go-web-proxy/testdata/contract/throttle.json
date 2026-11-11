@@ -1,0 +1,62 @@
+{
+  "_comment": "Sign-in throttle vectors both gateways run with one client (go-web-proxy/throttle_test.go TestThrottle_SharedVectors, tests/mock-broker/gateway/throttle.test.ts). Each step does one thing: fail (a failed sign-in for that user, times times, default 1), succeed (a sign-in for that user), advance (seconds on the clock) or wait (the seconds a sign-in for that user must wait, want).",
+  "limits": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900 },
+  "cases": [
+    {
+      "name": "another user's failures survive a success",
+      "steps": [
+        { "fail": "viewer", "times": 4 },
+        { "succeed": "admin" },
+        { "fail": "viewer" },
+        { "wait": "viewer", "want": 30 },
+        { "wait": "admin", "want": 0 }
+      ]
+    },
+    {
+      "name": "the client blocks every name once it reaches the limit",
+      "steps": [
+        { "fail": "a" },
+        { "fail": "b" },
+        { "fail": "c" },
+        { "fail": "d" },
+        { "fail": "e" },
+        { "wait": "someone-else", "want": 30 }
+      ]
+    },
+    {
+      "name": "each failure past the limit doubles the wait, up to the longest back-off",
+      "steps": [
+        { "fail": "admin", "times": 6 },
+        { "wait": "admin", "want": 60 },
+        { "fail": "admin", "times": 10 },
+        { "wait": "admin", "want": 900 }
+      ]
+    },
+    {
+      "name": "a block ends after its back-off",
+      "steps": [
+        { "fail": "viewer", "times": 5 },
+        { "wait": "viewer", "want": 30 },
+        { "advance": 30 },
+        { "wait": "viewer", "want": 0 }
+      ]
+    },
+    {
+      "name": "a count quiet for longer than the longest back-off starts again",
+      "steps": [
+        { "fail": "viewer", "times": 4 },
+        { "advance": 901 },
+        { "fail": "viewer" },
+        { "wait": "viewer", "want": 0 }
+      ]
+    },
+    {
+      "name": "names are counted by their first 64 bytes",
+      "steps": [
+        { "fail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-one", "times": 5 },
+        { "succeed": "somebody" },
+        { "wait": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-two", "want": 30 }
+      ]
+    }
+  ]
+}

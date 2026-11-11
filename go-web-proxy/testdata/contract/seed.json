@@ -39,7 +39,7 @@
     {
       "broker": "b2",
       "hostname": "host2",
-      "semp": { "port": "1943", "username": "mon", "password": "semp-b2-pw" },
+      "semp": { "scheme": "http", "port": "1943", "username": "mon", "password": "semp-b2-pw" },
       "client": {
         "port": "1443",
         "msgVpns": [{ "name": "v9", "username": "u9", "password": "cli-b2v9-pw" }]
@@ -50,6 +50,7 @@
       "hostname": "host3",
       "semp": { "port": "", "username": "", "password": "" },
       "client": {
+        "scheme": "ws",
         "port": "1443",
         "msgVpns": [{ "name": "v3", "username": "u3", "password": "cli-b3v3-pw" }]
       }

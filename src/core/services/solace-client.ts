@@ -1,9 +1,23 @@
 import { logger } from '../logger';
-import { buildBrokerUrl, gatewayWsUrl, isHosted } from '../hosted';
+import { buildBrokerUrl, gatewayWsUrl } from '../hosted';
 import { solaceErrorText } from '../utils';
 import type { SolaceConfig } from '../connections/types';
 
 declare const solace: any;
+
+const log = logger.withTag('solace-client');
+
+/** What `connect()` reports when a connect is already in flight on this client. */
+export const CONNECT_IN_PROGRESS = 'A connection attempt is already in progress.';
+
+/**
+ * The outcome of starting a connect: `ok` once the SDK session is created and
+ * connecting (the result arrives later through the hooks), otherwise why it
+ * did not start. Every refusal except `CONNECT_IN_PROGRESS` has also gone to
+ * `onError`; that one is not, because the attempt in flight still owns the
+ * caller's UI.
+ */
+export type ConnectStart = { ok: true } | { ok: false; error: string };
 
 /**
  * Lifecycle hooks the caller wires to whatever state/UI/event-bus it owns.
@@ -37,8 +51,14 @@ export interface SolaceClient {
      * `clientName` (optional) is forwarded verbatim to `SessionProperties.clientName`.
      * Callers compose the full string (including any app prefix and timestamp); the
      * factory stays unaware of naming conventions.
+     *
+     * Refused, with a warn, while an earlier connect on this client is still in
+     * flight (`CONNECT_IN_PROGRESS`): a second session would otherwise race the
+     * first, and the first one's teardown would dispose the second. A connect
+     * while a session is up replaces it; the old session's late events are
+     * ignored, so they cannot dispose the new session or fire its hooks.
      */
-    connect(cfg: SolaceConfig, host: string, pass: string, clientName?: string): void;
+    connect(cfg: SolaceConfig, host: string, pass: string, clientName?: string): ConnectStart;
     /** Close the session if connected; no-op otherwise. */
     disconnect(): void;
     /** Dispose the session and reset internal state. */
@@ -79,11 +99,13 @@ function tlsHandshakeProbe(httpsUrl: string, timeoutMs = 3000): void {
 export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient {
     let session: any = null;
     let isInitialized = false;
+    // True from session creation until it comes up, fails or disconnects.
+    let connecting = false;
 
     function init() {
         if (isInitialized) return;
         if (!(window as any).solace) {
-            logger.warn('Solace API not loaded yet.');
+            log.warn('Solace API not loaded yet.');
             return;
         }
 
@@ -93,13 +115,24 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
             factoryProps.logLevel = solace.LogLevel.WARN;
             solace.SolclientFactory.init(factoryProps);
             isInitialized = true;
-            logger.info('SolClientFactory Initialized.');
+            log.info('SolClientFactory Initialized.');
         } catch (e) {
-            logger.error('Failed to initialize SolClientFactory:', e);
+            log.error('Failed to initialize SolClientFactory:', e);
         }
     }
 
-    function connect(cfg: SolaceConfig, host: string, pass: string, clientName?: string) {
+    /** Refuse to start: tell `onError` (and the caller) why. */
+    function refuse(err: Error): ConnectStart {
+        hooks.onError?.(err);
+        return { ok: false, error: err.message };
+    }
+
+    function connect(cfg: SolaceConfig, host: string, pass: string, clientName?: string): ConnectStart {
+        if (connecting) {
+            log.warn(`connect to VPN "${cfg.vpn}" refused: ${CONNECT_IN_PROGRESS}`);
+            return { ok: false, error: CONNECT_IN_PROGRESS };
+        }
+
         if (session) {
             try {
                 session.disconnect();
@@ -111,14 +144,13 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
                  */
             } catch (e) {
                 // Prior session may already be disposed — expected during reconnect.
-                logger.warn('[solace-client] disconnect() on stale session during reconnect:', e);
+                log.warn('disconnect() on stale session during reconnect:', e);
             }
             /* v8 ignore stop */
         }
 
         if (!(window as any).solace) {
-            hooks.onError?.(new Error('Solace API not loaded.'));
-            return;
+            return refuse(new Error('Solace API not loaded.'));
         }
 
         // The shell's vendor loader (src/index.html) sets `solaceLibLoaded` only
@@ -130,10 +162,9 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
         // Managed) and secondary (queue-copy destination) callers all render
         // `onError` already.
         if (!(window as any).solaceLibLoaded) {
-            hooks.onError?.(new Error(
+            return refuse(new Error(
                 'Solace Web Messaging SDK is below the required version (10.18.3) — see the banner at the top of the page.',
             ));
-            return;
         }
 
         if (!isInitialized) init();
@@ -144,8 +175,9 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
         // Skip in hosted mode: the browser only sees the gateway's TLS endpoint
         // (already trusted by the PWA load); the internal broker host is not
         // user-reachable and probing it would be wrong.
-        if (cfg.protocol === 'wss' && !isHosted()) {
-            tlsHandshakeProbe(buildBrokerUrl('https', host, cfg.port, cfg.urlPath, false));
+        const hosted = cfg.hosted === true;
+        if (cfg.protocol === 'wss' && !hosted) {
+            tlsHandshakeProbe(buildBrokerUrl('https', host, cfg.port, cfg.urlPath, false, false));
         }
 
         try {
@@ -154,7 +186,7 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
             // VPN (from dial); a Direct one to the broker, relayed when hosted.
             props.url = cfg.smfPath
                 ? gatewayWsUrl(cfg.smfPath)
-                : buildBrokerUrl(cfg.protocol, host, cfg.port, cfg.urlPath, true);
+                : buildBrokerUrl(cfg.protocol, host, cfg.port, cfg.urlPath, true, hosted);
             props.vpnName = cfg.vpn;
             props.userName = cfg.user;
             props.publisherProperties = { acknowledgeMode: solace.MessagePublisherAcknowledgeMode.PER_MESSAGE };
@@ -178,10 +210,11 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
                 props.clientName = clientName;
             }
 
-            // Log a fixed summary, never `props` itself: it carries the
-            // password (BASIC), or the access and id tokens (OAuth, where
-            // userName holds the access token too).
-            logger.info('Creating Session:', {
+            // Where this session goes, for every lifecycle line below. Never
+            // `props` itself: it carries the password (BASIC), or the access
+            // and id tokens (OAuth, where userName holds the access token too).
+            const target = `${props.url} VPN "${cfg.vpn}"`;
+            log.info('Creating Session:', {
                 url: props.url,
                 vpnName: props.vpnName,
                 authMode: cfg.authMode,
@@ -190,27 +223,44 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
                 connectRetries: props.connectRetries,
                 reconnectRetries: props.reconnectRetries,
             });
-            session = solace.SolclientFactory.createSession(props);
+            const s = solace.SolclientFactory.createSession(props);
+            session = s;
+            connecting = true;
 
-            // Event Listeners
-            session.on(solace.SessionEventCode.UP_NOTICE, () => {
-                logger.info('Solace Session UP');
-                hooks.onConnected(session, cfg.vpn);
+            // Each handler acts on its own session `s`. An event from a session
+            // this client has since replaced is dropped (and that session
+            // disposed), so it can neither dispose the current session nor
+            // drive the caller's hooks.
+            const own = (code: string, handler: (sessionEvent: any) => void) => {
+                s.on(code, (sessionEvent: any) => {
+                    if (session !== s) {
+                        log.debug(`ignoring ${code} from a replaced session: ${target}`);
+                        disposeSession(s);
+                        return;
+                    }
+                    handler(sessionEvent);
+                });
+            };
+
+            own(solace.SessionEventCode.UP_NOTICE, () => {
+                connecting = false;
+                log.info(`Session up: ${target}`);
+                hooks.onConnected(s, cfg.vpn);
             });
 
-            session.on(solace.SessionEventCode.CONNECT_FAILED_ERROR, (sessionEvent: any) => {
-                logger.error('Connection Failed:', sessionEvent);
+            own(solace.SessionEventCode.CONNECT_FAILED_ERROR, (sessionEvent) => {
+                log.error(`Connection failed: ${target}:`, sessionEvent);
                 hooks.onConnectFailed?.({ infoStr: sessionEvent.infoStr });
                 cleanup();
             });
 
-            session.on(solace.SessionEventCode.DISCONNECTED, () => {
-                logger.info('Disconnected');
+            own(solace.SessionEventCode.DISCONNECTED, () => {
+                log.info(`Disconnected: ${target}`);
                 cleanup();
                 hooks.onDisconnected();
             });
 
-            session.on(solace.SessionEventCode.MESSAGE, () => {
+            s.on(solace.SessionEventCode.MESSAGE, () => {
                 // Generic handler (no-op)
             });
 
@@ -221,24 +271,24 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
             // sessionEvent payload. Iterates `SessionEventCode` so any future
             // codes the SDK adds are picked up automatically.
             for (const [name, code] of Object.entries(solace.SessionEventCode)) {
-                session.on(code, (sessionEvent: any) => {
+                s.on(code, (sessionEvent: any) => {
                     logger.debug(`[Session] ${name}`, sessionEvent);
                 });
             }
 
-            session.connect();
+            s.connect();
+            return { ok: true };
 
         } catch (e) {
-            logger.error('Session Creation Error', e);
+            log.error(`Session creation failed for VPN "${cfg.vpn}":`, e);
             // `onError` is typed `(err: Error) => void` and every consumer renders
             // `err.message`, so honour that here rather than trusting whatever the
             // SDK threw. Every throw site traced in the bundle throws an
             // OperationError, but a non-Error would otherwise surface to the user
             // as "Connection Failed: undefined" with the reason only in the console.
-            hooks.onError?.(e instanceof Error
-                ? e
-                : new Error(solaceErrorText(e, 'Session creation failed.')));
+            const err = e instanceof Error ? e : new Error(solaceErrorText(e, 'Session creation failed.'));
             cleanup();
+            return refuse(err);
         }
     }
 
@@ -248,7 +298,7 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
                 session.disconnect();
             } catch (e) {
                 // Session may already be disposed by the SDK (e.g. broker dropped us first).
-                logger.warn('[solace-client] disconnect() on already-disposed session:', e);
+                log.warn('disconnect() on already-disposed session:', e);
             }
         } else {
             // No live session — internal cleanup only. We deliberately DO NOT fire
@@ -261,22 +311,25 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
         }
     }
 
-    function cleanup() {
-        if (session) {
-            try {
-                session.dispose();
-                /* v8 ignore start -- defensive catch around an SDK contract that does not throw in jsdom.
-                 * Same coverage analysis as the connect() catch above: driving this path requires
-                 * order-of-operations coupling that makes the test brittle for a one-line warn whose
-                 * downstream effect (session = null on the next line) happens regardless.
-                 */
-            } catch (e) {
-                // dispose() on a never-connected or already-disposed session is benign.
-                logger.warn('[solace-client] dispose() during cleanup:', e);
-            }
-            /* v8 ignore stop */
+    function disposeSession(s: any) {
+        try {
+            s.dispose();
+            /* v8 ignore start -- defensive catch around an SDK contract that does not throw in jsdom.
+             * Same coverage analysis as the connect() catch above: driving this path requires
+             * order-of-operations coupling that makes the test brittle for a one-line warn whose
+             * downstream effect (the session is dropped) happens regardless.
+             */
+        } catch (e) {
+            // dispose() on a never-connected or already-disposed session is benign.
+            log.warn('dispose() during cleanup:', e);
         }
+        /* v8 ignore stop */
+    }
+
+    function cleanup() {
+        if (session) disposeSession(session);
         session = null;
+        connecting = false;
     }
 
     return { init, connect, disconnect, cleanup };

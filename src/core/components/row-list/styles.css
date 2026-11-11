@@ -1,6 +1,6 @@
 /* Row-list editor (src/core/components/row-list): the column labels above the
  * rows, lined up with the inputs, and the note an empty list shows. Imported
- * by main-admin.css, as only the admin editors use it. */
+ * by src/css/main.css with the other reusable components. */
 
 .row-list-head {
     margin-bottom: 0.25rem;

@@ -8,6 +8,7 @@ import {
     normalizeAccessType,
 } from '../../../src/modules/queue-copy/service-verify';
 import { createSessionMock, createBrowserMock } from '../../setup';
+import { managedErrorMessage } from '../../../src/core/services/managed-api';
 import type { SempContext } from '../../../src/core/connections/types';
 import type { VerifyResult } from '../../../src/modules/queue-copy/state';
 
@@ -165,7 +166,7 @@ describe('queue-copy/service-verify', () => {
             // wire URL from the connection-form values and applies hosted-mode
             // routing. The test's SempContext.fetch stub stands in for that
             // closure, so the assertion checks the path the service hands in.
-            const fetchImpl = vi.fn(async () => textRes(SAMPLE_RESPONSE));
+            const fetchImpl = vi.fn(async (_path: string, _init?: RequestInit) => textRes(SAMPLE_RESPONSE));
             const ctx = makeSempCtx(fetchImpl);
 
             const result = await verifySource({
@@ -188,7 +189,7 @@ describe('queue-copy/service-verify', () => {
         });
 
         it('uses vpn-name="*" when caller passes empty vpn', async () => {
-            const fetchImpl = vi.fn(async () => textRes(SAMPLE_RESPONSE));
+            const fetchImpl = vi.fn(async (_path: string, _init?: RequestInit) => textRes(SAMPLE_RESPONSE));
             await verifySource({
                 sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
                 vpn: '', queue: 'q', signal: new AbortController().signal,
@@ -198,7 +199,7 @@ describe('queue-copy/service-verify', () => {
         });
 
         it('escapes XML special characters in queue and VPN names', async () => {
-            const fetchImpl = vi.fn(async () => textRes(SAMPLE_RESPONSE));
+            const fetchImpl = vi.fn(async (_path: string, _init?: RequestInit) => textRes(SAMPLE_RESPONSE));
             await verifySource({
                 sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
                 vpn: 'a&b', queue: '<q>"x"', signal: new AbortController().signal,
@@ -234,7 +235,17 @@ describe('queue-copy/service-verify', () => {
                 sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
                 vpn: 'v', queue: 'q', signal: new AbortController().signal,
             });
-            expect(result.errors[0]).toBe('SEMP v1 returned 503');
+            expect(result.errors[0]).toBe('SEMP v1 returned an error (HTTP 503)');
+        });
+
+        it("a relay refusal surfaces the gateway's reason, as every SEMP caller does", async () => {
+            const refusal = new Response(JSON.stringify({ error: 'read_only' }), { status: 403 });
+            const result = await verifySource({
+                sempCtx: makeSempCtx(vi.fn(async () => refusal)), primarySession: createSessionMock(),
+                vpn: 'v', queue: 'q', signal: new AbortController().signal,
+            });
+            expect(result.sourceOk).toBe(false);
+            expect(result.errors[0]).toBe(managedErrorMessage({ ok: false, status: 403, code: 'read_only' }));
         });
 
         it('aborts before fetch when signal already aborted', async () => {
@@ -747,6 +758,40 @@ describe('queue-copy/service-verify', () => {
             const result = await promise;
             expect(result.errors[0]).toContain('timed out');
             vi.useRealTimers();
+        });
+
+        it('keeps counting past the 10 s bind window once bound: a deep queue settles with its full count', async () => {
+            vi.useFakeTimers();
+            const promise = verifySource({
+                sempCtx: null, primarySession: session,
+                vpn: '', queue: 'q', signal: new AbortController().signal,
+            });
+            await Promise.resolve();
+            (browser as any)._handlers.UP();
+            // A message every second for 12 s: the idle window never closes
+            // and the bind deadline passes while still accumulating.
+            for (let i = 0; i < 12; i++) {
+                (browser as any)._handlers.MESSAGE({ smfHeader: { messageLength: 10 } });
+                await vi.advanceTimersByTimeAsync(1_000);
+            }
+            await vi.advanceTimersByTimeAsync(ACCUMULATE_IDLE_MS);
+            const result = await promise;
+            expect(result.sourceOk).toBe(true);
+            expect(result.errors).toEqual([]);
+            expect(result.messageCount).toBe(12);
+            vi.useRealTimers();
+        });
+
+        it('a createQueueBrowser throw resolves a failed verify result with the reason', async () => {
+            (session.createQueueBrowser as any).mockImplementation(() => {
+                throw new Error('You are not entitled to browse queue "q".');
+            });
+            const result = await verifySource({
+                sempCtx: null, primarySession: session,
+                vpn: '', queue: 'q', signal: new AbortController().signal,
+            });
+            expect(result.sourceOk).toBe(false);
+            expect(result.errors).toEqual(['You are not entitled to browse queue "q".']);
         });
 
         it('hard timeout after UP is a no-op (idle takes over)', async () => {

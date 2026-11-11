@@ -78,8 +78,12 @@ func TestGenerateSelfSigned_CreatesValidKeypair(t *testing.T) {
 	if !hasV6 {
 		t.Errorf("IPAddresses missing ::1, got %v", parsed.IPAddresses)
 	}
-	if d := parsed.NotAfter.Sub(parsed.NotBefore); d < 364*24*time.Hour || d > 366*24*time.Hour {
-		t.Errorf("validity window %s outside ~365d", d)
+	// A bootstrap pair: seven days (plus the minute of back-dating), never more.
+	if d := parsed.NotAfter.Sub(parsed.NotBefore); d < bootstrapCertValidity || d > bootstrapCertValidity+2*time.Minute {
+		t.Errorf("validity window %s, want 7 days", d)
+	}
+	if left := time.Until(parsed.NotAfter); left > bootstrapCertValidity || left < bootstrapCertValidity-time.Hour {
+		t.Errorf("NotAfter %v: want 7 days from now", parsed.NotAfter)
 	}
 	// NotBefore should be slightly in the past (now - 1 min); allow generous skew.
 	if time.Until(parsed.NotBefore) > 0 {
@@ -128,20 +132,70 @@ func TestLoadOrGenerateServerCert_RefusesToOverwriteCorruptKeypair(t *testing.T)
 	}
 }
 
-func TestLoadOrGenerateServerCert_GeneratesWhenOnlyOneFilePresent(t *testing.T) {
+// Half a pair is the operator's material (a key whose certificate is not
+// issued yet): the start stops, naming both files and the ways out, and the
+// file that is there stays as it was.
+func TestLoadOrGenerateServerCert_RefusesHalfAPair(t *testing.T) {
+	cases := []struct {
+		name, present string
+	}{
+		{"only the certificate", "tls.crt"},
+		{"only the key", "tls.key"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			certPath, keyPath := filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key")
+			present := filepath.Join(dir, c.present)
+			writeFile(t, present, "operator material")
+			_, err := loadOrGenerateServerCert(certPath, keyPath, quietLogger())
+			if err == nil {
+				t.Fatal("want the start refused")
+			}
+			for _, want := range []string{certPath, keyPath, "Add the missing file", "remove " + present} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the error lacks %q: %v", want, err)
+				}
+			}
+			if data, _ := os.ReadFile(present); string(data) != "operator material" {
+				t.Error("the operator's file must stay as it was")
+			}
+		})
+	}
+}
+
+// writePEM goes through a .partial file: a write that fails leaves neither a
+// truncated target nor the partial, and a partial an earlier write left
+// behind is replaced, not appended to.
+func TestWritePEM_PartialThenRename(t *testing.T) {
 	dir := t.TempDir()
-	certPath := filepath.Join(dir, "tls.crt")
-	keyPath := filepath.Join(dir, "tls.key")
-	// Only cert present — generate path should trigger (and overwrite the stray cert).
-	if err := os.WriteFile(certPath, []byte("stray"), 0o644); err != nil {
+	block := &pem.Block{Type: "CERTIFICATE", Bytes: []byte("der")}
+	target := filepath.Join(dir, "tls.crt")
+	writeFile(t, target+".partial", "left by a write that stopped")
+	if err := writePEM(target, 0o644, block); err != nil {
 		t.Fatal(err)
 	}
-	cert, err := loadOrGenerateServerCert(certPath, keyPath, quietLogger())
-	if err != nil {
-		t.Fatalf("want generation, got error: %v", err)
+	if data, _ := os.ReadFile(target); string(data) != string(pem.EncodeToMemory(block)) {
+		t.Errorf("target: %q", data)
 	}
-	if len(cert.Certificate) == 0 {
-		t.Fatal("returned cert has no DER")
+	if fileExists(target + ".partial") {
+		t.Error("the partial must be renamed into place")
+	}
+
+	busy := filepath.Join(dir, "busy")
+	if err := os.MkdirAll(filepath.Join(busy, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePEM(busy, 0o644, block); err == nil || !strings.Contains(err.Error(), "write "+busy) {
+		t.Fatalf("a target the rename cannot replace: want an error naming it, got %v", err)
+	}
+	if fileExists(busy + ".partial") {
+		t.Error("a failed write must remove its partial")
+	}
+
+	nowhere := filepath.Join(dir, "missing", "tls.crt")
+	if err := writePEM(nowhere, 0o644, block); err == nil || !strings.Contains(err.Error(), "open "+nowhere+".partial") {
+		t.Fatalf("a directory that is not there: want an error naming the partial, got %v", err)
 	}
 }
 
@@ -291,12 +345,19 @@ func TestLoadOrGenerateServerCert_UnwritableLocationsStopTheStart(t *testing.T) 
 	cases := []struct{ name, cert, key, want string }{
 		{"the certificate's directory is a file", filepath.Join(file, "tls.crt"), filepath.Join(dir, "a.key"), "mkdir " + file},
 		{"the key's directory is a file", filepath.Join(dir, "b.crt"), filepath.Join(file, "tls.key"), "mkdir " + file},
-		{"the certificate path is a directory", sub, filepath.Join(dir, "c.key"), "open " + sub},
-		{"the key path is a directory", filepath.Join(dir, "d.crt"), sub, "open " + sub},
+		{"the certificate path is a directory", sub, filepath.Join(dir, "c.key"), "write " + sub},
+		{"the key path is a directory", filepath.Join(dir, "d.crt"), sub, "write " + sub},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := loadOrGenerateServerCert(c.cert, c.key, quietLogger()); err == nil || !strings.Contains(err.Error(), c.want) {
+			// A directory counts as present, so the last two go to
+			// generateSelfSigned directly: loadOrGenerateServerCert would
+			// refuse them as half a pair before writing anything.
+			gen := func() error { _, err := loadOrGenerateServerCert(c.cert, c.key, quietLogger()); return err }
+			if c.cert == sub || c.key == sub {
+				gen = func() error { _, err := generateSelfSigned(c.cert, c.key); return err }
+			}
+			if err := gen(); err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("want an error with %q, got %v", c.want, err)
 			}
 		})
@@ -326,5 +387,20 @@ func TestBuildTrustPool_SkipsFilesWithoutACertificate(t *testing.T) {
 	}
 	if !strings.Contains(log, "added_certs=0") {
 		t.Errorf("nothing was added: %s", log)
+	}
+}
+
+// A generated pair is logged with its fingerprint and its 7-day life, and
+// says it is never renewed.
+func TestLoadOrGenerateServerCert_GeneratedPairIsABootstrap(t *testing.T) {
+	dir := t.TempDir()
+	var buf strings.Builder
+	if _, err := loadOrGenerateServerCert(filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key"), newCapturingLogger(&buf)); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"generating a self-signed bootstrap certificate", "validity_days=7", "never renewed", "sha256_fingerprint="} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("log lacks %q: %s", want, buf.String())
+		}
 	}
 }

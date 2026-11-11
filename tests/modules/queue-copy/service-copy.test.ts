@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
     runCopyJob,
+    selectPublisher,
     IDLE_TIMEOUT_MS,
     PUBLISH_CONCURRENCY_HIGH,
     PUBLISH_CONCURRENCY_LOW,
 } from '../../../src/modules/queue-copy/service-copy';
-import { createInitialState } from '../../../src/modules/queue-copy/state';
+import { createInitialState, destTargetKey } from '../../../src/modules/queue-copy/state';
 import type { VerifyResult } from '../../../src/modules/queue-copy/state';
 import { createSolacePublisher } from '../../../src/core/services/solace-publisher';
 import { createSessionMock, createBrowserMock, createMessageMock } from '../../setup';
@@ -396,6 +397,39 @@ describe('queue-copy/service-copy', () => {
                 vi.useRealTimers();
             });
 
+            it('idle waits for in-flight acks: a late ACK still removes its message in move mode', async () => {
+                vi.useFakeTimers();
+                const { state, session, browser, onComplete, fireUp, fireMessage, ackLast } = setup({ mode: 'move' });
+                // An ack slower than the idle window, still inside its own timeout.
+                state.primaryPublisher = createSolacePublisher(session, { ackTimeoutMs: IDLE_TIMEOUT_MS * 2 });
+                state.verify = {
+                    inProgress: false, abort: null,
+                    result: verifyResult({ messageCount: 2, oldestMsgId: '1', newestMsgId: '2' }),
+                };
+
+                const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+                await flush();
+                fireUp();
+                fireMessage(msg('1'));
+                await flush();
+
+                // The source is quiet, but the publish is pending: the run keeps its browser.
+                await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS + 1_000);
+                expect(browser.disconnect).not.toHaveBeenCalled();
+                expect(onComplete).not.toHaveBeenCalled();
+
+                ackLast();
+                await flush();
+                expect(browser.removeMessageFromQueue).toHaveBeenCalledTimes(1);
+
+                // Nothing in flight now: the re-armed idle window ends the run.
+                await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS + 10);
+                await flush();
+                await job;
+                expect(onComplete.mock.calls[0][0].copied).toBe(1);
+                vi.useRealTimers();
+            });
+
             it('idle timer fires before any MESSAGE → count-mismatch error (copied=0)', async () => {
                 vi.useFakeTimers();
                 const { state, session, onComplete, fireUp } = setup();
@@ -544,6 +578,25 @@ describe('queue-copy/service-copy', () => {
                     .toBe('Permission Denied - not authorized to bind');
             });
 
+            it('a createQueueBrowser throw completes the run with status=error and the reason', async () => {
+                const { state, session, onComplete } = setup();
+                (session.createQueueBrowser as any).mockImplementation(() => {
+                    throw new Error('You are not entitled to browse queue "src-q".');
+                });
+                state.verify = {
+                    inProgress: false, abort: null,
+                    result: verifyResult({ messageCount: 1, oldestMsgId: '100', newestMsgId: '100' }),
+                };
+
+                await runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+
+                expect(onComplete).toHaveBeenCalledTimes(1);
+                const final = onComplete.mock.calls[0][0];
+                expect(final.status).toBe('error');
+                expect(final.lastError).toBe('You are not entitled to browse queue "src-q".');
+                expect(session.send).not.toHaveBeenCalled();
+            });
+
             it('synchronous browser.connect throw → browser-error', async () => {
                 const { state, session, onComplete } = setup();
                 ((session.createQueueBrowser as any).mock.results); // prime
@@ -574,6 +627,33 @@ describe('queue-copy/service-copy', () => {
                 await runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
                 const final = onComplete.mock.calls[0][0];
                 expect(final.lastError).toBe('Failed to start copy browser.');
+            });
+        });
+
+        describe('a destination the SDK refuses', () => {
+            it('stops the run with the SDK reason at the first message, not a count mismatch after a full browse', async () => {
+                const reason = "Invalid QUEUE: Empty level(s) in 'a//b'@2.";
+                (window as any).solace.SolclientFactory.createDurableQueueDestination
+                    .mockImplementation(() => { throw new Error(reason); });
+                const { state, session, browser, onComplete, fireUp } = setup();
+                state.dest = { type: 'queue', name: 'a//b' };
+                state.verify = {
+                    inProgress: false, abort: null,
+                    result: verifyResult({ messageCount: 3, oldestMsgId: '100', newestMsgId: '102' }),
+                };
+
+                const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+                await flush();
+                fireUp();
+                (browser as any)._handlers.MESSAGE(msg('100'));
+                await flush();
+                await job;
+
+                const final = onComplete.mock.calls[0][0];
+                expect(final.status).toBe('error');
+                expect(final.lastError).toBe(reason);
+                expect(browser.disconnect).toHaveBeenCalled();
+                expect(session.send).not.toHaveBeenCalled();
             });
         });
 
@@ -961,11 +1041,22 @@ describe('queue-copy/service-copy', () => {
     });
 
     describe('session selection', () => {
-        it('uses state.destPublisher for publish when set; primarySession only for the source browser', async () => {
-            const { state, session, onComplete, fireUp, fireMessage } = setup();
+        /** A destination session connected for the provisioned b1/v1. */
+        function connectedDest(state: ReturnType<typeof createInitialState>) {
+            state.destForm.sameBroker = false;
+            state.destForm.sameVpn = false;
+            state.destForm.credMode = 'provisioned';
+            state.destForm.provisioned = { broker: 'b1', vpn: 'v1' };
             const destSession = createSessionMock();
             state.destSession = destSession;
+            state.destSessionTarget = destTargetKey(state.destForm);
             state.destPublisher = createSolacePublisher(destSession);
+            return destSession;
+        }
+
+        it('uses state.destPublisher for publish when set; primarySession only for the source browser', async () => {
+            const { state, session, onComplete, fireUp, fireMessage } = setup();
+            const destSession = connectedDest(state);
             state.verify = {
                 inProgress: false, abort: null,
                 result: verifyResult({ messageCount: 1, oldestMsgId: '100', newestMsgId: '100' }),
@@ -986,6 +1077,34 @@ describe('queue-copy/service-copy', () => {
 
             expect(destSession.send).toHaveBeenCalledTimes(1);
             expect(session.send).not.toHaveBeenCalled();
+        });
+
+        it('Same broker + Same VPN publishes through the primary even while a destination session exists', () => {
+            const { state } = setup();
+            connectedDest(state);
+            state.destForm.sameBroker = true;
+            state.destForm.sameVpn = true;
+            expect(selectPublisher(state)).toBe(state.primaryPublisher);
+        });
+
+        it('no publisher when the destination session was connected for another VPN than the form names', () => {
+            const { state } = setup();
+            connectedDest(state);
+            state.destForm.provisioned.vpn = 'v2';
+            expect(selectPublisher(state)).toBeNull();
+        });
+
+        it('a run whose form no longer matches the destination session publishes nothing', async () => {
+            const { state, session, onComplete } = setup();
+            const destSession = connectedDest(state);
+            state.destForm.provisioned.vpn = 'v2';
+            state.verify = { inProgress: false, abort: null, result: verifyResult({ messageCount: 1 }) };
+
+            await runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+
+            expect(onComplete.mock.calls[0][0].status).toBe('error');
+            expect(session.createQueueBrowser).not.toHaveBeenCalled();
+            expect(destSession.send).not.toHaveBeenCalled();
         });
     });
 

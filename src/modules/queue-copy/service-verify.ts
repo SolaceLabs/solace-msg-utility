@@ -1,6 +1,7 @@
 import type { SempContext } from '../../core/types';
 import { escapeXml, solaceErrorText } from '../../core/utils';
 import { logger } from '../../core/logger';
+import { sempErrorText } from '../../core/services/semp-errors';
 import { BIND_PROBE_TIMEOUT_MS, ACCUMULATE_IDLE_MS } from './constants';
 import type { VerifyResult } from './state';
 
@@ -170,7 +171,7 @@ async function verifyViaSempV1(
             return result;
         }
         if (!res.ok) {
-            result.errors.push(`SEMP v1 returned ${res.status} ${res.statusText || ''}`.trim());
+            result.errors.push(await sempErrorText(res, 'SEMP v1 returned an error'));
             return result;
         }
         const text = await res.text();
@@ -374,6 +375,20 @@ function verifyViaQueueBrowserAccumulate(
         return Promise.resolve(result);
     }
 
+    const props = new solace.QueueBrowserProperties();
+    props.queueDescriptor = new solace.QueueDescriptor({ name: queue, type: solace.QueueType.QUEUE });
+    let browser: any;
+    try {
+        browser = session.createQueueBrowser(props);
+    } catch (e) {
+        // e.g. the managed entitlement wrapper refusing the queue, or the SDK
+        // refusing a session that is going down: a failed verify, not a hang.
+        const reason = solaceErrorText(e, `Cannot browse source queue "${queue}".`);
+        logger.error(`[Verify] QB-fallback createQueueBrowser threw: ${reason}`);
+        result.errors.push(reason);
+        return Promise.resolve(result);
+    }
+
     return new Promise<VerifyResult>((resolve) => {
         let settled = false;
         let bound = false;
@@ -385,10 +400,6 @@ function verifyViaQueueBrowserAccumulate(
         let oldestId: string | null = null;
         let newestId: string | null = null;
         let idleTimer: ReturnType<typeof setTimeout> | null = null;
-
-        const props = new solace.QueueBrowserProperties();
-        props.queueDescriptor = new solace.QueueDescriptor({ name: queue, type: solace.QueueType.QUEUE });
-        const browser = session.createQueueBrowser(props);
 
         const cleanup = () => {
             try { browser.disconnect(); } catch { /* swallow — best-effort */ }
@@ -419,6 +430,9 @@ function verifyViaQueueBrowserAccumulate(
 
         browser.on(solace.QueueBrowserEventName.UP, () => {
             bound = true;
+            // Bound: from here only the idle window ends accumulation, however
+            // long a deep queue takes to browse.
+            clearTimeout(bindTimer);
             // Capture access type from the SDK's `_messageConsumer._permissions`
             // the same way queue-browser does (see src/modules/queue-browser/ui-table.ts).
             // The bind has just completed, so the consumer object is populated.
@@ -469,23 +483,16 @@ function verifyViaQueueBrowserAccumulate(
         const onAbort = () => settle(false, 'Verification cancelled.');
         signal.addEventListener('abort', onAbort);
 
+        // A bind that never answers: UP clears this timer, so it fires only
+        // while the browser is still unbound.
         const bindTimer = setTimeout(() => {
-            /* v8 ignore start -- the entire body is defensively unreachable in
-             * tests: any QueueBrowserEventName.UP arms the idle timer (2s),
-             * which always fires before the 10s bind timer; settle() then
-             * runs cleanup() and clears bindTimer. The bind timer can only
-             * ever fire when bound is still false, so the `if (!bound)`
-             * guard below is itself dead — kept commented in case future
-             * timer-management changes break that invariant. */
-            // if (!bound)
             settle(false, `Verification timed out after ${BIND_PROBE_TIMEOUT_MS / 1000}s.`);
-            /* v8 ignore stop */
         }, BIND_PROBE_TIMEOUT_MS);
 
         try {
             browser.connect();
-        } catch (e: any) {
-            settle(false, e?.message ?? 'Failed to start verification probe.');
+        } catch (e) {
+            settle(false, solaceErrorText(e, 'Failed to start verification probe.'));
         }
     });
 }

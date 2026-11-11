@@ -18,7 +18,7 @@ export default defineConfig({
         globals: true,
         environment: 'jsdom',
         cache: false,
-        reporter: process.stdout.isTTY ? 'default' : 'verbose',
+        reporters: process.stdout.isTTY ? 'default' : 'verbose',
         include: ['tests/**/*.test.ts'],
         coverage: {
             provider: 'v8',
@@ -31,7 +31,17 @@ export default defineConfig({
                 'lcovonly'                                     // file: coverage/lcov.info — no duplicate HTML tree (use 'lcov' if you want both)
             ],
             reportsDirectory: 'coverage',
-            include: ['src/**/*.ts', 'src/**/*.js'],
+            include: [
+                'src/**/*.ts',
+                'src/**/*.js',
+                // The gate and build scripts whose logic ships or guards what
+                // ships: the bundle check, the module registry the build
+                // generates, the npm audit gate and the e2e run's helpers.
+                'scripts/check-bundles.mjs',
+                'scripts/module-registry-plugin.mjs',
+                'scripts/npm-audit-gate.mjs',
+                'scripts/e2e-lib.mjs'
+            ],
             exclude: [
                 'src/css/**',
                 'src/index.html',
@@ -39,7 +49,8 @@ export default defineConfig({
                 // The in-browser demo broker. Mock-only: the redirect that reaches
                 // it is registered only when mode === 'demo', so it never enters a
                 // production bundle. Its fidelity contracts are covered by
-                // tests/mock-broker/ rather than held to the 100% gate.
+                // tests/mock-broker/ rather than held to the 100% gate; `mock`
+                // reports its coverage (vitest.mock.config.ts).
                 'src/mock-broker/**'
             ],
             thresholds: {

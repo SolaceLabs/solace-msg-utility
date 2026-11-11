@@ -19,8 +19,39 @@
     "valid": ["twelve-chars", "a-much-longer-password-than-needed", "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"],
     "invalid": ["", "short", "eleven-char"]
   },
+  "scheme": {
+    "semp": {
+      "valid": ["", "https", "http"],
+      "invalid": ["HTTPS", "Http", "ftp", "ws", "wss", " https"]
+    },
+    "client": {
+      "valid": ["", "wss", "ws"],
+      "invalid": ["WSS", "Ws", "tcp", "http", "https", "wss "]
+    }
+  },
   "modules": {
     "valid": [[], ["queue-browser"], ["queue-copy", "queue-browser"]],
     "invalid": [["bogus"], ["queue-browser", "queue-browser"], ["Queue-Browser"]]
-  }
+  },
+  "glob": [
+    ["*", "anything", true],
+    ["*", "", true],
+    ["", "", true],
+    ["", "x", false],
+    ["queue1", "queue1", true],
+    ["queue1", "queue2", false],
+    ["broker-group*", "broker-group-prod", true],
+    ["broker-group*", "other", false],
+    ["*prod", "us-prod", true],
+    ["*prod", "prod-us", false],
+    ["orders.*", "orders.new", true],
+    ["orders.*", "ordersXnew", false],
+    ["a*b*c", "aXXbYYc", true],
+    ["a*b*c", "aXXc", false],
+    ["Order*", "order-secret", false],
+    ["Order*", "Order-1", true],
+    ["a*a", "a", false],
+    ["a*a", "aa", true],
+    ["a*a", "aba", true]
+  ]
 }

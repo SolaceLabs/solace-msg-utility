@@ -14,6 +14,8 @@ vi.mock('../../../src/modules/connection-management/service', () => ({
 }));
 
 import { ConnectionManagementModule, NO_VPNS } from '../../../src/modules/connection-management/module';
+import { completeContext } from '../../helpers/appContext';
+import { answerConfirm } from '../../helpers/confirmDialog';
 
 const ADMIN: ManagedSession = {
     admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
@@ -34,11 +36,11 @@ function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppCon
         activeModuleId: null, isConnected: false, selectedVpn: null,
         solaceConnection: null, sempCredentials: null, isSempConnected: false, managed,
     };
-    return {
+    return completeContext({
         container, appState, eventBus,
         setState: (k, v) => { (appState as any)[k] = v; eventBus.emit('app:state-change', { key: k, value: v }); },
         loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(), config: {},
-    } as unknown as AppContext;
+    });
 }
 
 async function setup(managed: ManagedSession | null = ADMIN) {
@@ -116,7 +118,7 @@ describe('connection-management — list', () => {
     });
 
     it('reloads on rbac:changed', async () => {
-        const { container, ctx } = await setup();
+        const { ctx } = await setup();
         svcMock.listConnections.mockClear();
         ctx.eventBus.emit('rbac:changed');
         await vi.waitFor(() => expect(svcMock.listConnections).toHaveBeenCalled());
@@ -340,28 +342,27 @@ describe('connection-management — delete', () => {
     it('deletes after confirmation', async () => {
         const { container } = await setup();
         svcMock.deleteConnection.mockResolvedValue({ ok: true });
-        (globalThis.confirm as any).mockReturnValue(true);
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
             .querySelector<HTMLButtonElement>('.conn-mgmt-delete')!.click();
+        expect(await answerConfirm(true)).toBe('Delete connection "b1"?');
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Connection deleted', 'ok'));
         expect(svcMock.deleteConnection).toHaveBeenCalledWith('b1');
     });
 
     it('does nothing when cancelled', async () => {
         const { container } = await setup();
-        (globalThis.confirm as any).mockReturnValue(false);
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
             .querySelector<HTMLButtonElement>('.conn-mgmt-delete')!.click();
-        await Promise.resolve();
+        await answerConfirm(false);
         expect(svcMock.deleteConnection).not.toHaveBeenCalled();
     });
 
     it("toasts the gateway's reason when the delete is rejected", async () => {
         const { container } = await setup();
         svcMock.deleteConnection.mockResolvedValue({ ok: false, status: 500, code: 'server_error' });
-        (globalThis.confirm as any).mockReturnValue(true);
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
             .querySelector<HTMLButtonElement>('.conn-mgmt-delete')!.click();
+        await answerConfirm(true);
         await vi.waitFor(() => expect(toastMock.showToast)
             .toHaveBeenCalledWith('The gateway could not complete the request. Its log has the cause.', 'error'));
     });

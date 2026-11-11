@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createServiceSemp, type SempConnectionHooks } from '../../../src/core/services/semp-client';
-import { setHosted } from '../../../src/core/hosted';
 import { managedErrorMessage } from '../../../src/core/services/managed-api';
+import { basicAuthHeader } from '../../../src/core/utils';
+import { REQUEST_TIMEOUT_MS } from '../../../src/core/timing';
 import type { SempConfig } from '../../../src/core/connections/types';
 
 /**
@@ -180,41 +181,68 @@ describe('core/services/semp-client', () => {
             }));
         });
 
-        it('fires onError for the synthetic untrust.com Certificate trip', async () => {
+        it('fires onError with the bare status when an HTTP/2 answer carries no status text', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 503, statusText: '' });
             const hooks = makeHooks();
-            const service = createServiceSemp(hooks);
-            await service.connect(baseCfg(), 'untrust.com', 'pw');
-
-            expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({
-                message: expect.stringContaining('Certificate'),
-                // "Certificate Not Trusted (Mock)" doesn't match Failed to fetch / NetworkError
-                isNetworkError: false,
-            }));
+            await createServiceSemp(hooks).connect(baseCfg(), 'broker.test', 'pw');
+            expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({ message: '503' }));
         });
 
-        it('handles non-ASCII credentials and encodes them correctly in the Authorization header (UTF-8 base64)', async () => {
-            // Historical ledger 5.6: btoa was failing on non-ASCII because it
-            // requires Latin-1 input. The fix encodes the credentials as UTF-8
-            // first then base64-wraps the bytes. The test must verify the
-            // round-trip — not just that connect resolves — because a
-            // regression that drops the UTF-8 encode (e.g. reverting to plain
-            // `btoa(${user}:${pass})`) would still resolve fine but produce a
-            // malformed header the broker would reject.
+        it('the probe and every later call send the same Basic header, built by basicAuthHeader', async () => {
             (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            let capturedFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
+            const hooks = makeHooks({ onConnected: vi.fn((sempCtx) => { capturedFetch = sempCtx.fetch; }) });
+            await createServiceSemp(hooks).connect(baseCfg(), 'broker.test', 'S3cret!#');
+            await capturedFetch!('/SEMP');
 
-            const service = createServiceSemp(makeHooks());
-            await service.connect(baseCfg({ user: 'user' }), 'broker.test', 'pässwörd€');
+            const headers = (globalThis.fetch as any).mock.calls.map((c: any[]) => c[1].headers.Authorization);
+            expect(headers).toEqual([basicAuthHeader('admin', 'S3cret!#'), basicAuthHeader('admin', 'S3cret!#')]);
+        });
 
-            const call = (globalThis.fetch as any).mock.calls.at(-1);
-            const authHeader = call[1].headers.Authorization;
-            expect(authHeader).toMatch(/^Basic /);
+        it('a credential btoa cannot encode reaches onError and sends no request', async () => {
+            // The connection forms reject non-ASCII credentials first
+            // (tests/modules/connections/module.test.ts > "rejects a non-ASCII
+            // SEMP password inline before any request"); a caller that skips
+            // that check still gets onError, not an unhandled rejection.
+            const hooks = makeHooks();
+            await createServiceSemp(hooks).connect(baseCfg(), 'broker.test', 'euro\u20ac');
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({
+                isNetworkError: false, isTimeout: false, baseUrl: 'https://broker.test:8080',
+            }));
+            expect(hooks.onConnected).not.toHaveBeenCalled();
+        });
 
-            // UTF-8 round-trip: atob the base64 portion, treat each char-code
-            // as a byte, then TextDecoder('utf-8') back to a string.
-            const decoded = new TextDecoder().decode(
-                Uint8Array.from(atob(authHeader.slice(6)), (c) => c.charCodeAt(0)),
-            );
-            expect(decoded).toBe('user:pässwörd€');
+        it("later calls carry a REQUEST_TIMEOUT_MS deadline joined to the caller's signal", async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            let capturedFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
+            const hooks = makeHooks({ onConnected: vi.fn((sempCtx) => { capturedFetch = sempCtx.fetch; }) });
+            await createServiceSemp(hooks).connect(baseCfg(), 'broker.test', 'pw');
+
+            const timeout = vi.spyOn(AbortSignal, 'timeout');
+            const cancel = new AbortController();
+            await capturedFetch!('/SEMP', { signal: cancel.signal });
+
+            expect(timeout).toHaveBeenCalledWith(REQUEST_TIMEOUT_MS);
+            const { signal } = (globalThis.fetch as any).mock.calls.at(-1)[1];
+            cancel.abort();
+            expect(signal.aborted).toBe(true);
+        });
+
+        it('a later call the broker never answers rejects with a TimeoutError', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            let capturedFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
+            const hooks = makeHooks({ onConnected: vi.fn((sempCtx) => { capturedFetch = sempCtx.fetch; }) });
+            await createServiceSemp(hooks).connect(baseCfg(), 'broker.test', 'pw');
+
+            const deadline = new AbortController();
+            vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal);
+            (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+                init.signal!.addEventListener('abort', () => reject(init.signal!.reason));
+            }));
+            const pending = capturedFetch!('/SEMP/v2/monitor/msgVpns');
+            deadline.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+            await expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
         });
 
         // URL Path is appended *between* the port and the canonical
@@ -305,15 +333,13 @@ describe('core/services/semp-client', () => {
     // broker's stored account: the browser sends its session cookie only.
     describe('relay mode', () => {
         const relayCfg = () => baseCfg({ user: '', relayBase: '/managed/relay/b1' });
-        afterEach(() => setHosted(false));
 
         it.each([false, true])('probes and fetches through the relay with no Authorization header (hosted %s)', async (hosted) => {
-            setHosted(hosted);
             (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
             let ctxFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
             const hooks = makeHooks({ onConnected: vi.fn((c) => { ctxFetch = c.fetch; }) });
 
-            await createServiceSemp(hooks).connect(relayCfg(), 'b1', '');
+            await createServiceSemp(hooks).connect({ ...relayCfg(), hosted }, 'b1', '');
 
             expect(globalThis.fetch).toHaveBeenLastCalledWith('/managed/relay/b1/SEMP/v2/monitor/msgVpns?count=1',
                 { method: 'GET', signal: expect.any(AbortSignal), credentials: 'same-origin' });
@@ -322,7 +348,7 @@ describe('core/services/semp-client', () => {
             // A later call (here a SEMP v1 show) keeps its own headers and gains none.
             await ctxFetch!('/SEMP', { method: 'POST', headers: { 'Content-Type': 'application/xml' }, body: '<rpc/>' });
             expect(globalThis.fetch).toHaveBeenLastCalledWith('/managed/relay/b1/SEMP',
-                { method: 'POST', headers: { 'Content-Type': 'application/xml' }, body: '<rpc/>', credentials: 'same-origin' });
+                { method: 'POST', headers: { 'Content-Type': 'application/xml' }, body: '<rpc/>', credentials: 'same-origin', signal: expect.any(AbortSignal) });
         });
 
         it('a relay 401 is onAuthFailed: the gateway session has ended', async () => {
@@ -385,18 +411,13 @@ describe('core/services/semp-client', () => {
 
     // Hosted mode routes the validation fetch through the gateway proxy
     // path and passes the gateway-prefixed baseUrl into onConnected.
-    describe('hosted mode', () => {
-        afterEach(() => {
-            setHosted(false);
-        });
-
+    describe('hosted mode (cfg.hosted, from AppState.connConfig)', () => {
         it('fetches the gateway-prefixed validation URL and exposes the same prefix as baseUrl', async () => {
-            setHosted(true);
             (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
 
             const hooks = makeHooks();
             const service = createServiceSemp(hooks);
-            await service.connect(baseCfg({ urlPath: '/api' }), 'broker.example.com', 'pw');
+            await service.connect(baseCfg({ urlPath: '/api', hosted: true }), 'broker.example.com', 'pw');
 
             // jsdom default location is http://localhost/, so wire scheme is http.
             const calledUrl = (globalThis.fetch as any).mock.calls.at(-1)[0];
@@ -414,7 +435,6 @@ describe('core/services/semp-client', () => {
             // broker-emitted nextPageUri) goes through the same closure that
             // reassembles the gateway-prefixed URL. Broker-direct URLs never
             // reach fetch().
-            setHosted(true);
             (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
 
             let capturedFetch: ((path: string, opts?: RequestInit) => Promise<Response>) | null = null;
@@ -422,7 +442,7 @@ describe('core/services/semp-client', () => {
                 onConnected: vi.fn((sempCtx) => { capturedFetch = sempCtx.fetch; }),
             });
             const service = createServiceSemp(hooks);
-            await service.connect(baseCfg(), 'broker-internal', 'pw');
+            await service.connect(baseCfg({ hosted: true }), 'broker-internal', 'pw');
 
             // Simulate a pagination follow-up: caller extracted pathname+search
             // from the broker's nextPageUri.

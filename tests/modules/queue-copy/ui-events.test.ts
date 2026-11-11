@@ -12,6 +12,7 @@ vi.mock('../../../src/core/components/queue-picker', () => ({
     pickQueue: vi.fn(async () => ({ vpn: 'default', queue: 'picked-q' })),
 }));
 import { pickQueue } from '../../../src/core/components/queue-picker';
+import { completeContext } from '../../helpers/appContext';
 
 const PRIMARY: PrimarySnapshot = {
     host: 'broker.solace.com',
@@ -20,7 +21,7 @@ const PRIMARY: PrimarySnapshot = {
 };
 
 function makeCtx(overrides: Partial<AppContext['appState']> = {}): AppContext {
-    return {
+    return completeContext({
         container: document.createElement('div'),
         appState: {
             activeModuleId: null,
@@ -41,7 +42,7 @@ function makeCtx(overrides: Partial<AppContext['appState']> = {}): AppContext {
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
         config: {},
-    };
+    });
 }
 
 function setup(opts: { ctx?: Partial<AppContext['appState']>; primarySnap?: PrimarySnapshot | null } = {}) {
@@ -468,6 +469,40 @@ describe('queue-copy/ui-events', () => {
             els.modal.showModal();
             els.btnModalCancel.click();
             expect(els.modal.hasAttribute('open')).toBe(false);
+        });
+    });
+
+    describe('modal Esc (the dialog cancel event) behaves exactly like Cancel', () => {
+        const pressEsc = (modal: HTMLDialogElement): Event => {
+            const e = new Event('cancel', { cancelable: true });
+            modal.dispatchEvent(e);
+            return e;
+        };
+
+        it('during verify: aborts the probe and closes the dialog', () => {
+            const { els, state } = setup();
+            const abort = new AbortController();
+            state.verify = { inProgress: true, abort, result: null };
+            els.modal.showModal();
+
+            const e = pressEsc(els.modal);
+
+            expect(e.defaultPrevented).toBe(true);
+            expect(abort.signal.aborted).toBe(true);
+            expect(state.verify).toBeNull();
+            expect(els.modal.hasAttribute('open')).toBe(false);
+        });
+
+        it('during a run: flags the cancel and keeps the dialog open until the run ends', () => {
+            const { els, state } = setup();
+            state.job = { total: 5, copied: 2, cancelRequested: false, lastError: null, status: 'running' };
+            els.modal.showModal();
+
+            const e = pressEsc(els.modal);
+
+            expect(e.defaultPrevented).toBe(true);
+            expect(state.job.cancelRequested).toBe(true);
+            expect(els.modal.hasAttribute('open')).toBe(true);
         });
     });
 

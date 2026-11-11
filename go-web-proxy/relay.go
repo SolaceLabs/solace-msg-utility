@@ -16,7 +16,8 @@ import (
 
 // The SEMP relay: /managed/relay/{broker}/SEMP... forwards a signed-in user's
 // SEMP request to a provisioned broker with the broker's stored credential,
-// which never reaches the browser. It is read-only by rule:
+// which never reaches the browser, over the connection's SEMP scheme (https
+// unless the record says http). It is read-only by rule:
 //
 //   - GET and HEAD under /SEMP/v2/
 //   - POST /SEMP (v1) only when the body is a single <rpc> whose one command
@@ -38,14 +39,16 @@ const (
 // dropped. Accept-Encoding is dropped too: the transport negotiates its own.
 // Content-Type is not taken from the client: a v1 POST is sent as
 // relayV1ContentType, so no charset the client names can make the broker read
-// the body differently from isShowRPC.
-var relayRequestHeaders = []string{"Accept", "If-Match", "If-None-Match"}
+// the body differently from isShowRPC. No conditional request header passes
+// either way: the relay answers a broker's 304 as a 502 (forward), so it
+// neither forwards If-Match and If-None-Match nor hands out an ETag.
+var relayRequestHeaders = []string{"Accept"}
 
 const relayV1ContentType = "application/xml"
 
 // Response headers that reach the browser. Set-Cookie, WWW-Authenticate (it
 // would raise a Basic prompt), Location, Server, Via and the rest never do.
-var relayResponseHeaders = []string{"Content-Type", "Content-Length", "Content-Encoding", "ETag", "Last-Modified"}
+var relayResponseHeaders = []string{"Content-Type", "Content-Length", "Content-Encoding", "Last-Modified"}
 
 // relayPath is a request path the relay accepted.
 type relayPath struct {
@@ -133,17 +136,19 @@ func (rl *sempRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	target, ok := rl.store.sempTarget(user, p.broker)
 	if !ok {
+		rl.logger.Info("semp relay denied", "user", user, "broker", p.broker)
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if !rl.inFlight.acquire(user) {
+		rl.logger.Info("semp relay limited: too many requests in flight", "user", user, "broker", p.broker, "max_in_flight", relayMaxInFlight)
 		writeRateLimited(w, time.Second)
 		return
 	}
 	defer rl.inFlight.release(user)
 
 	u := &url.URL{
-		Scheme:   "https",
+		Scheme:   target.scheme,
 		Host:     net.JoinHostPort(target.host, target.port),
 		Path:     p.tail,
 		RawPath:  p.rawTail,

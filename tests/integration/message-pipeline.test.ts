@@ -22,6 +22,7 @@ import { createEventBus } from '../../src/core/event-bus';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../helpers/resetQueueBrowserState';
 import type { AppContext, AppState } from '../../src/core/types';
+import { completeContext } from '../helpers/appContext';
 
 function makeCtx(container: HTMLElement): AppContext {
     const eventBus = createEventBus();
@@ -29,7 +30,7 @@ function makeCtx(container: HTMLElement): AppContext {
         activeModuleId: null, isConnected: true, selectedVpn: 'test-vpn',
         solaceConnection: null, sempCredentials: null, isSempConnected: false
     };
-    return {
+    return completeContext({
         container, appState, eventBus,
         setState: vi.fn((key: keyof AppState, value: any) => {
             (appState as any)[key] = value;
@@ -39,7 +40,7 @@ function makeCtx(container: HTMLElement): AppContext {
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
         config: { useMocks: false }
-    };
+    });
 }
 
 // Build a minimal Solace-looking message that onMessage's extraction logic will

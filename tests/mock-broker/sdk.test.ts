@@ -271,6 +271,22 @@ describe('mock-broker/sdk — queue browser', () => {
         expect(after.messages.some(m => m.id === target.id)).toBe(false);
     });
 
+    it('removing each message as it is delivered (a move) still delivers every one, in order', async () => {
+        const { sdk, browser } = browserFor('vpn-prod', 'Q/ORDER/PROCESS');
+        const ids = getQueue('vpn-prod', 'Q/ORDER/PROCESS')!.messages.map(m => String(m.id));
+        expect(ids.length).toBeGreaterThan(2);
+        const delivered: string[] = [];
+        browser.on(sdk.QueueBrowserEventName.MESSAGE, (msg: any) => {
+            delivered.push(msg.getGuaranteedMessageId().toString());
+            browser.removeMessageFromQueue(msg);
+        });
+        browser.connect();
+        await vi.waitFor(() => expect(delivered).toHaveLength(ids.length));
+
+        expect(delivered).toEqual(ids);
+        expect(getQueue('vpn-prod', 'Q/ORDER/PROCESS')!.messages).toEqual([]);
+    });
+
     it('reports an empty queue as bindable with nothing to deliver', async () => {
         const { sdk, browser } = browserFor('default', 'Q/EMPTY');
         const up = vi.fn();

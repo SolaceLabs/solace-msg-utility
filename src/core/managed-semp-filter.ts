@@ -13,9 +13,11 @@
  * its parsed rows with `visibleQueueRows` below: the same two rules, applied to
  * rows instead of a JSON list.
  *
- * This is a CLIENT-SIDE guardrail: the proxy returns the full list and the
- * browser drops non-entitled entries (the relay is ungated — see the plan's
- * threat model). It is wired in only for a managed session (by
+ * This is a CLIENT-SIDE guardrail: the relay is read-only (it refuses a request
+ * that would change the broker) and answers only for a broker the session is
+ * entitled to, but within that broker it returns the full list, and the
+ * browser drops the non-entitled entries -- the queue globs stay a UI filter,
+ * not a boundary the gateway enforces. It is wired in only for a managed session (by
  * `unfilteredPrimarySempContext`), so non-managed variants are unaffected. Note the
  * primary discovery path now sources VPNs from `managed.vpns` directly via
  * `queueSourceFrom`, so this filter's VPN branch is mainly a defense-in-depth
@@ -57,6 +59,15 @@ export function visibleQueueRows<T extends { vpn: string; queue: string }>(
     return rows.filter(r => isListedVpn(managed, r.vpn) && isQueueVisible(managed, managed.broker, r.vpn, r.queue));
 }
 
+/**
+ * A row's name field as the matchers take it: the string, or `''` (which no
+ * entitlement matches) when the row is not an object or the field is not text.
+ */
+function rowField(row: unknown, name: string): string {
+    const value: unknown = Object(row)[name];
+    return typeof value === 'string' ? value : '';
+}
+
 export function filterSempFetch(rawFetch: SempFetch, managed: ManagedSession): SempFetch {
     const broker = managed.broker;
 
@@ -82,8 +93,8 @@ export function filterSempFetch(rawFetch: SempFetch, managed: ManagedSession): S
         // VPN list: bound to the PROVISIONED set when it's known -- that's what
         // the picker and the Connections dropdown show (`isListedVpn`).
         const filtered = queueMatch
-            ? json.data.filter((q: any) => isQueueVisible(managed, broker, decodeURIComponent(queueMatch[1]), q?.queueName))
-            : json.data.filter((v: any) => isListedVpn(managed, v?.msgVpnName));
+            ? json.data.filter(q => isQueueVisible(managed, broker, decodeURIComponent(queueMatch[1]), rowField(q, 'queueName')))
+            : json.data.filter(v => isListedVpn(managed, rowField(v, 'msgVpnName')));
 
         return new Response(JSON.stringify({ ...json, data: filtered }), {
             status: res.status,

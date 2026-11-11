@@ -25,13 +25,16 @@ type resolvedClient struct {
 }
 
 // withClient resolves the client address once per request (clientIP, with the
-// current trusted proxies) and puts it on the context, where the access list
-// and the managed sign-in throttle read it with clientOf. The writer is passed
+// current trusted proxies) and puts it on the context, where the access log,
+// the access list and the managed sign-in throttle read it with clientOf. It
+// also puts the requestInfo there that the gates fill with the signed-in user
+// for the log lines around the request (logging.go). The writer is passed
 // through untouched.
 func withClient(lv *live, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip, ok := clientIP(r.RemoteAddr, r.Header.Values("X-Forwarded-For"), lv.get().access.trustedProxies)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientCtxKey{}, resolvedClient{ip, ok})))
+		ctx := withRequestInfo(context.WithValue(r.Context(), clientCtxKey{}, resolvedClient{ip, ok}))
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

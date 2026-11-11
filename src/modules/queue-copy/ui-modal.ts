@@ -2,10 +2,12 @@ import type { AppContext, ManagedSession } from '../../core/types';
 import { unfilteredPrimarySempContext } from '../../core/services/sempContext';
 import { isQueueVisible, canOperate } from '../../core/rbac';
 import { verifySource } from './service-verify';
-import { runCopyJob } from './service-copy';
+import { runCopyJob, selectPublisher } from './service-copy';
 import { logger } from '../../core/logger';
+import { solaceErrorText } from '../../core/utils';
 import * as ui from './ui';
 import type { CopyUiElements, SourceSummary, DestSummary } from './ui';
+import { resetTransientState } from './state';
 import type { QueueCopyState, VerifyResult } from './state';
 
 /**
@@ -59,6 +61,8 @@ export function openCopyModal(
         vpn: selectedVpn,
     };
 
+    // A fresh run: nothing from the previous one carries over.
+    resetTransientState(state);
     const source = buildSourceSummary(ctx, state.sourceQueue);
     const dest = buildDestSummary(ctx, state);
     ui.renderModalInitial(els, source, dest, state.mode);
@@ -105,12 +109,7 @@ function runVerify(
     // before the probe is ever spawned.
     if (!isQueueVisible(access.session, access.broker, access.vpn, state.sourceQueue)) {
         logger.warn(`[CopyModal] source gate refused "${state.sourceQueue}" — not entitled`);
-        const result: VerifyResult = {
-            sourceOk: false, via: 'queue-browser',
-            errors: [`You are not entitled to queue "${state.sourceQueue}".`],
-            messageVpn: null, messageCount: null, spoolUsageBytes: null, quotaBytes: null, maxMessageSize: null,
-            oldestMsgId: null, newestMsgId: null, accessType: null, owner: null,
-        };
+        const result = failedVerifyResult(`You are not entitled to queue "${state.sourceQueue}".`);
         state.verify.result = result;
         state.verify.inProgress = false;
         ui.renderVerifyResult(els, result);
@@ -124,11 +123,7 @@ function runVerify(
 
     if (!primarySession) {
         logger.warn('[CopyModal] runVerify — no primary session, synthesizing failure result');
-        const result: VerifyResult = {
-            sourceOk: false, via: 'queue-browser', errors: ['No primary Solace session — reconnect and retry.'],
-            messageVpn: null, messageCount: null, spoolUsageBytes: null, quotaBytes: null, maxMessageSize: null,
-            oldestMsgId: null, newestMsgId: null, accessType: null, owner: null,
-        };
+        const result = failedVerifyResult('No primary Solace session -- reconnect and retry.');
         state.verify.result = result;
         state.verify.inProgress = false;
         ui.renderVerifyResult(els, result);
@@ -146,6 +141,12 @@ function runVerify(
             if (!state.verify) return;
             ui.renderVerifyProgress(els, count, sizeBytes);
         },
+    }).catch((e): VerifyResult => {
+        // verifySource settles every failure it expects as a result; a
+        // rejection is a bug or an SDK throw it did not anticipate. Show it
+        // as a failed verify instead of leaving the modal on "Checking...".
+        logger.error('[CopyModal] verifySource rejected:', e);
+        return failedVerifyResult(solaceErrorText(e, 'Verification failed unexpectedly.'));
     }).then((result) => {
         if (!state.verify) return;
         // SEMP-path owner override. The SEMP RPC reports queue metadata
@@ -174,6 +175,15 @@ function runVerify(
         ui.renderVerifyResult(els, result);
         evaluateStartGate(els, state, access);
     });
+}
+
+/** A verify that failed with `error` before, or instead of, probing the queue. */
+function failedVerifyResult(error: string): VerifyResult {
+    return {
+        sourceOk: false, via: 'queue-browser', errors: [error],
+        messageVpn: null, messageCount: null, spoolUsageBytes: null, quotaBytes: null, maxMessageSize: null,
+        oldestMsgId: null, newestMsgId: null, accessType: null, owner: null,
+    };
 }
 
 /**
@@ -276,7 +286,8 @@ export function evaluateStartGate(els: CopyUiElements, state: QueueCopyState, ac
  * Modal Start (Copy/Move) click handler. Reuses the primary session when the
  * destination is same-broker + same-VPN; any other case publishes via the
  * destination session captured in `state.destSession` (set by the Connect
- * Client button's hook).
+ * Client button's hook), and only while it was connected for the destination
+ * the form names (`selectPublisher`).
  *
  * The engine reports a single `onComplete` whose `job.status` field carries
  * the final classification ('completed' / 'cancelled' / 'error'). The modal
@@ -333,6 +344,16 @@ function handleModalStart(
         ui.renderRunError(els, refusal);
         return;
     }
+    // The engine publishes only through the session the form names. A
+    // destination session connected for another target (the form moved after
+    // it connected) is refused here, with a reason, before anything is read.
+    if (!selectPublisher(state)) {
+        const reason = 'The destination connection does not match the destination selected. Connect the destination again.';
+        logger.warn(`[CopyModal] no publisher for the selected destination -- ${reason}`);
+        ui.renderRunPhase(els, 0, state.mode);
+        ui.renderRunError(els, reason);
+        return;
+    }
     ui.setFormDisabled(els, true);
     // handleModalStart only runs when btnModalStart is enabled, which
     // evaluateStartGate only does when sourceOk + messageCount > 0 + the
@@ -386,7 +407,22 @@ function handleModalStart(
             }
             ui.renderRunComplete(els, job);
             ui.setFormDisabled(els, false);
+            // Finished: a settled job must not read as a run still in flight
+            // (the rbac:changed halt and destination teardown check it).
+            resetTransientState(state);
         },
+    }).catch((e) => {
+        // runCopyJob reports every outcome it expects through onComplete; a
+        // rejection is a bug or an SDK throw it did not anticipate. End the run
+        // visibly instead of leaving the modal on "Copying...".
+        const job = state.job!;     // runCopyJob assigns it before anything can throw
+        job.status = 'error';
+        job.lastError = solaceErrorText(e, 'The run stopped unexpectedly.');
+        logger.error(`[CopyModal] runCopyJob rejected: ${job.lastError}`);
+        ui.renderRunError(els, job.lastError);
+        ui.renderRunComplete(els, job);
+        ui.setFormDisabled(els, false);
+        resetTransientState(state);
     });
 }
 

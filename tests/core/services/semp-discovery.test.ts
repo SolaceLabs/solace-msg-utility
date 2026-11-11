@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createSempDiscovery, PAGE_DELAY_MS } from '../../../src/core/services/semp-discovery';
 import type { SempContext } from '../../../src/core/connections/types';
+import { managedErrorMessage } from '../../../src/core/services/managed-api';
 
 /**
  * Pure-factory tests. The factory takes a SempContext (a fetch closure + a
@@ -51,13 +52,28 @@ describe('core/services/semp-discovery', () => {
         // `pages.length === 1` locks in the single-page-then-stop contract: a
         // regression that drops the `return` would emit a second page.
 
-        it('handles SEMP API error status', async () => {
+        it('handles SEMP API error status: the fallback with the HTTP status', async () => {
             const sempCtx = makeSempCtx();
-            (sempCtx.fetch as any).mockResolvedValue({ ok: false, statusText: 'Internal Server Error' });
+            (sempCtx.fetch as any).mockResolvedValue({ ok: false, status: 500, statusText: 'Internal Server Error' });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
             expect(pages).toHaveLength(1);
             expect(pages[0].ok).toBe(false);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Internal Server Error');
+            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching VPNs (HTTP 500 Internal Server Error)');
+        });
+
+        it("a relay refusal reads as the gateway code's sentence", async () => {
+            const sempCtx = makeSempCtx();
+            (sempCtx.fetch as any).mockResolvedValue({ ok: false, status: 502, statusText: '', json: async () => ({ error: 'upstream_auth' }) });
+            const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
+            if (!pages[0].ok) expect(pages[0].error).toBe(managedErrorMessage({ ok: false, status: 502, code: 'upstream_auth' }));
+        });
+
+        it('a request that timed out names the deadline', async () => {
+            const sempCtx = makeSempCtx();
+            (sempCtx.fetch as any).mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError'));
+            const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
+            expect(pages).toHaveLength(1);
+            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching VPNs: no answer within 30 s.');
         });
 
         it('handles OK response with no data field', async () => {
@@ -93,12 +109,12 @@ describe('core/services/semp-discovery', () => {
             if (!pages[0].ok) expect(pages[0].error).toContain('Unexpected token');
         });
 
-        it('falls back to default error when statusText is empty', async () => {
+        it('reads well over HTTP/2: the status alone when statusText is empty', async () => {
             const sempCtx = makeSempCtx();
-            (sempCtx.fetch as any).mockResolvedValue({ ok: false, statusText: '' });
+            (sempCtx.fetch as any).mockResolvedValue({ ok: false, status: 403, statusText: '' });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
             expect(pages).toHaveLength(1);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching VPNs');
+            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching VPNs (HTTP 403)');
         });
 
         it('falls back to default error when thrown error has no message', async () => {
@@ -193,7 +209,7 @@ describe('core/services/semp-discovery', () => {
                         meta: { paging: { nextPageUri: 'http://broker:8080/next' } }
                     })
                 })
-                .mockResolvedValueOnce({ ok: false, statusText: 'Server Error' });
+                .mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Server Error' });
 
             const pagesPromise = allPages(createSempDiscovery(sempCtx).fetchVpns());
             await vi.advanceTimersByTimeAsync(PAGE_DELAY_MS);
@@ -224,10 +240,11 @@ describe('core/services/semp-discovery', () => {
 
         it('handles API error', async () => {
             const sempCtx = makeSempCtx();
-            (sempCtx.fetch as any).mockResolvedValue({ ok: false, statusText: 'Not Found' });
+            (sempCtx.fetch as any).mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found' });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchQueues('default'));
             expect(pages).toHaveLength(1);
             expect(pages[0].ok).toBe(false);
+            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching Queues (HTTP 404 Not Found)');
         });
 
         it('handles OK response with no data field', async () => {
@@ -247,12 +264,12 @@ describe('core/services/semp-discovery', () => {
             if (!pages[0].ok) expect(pages[0].error).toBe('Timeout');
         });
 
-        it('falls back to default error when statusText is empty', async () => {
+        it('reads well over HTTP/2: the status alone when statusText is empty', async () => {
             const sempCtx = makeSempCtx();
-            (sempCtx.fetch as any).mockResolvedValue({ ok: false, statusText: '' });
+            (sempCtx.fetch as any).mockResolvedValue({ ok: false, status: 500, statusText: '' });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchQueues('default'));
             expect(pages).toHaveLength(1);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching Queues');
+            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching Queues (HTTP 500)');
         });
 
         it('falls back to default error when thrown error has no message', async () => {

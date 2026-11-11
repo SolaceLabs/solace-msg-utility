@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createInitialState, resetTransientState, syncDestFormFromSnapshot } from '../../../src/modules/queue-copy/state';
+import { createInitialState, resetTransientState, syncDestFormFromSnapshot, destTargetKey } from '../../../src/modules/queue-copy/state';
 import type { DestPrefillSnapshot } from '../../../src/modules/queue-copy/state';
 
 describe('queue-copy/state', () => {
@@ -16,6 +16,8 @@ describe('queue-copy/state', () => {
         it('starts with no live secondary connections', () => {
             const s = createInitialState();
             expect(s.destSession).toBeNull();
+            expect(s.destSessionTarget).toBeNull();
+            expect(s.destSolPending).toBeNull();
             expect(s.destSempCtx).toBeNull();
             expect(s.verify).toBeNull();
             expect(s.job).toBeNull();
@@ -82,6 +84,42 @@ describe('queue-copy/state', () => {
             syncDestFormFromSnapshot(s, null);
             expect(s.destForm.host).toBe('');
             expect(s.destForm.solace.vpn).toBe('');
+        });
+    });
+
+    describe('destTargetKey', () => {
+        it('a provisioned destination is its broker and VPN names, whatever the typed fields hold', () => {
+            const s = createInitialState();
+            s.destForm.credMode = 'provisioned';
+            s.destForm.provisioned = { broker: 'b1', vpn: 'v1' };
+            s.destForm.host = 'typed-host';
+            const key = destTargetKey(s.destForm);
+            s.destForm.solace.vpn = 'typed-vpn';
+            expect(destTargetKey(s.destForm)).toBe(key);
+            s.destForm.provisioned.vpn = 'v2';
+            expect(destTargetKey(s.destForm)).not.toBe(key);
+        });
+
+        it('a manual destination is its typed host and VPN', () => {
+            const s = createInitialState();
+            s.destForm.host = 'h1';
+            s.destForm.solace.vpn = 'v1';
+            const key = destTargetKey(s.destForm);
+            s.destForm.solace.vpn = 'v2';
+            expect(destTargetKey(s.destForm)).not.toBe(key);
+            s.destForm.solace.vpn = 'v1';
+            s.destForm.host = 'h2';
+            expect(destTargetKey(s.destForm)).not.toBe(key);
+        });
+
+        it('the same names under the other credential source are a different destination', () => {
+            const s = createInitialState();
+            s.destForm.host = 'b1';
+            s.destForm.solace.vpn = 'v1';
+            s.destForm.provisioned = { broker: 'b1', vpn: 'v1' };
+            const manual = destTargetKey(s.destForm);
+            s.destForm.credMode = 'provisioned';
+            expect(destTargetKey(s.destForm)).not.toBe(manual);
         });
     });
 
