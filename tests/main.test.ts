@@ -1,7 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 
 describe('main.ts entry point', () => {
-    beforeEach(() => {
+    let startSpy: MockInstance;
+
+    beforeEach(async () => {
         vi.resetModules();
         // Provide minimal DOM for kernel
         document.body.innerHTML = `
@@ -11,65 +13,49 @@ describe('main.ts entry point', () => {
             <div id="status-indicator-client"></div>
             <div id="status-indicator-semp"></div>
         `;
+        vi.doMock('../src/registry', () => ({ modules: [] }));
+        // Import the Kernel after the reset: main.ts then gets this same module
+        // instance, so a spy on its prototype sees the kernel main.ts builds.
+        const { Kernel } = await import('../src/core/kernel');
+        startSpy = vi.spyOn(Kernel.prototype, 'start').mockResolvedValue(undefined);
     });
 
-    it('boots immediately when solace is available and DOM is ready', async () => {
-        (window as any).solace = {
-            SolclientFactoryProperties: vi.fn(() => ({})),
-            SolclientFactoryProfiles: { version10: 'version10' },
-            LogLevel: { WARN: 'WARN' },
-            SolclientFactory: { init: vi.fn() }
-        };
+    afterEach(() => {
+        startSpy.mockRestore();
+        document.body.innerHTML = '';
+    });
 
-        // Mock the modules import to return empty array
-        vi.doMock('../src/registry', () => ({ modules: [] }));
+    it('starts the kernel at once when solace is available', async () => {
+        (window as any).solace = {};
 
-        const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
         await import('../src/main');
 
-        // Allow microtask queue to flush
-        await new Promise(r => setTimeout(r, 10));
-
-        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('[Kernel]'));
+        expect(startSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('boots in limited mode when no solace script found', async () => {
+    it('starts the kernel at once while the solclient script is still loading', async () => {
         (window as any).solace = undefined;
-
-        vi.doMock('../src/registry', () => ({ modules: [] }));
-
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        await import('../src/main');
-
-        await new Promise(r => setTimeout(r, 10));
-
-        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('limited mode'));
-    });
-
-    it('boots when solclient script loads after main.ts imports', async () => {
-        (window as any).solace = undefined;
-
         const script = document.createElement('script');
         script.src = 'https://example.com/solclient.js';
         document.body.appendChild(script);
 
-        vi.doMock('../src/registry', () => ({ modules: [] }));
-
-        const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
         await import('../src/main');
 
-        // Simulate solclient.js finishing load
-        (window as any).solace = {
-            SolclientFactoryProperties: vi.fn(() => ({})),
-            SolclientFactoryProfiles: { version10: 'version10' },
-            LogLevel: { WARN: 'WARN' },
-            SolclientFactory: { init: vi.fn() }
-        };
+        // No load event has fired: the start did not wait for one.
+        expect(startSpy).toHaveBeenCalledTimes(1);
         script.dispatchEvent(new Event('load'));
-
-        await new Promise(r => setTimeout(r, 10));
-
-        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('[Kernel]'));
+        expect(startSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('starts the kernel at once when the solclient script has failed', async () => {
+        (window as any).solace = undefined;
+        const script = document.createElement('script');
+        script.src = 'https://example.com/solclient.js';
+        document.body.appendChild(script);
+        script.dispatchEvent(new Event('error'));
+
+        await import('../src/main');
+
+        expect(startSpy).toHaveBeenCalledTimes(1);
+    });
 });

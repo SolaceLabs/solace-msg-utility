@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createServiceSolace, CONNECT_IN_PROGRESS, type SolaceConnectionHooks } from '../../../src/core/services/solace-client';
 import { createSolaceMock } from '../../setup';
 import { setLogLevel, getLogLevel } from '../../../src/core/logger';
@@ -418,6 +418,129 @@ describe('core/services/solace-client', () => {
 
             expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'session error' }));
             expect(consoleSpy).toHaveBeenCalledWith('[solace-client] Session creation failed for VPN "default":', expect.any(Error));
+        });
+    });
+
+    // The shell loader (src/index.html) publishes window.solaceLibState and
+    // fires 'Solclient:settled'; a Connect pressed while it is 'loading' waits.
+    describe('connect() while the Solace library is still loading', () => {
+        const settle = (state: string) =>
+            window.dispatchEvent(new CustomEvent('Solclient:settled', { detail: { state } }));
+
+        beforeEach(() => {
+            (window as any).solaceLibState = 'loading';
+        });
+
+        afterEach(() => {
+            delete (window as any).solaceLibState;
+            vi.useRealTimers();
+        });
+
+        it('returns ok without a session, then connects once the loader settles as loaded', () => {
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+
+            expect(service.connect(baseCfg(), 'broker.test', 'admin')).toEqual({ ok: true });
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+
+            (window as any).solaceLibState = 'loaded';
+            settle('loaded');
+
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+            const sessionMock = solaceMock.SolclientFactory.createSession.mock.results[0].value;
+            expect(sessionMock.connect).toHaveBeenCalled();
+            expect(hooks.onError).not.toHaveBeenCalled();
+        });
+
+        it('ends in "Solace API not loaded." when the loader settles as missing', () => {
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            (window as any).solace = undefined;
+            (window as any).solaceLibState = 'missing';
+            settle('missing');
+
+            expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'Solace API not loaded.' }));
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+        });
+
+        it('ends in the version refusal when the loader settles as outdated', () => {
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            (window as any).solaceLibLoaded = false;
+            (window as any).solaceLibState = 'outdated';
+            settle('outdated');
+
+            expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({
+                message: expect.stringContaining('10.18.3'),
+            }));
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+        });
+
+        it('stops waiting after SDK_LOAD_WAIT_MS and runs the normal checks', () => {
+            vi.useFakeTimers();
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            vi.advanceTimersByTime(29_999);
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(1);
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+
+            // The wait is over: a late verdict does not start a second connect.
+            const sessionMock = solaceMock.SolclientFactory.createSession.mock.results[0].value;
+            handlerFor(sessionMock, 'UP_NOTICE')();
+            settle('loaded');
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+        });
+
+        it('refuses a second connect during the wait with CONNECT_IN_PROGRESS', () => {
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            expect(service.connect(baseCfg(), 'broker.test', 'admin')).toEqual({ ok: false, error: CONNECT_IN_PROGRESS });
+            expect(hooks.onError).not.toHaveBeenCalled();
+
+            settle('loaded');
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+        });
+
+        it('disconnect() during the wait cancels it', () => {
+            vi.useFakeTimers();
+            const service = createServiceSolace(makeHooks());
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            service.disconnect();
+            vi.advanceTimersByTime(30_000);
+            settle('loaded');
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+
+            // The in-flight flag is cleared: a later connect is not refused.
+            (window as any).solaceLibState = 'loaded';
+            expect(service.connect(baseCfg(), 'broker.test', 'admin')).toEqual({ ok: true });
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+        });
+
+        it('cleanup() during the wait cancels it', () => {
+            vi.useFakeTimers();
+            const service = createServiceSolace(makeHooks());
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            service.cleanup();
+            vi.advanceTimersByTime(30_000);
+            settle('loaded');
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+        });
+
+        it('cleanup() with no wait pending does nothing', () => {
+            const service = createServiceSolace(makeHooks());
+            service.cleanup();
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
         });
     });
 

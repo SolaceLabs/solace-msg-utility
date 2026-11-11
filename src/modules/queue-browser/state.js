@@ -180,7 +180,7 @@ export function shouldShowMessage(msg) {
 
         // _originalMsg is set by service-events.onMessage for every broker-delivered
         // message; shouldShowMessage only runs on messages from that pipeline.
-        // window.solace is a required SDK global loaded before module install
+        // window.solace is a required SDK global loaded before any message arrives (a message needs a live session)
         // (untyped: the SDK ships no declarations).
         const sdk = /** @type {any} */ (window).solace;
         const dest = msg._originalMsg.getDestination();

@@ -252,7 +252,7 @@ The first file that loads wins; if both 404 the shell shows a "vendor file not f
 
 ### Graceful Degradation
 
-- If `solclient.js` is not found, the app boots in "limited mode" with a console warning. Connection features will not work.
+- If `solclient.js` is not found (or is too old), the app still starts and the banner at the top of the page explains why. **Connect** reports the missing or outdated library on the connection card; nothing else needs the SDK. A Connect pressed while the file is still downloading waits for the shell loader (up to 30 s) instead of failing.
 - If `jszip.min.js` is not found, message download (ZIP export) will not work. All other features function normally.
 
 ---

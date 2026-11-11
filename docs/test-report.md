@@ -245,7 +245,7 @@
 >   - **Queue Copy.** [`ui-modal.ts`](../src/modules/queue-copy/ui-modal.ts): `latestJob` is declared `let latestJob!: CopyJob` and the animation-frame callback renders unconditionally, so the null-guard ignore is gone. `service.ts` (`getOriginalIdHint`) and `service-verify.ts` (the two `DOMParser` calls, `msgIdToString`) lost their try/catch blocks and ignores. Removed from `tests/modules/queue-copy/service-verify.test.ts`: "supplementary DOMParser throw -> newestMsgId null", the describe "parseSempV1Response -- DOMParser exception path" (two tests) and "returns null when getGuaranteedMessageId throws" (four tests in all, no replacements: the code they drove is gone).
 >   - **Subscription Explorer, gateway and build script.** The two ignore comments in [`queue-subscription-explorer/module.ts`](../src/modules/queue-subscription-explorer/module.ts) were reworded; the blocks stay. `scripts/vite-build.mjs` documents `--show-payload` in its header, and `go-web-proxy/proxy.go` explains its `InsecureSkipVerify` line (comment-only).
 >   - **AppContext.** `AppContext.config` is deleted from [`src/core/types.ts`](../src/core/types.ts) and [`src/core/kernel.ts`](../src/core/kernel.ts) (no reader; nothing set `window.APP_CONFIG`), together with the `config` key in every test fixture and the `APP_CONFIG` default in `tests/setup.ts`. Removed from `tests/core/kernel.test.ts`: "provides config from window.APP_CONFIG" and "uses default config when APP_CONFIG is missing".
->   - **Results.** `./scripts/dev.sh full` passed on 2026-11-11 on the first run: web 112 files / 2621 tests (up from 2617), 100% on all four metrics (statements 6666, branches 2894, functions 1193, lines 5981); Go 98.3% of statements (unchanged). The registry guardrail tests pass, so `vi.doMock` replaces `virtual:module-registry` and no fallback was needed. Seven `/* v8 ignore */` blocks remain in `src/`: `main.ts` (readyState), the two queue-picker catches, the `dispose()` catch in `solace-client.ts`, the `removeListener` catch in `solace-publisher.ts` and the two in `queue-subscription-explorer/module.ts`.
+>   - **Results.** `./scripts/dev.sh full` passed on 2026-11-11 on the first run: web 112 files / 2621 tests (up from 2617), 100% on all four metrics (statements 6666, branches 2894, functions 1193, lines 5981); Go 98.3% of statements (unchanged). The registry guardrail tests pass, so `vi.doMock` replaces `virtual:module-registry` and no fallback was needed. Seven `/* v8 ignore */` blocks remained in `src/` then (six after startup fix S1 removed `main.ts` (readyState)): `main.ts` (readyState), the two queue-picker catches, the `dispose()` catch in `solace-client.ts`, the `removeListener` catch in `solace-publisher.ts` and the two in `queue-subscription-explorer/module.ts`.
 >
 > - **Review wave 4a: gateway settings, compose, dev scripts and test titles (November 2026):** one line per area.
 >   - **Gateway variables.** [`go-web-proxy/configfile.go`](../go-web-proxy/configfile.go): the nine gateway variables other than `LOG_LEVEL` now carry the `SMU_` prefix and `checkRenamedEnv` (first step of `resolveConfig`) refuses a start with any old name, listing `OLD -> NEW` and never a value. `USERS_FILE`, `CONNECTIONS_FILE`, `STORE_KEY_FILE` and the `usersFile` / `connectionsFile` keys are removed (fixed `/data` paths; a warning only, through `removedInUse`); `usersFile` and `connectionsFile` left the settings document and its `hostOnly` list. Tests added in `go-web-proxy/configfile_test.go`: `TestResolveConfig_RefusesRenamedVariables`, `TestResolveConfig_RefusesEachRenamedVariable`, `TestResolveConfig_IgnoresTheRemovedStoreVariables`, `TestResolveConfig_SeedIgnoresTheRemovedStoreVariables`, `TestResolveConfig_IgnoresTheRemovedStoreKeys`; `go-web-proxy/main_test.go`: `TestConfig_InDataDir` and a new "an old variable name" case in `TestServe_FailuresStopTheStart`; `go-web-proxy/live_test.go`: `TestFileConfig_EveryKeyIsClassifiedOnce`. Removed: the `usersFile` and `connectionsFile` rows of `TestSettings_PathKeysChangeOnlyOnTheHost` in `go-web-proxy/settings_test.go`, their entries in `TestRestartOnlyKeys_EachReadsItsField` and `TestPendingRestart` (repurposed to `tls.trustDir`), and the `STORE_KEY_FILE` assertions in `configfile_test.go`. The contract goldens `go-web-proxy/testdata/contract/cases.json` and `seed.json` were edited by hand.
@@ -255,6 +255,13 @@
 >   - **Test titles.** Plan ids and `Scenario #N` prefixes were removed from titles in `tests/core/kernel.test.ts`, `tests/core/components/queue-picker/picker.test.ts`, `tests/modules/connections/module.test.ts`, `tests/modules/queue-browser/module.test.ts`, `tests/modules/queue-subscription-explorer/parse.test.ts` and `tests/integration/module-events.test.ts`; text only.
 >   - **e2e B9 regression (from review wave 1).** Wave 1 made the TLS warm-up probe in [`solace-client.ts`](../src/core/services/solace-client.ts) skip only on `cfg.hosted`; a Provisioned session's dialled config has an `smfPath` and no `hosted` flag, so every Provisioned connect sent a hidden request to `https://<broker name>/` (e2e check B9). The probe now also skips when `cfg.smfPath` is set. Test: `tests/core/services/solace-client.test.ts` > "does not inject the probe iframe for a Provisioned session through the gateway socket" (the dialled shape: wss, an smfPath, no `hosted`).
 >   - **Results.** `./scripts/dev.sh full` passed on 2026-11-11 (after one fix: a misplaced bracket in `tests/mock-broker/gateway/backup.test.ts`): web 112 files / 2625 tests (up from 2621), 100% on all four metrics; Go 98.3% of statements (unchanged). The contract goldens edited by hand matched the real gateway and the fake. Not covered by these gates: `./scripts/dev.sh e2e` (checks 16 and 17 changed) and `./scripts/dev.ps1` on Windows PowerShell 5.1 (streaming and exact task names).
+>
+> - **Startup fix S1: the kernel starts at once (November 2026):** one bullet per part.
+>   - **Entry point.** [`src/main.ts`](../src/main.ts) calls `kernel.start()` straight after `new Kernel(modules)`; the wait for the first solclient script tag, the "limited mode" branch and the `readyState` branch with its v8 ignore are deleted. Removed from `tests/main.test.ts`: "boots in limited mode when no solace script found" and "boots when solclient script loads after main.ts imports". The file is rewritten: "starts the kernel at once when solace is available", "starts the kernel at once while the solclient script is still loading" (asserts the start before any load event) and "starts the kernel at once when the solclient script has failed", each spying on `Kernel.prototype.start`.
+>   - **Loader state.** [`src/index.html`](../src/index.html) sets `window.solaceLibState` ('loading', then 'loaded', 'outdated' or 'missing') and fires `Solclient:settled` at each final outcome; [`src/mock-broker/shell.ts`](../src/mock-broker/shell.ts) sets 'loaded' so a demo never defers. The loader is an inline script with no unit test; `tests/build/vendor-scripts.test.ts` patterns are unchanged.
+>   - **Connect waits for the SDK.** [`src/core/services/solace-client.ts`](../src/core/services/solace-client.ts) `connect()` defers while the state is 'loading' (bounded by `SDK_LOAD_WAIT_MS` in [`src/core/timing.ts`](../src/core/timing.ts)), then runs the normal checks; `disconnect()` and `cleanup()` cancel the wait. Added to `tests/core/services/solace-client.test.ts` (describe "connect() while the Solace library is still loading"): "returns ok without a session, then connects once the loader settles as loaded", "ends in \"Solace API not loaded.\" when the loader settles as missing", "ends in the version refusal when the loader settles as outdated", "stops waiting after SDK_LOAD_WAIT_MS and runs the normal checks", "refuses a second connect during the wait with CONNECT_IN_PROGRESS", "disconnect() during the wait cancels it", "cleanup() during the wait cancels it", "cleanup() with no wait pending does nothing".
+>   - **Docs and comments.** The `readyState` example in CLAUDE.md and `docs/contributing.md` is generic now, Category 3 above and its Summary row are retired, `docs/deployment.md` and `docs/user-guide.md` describe the new missing-library behaviour, and the comment in `src/modules/queue-browser/state.js` no longer says the SDK loads before module install.
+>   - **Results.** `./scripts/dev.sh full` passed on 2026-11-12 after one type fix (the `Kernel.start` stub in `tests/main.test.ts` returns a resolved promise): web 112 files / 2634 tests (up from 2626), 100% on all four metrics; Go 98.3% of statements (unchanged); six `/* v8 ignore */` blocks left in `src/`.
 >
 > The v8 ignore categories table further down has been trimmed to reflect which of the old justifications still apply.
 
@@ -308,7 +315,7 @@
 
 The SolaceMessageUtility PWA is a modular web application for managing Solace PubSub+ Event Broker message queues. It is built on a custom micro-kernel architecture with ten modules — four shipped in the everyday bundles (connections, queue-browser, queue-copy, queue-subscription-explorer), four admin-only ones in the standalone `/solAdmin` app (user-management, connection-management, gateway-settings, backup) plus its `admin-login` entry point, and the vestigial queue-discovery — a typed event bus, and dependency injection via an `AppContext` object.
 
-The test suite consists of **112 test files and 2625 tests** (the last `cov` run, 2026-11-11, after review wave 4a -- run `./scripts/dev.sh test` for the current count) covering every source file in scope (broadly one-to-one with source modules, plus dedicated tests for shared core helpers and for each variant manifest). Coverage thresholds in `vitest.config.ts` are set to **100%** across all four metrics (Statements, Branches, Functions, Lines); as of the May 2026 sweep the target is met across the board. Tests are split between dedicated unit tests per source file and four integration test files: `full-flow.test.ts` (Kernel mechanics with stub modules), `module-events.test.ts` (real cross-module event flows), `message-pipeline.test.ts` (end-to-end `onMessage -> ingest -> filter -> DOM`), and `admin-session.test.ts` (the `/solAdmin` session lifecycle: real admin-login + user-management).
+The test suite consists of **112 test files and 2634 tests** (the last `cov` run, 2026-11-12, after startup fix S1 -- run `./scripts/dev.sh test` for the current count) covering every source file in scope (broadly one-to-one with source modules, plus dedicated tests for shared core helpers and for each variant manifest). Coverage thresholds in `vitest.config.ts` are set to **100%** across all four metrics (Statements, Branches, Functions, Lines); as of the May 2026 sweep the target is met across the board. Tests are split between dedicated unit tests per source file and four integration test files: `full-flow.test.ts` (Kernel mechanics with stub modules), `module-events.test.ts` (real cross-module event flows), `message-pipeline.test.ts` (end-to-end `onMessage -> ingest -> filter -> DOM`), and `admin-session.test.ts` (the `/solAdmin` session lifecycle: real admin-login + user-management).
 
 **Coverage summary (last measured run, post the August 2026 managed-connections merge):**
 
@@ -319,7 +326,7 @@ Functions  : 100%  (841/841)
 Lines      : 100% (4564/4564)
 ```
 
-Every source file in the coverage scope reports 100% across all four metrics -- the per-file gap table that earlier revisions of this report carried is no longer needed. The remaining `/* v8 ignore */` blocks (seven in `src/`) are limited to CLAUDE.md's sanctioned categories (jsdom environment limitations, SDK-callback paths the harness can't fire, defensive catches around contracts that never throw); each is documented inline at its source site.
+Every source file in the coverage scope reports 100% across all four metrics -- the per-file gap table that earlier revisions of this report carried is no longer needed. The remaining `/* v8 ignore */` blocks (six in `src/` after startup fix S1) are limited to CLAUDE.md's sanctioned categories (SDK-callback paths the harness can't fire, defensive catches around contracts that never throw); each is documented inline at its source site.
 
 ---
 
@@ -876,19 +883,9 @@ The handler bodies continue to be tested separately and thoroughly in
 `ui-events.test.ts`; the wiring tests now prove the click routes through
 to them.
 
-#### Category 3: DOMContentLoaded in jsdom (`main.ts`)
+#### Category 3 (obsolete): DOMContentLoaded in jsdom (`main.ts`)
 
-```ts
-/* v8 ignore start -- jsdom readyState is always 'complete', can't test this branch */
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-} else {
-/* v8 ignore stop */
-    boot();
-}
-```
-
-In jsdom, `document.readyState` is always `'complete'` at test execution time — there is no way to simulate the browser's loading lifecycle where the DOM is partially parsed. This branch is a standard web development guard pattern (`readyState === 'loading'`) that is untestable in jsdom by design.
+> **Status:** removed by startup fix S1. `src/main.ts` no longer branches on `document.readyState` (the entry is a module script, which runs after parsing, so the branch was dead in every build); it calls `kernel.start()` at once. [`tests/main.test.ts`](../tests/main.test.ts) asserts the start.
 
 #### Category 4: Solace Callback Null Guards
 
@@ -949,7 +946,6 @@ v8 originally counted this inner arrow function as a separate function entity in
 
 | Scenario | Why Ignored | Alternative Considered | Why Rejected |
 | --- | --- | --- | --- |
-| DOMContentLoaded branch | jsdom readyState always `'complete'` | Manipulate jsdom internals | Unsupported by jsdom API |
 | Defensive SDK catch (`dispose()` in `solace-client.ts`, `removeListener` in `solace-publisher.ts`) | The SDK's `Session.dispose()` and `removeListener` do not throw; the catch guards a trusted contract on a possibly torn-down session | Make the mock throw from the test | The tractable catches (the stale `disconnect()` in `connect()`, `safeSet`) are tested that way and lost their ignores; these two guard calls the contract says cannot fail |
 | Defensive catch around a generator that never throws (queue-picker `fetchVpns` / `fetchQueues`, subscription-explorer load) | The source generators catch every fetch, JSON and mapper error and yield `{ok:false}`, so nothing escapes the `for await` | Feed a source that throws | That would test a state the real sources cannot produce |
 | Solace `DestinationType` enum branches in ui-details | `window.solace` is mocked but certain type-code paths require specific SDK internals | Stub more of the SDK type machinery | Mock fidelity gap tracked as Priority 6.6 |
@@ -1010,7 +1006,7 @@ Current files in the test tree:
 - **integration/** — `full-flow.test.ts`, `module-events.test.ts`, `message-pipeline.test.ts`, `admin-session.test.ts`
 - **(root)** — `main.test.ts`, `registry.test.ts`, `variants.test.ts` (every variant manifest's shape; the `managed` variant is standard plus the connections managed entry, no Release variant overrides an entry, and the gateway's `moduleCatalog()` equals the managed variant's module-controlled modules)
 
-Latest recorded totals (`scripts/logs/cov.log`, 2026-11-11, after review wave 4a): 112 files, 2625 tests, web 100% on all four metrics, Go 98.3% of statements.
+Latest recorded totals (`scripts/logs/cov.log`, 2026-11-12, after startup fix S1): 112 files, 2634 tests, web 100% on all four metrics, Go 98.3% of statements.
 
 Per-file counts shift with every audit pass (tests added for coverage, tests deleted when their guard was removed, ceremonial tests replaced with substantive ones); re-run `./scripts/dev.sh test` for up-to-the-minute numbers rather than relying on a static table.
 

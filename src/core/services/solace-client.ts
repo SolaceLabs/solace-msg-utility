@@ -1,6 +1,7 @@
 import { logger } from '../logger';
 import { buildBrokerUrl, gatewayWsUrl } from '../hosted';
 import { solaceErrorText } from '../utils';
+import { SDK_LOAD_WAIT_MS } from '../timing';
 import type { SolaceConfig } from '../connections/types';
 
 declare const solace: any;
@@ -101,6 +102,8 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
     let isInitialized = false;
     // True from session creation until it comes up, fails or disconnects.
     let connecting = false;
+    // Set while a connect waits for the shell loader to settle; cancels that wait.
+    let cancelLibraryWait: (() => void) | null = null;
 
     function init() {
         if (isInitialized) return;
@@ -133,6 +136,35 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
             return { ok: false, error: CONNECT_IN_PROGRESS };
         }
 
+        // The shell loader (src/index.html) is still downloading the SDK: wait
+        // for its verdict (bounded), then run the normal connect, whose checks
+        // proceed or refuse through the hooks. The wait counts as in flight.
+        if ((window as any).solaceLibState === 'loading') {
+            log.info(`connect to VPN "${cfg.vpn}" waits for the Solace library to load.`);
+            connecting = true;
+            const proceed = () => {
+                stopWaiting();
+                connecting = false;
+                startConnect(cfg, host, pass, clientName);
+            };
+            const timer = setTimeout(proceed, SDK_LOAD_WAIT_MS);
+            const stopWaiting = () => {
+                clearTimeout(timer);
+                window.removeEventListener('Solclient:settled', proceed);
+                cancelLibraryWait = null;
+            };
+            window.addEventListener('Solclient:settled', proceed);
+            cancelLibraryWait = () => {
+                stopWaiting();
+                connecting = false;
+            };
+            return { ok: true };
+        }
+
+        return startConnect(cfg, host, pass, clientName);
+    }
+
+    function startConnect(cfg: SolaceConfig, host: string, pass: string, clientName?: string): ConnectStart {
         if (session) {
             try {
                 session.disconnect();
@@ -288,6 +320,7 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
     }
 
     function disconnect() {
+        if (cancelLibraryWait) cancelLibraryWait();
         if (session) {
             try {
                 session.disconnect();
@@ -325,5 +358,11 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
         connecting = false;
     }
 
-    return { init, connect, disconnect, cleanup };
+    /** The public cleanup also abandons a connect still waiting for the library. */
+    function cleanupAll() {
+        if (cancelLibraryWait) cancelLibraryWait();
+        cleanup();
+    }
+
+    return { init, connect, disconnect, cleanup: cleanupAll };
 }

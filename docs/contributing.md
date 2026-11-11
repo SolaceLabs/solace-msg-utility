@@ -402,7 +402,7 @@ Use `/* v8 ignore start */` / `/* v8 ignore stop */` **only** for code that is a
 
 | Category | Example |
 | --- | --- |
-| jsdom limitations | `document.readyState === 'loading'` — always `'complete'` in jsdom |
+| jsdom limitations | A browser API jsdom does not implement |
 | SDK callback branches | Error paths inside Solace SDK callbacks the test harness can't deterministically fire |
 | Defensive `catch` on trusted contracts | Services return `{ok, error}` and never throw, but a `catch` guards against SDK misbehavior |
 | Redundant safety checks | Both branches produce identical results |

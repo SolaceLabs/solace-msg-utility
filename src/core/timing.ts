@@ -30,6 +30,14 @@ export const REQUEST_TIMEOUT_MS = 30_000;
 export const HOSTED_PROBE_TIMEOUT_MS = 10_000;
 
 /**
+ * How long a Connect pressed while the shell loader is still downloading the
+ * Solace SDK (`window.solaceLibState === 'loading'`) waits for its verdict.
+ * After it the normal connect runs and refuses through `onError` if the SDK
+ * is still absent.
+ */
+export const SDK_LOAD_WAIT_MS = 30_000;
+
+/**
  * A signal that aborts after `ms`, or as soon as the caller's own signal does
  * (queue-copy's verify passes a Cancel signal). The timeout aborts with a
  * `TimeoutError` (`isTimeoutError`), the caller's signal with its own reason.

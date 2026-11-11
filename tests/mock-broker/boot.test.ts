@@ -73,6 +73,8 @@ describe('mock-broker/boot — the vendor race', () => {
         // solace-client.ts refuses to open a session unless this is set, and the
         // shell only sets it when a real SDK clears the version floor.
         expect((window as any).solaceLibLoaded).toBe(true);
+        // ... and a Connect never defers waiting for a loader that does not run here.
+        expect((window as any).solaceLibState).toBe('loaded');
     });
 
     it('removes the missing-vendor banner so a later onerror cannot resurrect it', () => {

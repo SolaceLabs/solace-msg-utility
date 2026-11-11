@@ -443,7 +443,7 @@ Place both files in the **same folder as the HTML**, or in a sibling **`js/`** s
 
 > **What happens if a vendor file is missing:**
 >
-> - Without `solclient.js`, the app boots in a limited mode and shows a vendor-missing banner. Connection features will not work.
+> - Without `solclient.js`, the app starts and shows a vendor-missing banner; **Connect** reports the missing library. Connection features will not work. A Connect pressed while the file is still loading waits for it.
 > - Without `jszip.min.js`, every other feature works normally; only ZIP download is disabled.
 
 See [deployment.md](deployment.md#external-runtime-dependencies) for download sources and version requirements.

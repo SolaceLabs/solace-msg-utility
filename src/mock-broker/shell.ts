@@ -35,6 +35,7 @@ export function installSdk(): void {
     });
 
     (window as any).solaceLibLoaded = true;
+    (window as any).solaceLibState = 'loaded';
     window.dispatchEvent(new CustomEvent('Solclient:loaded'));
 }
 

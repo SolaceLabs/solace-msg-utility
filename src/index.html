@@ -30,7 +30,16 @@
     <script>
         (function () {
             window.solaceLibLoaded = false;
+            // 'loading' until the loader reaches its one final outcome: 'loaded',
+            // 'outdated' or 'missing'. Each outcome also fires 'Solclient:settled'
+            // so a Connect pressed meanwhile can wait (core/services/solace-client.ts).
+            window.solaceLibState = 'loading';
             window.jszipLoaded = false;
+
+            function settleSolclient(state) {
+                window.solaceLibState = state;
+                window.dispatchEvent(new CustomEvent('Solclient:settled', { detail: { state } }));
+            }
 
             // Global Version Comparator
             window.compareVersions = function (v1, v2) {
@@ -74,13 +83,16 @@
                         console.warn(`Solclient reported no version; cannot verify the ${MIN_VERSION}+ requirement. Proceeding.`);
                         window.solaceLibLoaded = true;
                         window.dispatchEvent(new CustomEvent('Solclient:loaded'));
+                        settleSolclient('loaded');
                     } else if (window.compareVersions(reportedVersion, MIN_VERSION) >= 0) {
                         window.solaceLibLoaded = true;
                         window.dispatchEvent(new CustomEvent('Solclient:loaded'));
+                        settleSolclient('loaded');
                     } else {
                         const err = `Solace API Version ${reportedVersion} is too old. Required: ${MIN_VERSION}+`;
                         console.error(err);
                         showBanner(`⚠️ <strong>Outdated Library</strong>: Found Solclient ${reportedVersion}, required ${MIN_VERSION}+. Connecting is disabled.`);
+                        settleSolclient('outdated');
                     }
                 };
                 script.onerror = () => {
@@ -89,6 +101,7 @@
                         loadSolclient(fallback, null); // Try fallback
                     } else {
                         console.error('Solace Client API missing.');
+                        settleSolclient('missing');
                         const msg = `⚠️ <strong>solclient.js</strong> not found. Please place it in the same directory.`;
                         if (document.readyState === 'loading') {
                             document.addEventListener('DOMContentLoaded', () => showBanner(msg));
