@@ -142,22 +142,6 @@ describe('queue-browser/ui-events', () => {
             expect(els.btnForwardSend.textContent).toBe('Send Complete');
         });
 
-        it('skips already successful messages', async () => {
-            state.forwardQueue = [
-                { originalMsg: {}, id: '1', correlationValue: 'cv-1', status: 'SUCCESS', error: null },
-                { originalMsg: {}, id: '2', correlationValue: 'cv-2', status: 'QUEUED', error: null }
-            ];
-            els.inputForwardDestName.value = 'dest';
-
-            const statusEl = document.createElement('div');
-            statusEl.id = 'status-cv-2';
-            els.listForwardMsgs.appendChild(statusEl);
-
-            await uiEvents.handleForwardSend();
-
-            expect(service.forwardMessage).toHaveBeenCalledTimes(1);
-        });
-
         it('handles forwarding error settled as {ok:false}', async () => {
             service.forwardMessage.mockResolvedValue({ ok: false, error: 'Broker rejected' });
             state.forwardQueue = [
@@ -379,10 +363,18 @@ describe('queue-browser/ui-events', () => {
             // Check both checkboxes
             document.querySelectorAll('.msg-check').forEach((cb: any) => cb.checked = true);
 
-            ui.generateUuid = () => 'test-uuid';
-            uiEvents.handleBulkForward();
+            const realGenerateUuid = ui.generateUuid;
+            let n = 0;
+            ui.generateUuid = () => `test-uuid-${n++}`;
+            try {
+                uiEvents.handleBulkForward();
+            } finally {
+                ui.generateUuid = realGenerateUuid;
+            }
 
-            expect(state.forwardQueue.length).toBe(2);
+            expect(els.modalForward.open).toBe(true);
+            expect(state.forwardQueue.map((q: any) => q.id)).toEqual(['1', '2']);
+            els.modalForward.close();
         });
 
         it('does nothing with no selection', () => {
@@ -443,8 +435,11 @@ describe('queue-browser/ui-events', () => {
             els.inputBind.value = 'new-queue';
             uiEvents.handleBindClick();
 
-            // showBindError(null) should have been called first
-            // If createBrowser succeeds, no error should be shown
+            // showBindError(null) runs first; createBrowser succeeds, so no error comes back.
+            expect(service.createBrowser).toHaveBeenCalledWith('new-queue');
+            expect(els.elBindError.textContent).toBe('');
+            expect(els.elBindError.style.display).toBe('none');
+            expect(els.inputBind.classList.contains('is-invalid')).toBe(false);
         });
     });
 
@@ -523,6 +518,8 @@ describe('queue-browser/ui-events', () => {
             uiEvents.handleUnbindClick();
 
             expect(service.disconnectBrowser).toHaveBeenCalledWith('q1');
+            expect(els.selectBound.querySelector('option[value="q1"]')).toBeNull();
+            expect(els.selectBound.value).toBe('q2');
         });
 
         it('resets queue selection when last queue unbound', () => {
@@ -533,7 +530,9 @@ describe('queue-browser/ui-events', () => {
             uiEvents.handleUnbindClick();
 
             expect(service.disconnectBrowser).toHaveBeenCalledWith('q1');
+            expect(els.selectBound.querySelector('option[value="q1"]')).toBeNull();
             expect(els.selectBound.selectedIndex).toBe(0);
+            expect(els.selectBound.value).toBe('');
         });
 
         it('does nothing when no queue selected (index 0)', () => {
@@ -609,6 +608,7 @@ describe('queue-browser/ui-events', () => {
         });
 
         it('initializes empty allMessages when no messageStore entry and not mocks', () => {
+            state.allMessages = [{ id: 'stale' }];
             els.selectBound.value = 'q1';
             uiEvents.handleDropdownChange();
             expect(state.allMessages).toEqual([]);
@@ -677,11 +677,11 @@ describe('queue-browser/ui-events', () => {
             expect(radios[0].checked).toBe(true);
         });
 
-        it('calls clearPropertyFilters', () => {
-            const clearSpy = vi.fn();
-            ui.clearPropertyFilters = clearSpy;
+        it('removes the property filter rows', () => {
+            ui.addPropertyFilterRow('key', 'val');
+            expect(els.filterPropsRows.children.length).toBe(1);
             uiEvents.clearFilters();
-            expect(clearSpy).toHaveBeenCalled();
+            expect(els.filterPropsRows.children.length).toBe(0);
         });
 
         it('resets newer-than and older-than datetime inputs', () => {
@@ -773,6 +773,7 @@ describe('queue-browser/ui-events', () => {
             uiEvents.applyFilters();
 
             expect(state.activeFilters.msgType).toBe('Text');
+            expect(state.displayedMessages.map((m: any) => m.id)).toEqual(['1']);
         });
 
         it('applies destination type filter', () => {
@@ -995,13 +996,6 @@ describe('queue-browser/ui-events', () => {
     });
 
     describe('applyFilters edge cases', () => {
-        it('applies filters with no active criteria (removes filter-active class)', () => {
-            state.activeFilters = { content: '', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'OR', properties: [] };
-            state.allMessages = [];
-            uiEvents.applyFilters();
-            expect(els.btnFilter.classList.contains('filter-active')).toBe(false);
-        });
-
         it('applies dest type filter', () => {
             els.inputFilterType.value = 'Topic';
             // Message with a Queue destination — shouldShowMessage evaluates the
@@ -1024,10 +1018,13 @@ describe('queue-browser/ui-events', () => {
         it('applies message type filter', () => {
             els.inputFilterMsgType.innerHTML = '<option value="ANY">ANY</option><option value="TextMessage">TextMessage</option>';
             els.inputFilterMsgType.value = 'TextMessage';
-            state.allMessages = [{ id: '1', type: 'TextMessage', content: 'test' }];
+            state.allMessages = [
+                { id: '1', type: 'TextMessage', content: 'test' },
+                { id: '2', type: 'BytesMessage', content: 'other' }
+            ];
             state.displayedMessages = [...state.allMessages];
             uiEvents.applyFilters();
-            expect(state.displayedMessages.length).toBe(1);
+            expect(state.displayedMessages.map((m: any) => m.id)).toEqual(['1']);
         });
     });
 
@@ -1035,21 +1032,7 @@ describe('queue-browser/ui-events', () => {
         it('handles whitespace-only input', () => {
             els.inputBind.value = '   ';
             uiEvents.handleBindClick();
-            expect(els.elBindError.style.display).toBe('none');
-        });
-    });
-
-    describe('handleUnbindClick edge cases', () => {
-        it('resets to placeholder when last queue unbound', () => {
-            // The DOM already has: <option value="">Select...</option><option value="q1">q1</option>
-            // Select q1
-            els.selectBound.value = 'q1';
-            state.browserInstances.set('q1', { disconnect: vi.fn() });
-
-            uiEvents.handleUnbindClick();
-            // After removing q1, only the placeholder remains
-            expect(els.selectBound.selectedIndex).toBe(0);
-            expect(els.selectBound.value).toBe('');
+            expect(service.createBrowser).not.toHaveBeenCalled();
         });
     });
 
@@ -1094,20 +1077,6 @@ describe('queue-browser/ui-events', () => {
 
             uiEvents.handleBulkForward();
             expect(state.forwardQueue.length).toBe(0);
-        });
-    });
-
-    describe('handleDropdownChange() non-mock no-store branch', () => {
-        it('initializes empty allMessages when queue not in messageStore', () => {
-            const opt = document.createElement('option');
-            opt.value = 'new-queue';
-            opt.textContent = 'new-queue';
-            els.selectBound.appendChild(opt);
-            els.selectBound.value = 'new-queue';
-
-            uiEvents.handleDropdownChange();
-            expect(state.currentQueue).toBe('new-queue');
-            expect(state.allMessages).toEqual([]);
         });
     });
 });

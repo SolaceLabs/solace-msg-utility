@@ -34,39 +34,51 @@ export type ManagedResult<T> = { ok: true; data: T } | ManagedError;
 
 type Method = 'GET' | 'PUT' | 'POST' | 'DELETE';
 
+/** What one exchange yields: the status, and the JSON body when there was one to read. */
+interface Exchange {
+    ok: boolean;
+    status: number;
+    body?: unknown;
+    /** False for a 204 (nothing to read) and for a body that is not JSON. */
+    parsed: boolean;
+}
+
+/** The fetch and the read of its body: the one exchange `managedRequest` puts a deadline on. */
+async function exchange(method: Method, path: string, body?: unknown): Promise<Exchange> {
+    const res = await fetch(path, {
+        method,
+        credentials: 'same-origin',
+        ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    });
+    if (res.ok && res.status === 204) return { ok: true, status: 204, parsed: false };
+    try {
+        return { ok: res.ok, status: res.status, body: await res.json(), parsed: true };
+    } catch {
+        // Not JSON (e.g. a reverse proxy's error page): the status alone decides.
+        return { ok: res.ok, status: res.status, parsed: false };
+    }
+}
+
 /**
- * One gateway call. A gateway that does not answer within `REQUEST_TIMEOUT_MS`
- * is reported like an unreachable one (`network`), so a stalled `/managed/me`
- * at startup ends in the signed-out view with an error instead of a blank page.
+ * One gateway call. A gateway that does not complete its answer (headers and
+ * body, one deadline over both) within `REQUEST_TIMEOUT_MS` is reported like an
+ * unreachable one (`network`), so a stalled `/managed/me` at startup ends in the
+ * signed-out view with an error instead of a blank page.
  */
 export async function managedRequest<T = void>(method: Method, path: string, body?: unknown): Promise<ManagedResult<T>> {
-    let res: Response;
+    let ans: Exchange;
     try {
-        res = await raceDeadline(fetch(path, {
-            method,
-            credentials: 'same-origin',
-            ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-        }));
+        ans = await raceDeadline(exchange(method, path, body));
     } catch (e) {
         log.warn(`${method} ${path} got no answer from the gateway (network error or ${REQUEST_TIMEOUT_MS / 1000} s timeout):`, e);
         return { ok: false, status: 0, code: 'network' };
     }
-    if (res.ok) {
-        if (res.status === 204) return { ok: true, data: undefined as T };
-        try {
-            return { ok: true, data: (await res.json()) as T };
-        } catch {
-            return { ok: false, status: res.status, code: 'bad_response' };
-        }
+    if (ans.ok) {
+        if (ans.status === 204) return { ok: true, data: undefined as T };
+        return ans.parsed ? { ok: true, data: ans.body as T } : { ok: false, status: ans.status, code: 'bad_response' };
     }
-    let err: { error?: string; field?: string; reason?: string } = {};
-    try {
-        err = await res.json();
-    } catch {
-        // Not the gateway's JSON (e.g. a reverse proxy's error page): the
-        // status alone decides the message.
-    }
-    return { ok: false, status: res.status, code: err.error ?? `http_${res.status}`, field: err.field, reason: err.reason };
+    const err = (ans.parsed ? ans.body : {}) as { error?: string; field?: string; reason?: string };
+    return { ok: false, status: ans.status, code: err.error ?? `http_${ans.status}`, field: err.field, reason: err.reason };
 }
 
 const MESSAGES: Record<string, string> = {

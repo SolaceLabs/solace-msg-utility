@@ -362,21 +362,30 @@ func TestPWAHandler_ServesIndex(t *testing.T) {
 	}
 }
 
-func TestPWAHandler_SPAFallback_NoExtension(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>SPA</html>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	h := mustPWA(t, dir, directIndexFile)
-
-	// /queue-browser/some/deep/route has no file extension → fallback to index.html.
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/queue-browser/some/deep/route", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("fallback: want 200, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "SPA") {
-		t.Errorf("fallback body: want SPA index, got %q", rec.Body.String())
+// The app has no client-side routes and the bundle's relative vendor paths
+// only resolve at /, so an unknown extensionless path is sent there: 308 for
+// GET and HEAD, a 404 for a method with nothing to follow.
+func TestPWAHandler_UnknownPathRedirectsHome(t *testing.T) {
+	dir := writeBundles(t)
+	for _, provisioned := range []bool{false, true} {
+		h := mustPWA(t, dir, appIndexFile(provisioned))
+		for _, p := range []string{"/queue-browser/some/deep/route", "/login", "/login/", "/a/b?x=1"} {
+			for _, method := range []string{http.MethodGet, http.MethodHead} {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(method, p, nil))
+				if rec.Code != http.StatusPermanentRedirect || rec.Header().Get("Location") != "/" {
+					t.Errorf("provisioned=%v %s %s: want 308 to /, got %d %q", provisioned, method, p, rec.Code, rec.Header().Get("Location"))
+				}
+				if strings.Contains(rec.Body.String(), "<html>direct") || strings.Contains(rec.Body.String(), "<html>provisioned") {
+					t.Errorf("provisioned=%v %s %s: served a bundle: %q", provisioned, method, p, rec.Body.String())
+				}
+			}
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/a/b", strings.NewReader("x")))
+		if rec.Code != http.StatusNotFound || rec.Header().Get("Location") != "" {
+			t.Errorf("provisioned=%v POST /a/b: want 404 without a Location, got %d %q", provisioned, rec.Code, rec.Header().Get("Location"))
+		}
 	}
 }
 
@@ -392,18 +401,16 @@ func writeBundles(t *testing.T) string {
 	return dir
 }
 
-// / and the history-mode fallback serve the mode's bundle: the Direct-only one
-// in Gateway mode, the one with the sign-in in Provisioned mode.
+// / serves the mode's bundle: the Direct-only one in Gateway mode, the one with
+// the sign-in in Provisioned mode.
 func TestPWAHandler_ServesTheModesBundle(t *testing.T) {
 	dir := writeBundles(t)
 	for provisioned, want := range map[bool]string{false: "direct", true: "provisioned"} {
 		h := mustPWA(t, dir, appIndexFile(provisioned))
-		for _, p := range []string{"/", "/queue-browser/deep/route"} {
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
-			if rec.Code != http.StatusOK || rec.Body.String() != "<html>"+want+"</html>" || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
-				t.Errorf("provisioned=%v %s: want the %s bundle, got %d %q", provisioned, p, want, rec.Code, rec.Body.String())
-			}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		if rec.Code != http.StatusOK || rec.Body.String() != "<html>"+want+"</html>" || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
+			t.Errorf("provisioned=%v /: want the %s bundle, got %d %q", provisioned, want, rec.Code, rec.Body.String())
 		}
 	}
 }
@@ -436,14 +443,12 @@ func TestPWAHandler_BundleGoneAtRequestTimeIsLogged(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, provisionedIndexFile)); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{"/", "/queue-browser/deep/route"} {
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
-		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "provisioned.html not found") {
-			t.Errorf("%s: want 404 naming provisioned.html, got %d %q", p, rec.Code, rec.Body.String())
-		}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "provisioned.html not found") {
+		t.Errorf("/: want 404 naming provisioned.html, got %d %q", rec.Code, rec.Body.String())
 	}
-	for _, want := range []string{"level=WARN", "app bundle missing", "file=" + filepath.Join(dir, provisionedIndexFile), "path=/queue-browser/deep/route"} {
+	for _, want := range []string{"level=WARN", "app bundle missing", "file=" + filepath.Join(dir, provisionedIndexFile), "path=/"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("log lacks %q: %s", want, buf.String())
 		}
@@ -825,6 +830,25 @@ func TestAdminHandler_ServesBundle(t *testing.T) {
 	}
 }
 
+// The bundle's relative vendor paths only resolve at /solAdmin, so the trailing
+// slash is sent there; a disabled route keeps its plain 404 for it too.
+func TestAdminHandler_TrailingSlashRedirects(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, adminIndexFile), []byte("<html>admin</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	newAdminHandler(dir, true, quietLogger()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath+"/", nil))
+	if rec.Code != http.StatusPermanentRedirect || rec.Header().Get("Location") != adminPath || strings.Contains(rec.Body.String(), "<html>admin") {
+		t.Errorf("enabled: want 308 to %s, got %d %q %q", adminPath, rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	newAdminHandler(dir, false, quietLogger()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath+"/", nil))
+	if rec.Code != http.StatusNotFound || rec.Header().Get("Location") != "" {
+		t.Errorf("disabled: want 404 without a Location, got %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
 func TestAdminHandler_EnabledButNotDeployed(t *testing.T) {
 	// Route on, bundle missing — a packaging error, still a 404 to the caller.
 	h := newAdminHandler(t.TempDir(), true, quietLogger())
@@ -871,7 +895,6 @@ func TestPWAHandler_FilesAndDirectories(t *testing.T) {
 
 	cases := []struct{ path, want, never string }{
 		{"/solclient.js", "// solclient", ""},
-		{"/licenses/", "<html>direct</html>", "LICENSE.markdown"},
 		{"/guide/", "<html>guide</html>", ""},
 	}
 	for _, c := range cases {
@@ -884,6 +907,11 @@ func TestPWAHandler_FilesAndDirectories(t *testing.T) {
 		if c.never != "" && strings.Contains(body, c.never) {
 			t.Errorf("%s: a directory must never be listed, got %q", c.path, body)
 		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/licenses/", nil))
+	if rec.Code != http.StatusPermanentRedirect || rec.Header().Get("Location") != "/" || strings.Contains(rec.Body.String(), "LICENSE.markdown") {
+		t.Errorf("/licenses/: a directory without an index is never listed, want 308 to /, got %d %q %q", rec.Code, rec.Header().Get("Location"), rec.Body.String())
 	}
 }
 

@@ -149,6 +149,10 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
   which refuses those users.
 - **Sign-in reloads the page,** as the gateway's redirect does. The users, connections, settings, sessions, queues and
   panel settings carry over in this tab. A new tab starts from the seed, and **Reset demo data** starts over.
+- **A damaged saved state does not lock the tab.** If the saved state has the current version but cannot be loaded,
+  the demo clears it, starts from the seed with a fresh fake gateway, still mounts the Demo controls (so **Reset demo
+  data** is there) and shows the warning "Saved demo state could not be restored; the demo was reset." for 8 seconds.
+  A snapshot of an older version, or one that cannot be read at all, is ignored without a message.
 - **Changes apply at once,** to the signed-in user too. Change your own password or Administrator flag, or delete
   your account, and you are signed out. Revoke a user's access and that user's broker connection closes.
 - **Not simulated:**

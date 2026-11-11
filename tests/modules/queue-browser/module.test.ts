@@ -46,17 +46,6 @@ describe('queue-browser/module', () => {
     });
 
     describe('install()', () => {
-        it('initializes module and caches DOM elements', async () => {
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-            await QueueBrowserModule.install(ctx);
-
-            const cached = ui.getElements();
-            expect(cached.container).toBe(container);
-            expect(cached.inputBind).toBeTruthy();
-            expect(cached.btnBind).toBeTruthy();
-            consoleSpy.mockRestore();
-        });
-
         it('announces browser:available so feature-gated UI in other modules can reveal itself', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const handler = vi.fn();
@@ -86,9 +75,9 @@ describe('queue-browser/module', () => {
             const cached = ui.getElements();
             cached.inputBind.value = 'test-queue';
 
-            // Click bind — since there's no real Solace session, createBrowser will fail
-            // but the handler should not throw
+            // No Solace session, so the bind handler reaches the service and reports its refusal.
             cached.btnBind.click();
+            expect(cached.elBindError.textContent).toBe('No active Solace session.');
             consoleSpy.mockRestore();
         });
 
@@ -194,8 +183,7 @@ describe('queue-browser/module', () => {
         });
 
         it('btnBindPick click wires to handleBindPickClick (invokes pickQueue with the primary queue source)', async () => {
-            // Covers the click listener at module.ts:89, which was
-            // previously unexercised. Spy on `pickQueue` — the distinguishing
+            // Covers the Bind-pick click listener. Spy on `pickQueue` -- the distinguishing
             // downstream effect of handleBindPickClick — so a regression that
             // re-wires this button to a different handler would fail.
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -325,6 +313,8 @@ describe('queue-browser/module', () => {
             els.selectBound.selectedIndex = 1;
 
             els.btnUnbind.click();
+            expect(els.selectBound.querySelector('option[value="q1"]')).toBeNull();
+            expect(els.selectBound.selectedIndex).toBe(0);
             consoleSpy.mockRestore();
         });
 
@@ -362,7 +352,9 @@ describe('queue-browser/module', () => {
             await QueueBrowserModule.install(ctx);
 
             state.allMessages = [];
+            els.inputFilterId.value = 'm1';
             els.btnFilterApply.click();
+            expect(state.activeFilters.msgId).toBe('m1');
             consoleSpy.mockRestore();
         });
 
@@ -371,7 +363,11 @@ describe('queue-browser/module', () => {
             await QueueBrowserModule.install(ctx);
 
             state.allMessages = [];
+            els.inputFilterId.value = 'm1';
+            state.activeFilters.msgId = 'm1';
             els.btnFilterClear.click();
+            expect(state.activeFilters.msgId).toBe('');
+            expect(els.inputFilterId.value).toBe('');
             consoleSpy.mockRestore();
         });
 
@@ -680,6 +676,7 @@ describe('queue-browser/module', () => {
             eventBus.emit('browser:browse-queue', { queue: 'my-queue' });
             vi.advanceTimersByTime(250);
 
+            expect(els.inputBind.value).toBe('my-queue');
             consoleSpy.mockRestore();
             vi.useRealTimers();
         });

@@ -7,7 +7,7 @@ import { isModuleVisible } from './rbac';
 import { createManagedProfile, type ManagedProfileStore } from './services/managed-profile';
 import { logger, setLogLevel, getLogLevel, readLogLevelFromUrl } from './logger';
 import { LogLevel } from './constants';
-import { TOAST_EVENT, type ToastEventDetail } from './toast';
+import { TOAST_EVENT, showToast, type ToastEventDetail } from './toast';
 import { createNotificationCenter, mountNotificationBell, type NotificationCenter } from './components/notification-center';
 
 /**
@@ -95,8 +95,9 @@ export class Kernel {
         this.moduleContainer = document.getElementById('module-container');
         this.pageTitle = document.getElementById('page-title');
 
-        // Clear initial static content
-        if (this.moduleContainer) this.moduleContainer.innerHTML = '';
+        // #module-container's only initial child is the shell's #app-loading
+        // placeholder. It stays until the first module view is shown
+        // (navigateTo) or is replaced by the no-modules message below.
 
         // Before any module installs, so a toast or a connection event raised
         // during install is recorded too.
@@ -116,11 +117,15 @@ export class Kernel {
         // message-cap from saved config) reaches later-priority modules that haven't
         // subscribed yet. release() flushes the buffered emits in FIFO order once
         // every module has finished install().
+        // try/finally: the bus must never stay held, whatever an install path throws.
         this.eventBus.hold();
-        for (const mod of this.modules) {
-            await this.installModule(mod);
+        try {
+            for (const mod of this.modules) {
+                await this.installModule(mod);
+            }
+        } finally {
+            this.eventBus.release();
         }
-        this.eventBus.release();
 
         // Bridge: HTML bootstrap script fires window 'jszip:loaded' — forward to EventBus
         window.addEventListener('jszip:loaded', () => this.eventBus.emit('jszip:loaded'));
@@ -146,8 +151,13 @@ export class Kernel {
         );
         if (firstInstalled) {
             this.navigateTo(firstInstalled.id);
-        } else if (this.modules.length > 0) {
-            logger.error('[Kernel] No modules installed successfully — nothing to navigate to.');
+        } else {
+            if (this.modules.length > 0) {
+                logger.error('[Kernel] No modules installed successfully -- nothing to navigate to.');
+            }
+            // Replace the shell's "Loading..." with a visible reason.
+            const loading = this.moduleContainer?.querySelector('#app-loading');
+            if (loading) loading.textContent = 'No modules are available. Check the browser console.';
         }
 
         logger.info('[Kernel] All modules installed. Application ready.');
@@ -198,6 +208,7 @@ export class Kernel {
             logger.info(`[Kernel] ✓ Module "${mod.name}" installed successfully`);
         } catch (err) {
             logger.error(`[Kernel] ✗ Failed to install module "${mod.name}":`, err);
+            showToast(`Module "${mod.name}" failed to install. See the browser console for details.`, 'error', 8000);
         }
     }
 
@@ -259,6 +270,8 @@ export class Kernel {
         // Toggle visibility
         if (this.moduleContainer) {
             this.moduleContainer.querySelectorAll('.module-view').forEach(v => v.classList.add('hidden'));
+            // The shell's "Loading..." placeholder goes with the first view shown.
+            this.moduleContainer.querySelector('#app-loading')?.remove();
         }
         entry.container.classList.remove('hidden');
     }

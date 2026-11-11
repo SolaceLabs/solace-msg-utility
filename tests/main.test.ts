@@ -47,6 +47,18 @@ describe('main.ts entry point', () => {
         expect(startSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('logs a rejected kernel start instead of leaving an unhandled rejection', async () => {
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const failure = new Error('start blew up');
+        startSpy.mockRejectedValue(failure);
+
+        await import('../src/main');
+
+        await vi.waitFor(() => expect(errSpy).toHaveBeenCalledWith(
+            expect.stringContaining('The kernel failed to start'), failure));
+        errSpy.mockRestore();
+    });
+
     it('starts the kernel at once when the solclient script has failed', async () => {
         (window as any).solace = undefined;
         const script = document.createElement('script');

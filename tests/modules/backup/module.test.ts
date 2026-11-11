@@ -119,6 +119,39 @@ describe('backup -- helpers', () => {
 });
 
 describe('backup -- gate and status', () => {
+    it('fetches the status once at start with an admin restored, and ignores an rbac:changed that leaves the session as it is', async () => {
+        const { c, ctx } = await setup();
+        expect(svc.status).toHaveBeenCalledTimes(1);
+        ctx.eventBus.emit('rbac:changed');
+        await flush();
+        expect(svc.status).toHaveBeenCalledTimes(1);
+        expect(hidden(c, '#backup-view')).toBe(false);
+    });
+
+    it('reloads when the admin signs out and in again, or another admin signs in', async () => {
+        const { c, ctx } = await setup();
+        ctx.appState.managed = null;
+        ctx.eventBus.emit('rbac:changed');
+        expect(hidden(c, '#backup-view')).toBe(true);
+        expect(svc.status).toHaveBeenCalledTimes(1);
+        ctx.appState.managed = ADMIN;
+        ctx.eventBus.emit('rbac:changed');
+        await flush();
+        expect(svc.status).toHaveBeenCalledTimes(2);
+        ctx.appState.managed = { ...ADMIN, username: 'other' };
+        ctx.eventBus.emit('rbac:changed');
+        await flush();
+        expect(svc.status).toHaveBeenCalledTimes(3);
+    });
+
+    it('shows the gate when the signed-in admin is demoted', async () => {
+        const { c, ctx } = await setup();
+        ctx.appState.managed = { ...ADMIN, admin: false };
+        ctx.eventBus.emit('rbac:changed');
+        expect(hidden(c, '#backup-view')).toBe(true);
+        expect(svc.status).toHaveBeenCalledTimes(1);
+    });
+
     it('shows the gate, not the page, without an administrator session, and loads once one arrives', async () => {
         const { c, ctx } = await setup(NONE, null);
         expect(hidden(c, '#backup-view')).toBe(true);

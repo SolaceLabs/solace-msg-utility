@@ -2,7 +2,7 @@ import { defineConfig, type PluginOption } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import fs from 'node:fs';
 import path from 'node:path';
-import { moduleRegistryPlugin, activeModuleIds, activeModuleEntries, readModuleTemplate } from './scripts/module-registry-plugin.mjs';
+import { moduleRegistryPlugin, activeModuleIds, activeModuleEntries, readModuleTemplate, variantNeedsVendorScripts, stripVendorBlocks } from './scripts/module-registry-plugin.mjs';
 
 /**
  * The git tag is the single source of version truth — `scripts/dev.sh` derives
@@ -32,6 +32,10 @@ const appVersion: string = (process.env.APP_VERSION ?? '0.0.0-dev').replace(/^v/
  *
  * Output is alphabetized for stable build diffs; runtime kernel lookups are
  * by id (querySelector), so order is cosmetic.
+ *
+ * A variant manifest that exports `NEEDS_VENDOR_SCRIPTS = false` (the admin
+ * variant) also loses the shell's `@vendor` blocks: the Solace SDK and JSZip
+ * loaders and the library banner.
  */
 function injectModuleTemplates(variant: string | undefined): PluginOption {
     return {
@@ -43,7 +47,9 @@ function injectModuleTemplates(variant: string | undefined): PluginOption {
                 .map(id => ({ id, content: readModuleTemplate(__dirname, id, entries[id]) }))
                 .filter(({ content }) => content !== null)
                 .map(({ id, content }) => `    <template data-module-id="${id}">\n${content}\n    </template>`);
-            return html.replace('<!-- @module-templates -->', blocks.join('\n\n'));
+            const composed = html.replace('<!-- @module-templates -->', blocks.join('\n\n'));
+            // A variant that declares NEEDS_VENDOR_SCRIPTS = false ships no SDK / JSZip loader or banner.
+            return variantNeedsVendorScripts(__dirname, variant) ? composed : stripVendorBlocks(composed);
         }
     };
 }

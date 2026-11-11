@@ -5,6 +5,7 @@ import { config } from '../../../src/modules/connections/config.js';
 import { createEventBus } from '../../../src/core/event-bus';
 import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import { INPUT_DEBOUNCE_MS } from '../../../src/core/timing';
+import { DEFAULT_CONN_CONFIG } from '../../../src/core/connections/conn-modes';
 import { MAX_MESSAGES_PER_QUEUE } from '../../../src/core/connections/defaults';
 import { SWITCH_CONNECT_TIMEOUT_MS, SWITCH_DISCONNECT_TIMEOUT_MS } from '../../../src/modules/connections/vpn-switch';
 import { logger } from '../../../src/core/logger';
@@ -1882,6 +1883,50 @@ describe('ConnectionsModule', () => {
             const { ctx, appState } = createTestContext(container);
             await ConnectionsModule.install(ctx);
             expect(appState.connConfig?.hosted).toBe(false);
+        });
+    });
+
+    describe('inconclusive /hosted probe', () => {
+        const noticeHidden = () => (container.querySelector('#conn-probe-notice') as HTMLElement).classList.contains('hidden');
+
+        it('a conclusive no-gateway (404) shows no notice', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 404, text: () => Promise.resolve('') });
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            expect(noticeHidden()).toBe(true);
+        });
+
+        it('a 5xx keeps the app standalone (not hosted, Direct form wired) and shows the notice; Retry reloads the page', async () => {
+            vi.spyOn(console, 'warn').mockImplementation(() => { });
+            (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 502, text: () => Promise.resolve('') });
+            const { ctx, appState } = createTestContext(container);
+            const reload = vi.fn();
+            await ConnectionsModule.install(ctx, { reload });
+
+            expect(appState.connConfig).toEqual({ ...DEFAULT_CONN_CONFIG, hosted: false });
+            expect(noticeHidden()).toBe(false);
+            expect(container.querySelector('#conn-probe-notice')!.textContent).toContain('Could not check whether this page is served by the gateway.');
+            expect(reload).not.toHaveBeenCalled();
+            (container.querySelector('#btn-conn-probe-retry') as HTMLButtonElement).click();
+            expect(reload).toHaveBeenCalledTimes(1);
+        });
+
+        it('a network error shows the notice, and Retry without an injected reload calls window.location.reload', async () => {
+            vi.spyOn(console, 'warn').mockImplementation(() => { });
+            (globalThis.fetch as any).mockRejectedValue(new TypeError('Failed to fetch'));
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            expect(noticeHidden()).toBe(false);
+
+            const original = window.location;
+            const reload = vi.fn();
+            Object.defineProperty(window, 'location', { value: { reload }, writable: true, configurable: true });
+            try {
+                (container.querySelector('#btn-conn-probe-retry') as HTMLButtonElement).click();
+            } finally {
+                Object.defineProperty(window, 'location', { value: original, writable: true, configurable: true });
+            }
+            expect(reload).toHaveBeenCalledTimes(1);
         });
     });
 

@@ -253,6 +253,13 @@
     overflow-y: auto;
 }
 
+/* The shell's static placeholder, until the first module view is shown. */
+.app-loading {
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
 /* ---------- Desktop-only gate ----------
  * Full-viewport overlay shown when the inline <head> script sets
  * `html.mobile-blocked` (viewport width < 1024px). Hides the app chrome,

@@ -117,11 +117,44 @@ describe('connection-management — list', () => {
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').textContent).toMatch(/no connections/i));
     });
 
-    it('reloads on rbac:changed', async () => {
-        const { ctx } = await setup();
+    it('fetches the list once at start with an admin restored', async () => {
+        await setup();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(svcMock.listConnections).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores an rbac:changed that leaves the session as it is (the kernel replay)', async () => {
+        const { container, ctx } = await setup();
         svcMock.listConnections.mockClear();
         ctx.eventBus.emit('rbac:changed');
-        await vi.waitFor(() => expect(svcMock.listConnections).toHaveBeenCalled());
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(svcMock.listConnections).not.toHaveBeenCalled();
+        expect(hidden(container, '#conn-mgmt-list-view')).toBe(false);
+    });
+
+    it('reloads when the admin signs out and in again, or another admin signs in', async () => {
+        const { container, ctx } = await setup();
+        svcMock.listConnections.mockClear();
+        ctx.setState('managed', null);
+        ctx.eventBus.emit('rbac:changed');
+        expect(hidden(container, '#conn-mgmt-gate')).toBe(false);
+        expect(svcMock.listConnections).not.toHaveBeenCalled();
+        ctx.setState('managed', ADMIN);
+        ctx.eventBus.emit('rbac:changed');
+        await vi.waitFor(() => expect(svcMock.listConnections).toHaveBeenCalledTimes(1));
+        ctx.setState('managed', { ...ADMIN, username: 'other' });
+        ctx.eventBus.emit('rbac:changed');
+        await vi.waitFor(() => expect(svcMock.listConnections).toHaveBeenCalledTimes(2));
+    });
+
+    it('shows the gate when the signed-in admin is demoted', async () => {
+        const { container, ctx } = await setup();
+        svcMock.listConnections.mockClear();
+        ctx.setState('managed', { ...ADMIN, admin: false });
+        ctx.eventBus.emit('rbac:changed');
+        expect(hidden(container, '#conn-mgmt-gate')).toBe(false);
+        expect(hidden(container, '#conn-mgmt-list-view')).toBe(true);
+        expect(svcMock.listConnections).not.toHaveBeenCalled();
     });
 
     it('clears the gate and loads the list when an admin logs in (rbac:changed)', async () => {

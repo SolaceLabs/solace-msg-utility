@@ -93,3 +93,13 @@
     flex-direction: column;
     gap: 0.5rem;
 }
+
+/* The inconclusive-/hosted notice (module.ts, module.managed.ts): the message
+ * with its Retry button beside it. */
+.conn-probe-notice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}

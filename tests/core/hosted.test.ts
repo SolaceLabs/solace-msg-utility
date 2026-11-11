@@ -69,20 +69,37 @@ describe('core/hosted — probeDeployment', () => {
         expect(warn).not.toHaveBeenCalled();
     });
 
-    it('an answer that looks broken (not JSON, a network error) is Direct only, with a warn saying why', async () => {
+    it('an answer that is neither JSON nor true/false is a conclusive no-gateway, with a warn saying why', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
-        const cause = new Error('Failed to fetch');
 
         (globalThis.fetch as any).mockResolvedValueOnce(ok('<html>not-the-gateway</html>'));
-        await expect(probeDeployment()).resolves.toEqual(notHosted);
-        (globalThis.fetch as any).mockRejectedValueOnce(cause);
-        await expect(probeDeployment()).resolves.toEqual(notHosted);
+        const info = await probeDeployment();
 
+        expect(info).toEqual(notHosted);
+        expect(info.inconclusive).toBeUndefined();
         expect(warn.mock.calls[0][0]).toBe('[hosted] /hosted answered neither JSON nor true/false; treating the page as not hosted (Direct only). Body starts: <html>not-the-gateway</html>');
-        expect(warn.mock.calls[1]).toEqual(['[hosted] /hosted probe failed (network error or no answer in time); treating the page as not hosted (Direct only):', cause]);
     });
 
-    it('a /hosted that never answers resolves Direct only after HOSTED_PROBE_TIMEOUT_MS, so the app still renders', async () => {
+    it('a network error is inconclusive, with a warn carrying the cause', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
+        const cause = new Error('Failed to fetch');
+        (globalThis.fetch as any).mockRejectedValueOnce(cause);
+
+        await expect(probeDeployment()).resolves.toEqual({ ...notHosted, inconclusive: true });
+
+        expect(warn.mock.calls[0]).toEqual(['[hosted] /hosted probe was inconclusive (network error or no complete answer in time); cannot tell whether a gateway serves this page:', cause]);
+    });
+
+    it('a 5xx answer is inconclusive (a gateway or proxy that is down), unlike a 404', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
+        (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, status: 503, text: () => Promise.resolve('') });
+
+        await expect(probeDeployment()).resolves.toEqual({ ...notHosted, inconclusive: true });
+
+        expect(warn.mock.calls[0][0]).toBe('[hosted] /hosted answered HTTP 503; cannot tell whether a gateway serves this page');
+    });
+
+    it('a /hosted that never answers is inconclusive after HOSTED_PROBE_TIMEOUT_MS, so the app still renders', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
         vi.useFakeTimers();
         (globalThis.fetch as any).mockImplementation(() => new Promise(() => { }));
@@ -90,8 +107,19 @@ describe('core/hosted — probeDeployment', () => {
         const probe = probeDeployment();
         await vi.advanceTimersByTimeAsync(HOSTED_PROBE_TIMEOUT_MS);
 
-        await expect(probe).resolves.toEqual(notHosted);
+        await expect(probe).resolves.toEqual({ ...notHosted, inconclusive: true });
         expect(warn.mock.calls[0][1]).toMatchObject({ name: 'TimeoutError' });
+    });
+
+    it('headers arrive, body never does -> inconclusive after the one deadline, so the app still renders', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => { });
+        vi.useFakeTimers();
+        (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200, text: () => new Promise(() => { }) });
+
+        const probe = probeDeployment();
+        await vi.advanceTimersByTimeAsync(HOSTED_PROBE_TIMEOUT_MS);
+
+        await expect(probe).resolves.toEqual({ ...notHosted, inconclusive: true });
     });
 });
 

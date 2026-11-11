@@ -529,6 +529,9 @@ describe('queue-browser/service-events', () => {
             msg.getType = () => { throw new Error('type error'); };
             se.onMessage('q1', msg);
             expect(consoleSpy).toHaveBeenCalled();
+            // The message is kept, with the generic type as the fallback.
+            expect(state.messageStore.get('q1')).toHaveLength(1);
+            expect(state.messageStore.get('q1')![0].type).toBe('Message');
         });
 
         it('handles timestamp extraction error', () => {
@@ -543,6 +546,10 @@ describe('queue-browser/service-events', () => {
             msg.getSenderTimestamp = () => { throw new Error('ts error'); };
             se.onMessage('q1', msg);
             expect(consoleSpy).toHaveBeenCalled();
+            // The message is kept, with no usable date.
+            expect(state.messageStore.get('q1')).toHaveLength(1);
+            expect(state.messageStore.get('q1')![0].date).toBe('N/A');
+            expect(state.messageStore.get('q1')![0].dateMs).toBeNull();
         });
 
         it('handles UserPropertyMap', () => {
@@ -788,6 +795,9 @@ describe('queue-browser/service-events', () => {
 
             const msg = createSolaceMessage({ gmid: 121, xmlContent: 'test content' });
             se.onMessage('q1', msg);
+
+            expect(state.displayedMessages.map((m: any) => m.id)).toEqual(['121']);
+            expect(ui.getElements().msgList.querySelector('tr[data-id="121"]')).not.toBeNull();
         });
 
         it('handles SDT Map message type via createMessageMock', () => {

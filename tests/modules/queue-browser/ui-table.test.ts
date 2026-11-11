@@ -61,7 +61,7 @@ describe('queue-browser/ui-table', () => {
             const checkbox = document.querySelector('.msg-check') as HTMLInputElement;
             checkbox.checked = true;
             const ids = ui.getSelectedMessageIds();
-            expect(ids).toContain('1');
+            expect(ids).toEqual(['1']);
         });
 
         it('returns empty when nothing checked', () => {
@@ -180,8 +180,10 @@ describe('queue-browser/ui-table', () => {
 
             ui.addMessageRow(msg);
 
-            const row = ui.getElements().msgList.querySelector('tr[data-id="new-1"]');
+            const row = ui.getElements().msgList.querySelector('tr[data-id="new-1"]') as HTMLElement;
             expect(row).toBeTruthy();
+            expect(row.style.animation).toBe('highlight-fade 2s');
+            expect(ui.getElements().countTotal.textContent).toBe('1');
         });
 
     });
@@ -203,6 +205,7 @@ describe('queue-browser/ui-table', () => {
             ui.getElements().detailId.textContent = '1';
 
             ui.removeMessageRow('1');
+            expect(ui.getElements().detailId.textContent).toBe('');
         });
 
         it('does not clear details when removing non-selected message', () => {
@@ -414,10 +417,15 @@ describe('queue-browser/ui-table', () => {
             const checkbox = document.querySelector('.msg-check') as HTMLInputElement;
             checkbox.checked = true;
 
+            const blobSpy = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
+
             await ui.downloadMessagesZip('content');
 
             expect(fileFn).toHaveBeenCalledWith('solace-message-1', 'Hello');
             expect(generateAsyncFn).toHaveBeenCalledWith({ type: 'blob' });
+            expect(blobSpy).toHaveBeenCalledTimes(1);
+            expect(blobSpy.mock.calls[0][1]).toMatch(/^solace-messages-content-.*\.zip$/);
+            blobSpy.mockRestore();
         });
 
         it('puts a binary attachment in the content ZIP as its original bytes', async () => {
@@ -451,7 +459,7 @@ describe('queue-browser/ui-table', () => {
             });
 
             state.displayedMessages = [
-                { id: '1', content: 'Hello', date: '', size: 0, type: 'Text', msgProperties: {}, appProperties: {} }
+                { id: '1', content: 'Hello', date: '', size: 0, type: 'Text', msgProperties: { key: 'val' }, appProperties: {} }
             ];
             state.allMessages = state.displayedMessages;
             ui.renderList();
@@ -461,7 +469,11 @@ describe('queue-browser/ui-table', () => {
 
             await ui.downloadMessagesZip('full');
 
-            expect(fileFn).toHaveBeenCalledWith(expect.stringContaining('-full.json'), expect.any(String));
+            expect(fileFn).toHaveBeenCalledTimes(1);
+            expect(fileFn.mock.calls[0][0]).toBe('solace-message-1-full.json');
+            const parsed = JSON.parse(fileFn.mock.calls[0][1]);
+            expect(parsed.payload).toBe('Hello');
+            expect(parsed.messageProperties.key).toBe('val');
         });
 
         it('handles ZIP generation error', async () => {
@@ -488,6 +500,7 @@ describe('queue-browser/ui-table', () => {
         it('returns early if no matching messages after filter', async () => {
             const zipCtor = vi.fn();
             (window as any).JSZip = zipCtor;
+            const toasts = freshToasts();
 
             state.displayedMessages = [{ id: '1', content: 'test' }];
             state.allMessages = state.displayedMessages;
@@ -501,6 +514,7 @@ describe('queue-browser/ui-table', () => {
             state.displayedMessages = [{ id: '999', content: 'other' }];
             await ui.downloadMessagesZip('content');
             expect(zipCtor).not.toHaveBeenCalled();
+            expect(toasts.children.length).toBe(0);
         });
     });
 
@@ -600,24 +614,6 @@ describe('queue-browser/ui-table', () => {
             triggerSpy.mockRestore();
         });
 
-        it('downloadMessagesZip with full type includes properties', async () => {
-            (window as any).JSZip = vi.fn(function(this: any) {
-                this.file = vi.fn();
-                this.generateAsync = vi.fn().mockResolvedValue(new Blob(['zip']));
-            });
-
-            state.displayedMessages = [
-                { id: '1', date: '', size: 0, type: 'Text', content: 'payload', msgProperties: { key: 'val' }, appProperties: {} }
-            ];
-            state.allMessages = state.displayedMessages;
-            ui.renderList();
-
-            const checkbox = document.querySelector('.msg-check') as HTMLInputElement;
-            checkbox.checked = true;
-
-            await ui.downloadMessagesZip('full');
-        });
-
         it('forward button opens modal', () => {
             state.displayedMessages = [
                 { id: '1', date: '', size: 0, type: 'Text', content: 'payload' }
@@ -625,13 +621,15 @@ describe('queue-browser/ui-table', () => {
             state.allMessages = state.displayedMessages;
             ui.renderList();
 
-            // Need to import ui-forward first
-            ui.generateUuid = () => 'test-uuid';
+            const uuidSpy = vi.spyOn(ui, 'generateUuid').mockImplementation(() => 'test-uuid');
 
             const btn = document.querySelector('.btn-forward-row') as HTMLElement;
             btn.click();
 
+            expect(ui.getElements().modalForward.open).toBe(true);
             expect(state.forwardQueue.length).toBe(1);
+            expect(state.forwardQueue[0].id).toBe('1');
+            uuidSpy.mockRestore();
         });
     });
 });

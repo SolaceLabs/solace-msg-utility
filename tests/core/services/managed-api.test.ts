@@ -81,6 +81,26 @@ describe('core/services/managed-api — managedRequest', () => {
     });
 });
 
+describe('core/services/managed-api -- managedRequest body deadline', () => {
+    it('headers arrive, body never does -> resolves as code network after REQUEST_TIMEOUT_MS', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => { });
+        vi.useFakeTimers();
+        fetchMock().mockResolvedValue({ ok: true, status: 200, json: () => new Promise(() => { }) });
+        const pending = managedRequest('GET', '/managed/me');
+        await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+        expect(await pending).toEqual({ ok: false, status: 0, code: 'network' });
+    });
+
+    it('an error answer whose body never arrives also resolves as code network', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => { });
+        vi.useFakeTimers();
+        fetchMock().mockResolvedValue({ ok: false, status: 500, json: () => new Promise(() => { }) });
+        const pending = managedRequest('GET', '/managed/me');
+        await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+        expect(await pending).toEqual({ ok: false, status: 0, code: 'network' });
+    });
+});
+
 describe('core/services/managed-api — managedErrorMessage', () => {
     const err = (code: string, extra: Partial<ManagedError> = {}): ManagedError => ({ ok: false, status: 400, code, ...extra });
 

@@ -1271,17 +1271,19 @@ async function runDirectChecks() {
     const { vpn, queue } = broker;
     const wssPath = `/wss/${broker.smfPort}/${broker.host}`;
 
-    await check('D1', 'Gateway mode: /hosted says direct, / and /login serve the Direct app, and /managed, /solAdmin and the other bundles are plain 404s', async () => {
+    await check('D1', 'Gateway mode: /hosted says direct, / serves the Direct app, /login redirects to /, and /managed, /solAdmin and the other bundles are plain 404s', async () => {
         const hosted = await request('GET', '/hosted', { at: DIRECT });
         expect(hosted.status === 200 && hosted.body.trim() === '{"hosted":true,"connModes":"direct","defaultConn":"direct"}',
             `/hosted: ${hosted.status} ${hosted.body.trim()}`);
         const root = await request('GET', '/', { at: DIRECT });
         expect(root.status === 200 && root.body.includes('id="conn-host"') && !root.body.includes('conn-panel-managed'),
             `/: want 200 with the Direct form and no Provisioned panel, got ${root.status}`);
-        // No sign-in page in Gateway mode: /login is an app route like any other.
+        // No sign-in page in Gateway mode, and the app has no client-side routes: /login redirects to /, which serves the app.
         const login = await request('GET', '/login', { at: DIRECT });
-        expect(login.status === 200 && login.body === root.body, `/login: want the app, as /, got ${login.status}`);
-        for (const p of ['/managed/me', '/solAdmin', '/provisioned.html', '/solAdmin.html']) {
+        expect(login.status === 308 && login.headers.location === '/', `/login: want 308 to /, got ${login.status} ${login.headers.location ?? ''}`);
+        const followed = await request('GET', login.headers.location, { at: DIRECT });
+        expect(followed.status === 200 && followed.body === root.body, `/login followed: want the app, as /, got ${followed.status}`);
+        for (const p of ['/managed/me', '/solAdmin', '/solAdmin/', '/provisioned.html', '/solAdmin.html']) {
             const r = await request('GET', p, { at: DIRECT });
             expect(r.status === 404 && r.body === '404 page not found\n', `${p}: want a plain 404, got ${r.status} ${r.body.slice(0, 120)}`);
         }

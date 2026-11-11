@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ui, els } from '../../../src/modules/queue-browser/ui-core.js';
 import { state } from '../../../src/modules/queue-browser/state.js';
+import { formatBytes, generateUuid } from '../../../src/core/utils';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 
@@ -36,13 +37,13 @@ describe('queue-browser/ui-core', () => {
         it('caches all elements', () => {
             const cached = ui.getElements();
             expect(cached.container).toBe(container);
-            expect(cached.inputBind).toBeTruthy();
-            expect(cached.btnBind).toBeTruthy();
-            expect(cached.selectBound).toBeTruthy();
-            expect(cached.msgList).toBeTruthy();
-            expect(cached.detailId).toBeTruthy();
-            expect(cached.modalForward).toBeTruthy();
-            expect(cached.btnFilter).toBeTruthy();
+            expect(cached.inputBind).toBe(container.querySelector('#browser-bind-input'));
+            expect(cached.btnBind).toBe(container.querySelector('#btn-browser-bind'));
+            expect(cached.selectBound).toBe(container.querySelector('#browser-bound-queues'));
+            expect(cached.msgList).toBe(container.querySelector('#browser-msg-list'));
+            expect(cached.detailId).toBe(container.querySelector('#detail-msg-id'));
+            expect(cached.modalForward).toBe(container.querySelector('#browser-forward-modal'));
+            expect(cached.btnFilter).toBe(container.querySelector('#btn-browser-filter'));
         });
     });
 
@@ -76,35 +77,11 @@ describe('queue-browser/ui-core', () => {
         });
     });
 
-    describe('formatBytes()', () => {
-        it('formats bytes correctly', () => {
-            expect(ui.formatBytes(0)).toBe('0 B');
-            expect(ui.formatBytes(500)).toBe('500 B');
-            expect(ui.formatBytes(1024)).toBe('1 KB');
-            expect(ui.formatBytes(1048576)).toBe('1 MB');
-            expect(ui.formatBytes(1073741824)).toBe('1 GB');
-        });
-
-        it('handles NaN', () => {
-            expect(ui.formatBytes(NaN)).toBe('0 B');
-            expect(ui.formatBytes('not a number')).toBe('0 B');
-        });
-
-        it('respects decimal places', () => {
-            expect(ui.formatBytes(1536, 1)).toBe('1.5 KB');
-        });
-    });
-
-    describe('generateUuid()', () => {
-        it('returns a UUID-like string', () => {
-            const uuid = ui.generateUuid();
-            expect(uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-        });
-
-        it('generates unique values', () => {
-            const a = ui.generateUuid();
-            const b = ui.generateUuid();
-            expect(a).not.toBe(b);
+    describe('core aliases', () => {
+        // The formatting itself is pinned in tests/core/utils.test.ts.
+        it('ui.formatBytes and ui.generateUuid are the core/utils functions', () => {
+            expect(ui.formatBytes).toBe(formatBytes);
+            expect(ui.generateUuid).toBe(generateUuid);
         });
     });
 
@@ -167,9 +144,13 @@ describe('queue-browser/ui-core', () => {
             state.allMessages = [{ id: '1' }];
             state.displayedMessages = [{ id: '1' }];
 
-            // Need renderList and clearDetails to be defined
+            // Need renderList and clearDetails to be defined; put them back after.
+            const savedRender = ui.renderList;
+            const savedClear = ui.clearDetails;
             ui.renderList = vi.fn();
             ui.clearDetails = vi.fn();
+            const renderSpy = ui.renderList;
+            const clearSpy = ui.clearDetails;
 
             ui.resetQueueSelection();
 
@@ -178,6 +159,11 @@ describe('queue-browser/ui-core', () => {
             expect(state.displayedMessages).toEqual([]);
             expect(state.currentQueuePermissions).toBeNull();
             expect(els.btnFilter.disabled).toBe(true);
+            expect(renderSpy).toHaveBeenCalledTimes(1);
+            expect(clearSpy).toHaveBeenCalledTimes(1);
+
+            ui.renderList = savedRender;
+            ui.clearDetails = savedClear;
         });
     });
 
@@ -264,12 +250,6 @@ describe('queue-browser/ui-core', () => {
 
             ui.renderList = savedRender;
             ui.clearDetails = savedClear;
-        });
-    });
-
-    describe('formatBytes edge cases', () => {
-        it('handles TB range', () => {
-            expect(ui.formatBytes(1099511627776)).toBe('1 TB');
         });
     });
 });

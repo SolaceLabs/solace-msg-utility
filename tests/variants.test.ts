@@ -158,6 +158,15 @@ describe('variants', () => {
         expect(DEMO_ENTRIES).toEqual({ connections: 'managed' });
     });
 
+    it('connections outranks queue-copy in every variant that lists both', () => {
+        // queue-copy reads the gateway verdict at install, so connections must have
+        // installed first. The kernel installs by priority, highest first.
+        const variants = [STANDARD_VARIANT, MIN_VARIANT, NO_QUEUE_COPY_VARIANT, ADMIN_VARIANT, ALL_VARIANT, MANAGED_VARIANT, DEMO_VARIANT];
+        const both = variants.filter(v => 'connections' in v && 'queue-copy' in v);
+        expect(both.length).toBeGreaterThan(0);
+        for (const v of both) expect(v['connections']).toBeGreaterThan(v['queue-copy']);
+    });
+
     it('_active re-exports a populated manifest', () => {
         expect(Object.keys(ACTIVE_VARIANT).length).toBeGreaterThan(0);
     });

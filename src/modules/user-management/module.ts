@@ -127,10 +127,20 @@ export const UserManagementModule = {
             });
         }
 
+        // The session as this module last applied it: signed-in user and admin
+        // flag, null when signed out. A replayed or unrelated rbac:changed (the
+        // kernel's held replay at start, a broker connect) leaves it equal.
+        const sessionKey = (): string | null => {
+            const m = appState.managed;
+            return m ? JSON.stringify([m.username, m.admin]) : null;
+        };
+        let appliedKey = sessionKey();
+
         // Gate the module on an admin session: non-admin (or not-logged-in) sees
         // the gate; an admin sees the list and it (re)loads. Called at install and
-        // on every rbac:changed (login / logout / self-demote).
+        // on an rbac:changed that changes the session (login / logout / self-demote).
         function applyGate(): void {
+            appliedKey = sessionKey();
             const m = appState.managed;
             if (!m?.admin) {
                 showGate();
@@ -264,14 +274,14 @@ export const UserManagementModule = {
             showToast('User saved', 'ok');
             // Editing your own entitlements leaves the session alive. Update the
             // local copy (preserving broker/vpns via the spread) BEFORE emitting
-            // so the kernel + this module's rbac:changed handler (applyGate)
-            // re-read fresh state.
+            // so the kernel re-reads fresh state. The user and admin flag are
+            // unchanged, so this module's rbac:changed handler ignores the emit;
+            // applyGate puts the list back, reloaded.
             if (own) {
                 app.setState('managed', { ...m, operate: payload.operate, readOnly: payload.readOnly });
                 eventBus.emit('rbac:changed');
-            } else {
-                applyGate(); // back to the list, reloaded
             }
+            applyGate(); // back to the list, reloaded
         }
 
         async function removeUser(username: string): Promise<void> {
@@ -309,7 +319,9 @@ export const UserManagementModule = {
         // default grants; returning to it shows the default again.
         els.modulesDefault.addEventListener('change', () =>
             renderModules(els.modulesDefault.checked ? null : checkedModules()));
-        eventBus.on('rbac:changed', () => applyGate());
+        eventBus.on('rbac:changed', () => {
+            if (sessionKey() !== appliedKey) applyGate();
+        });
 
         applyGate(); // gate until an admin session exists; load the list when it does
         logger.info('User Management Module Setup Complete');

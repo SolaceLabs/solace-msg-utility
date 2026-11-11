@@ -301,6 +301,7 @@ describe('ModuleName', () => {
 
 - **Always use `loadModuleDOM(moduleId, entry?)`** ([tests/helpers/loadModuleDOM.ts](../tests/helpers/loadModuleDOM.ts)) for module-level tests instead of hand-rolling an `innerHTML` literal. The helper reads the real `src/modules/<id>/index.html` (or, with `entry`, the composed `index.<entry>.html`) and appends a container to `document.body` — so when a template grows a new element, every test picks it up automatically.
 - The `moduleId` parameter is a plain `string` (the directory name under `src/modules/`); a typo throws at read time. The compile-time enumeration was dropped along with `src/module-ids.ts` when active modules moved to the variant manifests under [src/variants/](../src/variants/).
+- **Inline shell scripts are tested by reading them out of the shell.** The loader in `src/index.html` has no module to import, so `tests/shell-loader.test.ts` extracts the real inline script text from the file and runs it in jsdom (fake timers for its 30 s watchdog), instead of copying the logic into the test. `tests/build/vendor-blocks.test.ts` pins the `@vendor` blocks against `VENDOR_MARKERS`.
 - For tests that explicitly need a partial or malformed DOM (e.g. to verify a defensive path with a missing element), keep the inline `innerHTML` — that's a legitimate exception.
 
 ### Defensive-Guard Tests

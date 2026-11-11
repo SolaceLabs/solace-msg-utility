@@ -129,7 +129,11 @@ The SEMP connection shares the same Broker Host as the Solace client connection.
 - **Load All Config** -- Restores previously saved fields. A saved `ws://` or `http://` that the page cannot use (served over `https://` without the gateway) is loaded as `wss://` or `https://`, with a warning toast: check the port, which is likely still the unencrypted one. The same happens when the app opens with saved fields.
 - **Reset Form** — Clears all fields back to defaults
 
-> **Out-of-date `solclient.js`:** if the SDK next to the app is older than the required version, a banner appears at the top of the page and **Connect** refuses with an explicit message naming the required version, rather than failing somewhere inside the SDK. Replace the file to clear it.
+> **Solace library banner:** while the page loads, a neutral banner at the top reads "Loading the Solace library..."; it disappears once `solclient.js` has loaded. If the file is not found (or loads but defines no `window.solace`), the banner turns into the "not found" error; if the SDK is older than the required version, it names the required version and **Connect** refuses with the same message, rather than failing somewhere inside the SDK. If nothing settles within 30 seconds the banner reads "The Solace library did not finish loading. Check that solclient.js is next to this page." (a late result still replaces it). Replace the file to clear an error. Both demos remove the banner, and `/solAdmin` has none.
+
+> **Connections page, gateway check:** the page asks the gateway once whether it is served by one. When that check cannot be completed (no answer in time, a network error or a 5xx answer) the page says "Could not check whether this page is served by the gateway." with a **Retry** button that reloads the page. In the Direct build the form stays usable meanwhile, as for a standalone page. In the Provisioned build the notice replaces the connection panels, since there is no Direct-only fallback to offer. A plain 404 is not a failure: it means no gateway and shows no notice.
+
+> **Startup messages:** the page shows "Loading..." in the content area until the first module's view appears. If no module is available, it reads "No modules are available. Check the browser console." A module that fails to install shows an error toast, `Module "<name>" failed to install. See the browser console for details.`, and the other modules still start.
 
 ### Status Indicators
 
@@ -443,7 +447,7 @@ Place both files in the **same folder as the HTML**, or in a sibling **`js/`** s
 
 > **What happens if a vendor file is missing:**
 >
-> - Without `solclient.js`, the app starts and shows a vendor-missing banner; **Connect** reports the missing library. Connection features will not work. A Connect pressed while the file is still loading waits for it.
+> - Without `solclient.js`, the app starts and shows a vendor-missing banner (after "Loading the Solace library...", or the 30-second message if the request never settles); **Connect** reports the missing library. Connection features will not work. A Connect pressed while the file is still loading waits for it. A file that loads but defines no `window.solace` counts as missing.
 > - Without `jszip.min.js`, every other feature works normally; only ZIP download is disabled.
 
 See [deployment.md](deployment.md#external-runtime-dependencies) for download sources and version requirements.
@@ -487,7 +491,7 @@ If your entitlements change while you are working (you or an admin hit Refresh, 
 
 ### Administration (`/solAdmin`)
 
-Administration is a **separate app**, not a pair of extra sidebar entries in the main one. Open `https://<your-gateway>/solAdmin`: without a session you are sent to the sign-in page first, and an ordinary account gets an *Administrator access required* page instead of the app. Its **Administration** page shows who is signed in, with **Change password** and **Sign out**. The admin app never connects to a broker; it only edits the deployment's users, connections and gateway settings, and backs them up. It exists only on deployments running in Provisioned mode; anywhere else the URL simply 404s.
+Administration is a **separate app**, not a pair of extra sidebar entries in the main one. Open `https://<your-gateway>/solAdmin`: without a session you are sent to the sign-in page first, and an ordinary account gets an *Administrator access required* page instead of the app. Its **Administration** page shows who is signed in, with **Change password** and **Sign out**. The admin app never connects to a broker; it only edits the deployment's users, connections and gateway settings, and backs them up. It exists only on deployments running in Provisioned mode; anywhere else the URL simply 404s. `/solAdmin/` (with a trailing slash) redirects to `/solAdmin`. The page loads neither `solclient.js` nor `jszip.min.js` and shows no library banner, so it works without them.
 
 Signed in there, you get four modules:
 

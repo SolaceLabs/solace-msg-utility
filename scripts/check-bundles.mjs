@@ -25,7 +25,11 @@
  *   - PROVISIONED_DEMO_BUNDLE exists, contains every managed and every demo
  *     marker, and holds nothing that reaches past the page: no DEMO_FORBIDDEN call, no
  *     `<form action=...>`, and no URL literal whose host is not in
- *     ALLOWED_HOSTS.
+ *     ALLOWED_HOSTS;
+ *   - every bundle above carries the shell's vendor loaders and library banner
+ *     (VENDOR_MARKERS), and ADMIN_BUNDLE, whose five modules use neither the Solace
+ *     SDK nor JSZip, carries none of them (a hit means the admin variant lost its
+ *     `NEEDS_VENDOR_SCRIPTS = false`, or the shell's `@vendor` markers broke).
  *
  * The managed markers are DOM ids from `index.managed.html` and endpoint paths
  * from `managed-service.ts` (sign-in, sign-out, dial and the SEMP relay):
@@ -59,6 +63,16 @@ export const PROVISIONED_DEMO_BUNDLE = 'provisioned-demo.html';
 
 /** The bundles a GitHub Release uploads. Never solAdmin.html or provisioned.html. */
 export const RELEASE_BUNDLES = [...DIRECT_BUNDLES, PROVISIONED_DEMO_BUNDLE];
+
+/** The admin app the gateway serves at /solAdmin: image-only, and it needs no vendor scripts. */
+export const ADMIN_BUNDLE = 'solAdmin.html';
+
+/**
+ * Strings only the shell's vendor blocks (the Solace SDK and JSZip loaders and
+ * the library banner, `@vendor` in src/index.html) put into a bundle: loader
+ * candidate paths and the banner id, which no module code names.
+ */
+export const VENDOR_MARKERS = ['js/solclient.js', 'jszip.min.js', 'missing-lib-banner'];
 
 /** The bundle the gateway serves at / in Provisioned mode. */
 export const PROVISIONED_BUNDLE = 'provisioned.html';
@@ -171,6 +185,22 @@ export function checkBundles(distDir) {
             problems.push(`${name}: lacks the ${why[0]} marker "${marker}". ${why[1]}`);
         }
     };
+    /** The vendor blocks are in every bundle but the admin one, which `wanted` false asserts has none. */
+    const vendor = (name, text, wanted) => {
+        if (wanted) {
+            lacks(name, text, VENDOR_MARKERS, ['vendor',
+                'The shell\'s @vendor blocks (src/index.html) were stripped from a variant that needs the Solace SDK ' +
+                'loader, or a marker was renamed; update VENDOR_MARKERS in scripts/check-bundles.mjs.']);
+            return;
+        }
+        for (const marker of findMarkers(text, VENDOR_MARKERS)) {
+            problems.push(
+                `${name}: contains the vendor marker "${marker}". The admin variant uses neither the Solace SDK nor ` +
+                'JSZip: check that src/variants/admin.ts exports NEEDS_VENDOR_SCRIPTS = false and that the shell\'s ' +
+                '@vendor:start / @vendor:end markers are intact.',
+            );
+        }
+    };
     const stale = list => `or the marker was renamed; update ${list} in scripts/check-bundles.mjs to a string ` +
         'the build still emits.';
 
@@ -180,6 +210,7 @@ export function checkBundles(distDir) {
             problems.push(`${name}: missing from ${distDir}. Run \`npm run build\` (or the dev script's build task) first.`);
             continue;
         }
+        vendor(name, text, true);
         for (const marker of findMarkers(text)) {
             problems.push(
                 `${name}: contains the managed marker "${marker}". A Direct bundle must install the ` +
@@ -204,6 +235,7 @@ export function checkBundles(distDir) {
         lacks(PROVISIONED_BUNDLE, managed, MANAGED_MARKERS, ['managed',
             `Either the managed variant's MODULE_ENTRIES override did not apply, ${stale('MANAGED_MARKERS')}`]);
         noDemo(PROVISIONED_BUNDLE, managed);
+        vendor(PROVISIONED_BUNDLE, managed, true);
     }
 
     const demo = read(PROVISIONED_DEMO_BUNDLE);
@@ -215,6 +247,14 @@ export function checkBundles(distDir) {
         lacks(PROVISIONED_DEMO_BUNDLE, demo, DEMO_MARKERS, ['demo',
             `Either it was built without --mode demo or without ./mock-broker/boot.managed, ${stale('DEMO_MARKERS')}`]);
         offline(PROVISIONED_DEMO_BUNDLE, demo);
+        vendor(PROVISIONED_DEMO_BUNDLE, demo, true);
+    }
+
+    const admin = read(ADMIN_BUNDLE);
+    if (admin === null) {
+        problems.push(`${ADMIN_BUNDLE}: missing from ${distDir}. The build must emit it with --variant=admin.`);
+    } else {
+        vendor(ADMIN_BUNDLE, admin, false);
     }
     return problems;
 }
@@ -234,7 +274,8 @@ export function main(root = repoRoot()) {
     }
     console.log(
         `Bundle check passed (${DIRECT_BUNDLES.length} Direct bundles carry no Provisioned UI; ${PROVISIONED_BUNDLE} does; ` +
-        `${PROVISIONED_DEMO_BUNDLE} runs it against the demo gateway; both demos have no network).`,
+        `${PROVISIONED_DEMO_BUNDLE} runs it against the demo gateway; both demos have no network; ` +
+        `${ADMIN_BUNDLE} ships no Solace or JSZip loader).`,
     );
     return 0;
 }

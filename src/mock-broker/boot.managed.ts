@@ -22,13 +22,14 @@ import { installMockServer } from './server';
 import { mountControlPanel } from './controls/panel';
 import { managedSections } from './controls/managed';
 import { dumpStore, loadStore, seed, type StoreSnapshot } from './broker/store';
-import { dumpScenario, loadScenario, setBrokers, type ScenarioSnapshot } from './fixtures';
+import { dumpScenario, loadScenario, resetScenario, setBrokers, type ScenarioSnapshot } from './fixtures';
 import { installSdk, removeVendorBanner, whenReady } from './shell';
 import { setSocketGate } from './sdk/session';
 import { blockNetworkApis, refuseNetwork } from './network';
 import { createGateway, type Gateway, type GatewaySnapshot } from './gateway';
 import { createPages, type GatewayPages, type Page } from './gateway/pages';
 import { DEMO_TOPOLOGY, demoSeed } from './gateway/seed';
+import { showToast } from '../core/toast';
 
 export const SNAPSHOT_KEY = 'smu-managed-demo';
 /** Set on the tab's first load, so the panel opens once; Reset demo data keeps it. */
@@ -36,6 +37,8 @@ export const PANEL_SEEN_KEY = 'smu-managed-demo-panel-seen';
 const BANNER = 'Demo gateway and broker: nothing leaves this page, and no real gateway or broker is reached.';
 /** Bumped when the snapshot's shape changes: an older one is ignored, and the tab starts from the seed. */
 const SNAPSHOT_VERSION = 2;
+const RESTORE_FAILED = 'Saved demo state could not be restored; the demo was reset.';
+const RESTORE_NOTICE_MS = 8000;
 
 interface DemoSnapshot {
     v: typeof SNAPSHOT_VERSION;
@@ -84,17 +87,27 @@ export interface ManagedDemo {
 
 export function boot(opts: { reload?: () => void } = {}): ManagedDemo {
     const reload = opts.reload ?? (() => location.reload());
-    const snap = readSnapshot();
+    let snap = readSnapshot();
 
     setBrokers(DEMO_TOPOLOGY);
-    const gateway = createGateway({ seed: demoSeed() });
+    let gateway = createGateway({ seed: demoSeed() });
+    let restoreFailed = false;
     if (snap) {
-        loadScenario(snap.scenario);
-        loadStore(snap.broker);
-        gateway.restore(snap.gateway);
-    } else {
-        seed();
+        try {
+            loadScenario(snap.scenario);
+            loadStore(snap.broker);
+            gateway.restore(snap.gateway);
+        } catch {
+            // Same version but a damaged shape: session storage outlives the reload, so
+            // drop it and start over, or the tab could never get past this boot.
+            clearSnapshot();
+            snap = null;
+            restoreFailed = true;
+            resetScenario();
+            gateway = createGateway({ seed: demoSeed() });
+        }
     }
+    if (!snap) seed();
 
     installSdk();
     setSocketGate(gateway.sockets.gate);
@@ -137,6 +150,7 @@ export function boot(opts: { reload?: () => void } = {}): ManagedDemo {
         undoNav = pages.installNav();
         pages.show(page);
         window.addEventListener('pagehide', save);
+        if (restoreFailed) showToast(RESTORE_FAILED, 'warn', RESTORE_NOTICE_MS);
     });
 
     return {

@@ -170,6 +170,38 @@ describe('gateway-settings — load', () => {
         expect(svcMock.load).toHaveBeenCalledTimes(2);
     });
 
+    it('fetches once at start with an admin restored, and ignores an rbac:changed that leaves the session as it is', async () => {
+        const { container, ctx } = await setup();
+        expect(svcMock.load).toHaveBeenCalledTimes(1);
+        ctx.eventBus.emit('rbac:changed');
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(svcMock.load).toHaveBeenCalledTimes(1);
+        expect(hidden(container, '#gw-set-view')).toBe(false);
+    });
+
+    it('reloads when the admin signs out and in again, or another admin signs in', async () => {
+        const { container, ctx } = await setup();
+        ctx.setState('managed', null);
+        ctx.eventBus.emit('rbac:changed');
+        expect(hidden(container, '#gw-set-gate')).toBe(false);
+        expect(svcMock.load).toHaveBeenCalledTimes(1);
+        ctx.setState('managed', ADMIN);
+        ctx.eventBus.emit('rbac:changed');
+        await vi.waitFor(() => expect(svcMock.load).toHaveBeenCalledTimes(2));
+        ctx.setState('managed', { ...ADMIN, username: 'other' });
+        ctx.eventBus.emit('rbac:changed');
+        await vi.waitFor(() => expect(svcMock.load).toHaveBeenCalledTimes(3));
+    });
+
+    it('shows the gate when the signed-in admin is demoted', async () => {
+        const { container, ctx } = await setup();
+        ctx.setState('managed', { ...ADMIN, admin: false });
+        ctx.eventBus.emit('rbac:changed');
+        expect(hidden(container, '#gw-set-gate')).toBe(false);
+        expect(hidden(container, '#gw-set-view')).toBe(true);
+        expect(svcMock.load).toHaveBeenCalledTimes(1);
+    });
+
     it("shows the gateway's reason when the load fails; Save then sends nothing", async () => {
         const { container } = await setup(ADMIN, { ok: false, status: 0, code: 'network' });
         await vi.waitFor(() => expect(errorText(container)).toBe('The gateway could not be reached.'));

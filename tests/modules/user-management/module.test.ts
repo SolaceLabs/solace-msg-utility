@@ -148,11 +148,44 @@ describe('user-management — list', () => {
         await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').textContent).toMatch(/no users/i));
     });
 
-    it('reloads the list on rbac:changed', async () => {
-        const { ctx } = await setup();
+    it('fetches the list once at start with an admin restored', async () => {
+        await setup();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(svcMock.listUsers).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores an rbac:changed that leaves the session as it is (the kernel replay)', async () => {
+        const { container, ctx } = await setup();
         svcMock.listUsers.mockClear();
         ctx.eventBus.emit('rbac:changed');
-        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalled());
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+    });
+
+    it('reloads when the admin signs out and in again, or another admin signs in', async () => {
+        const { container, ctx } = await setup();
+        svcMock.listUsers.mockClear();
+        ctx.setState('managed', null);
+        ctx.eventBus.emit('rbac:changed');
+        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+        ctx.setState('managed', ADMIN);
+        ctx.eventBus.emit('rbac:changed');
+        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledTimes(1));
+        ctx.setState('managed', { ...ADMIN, username: 'other' });
+        ctx.eventBus.emit('rbac:changed');
+        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledTimes(2));
+    });
+
+    it('shows the gate when the signed-in admin is demoted', async () => {
+        const { container, ctx } = await setup();
+        svcMock.listUsers.mockClear();
+        ctx.setState('managed', { ...ADMIN, admin: false });
+        ctx.eventBus.emit('rbac:changed');
+        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(true);
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
     });
 
     it('clears the gate and loads the list when an admin logs in (rbac:changed)', async () => {
@@ -535,6 +568,7 @@ describe('user-management — your own session', () => {
         const rbac = vi.fn();
         ctx.eventBus.on('rbac:changed', rbac);
         svcMock.saveUser.mockResolvedValue({ ok: true });
+        svcMock.listUsers.mockClear();
         clickRow(container, 0, '.user-mgmt-edit');
         el(container, '#user-mgmt-operate-rows').querySelectorAll<HTMLInputElement>('input')[2].value = 'orders.*';
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
@@ -546,6 +580,8 @@ describe('user-management — your own session', () => {
         });
         expect(toastMock.showToast).toHaveBeenCalledWith('User saved', 'ok');
         expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+        // The emit changes no user or flag, so the save itself reloads the list, once.
+        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledTimes(1));
     });
 
     it("changing another user's password keeps you signed in", async () => {

@@ -40,10 +40,11 @@ export function installSdk(): void {
 }
 
 /**
- * Remove the shell's missing-vendor banner outright rather than hiding it.
- * Hiding is not enough: if `solclient.js` is absent the loader's `onerror` fires
- * *after* boot and calls `showBanner` again. `showBanner` no-ops when the
- * element is gone, so removal is what actually holds.
+ * Remove the shell's library banner (visible, "Loading the Solace library...",
+ * until the loader settles) outright rather than hiding it. Hiding is not
+ * enough: if `solclient.js` is absent the loader's outcome, or its 30 second
+ * watchdog, lands *after* boot and shows the banner again. The loader applies
+ * an outcome only to a banner that exists, so removal is what actually holds.
  */
 export function removeVendorBanner(): void {
     document.getElementById('missing-lib-banner')?.remove();

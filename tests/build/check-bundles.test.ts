@@ -8,6 +8,8 @@ import {
     PROVISIONED_DEMO_BUNDLE,
     DEMO_BUNDLE,
     PROVISIONED_BUNDLE,
+    ADMIN_BUNDLE,
+    VENDOR_MARKERS,
     MANAGED_MARKERS,
     DEMO_MARKERS,
     GATEWAY_MARKER,
@@ -28,12 +30,15 @@ import { NETWORK_DISABLED } from '../../src/mock-broker/network';
  * namespace, the mock server's `.invalid` route base, a URL built from a
  * variable).
  */
-const PROVISIONED_DEMO_CLEAN = `<html>${[...MANAGED_MARKERS, ...DEMO_MARKERS].join(' ')}` +
+const PROVISIONED_DEMO_CLEAN = `<html>${[...MANAGED_MARKERS, ...DEMO_MARKERS, ...VENDOR_MARKERS].join(' ')}` +
     '<form class="login-form"></form><svg xmlns="http://www.w3.org/2000/svg"></svg>' +
     '<script>const b="https://mock.invalid/";const u=`https://${a.host}:${a.port}`;</script></html>';
 
-/** What a clean demo.html holds: the network refusal, the Direct form and an inert namespace URL. */
-const DEMO_CLEAN = `<html>${NETWORK_MARKER}<div id="conn-host"></div><svg xmlns="http://www.w3.org/2000/svg"></svg></html>`;
+/** What the shell's vendor blocks leave in a bundle that needs the Solace SDK: the loaders' paths and the banner id. */
+const VENDOR = VENDOR_MARKERS.join(' ');
+
+/** What a clean demo.html holds: the network refusal, the vendor blocks, the Direct form and an inert namespace URL. */
+const DEMO_CLEAN = `<html>${NETWORK_MARKER} ${VENDOR}<div id="conn-host"></div><svg xmlns="http://www.w3.org/2000/svg"></svg></html>`;
 
 /**
  * A fake project root whose dist/ holds a clean build: Direct-only bundles
@@ -48,10 +53,11 @@ function fakeBuild(overrides: Record<string, string | null> = {}): string {
     const dist = path.join(root, 'dist');
     fs.mkdirSync(dist);
     const files: Record<string, string | null> = {
-        ...Object.fromEntries(DIRECT_BUNDLES.map((f: string) => [f, '<html><div id="conn-host"></div></html>'])),
+        ...Object.fromEntries(DIRECT_BUNDLES.map((f: string) => [f, `<html>${VENDOR}<div id="conn-host"></div></html>`])),
         [DEMO_BUNDLE]: DEMO_CLEAN,
-        [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')}</html>`,
+        [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')} ${VENDOR}</html>`,
         [PROVISIONED_DEMO_BUNDLE]: PROVISIONED_DEMO_CLEAN,
+        [ADMIN_BUNDLE]: '<html><div id="admin-login"></div></html>',
         ...overrides,
     };
     for (const [name, content] of Object.entries(files)) {
@@ -69,7 +75,7 @@ describe('check-bundles — checkBundles', () => {
     });
 
     it('fails a Direct bundle that carries a managed marker, naming the file and the marker', () => {
-        const root = fakeBuild({ 'min.html': '<html>fetch("/managed/logout")</html>' });
+        const root = fakeBuild({ 'min.html': `<html>${VENDOR} fetch("/managed/logout")</html>` });
         const problems = checkBundles(path.join(root, 'dist'));
         expect(problems).toHaveLength(1);
         expect(problems[0]).toMatch(/^min\.html: contains the managed marker "\/managed\/logout"/);
@@ -79,7 +85,7 @@ describe('check-bundles — checkBundles', () => {
     // The broker-facing calls are managed-only too: a Direct bundle that could
     // dial or reach the SEMP relay has imported the managed entry.
     it.each(['/managed/dial', '/managed/relay/'])('fails a Direct bundle that carries %s', (marker) => {
-        const problems = checkBundles(path.join(fakeBuild({ 'index.html': `<html>fetch("${marker}b1")</html>` }), 'dist'));
+        const problems = checkBundles(path.join(fakeBuild({ 'index.html': `<html>${VENDOR} fetch("${marker}b1")</html>` }), 'dist'));
         expect(problems).toEqual([expect.stringContaining(`index.html: contains the managed marker "${marker}"`)]);
     });
 
@@ -94,19 +100,19 @@ describe('check-bundles — checkBundles', () => {
     });
 
     it('fails when provisioned.html lacks a marker: the override did not apply, or the marker went stale', () => {
-        const root = fakeBuild({ [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.slice(1).join(' ')}</html>` });
+        const root = fakeBuild({ [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.slice(1).join(' ')} ${VENDOR}</html>` });
         const problems = checkBundles(path.join(root, 'dist'));
         expect(problems).toEqual([expect.stringContaining(`lacks the managed marker "${MANAGED_MARKERS[0]}"`)]);
     });
 
     // Either marker in a production bundle means demo code reached it.
     it.each(DEMO_MARKERS)('fails a production Direct bundle that carries the demo marker %s', (marker) => {
-        const problems = checkBundles(path.join(fakeBuild({ 'index.html': `<html>${marker}</html>` }), 'dist'));
+        const problems = checkBundles(path.join(fakeBuild({ 'index.html': `<html>${VENDOR} ${marker}</html>` }), 'dist'));
         expect(problems).toEqual([expect.stringMatching(new RegExp(`^index\\.html: contains the demo marker "${marker}"\\. Only `))]);
     });
 
     it('fails provisioned.html when it carries the fake gateway', () => {
-        const root = fakeBuild({ [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')} ${DEMO_MARKERS[0]}</html>` });
+        const root = fakeBuild({ [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')} ${VENDOR} ${DEMO_MARKERS[0]}</html>` });
         expect(checkBundles(path.join(root, 'dist'))).toEqual([
             expect.stringContaining(`provisioned.html: contains the demo marker "${DEMO_MARKERS[0]}"`),
         ]);
@@ -182,6 +188,39 @@ describe('check-bundles -- the Provisioned demo', () => {
     });
 });
 
+// The SDK and JSZip loaders and the library banner are the shell's `@vendor` blocks:
+// in every bundle whose modules may use the SDK, and in none of the admin one.
+describe('check-bundles -- the vendor loaders', () => {
+    const problemsFor = (overrides: Record<string, string | null>) => checkBundles(path.join(fakeBuild(overrides), 'dist'));
+
+    it('fails a Direct bundle that lost a loader marker, naming the file and the marker', () => {
+        expect(problemsFor({ 'min.html': '<html>js/solclient.js missing-lib-banner</html>' })).toEqual([
+            expect.stringMatching(/^min\.html: lacks the vendor marker "jszip\.min\.js"\. The shell's @vendor blocks/),
+        ]);
+    });
+
+    it.each([
+        { name: PROVISIONED_BUNDLE, text: `<html>${MANAGED_MARKERS.join(' ')}</html>` },
+        { name: PROVISIONED_DEMO_BUNDLE, text: PROVISIONED_DEMO_CLEAN.replace(VENDOR, '') },
+    ])('fails $name without the vendor blocks, once per marker', ({ name, text }) => {
+        const problems = problemsFor({ [name]: text });
+        expect(problems).toHaveLength(VENDOR_MARKERS.length);
+        VENDOR_MARKERS.forEach((marker: string, i: number) => {
+            expect(problems[i]).toContain(`${name}: lacks the vendor marker "${marker}"`);
+        });
+    });
+
+    it('fails when solAdmin.html is missing', () => {
+        expect(problemsFor({ [ADMIN_BUNDLE]: null })).toEqual([expect.stringMatching(/^solAdmin\.html: missing.*--variant=admin/)]);
+    });
+
+    it.each(VENDOR_MARKERS)('fails solAdmin.html when it carries %s: the admin variant lost its flag', (marker: string) => {
+        expect(problemsFor({ [ADMIN_BUNDLE]: `<html>${marker}</html>` })).toEqual([
+            expect.stringMatching(new RegExp(`^solAdmin\\.html: contains the vendor marker "${marker}".*NEEDS_VENDOR_SCRIPTS = false`)),
+        ]);
+    });
+});
+
 describe('check-bundles -- strayHosts', () => {
     it('keeps only literal hosts outside the allow-list, each once', () => {
         expect(strayHosts('http://www.w3.org/2000/svg https://east-prod.demo.invalid ws://10.0.0.1:8008 ws://10.0.0.1 https://${h} https://'))
@@ -216,7 +255,7 @@ describe('check-bundles — main', () => {
 
     it('returns 1 and lists every problem', () => {
         const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-        expect(main(fakeBuild({ 'index.html': 'btn-managed-login', [PROVISIONED_BUNDLE]: null }))).toBe(1);
+        expect(main(fakeBuild({ 'index.html': `btn-managed-login ${VENDOR}`, [PROVISIONED_BUNDLE]: null }))).toBe(1);
         expect(err).toHaveBeenCalledWith('Bundle check FAILED: 2 problem(s).');
         expect(err).toHaveBeenCalledWith(expect.stringContaining('index.html: contains the managed marker'));
     });

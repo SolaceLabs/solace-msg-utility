@@ -178,6 +178,7 @@ The gateway keeps its settings in `config.yaml`. The variables below seed it on 
 ### In production
 
 - **Health check:** the image has no shell, so it declares no `HEALTHCHECK`. Probe `https://<host>:9443/hosted` from outside (`200` while `SMU_HOSTED=true`; `503` once the app bundle can no longer be served, say a mounted build went away), with the certificate pinned or verification off. A client access list must allow the prober.
+- **Paths the gateway does not serve:** there is no history-mode fallback, because the app has no client-side routes and the bundle's relative vendor paths (`solclient.js`, `jszip.min.js`) only resolve at `/` and `/solAdmin`. A `GET` or `HEAD` for an unknown path without a file extension (`/a/b`, or `/login/` and `/login` in Gateway mode) answers `308` to `/` (any other method, `404`); a missing file with an extension is `404`. `/solAdmin/` answers `308` to `/solAdmin` where the admin route is enabled (`404` where it is not). A directory under the app directory without an `index.html` (for example `/licenses/`) is never listed and redirects to `/`. In Provisioned mode the session gate still answers first: a visitor without a session goes to `/login`.
 - **Your own build:** mount it at `/SolaceMsgUtility`. It must hold the mode's bundle (`index.html` in Gateway mode, `provisioned.html` in Provisioned mode): without it the gateway does not start, and the log names the file.
 - **Behind a reverse proxy:** pass the original `Host` header through, allow WebSocket upgrades, and list the proxy in `access.trustedProxies` so the gateway sees each client's own address. See [Client addresses behind Docker and proxies](#client-addresses-behind-docker-and-proxies).
 - **Network:** browsers need to reach only the gateway; the gateway needs the brokers' SEMP and web messaging ports. In Gateway mode the user picks `https`/`wss` or `http`/`ws` per connection; in Provisioned mode each stored connection uses TLS (`https` for SEMP, `wss` for messaging) unless an administrator gave it the plain scheme (`http`, `ws`).
@@ -212,14 +213,14 @@ Users sign in and get only the brokers and Message VPNs an administrator granted
 
 ## External Runtime Dependencies
 
-The PWA loads two external scripts via `<script>` tags. They are not bundled into the HTML: wherever you host an HTML file yourself, put both next to it. The image already includes both, from the exact versions `package.json` pins, with their licence files under `licenses/`. The same requirement applies to `min.html`, `demo.html`, `no-payload.html`, and `no-queue-copy.html`; every variant of the PWA expects the two vendor files next to it. `provisioned.html` (what the image serves in Provisioned mode) needs them too. `solAdmin.html` uses none of what those files provide (it never opens a broker connection and has no ZIP export), but it is built from the same shell, so it still runs the vendor loader and will show the "not found" banner if they are absent.
+The PWA loads two external scripts via `<script>` tags. They are not bundled into the HTML: wherever you host an HTML file yourself, put both next to it. The image already includes both, from the exact versions `package.json` pins, with their licence files under `licenses/`. The same requirement applies to `min.html`, `demo.html`, `no-payload.html`, and `no-queue-copy.html`; every variant of the PWA expects the two vendor files next to it. `provisioned.html` (what the image serves in Provisioned mode) needs them too. `solAdmin.html` uses none of what those files provide (it never opens a broker connection and has no ZIP export), so its build leaves out the vendor loader and the library banner: `/solAdmin` needs neither file. (`check:bundles` holds the build to it.)
 
 The shell tries each file in two locations, in order:
 
 1. The same directory as the HTML (e.g. `solclient.js` next to `index.html`).
 2. A sibling `js/` subfolder (e.g. `js/solclient.js`).
 
-The first file that loads wins; if both 404 the shell shows a "vendor file not found" banner at the top of the page. Only those two names are tried -- rename a debug build to `solclient.js` rather than dropping it in as `solclient-debug.js`.
+The first file that loads wins; if both 404 the shell shows a "vendor file not found" banner at the top of the page. The banner is visible from the start as a neutral "Loading the Solace library...", disappears when the SDK loads, and if nothing settles within 30 seconds reads "The Solace library did not finish loading. Check that solclient.js is next to this page." A `solclient.js` that loads but defines no `window.solace` is treated as not found (the `js/` location is then tried). Only those two names are tried -- rename a debug build to `solclient.js` rather than dropping it in as `solclient-debug.js`.
 
 ### 1. Solace JavaScript SDK (`solclient.js`)
 
@@ -252,7 +253,7 @@ The first file that loads wins; if both 404 the shell shows a "vendor file not f
 
 ### Graceful Degradation
 
-- If `solclient.js` is not found (or is too old), the app still starts and the banner at the top of the page explains why. **Connect** reports the missing or outdated library on the connection card; nothing else needs the SDK. A Connect pressed while the file is still downloading waits for the shell loader (up to 30 s) instead of failing.
+- If `solclient.js` is not found (or is too old), the app still starts and the banner at the top of the page explains why. The page itself shows "Loading..." in the content area until the first module's view appears. **Connect** reports the missing or outdated library on the connection card; nothing else needs the SDK. A Connect pressed while the file is still downloading waits for the shell loader (up to 30 s) instead of failing.
 - If `jszip.min.js` is not found, message download (ZIP export) will not work. All other features function normally.
 
 ---

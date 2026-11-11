@@ -113,6 +113,24 @@ export function activeModuleEntries(root, variant) {
     return entries;
 }
 
+/**
+ * Whether the active variant needs the shell's vendor scripts (the Solace SDK and
+ * JSZip loaders and the library banner). A manifest says `export const
+ * NEEDS_VENDOR_SCRIPTS = false;` to drop them; one without the export keeps them.
+ */
+export function variantNeedsVendorScripts(root, variant) {
+    const m = stripComments(readVariant(root, variant).src).match(/NEEDS_VENDOR_SCRIPTS[^=]*=\s*(true|false)\b/);
+    return !m || m[1] === 'true';
+}
+
+/**
+ * Remove every `<!-- @vendor:start -->` ... `<!-- @vendor:end -->` block from the
+ * shell HTML, with its own line. Without the flag the markers stay as comments.
+ */
+export function stripVendorBlocks(html) {
+    return html.replace(/[ \t]*<!-- @vendor:start -->[\s\S]*?<!-- @vendor:end -->[ \t]*\n?/g, '');
+}
+
 /** Absolute path of the module file a variant installs for `id`. */
 export function moduleEntryFile(root, id, entry) {
     const file = entry ? `module.${entry}.ts` : 'module.ts';

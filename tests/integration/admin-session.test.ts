@@ -16,10 +16,13 @@ import { createManagedProfile } from '../../src/core/services/managed-profile';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
 import type { AppContext, AppState } from '../../src/core/types';
 
-const { me, logout, umSvc, showToast } = vi.hoisted(() => ({
+const { me, logout, umSvc, connSvc, settingsSvc, backupSvc, showToast } = vi.hoisted(() => ({
     me: vi.fn(),
     logout: vi.fn(),
     umSvc: { listUsers: vi.fn(), saveUser: vi.fn(), deleteUser: vi.fn() },
+    connSvc: { listConnections: vi.fn() },
+    settingsSvc: { load: vi.fn() },
+    backupSvc: { status: vi.fn() },
     showToast: vi.fn(),
 }));
 vi.mock('../../src/core/services/managed-service', () => ({
@@ -28,11 +31,23 @@ vi.mock('../../src/core/services/managed-service', () => ({
 vi.mock('../../src/modules/user-management/service', () => ({
     createUserMgmtService: () => umSvc,
 }));
+vi.mock('../../src/modules/connection-management/service', () => ({
+    createConnMgmtService: () => connSvc,
+}));
+vi.mock('../../src/modules/gateway-settings/service', () => ({
+    createSettingsService: () => settingsSvc,
+}));
+vi.mock('../../src/modules/backup/service', () => ({
+    createBackupService: () => backupSvc,
+}));
 vi.mock('../../src/core/toast', () => ({ showToast }));
 
 // Import AFTER the mocks are registered.
 import { AdminLoginModule } from '../../src/modules/admin-login/module';
 import { UserManagementModule } from '../../src/modules/user-management/module';
+import { ConnectionManagementModule } from '../../src/modules/connection-management/module';
+import { GatewaySettingsModule } from '../../src/modules/gateway-settings/module';
+import { BackupModule } from '../../src/modules/backup/module';
 import { completeContext } from '../helpers/appContext';
 import { answerConfirm } from '../helpers/confirmDialog';
 
@@ -57,6 +72,10 @@ async function installAdminApp(list: unknown = { ok: true, data: { users: USERS,
         operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], brokers: [], modules: [],
     } });
     umSvc.listUsers.mockResolvedValue(list);
+    connSvc.listConnections.mockResolvedValue({ ok: true, data: [] });
+    // A refused load still counts as the one request; it needs no view to render.
+    settingsSvc.load.mockResolvedValue({ ok: false, status: 0, code: 'network' });
+    backupSvc.status.mockResolvedValue({ ok: false, status: 0, code: 'network' });
     const eventBus = createEventBus();
     const appState: AppState = {
         activeModuleId: null, isConnected: false, isSempConnected: false,
@@ -73,6 +92,9 @@ async function installAdminApp(list: unknown = { ok: true, data: { users: USERS,
     const loginCtx = ctxFor(login);
     await AdminLoginModule.install(loginCtx);
     await UserManagementModule.install(ctxFor(users));
+    await ConnectionManagementModule.install(ctxFor(loadModuleDOM('connection-management')));
+    await GatewaySettingsModule.install(ctxFor(loadModuleDOM('gateway-settings')));
+    await BackupModule.install(ctxFor(loadModuleDOM('backup')));
     return { appState, login, users, loginCtx };
 }
 
@@ -102,10 +124,25 @@ beforeEach(() => {
     umSvc.listUsers.mockReset();
     umSvc.saveUser.mockReset();
     umSvc.deleteUser.mockReset();
+    connSvc.listConnections.mockReset();
+    settingsSvc.load.mockReset();
+    backupSvc.status.mockReset();
     showToast.mockReset();
 });
 
 describe('integration — admin app session lifecycle', () => {
+    it('each admin module makes one request at start, and the kernel replay of rbac:changed adds none', async () => {
+        const app = await openAdminApp();
+        // admin-login restored the session before the other modules installed; the
+        // kernel then replays the held rbac:changed to them.
+        app.loginCtx.eventBus.emit('rbac:changed');
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(umSvc.listUsers).toHaveBeenCalledTimes(1);
+        expect(connSvc.listConnections).toHaveBeenCalledTimes(1);
+        expect(settingsSvc.load).toHaveBeenCalledTimes(1);
+        expect(backupSvc.status).toHaveBeenCalledTimes(1);
+    });
+
     it('changing your own password signs the admin app out instead of leaving a list that cannot load', async () => {
         const app = await openAdminApp();
         umSvc.saveUser.mockResolvedValue({ ok: true });

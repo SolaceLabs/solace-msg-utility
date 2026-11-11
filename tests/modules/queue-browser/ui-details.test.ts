@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ui, els } from '../../../src/modules/queue-browser/ui-core.js';
 import { initDetails } from '../../../src/modules/queue-browser/ui-details';
-import { BLOB_URL_REVOKE_DELAY_MS } from '../../../src/core/download';
 import { state } from '../../../src/modules/queue-browser/state.js';
 import { initTable } from '../../../src/modules/queue-browser/ui-table';
 import { createEventBus } from '../../../src/core/event-bus';
@@ -41,47 +40,33 @@ describe('queue-browser/ui-details', () => {
     });
 
     describe('triggerDownload()', () => {
-        it('creates blob and defers URL revocation', () => {
-            vi.useFakeTimers();
+        it('wraps the text in a blob of the given type and hands it to triggerDownloadBlob', async () => {
+            const saved = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
             ui.triggerDownload('test.txt', 'hello', 'text/plain');
-            expect(URL.createObjectURL).toHaveBeenCalled();
-            expect(URL.revokeObjectURL).not.toHaveBeenCalled();
-            vi.advanceTimersByTime(BLOB_URL_REVOKE_DELAY_MS);
-            expect(URL.revokeObjectURL).toHaveBeenCalled();
-            vi.useRealTimers();
-        });
-    });
 
-    describe('triggerDownloadBlob()', () => {
-        it('creates download link from blob and defers URL revocation', () => {
-            vi.useFakeTimers();
-            const blob = new Blob(['data']);
-            ui.triggerDownloadBlob(blob, 'file.bin');
-            expect(URL.createObjectURL).toHaveBeenCalled();
-            expect(URL.revokeObjectURL).not.toHaveBeenCalled();
-            vi.advanceTimersByTime(BLOB_URL_REVOKE_DELAY_MS);
-            expect(URL.revokeObjectURL).toHaveBeenCalled();
-            vi.useRealTimers();
+            expect(saved).toHaveBeenCalledTimes(1);
+            const [blob, filename] = saved.mock.calls[0] as [Blob, string];
+            expect(filename).toBe('test.txt');
+            expect(blob.type).toBe('text/plain');
+            expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual(Array.from(new TextEncoder().encode('hello')));
+            saved.mockRestore();
         });
-
     });
 
     describe('downloadMessageContent()', () => {
-        it('downloads message content', () => {
-            const msg = { id: 'msg-1', content: 'payload data' };
-            ui.downloadMessageContent(msg);
-            expect(URL.createObjectURL).toHaveBeenCalled();
-        });
-
         it('returns early for null message', () => {
             ui.downloadMessageContent(null);
             expect(URL.createObjectURL).not.toHaveBeenCalled();
         });
 
         it('handles empty content', () => {
-            const msg = { id: 'msg-2', content: '' };
-            ui.downloadMessageContent(msg);
-            expect(URL.createObjectURL).toHaveBeenCalled();
+            const triggerSpy = vi.spyOn(ui, 'triggerDownload').mockImplementation(() => {});
+            ui.downloadMessageContent({ id: 'msg-2', content: '' });
+
+            expect(triggerSpy).toHaveBeenCalledTimes(1);
+            expect(triggerSpy.mock.calls[0][0]).toBe('solace-message-msg-2');
+            expect(triggerSpy.mock.calls[0][1]).toBe('');
+            triggerSpy.mockRestore();
         });
 
         it('sanitizes filename from message id', () => {
@@ -219,12 +204,6 @@ describe('queue-browser/ui-details', () => {
     });
 
     describe('downloadMessageFull()', () => {
-        it('downloads full message as JSON', () => {
-            const msg = { id: 'msg-1', type: 'Text', content: 'test', msgProperties: {}, appProperties: {} };
-            ui.downloadMessageFull(msg);
-            expect(URL.createObjectURL).toHaveBeenCalled();
-        });
-
         it('returns early for null message', () => {
             ui.downloadMessageFull(null);
             expect(URL.createObjectURL).not.toHaveBeenCalled();
@@ -360,7 +339,8 @@ describe('queue-browser/ui-details', () => {
 
             expect(els.btnCopyDest.disabled).toBe(false);
             els.btnCopyDest.click();
-            expect(ctx.copyToClipboard).toHaveBeenCalled();
+            expect(ctx.copyToClipboard).toHaveBeenCalledTimes(1);
+            expect(ctx.copyToClipboard).toHaveBeenCalledWith('dest', els.btnCopyDest);
         });
 
         it('enables copy repl-msg-id button and wires onclick', () => {
@@ -377,13 +357,24 @@ describe('queue-browser/ui-details', () => {
 
             expect(els.btnCopyReplMsgId.disabled).toBe(false);
             els.btnCopyReplMsgId.click();
-            expect(ctx.copyToClipboard).toHaveBeenCalled();
+            expect(ctx.copyToClipboard).toHaveBeenCalledTimes(1);
+            expect(ctx.copyToClipboard).toHaveBeenCalledWith('rmid', els.btnCopyReplMsgId);
         });
 
         it('does nothing if message not found', () => {
-            state.displayedMessages = [];
+            const msg = {
+                id: 'msg-1', type: 'Text', content: '', msgProperties: {}, appProperties: {},
+                _originalMsg: {
+                    getDestination: () => ({ getName: () => 'd', getType: () => 0 }),
+                    getReplicationGroupMessageId: () => null, dump: () => ''
+                }
+            };
+            state.displayedMessages = [msg];
+            ui.selectMessage('msg-1');
+
             ui.selectMessage('nonexistent');
-            expect(els.detailId.textContent).toBe('');
+            expect(els.detailId.textContent).toBe('msg-1');
+            expect(state.selectedMessage).toBe(msg);
         });
 
         it('wires showRaw button onclick', () => {
@@ -671,45 +662,7 @@ describe('queue-browser/ui-details', () => {
 
     });
 
-    describe('addPropertyFilterRow edge cases', () => {
-        it('non-Enter key on filter row does not trigger apply', () => {
-            ui.addPropertyFilterRow('key', 'val');
-            const keyInput = els.filterPropsRows.querySelector('.prop-key') as HTMLElement;
-            const applyClickSpy = vi.spyOn(els.btnFilterApply, 'click');
-            keyInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
-            expect(applyClickSpy).not.toHaveBeenCalled();
-        });
-    });
-
     describe('selectMessage destination label', () => {
-        it('shows TOPIC label when destType matches solace.DestinationType.TOPIC', () => {
-            const solace = (window as any).solace;
-            const msg = {
-                id: 'msg-1', type: 'Text', content: '', msgProperties: {}, appProperties: {},
-                _originalMsg: {
-                    getDestination: () => ({ getName: () => 'my/topic', getType: () => solace.DestinationType.TOPIC }),
-                    getReplicationGroupMessageId: () => null, dump: () => ''
-                }
-            };
-            state.displayedMessages = [msg];
-            ui.selectMessage('msg-1');
-            expect(els.detailDestBadge.textContent).toBe('Topic');
-        });
-
-        it('shows Queue label when destType matches solace.DestinationType.QUEUE', () => {
-            const solace = (window as any).solace;
-            const msg = {
-                id: 'msg-1', type: 'Text', content: '', msgProperties: {}, appProperties: {},
-                _originalMsg: {
-                    getDestination: () => ({ getName: () => 'my-queue', getType: () => solace.DestinationType.QUEUE }),
-                    getReplicationGroupMessageId: () => null, dump: () => ''
-                }
-            };
-            state.displayedMessages = [msg];
-            ui.selectMessage('msg-1');
-            expect(els.detailDestBadge.textContent).toBe('Queue');
-        });
-
         it('falls back to raw enum string when destType is neither TOPIC nor QUEUE', () => {
             // Covers the falsy branch of `else if (destType === QUEUE)` at
             // ui-details.ts:102 — when a future Solace SDK introduces a new

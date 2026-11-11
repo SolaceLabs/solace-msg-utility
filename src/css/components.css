@@ -14,7 +14,12 @@
     width: 100%;
     z-index: var(--z-dropdown);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-    display: none;
+}
+
+/* Neutral while the Solace library loads; the loader drops the class on an error. */
+.notification-banner.is-pending {
+    background-color: var(--bg-card);
+    color: var(--text-primary);
 }
 
 .notification-banner a {

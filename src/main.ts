@@ -8,6 +8,7 @@
 import './css/main.css';
 import { boot as preBoot } from './core/boot';
 import { Kernel } from './core/kernel';
+import { logger } from './core/logger';
 import { modules } from './registry';
 
 // Pre-kernel seam. A no-op in shipped builds; the demo build redirects it to
@@ -22,4 +23,6 @@ const kernel = new Kernel(modules);
 // live, and Connect waits for the shell loader (src/index.html) if the SDK is
 // still downloading. A missing or outdated SDK is reported at Connect, not
 // by a blank page.
-kernel.start();
+kernel.start().catch((err: unknown) => {
+    logger.error('[main] The kernel failed to start; the page may be incomplete. Reload to retry.', err);
+});

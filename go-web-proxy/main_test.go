@@ -249,6 +249,31 @@ func TestRootHandler_WithoutManagedRouting(t *testing.T) {
 	}
 }
 
+// Gateway mode end to end through the route table: /solAdmin/ and an unknown
+// extensionless path (/login included, which only Provisioned mode serves)
+// are sent to the page that can load its vendor scripts, while the real
+// routes answer as they did.
+func TestRootHandler_RedirectsInGatewayMode(t *testing.T) {
+	dir := writeBundles(t)
+	app := mustPWA(t, dir, directIndexFile)
+	h := newRootHandler(stubHandler("hosted"), newAdminHandler(dir, true, quietLogger()), app, stubHandler("relay"), nil)
+	for path, want := range map[string]string{"/solAdmin/": "/solAdmin", "/login": "/", "/login/": "/", "/a/b": "/"} {
+		if rec := route(h, path); rec.Code != http.StatusPermanentRedirect || rec.Header().Get("Location") != want {
+			t.Errorf("%s: want 308 to %s, got %d %q", path, want, rec.Code, rec.Header().Get("Location"))
+		}
+	}
+	for path, want := range map[string]string{"/": "<html>direct</html>", "/solAdmin": "<html>admin</html>", "/hosted": "hosted", "/https/943/broker/SEMP/x": "relay"} {
+		if rec := route(h, path); rec.Code != http.StatusOK || rec.Body.String() != want {
+			t.Errorf("%s: want 200 %q, got %d %q", path, want, rec.Code, rec.Body.String())
+		}
+	}
+	// A deployment with the admin route off keeps /solAdmin/ a plain 404.
+	off := newRootHandler(stubHandler("hosted"), newAdminHandler(dir, false, quietLogger()), app, stubHandler("relay"), nil)
+	if rec := route(off, "/solAdmin/"); rec.Code != http.StatusNotFound {
+		t.Errorf("/solAdmin/ with the admin route off: want 404, got %d", rec.Code)
+	}
+}
+
 func TestRootHandler_RobotsOnEveryResponse(t *testing.T) {
 	h := newRootHandler(stubHandler("hosted"), stubHandler("admin"), stubHandler("app"), stubHandler("relay"), nil)
 	rec := route(h, "/robots.txt")

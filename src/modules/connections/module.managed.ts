@@ -16,7 +16,7 @@ import { required } from '../../core/dom';
 import { logger } from '../../core/logger';
 import { probeDeployment } from '../../core/hosted';
 import { resolveConnTabs, type ConnMode } from '../../core/connections/conn-modes';
-import { CONNECTIONS_ICON, installDirect } from './module';
+import { CONNECTIONS_ICON, installDirect, showProbeNotice } from './module';
 import { createManagedPanel } from './managed-panel';
 import type { AppContext } from '../../core/types';
 
@@ -62,14 +62,27 @@ export const ConnectionsModule = {
     id: 'connections',
     icon: CONNECTIONS_ICON,
 
-    async install(app: AppContext) {
+    async install(app: AppContext, opts: { reload?: () => void } = {}) {
         const { container, appState, eventBus, loadSelf } = app;
 
         // 0. Probe `/hosted` (see module.ts) and publish the deployment's
         //    connection config with the hosted verdict (its one home), so other
         //    modules derive what they may offer for their own secondary
         //    connections, and route their URLs, without re-probing the gateway.
-        const { hosted, conn } = await probeDeployment();
+        const { hosted, conn, inconclusive } = await probeDeployment();
+        if (inconclusive) {
+            // Never fall back to a Direct-only view: this bundle exists to sign
+            // in through the gateway. Say so, in place of every panel, and
+            // publish no verdict (none is known); Retry reloads the page.
+            required<HTMLElement>(container, '#conn-panel-direct').classList.add('hidden');
+            showProbeNotice(
+                required<HTMLElement>(container, '#conn-probe-notice-managed'),
+                required<HTMLElement>(container, '#btn-conn-probe-retry-managed'),
+                opts.reload ?? (() => window.location.reload()),
+            );
+            logger.warn('[Connections] /hosted probe was inconclusive; showing the retry notice instead of the connection panels');
+            return;
+        }
         app.setState('connConfig', { ...conn, hosted });
         logger.info(`[Connections] mode = ${hosted ? 'hosted' : 'browser'}`);
 

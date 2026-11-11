@@ -220,15 +220,160 @@ describe('Kernel', () => {
             delete (window as any).jszipLoaded;
         });
 
-        it('clears module container on start', async () => {
+        it('does not empty the module container at start: content already there stays, module views are appended', async () => {
             setupDOM(['test-module']);
-            document.getElementById('module-container')!.innerHTML = '<div>old stuff</div>';
+            document.getElementById('module-container')!.innerHTML = '<div id="pre-existing">old stuff</div>';
             const mod = createMockModule({ id: 'test-module' });
             const kernel = new Kernel([reg(mod)]);
             await kernel.start();
 
-            // Old content should be gone
-            expect(document.getElementById('module-container')!.innerHTML).not.toContain('old stuff');
+            const children = Array.from(document.getElementById('module-container')!.children).map(c => c.id);
+            expect(children).toEqual(['pre-existing', 'module-view-test-module']);
+        });
+
+        describe('loading placeholder and start-up failures', () => {
+            const LOADING = '<div id="app-loading" class="app-loading" role="status">Loading...</div>';
+
+            function setupLoadingDOM(moduleIds: string[]) {
+                setupDOM(moduleIds);
+                document.getElementById('module-container')!.innerHTML = LOADING;
+                document.body.insertAdjacentHTML('beforeend', '<div id="toast-container"></div>');
+            }
+
+            it('keeps the placeholder while modules install and removes it when the first view is shown', async () => {
+                let presentDuringInstall = false;
+                const mod = createMockModule({
+                    id: 'test-module',
+                    install: vi.fn(async () => { presentDuringInstall = !!document.getElementById('app-loading'); }),
+                });
+                setupLoadingDOM(['test-module']);
+                await new Kernel([reg(mod)]).start();
+
+                expect(presentDuringInstall).toBe(true);
+                expect(document.getElementById('app-loading')).toBeNull();
+                expect(document.getElementById('module-view-test-module')!.classList.contains('hidden')).toBe(false);
+            });
+
+            it('starts and navigates normally when the shell has no placeholder', async () => {
+                const mod = createMockModule({ id: 'test-module', name: 'Test Module' });
+                setupDOM(['test-module']);
+                await new Kernel([reg(mod)]).start();
+
+                expect(document.getElementById('page-title')!.textContent).toBe('Test Module');
+                expect(document.getElementById('module-container')!.children).toHaveLength(1);
+            });
+
+            it('replaces the placeholder text with a message when no module is registered', async () => {
+                setupLoadingDOM([]);
+                await new Kernel([]).start();
+
+                const loading = document.getElementById('app-loading')!;
+                expect(loading.textContent).toBe('No modules are available. Check the browser console.');
+            });
+
+            it('replaces the placeholder text with a message when every module fails to install', async () => {
+                const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+                setupLoadingDOM(['a']);
+                const failing = createMockModule({ id: 'a', name: 'A', install: vi.fn(async () => { throw new Error('boom'); }) });
+                await new Kernel([reg(failing)]).start();
+
+                expect(document.getElementById('app-loading')!.textContent)
+                    .toBe('No modules are available. Check the browser console.');
+                errSpy.mockRestore();
+            });
+
+            it('shows no message and does not throw when nothing is installed and the shell has no container', async () => {
+                document.body.innerHTML = '<nav id="sidebar-nav"></nav>';
+                await expect(new Kernel([]).start()).resolves.toBeUndefined();
+                expect(document.getElementById('app-loading')).toBeNull();
+            });
+
+            it('shows one error toast naming a module whose install throws, and still installs the others', async () => {
+                const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+                const failing = createMockModule({
+                    id: 'a', name: 'Alpha',
+                    install: vi.fn(async () => { throw new Error('boom'); }),
+                });
+                const healthy = createMockModule({ id: 'b', name: 'Beta' });
+                setupLoadingDOM(['a', 'b']);
+                await new Kernel([reg(failing, 100), reg(healthy, 50)]).start();
+
+                const toasts = Array.from(document.querySelectorAll('#toast-container .toast--error'));
+                expect(toasts.map(t => t.textContent)).toEqual([
+                    'Module "Alpha" failed to install. See the browser console for details.',
+                ]);
+                expect(healthy.install).toHaveBeenCalledTimes(1);
+                expect(document.getElementById('page-title')!.textContent).toBe('Beta');
+                errSpy.mockRestore();
+            });
+
+            it('names each failed module in its own toast', async () => {
+                const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+                const bad = (id: string, name: string) => createMockModule({
+                    id, name, install: vi.fn(async () => { throw new Error('boom'); }),
+                });
+                setupLoadingDOM(['a', 'b']);
+                await new Kernel([reg(bad('a', 'Alpha'), 100), reg(bad('b', 'Beta'), 50)]).start();
+
+                const texts = Array.from(document.querySelectorAll('#toast-container .toast--error')).map(t => t.textContent);
+                expect(texts).toEqual([
+                    'Module "Alpha" failed to install. See the browser console for details.',
+                    'Module "Beta" failed to install. See the browser console for details.',
+                ]);
+                errSpy.mockRestore();
+            });
+
+            it('releases the event bus even when an install path throws outside the module', async () => {
+                // importNode runs in installModule before mod.install's own try/catch,
+                // so its throw escapes the loop: the finally must still flush the bus.
+                const handler = vi.fn();
+                const first = createMockModule({
+                    id: 'a', name: 'A',
+                    install: vi.fn(async (ctx: AppContext) => {
+                        ctx.eventBus.on('semp:connected', handler);
+                        ctx.eventBus.emit('semp:connected');
+                    }),
+                });
+                const second = createMockModule({ id: 'b', name: 'B' });
+                setupLoadingDOM(['a', 'b']);
+
+                const realImport = document.importNode.bind(document);
+                let calls = 0;
+                const importSpy = vi.spyOn(document, 'importNode').mockImplementation(((node: Node, deep?: boolean) => {
+                    if (++calls === 2) throw new Error('importNode blew up');
+                    return realImport(node, deep);
+                }) as typeof document.importNode);
+                try {
+                    await expect(new Kernel([reg(first, 100), reg(second, 50)]).start())
+                        .rejects.toThrow('importNode blew up');
+                } finally {
+                    importSpy.mockRestore();
+                }
+
+                // Held during the install of a, delivered on release: not lost, not stuck.
+                expect(handler).toHaveBeenCalledTimes(1);
+            });
+
+            it('delivers an event emitted in a higher-priority install to a lower-priority module that subscribes only in its own install', async () => {
+                // The hold-and-replay guarantee: connections (priority 100) emits while
+                // installing, before queue-copy (70) has subscribed; the bus holds the
+                // emit and replays it once every install has finished.
+                const received = vi.fn();
+                const emitter = createMockModule({
+                    id: 'emitter', name: 'Emitter',
+                    install: vi.fn(async (ctx: AppContext) => { ctx.eventBus.emit('semp:connected'); }),
+                });
+                const late = createMockModule({
+                    id: 'late', name: 'Late',
+                    install: vi.fn(async (ctx: AppContext) => { ctx.eventBus.on('semp:connected', received); }),
+                });
+                setupDOM(['emitter', 'late']);
+                const kernel = new Kernel([reg(late, 70), reg(emitter, 100)]);
+
+                await kernel.start();
+
+                expect(received).toHaveBeenCalledTimes(1);
+            });
         });
 
         it('handles missing template gracefully', async () => {

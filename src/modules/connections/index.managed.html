@@ -1,5 +1,10 @@
 <!-- Provisioned entry template (the `managed` variant). The build splices the
      Direct markup from index.html in at the module-base marker below. -->
+<!-- Shown by module.managed.ts, in place of every panel, when the /hosted probe was inconclusive. -->
+<div id="conn-probe-notice-managed" class="card conn-probe-notice hidden" role="status">
+    <span>Could not check whether this page is served by the gateway.</span>
+    <button id="btn-conn-probe-retry-managed" class="btn btn-secondary" type="button">Retry</button>
+</div>
 <div id="conn-tabs" class="conn-tabs flex-row gap-2 mb-4 hidden" role="tablist">
     <button id="conn-tab-direct" class="btn btn-primary conn-tab" type="button" role="tab" data-conn-mode="direct" aria-selected="true">Direct</button>
     <button id="conn-tab-managed" class="btn btn-secondary conn-tab hidden" type="button" role="tab" data-conn-mode="provisioned" aria-selected="false">Provisioned</button>

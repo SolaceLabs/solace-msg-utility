@@ -72,8 +72,8 @@ func (h *hostedHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 // adminHandler serves the standalone administration app (the `admin` variant's
 // solAdmin.html). It is a dedicated route rather than a file the SPA tree serves
 // on its own for two reasons: the entitlement editors must not be reachable from
-// a deployment that has no user list to edit, and the SPA's history-mode
-// fallback would otherwise answer /solAdmin with the ordinary index.html.
+// a deployment that has no user list to edit, and the app's catch-all
+// would otherwise answer /solAdmin with a redirect to the ordinary app.
 //
 // Outside Provisioned mode the route 404s, which is also what a wrong URL
 // returns -- a probe cannot tell an admin-capable deployment from any
@@ -94,6 +94,11 @@ func (h *adminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// The bundle's relative vendor paths only resolve at /solAdmin.
+	if r.URL.Path == adminPath+"/" {
+		http.Redirect(w, r, adminPath, http.StatusPermanentRedirect)
+		return
+	}
 	data, err := os.ReadFile(h.root + "/" + adminIndexFile)
 	if err != nil {
 		// The route is enabled but the bundle isn't deployed — a packaging
@@ -111,7 +116,7 @@ func (h *adminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type pwaHandler struct {
 	root   string
-	index  string // the bundle served at / and as the history-mode fallback
+	index  string // the bundle served at /
 	fs     http.Handler
 	logger *slog.Logger
 }
@@ -164,10 +169,11 @@ func (h *pwaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// / is the mode's bundle. SPA history-mode fallback: a path that doesn't
-	// resolve to a real file gets the same bundle inline. Asset requests
-	// (anything with a file extension) skip the fallback so a missing asset
-	// still 404s loudly.
+	// / is the mode's bundle. The app has no client-side routes, and the
+	// bundle's relative vendor paths only resolve at /, so a path that doesn't
+	// resolve to a real file is sent there (308 for GET and HEAD; any other
+	// method has nothing to follow, so 404). A missing asset (anything with a
+	// file extension) 404s loudly.
 	if clean == "/" {
 		h.serveIndex(w, r)
 		return
@@ -177,7 +183,11 @@ func (h *pwaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		h.serveIndex(w, r)
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusPermanentRedirect)
 		return
 	}
 	h.fs.ServeHTTP(w, r)
@@ -350,7 +360,7 @@ func contextWithTarget(ctx context.Context, u *url.URL) context.Context {
 
 // refuseRelay answers the relay paths in files-only mode (hosted: false), where
 // the app connects to brokers itself: the gateway relays nothing, and a 403
-// says so where the app's fallback would hide it.
+// says so where the app's redirect to / would hide it.
 func refuseRelay(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, "403 forbidden: this deployment serves the app's files only and relays no broker connection", http.StatusForbidden)
 }

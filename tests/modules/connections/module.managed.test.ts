@@ -133,6 +133,54 @@ describe('connections/module.managed — connection-mode tabs', () => {
     });
 });
 
+describe('connections/module.managed -- inconclusive /hosted probe', () => {
+    const visible = (sel: string) => !hiddenCls(sel);
+
+    it('never falls back to Direct-only: the notice replaces every panel, no verdict is published, and Retry reloads', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => { });
+        (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 503, text: () => Promise.resolve('') });
+        const { ctx, appState } = createTestContext(container);
+        const reload = vi.fn();
+        await ConnectionsModule.install(ctx, { reload });
+
+        expect(visible('#conn-probe-notice-managed')).toBe(true);
+        expect(container.querySelector('#conn-probe-notice-managed')!.textContent).toContain('Could not check whether this page is served by the gateway.');
+        expect(hiddenCls('#conn-panel-direct')).toBe(true);
+        expect(hiddenCls('#conn-panel-managed')).toBe(true);
+        expect(hiddenCls('#conn-tabs')).toBe(true);
+        expect(appState.connConfig).toBeUndefined();
+
+        (container.querySelector('#btn-conn-probe-retry-managed') as HTMLButtonElement).click();
+        expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it('a network error is inconclusive too; Retry without an injected reload calls window.location.reload', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => { });
+        (globalThis.fetch as any).mockRejectedValue(new TypeError('Failed to fetch'));
+        const { ctx } = createTestContext(container);
+        await ConnectionsModule.install(ctx);
+        expect(visible('#conn-probe-notice-managed')).toBe(true);
+
+        const original = window.location;
+        const reload = vi.fn();
+        Object.defineProperty(window, 'location', { value: { reload }, writable: true, configurable: true });
+        try {
+            (container.querySelector('#btn-conn-probe-retry-managed') as HTMLButtonElement).click();
+        } finally {
+            Object.defineProperty(window, 'location', { value: original, writable: true, configurable: true });
+        }
+        expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it('a conclusive no-gateway (404) shows no notice', async () => {
+        (globalThis.fetch as any).mockImplementation(() => Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('') }));
+        const { ctx } = createTestContext(container);
+        await ConnectionsModule.install(ctx);
+        expect(visible('#conn-probe-notice-managed')).toBe(false);
+        expect(hiddenCls('#conn-panel-direct')).toBe(false);
+    });
+});
+
 describe('connections/module.managed — routers without a managed session', () => {
     it('connection:edit-requested navigates to the module', async () => {
         stubHosted({ hosted: true, connModes: 'both', defaultConn: 'direct' });

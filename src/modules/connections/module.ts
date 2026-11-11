@@ -25,6 +25,7 @@ import { createServiceSemp, type SempConnectionHooks } from '../../core/services
 import { showToast } from '../../core/toast';
 import { INPUT_DEBOUNCE_MS } from '../../core/timing';
 import { logger } from '../../core/logger';
+import { required } from '../../core/dom';
 import { normalizeUrlPath, generateUuid, sdkClientName, sempAccountError } from '../../core/utils';
 import { createOptionalField } from './optional-field';
 import { isHostedDeployment, limitSchemeOptions, probeDeployment, usableScheme } from '../../core/hosted';
@@ -654,13 +655,23 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
     };
 }
 
+/**
+ * Reveal an inconclusive-`/hosted` notice and wire its Retry button to a page
+ * reload, so every reader of the verdict (read once at install) sees the new
+ * one. Shared by both entry files, which each own their notice element.
+ */
+export function showProbeNotice(notice: HTMLElement, retry: HTMLElement, reload: () => void): void {
+    notice.classList.remove('hidden');
+    retry.addEventListener('click', () => reload());
+}
+
 export const ConnectionsModule = {
     name: 'Connections',
     id: 'connections',
     icon: CONNECTIONS_ICON,
 
-    async install(app: AppContext) {
-        const { eventBus, loadSelf } = app;
+    async install(app: AppContext, opts: { reload?: () => void } = {}) {
+        const { container, eventBus, loadSelf } = app;
 
         // 0. Probe `/hosted`. Behind go-web-proxy with hosted on, every broker
         //    URL (Solace WebSocket + SEMP HTTP) must route via the gateway proxy
@@ -669,7 +680,7 @@ export const ConnectionsModule = {
         //    The verdict's one home is AppState.connConfig.hosted (read with
         //    isHostedDeployment); the probe has its own deadline, so a stalled
         //    /hosted cannot keep the page blank.
-        const { hosted, conn } = await probeDeployment();
+        const { hosted, conn, inconclusive } = await probeDeployment();
         // This bundle offers Direct only, whatever the gateway advertises. Publish
         // that, so modules deriving their own connection choices (queue-copy's
         // destination) never offer a provisioned mode no session can back.
@@ -679,6 +690,14 @@ export const ConnectionsModule = {
         }
         app.setState('connConfig', { ...DEFAULT_CONN_CONFIG, hosted });
         log.info(`mode = ${hosted ? 'hosted' : 'browser'}`);
+        // An inconclusive probe keeps the app usable standalone, but says so.
+        if (inconclusive) {
+            showProbeNotice(
+                required<HTMLElement>(container, '#conn-probe-notice'),
+                required<HTMLElement>(container, '#btn-conn-probe-retry'),
+                opts.reload ?? (() => window.location.reload()),
+            );
+        }
 
         const direct = installDirect(app);
 

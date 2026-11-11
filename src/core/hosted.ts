@@ -36,30 +36,48 @@ export interface DeploymentInfo {
     hosted: boolean;
     /** Which connection tabs to offer + default. Direct-only when not hosted. */
     conn: ConnDeploymentConfig;
+    /**
+     * Set when the probe could not tell (no answer in time, a network error, a
+     * 5xx answer). `hosted` is false and `conn` Direct-only then, but only as
+     * placeholders: a conclusive "no gateway" never carries this flag.
+     */
+    inconclusive?: true;
 }
 
 /**
  * Probe the gateway's `/hosted` endpoint for hosted-mode + connection-tab config.
  *
  * The current gateway returns JSON `{ hosted:true, connModes, defaultConn }`; a
- * legacy gateway may return plaintext `'true'`/`'false'`. Any non-200,
- * non-hosted, malformed, timed-out (`HOSTED_PROBE_TIMEOUT_MS`) or network-error
- * outcome resolves to `{ hosted:false, conn: DEFAULT_CONN_CONFIG }` (Direct
- * only) -- so a static/non-hosted deployment never surfaces Managed, and a
- * stalled answer cannot keep the app from rendering. A legacy plaintext
- * `'true'` is treated as hosted with the Direct-only default (Managed requires
- * the JSON contract). Each fallback logs why: info for the ordinary no-gateway
- * answers, warn for an answer that looks broken.
+ * legacy gateway may return plaintext `'true'`/`'false'`. A conclusive "no
+ * gateway" -- any other non-OK answer (a 404 from a static host), `false`, an
+ * empty body, a body that is neither JSON nor true/false, `hosted:false` --
+ * resolves to `{ hosted:false, conn: DEFAULT_CONN_CONFIG }` (Direct only), so a
+ * static/non-hosted deployment never surfaces Managed. An inconclusive probe --
+ * no complete answer within `HOSTED_PROBE_TIMEOUT_MS` (headers and body: one
+ * deadline over the exchange), a network error or a 5xx answer -- resolves to
+ * the same placeholders plus `inconclusive: true`, so the caller can tell the
+ * user instead of silently assuming no gateway, and a stalled answer still
+ * cannot keep the app from rendering. A legacy plaintext `'true'` is treated as
+ * hosted with the Direct-only default (Managed requires the JSON contract).
+ * Each fallback logs why: info for the ordinary no-gateway answers, warn for an
+ * answer that looks broken or inconclusive.
  */
 export async function probeDeployment(): Promise<DeploymentInfo> {
     const notHosted: DeploymentInfo = { hosted: false, conn: DEFAULT_CONN_CONFIG };
     try {
-        const res = await raceDeadline(fetch('/hosted', { method: 'GET', cache: 'no-store' }), HOSTED_PROBE_TIMEOUT_MS);
-        if (!res.ok) {
-            log.info(`/hosted answered HTTP ${res.status}: no gateway, Direct only`);
+        const answer = await raceDeadline((async () => {
+            const res = await fetch('/hosted', { method: 'GET', cache: 'no-store' });
+            return { ok: res.ok, status: res.status, text: res.ok ? await res.text() : '' };
+        })(), HOSTED_PROBE_TIMEOUT_MS);
+        if (answer.status >= 500) {
+            log.warn(`/hosted answered HTTP ${answer.status}; cannot tell whether a gateway serves this page`);
+            return { ...notHosted, inconclusive: true };
+        }
+        if (!answer.ok) {
+            log.info(`/hosted answered HTTP ${answer.status}: no gateway, Direct only`);
             return notHosted;
         }
-        const text = (await res.text()).trim();
+        const text = answer.text.trim();
         const lower = text.toLowerCase();
         if (lower === 'true') return { hosted: true, conn: DEFAULT_CONN_CONFIG }; // legacy plaintext
         if (lower === 'false' || lower === '') {
@@ -80,8 +98,8 @@ export async function probeDeployment(): Promise<DeploymentInfo> {
         }
         return { hosted: true, conn: coerceConnConfig(json) };
     } catch (e) {
-        log.warn('/hosted probe failed (network error or no answer in time); treating the page as not hosted (Direct only):', e);
-        return notHosted;
+        log.warn('/hosted probe was inconclusive (network error or no complete answer in time); cannot tell whether a gateway serves this page:', e);
+        return { ...notHosted, inconclusive: true };
     }
 }
 

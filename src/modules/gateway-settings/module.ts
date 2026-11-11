@@ -206,9 +206,19 @@ export const GatewaySettingsModule = {
             await load(); // the gateway's normalised values and the restart banner
         }
 
+        // The session as this module last applied it: signed-in user and admin
+        // flag, null when signed out. A replayed or unrelated rbac:changed (the
+        // kernel's held replay at start, a broker connect) leaves it equal.
+        const sessionKey = (): string | null => {
+            const m = appState.managed;
+            return m ? JSON.stringify([m.username, m.admin]) : null;
+        };
+        let appliedKey = sessionKey();
+
         // Admin sessions only, like the other admin modules. Called at install
-        // and on every rbac:changed.
+        // and on an rbac:changed that changes the session.
         function applyGate(): void {
+            appliedKey = sessionKey();
             if (!appState.managed?.admin) {
                 els.view.classList.add('hidden');
                 gate.show();
@@ -221,7 +231,9 @@ export const GatewaySettingsModule = {
 
         els.btnReload.addEventListener('click', () => void load());
         els.btnSave.addEventListener('click', () => void save());
-        eventBus.on('rbac:changed', () => applyGate());
+        eventBus.on('rbac:changed', () => {
+            if (sessionKey() !== appliedKey) applyGate();
+        });
 
         applyGate();
         logger.info('Gateway Settings Module Setup Complete');

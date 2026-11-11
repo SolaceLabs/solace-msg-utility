@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readSource } from '../helpers/sources';
 import { boot } from '../../src/mock-broker/boot';
 import { NETWORK_DISABLED } from '../../src/mock-broker/network';
 import { DIRECT_BANNER } from '../../src/mock-broker/controls/panel';
@@ -86,6 +87,43 @@ describe('mock-broker/boot — the vendor race', () => {
 
         // Hiding it would not survive the loader's onerror calling showBanner
         // again; showBanner no-ops only when the element is gone.
+        expect(document.getElementById('missing-lib-banner')).toBeNull();
+    });
+
+    // The shell's real loader runs first (it is in <head>), then boot() removes the banner;
+    // whatever the loader does afterwards must find no banner and throw nothing.
+    function bootAfterLoader(): HTMLScriptElement[] {
+        vi.useFakeTimers();
+        const loader = readSource('src/index.html').match(/<!-- Solace Library Loader -->\s*<script>([\s\S]*?)<\/script>/)![1];
+        const appended: HTMLScriptElement[] = [];
+        vi.spyOn(document.head, 'appendChild').mockImplementation(((node: Node) => {
+            appended.push(node as HTMLScriptElement);
+            return node;
+        }) as typeof document.head.appendChild);
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const banner = document.createElement('div');
+        banner.id = 'missing-lib-banner';
+        document.body.appendChild(banner);
+        new Function(loader)();
+        boot();
+        return appended;
+    }
+
+    it('keeps the banner gone, and throws nothing, when solclient.js turns out to be absent after boot', () => {
+        const appended = bootAfterLoader();
+        const fail = (src: string) => (appended.find((x) => x.getAttribute('src') === src)!.onerror as unknown as () => void)();
+
+        expect(() => { fail('solclient.js'); fail('js/solclient.js'); }).not.toThrow();
+
+        expect(document.getElementById('missing-lib-banner')).toBeNull();
+    });
+
+    it('keeps the banner gone, and throws nothing, when the loader hears nothing and its watchdog fires', () => {
+        bootAfterLoader();
+
+        expect(() => vi.advanceTimersByTime(60_000)).not.toThrow();
+
         expect(document.getElementById('missing-lib-banner')).toBeNull();
     });
 

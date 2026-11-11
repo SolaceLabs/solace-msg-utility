@@ -162,6 +162,21 @@ describe('mock-broker/boot.managed -- the sign-in and the reloads', () => {
         expect(open()).toBe(false);
     });
 
+    it('starts from the seed, clears the snapshot and says so when a same-version snapshot is damaged', () => {
+        document.body.innerHTML = '<div id="toast-container"></div>';
+        sessionStorage.setItem(SNAPSHOT_KEY, '{"v":2,"page":"app"}');
+
+        const demo = start();
+
+        expect(sessionStorage.getItem(SNAPSHOT_KEY)).toBeNull();
+        expect(demo.gateway.session()).toBeNull();
+        expect(layerTitle()).toBe('Sign in');
+        expect(getQueue('orders', 'orders.new')!.messages).toHaveLength(24);
+        expect(document.getElementById('mock-controls')).not.toBeNull();
+        expect(document.querySelector('#toast-container .toast')!.textContent)
+            .toBe('Saved demo state could not be restored; the demo was reset.');
+    });
+
     it('starts from the seed when the storage refuses or holds an older snapshot', () => {
         // v1 kept one throttle counter; its shape cannot be loaded.
         sessionStorage.setItem(SNAPSHOT_KEY, '{"v":1,"gateway":{"throttle":{"count":5,"blockedUntil":0}}}');
