@@ -29,14 +29,13 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
  * file too.
  */
 describe('variants', () => {
-    it('standard variant lists the four shipped modules at non-overlapping priorities', () => {
-        const ids = Object.keys(STANDARD_VARIANT);
-        expect(ids).toEqual(expect.arrayContaining([
+    it('standard variant lists exactly the four shipped modules at non-overlapping priorities', () => {
+        expect(Object.keys(STANDARD_VARIANT).sort()).toEqual([
             'connections',
             'queue-browser',
             'queue-copy',
             'queue-subscription-explorer',
-        ]));
+        ]);
         const priorities = Object.values(STANDARD_VARIANT);
         expect(new Set(priorities).size).toBe(priorities.length);
         priorities.forEach(p => expect(Number.isFinite(p)).toBe(true));
@@ -167,7 +166,9 @@ describe('variants', () => {
         for (const v of both) expect(v['connections']).toBeGreaterThan(v['queue-copy']);
     });
 
-    it('_active re-exports a populated manifest', () => {
-        expect(Object.keys(ACTIVE_VARIANT).length).toBeGreaterThan(0);
+    it('_active re-exports the standard variant manifest', () => {
+        // index/demo/no-payload build without --variant, so a subset or other
+        // variant here would silently change what the default bundles ship.
+        expect(ACTIVE_VARIANT).toBe(STANDARD_VARIANT);
     });
 });

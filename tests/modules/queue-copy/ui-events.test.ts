@@ -309,6 +309,7 @@ describe('queue-copy/ui-events', () => {
             await Promise.resolve();
             await Promise.resolve();
             expect(pickQueue).toHaveBeenCalled();
+            expect((pickQueue as any).mock.calls.at(-1)[0].key).toBe('https://broker.solace.com:1943/SEMP/v2');
             expect(state.dest.name).toBe('picked-q');
         });
 
@@ -325,6 +326,7 @@ describe('queue-copy/ui-events', () => {
             await Promise.resolve();
             await Promise.resolve();
             expect(pickQueue).toHaveBeenCalled();
+            expect((pickQueue as any).mock.calls.at(-1)[0].key).toBe('http://d');
         });
 
         it('dest pick is a no-op when no SempContext is resolvable', async () => {

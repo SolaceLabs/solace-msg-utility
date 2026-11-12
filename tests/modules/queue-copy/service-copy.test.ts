@@ -508,7 +508,6 @@ describe('queue-copy/service-copy', () => {
                 await flush();
                 fireUp();
                 await flush();
-                (state as any); // no-op anchor for readability
                 // DOWN_ERROR with no infoStr field at all.
                 ((session.createQueueBrowser as any).mock.results.at(-1)!.value as any)._handlers.DOWN_ERROR({});
                 await flush();
@@ -1128,21 +1127,17 @@ describe('queue-copy/service-copy', () => {
             await job;
 
             const final = onComplete.mock.calls[0][0];
-            // Cancel upgrades status, but the original lastError is preserved
-            // (cancel path clears it). Either way no publishes happened.
+            // Cancel upgrades status and the cancel branch clears the browser
+            // error. No publishes happened.
             expect(session.send).not.toHaveBeenCalled();
             expect(final.status).toBe('cancelled');
+            expect(final.lastError).toBeNull();
         });
 
         it('a second browser-event triggerStop hits the early-return; final lastError is the first reason', async () => {
             // Both DOWN_ERROR and CONNECT_FAILED_ERROR call triggerStop with
-            // 'browser-error', each setting state.job.lastError to their own
-            // infoStr beforehand. triggerStop's first-wins guard must keep
-            // stopReason fixed at the first call and not re-fire the drain.
-            // The browser-event lastError writes happen BEFORE triggerStop,
-            // so both will overwrite state.job.lastError — but the second
-            // triggerStop returns early so the drainAndFinish + onComplete
-            // pipeline runs exactly once.
+            // 'browser-error'. The first stop reason wins: the second handler
+            // must neither re-fire the drain nor overwrite lastError.
             const { state, session, browser, onComplete, fireUp, fireDown, fireConnectFailed } = setup();
             state.verify = {
                 inProgress: false, abort: null,
@@ -1169,10 +1164,27 @@ describe('queue-copy/service-copy', () => {
             expect(browser.disconnect).toHaveBeenCalledTimes(1);
             const final = onComplete.mock.calls[0][0];
             expect(final.status).toBe('error');
-            // The second handler still wrote lastError before its (now-ignored)
-            // triggerStop call. The first-wins guard protects the run from
-            // double-processing, not the SDK from overwriting an error string.
-            // What matters: status stays 'error' and the run terminated cleanly.
+            expect(final.lastError).toBe('first failure');
+        });
+
+        it('a DOWN_ERROR after a connect failure keeps the connect failure as lastError', async () => {
+            const { state, session, onComplete, fireUp, fireDown, fireConnectFailed } = setup();
+            state.verify = {
+                inProgress: false, abort: null,
+                result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
+            };
+
+            const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+            await flush();
+            fireUp();
+            await flush();
+            fireConnectFailed('first failure');
+            fireDown('second failure');
+            await flush();
+            await job;
+
+            expect(onComplete).toHaveBeenCalledTimes(1);
+            expect(onComplete.mock.calls[0][0].lastError).toBe('first failure');
         });
     });
 

@@ -655,10 +655,11 @@ describe('managed-connections — createQueueBrowser wrap', () => {
 
     it('throws when binding a non-entitled queue, allows an entitled one', async () => {
         const restrictive = { ...PROFILE, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'vpn1', queues: 'allowed' }] };
-        const session = fakeSession();
+        const browser = fakeBrowser();
+        const session = fakeSession(browser);
         await connectWithSession(session, restrictive);
         expect(() => session.createQueueBrowser({ queueDescriptor: { name: 'denied' } })).toThrow(/not entitled/i);
-        expect(() => session.createQueueBrowser({ queueDescriptor: { name: 'allowed' } })).not.toThrow();
+        expect(session.createQueueBrowser({ queueDescriptor: { name: 'allowed' } })).toBe(browser);
     });
 
     // Read-only rows are queue-browser's to apply (ui-table.ts, downgrade
@@ -674,16 +675,27 @@ describe('managed-connections — createQueueBrowser wrap', () => {
     });
 
     it('reads the queue name via getName() when .name is absent', async () => {
-        const session = fakeSession();
-        await connectWithSession(session, PROFILE);
-        // operate '*' → visible; just assert no throw and the descriptor is consumed.
-        expect(() => session.createQueueBrowser({ queueDescriptor: { getName: () => 'q-getname' } })).not.toThrow();
+        const restrictive = { ...PROFILE, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'vpn1', queues: 'q-getname' }] };
+        const browser = fakeBrowser();
+        const session = fakeSession(browser);
+        await connectWithSession(session, restrictive);
+        // Only 'q-getname' is entitled: it resolves through getName(), another name is refused.
+        expect(session.createQueueBrowser({ queueDescriptor: { getName: () => 'q-getname' } })).toBe(browser);
+        expect(() => session.createQueueBrowser({ queueDescriptor: { getName: () => 'other' } })).toThrow(/not entitled/i);
     });
 
-    it('tolerates an empty/unknown queue descriptor (queue name "")', async () => {
-        const session = fakeSession();
+    it('treats an empty/unknown queue descriptor as queue name "" (allowed under operate "*")', async () => {
+        const browser = fakeBrowser();
+        const session = fakeSession(browser);
         await connectWithSession(session, PROFILE); // operate '*' matches '' too
-        expect(() => session.createQueueBrowser({ queueDescriptor: {} })).not.toThrow();
+        expect(session.createQueueBrowser({ queueDescriptor: {} })).toBe(browser);
+    });
+
+    it('refuses an empty/unknown queue descriptor under a restrictive profile (fail closed)', async () => {
+        const restrictive = { ...PROFILE, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'vpn1', queues: 'allowed' }] };
+        const session = fakeSession();
+        await connectWithSession(session, restrictive);
+        expect(() => session.createQueueBrowser({ queueDescriptor: {} })).toThrow(/not entitled/i);
     });
 
     it('falls back to a plain browser when the managed session is gone (post-logout)', async () => {

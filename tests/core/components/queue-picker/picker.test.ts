@@ -1701,11 +1701,17 @@ describe('core/components/queue-picker', () => {
             expect(await p).toBeNull();
 
             // Each of these would have null-deref'd `state.vpns` / `state.selectedVpn`
-            // without the `!state` guard. Verify they're silent no-ops.
+            // without the `!state` guard. Verify they're silent no-ops: no error
+            // event (a listener exception is reported, never rethrown by dispatchEvent)
+            // and no SEMP request started on the closed picker.
             // Use dispatchEvent (not .click()) for buttons that are still disabled
             // post-close — jsdom skips click handlers on disabled buttons, but
             // dispatchEvent fires regardless, exercising the handler's guard.
-            expect(() => {
+            const fetchCallsAtClose = (sempCtx.fetch as any).mock.calls.length;
+            const errors: ErrorEvent[] = [];
+            const onError = (e: ErrorEvent) => { errors.push(e); e.preventDefault(); };
+            window.addEventListener('error', onError);
+            try {
                 refs.vpnInput.dispatchEvent(new Event('focus'));
                 refs.vpnInput.dispatchEvent(new Event('input'));
                 refs.vpnRefresh.click();
@@ -1713,7 +1719,13 @@ describe('core/components/queue-picker', () => {
                 refs.queueInput.dispatchEvent(new Event('input'));
                 refs.queueRefresh.dispatchEvent(new MouseEvent('click', { bubbles: true }));
                 refs.confirm.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            }).not.toThrow();
+                await new Promise(r => setTimeout(r, INPUT_DEBOUNCE_MS * 2));
+                await flushAsync();
+            } finally {
+                window.removeEventListener('error', onError);
+            }
+            expect(errors.map(e => e.message)).toEqual([]);
+            expect((sempCtx.fetch as any).mock.calls.length).toBe(fetchCallsAtClose);
 
             // Picker stays closed; nothing magically reopened it.
             expect(getDialog().hasAttribute('open')).toBe(false);

@@ -187,12 +187,17 @@ describe('QueueDiscoveryModule', () => {
     it('ignores non-isSempConnected state changes', async () => {
         const container = createDiscoveryDOM();
         document.body.appendChild(container);
-        const { ctx, eventBus } = createTestContext(container);
+        const { ctx, eventBus, appState } = createTestContext(container);
 
         await QueueDiscoveryModule.install(ctx);
 
-        // This should not trigger any VPN fetch
+        // SEMP becomes connected after install without the event, so a handler
+        // that reacted to any key would fetch the VPN list on the isConnected change.
+        appState.isSempConnected = true;
         eventBus.emit('app:state-change', { key: 'isConnected', value: true });
+        await new Promise(r => setTimeout(r, 0));
+
+        expect(ctx.sempFetch).not.toHaveBeenCalled();
     });
 
     it('cached VPN list is reused — second fetchVpns call does not hit SEMP', async () => {
@@ -309,21 +314,40 @@ describe('QueueDiscoveryModule', () => {
         const vpnOptions = container.querySelector('#discovery-vpn-list')!.querySelectorAll('.dropdown-option');
         (vpnOptions[0] as HTMLElement).click();
 
-        // Now refresh queues
+        const queueList = container.querySelector('#discovery-queue-list')!;
+        await vi.waitFor(() => {
+            expect(queueList.querySelectorAll('.dropdown-option').length).toBe(2);
+        });
+        const queueCalls = () => (ctx.sempFetch as any).mock.calls
+            .filter((c: any[]) => String(c[0]).includes('/msgVpns/default/queues'));
+        expect(queueCalls()).toHaveLength(1);
+
+        // Now refresh queues: a second queue fetch for the selected VPN, list re-rendered
         const btnRefreshQueues = container.querySelector('#btn-refresh-queues') as HTMLButtonElement;
         btnRefreshQueues.click();
+
+        await vi.waitFor(() => {
+            expect(queueCalls()).toHaveLength(2);
+            expect(Array.from(queueList.querySelectorAll('.dropdown-option')).map(o => o.textContent))
+                .toEqual(['test-queue-1', 'test-queue-2']);
+        });
     });
 
     it('refresh queues does nothing without selected VPN', async () => {
         const container = createDiscoveryDOM();
         document.body.appendChild(container);
-        const { ctx } = createTestContext(container);
+        const { ctx, appState } = createTestContext(container);
 
         await QueueDiscoveryModule.install(ctx);
+        // Connected after install, so no VPN fetch ran; a missing selectedVpn guard
+        // would request the queues of a null VPN.
+        appState.isSempConnected = true;
 
         const btnRefreshQueues = container.querySelector('#btn-refresh-queues') as HTMLButtonElement;
         btnRefreshQueues.click();
-        // Should do nothing
+        await new Promise(r => setTimeout(r, 0));
+
+        expect(ctx.sempFetch).not.toHaveBeenCalled();
     });
 
     it('copy button emits connection:check-connection', async () => {
@@ -356,7 +380,8 @@ describe('QueueDiscoveryModule', () => {
         const btnCopy = container.querySelector('#btn-copy-config') as HTMLButtonElement;
         btnCopy.click();
 
-        expect(handler).toHaveBeenCalled();
+        expect(handler).toHaveBeenCalledTimes(1);
+        expect(handler).toHaveBeenCalledWith({ vpn: 'default', queue: 'test-queue-1' });
     });
 
     it('copy button warns in a toast when no VPN/queue is selected', async () => {
@@ -380,23 +405,54 @@ describe('QueueDiscoveryModule', () => {
     it('enter key on VPN input triggers refresh', async () => {
         const container = createDiscoveryDOM();
         document.body.appendChild(container);
-        const { ctx } = createTestContext(container);
+        const { ctx, appState } = createTestContext(container);
+        appState.isSempConnected = true;
 
         await QueueDiscoveryModule.install(ctx);
+        const vpnList = container.querySelector('#discovery-vpn-list')!;
+        await vi.waitFor(() => {
+            expect(vpnList.querySelectorAll('.dropdown-option').length).toBe(2);
+        });
+        (ctx.sempFetch as any).mockClear();
 
         const vpnInput = container.querySelector('#discovery-vpn-input') as HTMLInputElement;
-        vpnInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        const ev = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+        vpnInput.dispatchEvent(ev);
+
+        // Refresh drops the VPN cache, so the list is requested again.
+        expect(ev.defaultPrevented).toBe(true);
+        await vi.waitFor(() => {
+            expect((ctx.sempFetch as any).mock.calls.map((c: any[]) => String(c[0])))
+                .toEqual([expect.stringContaining('/msgVpns?count=')]);
+        });
     });
 
     it('enter key on queue input triggers refresh', async () => {
         const container = createDiscoveryDOM();
         document.body.appendChild(container);
-        const { ctx } = createTestContext(container);
+        const { ctx, appState } = createTestContext(container);
+        appState.isSempConnected = true;
 
         await QueueDiscoveryModule.install(ctx);
-
+        await vi.waitFor(() => {
+            expect(container.querySelectorAll('#discovery-vpn-list .dropdown-option').length).toBe(2);
+        });
+        (container.querySelector('#discovery-vpn-list .dropdown-option') as HTMLElement).click();
         const queueInput = container.querySelector('#discovery-queue-input') as HTMLInputElement;
-        queueInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        await vi.waitFor(() => {
+            expect(container.querySelectorAll('#discovery-queue-list .dropdown-option').length).toBe(2);
+        });
+        (ctx.sempFetch as any).mockClear();
+
+        const ev = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+        queueInput.dispatchEvent(ev);
+
+        // Refresh drops this VPN's queue cache, so its queues are requested again.
+        expect(ev.defaultPrevented).toBe(true);
+        await vi.waitFor(() => {
+            expect((ctx.sempFetch as any).mock.calls.map((c: any[]) => String(c[0])))
+                .toEqual([expect.stringContaining('/msgVpns/default/queues')]);
+        });
     });
 
     it('VPN blur clears invalid entry', async () => {
@@ -471,7 +527,7 @@ describe('QueueDiscoveryModule', () => {
         vi.useRealTimers();
     });
 
-    it('handles fetchQueues error', async () => {
+    it('shows the VPN fetch error in the VPN input and renders no options', async () => {
         const container = createDiscoveryDOM();
         document.body.appendChild(container);
         const ctx = createTestContext(container).ctx;
@@ -484,8 +540,12 @@ describe('QueueDiscoveryModule', () => {
 
         await QueueDiscoveryModule.install(ctx);
 
-        // Wait for initial VPN fetch (will fail)
-        await new Promise(r => setTimeout(r, 50));
+        // The initial VPN fetch fails
+        const vpnInput = container.querySelector('#discovery-vpn-input') as HTMLInputElement;
+        await vi.waitFor(() => {
+            expect(vpnInput.placeholder).toContain('Error fetching VPNs');
+        });
+        expect(container.querySelectorAll('#discovery-vpn-list .dropdown-option')).toHaveLength(0);
     });
 
     it('handles fetchQueues returning empty list', async () => {
@@ -582,7 +642,11 @@ describe('QueueDiscoveryModule', () => {
         const vpnOption = container.querySelector('#discovery-vpn-list .dropdown-option') as HTMLElement;
         vpnOption.click();
 
-        await new Promise(r => setTimeout(r, 100));
+        const queueInput = container.querySelector('#discovery-queue-input') as HTMLInputElement;
+        await vi.waitFor(() => {
+            expect(queueInput.placeholder).toContain('Error fetching Queues');
+        });
+        expect(queueInput.placeholder).toContain('Custom Error');
     });
 
     it('copy button stays hidden when browser:available is never emitted', async () => {
@@ -1011,6 +1075,53 @@ describe('QueueDiscoveryModule', () => {
             });
 
             renderSpy.mockRestore();
+        });
+
+        it('drops a page from an older queue fetch once a newer fetch has taken over', async () => {
+            // The in-loop generation check in fetchQueues: a Refresh (or a quick VPN
+            // switch) starts a newer fetch while the older one still waits for a
+            // page; that late page must not merge into the newer list.
+            const container = createDiscoveryDOM();
+            document.body.appendChild(container);
+            const { ctx, appState } = createTestContext(container);
+            appState.isSempConnected = true;
+
+            const staleJson = vi.fn(async () => ({ data: [{ queueName: 'stale-queue' }] }));
+            let releaseStale!: () => void;
+            const stale = new Promise<{ ok: boolean; json: typeof staleJson }>((resolve) => {
+                releaseStale = () => resolve({ ok: true, json: staleJson });
+            });
+            let queueCalls = 0;
+            (ctx.sempFetch as any).mockImplementation(async (url: string) => {
+                if (url.includes('/queues')) {
+                    queueCalls++;
+                    if (queueCalls === 1) return stale;
+                    return { ok: true, json: async () => ({ data: [{ queueName: 'fresh-queue' }] }) };
+                }
+                return { ok: true, json: async () => ({ data: [{ msgVpnName: 'vpn-a' }] }) };
+            });
+
+            await QueueDiscoveryModule.install(ctx);
+            await vi.waitFor(() => {
+                expect(container.querySelectorAll('#discovery-vpn-list .dropdown-option').length).toBe(1);
+            });
+
+            // Select vpn-a: the first queue fetch starts and waits for its page.
+            (container.querySelector('#discovery-vpn-list .dropdown-option') as HTMLElement).click();
+            await vi.waitFor(() => { expect(queueCalls).toBe(1); });
+
+            // Refresh starts a newer fetch, which completes at once.
+            (container.querySelector('#btn-refresh-queues') as HTMLButtonElement).click();
+            const queueList = container.querySelector('#discovery-queue-list')!;
+            const shown = () => Array.from(queueList.querySelectorAll('.dropdown-option')).map(o => o.textContent);
+            await vi.waitFor(() => { expect(shown()).toEqual(['fresh-queue']); });
+
+            // The older fetch's page arrives late: it is read, then dropped.
+            releaseStale();
+            await vi.waitFor(() => { expect(staleJson).toHaveBeenCalledTimes(1); });
+            await new Promise(resolve => setTimeout(resolve, 0));
+            expect(shown()).toEqual(['fresh-queue']);
+            expect(queueCalls).toBe(2);
         });
 
         it('refresh-vpns click invalidates VPN + queue caches', async () => {

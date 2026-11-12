@@ -77,6 +77,7 @@ describe('connections/config', () => {
             // deobfuscate() returns null on failure without logging; load() only
             // logs when something throws BEFORE the deobf null-check. A bad-base64
             // blob is handled cleanly and silently.
+            expect(consoleSpy).not.toHaveBeenCalled();
             consoleSpy.mockRestore();
         });
 

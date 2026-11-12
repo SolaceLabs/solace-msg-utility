@@ -236,8 +236,7 @@ describe('queue-copy/ui-modal', () => {
             (browser as any)._handlers.UP();
             (browser as any)._handlers.MESSAGE({ smfHeader: { messageLength: 100 } });
             (browser as any)._handlers.MESSAGE({ smfHeader: { messageLength: 200 } });
-            expect(els.modalSourceCount.textContent).toContain('2');
-            expect(els.modalSourceCount.textContent).toContain('loading');
+            expect(els.modalSourceCount.textContent).toBe('2 (loading\u2026)');
 
             await vi.advanceTimersByTimeAsync(ACCUMULATE_IDLE_MS);
             for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -263,6 +262,8 @@ describe('queue-copy/ui-modal', () => {
             await vi.advanceTimersByTimeAsync(ACCUMULATE_IDLE_MS);
             for (let i = 0; i < 10; i++) await Promise.resolve();
             expect(state.verify).toBeNull();
+            // The MESSAGE after close must not repaint the count the modal opened with.
+            expect(els.modalSourceCount.textContent).toBe('\u2014');
             vi.useRealTimers();
         });
 
@@ -283,6 +284,9 @@ describe('queue-copy/ui-modal', () => {
             await vi.advanceTimersByTimeAsync(ACCUMULATE_IDLE_MS);
             for (let i = 0; i < 10; i++) await Promise.resolve();
             expect(state.verify).toBeNull();
+            // The late result must not paint the modal: still "Checking", Start still off.
+            expect(els.modalSourceStatus.textContent).toBe('Checking\u2026');
+            expect(els.btnModalStart.disabled).toBe(true);
             vi.useRealTimers();
         });
     });
@@ -656,8 +660,7 @@ describe('queue-copy/ui-modal', () => {
             // Edge case: SEMP returned an owner but couldn't determine
             // accessType (e.g. a partial response or a queue state where
             // others-permission was missing). The owner-match override
-            // still fires and lifts accessType to 'read-write'. Covers the
-            // `prior ?? 'null'` branch of the override log line.
+            // still fires and lifts accessType to 'read-write'.
             const verifyMod = await import('../../../src/modules/queue-copy/service-verify');
             const verifySpy = vi.spyOn(verifyMod, 'verifySource')
                 .mockResolvedValue(verifyResult({
@@ -1327,12 +1330,14 @@ describe('queue-copy/ui-modal — entitlement gates', () => {
             // refusal result was synthesized (verify is still in flight).
             const { state, ctx } = openFor('ops.x', managed());
             expect(ctx.sempFetch).toHaveBeenCalled();
+            expect(JSON.stringify((ctx.sempFetch as any).mock.calls[0])).toContain('ops.x');
             expect(state.verify!.result).toBeNull();
         });
 
         it('direct mode never refuses', () => {
             const { state, ctx } = openFor('anything-at-all', null);
             expect(ctx.sempFetch).toHaveBeenCalled();
+            expect(JSON.stringify((ctx.sempFetch as any).mock.calls[0])).toContain('anything-at-all');
             expect(state.verify!.result).toBeNull();
         });
     });
@@ -1379,13 +1384,28 @@ describe('queue-copy/ui-modal — entitlement gates', () => {
         // Wiring: the Start handler must consult the gate and surface its reason
         // instead of starting a run. A refused gate returns before the run path
         // touches the verify result, so this is safe to drive through a click.
-        it('is wired into Start — a refused run renders the reason and never starts', () => {
-            const state = provisionedState('topic', 'some/topic');
-            const ctx = makeCtx({ selectedVpn: 'vpn1', managed: managed() });
-            openCopyModal(ctx, els, state, () => createSessionMock());
-            els.btnModalStart.disabled = false;
-            els.btnModalStart.click();
-            expect(els.modalRunError.textContent).toMatch(/Topic destinations/);
+        it('is wired into Start -- a refused run renders the reason and never starts', async () => {
+            const copyMod = await import('../../../src/modules/queue-copy/service-copy');
+            const copySpy = vi.spyOn(copyMod, 'runCopyJob').mockResolvedValue(undefined);
+            try {
+                const state = provisionedState('topic', 'some/topic');
+                const session = createSessionMock();
+                const { createSolacePublisher } = await import('../../../src/core/services/solace-publisher');
+                state.primaryPublisher = createSolacePublisher(session);
+                const ctx = makeCtx({ selectedVpn: 'vpn1', managed: managed() });
+                openCopyModal(ctx, els, state, () => session);
+                // A completed verify, so only the gate's return keeps the run from starting.
+                state.verify!.result = verifyResult({ messageCount: 5 });
+                state.verify!.inProgress = false;
+                els.btnModalStart.disabled = false;
+                els.btnModalStart.click();
+                expect(els.modalRunError.textContent).toMatch(/Topic destinations/);
+                expect(copySpy).not.toHaveBeenCalled();
+                expect(state.job).toBeNull();
+                expect(els.sourceInput.disabled).toBe(false);
+            } finally {
+                copySpy.mockRestore();
+            }
         });
     });
 });

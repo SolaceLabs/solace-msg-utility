@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Kernel } from '../../src/core/kernel';
-import type { PwaModule, EventBus, AppContext } from '../../src/core/types';
+import type { PwaModule, EventBus } from '../../src/core/types';
 
 // ---- Test helpers ----
 
@@ -81,34 +81,5 @@ describe('Integration: cross-module communication', () => {
 
         expect(received.length).toBe(1);
         expect(received[0]).toEqual({ key: 'isConnected', value: true });
-    });
-
-    it('module A emits event, module B receives it', async () => {
-        createAppShell();
-
-        let receivedQueue: string | null = null;
-        let emitCtx: AppContext | null = null;
-
-        const modA: PwaModule = {
-            name: 'A', id: 'mod-a',
-            async install(ctx) { emitCtx = ctx; }
-        };
-        const modB: PwaModule = {
-            name: 'B', id: 'mod-b',
-            async install(ctx) {
-                ctx.eventBus.on('browser:browse-queue', ({ queue }) => {
-                    receivedQueue = queue;
-                });
-            }
-        };
-
-        createModuleTemplate('mod-a', '<div>A</div>');
-        createModuleTemplate('mod-b', '<div>B</div>');
-
-        const kernel = new Kernel([{ module: modA, priority: 10 }, { module: modB, priority: 5 }]);
-        await kernel.start();
-
-        emitCtx!.eventBus.emit('browser:browse-queue', { queue: 'test-queue' });
-        expect(receivedQueue).toBe('test-queue');
     });
 });

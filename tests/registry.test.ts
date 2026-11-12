@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { modules } from '../src/registry';
 import { Kernel } from '../src/core/kernel';
+import { ACTIVE_MODULES as STANDARD_MANIFEST } from '../src/variants/standard';
 import type { RegisteredModule } from '../src/core/types';
 
 /**
@@ -81,25 +82,13 @@ describe('registry', () => {
             expect(new Set(order)).toEqual(new Set(spied.map(r => r.module.id)));
         });
 
-        it('modules install in priority-descending order regardless of registry array order', async () => {
-            // The registry might list modules in any order; the kernel must
-            // sort by priority before installing. This proves the registry +
-            // kernel contract end-to-end: whatever the array order, install
-            // order matches the declared priorities.
-            const { spied, order } = spyRegistry();
-
-            // Shuffle deterministically so the registry order is NOT the
-            // priority order — if the kernel skipped its sort, this would
-            // catch it.
-            const shuffled = [...spied].reverse();
-            shellDOM(shuffled);
-
-            await new Kernel(shuffled).start();
-
-            const expected = [...spied]
-                .sort((a, b) => b.priority - a.priority)
-                .map(r => r.module.id);
-            expect(order).toEqual(expected);
+        it('registry ids and priorities equal the standard variant manifest', () => {
+            // The registry resolves the active variant (the registry plugin builds
+            // `standard` under vitest). Swapped, dropped or collapsed priorities
+            // would change install and sidebar order. The kernel's sort itself is
+            // tests/core/kernel.test.ts > "installs modules in priority order".
+            const resolved = Object.fromEntries(modules.map(r => [r.module.id, r.priority]));
+            expect(resolved).toEqual(STANDARD_MANIFEST);
         });
     });
 

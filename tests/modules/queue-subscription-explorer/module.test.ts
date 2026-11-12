@@ -460,42 +460,52 @@ describe('QueueSubscriptionExplorerModule', () => {
         // yields, and the for-await body's `if (myGen !== loadGen) return;`
         // check at line 122 fires, discarding the page.
         const container = createDOM();
-        const { ctx, eventBus } = createTestContext(container);
+        const toasts = document.createElement('div');
+        toasts.id = 'toast-container';
+        document.body.appendChild(toasts);
+        try {
+            const { ctx, eventBus } = createTestContext(container);
 
-        let resolveFetch: (v: any) => void = () => {};
-        (ctx.sempFetch as any).mockReturnValueOnce(new Promise((r) => { resolveFetch = r; }));
+            let resolveFetch: (v: any) => void = () => {};
+            (ctx.sempFetch as any).mockReturnValueOnce(new Promise((r) => { resolveFetch = r; }));
 
-        await QueueSubscriptionExplorerModule.install(ctx);
-        const btn = container.querySelector('#btn-subexp-load') as HTMLButtonElement;
-        btn.click();
+            await QueueSubscriptionExplorerModule.install(ctx);
+            const btn = container.querySelector('#btn-subexp-load') as HTMLButtonElement;
+            btn.click();
 
-        // Drain microtasks so load() reaches the awaited sempFetch.
-        for (let i = 0; i < 5; i++) await Promise.resolve();
+            // Drain microtasks so load() reaches the awaited sempFetch.
+            for (let i = 0; i < 5; i++) await Promise.resolve();
 
-        // Disconnect mid-fetch — per the fix, this bumps loadGen, resets
-        // allRows to null, re-enables the button, clears the filters.
-        eventBus.emit('app:state-change', { key: 'isSempConnected', value: false });
-        expect(btn.textContent).toBe('Load');
-        const tbody = container.querySelector('#subexp-tbody')!;
-        expect(tbody.textContent).toMatch(/Click/);
-
-        // Resolve the fetch with a valid page. The generator yields it;
-        // for-await body line 122 sees myGen=1 !== loadGen=2 and returns
-        // BEFORE the `accumulated.push(page.data)` would have run.
-        resolveFetch(textRes(PAGE_OK));
-        await vi.waitFor(() => {
-            // Wait until the load chain has had a chance to either render
-            // the rows (regression) or be discarded (current). We assert
-            // the discard outcome below.
+            // Disconnect mid-fetch -- per the fix, this bumps loadGen, resets
+            // allRows to null, re-enables the button, clears the filters.
+            eventBus.emit('app:state-change', { key: 'isSempConnected', value: false });
             expect(btn.textContent).toBe('Load');
-        });
+            const tbody = container.querySelector('#subexp-tbody')!;
+            expect(tbody.textContent).toMatch(/Click/);
 
-        // Stayed cleared: button is 'Load' (NOT 'Refresh'), table is empty,
-        // and the bad rows from PAGE_OK never made it into the DOM.
-        expect(btn.textContent).toBe('Load');
-        expect(tbody.textContent).not.toContain('BULKQ-001');
-        expect(tbody.textContent).not.toContain('orders-new');
-        expect(tbody.textContent).toMatch(/Click/);
+            // Resolve the fetch with a valid page. The generator yields it;
+            // for-await body line 122 sees myGen=1 !== loadGen=2 and returns
+            // BEFORE the `accumulated.push(page.data)` would have run.
+            const late = { ...textRes(PAGE_OK), text: vi.fn(async () => PAGE_OK) };
+            resolveFetch(late);
+
+            // Gate on the late page: its body was read (the chain is past the
+            // fetch), then a macrotask lets the parse -> yield -> loadGen check
+            // -> post-loop work finish before anything is asserted.
+            await vi.waitFor(() => expect(late.text).toHaveBeenCalledTimes(1));
+            await new Promise(r => setTimeout(r, 0));
+
+            // Stayed cleared: button is 'Load' (NOT 'Refresh'), table is empty,
+            // the rows from PAGE_OK never made it into the DOM, and no
+            // "Loaded N" toast was shown.
+            expect(btn.textContent).toBe('Load');
+            expect(tbody.textContent).not.toContain('BULKQ-001');
+            expect(tbody.textContent).not.toContain('orders-new');
+            expect(tbody.textContent).toMatch(/Click/);
+            expect(toasts.querySelector('.toast')).toBeNull();
+        } finally {
+            toasts.remove();
+        }
     });
 
     it('debounced filter handler coalesces rapid keystrokes into one rerender', async () => {

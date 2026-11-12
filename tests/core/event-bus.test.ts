@@ -2,13 +2,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { createEventBus } from '../../src/core/event-bus';
 
 describe('EventBus', () => {
-    it('creates an event bus with on, off, emit methods', () => {
-        const bus = createEventBus();
-        expect(bus.on).toBeDefined();
-        expect(bus.off).toBeDefined();
-        expect(bus.emit).toBeDefined();
-    });
-
     it('calls handler when event is emitted', () => {
         const bus = createEventBus();
         const handler = vi.fn();
@@ -90,31 +83,15 @@ describe('EventBus', () => {
         );
     });
 
-    it('cleans up empty listener Set on off()', () => {
+    it('re-subscribing after off() delivers exactly once (empty listener Set cleaned up)', () => {
         const bus = createEventBus();
         const handler = vi.fn();
         bus.on('client:disconnected', handler);
         bus.off('client:disconnected', handler);
-        // Emitting should do nothing — the Set was cleaned up
+        // The listener Set is gone after off(); a fresh subscribe must create a new one.
+        bus.on('client:disconnected', handler);
         bus.emit('client:disconnected');
-        expect(handler).not.toHaveBeenCalled();
-    });
-
-    it('handles void events with no args', () => {
-        const bus = createEventBus();
-        const handler = vi.fn();
-        bus.on('jszip:loaded', handler);
-        bus.emit('jszip:loaded');
         expect(handler).toHaveBeenCalledTimes(1);
-    });
-
-    it('handles events with complex payloads', () => {
-        const bus = createEventBus();
-        const handler = vi.fn();
-        const session = { id: 'test-session' };
-        bus.on('client:connected', handler);
-        bus.emit('client:connected', { session });
-        expect(handler).toHaveBeenCalledWith({ session });
     });
 
     describe('hold() / release() buffering', () => {

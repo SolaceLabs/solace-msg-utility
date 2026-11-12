@@ -57,7 +57,11 @@ describe('core/services/solace-client', () => {
         it('initializes SolclientFactory', () => {
             const service = createServiceSolace(makeHooks());
             service.init();
-            expect(solaceMock.SolclientFactory.init).toHaveBeenCalled();
+            expect(solaceMock.SolclientFactory.init).toHaveBeenCalledTimes(1);
+            const props = solaceMock.SolclientFactoryProperties.mock.results[0].value;
+            expect(solaceMock.SolclientFactory.init).toHaveBeenCalledWith(props);
+            expect(props.profile).toBe(solaceMock.SolclientFactoryProfiles.version10);
+            expect(props.logLevel).toBe(solaceMock.LogLevel.WARN);
         });
 
         it('does not initialize twice', () => {

@@ -57,7 +57,11 @@ describe('core/utils', () => {
 
         it('escapes regex special characters', () => {
             expect(matchString('test.value', 'test.*')).toBe(true);
-            expect(matchString('test[1]', 'test*')).toBe(true);
+            // An unescaped '.' would match any character here.
+            expect(matchString('testXvalue', 'test.*')).toBe(false);
+            expect(matchString('test[1]x', 'test[1]*')).toBe(true);
+            // An unescaped '[1]' would be a character class matching '1'.
+            expect(matchString('test1x', 'test[1]*')).toBe(false);
         });
     });
 
@@ -445,7 +449,7 @@ describe('core/utils solaceErrorText', () => {
 
     it('never stringifies the object, so [object Object] cannot reach a user', () => {
         // The old `err.message || err` idiom did exactly that.
-        expect(solaceErrorText({ nope: 1 }, 'fallback')).not.toContain('object');
+        expect(solaceErrorText({ nope: 1 }, 'fallback')).toBe('fallback');
         expect(solaceErrorText(42, 'fallback')).toBe('fallback');
     });
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { formatBytes } from '../../../src/core/utils';
 import {
     cacheElements,
     applyDestPrefill,
@@ -59,21 +60,9 @@ describe('queue-copy/ui', () => {
         it('caches every required element including the source-side mirror', () => {
             const els = elsHolder.els;
             expect(els.modal.tagName.toLowerCase()).toBe('dialog');
-            expect(els.btnStart).toBeDefined();
             expect(els.btnStart.disabled).toBe(true);
-            expect(els.destTypeToggle).toBeDefined();
-            expect(els.destTypeLabelQueue).toBeDefined();
-            expect(els.destTypeLabelTopic).toBeDefined();
             expect(els.modeRadios.length).toBe(2);
-            expect(els.destSempUrlPath).toBeDefined();
-            expect(els.destSolUrlPath).toBeDefined();
-            expect(els.modalSourceBroker).toBeDefined();
-            expect(els.modalSourceUsage).toBeDefined();
-            expect(els.modalSourceMaxSize).toBeDefined();
-            // Source-side read-only mirror.
-            expect(els.sourceHost).toBeDefined();
-            expect(els.sourceSempProtocol).toBeDefined();
-            expect(els.sourceSolVpn).toBeDefined();
+            // Source-side read-only mirror (presence is enforced by required()).
             expect(els.sourceEditButtons.length).toBe(3);
         });
     });
@@ -491,9 +480,8 @@ describe('queue-copy/ui', () => {
     describe('renderVerifyProgress', () => {
         it('shows live count + size with loading hint', () => {
             renderVerifyProgress(elsHolder.els, 7, 1024);
-            expect(elsHolder.els.modalSourceCount.textContent).toContain('7');
-            expect(elsHolder.els.modalSourceCount.textContent).toContain('loading');
-            expect(elsHolder.els.modalSourceUsage.textContent).toContain('loading');
+            expect(elsHolder.els.modalSourceCount.textContent).toBe('7 (loading\u2026)');
+            expect(elsHolder.els.modalSourceUsage.textContent).toBe(`${formatBytes(1024)} (loading\u2026)`);
         });
     });
 
@@ -523,8 +511,9 @@ describe('queue-copy/ui', () => {
             expect(elsHolder.els.modalSourceStatus.textContent).toBe('Found via SEMP');
             expect(elsHolder.els.modalSourceVpn.textContent).toBe('vpn-01');
             expect(elsHolder.els.modalSourceCount.textContent).toBe('18');
-            expect(elsHolder.els.modalSourceUsage.textContent).toContain('/');
-            expect(elsHolder.els.modalSourceMaxSize.textContent).toMatch(/MB|KB|B/);
+            expect(elsHolder.els.modalSourceUsage.textContent)
+                .toBe(`${formatBytes(2937)} / ${formatBytes(5000 * 1024 * 1024)}`);
+            expect(elsHolder.els.modalSourceMaxSize.textContent).toBe(formatBytes(10_000_000));
         });
 
         it('on success, renderVerifyResult does NOT toggle btnModalStart — that gate lives in ui-modal', () => {
@@ -557,7 +546,7 @@ describe('queue-copy/ui', () => {
         it('spool present, quota null: usage shows just used bytes', () => {
             renderModalInitial(elsHolder.els, SRC, DST, 'copy');
             renderVerifyResult(elsHolder.els, baseOk({ spoolUsageBytes: 500 }));
-            expect(elsHolder.els.modalSourceUsage.textContent).toMatch(/B|KB|MB/);
+            expect(elsHolder.els.modalSourceUsage.textContent).toBe(formatBytes(500));
             expect(elsHolder.els.modalSourceUsage.textContent).not.toContain('/');
         });
 

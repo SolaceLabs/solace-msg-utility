@@ -30,7 +30,6 @@ describe('logger', () => {
     describe('constants & round-trip', () => {
         it('defaults to INFO', () => {
             expect(DEFAULT_LOG_LEVEL).toBe(LogLevel.INFO);
-            expect(getLogLevel()).toBe(LogLevel.INFO);
         });
 
         it('setLogLevel/getLogLevel round-trip for every level', () => {
@@ -197,8 +196,22 @@ describe('logger', () => {
         });
 
         it('defaults search arg to window.location.search', () => {
-            // jsdom default: location.search is ''
-            expect(readLogLevelFromUrl()).toBeNull();
+            const originalLocation = window.location;
+            // jsdom doesn't allow direct assignment to .search; redefine.
+            Object.defineProperty(window, 'location', {
+                value: { search: '?logLevel=WARN' },
+                writable: true,
+                configurable: true,
+            });
+            try {
+                expect(readLogLevelFromUrl()).toBe(LogLevel.WARN);
+            } finally {
+                Object.defineProperty(window, 'location', {
+                    value: originalLocation,
+                    writable: true,
+                    configurable: true,
+                });
+            }
         });
     });
 });

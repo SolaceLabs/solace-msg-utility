@@ -136,8 +136,12 @@ describe('core/services/solace-publisher', () => {
 
             const promise = publisher.send(createMessageMock(), queueDest, { beforeSend });
             expect(sendCallOrder).toEqual(['beforeSend', 'session.send']);
-            // setCorrelationKey was already invoked before beforeSend ran.
-            expect(cloned.setCorrelationKey).toHaveBeenCalled();
+            // Global call order: destination and correlation key are stamped
+            // before beforeSend runs, and beforeSend runs before session.send.
+            const orderOf = (fn: any) => fn.mock.invocationCallOrder[0];
+            expect(orderOf(cloned.setDestination)).toBeLessThan(orderOf(beforeSend));
+            expect(orderOf(cloned.setCorrelationKey)).toBeLessThan(orderOf(beforeSend));
+            expect(orderOf(beforeSend)).toBeLessThan(orderOf(session.send));
 
             fireAck(getKeyFromMsg(cloned));
             await promise;
@@ -377,7 +381,9 @@ describe('core/services/solace-publisher', () => {
             solaceMock.SolclientFactory.createMessage.mockReturnValueOnce(cloned);
 
             const promise = publisher.send(original, queueDest);
-            expect(cloned.setBinaryAttachment).toHaveBeenCalled();
+            expect(cloned.setBinaryAttachment).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]));
+            expect(cloned.setSdtContainer).not.toHaveBeenCalled();
+            expect(cloned.setXmlContent).not.toHaveBeenCalled();
 
             fireAck(getKeyFromMsg(cloned));
             await promise;

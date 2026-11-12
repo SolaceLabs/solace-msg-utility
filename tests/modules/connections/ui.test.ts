@@ -40,13 +40,6 @@ describe('connections/ui', () => {
             expect(els2.elHost).toBe(hostBefore);
             expect(els2.btnSolace).toBe(btnBefore);
         });
-
-        it('getElements falls back to document.getElementById', () => {
-            // Reset ui internals by testing the fallback
-            // We can't easily test this without resetting, so verify it returns elements
-            const els = ui.getElements();
-            expect(els.container).toBe(container);
-        });
     });
 
     describe('initEvents', () => {
@@ -66,6 +59,7 @@ describe('connections/ui', () => {
             ui.initEvents();
             const els = ui.getElements();
             ui.openSslModal('https://test:8080');
+            expect(els.elSslModal.open).toBe(true);
 
             els.btnCloseSsl.click();
             expect(els.elSslModal.open).toBe(false);
@@ -254,22 +248,6 @@ describe('connections/ui', () => {
         });
     });
 
-    describe('updateAuthUI', () => {
-        it('updates labels for oauth mode', () => {
-            const els = ui.getElements();
-            ui.setAuthMode('oauth');
-            expect(els.lblSolUser.textContent).toBe('Access Token');
-            expect(els.lblSolPass.textContent).toBe('ID Token');
-        });
-
-        it('updates labels for basic mode', () => {
-            const els = ui.getElements();
-            ui.setAuthMode('basic');
-            expect(els.lblSolUser.textContent).toBe('Username');
-            expect(els.lblSolPass.textContent).toBe('Password');
-        });
-    });
-
     describe('getAuthMode edge cases', () => {
         it('returns basic when no radio is checked', () => {
             const els = ui.getElements();
@@ -291,17 +269,11 @@ describe('connections/ui', () => {
     describe('showConnectError edge cases', () => {
         it('does nothing with empty string message', () => {
             const els = ui.getElements();
+            ui.showConnectError(els.elSolError, 'Earlier error');
+            expect(els.elSolError.style.display).toBe('block');
             ui.showConnectError(els.elSolError, '');
             expect(els.elSolError.style.display).toBe('none');
-        });
-    });
-
-    describe('updateInputState edge cases', () => {
-        it('throws when cacheElements has not been given required elements', () => {
-            const bare = document.createElement('div');
-            document.body.appendChild(bare);
-            expect(() => ui.cacheElements(bare)).toThrow();
-            ui.cacheElements(container);
+            expect(els.elSolError.textContent).toBe('');
         });
     });
 });

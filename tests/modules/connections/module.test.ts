@@ -153,7 +153,7 @@ describe('ConnectionsModule', () => {
         const btnSave = container.querySelector('#btn-save-config') as HTMLButtonElement;
         btnSave.click();
 
-        expect(localStorage.setItem).toHaveBeenCalled();
+        expect(localStorage.setItem).toHaveBeenCalledWith('solace_utility_config', expect.stringMatching(/^OBF1:/));
         const toast = document.querySelector('#toast-container .toast.toast--ok');
         expect(toast).not.toBeNull();
         expect(toast!.textContent).toMatch(/saved/i);
@@ -613,7 +613,11 @@ describe('ConnectionsModule', () => {
         const btnSolace = container.querySelector('#btn-solace-connect') as HTMLButtonElement;
         btnSolace.click();
 
-        expect((window as any).solace.SolclientFactory.createSession).toHaveBeenCalled();
+        expect((window as any).solace.SolclientFactory.createSession).toHaveBeenCalledWith(expect.objectContaining({
+            url: expect.stringContaining('broker.test:8080'),
+            vpnName: 'default',
+            userName: 'admin',
+        }));
     });
 
     it('solace connect button disconnects when connected', async () => {
@@ -745,6 +749,8 @@ describe('ConnectionsModule', () => {
 
         eventBus.emit('connection:check-connection', { vpn: 'target-vpn', queue: 'target-queue' });
         expect(ctx.loadSelf).toHaveBeenCalled();
+        // The connect to the requested VPN started: the form carries it.
+        expect((container.querySelector('#solace-vpn') as HTMLInputElement).value).toBe('target-vpn');
     });
 
     it('handles connection:check-connection when connected same VPN', async () => {
@@ -827,8 +833,17 @@ describe('ConnectionsModule', () => {
 
         await ConnectionsModule.install(ctx);
 
+        // validateSemp returns before any fetch unless the SEMP fields are filled.
+        (container.querySelector('#conn-host') as HTMLInputElement).value = 'broker.test';
+        (container.querySelector('#semp-port') as HTMLInputElement).value = '943';
+        (container.querySelector('#semp-username') as HTMLInputElement).value = 'admin';
         const sempPass = container.querySelector('#semp-password') as HTMLInputElement;
+        sempPass.value = 'admin';
+        (globalThis.fetch as any).mockClear();
         sempPass.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+
+        await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+            expect.stringContaining('/SEMP/v2/monitor/msgVpns'), expect.anything()));
     });
 
     it('non-Enter key does not trigger connect', async () => {
@@ -1145,8 +1160,14 @@ describe('ConnectionsModule', () => {
         // fire on the follow-up emit.
         const probe = vi.fn();
         eventBus.on('client:disconnected', probe);
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
         eventBus.emit('connection:edit-requested');
+        // The bus catches and logs a throwing handler, so the missing loadSelf
+        // must be guarded in the module: no handler error was logged.
+        const handlerErrors = errSpy.mock.calls.filter(c => String(c[0]).includes('Error in handler'));
+        errSpy.mockRestore();
+        expect(handlerErrors).toEqual([]);
 
         // The event bus is still capable of dispatching — proves the prior
         // emit didn't poison its internal listener registry. A bare
@@ -1845,9 +1866,14 @@ describe('ConnectionsModule', () => {
 
         appState.isConnected = false;
 
-        expect(() => {
-            eventBus.emit('connection:check-connection', { vpn: 'target-vpn', queue: 'q1' });
-        }).not.toThrow();
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        eventBus.emit('connection:check-connection', { vpn: 'target-vpn', queue: 'q1' });
+        // The bus catches and logs a throwing handler, so assert the effect:
+        // no handler error was logged and the connect to the target VPN started.
+        const handlerErrors = errSpy.mock.calls.filter(c => String(c[0]).includes('Error in handler'));
+        errSpy.mockRestore();
+        expect(handlerErrors).toEqual([]);
+        expect((container.querySelector('#solace-vpn') as HTMLInputElement).value).toBe('target-vpn');
     });
 
     // The connections module probes `/hosted` once at install and publishes the

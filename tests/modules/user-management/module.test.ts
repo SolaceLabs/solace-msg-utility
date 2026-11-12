@@ -113,13 +113,6 @@ describe('user-management — list', () => {
         expect(svcMock.listUsers).not.toHaveBeenCalled();
     });
 
-    it('Refresh re-fetches the list', async () => {
-        const { container } = await setup();
-        svcMock.listUsers.mockClear();
-        el<HTMLButtonElement>(container, '#btn-user-mgmt-refresh').click();
-        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalled());
-    });
-
     it("shows the gateway's reason when the list fails", async () => {
         const container = loadModuleDOM('user-management');
         const ctx = makeCtx(container, ADMIN);
@@ -170,12 +163,18 @@ describe('user-management — list', () => {
         ctx.eventBus.emit('rbac:changed');
         expect(hidden(container, '#user-mgmt-gate')).toBe(false);
         expect(svcMock.listUsers).not.toHaveBeenCalled();
+        svcMock.listUsers.mockResolvedValue(listed([{ ...USERS[1], username: 'carol' }]));
         ctx.setState('managed', ADMIN);
         ctx.eventBus.emit('rbac:changed');
         await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledTimes(1));
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').textContent).toContain('carol'));
+        expect(rowCount(container)).toBe(1);
+        svcMock.listUsers.mockResolvedValue(listed([{ ...USERS[1], username: 'dave' }]));
         ctx.setState('managed', { ...ADMIN, username: 'other' });
         ctx.eventBus.emit('rbac:changed');
         await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledTimes(2));
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').textContent).toContain('dave'));
+        expect(rowCount(container)).toBe(1);
     });
 
     it('shows the gate when the signed-in admin is demoted', async () => {

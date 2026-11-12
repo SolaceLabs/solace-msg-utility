@@ -344,13 +344,15 @@ export function runCopyJob(
         });
         browser.on(solace.QueueBrowserEventName.CONNECT_FAILED_ERROR, (e: any) => {
             // OperationError carries the reason on `.message`, not `infoStr`.
-            state.job!.lastError = solaceErrorText(e, 'Browser connect failed');
-            logger.error(`[Copy] Source QueueBrowser CONNECT_FAILED_ERROR: ${state.job!.lastError}`);
+            // First stop reason wins: a later browser event must not overwrite it.
+            if (stopReason === null) state.job!.lastError = solaceErrorText(e, 'Browser connect failed');
+            logger.error(`[Copy] Source QueueBrowser CONNECT_FAILED_ERROR: ${solaceErrorText(e, 'Browser connect failed')}`);
             triggerStop('browser-error');
         });
         browser.on(solace.QueueBrowserEventName.DOWN_ERROR, (e: any) => {
-            state.job!.lastError = solaceErrorText(e, 'Browser disconnected');
-            logger.error(`[Copy] Source QueueBrowser DOWN_ERROR: ${state.job!.lastError}`);
+            // First stop reason wins: a later browser event must not overwrite it.
+            if (stopReason === null) state.job!.lastError = solaceErrorText(e, 'Browser disconnected');
+            logger.error(`[Copy] Source QueueBrowser DOWN_ERROR: ${solaceErrorText(e, 'Browser disconnected')}`);
             triggerStop('browser-error');
         });
         // GM_DISABLED registered for SDK-event-code-validation parity

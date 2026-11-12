@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { REPO_ROOT } from '../helpers/sources';
 import { createEmitter } from '../../src/mock-broker/emitter';
 import { buildSolaceSdk } from '../../src/mock-broker/sdk';
 import { createMessage } from '../../src/mock-broker/sdk/message';
@@ -315,7 +318,15 @@ describe('mock-broker/sdk — enums', () => {
     });
 
     it('reports a version above the shell floor', () => {
-        expect(buildSolaceSdk().Version.version).toBe('10.99.0-mock');
+        // The floor is the shell's own MIN_VERSION for solclientjs (src/index.html);
+        // a raised floor the mock no longer meets must fail here, not in the demo.
+        const shell = fs.readFileSync(path.join(REPO_ROOT, 'src/index.html'), 'utf-8');
+        const m = shell.match(/Version Check \(>= [\d.]+\)\. solaceLibLoaded[\s\S]*?const MIN_VERSION = '([\d.]+)'/);
+        expect(m, "src/index.html's MIN_VERSION check for solclientjs").not.toBeNull();
+        const parse = (v: string) => v.split('-')[0].split('.').map(Number);
+        const [a, b] = [parse(buildSolaceSdk().Version.version), parse(m![1])];
+        const i = a.findIndex((n, k) => n !== b[k]);
+        expect(i < 0 || a[i] > b[i], `mock ${a.join('.')} is below the shell floor ${b.join('.')}`).toBe(true);
     });
 });
 

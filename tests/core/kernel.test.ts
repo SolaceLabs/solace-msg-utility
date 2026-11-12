@@ -384,19 +384,27 @@ describe('Kernel', () => {
             await kernel.start();
 
             expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Template for module'));
+            expect(mod.install).not.toHaveBeenCalled();
         });
 
         it('handles module install failure gracefully', async () => {
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             const mod = createMockModule({
-                id: 'failing',
+                id: 'failing', name: 'Failing',
                 install: vi.fn(async () => { throw new Error('install failed'); })
             });
-            setupDOM(['failing']);
-            const kernel = new Kernel([reg(mod)]);
+            const good = createMockModule({ id: 'good', name: 'Good' });
+            setupDOM(['failing', 'good']);
+            const kernel = new Kernel([reg(mod, 100), reg(good, 50)]);
             await kernel.start();
 
             expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to install'), expect.any(Error));
+            // The failed module is not registered: the next module is active, its view
+            // stays hidden and the nav omits it.
+            expect(document.getElementById('page-title')?.textContent).toBe('Good');
+            expect(document.getElementById('module-view-failing')!.classList.contains('hidden')).toBe(true);
+            expect(document.getElementById('module-view-good')!.classList.contains('hidden')).toBe(false);
+            expect(document.getElementById('sidebar-nav')?.innerHTML).not.toContain('Failing');
         });
 
         it('works with no modules', async () => {
@@ -439,6 +447,7 @@ describe('Kernel', () => {
             expect(errSpy).toHaveBeenCalledWith(
                 expect.stringContaining('No modules installed successfully')
             );
+            expect(document.getElementById('page-title')?.textContent).toBe('');
             errSpy.mockRestore();
         });
 
@@ -459,22 +468,22 @@ describe('Kernel', () => {
         });
 
         it('idempotency prevents window listener accumulation across start() calls', async () => {
-            const mod = createMockModule({ id: 'test-module' });
+            let ctx: AppContext | null = null;
+            const mod = createMockModule({ id: 'test-module', install: vi.fn(async c => { ctx = c; }) });
             setupDOM(['test-module']);
             const kernel = new Kernel([reg(mod)]);
             await kernel.start();
 
-            // Snapshot the current jszip:loaded listener count via a probe: calling
-            // start() again and dispatching the event should not cause the EventBus
-            // to emit twice. We can observe this via the bus — but the bus isn't
-            // exposed, so instead we rely on the fact that install() is gated.
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
             await kernel.start();
             await kernel.start();
-            // install stays at 1 call — transitively proves no second window
-            // listener was registered either (both happen inside the same start() block).
-            expect(mod.install).toHaveBeenCalledTimes(1);
             warnSpy.mockRestore();
+
+            // A second start() that re-ran the bridge would forward the window event twice.
+            const handler = vi.fn();
+            ctx!.eventBus.on('jszip:loaded', handler);
+            window.dispatchEvent(new Event('jszip:loaded'));
+            expect(handler).toHaveBeenCalledTimes(1);
         });
     });
 
@@ -1094,18 +1103,9 @@ describe('Kernel', () => {
             const mod = createMockModule({ id: 'test-module' });
             const kernel = new Kernel([reg(mod)]);
             await kernel.start();
-            // No toggle button, should not throw
-        });
-
-        it('starts with no module container', async () => {
-            document.body.innerHTML = `
-                <nav id="sidebar-nav"></nav>
-                <h1 id="page-title"></h1>
-                <template data-module-id="test-module"><div>content</div></template>
-            `;
-            const mod = createMockModule({ id: 'test-module' });
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
+            // No toggle button: start() still installs and shows the module.
+            expect(mod.install).toHaveBeenCalledTimes(1);
+            expect(document.getElementById('module-view-test-module')!.classList.contains('hidden')).toBe(false);
         });
     });
 
@@ -1211,12 +1211,20 @@ describe('Kernel', () => {
             await kernel.start();
             expect(document.getElementById('page-title')?.textContent).toBe('Users');
 
-            ctx!.setState('managed', managedSession({ admin: false }));
-            ctx!.eventBus.emit('rbac:changed');
+            // The bus swallows handler errors into console.error, so spy on it.
+            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            try {
+                ctx!.setState('managed', managedSession({ admin: false }));
+                ctx!.eventBus.emit('rbac:changed');
 
-            // The only module is now hidden; sidebar empties and there's nowhere
-            // to navigate — the kernel leaves the (now-hidden) view as-is without throwing.
-            expect(nav().innerHTML).toBe('');
+                // The only module is now hidden; sidebar empties and there's nowhere
+                // to navigate -- the kernel leaves the (now-hidden) view as-is without throwing.
+                expect(nav().innerHTML).toBe('');
+                expect(document.getElementById('page-title')?.textContent).toBe('Users');
+                expect(errSpy).not.toHaveBeenCalled();
+            } finally {
+                errSpy.mockRestore();
+            }
         });
     });
 
