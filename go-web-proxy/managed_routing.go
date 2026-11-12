@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,8 +19,12 @@ import (
 // lv is the live settings every piece reads per request; src is config.yaml,
 // which the settings endpoint rewrites; upstream is the broker transport the
 // Direct relay uses too (newUpstreamTransport), for the SEMP relay and the
-// SMF gate.
-func newManagedRouting(cfg config, lv *live, src configSource, upstream http.RoundTripper, logger *slog.Logger) (*managedRoutes, error) {
+// SMF gate; auditOut gets the copy of each audit line while audit.stdout is on.
+//
+// Provisioned mode always has an audit trail: the log at cfg.auditFile is
+// opened here, and a failure stops the start. buildManagedRoutes leaves the
+// auditor nil (no trail), so tests that do not look at it need no /data.
+func newManagedRouting(cfg config, lv *live, src configSource, upstream http.RoundTripper, auditOut io.Writer, logger *slog.Logger) (*managedRoutes, error) {
 	if !cfg.provisioned() {
 		return nil, nil
 	}
@@ -29,7 +34,29 @@ func newManagedRouting(cfg config, lv *live, src configSource, upstream http.Rou
 	if err != nil {
 		return nil, fmt.Errorf("password hasher: %w", err)
 	}
-	return buildManagedRoutes(cfg, lv, src, h, os.Getenv, time.Now, upstream, logger)
+	routes, err := buildManagedRoutes(cfg, lv, src, h, os.Getenv, time.Now, upstream, logger)
+	if err != nil {
+		return nil, err
+	}
+	au, err := openAuditor(cfg.auditFile, lv, auditOut, logger.With("component", "audit"))
+	if err != nil {
+		return nil, err
+	}
+	routes.setAuditor(au)
+	return routes, nil
+}
+
+// setAuditor hands the audit trail to every piece that records to it. Each
+// piece keeps its own *auditor field, nil until here.
+func (mr *managedRoutes) setAuditor(a *auditor) {
+	mr.audit = a
+	h := mr.api.(*managedHandler)
+	h.audit = a
+	h.throttle.audit = a // the sign-in pages share it
+	h.relay.(*sempRelay).audit = a
+	h.smf.(*smfGate).audit = a
+	h.dial.(*dialer).audit = a
+	mr.pages.(*authPages).audit = a
 }
 
 // buildManagedRoutes wires the pieces; split from newManagedRouting so tests

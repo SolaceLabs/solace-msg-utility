@@ -3,8 +3,10 @@
  * live.go): what `GET /managed/settings` shows and what a `PUT` may change,
  * refused in the gateway's order with its reasons. Live keys apply at once
  * (connModes and defaultConn reach the next `/hosted`, modules the next
- * `/me`); restart-only keys are saved and reported as pending, and the path
- * keys change only "on the host", which the demo has none of.
+ * `/me`; audit.stdout and audit.access the next audit event, which the demo
+ * does not write: the keys are saved and shown only); restart-only keys are
+ * saved and reported as pending, and the path keys change only "on the host",
+ * which the demo has none of.
  *
  * Not simulated: the access list is saved and shown but never enforced, so
  * the demo cannot lock its viewer out; `would_lock_out` still refuses a list
@@ -28,6 +30,7 @@ const SCHEMA: Schema = {
     session: { idleMinutes: 'int', absoluteMinutes: 'int' },
     login: { maxFailures: 'int', backoffSeconds: 'int', maxBackoffSeconds: 'int', unauthenticatedPerMinute: 'int' },
     modules: { offered: 'strings', userDefault: 'string' },
+    audit: { stdout: 'bool', access: 'bool' },
 };
 
 /** restartOnlyKeys (live.go), in order; `host` marks the path keys. */
@@ -75,6 +78,7 @@ const ZERO: GatewaySettings = {
     session: { idleMinutes: 0, absoluteMinutes: 0 },
     login: { maxFailures: 0, backoffSeconds: 0, maxBackoffSeconds: 0, unauthenticatedPerMinute: 0 },
     modules: { offered: [], userDefault: '' },
+    audit: { stdout: false, access: false },
 };
 
 /**

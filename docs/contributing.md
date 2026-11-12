@@ -102,7 +102,7 @@ Needs: a Linux-container Docker; the npm packages installed (`npm ci`: the SMF c
 
 The harness generates the gateway's TLS material and every gateway password (the gateway makes its own store key in `/data`), writes them only under `scripts/logs/e2e/`, and masks them in all it prints; it masks the broker passwords at any length. A broker password shorter than 8 characters cannot be looked for by checks 2, 13, 14, 17 and `B6` without matching ordinary text, and the run says so. It always ends with `docker compose down -v` and deletes that directory; the task runs `down -v` again as a backstop. The task runs the harness on the real terminal rather than through the log capture, so that it can ask; the harness appends its own masked output to `scripts/logs/e2e.log`. The SMF check uses the real SDK under Node through a loopback bridge, which adds the session cookie and a same-origin `Origin` the way a browser would; the bytes reach the gateway's `/managed/smf` socket unchanged. In Gateway mode the same bridge adds only an `Origin` and dials the Direct relay's `/wss/<port>/<host>`, which forwards the bytes to the broker.
 
-Each check prints `PASS <id>.` or `FAIL <id>.`: 31 in a full run, 21 with `E2E_BROWSER=0`. Any failure exits 1, followed by the tail of the gateway log, and of the `direct` service's when a `D` check or the setup failed:
+Each check prints `PASS <id>.` or `FAIL <id>.`: 32 in a full run, 22 with `E2E_BROWSER=0`. Any failure exits 1, followed by the tail of the gateway log, and of the `direct` service's when a `D` check or the setup failed:
 
 1. A wrong password is refused, and sign-in issues `__Host-smu-session` as `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, with no `Domain` and no lifetime.
 2. `/managed/me` names the entitled broker and VPN only, with no address, port or credential.
@@ -139,14 +139,16 @@ Each check prints `PASS <id>.` or `FAIL <id>.`: 31 in a full run, 21 with `E2E_B
 13. No response from either gateway carries a credential, except the body of the `dial` answer. This includes every response the browser received and every Gateway-mode response.
 14. Both stores are sealed at rest (`SMUS` header, no plaintext).
 
+    Check 19 runs here too: `/data/audit.log` is copied out of the gateway container and read as the audit trail: every line is a JSON object with the decided fields in order, an RFC 3339 UTC `time` and an `outcome` of `ok` or `refused`, and the log holds the refused sign-in (`bad_credentials`), the e2e user's sign-in, a `settings.update` naming `connModes` and `modules.userDefault`, and the `backup.export` and `backup.import` entries. It runs before check 17 reads the copy.
+
     Check 18 runs here, while the administrator's session and the gateway are up: an export holds no credential, host or hash in clear and previews as no change; a schedule's **Back up now** writes a file into the `/backup` volume, also sealed, which `GET /managed/backup/files/{name}` returns as written; a **Merge** import of that file, settings included, leaves the administrator signed in; the schedule is then removed.
 15. After a restart the stores still open: old sessions are gone, and the administrator signs in again.
 16. A missing key file beside an existing store refuses to start, naming both files (the check mounts a host copy of `users.yaml`, with no key, over `/data`).
-17. Neither gateway log (both at `debug`) holds a password, store key (read from the gateway's `/data/store.key` with `compose cp`) or session cookie, the browser's included.
+17. Neither gateway log (both at `debug`), nor the audit log copied out by check 19, holds a password, store key (read from the gateway's `/data/store.key` with `compose cp`) or session cookie, the browser's included.
 
 The browser trusts the gateways' throwaway certificate (both serve the same one) by ignoring certificate errors; the Node checks verify that certificate against the run's CA. The harness aborts any browser request to an origin other than the gateway its page was opened on, so nothing leaves the stack. Chromium runs without its own sandbox (Playwright's default in a container); the container's posture is the boundary, and its Playwright server takes one client at a time, the harness, which connects once for `B1`-`B9` and again for `D4`. The server is the `playwright-core` that `npm ci` installed, mounted read-only, so the image's tag must equal that version, and the image is pinned by digest; `tests/build/e2e-lib.test.ts` holds both. To move to a new version, bump `playwright-core` and the image tag and digest together. A failed browser check saves a screenshot to `scripts/logs/e2e-<check>.png` (git-ignored); no page the run opens shows a password.
 
-The pure helpers (certificate issuing and reading, the broker details and their file, the cookie rules, the sealed-store header, masking and the secret sweep) live in [`scripts/e2e-lib.mjs`](../scripts/e2e-lib.mjs) and are covered by `tests/build/e2e-lib.test.ts`, which runs in the ordinary suite without Docker.
+The pure helpers (certificate issuing and reading, the broker details and their file, the cookie rules, the sealed-store header, masking and the secret sweep, and `parseAuditLog` and `auditMissing` for check 19) live in [`scripts/e2e-lib.mjs`](../scripts/e2e-lib.mjs) and are covered by `tests/build/e2e-lib.test.ts`, which runs in the ordinary suite without Docker.
 
 ---
 

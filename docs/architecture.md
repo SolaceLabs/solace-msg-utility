@@ -41,6 +41,7 @@
   - [Provisioned secondary connections](#provisioned-secondary-connections)
   - [The admin app (`/solAdmin`)](#the-admin-app-soladmin)
   - [The demo broker (`demo.html`, `provisioned-demo.html`)](#the-demo-broker-demohtml-provisioned-demohtml)
+  - [The audit trail](#the-audit-trail)
   - [Admin modules + the Go store](#admin-modules--the-go-store)
 - [CSS Organization](#css-organization)
   - [Required-Element Invariant](#required-element-invariant)
@@ -114,7 +115,7 @@ The image ([docker/Dockerfile](../docker/Dockerfile), whose header is the author
 | --- | --- |
 | `/gateway` | The version-stamped gateway binary built from `go-web-proxy/`; the entrypoint, listening on `:9443`. |
 | `/tls` | `tls.crt` and `tls.key` (generated self-signed on the first start when both are missing, so the directory ships writable) and `trust/`, the broker CAs (`*.crt`, `*.pem`). |
-| `/data` | `config.yaml` in every mode; `users.yaml`, `connections.yaml`, `backup.yaml` (all encrypted) and `store.key` in Provisioned mode. Baked empty so a named volume inherits the ownership. |
+| `/data` | `config.yaml` in every mode; `users.yaml`, `connections.yaml`, `backup.yaml` (all encrypted), `store.key` and the plain audit trail `audit.log` (with its rotated `audit.log.1` to `.50`) in Provisioned mode. Baked empty so a named volume inherits the ownership. |
 | `/backup` | `backupRoot`, a fixed path: Provisioned mode's scheduled backups (see Backup & Restore below). Baked empty and private (`0700`). |
 | `/SolaceMsgUtility` | `appRoot`, a fixed path: `index.html` (the Direct Release bundle), `provisioned.html`, `solAdmin.html`, `solclient.js`, `jszip.min.js`, and the vendor licences under `licenses/solclientjs/` and `licenses/jszip/`. Nothing else from `dist/` is copied in. |
 
@@ -937,6 +938,18 @@ before queue-browser's, and the Provisioned demo runs that patch against the emu
 delivers in **spool-ID order** and its `stop()`/`start()` genuinely suspend delivery (the copy engine's drift
 detection and backpressure depend on both). The SEMP v1 detail response even reproduces the broker bug the product
 works around — `newest-msg-id` of `0` — so the two-call workaround is exercised rather than bypassed.
+
+### The audit trail
+
+[audit.go](../go-web-proxy/audit.go) holds the audit stream of Provisioned mode: an always-on record of who did what, kept apart from the application log, never filtered by `LOG_LEVEL` and never read back to rebuild state (OWASP Logging Cheat Sheet, NIST SP 800-92, ISO 27001 A.8.15). Operator reference: [provisioned-mode.md -> Audit trail](provisioned-mode.md#audit-trail).
+
+- **The auditor** is a closure-held writer: `openAuditor(path, lv, stdout, logger)` opens `/data/audit.log` (`0600`, append) and returns an `*auditor`; `record(category, entry)` is the only call handlers make. A nil `*auditor` records nothing, so Gateway mode and the many tests that build a handler without one need no guard.
+- **Where it is opened.** `newManagedRouting` ([managed_routing.go](../go-web-proxy/managed_routing.go)) opens it after `buildManagedRoutes`, from `config.auditFile` (`/data/audit.log`, moved by `inDataDir` in tests), and hands it to `setAuditor`, the single wiring point that assigns the pointer to `managedRoutes`, `managedHandler`, the throttle, the sign-in pages, and the relay, SMF and dial endpoints. `buildManagedRoutes` keeps its signature and leaves the auditor nil. `serve` closes it at shutdown. `process.stdout` carries the optional copy; the application log stays on standard error, so the two streams stay separate.
+- **Category filter and live keys.** `admin` and `auth` entries are always written; `access` entries are dropped while `audit.access` is false. The two keys (`audit.stdout`, `audit.access`) are in the live set (`liveSettings.audit`, [live.go](../go-web-proxy/live.go)), read at each `record` call, so a Gateway Settings save applies at the next event. `audit.stdout` is seeded by `SMU_SHOW_AUDIT` (`seedVars` in [configfile.go](../go-web-proxy/configfile.go)); `audit.access` has no variable.
+- **Writing.** One mutex serialises whole lines: an entry is marshalled to one JSON object plus a newline and written in a single call, so concurrent requests never interleave. `record` sets `time` (RFC 3339, UTC) itself. A write that would take the file past 10 MB (`auditMaxBytes`) first rotates: `audit.log` to `.1`, `.1` to `.2`, up to `.50` (`auditKeepFiles`), and the oldest beyond is deleted, so the trail is at most about 500 MB. The gateway rotates because the image has no logrotate and runs non-root on a read-only root filesystem with only `/data` writable. A line longer than the cap goes to an empty file on its own.
+- **Fail loud at setup, fail open per write.** A file that cannot be opened stops a Provisioned start (systemic misconfiguration). A failed write, reopen or rotation is logged at `error` in the application log (the path and the cause, never the entry) and the request proceeds; a rotation that fails still appends the line to the current file rather than losing it.
+- **Where entries come from.** Admin routes are registered through `managedHandler.audited(pre, fn)` ([managed.go](../go-web-proxy/managed.go)), which composes `adminOnly` with one `admin` entry written after the handler answers: a status below 400 is `ok`, otherwise `refused` with the error body's code (captured by `auditWriter`). Handlers fill the `*auditCall` they are given (action override, target, names changed). Sign-in, sign-out and password change are recorded in `authPages` ([pages.go](../go-web-proxy/pages.go)), lockouts in the throttle ([throttle.go](../go-web-proxy/throttle.go)), and the access category in the dial, SMF and relay endpoints. `auditFor(r, action)` builds the common part: the actor the session gate recorded (`requestUser`) and the client address `withClient` resolved.
+- **Not in backups, not in the demos.** The audit file is not one of the backup sections and a restore does not touch it. The fake gateway carries the two settings keys only ([demo.md](demo.md#how-it-differs-from-a-real-gateway)).
 
 ### Admin modules + the Go store
 

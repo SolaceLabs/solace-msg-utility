@@ -169,6 +169,7 @@ The gateway keeps its settings in `config.yaml`. The variables below seed it on 
 | `SMU_SSL_CERTKEYFILE` | `/tls/tls.key` | Its private key (PEM). |
 | `SMU_SSL_TRUSTDIR` | `/tls/trust` | The CAs trusted for broker connections (`*.crt`, `*.pem`); see [TLS and trusted CAs](#tls-and-trusted-cas). |
 | `SMU_SSL_SKIP_CERT_VERIFY` | `false` | `true` skips verifying brokers' certificates (`tls.insecureSkipVerify` in `config.yaml`), with a warning at every start. Lab use only. Any value other than `true` or `false` stops the start. |
+| `SMU_SHOW_AUDIT` | `false` | Provisioned mode: `true` also copies each audit line to standard output (`audit.stdout` in `config.yaml`). The audit trail itself is always written to `/data/audit.log` and never filtered by `LOG_LEVEL`; see [provisioned-mode.md](provisioned-mode.md#audit-trail). Any value other than `true` or `false` stops the start. |
 | `LOG_LEVEL` | `warn` | `debug`, `info`, `warn` or `error`. See [Logs](#logs). |
 
 **Renamed variables.** Every gateway variable except `LOG_LEVEL` carries the `SMU_` prefix. The `SSL_` names were renamed because Go itself reads `SSL_CERT_FILE` as its CA bundle, so the old name silently replaced the gateway's trust pool for upstream brokers; the rest were prefixed to match. The old names are refused: a start with any of `SSL_CERT_FILE`, `SSL_KEY_FILE`, `SSL_TRUST_DIR`, `SSL_INSECURE_SKIP_VERIFY`, `HOSTED`, `CONN_MODES`, `DEFAULT_CONN`, `ADMIN_PASSWORD` or `ADMIN_PASSWORD_FILE` set stops with one error that lists each old name found and its new name (never the value). The new names behave exactly as the old ones did.
@@ -200,6 +201,8 @@ The gateway logs to standard error, one `key=value` line per event, at the level
 - **warn:** a recoverable problem: a denied client, a burst of failed sign-ins, a broker the relay could not reach, a full throttle table, a setting that is ignored.
 - **info:** what happened: each request (with the resolved client and the signed-in user), sign-ins, dials, every administrator's change to users, connections and settings, backups written, imports and exports.
 - **debug:** traces.
+
+Provisioned mode also keeps an [audit trail](provisioned-mode.md#audit-trail) of who did what, in `/data/audit.log`, apart from this log and never filtered by `LOG_LEVEL`; `SMU_SHOW_AUDIT=true` copies it to standard output.
 
 Each line names its `component` and what it concerns (`user`, `client`, `broker`, `vpn`, `path`, `target`); no password or key is ever logged (the standard is in [developer-guide.md -> Logging standard](developer-guide.md#logging-standard)). One line, `gateway starting`, is written at every level: the version, the mode, the files, the access list, the trusted proxies, the TLS settings and, in Provisioned mode, the sign-in and session limits the gateway runs with.
 
@@ -293,6 +296,7 @@ Connection profiles are stored in the browser's `localStorage`. They persist acr
 | --- | --- | --- |
 | `access.allow` | `[]` | CIDR list of clients allowed to reach the gateway at all. Empty means everyone. A denied client gets `403`, and the log names its address. |
 | `access.trustedProxies` | `[]` | CIDR list of your reverse proxies. From one of them the client's address is taken from `X-Forwarded-For`; from any other peer that header is ignored. See [Client addresses behind Docker and proxies](#client-addresses-behind-docker-and-proxies). |
+| `audit.access` | `false` | Provisioned mode only: also audit broker access (each dial, SMF socket and SEMP relay request). `audit.stdout` is the other key of the `audit` section; `SMU_SHOW_AUDIT` seeds it. Both apply at once. See [provisioned-mode.md](provisioned-mode.md#audit-trail). |
 | `session.*`, `login.*`, `modules.*` | see [provisioned-mode.md](provisioned-mode.md#configure) | Provisioned mode only: session lengths, the sign-in limits and the modules users may be given. |
 
 Missing keys take the built-in defaults, never an environment value; an unknown key, an empty file, a missing `version: 1` or a value out of range stops the start, naming the key and the value. The users store, the connections store and the store key are not settings: they always live at `/data/users.yaml`, `/data/connections.yaml` and `/data/store.key`, and you move data with Backup & Restore (see [provisioned-mode.md](provisioned-mode.md)). An old `usersFile` or `connectionsFile` key still loads, is ignored with a warning, and is dropped the next time the gateway writes the file. In Provisioned mode the admin console's Gateway Settings page edits this file too.

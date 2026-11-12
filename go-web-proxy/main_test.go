@@ -56,23 +56,23 @@ func TestParseLogLevel(t *testing.T) {
 	}
 }
 
-// The stores and the store key sit at fixed paths; only a test (or main, with
-// "") chooses where /data is.
+// The stores, the store key and the audit log sit at fixed paths; only a test
+// (or main, with "") chooses where /data is.
 func TestConfig_InDataDir(t *testing.T) {
 	d := defaultConfig()
-	if got := d.inDataDir(""); got.usersFile != defaultUsersFile || got.connectionsFile != defaultConnectionsFile || got.storeKeyFile != defaultStoreKeyFile {
-		t.Errorf("no data dir: want the fixed paths, got %q %q %q", got.usersFile, got.connectionsFile, got.storeKeyFile)
+	if got := d.inDataDir(""); got.usersFile != defaultUsersFile || got.connectionsFile != defaultConnectionsFile || got.storeKeyFile != defaultStoreKeyFile || got.auditFile != defaultAuditFile {
+		t.Errorf("no data dir: want the fixed paths, got %q %q %q %q", got.usersFile, got.connectionsFile, got.storeKeyFile, got.auditFile)
 	}
 	dir := filepath.Join("some", "dir")
 	got := d.inDataDir(dir)
-	if got.usersFile != filepath.Join(dir, "users.yaml") || got.connectionsFile != filepath.Join(dir, "connections.yaml") || got.storeKeyFile != filepath.Join(dir, "store.key") {
-		t.Errorf("stores not under %s: %q %q %q", dir, got.usersFile, got.connectionsFile, got.storeKeyFile)
+	if got.usersFile != filepath.Join(dir, "users.yaml") || got.connectionsFile != filepath.Join(dir, "connections.yaml") || got.storeKeyFile != filepath.Join(dir, "store.key") || got.auditFile != filepath.Join(dir, "audit.log") {
+		t.Errorf("stores and audit log not under %s: %q %q %q %q", dir, got.usersFile, got.connectionsFile, got.storeKeyFile, got.auditFile)
 	}
 }
 
 func TestLoadConfig_Defaults(t *testing.T) {
 	// Clear all relevant env so we exercise the default path.
-	for _, k := range []string{"SMU_HOSTED", "SMU_SSL_CERTFILE", "SMU_SSL_CERTKEYFILE", "SMU_SSL_TRUSTDIR", "SMU_SSL_SKIP_CERT_VERIFY", "LOG_LEVEL"} {
+	for _, k := range []string{"SMU_HOSTED", "SMU_SSL_CERTFILE", "SMU_SSL_CERTKEYFILE", "SMU_SSL_TRUSTDIR", "SMU_SSL_SKIP_CERT_VERIFY", "SMU_SHOW_AUDIT", "LOG_LEVEL"} {
 		t.Setenv(k, "")
 	}
 	cfg, err := loadConfig()
@@ -87,6 +87,9 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	}
 	if cfg.usersFile != "/data/users.yaml" || cfg.connectionsFile != "/data/connections.yaml" || cfg.storeKeyFile != "/data/store.key" {
 		t.Errorf("stores: want them under /data, got %q %q %q", cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile)
+	}
+	if cfg.auditFile != "/data/audit.log" || cfg.audit != (auditSettings{}) {
+		t.Errorf("audit: want /data/audit.log with both options off, got %q %+v", cfg.auditFile, cfg.audit)
 	}
 	if cfg.certFile != "/tls/tls.crt" {
 		t.Errorf("certFile: want /tls/tls.crt, got %q", cfg.certFile)
@@ -161,6 +164,25 @@ func TestLoadConfig_InsecureSkipVerifyIsStrict(t *testing.T) {
 		t.Setenv("SMU_SSL_SKIP_CERT_VERIFY", v)
 		if _, err := loadConfig(); err == nil || !strings.Contains(err.Error(), `SMU_SSL_SKIP_CERT_VERIFY="`+v+`"`) || !strings.Contains(err.Error(), `"true" or "false"`) {
 			t.Errorf("SMU_SSL_SKIP_CERT_VERIFY=%q: want an error naming the variable and the accepted values, got %v", v, err)
+		}
+	}
+}
+
+// SMU_SHOW_AUDIT seeds audit.stdout and is as strict as the other booleans:
+// the value is written into config.yaml on the first start. audit.access has
+// no variable.
+func TestLoadConfig_ShowAuditIsStrict(t *testing.T) {
+	for v, want := range map[string]bool{"": false, "false": false, "true": true} {
+		t.Setenv("SMU_SHOW_AUDIT", v)
+		cfg, err := loadConfig()
+		if err != nil || cfg.audit.stdout != want || cfg.audit.access {
+			t.Errorf("SMU_SHOW_AUDIT=%q: want stdout=%v and access off, got %+v (%v)", v, want, cfg.audit, err)
+		}
+	}
+	for _, v := range []string{"TRUE", "1", "yes", "False"} {
+		t.Setenv("SMU_SHOW_AUDIT", v)
+		if _, err := loadConfig(); err == nil || !strings.Contains(err.Error(), `SMU_SHOW_AUDIT="`+v+`"`) || !strings.Contains(err.Error(), `"true" or "false"`) {
+			t.Errorf("SMU_SHOW_AUDIT=%q: want an error naming the variable and the accepted values, got %v", v, err)
 		}
 	}
 }
@@ -516,7 +538,7 @@ func TestServe_ProvisionedModeStartsAndShutsDownOnASignal(t *testing.T) {
 	if err := r.result(t); err != nil {
 		t.Fatalf("serve after SIGTERM: %v", err)
 	}
-	for _, name := range []string{"users.yaml", "store.key"} {
+	for _, name := range []string{"users.yaml", "store.key", "audit.log"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("%s was not created: %v", name, err)
 		}
@@ -558,6 +580,13 @@ func TestServe_FailuresStopTheStart(t *testing.T) {
 			writeFile(t, filepath.Join(dir, scheduleFileName), "not sealed\n")
 			return writeServeConfig(t, dir, provisionedKeys)
 		}, nil, "read backup schedule"},
+		{"an audit log it cannot open", func(t *testing.T, dir string) string {
+			writeFile(t, filepath.Join(dir, "store.key"), testStoreKeyHex+"\n")
+			if err := os.Mkdir(filepath.Join(dir, "audit.log"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			return writeServeConfig(t, dir, provisionedKeys)
+		}, nil, "cannot open the audit log"},
 		{"an old variable name", func(t *testing.T, dir string) string {
 			t.Setenv("HOSTED", "false")
 			return writeServeConfig(t, dir, "")

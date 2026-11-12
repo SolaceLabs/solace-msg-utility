@@ -29,7 +29,7 @@
 // so at the start and in its summary: checks 3, 4, 6, 11 and 12 and D2-D4 pass
 // without proving the broker's TLS is trusted.
 //
-// Every check prints PASS or FAIL with its id: 1-17, B1-B9 in the browser and
+// Every check prints PASS or FAIL with its id: 1-19, B1-B9 in the browser and
 // D1-D4 in Gateway mode. Any FAIL, or a setup step that cannot complete, exits
 // 1. The gateway's passwords and its TLS material are generated
 // per run, written only under scripts/logs/e2e/ (git-ignored, deleted at the
@@ -67,8 +67,8 @@ import readline from 'node:readline';
 import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import {
-    MIN_MASKED, SESSION_COOKIE, createCookieJar, detailsFileText, findTokens, hostRootBundle, issueCert, jsonFindings,
-    hostAliasOverride, hostAliasProblem, makeCA, maskSecrets, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails, sealedHeaderProblem,
+    MIN_MASKED, SESSION_COOKIE, auditMissing, createCookieJar, detailsFileText, findTokens, hostRootBundle, issueCert, jsonFindings,
+    hostAliasOverride, hostAliasProblem, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails, sealedHeaderProblem,
     sessionCookieProblems, sweepSecrets,
 } from './e2e-lib.mjs';
 
@@ -854,6 +854,21 @@ async function runChecks(admin) {
             return file;
         });
 
+        // After 18 and before the restart of 15: the audit trail is plain JSON by
+        // design (so check 14's sealed-store checks do not apply to it), and
+        // every sign-in, settings change and backup above has left a line.
+        await check(19, 'the audit log (/data/audit.log) holds one JSON entry per line with the decided fields: the refused and the ok sign-in, the settings change, the backup export and import', async () => {
+            const dest = path.join(WORK, 'at-rest-audit.log');
+            const cp = compose(['cp', 'gateway:/data/audit.log', dest], { quiet: true });
+            expect(cp.code === 0, `docker compose cp audit.log: ${cp.out.trim()}`);
+            const { entries, problems } = parseAuditLog(fs.readFileSync(dest, 'utf8'));
+            expect(entries.length > 0, 'audit.log is empty');
+            expect(problems.length === 0, problems.slice(0, 5).join('; '));
+            const missing = auditMissing(entries, { user: USER, settingsKeys: ['connModes', 'modules.userDefault'] });
+            expect(missing.length === 0, `lacks ${missing.join('; ')}`);
+            return `${entries.length} entries`;
+        });
+
         await check(15, 'after a restart the stores still open: old sessions are gone, and the admin signs in again', async () => {
             const r = compose(['restart', 'gateway'], { quiet: true });
             expect(r.code === 0, `docker compose restart: ${r.out.trim()}`);
@@ -886,7 +901,7 @@ async function runChecks(admin) {
             return `exit ${run.code}`;
         });
 
-        await check(17, 'neither gateway log holds a password, store key or session cookie', async () => {
+        await check(17, 'neither gateway log nor the audit log holds a password, store key or session cookie', async () => {
             const logs = compose(['logs', '--no-color', 'gateway', 'direct'], { quiet: true });
             const text = logs.out + runOutput;
             // The key the gateway made on its fresh volume (64 hex characters).
@@ -897,7 +912,11 @@ async function runChecks(admin) {
             expect(storeKey.length >= MIN_MASKED, 'the gateway made no store key');
             const found = Object.entries({ ...sweepable(), storeKey, ...cookies }).filter(([, v]) => text.includes(v)).map(([name]) => name);
             expect(found.length === 0, `found ${found.join(', ')}`);
-            return `${text.split('\n').length} lines`;
+            // The audit log, copied out by check 19, is swept the same way.
+            const auditText = fs.readFileSync(path.join(WORK, 'at-rest-audit.log'), 'utf8');
+            const inAudit = Object.entries({ ...sweepable(), storeKey, ...cookies }).filter(([, v]) => auditText.includes(v)).map(([name]) => name);
+            expect(inAudit.length === 0, `audit.log holds ${inAudit.join(', ')}`);
+            return `${text.split('\n').length} lines, ${auditText.split('\n').length} audit lines`;
         });
     } finally {
         // Newest first: each SMF session before the bridge it runs through.

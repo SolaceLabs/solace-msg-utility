@@ -90,7 +90,7 @@ func (sf *settingsFile) current() fileConfig {
 
 // saveSettings validates and writes the whole file. A key missing from the
 // body keeps its saved value. Refusals are checkSettings'.
-func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request) {
+func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request, call *auditCall) {
 	sf := h.settings
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
@@ -103,6 +103,7 @@ func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	changed := settingsChanges(sf.saved, fileConfigFromConfig(cfg))
+	call.changed = changed
 	restart, err := sf.commit(cfg)
 	if err != nil {
 		h.serverError(w, r, "saveSettings", err)

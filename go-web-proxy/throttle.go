@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/netip"
@@ -36,6 +37,7 @@ type throttle struct {
 	buckets    map[netip.Prefix]*bucket
 	turns      map[string]*turn     // accounts with a sign-in being checked (loginTurn)
 	fullWarned map[string]time.Time // when tableFull last warned, per table
+	audit      *auditor             // the audit trail (audit.go); nil records nothing
 }
 
 type failures struct {
@@ -207,14 +209,36 @@ func (t *throttle) loginFailed(user string, client netip.Addr, ok bool) {
 	t.lim = t.limits()
 	now := t.now()
 	ck := clientKey(client, ok)
-	recordFailure(t, t.users, userKey(user), now, "user", userKey(user))
-	recordFailure(t, t.clients, ck, now, "client", ck.String())
+	if recordFailure(t, t.users, userKey(user), now, "user", userKey(user)) {
+		t.auditLockout(client, ok, "user", userKey(user))
+	}
+	if recordFailure(t, t.clients, ck, now, "client", ck.String()) {
+		t.auditLockout(client, ok, "client", ck.String())
+	}
+}
+
+// auditLockout records that a key has started being refused: the lockout
+// entry names the key (a username, or the client's prefix) and the failures
+// that did it. The attempt that tripped it is unauthenticated, so the actor
+// is empty. t.mu must be held (t.lim is read).
+func (t *throttle) auditLockout(client netip.Addr, ok bool, kind, label string) {
+	addr := "unknown"
+	if ok {
+		addr = client.String()
+	} else if kind == "client" {
+		label = addr // the zero key has no prefix to show
+	}
+	t.audit.record(auditAuth, auditEntry{
+		Client: addr, Action: auditLockout, Target: label, Outcome: auditRefused, Code: "throttled",
+		Msg: fmt.Sprintf("sign-in throttled for %s %s after %d failed attempts", kind, label, t.lim.maxFailures),
+	})
 }
 
 // recordFailure bumps one key's count and blocks it once it reaches
 // maxFailures. The first block logs a warn: that line is the "burst of failed
-// sign-ins" signal for the operator.
-func recordFailure[K comparable](t *throttle, m map[K]*failures, k K, now time.Time, kind, label string) {
+// sign-ins" signal for the operator. It reports whether this failure started
+// the block (the audit trail's lockout).
+func recordFailure[K comparable](t *throttle, m map[K]*failures, k K, now time.Time, kind, label string) (started bool) {
 	f := m[k]
 	if f != nil && t.stale(f, now) {
 		f.count = 0
@@ -222,7 +246,7 @@ func recordFailure[K comparable](t *throttle, m map[K]*failures, k K, now time.T
 	if f == nil {
 		if !hasRoom(t, m, now) {
 			t.tableFull(kind+"s", len(m), now) // loginWait already refuses untracked keys while full
-			return
+			return false
 		}
 		f = &failures{}
 		m[k] = f
@@ -230,7 +254,7 @@ func recordFailure[K comparable](t *throttle, m map[K]*failures, k K, now time.T
 	f.count++
 	f.last = now
 	if f.count < t.lim.maxFailures {
-		return
+		return false
 	}
 	backoff := t.lim.backoff
 	for i := t.lim.maxFailures; i < f.count && backoff < t.lim.maxBackoff; i++ {
@@ -238,9 +262,11 @@ func recordFailure[K comparable](t *throttle, m map[K]*failures, k K, now time.T
 	}
 	backoff = min(backoff, t.lim.maxBackoff)
 	f.blockedUntil = now.Add(backoff)
-	if f.count == t.lim.maxFailures {
+	started = f.count == t.lim.maxFailures
+	if started {
 		t.logger.Warn("sign-in throttled after repeated failures", kind, label, "failures", f.count, "retry_after_s", int(backoff.Seconds()))
 	}
+	return started
 }
 
 // loginSucceeded clears both keys' failure counts.

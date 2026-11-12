@@ -26,6 +26,7 @@
   - [Event Handling](#event-handling)
   - [Error Handling](#error-handling)
   - [Logging standard](#logging-standard)
+  - [Auditing an action](#auditing-an-action)
   - [TypeScript](#typescript)
 
 ---
@@ -549,6 +550,16 @@ One standard for the web app and the gateway, so a line can be read, filtered an
 - **No secrets, at any level.** Never a password, a passphrase, a store key, a session cookie or an `Authorization` header: leave it out or mask it. A broker's address is not a secret; its credential is.
 - **Web app.** `const log = logger.withTag('<Component>')` from [src/core/logger.ts](../src/core/logger.ts), never `console.*`: ESLint holds it, and the inline script in `src/index.html`, which runs before any module, is the one exception. The level is set at boot; `?logLevel=DEBUG` (or `WARN`, `ERROR`, `SILENT`) overrides it.
 - **Gateway.** A request's lines go through `requestLogger(base, r)` ([go-web-proxy/logging.go](../go-web-proxy/logging.go)), which carries the client, the method, the path and, once a gate has recorded one, the user. `LOG_LEVEL` sets the level, and one summary line at startup is always written whatever the level: the version, the mode and the settings in force, never a secret.
+
+### Auditing an action
+
+The gateway's audit trail (design: [architecture.md -> The audit trail](architecture.md#the-audit-trail); operator view: [provisioned-mode.md -> Audit trail](provisioned-mode.md#audit-trail)) is separate from logging: log what the program does, audit what a person did to it. Add an event when a new route changes configuration or access, or a new sign-in path appears.
+
+- **An admin route.** Register it with `h.audited(pre, fn)` in `managed.go` instead of `h.adminOnly(...)`. `pre` names the action and target from the request (before the handler runs, so a refusal by `adminOnly` is recorded too); `fn` receives a `*auditCall` to override the action, set the target, and list `changed` (names only). Add the action constant to the `audit.go` list, its phrase to `auditPhrases` (`done` and `attempt`), and tests for one `ok` and one `refused` entry.
+- **Anything else.** `e := auditFor(r, auditX)` gives actor and client; set `Target`, `Outcome` (`auditOK` or `auditRefused`), `Code` (the code the API answers), `Changed` and `Msg`, then `h.audit.record(category, e)`. Set `e.Actor` yourself where the actor is not the session user (a sign-in names the account tried). Do not nil-check `h.audit`.
+- **Naming.** `noun.verb` in lower case (`user.update`, `schedule.remove`); a single word for an event with no noun (`signin`, `dial`). Categories: `auditAdmin` and `auditAuth` are always written, `auditAccess` only while `audit.access` is on, so use it for high-volume broker traffic. `msg` is a plain sentence naming actor, verb and target.
+- **Names, never values.** `changed` lists parts (`password`, `grants`, `vpn prod`, a settings key such as `modules.userDefault`), never what they were set to. An entry never holds a password or hash, store or backup key, passphrase, session cookie or token, a VPN or SEMP credential, a settings value or backup content. A target that came from the requester (a path segment, a file name, a username) is cut to 64 bytes (`userKey`) so it cannot flood the line.
+- **Tests.** A test that looks at the trail sets `e.api.audit` (`env.setAudit` in [managed_test.go](../go-web-proxy/managed_test.go) opens an auditor over a temp file with a fixed clock and the `auditLog` helper reads it back). Cover the entry for the new event, its refusal, and keep `TestManagedAPI_AuditNeverHoldsASecret` (`managed_test.go`, the secret sweep) passing: it submits known secrets through every audited route and fails if any appears in the file.
 
 ### TypeScript
 

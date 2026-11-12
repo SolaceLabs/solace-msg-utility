@@ -514,3 +514,17 @@ func TestParseSMFPath(t *testing.T) {
 		}
 	}
 }
+
+// An SMF socket is two access entries, one when it opens and one when it ends.
+func TestSMF_SocketsAreAudited(t *testing.T) {
+	s := newSMFEnv(t, fakeAnswer{})
+	au := s.withAudit(t, auditSettings{access: true})
+	ws := s.mustOpen(t, "/managed/smf/b1/v1", s.cookie("viewer", false))
+	ws.echo(t, "ping")
+	_ = ws.conn.Close()
+	au.waitEntries(t, 2)
+	au.expect(t,
+		auditEntry{Actor: "viewer", Client: "127.0.0.1", Action: "smf.open", Target: "b1/v1", Outcome: "ok", Msg: "viewer's SMF socket to b1/v1 opened"},
+		auditEntry{Actor: "viewer", Client: "127.0.0.1", Action: "smf.close", Target: "b1/v1", Outcome: "ok", Msg: "viewer's SMF socket to b1/v1 closed"},
+	)
+}

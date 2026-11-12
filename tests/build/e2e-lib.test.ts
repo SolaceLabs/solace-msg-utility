@@ -5,9 +5,9 @@ import path from 'node:path';
 import tls from 'node:tls';
 import type { AddressInfo } from 'node:net';
 import {
-    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, createCookieJar, detailsFileText, findTokens, hostAliasOverride,
+    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, auditMissing, createCookieJar, detailsFileText, findTokens, hostAliasOverride,
     hostAliasProblem, hostRootBundle,
-    issueCert, jsonFindings, makeCA, maskSecrets, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails,
+    issueCert, jsonFindings, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails,
     sealedHeaderProblem, sessionCookieProblems, sweepSecrets,
 } from '../../scripts/e2e-lib.mjs';
 import { REPO_ROOT } from '../helpers/sources';
@@ -427,5 +427,79 @@ describe('e2e-lib -- secrets', () => {
         expect(sweepSecrets(records, { pass: secrets.pass })).toEqual([
             'pass in the body of POST /managed/dial -> 200', 'pass in the headers of GET /managed/me -> 200',
         ]);
+    });
+});
+
+describe('e2e-lib -- audit log', () => {
+    const line = (e: Record<string, unknown>) => JSON.stringify({ time: '2026-11-12T10:00:00Z', actor: 'u', client: '10.0.0.1', outcome: 'ok', msg: 'm', ...e });
+    // Keys in the gateway's order, whatever order the literal was written in.
+    const entry = (e: Record<string, unknown>) => {
+        const full = JSON.parse(line(e)) as Record<string, unknown>;
+        const order = ['time', 'actor', 'client', 'action', 'target', 'outcome', 'code', 'changed', 'msg'];
+        return JSON.stringify(Object.fromEntries(order.filter((k) => k in full).map((k) => [k, full[k]])));
+    };
+
+    it('parses well-formed lines and ignores blank ones', () => {
+        const text = `${entry({ action: 'signin' })}\n\n${entry({ action: 'settings.update', changed: ['connModes'], target: 't' })}\n`;
+        const { entries, problems } = parseAuditLog(text);
+        expect(problems).toEqual([]);
+        expect(entries.map((e) => e.action)).toEqual(['signin', 'settings.update']);
+    });
+
+    it('reports a line that is not JSON, not an object, or has unknown, missing or misordered fields', () => {
+        const { problems } = parseAuditLog([
+            'not json',
+            '[1]',
+            JSON.stringify({ time: '2026-11-12T10:00:00Z', actor: 'u', client: 'c', action: 'signin', outcome: 'ok', msg: 'm', extra: 1 }),
+            JSON.stringify({ time: '2026-11-12T10:00:00Z', actor: 'u' }),
+            JSON.stringify({ time: '2026-11-12T10:00:00Z', actor: 'u', client: 'c', outcome: 'ok', action: 'signin', msg: 'm' }),
+        ].join('\n'));
+        expect(problems).toEqual([
+            'line 1 is not JSON',
+            'line 2 is not a JSON object',
+            'line 3 has unknown field(s) extra',
+            'line 4 lacks client, action, outcome, msg',
+            'line 5 has its fields out of order: time, actor, client, outcome, action, msg',
+        ]);
+    });
+
+    it('reports a time that is not RFC 3339 UTC and an outcome other than ok or refused', () => {
+        const { problems } = parseAuditLog(entry({ action: 'signin', time: '2026-11-12 10:00:00', outcome: 'maybe' }));
+        expect(problems).toEqual(['line 1 has time 2026-11-12 10:00:00, not RFC 3339 UTC', 'line 1 has outcome maybe']);
+        expect(parseAuditLog(entry({ action: 'signin', time: '2026-11-12T10:00:00.123456Z' })).problems).toEqual([]);
+    });
+
+    const want = { user: 'e2e-user', settingsKeys: ['connModes', 'modules.userDefault'] };
+    const complete = [
+        { action: 'signin', outcome: 'refused', code: 'bad_credentials', actor: '', target: 'e2e-user' },
+        { action: 'signin', outcome: 'ok', actor: 'e2e-user' },
+        { action: 'settings.update', outcome: 'ok', changed: ['modules.userDefault'] },
+        { action: 'settings.update', outcome: 'ok', changed: ['connModes'] },
+        { action: 'backup.export', outcome: 'ok' },
+        { action: 'backup.import', outcome: 'ok' },
+    ];
+
+    it('finds nothing missing in a log that holds every decided entry', () => {
+        expect(auditMissing(complete, want)).toEqual([]);
+    });
+
+    it('names each decided entry that is missing', () => {
+        expect(auditMissing([], want)).toEqual([
+            'a refused signin for e2e-user with code bad_credentials', 'an ok signin for e2e-user',
+            'an ok settings.update naming connModes', 'an ok settings.update naming modules.userDefault',
+            'an ok backup.export', 'an ok backup.import',
+        ]);
+    });
+
+    it('does not count a refused entry, another user, another code or a settings entry without a changed list', () => {
+        const wrong = [
+            { action: 'signin', outcome: 'refused', code: 'throttled', actor: '', target: 'e2e-user' },
+            { action: 'signin', outcome: 'refused', code: 'bad_credentials', actor: '', target: 'someone-else' },
+            { action: 'signin', outcome: 'ok', actor: 'admin' },
+            { action: 'settings.update', outcome: 'refused', changed: ['connModes'] },
+            { action: 'settings.update', outcome: 'ok' },
+            { action: 'backup.export', outcome: 'refused' },
+        ];
+        expect(auditMissing(wrong, want)).toHaveLength(6);
     });
 });

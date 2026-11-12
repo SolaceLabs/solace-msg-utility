@@ -473,3 +473,23 @@ func TestRelay_UserDeletedMidRequestIs404(t *testing.T) {
 		t.Error("nothing reaches the broker")
 	}
 }
+
+// Each relayed SEMP request is an access entry naming the method and the path
+// without its query; a refused one is not recorded.
+func TestRelay_IsAuditedOnlyWhileAccessIsOn(t *testing.T) {
+	e, _ := newRelayEnv(t, answerJSON)
+	au := e.withAudit(t, auditSettings{})
+	c := e.cookie("viewer", false)
+	get := "/managed/relay/b1/SEMP/v2/monitor/msgVpns?count=10&where=secret"
+	expect(t, e.do("GET", get, "", c), http.StatusOK, "")
+	au.expect(t)
+	e.setAudit(auditSettings{access: true})
+	expect(t, e.do("GET", get, "", c), http.StatusOK, "")
+	expect(t, e.do("POST", "/managed/relay/b1/SEMP", showRPC, c), http.StatusOK, "")
+	expect(t, e.do("GET", "/managed/relay/b2/SEMP/v2/monitor/msgVpns", "", c), http.StatusNotFound, "not_found")
+	expect(t, e.do("DELETE", "/managed/relay/b1/SEMP/v2/config/msgVpns/v1", "", c), http.StatusForbidden, "read_only")
+	au.expect(t,
+		auditEntry{Actor: "viewer", Action: "relay", Target: "b1", Outcome: "ok", Msg: "viewer relayed GET /SEMP/v2/monitor/msgVpns to b1"},
+		auditEntry{Actor: "viewer", Action: "relay", Target: "b1", Outcome: "ok", Msg: "viewer relayed POST /SEMP to b1"},
+	)
+}

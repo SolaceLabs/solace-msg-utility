@@ -52,6 +52,8 @@ Standalone and Gateway mode have no store. This question concerns Provisioned mo
 
 **Settings.** `config.yaml` is seeded from the environment on first start, then edited on the admin console's Gateway Settings page (`settings.go`). Live keys apply at once through `live.go`.
 
+**Audit trail.** `/data/audit.log` (`audit.go`) is a separate append-only JSON-lines log of who did what, rotated by size (10 MB, up to 50 files). It is not part of the store: never read back, never backed up, never used to rebuild state, and a store change need not keep it in step. A future store should keep writing it the same way.
+
 **One gateway.** Everything assumes a single gateway process. Two replicas would share neither sessions nor edits.
 
 ---

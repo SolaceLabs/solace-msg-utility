@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // managedEnv is the managed gateway as serve() mounts it, over the store
@@ -127,6 +128,89 @@ func expect(t *testing.T, rec *httptest.ResponseRecorder, status int, code strin
 	}
 }
 
+// ----- the audit trail over the managed gateway ---------------------------------------
+
+// auditTestTime is every entry's time under newTestAuditor's clock.
+const auditTestTime = "2026-11-12T09:30:00Z"
+
+// auditLog reads the audit file an auditor wrote.
+type auditLog struct{ path string }
+
+// newTestAuditor opens an auditor over lv in a temp file, its clock fixed at
+// auditTestTime and the stdout copy discarded.
+func newTestAuditor(t *testing.T, lv *live) (*auditor, *auditLog) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	a, err := openAuditor(path, lv, io.Discard, quietLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.close() })
+	a.now = func() time.Time { return time.Date(2026, 11, 12, 9, 30, 0, 0, time.UTC) }
+	return a, &auditLog{path: path}
+}
+
+// setAudit swaps the live audit options, as a settings save does.
+func (e *managedEnv) setAudit(set auditSettings) {
+	next := e.cfg
+	next.audit = set
+	e.live.apply(next)
+}
+
+// withAudit gives every piece of the gateway an auditor over a temp file, with
+// the live audit options set.
+func (e *managedEnv) withAudit(t *testing.T, set auditSettings) *auditLog {
+	t.Helper()
+	e.setAudit(set)
+	a, l := newTestAuditor(t, e.live)
+	e.routes.setAuditor(a)
+	return l
+}
+
+func (l *auditLog) entries(t *testing.T) []auditEntry {
+	t.Helper()
+	var out []auditEntry
+	for _, line := range fileLines(t, l.path) {
+		if line == "" {
+			continue
+		}
+		var e auditEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("audit line %q: %v", line, err)
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// expect asserts the whole trail so far. A want's Time is the test clock's,
+// and its Client the one e.do uses unless it names another.
+func (l *auditLog) expect(t *testing.T, want ...auditEntry) {
+	t.Helper()
+	for i := range want {
+		want[i].Time = auditTestTime
+		if want[i].Client == "" {
+			want[i].Client = "192.0.2.10"
+		}
+	}
+	if got := l.entries(t); !reflect.DeepEqual(got, want) {
+		t.Fatalf("audit entries:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// waitEntries waits for n entries: a few are written after the response (an
+// SMF socket's close).
+func (l *auditLog) waitEntries(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(l.entries(t)) < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("want %d audit entries, got %+v", n, l.entries(t))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // ----- the gate ------------------------------------------------------------------
 
 // Without a session every /managed/* request gets byte-for-byte the same 401:
@@ -221,9 +305,11 @@ func TestManagedAPI_Me(t *testing.T) {
 
 func TestManagedAPI_Logout(t *testing.T) {
 	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
 	c := e.cookie("viewer", false)
 	rec := e.do("POST", "/managed/logout", "", c)
 	expect(t, rec, http.StatusNoContent, "")
+	au.expect(t, auditEntry{Actor: "viewer", Action: "signout", Target: "viewer", Outcome: "ok", Msg: "viewer signed out"})
 	if cl := rec.Result().Cookies(); len(cl) != 1 || cl[0].MaxAge >= 0 {
 		t.Errorf("logout must expire the cookie: %+v", cl)
 	}
@@ -554,4 +640,123 @@ func TestManagedAPI_ClientSeen(t *testing.T) {
 		})
 	}
 	expect(t, e.do("GET", "/managed/client", "", e.cookie("viewer", false)), http.StatusForbidden, "forbidden")
+}
+
+// ----- audit entries of the admin routes ---------------------------------------------
+
+// Every user change is one admin entry: ok after the commit, refused with the
+// API's code otherwise, and an update names the parts changed, never a value.
+func TestManagedAPI_UserChangesAreAudited(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	c := e.cookie("admin", false)
+	put := func(name, body string) { e.do("PUT", "/managed/users/"+name, body, c) }
+
+	put("bob", `{"password":"bob-password-1","readOnly":[{"brokers":"b1","msgVpns":"*","queues":"*"}]}`)
+	put("bob", `{"password":"bob-password-2","admin":true,"readOnly":[],"modules":["queue-browser"]}`)
+	put("viewer", `{"modules":["queue-browser"],"readOnly":[{"brokers":"b1","msgVpns":"v1","queues":"*"}]}`)
+	put("admin", `{"admin":true,"operate":[{"brokers":"*","msgVpns":"*","queues":"*"}]}`)
+	put("carol", `{"password":"short"}`)
+	// bob goes first: while bob is an admin, the demotion would succeed and sign admin out.
+	e.do("DELETE", "/managed/users/bob", "", c)
+	put("admin", `{"admin":false}`)
+	e.do("DELETE", "/managed/users/ghost", "", c)
+	e.do("PUT", "/managed/users/x", `{}`, e.cookie("viewer", false))
+
+	au.expect(t,
+		auditEntry{Actor: "admin", Action: "user.create", Target: "bob", Outcome: "ok", Msg: "admin created user bob"},
+		auditEntry{Actor: "admin", Action: "user.update", Target: "bob", Outcome: "ok", Changed: []string{"password", "admin", "grants", "modules"},
+			Msg: "admin updated user bob: password, admin, grants, modules"},
+		auditEntry{Actor: "admin", Action: "user.update", Target: "viewer", Outcome: "ok", Msg: "admin updated user viewer"},
+		auditEntry{Actor: "admin", Action: "user.update", Target: "admin", Outcome: "ok", Msg: "admin updated user admin"},
+		auditEntry{Actor: "admin", Action: "user.create", Target: "carol", Outcome: "refused", Code: "invalid", Msg: "admin could not create user carol: invalid"},
+		auditEntry{Actor: "admin", Action: "user.delete", Target: "bob", Outcome: "ok", Msg: "admin deleted user bob"},
+		auditEntry{Actor: "admin", Action: "user.update", Target: "admin", Outcome: "refused", Code: "last_admin", Msg: "admin could not update user admin: last_admin"},
+		auditEntry{Actor: "admin", Action: "user.delete", Target: "ghost", Outcome: "refused", Code: "not_found", Msg: "admin could not delete user ghost: not_found"},
+		auditEntry{Actor: "viewer", Action: "user.create", Target: "x", Outcome: "refused", Code: "forbidden", Msg: "viewer could not create user x: forbidden"},
+	)
+}
+
+// A save that fails to write is a refusal with the server_error code.
+func TestManagedAPI_FailedSaveIsAuditedAsRefused(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	blockWrites(t, &e.api.store.usersPath)
+	expect(t, e.do("PUT", "/managed/users/bob", `{"password":"bob-password-1"}`, e.cookie("admin", false)), http.StatusInternalServerError, "server_error")
+	au.expect(t, auditEntry{Actor: "admin", Action: "user.create", Target: "bob", Outcome: "refused", Code: "server_error",
+		Msg: "admin could not create user bob: server_error"})
+}
+
+// A connection update names hostname, semp, client and each VPN added,
+// changed or removed; a password counts as a change to its part, with no value.
+func TestManagedAPI_ConnectionChangesAreAudited(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	c := e.cookie("admin", false)
+	put := func(broker, body string) { e.do("PUT", "/managed/connections/"+broker, body, c) }
+
+	put("b3", `{"hostname":"h3","semp":{"port":"1943","user":"mon","pass":"semp-new-pw"},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u","pass":"vpn-new-pw"}]}}`)
+	put("b3", `{"hostname":"h3b","semp":{"scheme":"http","port":"1943","user":"mon","pass":""},"client":{"scheme":"ws","port":"1443","msgVpns":[{"name":"v1","user":"u","pass":""},{"name":"v2","user":"u2","pass":"vpn2-pw"}]}}`)
+	put("b3", `{"hostname":"h3b","semp":{"scheme":"http","port":"1943","user":"mon","pass":"semp2-pw"},"client":{"scheme":"ws","port":"1443","msgVpns":[{"name":"v1","user":"u-new","pass":""}]}}`)
+	put("b3", `{"semp":{"port":"x"}}`)
+	e.do("DELETE", "/managed/connections/b3", "", c)
+	e.do("DELETE", "/managed/connections/nope", "", c)
+	e.do("PUT", "/managed/connections/b9", `{}`, e.cookie("viewer", false))
+
+	au.expect(t,
+		auditEntry{Actor: "admin", Action: "connection.create", Target: "b3", Outcome: "ok", Msg: "admin created connection b3"},
+		auditEntry{Actor: "admin", Action: "connection.update", Target: "b3", Outcome: "ok", Changed: []string{"hostname", "semp", "client", "vpn v2"},
+			Msg: "admin updated connection b3: hostname, semp, client, vpn v2"},
+		auditEntry{Actor: "admin", Action: "connection.update", Target: "b3", Outcome: "ok", Changed: []string{"semp", "vpn v1", "vpn v2"},
+			Msg: "admin updated connection b3: semp, vpn v1, vpn v2"},
+		auditEntry{Actor: "admin", Action: "connection.update", Target: "b3", Outcome: "refused", Code: "invalid", Msg: "admin could not update connection b3: invalid"},
+		auditEntry{Actor: "admin", Action: "connection.delete", Target: "b3", Outcome: "ok", Msg: "admin deleted connection b3"},
+		auditEntry{Actor: "admin", Action: "connection.delete", Target: "nope", Outcome: "refused", Code: "not_found", Msg: "admin could not delete connection nope: not_found"},
+		auditEntry{Actor: "viewer", Action: "connection.create", Target: "b9", Outcome: "refused", Code: "forbidden", Msg: "viewer could not create connection b9: forbidden"},
+	)
+}
+
+// A target is cut to the length of a username key: a path segment is the
+// requester's to make long.
+func TestManagedAPI_AuditTargetIsCut(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	long := strings.Repeat("a", 200)
+	e.do("DELETE", "/managed/users/"+long, "", e.cookie("admin", false))
+	got := au.entries(t)
+	if len(got) != 1 || got[0].Target != strings.Repeat("a", 64) || strings.Contains(got[0].Msg, long) {
+		t.Fatalf("want the target cut to 64 bytes, got %+v", got)
+	}
+}
+
+// A password, a hash, a store key, a session and a VPN or SEMP credential
+// never reach the trail, whichever action handled them.
+func TestManagedAPI_AuditNeverHoldsASecret(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{access: true})
+	rec := e.form("/login", signInForm("admin", adminPW, "/"), nil)
+	expectRedirect(t, rec, "/")
+	c := issuedCookie(t, rec)
+	expect(t, e.do("PUT", "/managed/users/sweep", `{"password":"sweep-user-pw-1"}`, c), http.StatusNoContent, "")
+	expect(t, e.do("PUT", "/managed/connections/b3", `{"hostname":"h3","semp":{"port":"1943","user":"mon","pass":"sweep-semp-pw"},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u","pass":"sweep-vpn-pw"}]}}`, c), http.StatusNoContent, "")
+	expect(t, e.do("POST", "/managed/dial", dialBody("b1", "v1"), c), http.StatusOK, "")
+	exp := e.do("POST", "/managed/backup/export", `{"passphrase":"sweep passphrase one"}`, c)
+	expect(t, exp, http.StatusOK, "")
+
+	if n := len(au.entries(t)); n != 5 {
+		t.Fatalf("want sign-in, user, connection, dial and export entries, got %d", n)
+	}
+	data, err := os.ReadFile(au.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{
+		adminPW, viewerPW, "sweep-user-pw-1", "sweep-semp-pw", "sweep-vpn-pw", "sweep passphrase one",
+		"cli-b1v1-pw", "semp-b1-pw", "pbkdf2", testStoreKeyHex, c.Value,
+		decodeTo[map[string]string](t, exp.Body.Bytes())["content"],
+	} {
+		if strings.Contains(string(data), secret) {
+			t.Errorf("the audit file holds %q:\n%s", secret, data)
+		}
+	}
 }

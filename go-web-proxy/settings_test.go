@@ -103,6 +103,37 @@ func TestSettings_SaveAppliesLiveKeysAtOnce(t *testing.T) {
 	}
 }
 
+// audit.stdout and audit.access are live keys: saved, shown by GET, applied to
+// the next audit event with no restart, and a body that names one keeps the
+// other.
+func TestSettings_AuditKeysApplyLive(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	if cur := e.live.get().audit; cur != (auditSettings{}) {
+		t.Fatalf("both options default to off, got %+v", cur)
+	}
+	rec := e.saveSettings(t, `{"audit":{"stdout":true,"access":true}}`)
+	expect(t, rec, http.StatusOK, "")
+	if strings.TrimSpace(rec.Body.String()) != `{"restartRequired":[]}` {
+		t.Errorf("audit keys need no restart: %s", rec.Body.String())
+	}
+	if cur := e.live.get().audit; cur != (auditSettings{stdout: true, access: true}) {
+		t.Errorf("not applied: %+v", cur)
+	}
+	if got := e.settings(t).Settings.Audit; got != (fileAudit{Stdout: true, Access: true}) {
+		t.Errorf("GET after save: %+v", got)
+	}
+	if got := e.fileOnDisk(t).Audit; got != (fileAudit{Stdout: true, Access: true}) {
+		t.Errorf("file: %+v", got)
+	}
+	if line := logLine(e.log.String(), `msg="gateway settings saved"`); !strings.Contains(line, `changed="[audit.access audit.stdout]"`) {
+		t.Errorf("the save must name the audit keys changed: %s", line)
+	}
+	expect(t, e.saveSettings(t, `{"audit":{"access":false}}`), http.StatusOK, "")
+	if cur := e.live.get().audit; cur != (auditSettings{stdout: true}) {
+		t.Errorf("a body naming access must keep stdout: %+v", cur)
+	}
+}
+
 func TestSettings_RestartOnlyKeysAreSavedAndFlagged(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	rec := e.saveSettings(t, `{"tls":{"insecureSkipVerify":true}}`)
@@ -276,4 +307,22 @@ func TestSettings_WriteFailureIs500AndChangesNothing(t *testing.T) {
 	if e.live.level.Level() != slog.LevelWarn || !strings.Contains(e.log.String(), "op=saveSettings") {
 		t.Errorf("a failed write must apply nothing and log the cause: %s", e.log.String())
 	}
+}
+
+// A settings save is one admin entry naming the keys changed, never their
+// values; a refusal carries the code checkSettings answered.
+func TestSettings_SaveIsAudited(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	e.saveSettings(t, `{"logLevel":"debug"}`)
+	e.saveSettings(t, `{"connModes":"direct"}`)
+	e.saveSettings(t, `{"audit":{"stdout":true,"access":true}}`)
+	e.do("PUT", "/managed/settings", `{}`, e.cookie("viewer", false))
+	au.expect(t,
+		auditEntry{Actor: "admin", Action: "settings.update", Outcome: "ok", Changed: []string{"logLevel"}, Msg: "admin updated the gateway settings: logLevel"},
+		auditEntry{Actor: "admin", Action: "settings.update", Outcome: "refused", Code: "invalid", Msg: "admin could not update the gateway settings: invalid"},
+		auditEntry{Actor: "admin", Action: "settings.update", Outcome: "ok", Changed: []string{"audit.access", "audit.stdout"},
+			Msg: "admin updated the gateway settings: audit.access, audit.stdout"},
+		auditEntry{Actor: "viewer", Action: "settings.update", Outcome: "refused", Code: "forbidden", Msg: "viewer could not update the gateway settings: forbidden"},
+	)
 }

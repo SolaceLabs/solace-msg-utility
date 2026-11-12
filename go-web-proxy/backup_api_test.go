@@ -496,3 +496,49 @@ func TestBackupAPI_ImportIsAllOrNothing(t *testing.T) {
 		t.Errorf("a settings-only import applies at once: idle %v", e.live.get().session.idle)
 	}
 }
+
+// Export, the schedule and import are admin entries; an import names the
+// sections it applied and, for a saved backup, the file, never any content.
+func TestBackupAPI_ActionsAreAudited(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	pass := jsonBody(t, map[string]string{"passphrase": testPassphrase})
+	sched := jsonBody(t, map[string]any{"kind": "hourly", "keep": 5, "passphrase": testPassphrase})
+	e.do("POST", "/managed/backup/export", pass, e.admin())
+	e.do("POST", "/managed/backup/export", `{"passphrase":"short"}`, e.admin())
+	e.do("POST", "/managed/backup/export", pass, e.cookie("viewer", false))
+	e.do("PUT", "/managed/backup/schedule", sched, e.admin())
+	e.do("PUT", "/managed/backup/schedule", `{"kind":"yearly"}`, e.admin())
+	rec := e.do("POST", "/managed/backup/run", "", e.admin())
+	expect(t, rec, http.StatusOK, "")
+	saved := decodeTo[map[string]string](t, rec.Body.Bytes())["file"]
+	e.do("POST", "/managed/backup/import", jsonBody(t, map[string]string{
+		"backup": saved, "passphrase": testPassphrase, "users": "merge", "connections": "skip", "settings": "skip",
+	}), e.admin())
+	e.do("POST", "/managed/backup/import", jsonBody(t, map[string]string{
+		"file": e.exported(t, nil), "passphrase": testPassphrase, "users": "merge", "connections": "replace", "settings": "skip",
+	}), e.admin())
+	noAdmin := e.exported(t, func(d *backupDoc) { d.Users = d.Users[1:] })
+	e.do("POST", "/managed/backup/import", jsonBody(t, map[string]string{
+		"file": noAdmin, "passphrase": testPassphrase, "users": "replace", "connections": "skip", "settings": "skip",
+	}), e.admin())
+	e.do("POST", "/managed/backup/import", jsonBody(t, map[string]string{
+		"file": "x", "passphrase": testPassphrase, "users": "all", "connections": "skip", "settings": "skip",
+	}), e.admin())
+	e.do("DELETE", "/managed/backup/schedule", "", e.admin())
+	e.do("DELETE", "/managed/backup/schedule", "", e.admin())
+
+	au.expect(t,
+		auditEntry{Actor: "admin", Action: "backup.export", Outcome: "ok", Msg: "admin exported a backup"},
+		auditEntry{Actor: "admin", Action: "backup.export", Outcome: "refused", Code: "invalid", Msg: "admin could not export a backup: invalid"},
+		auditEntry{Actor: "viewer", Action: "backup.export", Outcome: "refused", Code: "forbidden", Msg: "viewer could not export a backup: forbidden"},
+		auditEntry{Actor: "admin", Action: "schedule.set", Outcome: "ok", Msg: "admin set the backup schedule"},
+		auditEntry{Actor: "admin", Action: "schedule.set", Outcome: "refused", Code: "invalid", Msg: "admin could not set the backup schedule: invalid"},
+		auditEntry{Actor: "admin", Action: "backup.import", Target: saved, Outcome: "ok", Changed: []string{"users"}, Msg: "admin imported a backup: users"},
+		auditEntry{Actor: "admin", Action: "backup.import", Outcome: "ok", Changed: []string{"users", "connections"}, Msg: "admin imported a backup: users, connections"},
+		auditEntry{Actor: "admin", Action: "backup.import", Outcome: "refused", Code: "last_admin", Msg: "admin could not import a backup: last_admin"},
+		auditEntry{Actor: "admin", Action: "backup.import", Outcome: "refused", Code: "invalid", Msg: "admin could not import a backup: invalid"},
+		auditEntry{Actor: "admin", Action: "schedule.remove", Outcome: "ok", Msg: "admin removed the backup schedule"},
+		auditEntry{Actor: "admin", Action: "schedule.remove", Outcome: "refused", Code: "not_found", Msg: "admin could not remove the backup schedule: not_found"},
+	)
+}

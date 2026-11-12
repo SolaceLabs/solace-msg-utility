@@ -16,6 +16,7 @@ export interface GatewaySettings {
     session: { idleMinutes: number; absoluteMinutes: number };
     login: { maxFailures: number; backoffSeconds: number; maxBackoffSeconds: number; unauthenticatedPerMinute: number };
     modules: { offered: string[]; userDefault: string };
+    audit: { stdout: boolean; access: boolean };
 }
 
 /** The GET /managed/settings body. */

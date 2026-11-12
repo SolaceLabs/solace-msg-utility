@@ -46,6 +46,7 @@ type smfGate struct {
 	rate     *rateWindow
 	upstream http.RoundTripper
 	logger   *slog.Logger
+	audit    *auditor // the audit trail (audit.go); nil records nothing
 }
 
 func newSMFGate(st *store, ss *sessions, sockets *socketRegistry, rate *rateWindow, upstream http.RoundTripper, logger *slog.Logger) *smfGate {
@@ -147,9 +148,20 @@ func (g *smfGate) connect(ctx context.Context, w http.ResponseWriter, r *http.Re
 	err = writeSwitch(brw.Writer, resp.Header)
 	if err == nil {
 		log.Info("smf socket opened")
+		g.auditSocket(r, auditSMFOpen, p, "opened")
 		pipe(ctx, conn, brw.Reader, back)
+		g.auditSocket(r, auditSMFClose, p, "closed")
 	}
 	log.Debug("smf socket ended", "err", err)
+}
+
+// auditSocket records the opening or closing of a socket to p's broker and
+// VPN (access category).
+func (g *smfGate) auditSocket(r *http.Request, action string, p smfPath, did string) {
+	e := auditFor(r, action)
+	e.Target, e.Outcome = p.broker+"/"+p.vpn, auditOK
+	e.Msg = e.Actor + "'s SMF socket to " + e.Target + " " + did
+	g.audit.record(auditAccess, e)
 }
 
 // upgradeScheme is the URL scheme the broker transport dials for a WebSocket

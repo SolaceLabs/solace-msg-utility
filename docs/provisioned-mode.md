@@ -16,9 +16,11 @@ It is the same container image as [Gateway mode](deployment.md#gateway-mode), wi
   - [Sessions and sign-in](#sessions-and-sign-in)
   - [Who can reach the gateway](#who-can-reach-the-gateway)
   - [What users may open](#what-users-may-open)
+  - [Audit settings](#audit-settings)
   - [Environment variables](#environment-variables)
 - [Administer](#administer)
 - [Back up and restore](#back-up-and-restore)
+- [Audit trail](#audit-trail)
 - [Security checklist](#security-checklist)
 - [Troubleshooting](#troubleshooting)
 
@@ -134,6 +136,15 @@ The waits apply to the account as well as the client, so someone guessing at a k
 | `modules.offered` | `[queue-browser, queue-copy, queue-subscription-explorer]` | All three, unless no one should copy or move messages (drop `queue-copy`), or queue and topic names in VPNs a user is not granted must stay hidden from them (drop `queue-subscription-explorer`, see the [security checklist](#security-checklist)). A `config.yaml` written by an earlier version lists only the first two: add Queue Subscriptions in Gateway Settings to offer it. |
 | `modules.userDefault` | `all` | `all` for a small team; `none` if each user should get modules explicitly on their account. |
 
+### Audit settings
+
+| Key | Default | Recommended |
+| --- | --- | --- |
+| `audit.stdout` | `false` | `true` if a log shipper reads the container's output and should carry the audit lines too; the file is written either way. Seeded by `SMU_SHOW_AUDIT`. |
+| `audit.access` | `false` | Leave off unless you need to know who opened which broker: it adds a line for every dial, socket and SEMP relay request, which is a high volume (see [Audit trail](#audit-trail)). No environment variable. |
+
+Both are on the Gateway Settings page and apply at the next audited event, with no restart.
+
 ### Environment variables
 
 These seed `config.yaml` on the first start only, except the two `SMU_ADMIN_PASSWORD` variables, which are never written to it. The users store, the connections store and the store key are not settings: they always live at `/data/users.yaml`, `/data/connections.yaml` and `/data/store.key`, and you move data with Backup & Restore. A deployment that still sets `USERS_FILE`, `CONNECTIONS_FILE` or `STORE_KEY_FILE` (or the `usersFile` / `connectionsFile` keys in `config.yaml`) starts with a warning that the value is ignored. Gateways renamed their variables with an `SMU_` prefix; a start with an old name set is refused, see [deployment.md](deployment.md#settings).
@@ -143,6 +154,7 @@ These seed `config.yaml` on the first start only, except the two `SMU_ADMIN_PASS
 | `SMU_CONN_MODES` | `direct` | `provisioned` |
 | `SMU_ADMIN_PASSWORD_FILE` | unset | A secret file, as in the compose file. Read only on the first start. |
 | `SMU_ADMIN_PASSWORD` | unset | Avoid: an environment value is visible to anyone who can inspect the container. Set this or `SMU_ADMIN_PASSWORD_FILE`, not both. |
+| `SMU_SHOW_AUDIT` | `false` | `true` or `false` (anything else stops the start). Seeds `audit.stdout`: copy each audit line to the container's standard output. Read on the first start only; after that `config.yaml` wins and a differing value is reported like the other `SMU_` variables. |
 
 The rest (TLS, log level) are the same as in Gateway mode: see [Settings](deployment.md#settings).
 
@@ -156,7 +168,7 @@ The admin console is at `https://<host>:9443/solAdmin`, for administrator accoun
 - **Connection Management:** add brokers, their SEMP account and their VPNs' client credentials. Leave a password blank to keep the stored one. The gateway reaches each broker over TLS (`https` for SEMP, `wss` for messaging), so the ports are the broker's TLS ports, unless the connection's `scheme` names the plain one (`http` for SEMP, `ws` for messaging; each side set on its own). A connection stored before the field existed stays on TLS: an absent or blank scheme means TLS, so no record needs a migration. Pick `http` or `ws` only for a broker on a trusted network that does not serve TLS on that port: the gateway then reaches it unencrypted, and the SEMP and SMF credentials cross that hop in clear text. Set the scheme in Connections -> Add or Edit connection.
 - **Gateway Settings:** the settings above, and a line under Access, "Your address as the gateway sees it", saying whether the address is the TCP peer or came from `X-Forwarded-For` through a trusted proxy. If it shows your proxy's address rather than yours, see [Client addresses behind Docker and proxies](deployment.md#client-addresses-behind-docker-and-proxies).
 
-Every change to a user, a connection or the settings is logged at `info` with the administrator's name and what changed (never a password): set `LOG_LEVEL=info` (or `logLevel: info` on Gateway Settings) to keep that record.
+Every change to a user, a connection or the settings is also logged at `info` with the administrator's name and what changed (never a password), but the record to keep is the [audit trail](#audit-trail): it is always written, whatever `LOG_LEVEL` says.
 - **Backup & Restore:** export the configuration to a file, import one, and schedule backups. See [Back up and restore](#back-up-and-restore).
 
 Changes apply at once. Revoking a user's access closes their broker connections. A restart signs everyone out.
@@ -197,6 +209,53 @@ To move a deployment: export (or copy a file from `/backup`), start the new gate
 
 ---
 
+## Audit trail
+
+The gateway keeps a record of who did what, apart from its log. It is written in Provisioned mode only, always, and never filtered by `LOG_LEVEL`. It answers questions such as who deleted a user, who changed the access list, whose sign-ins were refused, and which address they came from. It is for people to read and for a log shipper to collect: the gateway never reads it back, and nothing is rebuilt from it.
+
+**What is recorded.** Each event is one line, in a category:
+
+| Category | Recorded | Actions |
+| --- | --- | --- |
+| `admin` | Always | `user.create`, `user.update`, `user.delete`, `connection.create`, `connection.update`, `connection.delete`, `settings.update`, `backup.export`, `backup.import`, `schedule.set`, `schedule.remove` |
+| `auth` | Always | `signin`, `signout`, `password.change` (a user's own change, the forced first one included), `lockout` (the sign-in throttle starts refusing an account or a client) |
+| `access` | Only while `audit.access` is `true` | `dial` (a VPN credential issued), `smf.open` and `smf.close` (the gateway's socket to a broker), `relay` (each SEMP request through the gateway) |
+
+Refusals are recorded as well, with `outcome` `refused` and the code the gateway answered: a user form that did not validate (`invalid`), a request by someone who is not an administrator (`forbidden`), removing the last administrator (`last_admin`), an unknown name (`not_found`), a wrong password (`bad_credentials`), a throttled sign-in (`throttled`). Three things are not recorded: a forged cross-site form post (refused before the form is read, so no account is known), the refused access events (a denied dial, socket or relay request), and a backup run, download or preview.
+
+**What is never recorded.** No password or password hash, no store key or backup key, no backup passphrase, no session cookie or token, no VPN client or SEMP credential, no settings value (only the names of the keys changed) and no backup file content. Where an entry says what changed, it names the parts (`password`, `grants`, `vpn prod`, `modules.userDefault`), never what they were set to.
+
+**Where it is.** `/data/audit.log`, mode `0600`, owned by the gateway's user (UID `65532`), appended one JSON object per line. The gateway cannot start in Provisioned mode if it cannot open the file, and says why; check that `/data` is writable by UID `65532`. Gateway mode writes none.
+
+| Field | Holds |
+| --- | --- |
+| `time` | When the gateway wrote the line, RFC 3339, UTC |
+| `actor` | The user who acted; empty for a sign-in that failed and for a lockout, where no one is signed in |
+| `client` | The client address, as the access list sees it (behind a trusted proxy, the address from `X-Forwarded-For`) |
+| `action` | One of the actions above |
+| `target` | What it was done to: a user, a connection, a `broker/vpn`, a broker, or the account a sign-in tried (cut to 64 bytes). Left out when there is none |
+| `outcome` | `ok` or `refused` |
+| `code` | The refusal or error code. Left out for `ok` |
+| `changed` | The names of the parts changed. Left out when there are none |
+| `msg` | The event as a sentence |
+
+```json
+{"time":"2026-11-12T09:30:01Z","actor":"alice","client":"10.1.2.3","action":"user.update","target":"bob","outcome":"ok","changed":["vpn prod"],"msg":"alice updated user bob: vpn prod"}
+{"time":"2026-11-12T09:31:40Z","actor":"","client":"10.1.2.9","action":"signin","target":"bob","outcome":"refused","code":"bad_credentials","msg":"sign-in refused for bob: bad credentials"}
+```
+
+**Rotation.** The gateway rotates the file itself, by size: a write that would take `audit.log` past 10 MB first renames it to `audit.log.1`, moving `.1` to `.2` and so on up to `audit.log.50`; the oldest beyond that is deleted. The trail therefore holds at most about 500 MB. There is no logrotate in the image, and none is needed. If a rotation fails (a file cannot be renamed), the gateway logs an error and keeps writing to the current file, which then grows past 10 MB until the cause is fixed.
+
+**A copy on standard output.** Off by default. Set `SMU_SHOW_AUDIT=true` for the first start, or `audit.stdout` on Gateway Settings later, and each line is also written, unchanged, to the container's standard output, apart from the gateway's log (which goes to standard error), so a shipper can take the audit stream alone.
+
+**Broker access.** `audit.access` adds the `access` category. Expect one line for each dial and each SMF socket (two lines, open and close) and one for every SEMP request the app makes through the gateway, which is a steady stream while someone browses queues. Turn it on when you need to show who opened which broker, and plan for the rotation to cover less time.
+
+**If a line cannot be written.** The request goes ahead: the gateway never refuses a user's action because the trail failed. It logs an error in its own log (the file and the cause, never the entry) and tries again with the next event.
+
+**Keep it.** The audit trail is not part of a backup, and a backup restore does not bring it back. To keep it, copy `/data/audit.log` and `/data/audit.log.*` off the volume (a scheduled copy, or a shipper reading the standard output copy), and keep the copies for as long as your policy and any dispute need: the 500 MB cap can be a few weeks on a busy deployment. Anyone who can read the volume can read the trail, and it names users and client addresses, so give the copies the same care as the gateway's logs. The gateway's user can also rewrite the file, so for evidence you must rely on, ship it off the host as it is written.
+
+---
+
 ## Security checklist
 
 Provisioned mode is meant for **trusted internal** networks. Before exposing it:
@@ -210,6 +269,7 @@ Provisioned mode is meant for **trusted internal** networks. Before exposing it:
 - **Keep backup passphrases secret, and apart from the backups.** A backup holds every broker credential and every password hash; anyone with a file and its passphrase has them. Make `/backup` readable by the gateway's UID only.
 - **Restrict who can reach the gateway** with `access.allow`, and list your reverse proxy in `access.trustedProxies`.
 - **Treat administrator accounts as privileged.** They edit grants, the access list and sign-in itself.
+- **Keep the audit trail.** It is not in backups: copy `/data/audit.log*` off the volume on a schedule, and keep the copies as long as your policy needs (see [Audit trail](#audit-trail)).
 
 ---
 

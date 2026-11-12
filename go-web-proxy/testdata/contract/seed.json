@@ -75,7 +75,8 @@
       "maxBackoffSeconds": 900,
       "unauthenticatedPerMinute": 1000
     },
-    "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" }
+    "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
+    "audit": { "stdout": false, "access": false }
   },
   "client": "192.0.2.10"
 }

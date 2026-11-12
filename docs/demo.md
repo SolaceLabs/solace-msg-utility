@@ -161,6 +161,7 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
   - the sign-in limit for clients without a session (the per-account lockout after five wrong passwords is
     simulated);
   - the limit on concurrent requests.
+- **The audit options are saved, no audit trail is written.** Gateway Settings shows the two Audit trail checkboxes (`audit.stdout`, `audit.access`, both off at first) and saves them, but the demo keeps no audit log and has no Audit page, as the real gateway has none in the console.
 - **The client access list** is saved and checked against the demo's own address, `192.0.2.10`, so a list that would
   lock you out is refused. A saved list is never enforced.
 

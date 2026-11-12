@@ -48,6 +48,7 @@ type dialer struct {
 	store  *store
 	rate   *rateWindow
 	logger *slog.Logger
+	audit  *auditor // the audit trail (audit.go); nil records nothing
 }
 
 func newDialer(st *store, rate *rateWindow, logger *slog.Logger) *dialer {
@@ -75,6 +76,10 @@ func (d *dialer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.logger.Info("dial issued", "user", user, "broker", body.Broker, "vpn", body.Vpn)
+	e := auditFor(r, auditDial)
+	e.Target, e.Outcome = body.Broker+"/"+body.Vpn, auditOK
+	e.Msg = user + " dialed " + e.Target
+	d.audit.record(auditAccess, e)
 	writeJSON(w, http.StatusOK, dialResponse{
 		SMFPath: smfPathFor(body.Broker, body.Vpn),
 		Vpn:     body.Vpn,

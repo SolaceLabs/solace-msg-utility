@@ -32,6 +32,7 @@ func TestLive_ApplySwapsEveryLiveKey(t *testing.T) {
 	cfg.session = sessionLimits{idle: time.Minute, absolute: 2 * time.Minute}
 	cfg.login.maxFailures = 9
 	cfg.modules = moduleSettings{offered: []string{"queue-copy"}, userDefault: modulesDefaultNone}
+	cfg.audit = auditSettings{stdout: true, access: true}
 	lv.apply(cfg)
 	got := lv.get()
 	if got.connModes != connBoth || got.defaultConn != connProvisioned || lv.level.Level() != slog.LevelDebug {
@@ -39,6 +40,9 @@ func TestLive_ApplySwapsEveryLiveKey(t *testing.T) {
 	}
 	if lv.sessionLimits() != cfg.session || lv.loginLimits() != cfg.login || !reflect.DeepEqual(got.modules, cfg.modules) {
 		t.Errorf("limits or modules not applied: %+v", got)
+	}
+	if got.audit != cfg.audit {
+		t.Errorf("audit options not applied: %+v", got.audit)
 	}
 	if before.connModes != connDirect {
 		t.Error("apply must swap in a new value, never edit the one a reader holds")
@@ -133,7 +137,7 @@ func TestFileConfig_EveryKeyIsClassifiedOnce(t *testing.T) {
 	for i := 0; i < lt.NumField(); i++ {
 		liveKeys[lt.Field(i).Name] = true
 	}
-	for _, top := range []string{"connModes", "defaultConn", "logLevel", "access", "session", "login", "modules"} {
+	for _, top := range []string{"connModes", "defaultConn", "logLevel", "access", "session", "login", "modules", "audit"} {
 		if !liveKeys[top] {
 			t.Errorf("live key %q is not copied by liveSettings/apply", top)
 		}
@@ -144,7 +148,7 @@ func TestFileConfig_EveryKeyIsClassifiedOnce(t *testing.T) {
 	}
 
 	leaves := yamlLeaves(t, reflect.TypeOf(fileConfig{}), "", map[string]bool{"appDir": true, "usersFile": true, "connectionsFile": true})
-	liveTops := map[string]bool{"connModes": true, "defaultConn": true, "logLevel": true, "access": true, "session": true, "login": true, "modules": true}
+	liveTops := map[string]bool{"connModes": true, "defaultConn": true, "logLevel": true, "access": true, "session": true, "login": true, "modules": true, "audit": true}
 	restartOnly, hostOnly := map[string]bool{}, map[string]bool{}
 	for _, k := range restartOnlyKeys {
 		if k.hostOnly {

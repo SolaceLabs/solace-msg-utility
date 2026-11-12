@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ type managedHandler struct {
 	relay    http.Handler   // /managed/relay/*, dispatched before the mux (relay.go)
 	smf      http.Handler   // /managed/smf/*, dispatched before the mux (smf.go)
 	dial     http.Handler   // POST /managed/dial (dial.go)
+	audit    *auditor       // the audit trail (audit.go); nil records nothing
 	cop      *http.CrossOriginProtection
 	logger   *slog.Logger
 	mux      *http.ServeMux
@@ -56,13 +58,13 @@ func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *sett
 	mux.HandleFunc("POST /managed/logout", h.logout)
 	mux.Handle("POST /managed/dial", h.dial)
 	mux.HandleFunc("GET /managed/users", h.adminOnly(h.listUsers))
-	mux.HandleFunc("PUT /managed/users/{name}", h.adminOnly(h.saveUser))
-	mux.HandleFunc("DELETE /managed/users/{name}", h.adminOnly(h.deleteUser))
+	mux.HandleFunc("PUT /managed/users/{name}", h.audited(h.userAction, h.saveUser))
+	mux.HandleFunc("DELETE /managed/users/{name}", h.audited(fixedAction(auditUserDelete), h.deleteUser))
 	mux.HandleFunc("GET /managed/connections", h.adminOnly(h.listConnections))
-	mux.HandleFunc("PUT /managed/connections/{broker}", h.adminOnly(h.saveConnection))
-	mux.HandleFunc("DELETE /managed/connections/{broker}", h.adminOnly(h.deleteConnection))
+	mux.HandleFunc("PUT /managed/connections/{broker}", h.audited(h.connectionAction, h.saveConnection))
+	mux.HandleFunc("DELETE /managed/connections/{broker}", h.audited(fixedAction(auditConnectionDelete), h.deleteConnection))
 	mux.HandleFunc("GET /managed/settings", h.adminOnly(h.getSettings))
-	mux.HandleFunc("PUT /managed/settings", h.adminOnly(h.saveSettings))
+	mux.HandleFunc("PUT /managed/settings", h.audited(fixedAction(auditSettingsUpdate), h.saveSettings))
 	mux.HandleFunc("GET /managed/client", h.adminOnly(h.clientSeen))
 	h.registerBackupRoutes(mux)
 	// Anything else, including a known path with the wrong method, is a 404:
@@ -123,6 +125,131 @@ func (h *managedHandler) adminOnly(fn http.HandlerFunc) http.HandlerFunc {
 			fn(w, r)
 		}
 	}
+}
+
+// ----- audit trail of the admin routes ---------------------------------------------
+
+// auditCall is what an audited admin handler tells its wrapper beyond the
+// response: the action when it knows better than the route did (a save that
+// turned out to create), the target that is not in the path (an import's
+// backup file) and the names of the parts it changed.
+type auditCall struct {
+	action  string
+	target  string
+	changed []string
+}
+
+// auditWriter notes the status and error code of a response, so the wrapper
+// can tell an ok entry from a refusal and name the code the API answered. It
+// reads the body of an error only; a success body (an export) is never looked
+// at.
+type auditWriter struct {
+	http.ResponseWriter
+	status int
+	code   string
+}
+
+func (a *auditWriter) WriteHeader(status int) {
+	a.status = status
+	a.ResponseWriter.WriteHeader(status)
+}
+
+func (a *auditWriter) Write(b []byte) (int, error) {
+	if a.status >= http.StatusBadRequest && a.code == "" {
+		var e apiError
+		_ = json.Unmarshal(b, &e) // a body that is not an apiError leaves the code empty
+		a.code = e.Error
+	}
+	return a.ResponseWriter.Write(b)
+}
+
+// auditPhrases word an action in an entry's msg: what happened, and what was
+// tried when it was refused. {t} is the target.
+var auditPhrases = map[string]struct{ done, attempt string }{
+	auditUserCreate:       {"created user {t}", "create user {t}"},
+	auditUserUpdate:       {"updated user {t}", "update user {t}"},
+	auditUserDelete:       {"deleted user {t}", "delete user {t}"},
+	auditConnectionCreate: {"created connection {t}", "create connection {t}"},
+	auditConnectionUpdate: {"updated connection {t}", "update connection {t}"},
+	auditConnectionDelete: {"deleted connection {t}", "delete connection {t}"},
+	auditSettingsUpdate:   {"updated the gateway settings", "update the gateway settings"},
+	auditBackupExport:     {"exported a backup", "export a backup"},
+	auditBackupImport:     {"imported a backup", "import a backup"},
+	auditScheduleSet:      {"set the backup schedule", "set the backup schedule"},
+	auditScheduleRemove:   {"removed the backup schedule", "remove the backup schedule"},
+}
+
+// auditPre names the action and target a route stands for before its handler
+// has run, so a refusal that never reaches the handler (not an administrator)
+// is still recorded under the action that was tried.
+type auditPre func(r *http.Request) (action, target string)
+
+// fixedAction is the pre of a route that always means action on the broker or
+// user its path names, if any.
+func fixedAction(action string) auditPre {
+	return func(r *http.Request) (string, string) { return action, pathTarget(r) }
+}
+
+// userAction is PUT /managed/users/{name}: a create unless the user exists.
+func (h *managedHandler) userAction(r *http.Request) (string, string) {
+	name := r.PathValue("name")
+	_, exists := h.store.isAdmin(name)
+	return userSaveAction(exists), name
+}
+
+func userSaveAction(existed bool) string {
+	if existed {
+		return auditUserUpdate
+	}
+	return auditUserCreate
+}
+
+// connectionAction is PUT /managed/connections/{broker}: a create unless the
+// connection exists.
+func (h *managedHandler) connectionAction(r *http.Request) (string, string) {
+	broker := r.PathValue("broker")
+	return connectionSaveAction(h.store.hasConnection(broker)), broker
+}
+
+func connectionSaveAction(existed bool) string {
+	if existed {
+		return auditConnectionUpdate
+	}
+	return auditConnectionCreate
+}
+
+// audited is adminOnly plus one admin audit entry per request, written once
+// fn has answered: ok when the status is below 400, else refused with the code
+// of the error body. A request the admin gate refuses is recorded too, under
+// the action pre names.
+func (h *managedHandler) audited(pre auditPre, fn func(http.ResponseWriter, *http.Request, *auditCall)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		action, target := pre(r)
+		call := &auditCall{action: action, target: target}
+		aw := &auditWriter{ResponseWriter: w}
+		h.adminOnly(func(w http.ResponseWriter, r *http.Request) { fn(w, r, call) })(aw, r)
+		h.recordAdmin(r, call, aw)
+	}
+}
+
+// recordAdmin writes the entry of an audited admin request. The target is cut
+// like a sign-in's username (userKey): it can be a path segment or a file
+// name the requester chose.
+func (h *managedHandler) recordAdmin(r *http.Request, call *auditCall, aw *auditWriter) {
+	e := auditFor(r, call.action)
+	e.Target = userKey(call.target)
+	ph := auditPhrases[call.action]
+	if aw.status < http.StatusBadRequest {
+		e.Outcome, e.Changed = auditOK, call.changed
+		e.Msg = e.Actor + " " + strings.Replace(ph.done, "{t}", e.Target, 1)
+		if len(e.Changed) > 0 {
+			e.Msg += ": " + strings.Join(e.Changed, ", ")
+		}
+	} else {
+		e.Outcome, e.Code = auditRefused, aw.code
+		e.Msg = e.Actor + " could not " + strings.Replace(ph.attempt, "{t}", e.Target, 1) + ": " + aw.code
+	}
+	h.audit.record(auditAdmin, e)
 }
 
 // ----- responses ----------------------------------------------------------------
@@ -218,8 +345,12 @@ func (h *managedHandler) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *managedHandler) logout(w http.ResponseWriter, r *http.Request) {
-	h.sessions.drop(sessionOf(r).id)
+	as := sessionOf(r)
+	h.sessions.drop(as.id)
 	clearSessionCookie(w)
+	e := auditFor(r, auditSignout)
+	e.Target, e.Outcome, e.Msg = as.user, auditOK, as.user+" signed out"
+	h.audit.record(auditAuth, e)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -368,7 +499,7 @@ func (h *managedHandler) listUsers(w http.ResponseWriter, _ *http.Request) {
 // saveUser creates or edits a user. A new password, a changed admin flag or a
 // deletion ends the target's sessions, the requester's own included: an admin
 // who changes their own password signs in again.
-func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request) {
+func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request, call *auditCall) {
 	name := r.PathValue("name")
 	var body userSaveJSON
 	if !decodeJSON(w, r, &body) {
@@ -391,7 +522,11 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	rec := userRec{Username: name, Admin: body.Admin, Operate: permsToRows(body.Operate), ReadOnly: permsToRows(body.ReadOnly), Modules: body.Modules}
-	_, existed := h.store.isAdmin(name)
+	old, existed := userNamed(h.store.listUsers(), name)
+	call.action = userSaveAction(existed)
+	if existed {
+		call.changed = userChanges(old, rec, body.Password != "")
+	}
 	drop, err := h.store.upsertUser(r.Context(), rec, body.Password)
 	switch {
 	case errors.Is(err, errBlankNewUserPassword):
@@ -413,6 +548,43 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// userNamed is the user called name in users.
+func userNamed(users []userRec, name string) (userRec, bool) {
+	i := slices.IndexFunc(users, func(u userRec) bool { return u.Username == name })
+	if i < 0 {
+		return userRec{}, false
+	}
+	return users[i], true
+}
+
+// userChanges names the parts of a user a save changes, for the audit trail:
+// never a value. newPassword says the save carries one.
+func userChanges(old, next userRec, newPassword bool) []string {
+	var out []string
+	if newPassword {
+		out = append(out, "password")
+	}
+	if old.Admin != next.Admin {
+		out = append(out, "admin")
+	}
+	if !slices.Equal(old.Operate, next.Operate) || !slices.Equal(old.ReadOnly, next.ReadOnly) {
+		out = append(out, "grants")
+	}
+	if !sameModules(old.Modules, next.Modules) {
+		out = append(out, "modules")
+	}
+	return out
+}
+
+// sameModules compares two module lists, where nil (the deployment default)
+// differs from an empty list.
+func sameModules(a, b *[]string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return slices.Equal(*a, *b)
+}
+
 // modulesAttr is a user's module list for a log line: "default" when the
 // user has no list of their own.
 func modulesAttr(m *[]string) any {
@@ -422,7 +594,7 @@ func modulesAttr(m *[]string) any {
 	return *m
 }
 
-func (h *managedHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
+func (h *managedHandler) deleteUser(w http.ResponseWriter, r *http.Request, _ *auditCall) {
 	name := r.PathValue("name")
 	found, err := h.store.deleteUser(name)
 	switch {
@@ -447,7 +619,7 @@ func (h *managedHandler) listConnections(w http.ResponseWriter, _ *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"connections": out})
 }
 
-func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request) {
+func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request, call *auditCall) {
 	var body connSaveJSON
 	if !decodeJSON(w, r, &body) {
 		return
@@ -457,7 +629,12 @@ func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request) 
 		writeInvalid(w, "connection", err.Error())
 		return
 	}
-	created := !h.store.hasConnection(rec.Broker)
+	old, found := connectionNamed(h.store.listConnections(), rec.Broker)
+	created := !found
+	call.action = connectionSaveAction(found)
+	if found {
+		call.changed = connChanges(old, rec)
+	}
 	if err := h.store.upsertConnection(rec); err != nil {
 		h.serverError(w, r, "saveConnection", err)
 		return
@@ -476,7 +653,48 @@ func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *managedHandler) deleteConnection(w http.ResponseWriter, r *http.Request) {
+// connectionNamed is the connection to broker in conns.
+func connectionNamed(conns []connRec, broker string) (connRec, bool) {
+	i := slices.IndexFunc(conns, func(c connRec) bool { return c.Broker == broker })
+	if i < 0 {
+		return connRec{}, false
+	}
+	return conns[i], true
+}
+
+// connChanges names the parts of a connection a save changes, for the audit
+// trail: hostname, semp, client, and "vpn <name>" for each VPN added, changed
+// or removed; never a value. A password in next is one the save supplies (the
+// stored one is merged in after this runs), so it counts as a change.
+func connChanges(old, next connRec) []string {
+	var out []string
+	if old.Hostname != next.Hostname {
+		out = append(out, "hostname")
+	}
+	if old.Semp.Scheme != next.Semp.Scheme || old.Semp.Port != next.Semp.Port || old.Semp.Username != next.Semp.Username || next.Semp.Password != "" {
+		out = append(out, "semp")
+	}
+	if old.Client.Scheme != next.Client.Scheme || old.Client.Port != next.Client.Port {
+		out = append(out, "client")
+	}
+	named := func(vpns []vpnRec, name string) int {
+		return slices.IndexFunc(vpns, func(v vpnRec) bool { return v.Name == name })
+	}
+	for _, v := range next.Client.MsgVpns {
+		i := named(old.Client.MsgVpns, v.Name)
+		if i < 0 || old.Client.MsgVpns[i].Username != v.Username || v.Password != "" {
+			out = append(out, "vpn "+v.Name)
+		}
+	}
+	for _, v := range old.Client.MsgVpns {
+		if named(next.Client.MsgVpns, v.Name) < 0 {
+			out = append(out, "vpn "+v.Name)
+		}
+	}
+	return out
+}
+
+func (h *managedHandler) deleteConnection(w http.ResponseWriter, r *http.Request, _ *auditCall) {
 	found, err := h.store.deleteConnection(r.PathValue("broker"))
 	switch {
 	case err != nil:

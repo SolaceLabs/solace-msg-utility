@@ -372,3 +372,31 @@ func TestThrottle_SharedVectors(t *testing.T) {
 		})
 	}
 }
+
+// A key that starts being refused is one lockout entry, written by the failure
+// that starts it and not by the ones after; the actor is empty, the client is
+// the address, and an unresolved client is named as such.
+func TestThrottle_LockoutIsAudited(t *testing.T) {
+	th := newThrottle(fixed(testLoginLimits), newFakeClock().now, quietLogger())
+	a, al := newTestAuditor(t, liveWith(nil))
+	th.audit = a
+	client := addr(t, "192.0.2.7")
+	for range testLoginLimits.maxFailures - 1 {
+		th.loginFailed("alice", client, true)
+	}
+	al.expect(t)
+	th.loginFailed("alice", client, true)
+	th.loginFailed("alice", client, true) // already blocked: no second entry
+	th.loginSucceeded("alice", client, true)
+	for range testLoginLimits.maxFailures {
+		th.loginFailed("bob", netip.Addr{}, false)
+	}
+	lock := func(client, target, kind string) auditEntry {
+		return auditEntry{Client: client, Action: "lockout", Target: target, Outcome: "refused", Code: "throttled",
+			Msg: "sign-in throttled for " + kind + " " + target + " after 3 failed attempts"}
+	}
+	al.expect(t,
+		lock("192.0.2.7", "alice", "user"), lock("192.0.2.7", "192.0.2.7/32", "client"),
+		lock("unknown", "bob", "user"), lock("unknown", "unknown", "client"),
+	)
+}

@@ -32,16 +32,18 @@ const (
 	defaultUsersFile       = "/data/users.yaml"
 	defaultConnectionsFile = "/data/connections.yaml"
 	defaultStoreKeyFile    = "/data/store.key"
+	defaultAuditFile       = "/data/audit.log"
 )
 
 const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # Environment variables seed this file on first start only, when it does not
 # exist. Afterwards the file wins; a changed env var is ignored and logged.
 # Edit this file and restart the gateway, or delete it to re-seed from env.
-# access.*, session.*, login.* and modules.* have no env var: edit them here.
+# access.*, session.*, login.*, modules.* and audit.access have no env var: edit
+# them here. audit.stdout is seeded by SMU_SHOW_AUDIT.
 # An empty allow list admits every client; trustedProxies lists the reverse
-# proxies whose X-Forwarded-For is believed. session.*, login.* and modules.*
-# apply only in Provisioned mode (connModes provisioned or both):
+# proxies whose X-Forwarded-For is believed. session.*, login.*, modules.* and
+# audit.* apply only in Provisioned mode (connModes provisioned or both):
 # modules.offered lists the app modules a signed-in user may be given,
 # modules.userDefault (all|none) what a user without a list of their own gets.
 # In Provisioned mode an administrator can also edit this file from the admin
@@ -63,6 +65,7 @@ type fileConfig struct {
 	Session     fileSession `yaml:"session" json:"session"`
 	Login       fileLogin   `yaml:"login" json:"login"`
 	Modules     fileModules `yaml:"modules" json:"modules"`
+	Audit       fileAudit   `yaml:"audit" json:"audit"`
 	// RemovedAppDir is the appDir key an earlier release read; the app is now
 	// always served from appRoot. A file that still has it loads, the value is
 	// ignored with a warning at start (removedInUse), and the gateway's next
@@ -100,6 +103,13 @@ type fileLogin struct {
 type fileModules struct {
 	Offered     []string `yaml:"offered" json:"offered"`
 	UserDefault string   `yaml:"userDefault" json:"userDefault"`
+}
+
+// fileAudit holds the audit stream's two options (audit.go). Both apply at the
+// next event; the log file itself is always on in Provisioned mode.
+type fileAudit struct {
+	Stdout bool `yaml:"stdout" json:"stdout"`
+	Access bool `yaml:"access" json:"access"`
 }
 
 // clone copies fc deeply enough that decoding into the copy cannot write
@@ -198,6 +208,7 @@ var seedVars = []seedVar{
 	{"SMU_SSL_TRUSTDIR", "tls.trustDir", identity, func(c config) string { return c.trustDir }},
 	{"SMU_SSL_SKIP_CERT_VERIFY", "tls.insecureSkipVerify", insecureEnv, func(c config) string { return strconv.FormatBool(c.insecureSkipVerify) }},
 	{"LOG_LEVEL", "logLevel", strings.ToLower, func(c config) string { return levelName(c.logLevel) }},
+	{"SMU_SHOW_AUDIT", "audit.stdout", showAuditEnv, func(c config) string { return strconv.FormatBool(c.audit.stdout) }},
 }
 
 // renamedEnv are the variables an earlier release read, with their names now.
@@ -237,6 +248,14 @@ func checkRenamedEnv() error {
 // as hostedEnv mirrors parseHosted.
 func insecureEnv(raw string) string {
 	if b, err := parseInsecureSkipVerify(raw); err == nil {
+		return strconv.FormatBool(b)
+	}
+	return raw
+}
+
+// showAuditEnv mirrors parseShowAudit for the override comparison.
+func showAuditEnv(raw string) string {
+	if b, err := parseShowAudit(raw); err == nil {
 		return strconv.FormatBool(b)
 	}
 	return raw
@@ -296,6 +315,7 @@ func fileConfigFromConfig(c config) fileConfig {
 			Offered:     append([]string{}, c.modules.offered...),
 			UserDefault: c.modules.userDefault,
 		},
+		Audit: fileAudit{Stdout: c.audit.stdout, Access: c.audit.access},
 	}
 }
 
@@ -345,12 +365,14 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 		connectionsFile:    defaultConnectionsFile,
 		storeKeyFile:       secrets.storeKey,
 		backupDir:          backupRoot,
+		auditFile:          defaultAuditFile,
 		connModes:          strings.ToLower(fc.ConnModes),
 		defaultConn:        strings.ToLower(fc.DefaultConn),
 		access:             accessConfig{allow: allow, trustedProxies: trusted},
 		session:            session,
 		login:              login,
 		modules:            modules,
+		audit:              auditSettings{stdout: fc.Audit.Stdout, access: fc.Audit.Access},
 	}
 	// Value and cross checks on the connection modes.
 	if err := validateConnModes(cfg); err != nil {

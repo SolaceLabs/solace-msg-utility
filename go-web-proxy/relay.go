@@ -67,6 +67,7 @@ type sempRelay struct {
 	upstream http.RoundTripper
 	inFlight *userCounter
 	logger   *slog.Logger
+	audit    *auditor // the audit trail (audit.go); nil records nothing
 }
 
 func newSEMPRelay(st *store, upstream http.RoundTripper, logger *slog.Logger) *sempRelay {
@@ -166,6 +167,10 @@ func (rl *sempRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		out.Body = io.NopCloser(bytes.NewReader(body))
 	}
 	out.SetBasicAuth(target.user, target.pass)
+	e := auditFor(r, auditRelay)
+	e.Target, e.Outcome = p.broker, auditOK
+	e.Msg = user + " relayed " + r.Method + " " + p.tail + " to " + p.broker
+	rl.audit.record(auditAccess, e)
 	rl.forward(w, out, user, p.broker)
 }
 

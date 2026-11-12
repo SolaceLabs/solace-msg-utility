@@ -37,12 +37,12 @@ const (
 func (h *managedHandler) registerBackupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /managed/backup", h.adminOnly(h.backupStatus))
 	mux.HandleFunc("GET /managed/backup/files/{name}", h.adminOnly(h.downloadBackup))
-	mux.HandleFunc("PUT /managed/backup/schedule", h.adminOnly(h.saveBackupSchedule))
-	mux.HandleFunc("DELETE /managed/backup/schedule", h.adminOnly(h.deleteBackupSchedule))
+	mux.HandleFunc("PUT /managed/backup/schedule", h.audited(fixedAction(auditScheduleSet), h.saveBackupSchedule))
+	mux.HandleFunc("DELETE /managed/backup/schedule", h.audited(fixedAction(auditScheduleRemove), h.deleteBackupSchedule))
 	mux.HandleFunc("POST /managed/backup/run", h.adminOnly(h.runBackup))
-	mux.HandleFunc("POST /managed/backup/export", h.adminOnly(h.exportBackup))
+	mux.HandleFunc("POST /managed/backup/export", h.audited(fixedAction(auditBackupExport), h.exportBackup))
 	mux.HandleFunc("POST /managed/backup/preview", h.adminOnly(h.previewImport))
-	mux.HandleFunc("POST /managed/backup/import", h.adminOnly(h.importBackup))
+	mux.HandleFunc("POST /managed/backup/import", h.audited(fixedAction(auditBackupImport), h.importBackup))
 }
 
 // writeBackupProblem answers a *backupProblem as a 422; anything else is a
@@ -120,7 +120,7 @@ type scheduleSaveJSON struct {
 	Passphrase string `json:"passphrase"` // "" keeps the current key
 }
 
-func (h *managedHandler) saveBackupSchedule(w http.ResponseWriter, r *http.Request) {
+func (h *managedHandler) saveBackupSchedule(w http.ResponseWriter, r *http.Request, _ *auditCall) {
 	var body scheduleSaveJSON
 	if !decodeJSON(w, r, &body) {
 		return
@@ -141,7 +141,7 @@ func (h *managedHandler) saveBackupSchedule(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *managedHandler) deleteBackupSchedule(w http.ResponseWriter, r *http.Request) {
+func (h *managedHandler) deleteBackupSchedule(w http.ResponseWriter, r *http.Request, _ *auditCall) {
 	found, err := h.backups.removeSchedule()
 	switch {
 	case err != nil:
@@ -171,7 +171,7 @@ func (h *managedHandler) runBackup(w http.ResponseWriter, r *http.Request) {
 
 // ----- export ------------------------------------------------------------------------------
 
-func (h *managedHandler) exportBackup(w http.ResponseWriter, r *http.Request) {
+func (h *managedHandler) exportBackup(w http.ResponseWriter, r *http.Request, _ *auditCall) {
 	var body struct {
 		Passphrase string `json:"passphrase"`
 	}
@@ -290,7 +290,7 @@ type importResultJSON struct {
 // Refusals: 422 invalid (a choice, the file, the passphrase, or records the
 // gateway would not load), 409 last_admin (no administrator would remain),
 // and checkSettings' refusals for the settings.
-func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request) {
+func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request, call *auditCall) {
 	var body importJSON
 	if !decodeJSONLimit(w, r, &body, maxImportBytes) {
 		return
@@ -312,6 +312,12 @@ func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request) {
 	doc, ok := h.openSource(w, r, body.importSourceJSON)
 	if !ok {
 		return
+	}
+	call.target = body.Backup
+	for _, sec := range []struct{ name, mode string }{{"users", body.Users}, {"connections", body.Connections}, {"settings", body.Settings}} {
+		if sec.mode != importSkip {
+			call.changed = append(call.changed, sec.name)
+		}
 	}
 
 	sf := h.settings

@@ -149,6 +149,13 @@ describe('mock-broker/gateway/backup -- the file format', () => {
         expect(settingsFromBackup(null).session).toEqual({ idleMinutes: 0, absoluteMinutes: 0 });
         expect(() => settingsFromBackup({ hosted: 'yes' })).toThrow();
     });
+
+    it('opens a backup from before the audit section, with both audit keys off', () => {
+        const { audit, ...old } = settings();
+        expect(audit).toEqual({ stdout: false, access: false });
+        expect(settingsFromBackup(old).audit).toEqual({ stdout: false, access: false });
+        expect(settingsFromBackup({ ...old, audit: { stdout: true } }).audit).toEqual({ stdout: true, access: false });
+    });
 });
 
 describe('mock-broker/gateway/backup -- import planning', () => {

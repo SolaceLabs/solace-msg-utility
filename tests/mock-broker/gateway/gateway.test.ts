@@ -163,6 +163,16 @@ describe('mock-broker/gateway -- settings', () => {
         expect(gw.settings.current().access.allow).toEqual([]);
     });
 
+    it('carries the audit section: off by default, saved live, never pending a restart', async () => {
+        expect(gw.settings.current().audit).toEqual({ stdout: false, access: false });
+        expect((await call('PUT', '/managed/settings', { audit: { access: true } })).json).toEqual({ restartRequired: [] });
+        expect(gw.settings.current().audit).toEqual({ stdout: false, access: true });
+        const view: any = (await call('GET', '/managed/settings')).json;
+        expect([view.restartOnly, view.hostOnly].flat().filter((k: string) => k.startsWith('audit'))).toEqual([]);
+        expect((await call('PUT', '/managed/settings', { audit: { stdout: 'yes' } })).status).toBe(400);
+        expect((await call('PUT', '/managed/settings', { audit: { verbose: true } })).status).toBe(400);
+    });
+
     it('normalises the modes, the log level and the module order', async () => {
         await call('PUT', '/managed/settings', { connModes: 'PROVISIONED', logLevel: 'DEBUG', modules: { offered: ['queue-copy', 'queue-browser'] } });
         const s = gw.settings.current();

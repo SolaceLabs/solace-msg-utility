@@ -455,7 +455,8 @@
               "access": { "allow": [], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
               "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
-              "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" }
+              "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
+              "audit": { "stdout": false, "access": false }
             },
             "restartOnly": ["hosted", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify"],
             "hostOnly": ["tls.certFile", "tls.keyFile", "tls.trustDir"],
@@ -557,7 +558,8 @@
               "access": { "allow": ["192.0.2.0/24", "2001:db8::/32", "2001:db8:abcd:1000::/52", "fe80::1:0:0:1/128"], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
               "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
-              "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" }
+              "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
+              "audit": { "stdout": false, "access": false }
             },
             "restartOnly": ["hosted", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify"],
             "hostOnly": ["tls.certFile", "tls.keyFile", "tls.trustDir"],
@@ -1315,6 +1317,10 @@
                   "queue-subscription-explorer"
                 ],
                 "userDefault": "all"
+              },
+              "audit": {
+                "stdout": false,
+                "access": false
               }
             },
             "restartOnly": [

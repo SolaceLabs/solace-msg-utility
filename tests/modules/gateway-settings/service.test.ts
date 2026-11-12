@@ -9,6 +9,7 @@ const SETTINGS: GatewaySettings = {
     session: { idleMinutes: 10, absoluteMinutes: 30 },
     login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60 },
     modules: { offered: ['queue-browser'], userDefault: 'all' },
+    audit: { stdout: false, access: false },
 };
 
 const fetchMock = () => globalThis.fetch as any;

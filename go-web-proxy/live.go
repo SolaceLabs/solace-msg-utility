@@ -6,9 +6,9 @@ import (
 )
 
 // live holds the config.yaml keys that take effect without a restart:
-// connModes, defaultConn, logLevel, access.*, session.*, login.* and
-// modules.*. serve() builds it from the loaded config and passes it to every
-// reader, which loads the current value per request. The settings
+// connModes, defaultConn, logLevel, access.*, session.*, login.*, modules.*
+// and audit.*. serve() builds it from the loaded config and passes it to
+// every reader, which loads the current value per request. The settings
 // endpoint (settings.go) is the only writer. Every other key is read once at
 // startup (restartOnlyKeys) and applies at the next restart.
 type live struct {
@@ -22,6 +22,7 @@ type liveSettings struct {
 	session                sessionLimits
 	login                  loginLimits
 	modules                moduleSettings
+	audit                  auditSettings
 }
 
 func newLive(cfg config) *live {
@@ -40,6 +41,7 @@ func (lv *live) apply(cfg config) {
 		session:     cfg.session,
 		login:       cfg.login,
 		modules:     cfg.modules,
+		audit:       cfg.audit,
 	})
 	lv.level.Set(cfg.logLevel)
 }

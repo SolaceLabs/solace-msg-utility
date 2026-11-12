@@ -65,6 +65,9 @@ login:
 modules:
   offered: [queue-copy]
   userDefault: none
+audit:
+  stdout: true
+  access: true
 `
 
 func TestDecodeConfigFile_Valid(t *testing.T) {
@@ -80,6 +83,7 @@ func TestDecodeConfigFile_Valid(t *testing.T) {
 		Session:  fileSession{IdleMinutes: 5, AbsoluteMinutes: 60},
 		Login:    fileLogin{MaxFailures: 3, BackoffSeconds: 10, MaxBackoffSeconds: 600, UnauthenticatedPerMinute: 20},
 		Modules:  fileModules{Offered: []string{"queue-copy"}, UserDefault: "none"},
+		Audit:    fileAudit{Stdout: true, Access: true},
 	}
 	if !reflect.DeepEqual(fc, want) {
 		t.Errorf("decoded:\n%+v\nwant:\n%+v", fc, want)
@@ -237,6 +241,30 @@ func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 	}
 }
 
+// audit.stdout and audit.access reach the runtime config and back, and both
+// default to off.
+func TestToConfig_Audit(t *testing.T) {
+	cfg, err := defaultFileConfig().toConfig(secretPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.audit != (auditSettings{}) || cfg.auditFile != defaultAuditFile {
+		t.Errorf("defaults: want both options off and the fixed log path, got %+v %q", cfg.audit, cfg.auditFile)
+	}
+	fc := defaultFileConfig()
+	fc.Audit = fileAudit{Stdout: true, Access: true}
+	cfg, err = fc.toConfig(secretPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.audit != (auditSettings{stdout: true, access: true}) {
+		t.Errorf("audit: got %+v", cfg.audit)
+	}
+	if back := fileConfigFromConfig(cfg).Audit; back != fc.Audit {
+		t.Errorf("round trip: got %+v", back)
+	}
+}
+
 // offered is kept in catalog order whatever order the file lists it in; an
 // empty list offers nothing.
 func TestToConfig_ModulesInCatalogOrder(t *testing.T) {
@@ -389,6 +417,42 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	}
 	if again.cfg.connModes != connBoth || again.cfg.logLevel != slog.LevelInfo || !again.cfg.provisioned() {
 		t.Errorf("second start config: %+v", again.cfg)
+	}
+}
+
+// SMU_SHOW_AUDIT seeds audit.stdout on the first start only; audit.access has
+// no variable. Afterwards the file wins and a differing value is reported.
+func TestResolveConfig_SeedsAuditStdoutFromEnvThenFileWins(t *testing.T) {
+	clearSeedEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("SMU_SHOW_AUDIT", "true")
+
+	load, err := resolveConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !load.seeded || !load.cfg.audit.stdout || load.cfg.audit.access {
+		t.Fatalf("first start: want audit.stdout seeded on and audit.access off, got seeded=%v %+v", load.seeded, load.cfg.audit)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "audit:") || !strings.Contains(string(raw), "stdout: true") || !strings.Contains(string(raw), "access: false") || !strings.Contains(string(raw), "audit.stdout <- SMU_SHOW_AUDIT") {
+		t.Errorf("seeded file lacks the audit block or its header mapping:\n%s", raw)
+	}
+
+	t.Setenv("SMU_SHOW_AUDIT", "false")
+	again, err := resolveConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.cfg.audit.stdout {
+		t.Error("the file must win over a later SMU_SHOW_AUDIT")
+	}
+	want := []envOverride{{Env: "SMU_SHOW_AUDIT", Key: "audit.stdout", EnvValue: "false", FileValue: "true"}}
+	if !reflect.DeepEqual(again.overrides, want) {
+		t.Errorf("overrides: want %v, got %v", want, again.overrides)
 	}
 }
 
@@ -601,11 +665,20 @@ func TestEnvOverrides_EveryVariableAndBoolParsing(t *testing.T) {
 		t.Errorf("SMU_SSL_SKIP_CERT_VERIFY=TRUE: want it reported as typed, got %v", o)
 	}
 	t.Setenv("SMU_SSL_SKIP_CERT_VERIFY", "")
+	t.Setenv("SMU_SHOW_AUDIT", "false") // agrees with the default file
+	if o := envOverrides(file); len(o) != 0 {
+		t.Errorf("SMU_SHOW_AUDIT=false must not be reported, got %v", o)
+	}
+	t.Setenv("SMU_SHOW_AUDIT", "TRUE") // not a value loadConfig takes: reported as typed
+	if o := envOverrides(file); len(o) != 1 || o[0].EnvValue != "TRUE" || o[0].Key != "audit.stdout" {
+		t.Errorf("SMU_SHOW_AUDIT=TRUE: want it reported as typed, got %v", o)
+	}
+	t.Setenv("SMU_SHOW_AUDIT", "")
 
 	differing := map[string]string{
 		"SMU_HOSTED": "false", "SMU_CONN_MODES": "both", "SMU_DEFAULT_CONN": "provisioned",
 		"SMU_SSL_CERTFILE": "/x", "SMU_SSL_CERTKEYFILE": "/x", "SMU_SSL_TRUSTDIR": "/x", "SMU_SSL_SKIP_CERT_VERIFY": "true",
-		"LOG_LEVEL": "debug",
+		"LOG_LEVEL": "debug", "SMU_SHOW_AUDIT": "true",
 	}
 	if len(differing) != len(seedVars) {
 		t.Fatalf("test table covers %d vars, seedVars has %d", len(differing), len(seedVars))

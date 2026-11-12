@@ -101,6 +101,17 @@
         </select>
     </div>
 
+    <h3 class="gw-set-section">Audit trail</h3>
+    <p class="text-secondary gw-set-client">
+        The audit trail itself is always written to /data/audit.log on the gateway; these two settings only add to it.
+    </p>
+    <div class="form-group" data-key="audit.stdout">
+        <label class="flex-row items-center gap-2 m-0"><input type="checkbox" id="gw-set-audit-stdout"> Copy audit lines to the gateway log (stdout)</label>
+    </div>
+    <div class="form-group" data-key="audit.access">
+        <label class="flex-row items-center gap-2 m-0"><input type="checkbox" id="gw-set-audit-access"> Also audit broker access: dials, SMF sockets and SEMP relay requests</label>
+    </div>
+
     <h3 class="gw-set-section">Files and TLS</h3>
     <div class="form-group" data-key="tls.certFile">
         <label for="gw-set-tls-certFile">TLS certificate file</label>

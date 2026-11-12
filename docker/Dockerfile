@@ -58,6 +58,10 @@
 #   SMU_ADMIN_PASSWORD_FILE   The same, as the path of a file (a Docker secret).
 #   LOG_LEVEL                 debug|info|warn|error  (default warn; anything
 #                             else fails startup)
+#   SMU_SHOW_AUDIT            Provisioned mode: "true" also copies each audit
+#                             line to stdout (default false; seeds audit.stdout
+#                             in config.yaml). The audit trail itself is always
+#                             /data/audit.log, never filtered by LOG_LEVEL.
 # The users store, connections store and store key always live at
 # /data/users.yaml, /data/connections.yaml and /data/store.key (the key is made
 # on a fresh volume only -- back it up); move them with Backup & Restore. The

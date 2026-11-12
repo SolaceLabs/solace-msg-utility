@@ -99,6 +99,7 @@ export function demoSeed(): GatewaySeed {
             session: { idleMinutes: 10, absoluteMinutes: 30 },
             login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60 },
             modules: { offered: ['queue-browser', 'queue-copy', 'queue-subscription-explorer'], userDefault: 'all' },
+            audit: { stdout: false, access: false },
         },
         // TEST-NET-1: the address the fake gateway sees the browser at.
         client: '192.0.2.10',

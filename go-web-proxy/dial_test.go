@@ -124,3 +124,17 @@ func TestSecret_OnlyJSONCarriesIt(t *testing.T) {
 		t.Errorf("printed or logged: %s", printed)
 	}
 }
+
+// A dial is an access entry: recorded only while audit.access is on, only when
+// a credential was issued, and never with the password.
+func TestDial_IsAuditedOnlyWhileAccessIsOn(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	c := e.cookie("viewer", false)
+	expect(t, e.do("POST", "/managed/dial", dialBody("b1", "v1"), c), http.StatusOK, "")
+	au.expect(t)
+	e.setAudit(auditSettings{access: true})
+	expect(t, e.do("POST", "/managed/dial", dialBody("b1", "v1"), c), http.StatusOK, "")
+	expect(t, e.do("POST", "/managed/dial", dialBody("b2", "v9"), c), http.StatusNotFound, "not_found")
+	au.expect(t, auditEntry{Actor: "viewer", Action: "dial", Target: "b1/v1", Outcome: "ok", Msg: "viewer dialed b1/v1"})
+}

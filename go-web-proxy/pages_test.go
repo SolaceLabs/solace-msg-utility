@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -141,6 +142,7 @@ func TestLogin_RefusedRequests(t *testing.T) {
 
 func TestLogin_CheckUnavailableIs503(t *testing.T) {
 	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
 	e.api.store.hasher = &hasher{iter: 1, slots: make(chan struct{}, 1)}
 	e.api.store.hasher.slots <- struct{}{} // every slot busy...
 	req := httptest.NewRequest("POST", "https://gw.example/login", strings.NewReader(signInForm("viewer", viewerPW, "/").Encode()))
@@ -150,6 +152,7 @@ func TestLogin_CheckUnavailableIs503(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.root.ServeHTTP(rec, req.WithContext(ctx))
 	expectPage(t, rec, http.StatusServiceUnavailable, "could not be checked")
+	au.expect(t, auditEntry{Client: "192.0.2.1", Action: "signin", Target: "viewer", Outcome: "refused", Code: "unavailable", Msg: "sign-in refused for viewer: unavailable"})
 }
 
 func TestAuthPages_UnauthenticatedBudget(t *testing.T) {
@@ -191,6 +194,7 @@ func TestPasswordPage_NeedsSession(t *testing.T) {
 
 func TestPasswordChange_Rejections(t *testing.T) {
 	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
 	c := e.cookie("viewer", false)
 	cases := []struct {
 		name   string
@@ -215,10 +219,17 @@ func TestPasswordChange_Rejections(t *testing.T) {
 	if !signsIn(t, e.api.store, "viewer", viewerPW) {
 		t.Error("no rejected change may alter the password")
 	}
+	// The forged submission was refused before it was read: no entry.
+	refused := func(code string) auditEntry {
+		return auditEntry{Actor: "viewer", Action: "password.change", Target: "viewer", Outcome: "refused", Code: code,
+			Msg: "viewer could not change their password: " + strings.ReplaceAll(code, "_", " ")}
+	}
+	au.expect(t, refused("bad_credentials"), refused("invalid"), refused("invalid"), refused("invalid"))
 }
 
 func TestPasswordChange_SuccessEndsOtherSessionsAndClearsFlag(t *testing.T) {
 	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
 	e.api.store.users[1].MustChangePassword = true
 	other := e.cookie("viewer", true)
 	here := e.cookie("viewer", true)
@@ -232,10 +243,28 @@ func TestPasswordChange_SuccessEndsOtherSessionsAndClearsFlag(t *testing.T) {
 	if !ok || mustChange {
 		t.Errorf("new password must work and clear the flag: ok=%v mustChange=%v", ok, mustChange)
 	}
+	au.expect(t, auditEntry{Actor: "viewer", Action: "password.change", Target: "viewer", Outcome: "ok", Msg: "viewer set a new password after the forced change"})
+}
+
+// A change the user chose to make reads differently from the forced one, and
+// neither entry holds a password.
+func TestPasswordChange_VoluntaryChangeIsAudited(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	expectRedirect(t, e.form("/login/password", passwordForm(viewerPW, "viewer-new-pw-1", "viewer-new-pw-1"), e.cookie("viewer", false)), "/")
+	au.expect(t, auditEntry{Actor: "viewer", Action: "password.change", Target: "viewer", Outcome: "ok", Msg: "viewer changed their password"})
+	data, err := os.ReadFile(au.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), viewerPW) || strings.Contains(string(data), "viewer-new-pw-1") {
+		t.Errorf("a password reached the trail: %s", data)
+	}
 }
 
 func TestPasswordChange_ThrottledAndFailures(t *testing.T) {
 	e := newManagedEnv(t, func(c *config) { c.login = testLoginLimits; c.login.unauthPerMinute = 1000 })
+	au := e.withAudit(t, auditSettings{})
 	c := e.cookie("viewer", false)
 	for i := 0; i < testLoginLimits.maxFailures; i++ {
 		e.form("/login/password", passwordForm("guess", "viewer-new-pw-1", "viewer-new-pw-1"), c)
@@ -258,6 +287,23 @@ func TestPasswordChange_ThrottledAndFailures(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.root.ServeHTTP(rec, req.WithContext(ctx))
 	expectPage(t, rec, http.StatusServiceUnavailable, "could not be checked")
+
+	// Three wrong guesses (the third starts the lockout), the refused attempt,
+	// the failed write and the unavailable check; the last request came from
+	// httptest's default address.
+	refused := func(client, code string) auditEntry {
+		return auditEntry{Actor: "viewer", Client: client, Action: "password.change", Target: "viewer", Outcome: "refused", Code: code,
+			Msg: "viewer could not change their password: " + strings.ReplaceAll(code, "_", " ")}
+	}
+	lockout := func(target, kind string) auditEntry {
+		return auditEntry{Action: "lockout", Target: target, Outcome: "refused", Code: "throttled",
+			Msg: "sign-in throttled for " + kind + " " + target + " after 3 failed attempts"}
+	}
+	au.expect(t,
+		refused("", "bad_credentials"), refused("", "bad_credentials"),
+		lockout("viewer", "user"), lockout("192.0.2.10/32", "client"), refused("", "bad_credentials"),
+		refused("", "throttled"), refused("", "server_error"), refused("192.0.2.1", "unavailable"),
+	)
 }
 
 // ----- gates ------------------------------------------------------------------------------
@@ -412,6 +458,7 @@ func slowHasher(e *managedEnv) chan struct{} {
 // matched the old password, so it gets the generic failure and no session.
 func TestLogin_AccountChangedDuringTheCheckIsRefused(t *testing.T) {
 	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
 	reset := mustHash(t, e.f.h, "reset-by-admin-1")
 	slots := slowHasher(e)
 	done := make(chan *httptest.ResponseRecorder)
@@ -429,12 +476,14 @@ func TestLogin_AccountChangedDuringTheCheckIsRefused(t *testing.T) {
 	if !strings.Contains(e.log.String(), "the account changed while its password was checked") {
 		t.Errorf("the refusal is logged: %s", e.log.String())
 	}
+	au.expect(t, auditEntry{Action: "signin", Target: "viewer", Outcome: "refused", Code: "account_changed", Msg: "sign-in refused for viewer: account changed"})
 }
 
 // The same race on the password page: the administrator's reset stands and
 // the user is told to sign in again.
 func TestPasswordChange_AccountChangedDuringTheCheckIs409(t *testing.T) {
 	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
 	reset := mustHash(t, e.f.h, "reset-by-admin-1")
 	c := e.cookie("viewer", false)
 	slots := slowHasher(e)
@@ -454,6 +503,8 @@ func TestPasswordChange_AccountChangedDuringTheCheckIs409(t *testing.T) {
 	if storedHash(e.api.store, "viewer") != reset {
 		t.Error("the administrator's reset must stand")
 	}
+	au.expect(t, auditEntry{Actor: "viewer", Action: "password.change", Target: "viewer", Outcome: "refused", Code: "account_changed",
+		Msg: "viewer could not change their password: account changed"})
 }
 
 // Every recent sign-in from one private address means a proxy the gateway
@@ -496,4 +547,44 @@ func TestClientWatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Every sign-in is one auth entry: a refusal names the account tried as its
+// target and has no actor, a lockout follows the failure that starts it, and
+// a sign-in that forces a password change says so.
+func TestLogin_IsAudited(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.login = testLoginLimits; c.login.unauthPerMinute = 1000 })
+	au := e.withAudit(t, auditSettings{})
+	for range testLoginLimits.maxFailures {
+		e.form("/login", signInForm("viewer", "wrong-password", "/"), nil)
+	}
+	e.form("/login", signInForm("viewer", viewerPW, "/"), nil) // throttled, though the password is right
+	e.clock.advance(testLoginLimits.backoff)
+	expectRedirect(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil), "/")
+	e.form("/login", signInForm("ghost", "wrong-password", "/"), nil)
+	e.api.store.users[0].MustChangePassword = true
+	e.form("/login", signInForm("admin", adminPW, "/"), nil)
+
+	bad := func(user string) auditEntry {
+		return auditEntry{Action: "signin", Target: user, Outcome: "refused", Code: "bad_credentials", Msg: "sign-in refused for " + user + ": bad credentials"}
+	}
+	au.expect(t,
+		bad("viewer"), bad("viewer"),
+		auditEntry{Action: "lockout", Target: "viewer", Outcome: "refused", Code: "throttled", Msg: "sign-in throttled for user viewer after 3 failed attempts"},
+		auditEntry{Action: "lockout", Target: "192.0.2.10/32", Outcome: "refused", Code: "throttled", Msg: "sign-in throttled for client 192.0.2.10/32 after 3 failed attempts"},
+		bad("viewer"),
+		auditEntry{Action: "signin", Target: "viewer", Outcome: "refused", Code: "throttled", Msg: "sign-in refused for viewer: throttled"},
+		auditEntry{Actor: "viewer", Action: "signin", Target: "viewer", Outcome: "ok", Msg: "viewer signed in"},
+		bad("ghost"),
+		auditEntry{Actor: "admin", Action: "signin", Target: "admin", Outcome: "ok", Msg: "admin signed in; a password change is required"},
+	)
+}
+
+// A refused sign-in has no actor even when the browser already holds a
+// session: nobody was authenticated by it.
+func TestLogin_RefusalHasNoActorEvenWithASession(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	e.form("/login", signInForm("ghost", "wrong-password", "/"), e.cookie("viewer", false))
+	au.expect(t, auditEntry{Action: "signin", Target: "ghost", Outcome: "refused", Code: "bad_credentials", Msg: "sign-in refused for ghost: bad credentials"})
 }

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -41,6 +42,7 @@ type authPages struct {
 	logger   *slog.Logger
 	tmpl     *template.Template
 	watch    *clientWatch // warns when every recent sign-in looks like one client
+	audit    *auditor     // the audit trail (audit.go); nil records nothing
 }
 
 func newAuthPages(st *store, ss *sessions, th *throttle, lv *live, logger *slog.Logger) (*authPages, error) {
@@ -116,6 +118,26 @@ func (p *authPages) readForm(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// signinRefused records a refused sign-in. The actor is empty whatever the
+// browser's earlier session: nobody was authenticated, and the target names
+// the account tried (cut, it is a form field).
+func (p *authPages) signinRefused(r *http.Request, user, code string) {
+	e := auditFor(r, auditSignin)
+	e.Actor, e.Target = "", userKey(user)
+	e.Outcome, e.Code = auditRefused, code
+	e.Msg = "sign-in refused for " + e.Target + ": " + strings.ReplaceAll(code, "_", " ")
+	p.audit.record(auditAuth, e)
+}
+
+// passwordRefused records a refused change of the signed-in user's own
+// password.
+func (p *authPages) passwordRefused(r *http.Request, code string) {
+	e := auditFor(r, auditPasswordChange)
+	e.Target, e.Outcome, e.Code = e.Actor, auditRefused, code
+	e.Msg = e.Actor + " could not change their password: " + strings.ReplaceAll(code, "_", " ")
+	p.audit.record(auditAuth, e)
 }
 
 func throttledText(wait time.Duration) string {
@@ -209,6 +231,7 @@ func (p *authPages) submitLogin(w http.ResponseWriter, r *http.Request, prior ac
 	log := clientLogger(p.logger, r).With("user", userKey(user))
 	unavailable := func(err error) {
 		log.Error("sign-in check failed", "err", err)
+		p.signinRefused(r, user, "unavailable")
 		p.message(w, http.StatusServiceUnavailable, "Sign-in unavailable", "Sign-in could not be checked. Try again.")
 	}
 	refused := func() {
@@ -221,6 +244,7 @@ func (p *authPages) submitLogin(w http.ResponseWriter, r *http.Request, prior ac
 		unavailable(err)
 		return
 	case wait > 0:
+		p.signinRefused(r, user, "throttled")
 		w.Header().Set("Retry-After", strconv.Itoa(retrySeconds(wait)))
 		page.Error = throttledText(wait)
 		p.render(w, http.StatusTooManyRequests, page)
@@ -234,12 +258,14 @@ func (p *authPages) submitLogin(w http.ResponseWriter, r *http.Request, prior ac
 	}
 	if !check.ok {
 		p.throttle.loginFailed(user, client, resolved)
+		p.signinRefused(r, user, "bad_credentials")
 		log.Warn("sign-in failed")
 		refused()
 		return
 	}
 	id, ok := p.startSession(user, check)
 	if !ok {
+		p.signinRefused(r, user, "account_changed")
 		log.Warn("sign-in refused: the account changed while its password was checked")
 		refused()
 		return
@@ -250,6 +276,12 @@ func (p *authPages) submitLogin(w http.ResponseWriter, r *http.Request, prior ac
 	}
 	setSessionCookie(w, id)
 	setRequestUser(r, user)
+	e := auditFor(r, auditSignin)
+	e.Target, e.Outcome, e.Msg = user, auditOK, user+" signed in"
+	if check.mustChange {
+		e.Msg += "; a password change is required"
+	}
+	p.audit.record(auditAuth, e)
 	log.Info("signed in")
 	if p.watch.seen(client, resolved) {
 		log.Warn("every recent sign-in came from this one private address: a reverse proxy or Docker's userland proxy the gateway does not trust is likely in front of it, so all users share one throttle and one access-list entry; list the proxy in access.trustedProxies (config.yaml), see docs/deployment.md",
@@ -295,6 +327,7 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 	log := requestLogger(p.logger, r)
 	unavailable := func(err error) {
 		log.Error("password check failed", "err", err)
+		p.passwordRefused(r, "unavailable")
 		fail(http.StatusServiceUnavailable, "The password could not be checked. Try again.")
 	}
 	release, wait, err := p.checkTurn(r, as.user, client, resolved)
@@ -303,6 +336,7 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 		unavailable(err)
 		return
 	case wait > 0:
+		p.passwordRefused(r, "throttled")
 		w.Header().Set("Retry-After", strconv.Itoa(retrySeconds(wait)))
 		fail(http.StatusTooManyRequests, throttledText(wait))
 		return
@@ -315,16 +349,20 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 		return
 	case !check.ok:
 		p.throttle.loginFailed(as.user, client, resolved)
+		p.passwordRefused(r, "bad_credentials")
 		log.Warn("password change refused: the current password is not correct")
 		fail(http.StatusUnauthorized, "The current password is not correct.")
 		return
 	case nw != confirm:
+		p.passwordRefused(r, "invalid")
 		fail(http.StatusUnprocessableEntity, "The new passwords do not match.")
 		return
 	case checkPasswordPolicy(nw) != nil:
+		p.passwordRefused(r, "invalid")
 		fail(http.StatusUnprocessableEntity, "The new password must be "+strconv.Itoa(passwordMinLen)+" to "+strconv.Itoa(passwordMaxLen)+" characters.")
 		return
 	case nw == cur:
+		p.passwordRefused(r, "invalid")
 		fail(http.StatusUnprocessableEntity, "The new password must differ from the current one.")
 		return
 	}
@@ -332,10 +370,12 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 	err = p.store.setPassword(r.Context(), as.user, nw, check.hash, func() { id = p.sessions.create(as.user, false) })
 	switch {
 	case errors.Is(err, errAccountChanged), errors.Is(err, errUserNotFound):
+		p.passwordRefused(r, "account_changed")
 		log.Warn("password change refused: the account changed while its password was checked")
 		p.message(w, http.StatusConflict, "Password not changed", "Your account was changed while this request ran. Sign in again.")
 		return
 	case err != nil:
+		p.passwordRefused(r, "server_error")
 		log.Error("password change failed", "err", err)
 		fail(http.StatusInternalServerError, "The password could not be saved.")
 		return
@@ -343,6 +383,12 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 	p.throttle.loginSucceeded(as.user, client, resolved)
 	p.sessions.dropOthers(as.user, id)
 	setSessionCookie(w, id)
+	e := auditFor(r, auditPasswordChange)
+	e.Target, e.Outcome, e.Msg = as.user, auditOK, as.user+" changed their password"
+	if as.mustChange {
+		e.Msg = as.user + " set a new password after the forced change"
+	}
+	p.audit.record(auditAuth, e)
 	log.Info("password changed")
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }

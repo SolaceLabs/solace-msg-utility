@@ -25,6 +25,7 @@ const SETTINGS = {
     session: { idleMinutes: 10, absoluteMinutes: 30 },
     login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60 },
     modules: { offered: ['queue-browser'], userDefault: 'all' },
+    audit: { stdout: false, access: false },
 };
 const RESTART_ONLY = ['hosted', 'tls.certFile', 'tls.keyFile', 'tls.trustDir', 'tls.insecureSkipVerify'];
 const HOST_ONLY = ['tls.certFile', 'tls.keyFile', 'tls.trustDir'];
@@ -222,6 +223,28 @@ describe('gateway-settings — load', () => {
     });
 });
 
+describe('gateway-settings -- audit trail', () => {
+    it('shows the two audit checkboxes from the loaded settings, live and editable', async () => {
+        const { container } = await setup(ADMIN, view({
+            settings: { ...SETTINGS, audit: { stdout: true, access: false } },
+        }));
+        const stdout = el<HTMLInputElement>(container, '#gw-set-audit-stdout');
+        const access = el<HTMLInputElement>(container, '#gw-set-audit-access');
+        expect([stdout.checked, access.checked]).toEqual([true, false]);
+        expect([stdout.disabled, access.disabled]).toEqual([false, false]);
+        expect(el(container, '[data-key="audit.stdout"]').classList.contains('gw-set-restart')).toBe(false);
+        expect(container.textContent).toContain('/data/audit.log');
+    });
+
+    it('sends an unchanged audit section back as loaded', async () => {
+        const { container } = await setup();
+        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [] } });
+        clickSave(container);
+        await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
+        expect(svcMock.save.mock.calls[0][0].audit).toEqual({ stdout: false, access: false });
+    });
+});
+
 describe('gateway-settings — save', () => {
     it("sends the whole file with the form's values, then reloads", async () => {
         const { container } = await setup();
@@ -230,6 +253,8 @@ describe('gateway-settings — save', () => {
         el<HTMLTextAreaElement>(container, '#gw-set-access-allow').value = ' 10.0.0.0/8 \n\n192.0.2.7/32\n';
         el<HTMLSelectElement>(container, '#gw-set-logLevel').value = 'debug';
         el<HTMLInputElement>(container, '#gw-set-tls-insecureSkipVerify').checked = true;
+        el<HTMLInputElement>(container, '#gw-set-audit-stdout').checked = true;
+        el<HTMLInputElement>(container, '#gw-set-audit-access').checked = true;
         offeredBoxes(container)[1].checked = true;
         svcMock.load.mockResolvedValue(view({ pendingRestart: ['tls.insecureSkipVerify'] }));
         clickSave(container);
@@ -242,6 +267,7 @@ describe('gateway-settings — save', () => {
             access: { allow: ['10.0.0.0/8', '192.0.2.7/32'], trustedProxies: [] },
             session: { idleMinutes: 5, absoluteMinutes: 30 },
             modules: { offered: ['queue-browser', 'queue-copy'], userDefault: 'all' },
+            audit: { stdout: true, access: true },
         });
         expect(toastMock.showToast).toHaveBeenCalledWith('Settings saved', 'ok');
         expect(svcMock.load).toHaveBeenCalledTimes(2);

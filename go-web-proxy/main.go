@@ -69,6 +69,9 @@ type config struct {
 	// backupDir is where scheduled backups go: always backupRoot, a field
 	// only so tests can point it elsewhere (backup.go).
 	backupDir string
+	// auditFile is the audit log (audit.go): always defaultAuditFile, a field
+	// only so tests can move it (inDataDir). Opened in Provisioned mode only.
+	auditFile string
 	// Connection-mode config surfaced to the SPA through /hosted. connModes is
 	// one of direct|provisioned|both; defaultConn (direct|provisioned) picks
 	// the tab shown first when both are offered. The default, direct, is
@@ -83,6 +86,9 @@ type config struct {
 	session sessionLimits
 	login   loginLimits
 	modules moduleSettings
+	// The audit stream's options (audit.go): audit.stdout is seeded by
+	// SMU_SHOW_AUDIT, audit.access has no env var. Live.
+	audit auditSettings
 }
 
 // managedRoutes is what Provisioned mode adds to the router; nil in Gateway
@@ -94,6 +100,7 @@ type managedRoutes struct {
 	gateAdmin func(http.Handler) http.Handler // /solAdmin; an admin session, every mode
 	gateRelay func(http.Handler) http.Handler // the Direct relay; 404 under connModes=provisioned
 	backups   *backupService                  // the backup schedule, run by serve
+	audit     *auditor                        // the audit trail, closed by serve at shutdown
 }
 
 // robotsTxt asks every crawler to stay out; X-Robots-Tag on each response says
@@ -146,6 +153,7 @@ func defaultConfig() config {
 		connectionsFile: defaultConnectionsFile,
 		storeKeyFile:    defaultStoreKeyFile,
 		backupDir:       backupRoot,
+		auditFile:       defaultAuditFile,
 		connModes:       connDirect,
 		defaultConn:     connDirect,
 		session:         sessionLimits{idle: 10 * time.Minute, absolute: 30 * time.Minute},
@@ -176,6 +184,10 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, fmt.Errorf("SMU_SSL_SKIP_CERT_VERIFY=%q: %w", os.Getenv("SMU_SSL_SKIP_CERT_VERIFY"), err)
 	}
+	showAudit, err := parseShowAudit(os.Getenv("SMU_SHOW_AUDIT"))
+	if err != nil {
+		return config{}, fmt.Errorf("SMU_SHOW_AUDIT=%q: %w", os.Getenv("SMU_SHOW_AUDIT"), err)
+	}
 	return config{
 		hosted:             hosted,
 		certFile:           envOr("SMU_SSL_CERTFILE", d.certFile),
@@ -191,6 +203,8 @@ func loadConfig() (config, error) {
 		session:            d.session,
 		login:              d.login,
 		modules:            d.modules,
+		auditFile:          d.auditFile,
+		audit:              auditSettings{stdout: showAudit},
 	}, nil
 }
 
@@ -221,8 +235,22 @@ func parseInsecureSkipVerify(raw string) (bool, error) {
 	return false, errors.New(`must be "true" or "false"`)
 }
 
-// inDataDir moves the stores and the store key under dir, keeping their file
-// names. It is the one seam tests use to keep the fixed paths out of /data;
+// parseShowAudit reads SMU_SHOW_AUDIT as strictly as parseInsecureSkipVerify:
+// unset or "false" keeps the audit copy off stdout, "true" turns it on, and
+// anything else is refused, since the value is written into config.yaml on the
+// first start.
+func parseShowAudit(raw string) (bool, error) {
+	switch raw {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	}
+	return false, errors.New(`must be "true" or "false"`)
+}
+
+// inDataDir moves the stores, the store key and the audit log under dir,
+// keeping their file names. It is the one seam tests use to keep the fixed paths out of /data;
 // "" (main) leaves them as they are.
 func (c config) inDataDir(dir string) config {
 	if dir == "" {
@@ -231,6 +259,7 @@ func (c config) inDataDir(dir string) config {
 	c.usersFile = filepath.Join(dir, filepath.Base(defaultUsersFile))
 	c.connectionsFile = filepath.Join(dir, filepath.Base(defaultConnectionsFile))
 	c.storeKeyFile = filepath.Join(dir, filepath.Base(defaultStoreKeyFile))
+	c.auditFile = filepath.Join(dir, filepath.Base(defaultAuditFile))
 	return c
 }
 
@@ -316,6 +345,7 @@ func main() {
 		configFile: configFilePath,
 		appDir:     appRoot,
 		log:        os.Stderr,
+		stdout:     os.Stdout,
 		listen:     func() (net.Listener, error) { return net.Listen("tcp", listenAddr) },
 		signals:    signals,
 		shutdown:   shutdownTimeout,
@@ -334,6 +364,7 @@ type process struct {
 	appDir     string                       // the app's files: appRoot
 	dataDir    string                       // holds the stores and the store key; "" keeps the fixed /data paths
 	log        io.Writer                    // every log line
+	stdout     io.Writer                    // the audit copy while audit.stdout is on: os.Stdout; nil discards
 	listen     func() (net.Listener, error) // listenAddr
 	signals    <-chan os.Signal             // SIGINT or SIGTERM: a graceful shutdown
 	shutdown   time.Duration                // shutdownTimeout
@@ -401,10 +432,17 @@ func serve(p process) error {
 	// /managed/* is a 404. A load failure is fatal: a misconfiguration must not
 	// fall back to an unauthenticated app. The connection modes were validated
 	// with the rest of config.yaml (resolveConfig).
-	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, sum: load.sum}, upstream, logger)
+	auditOut := p.stdout
+	if auditOut == nil {
+		auditOut = io.Discard
+	}
+	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, sum: load.sum}, upstream, auditOut, logger)
 	if err != nil {
 		logger.Error("provisioned store load failed", "err", err)
 		return err
+	}
+	if mr != nil {
+		defer func() { _ = mr.audit.close() }()
 	}
 
 	// The mode's bundle must be there, or every page would be a 404: a

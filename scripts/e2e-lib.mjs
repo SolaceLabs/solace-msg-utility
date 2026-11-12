@@ -462,3 +462,75 @@ export function sweepSecrets(records, secrets, allow = () => false) {
     }
     return hits;
 }
+
+// The audit trail's entry fields, in the order the gateway writes them
+// (go-web-proxy/audit.go); the first six are always present.
+const AUDIT_FIELDS = ['time', 'actor', 'client', 'action', 'target', 'outcome', 'code', 'changed', 'msg'];
+const AUDIT_REQUIRED = ['time', 'actor', 'client', 'action', 'outcome', 'msg'];
+const RFC3339_UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/;
+
+/**
+ * The lines of an audit log as entries, and what is wrong with any of them:
+ * not a JSON object, a field the gateway does not write, a field out of
+ * order, a missing required field, a time that is not RFC 3339 UTC, an
+ * outcome other than ok or refused.
+ * @param {string} text
+ * @returns {{ entries: Array<Record<string, any>>, problems: string[] }}
+ */
+export function parseAuditLog(text) {
+    const entries = [];
+    const problems = [];
+    String(text).split('\n').forEach((line, i) => {
+        if (!line.trim()) return;
+        const at = `line ${i + 1}`;
+        let e;
+        try {
+            e = JSON.parse(line);
+        } catch {
+            problems.push(`${at} is not JSON`);
+            return;
+        }
+        if (!e || typeof e !== 'object' || Array.isArray(e)) {
+            problems.push(`${at} is not a JSON object`);
+            return;
+        }
+        const keys = Object.keys(e);
+        const unknown = keys.filter((k) => !AUDIT_FIELDS.includes(k));
+        const missing = AUDIT_REQUIRED.filter((k) => !keys.includes(k));
+        if (unknown.length) problems.push(`${at} has unknown field(s) ${unknown.join(', ')}`);
+        if (missing.length) problems.push(`${at} lacks ${missing.join(', ')}`);
+        const order = keys.filter((k) => AUDIT_FIELDS.includes(k)).map((k) => AUDIT_FIELDS.indexOf(k));
+        if (order.some((v, j) => j > 0 && v < order[j - 1])) problems.push(`${at} has its fields out of order: ${keys.join(', ')}`);
+        if (typeof e.time === 'string' && !RFC3339_UTC.test(e.time)) problems.push(`${at} has time ${e.time}, not RFC 3339 UTC`);
+        if (keys.includes('outcome') && e.outcome !== 'ok' && e.outcome !== 'refused') problems.push(`${at} has outcome ${e.outcome}`);
+        entries.push(e);
+    });
+    return { entries, problems };
+}
+
+/**
+ * What the e2e run must have left in the audit log: a refused sign-in with
+ * code bad_credentials and an ok one for `user`, a settings.update naming each
+ * of `settingsKeys`, and backup.export and backup.import entries, all ok.
+ * @param {Array<Record<string, any>>} entries
+ * @param {{ user: string, settingsKeys: string[] }} want
+ * @returns {string[]} what is missing
+ */
+export function auditMissing(entries, { user, settingsKeys }) {
+    const has = (pred) => entries.some(pred);
+    const missing = [];
+    // A refused sign-in has no actor (nobody signed in); its target is the account tried.
+    if (!has((e) => e.action === 'signin' && e.outcome === 'refused' && e.code === 'bad_credentials' && e.actor === '' && e.target === user)) {
+        missing.push(`a refused signin for ${user} with code bad_credentials`);
+    }
+    if (!has((e) => e.action === 'signin' && e.outcome === 'ok' && e.actor === user)) missing.push(`an ok signin for ${user}`);
+    for (const key of settingsKeys) {
+        if (!has((e) => e.action === 'settings.update' && e.outcome === 'ok' && Array.isArray(e.changed) && e.changed.includes(key))) {
+            missing.push(`an ok settings.update naming ${key}`);
+        }
+    }
+    for (const action of ['backup.export', 'backup.import']) {
+        if (!has((e) => e.action === action && e.outcome === 'ok')) missing.push(`an ok ${action}`);
+    }
+    return missing;
+}
