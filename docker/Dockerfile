@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.6
+# syntax=docker/dockerfile:1.6@sha256:ac85f380a63b13dfcefa89046420e1781752bab202122f8f50032edf31be0021
 #
 # Single-binary HTTPS gateway for the Solace Message Utility PWA. One image
 # runs every container mode (docs/deployment.md):
@@ -79,7 +79,10 @@
 #               lost it looks wrong rather than merely out of date.
 
 # ---- Stage 1: build the static Go gateway ------------------------------------
-FROM golang:1.27.4-alpine AS gateway-builder
+# Base images and the syntax frontend are pinned tag@digest (the multi-arch
+# index digest), so a re-pushed tag cannot change the build; Dependabot's
+# docker entry moves the digest.
+FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS gateway-builder
 WORKDIR /src
 # pages/ holds the sign-in page the binary embeds (go:embed).
 COPY go-web-proxy/go.mod go-web-proxy/go.sum ./
@@ -107,7 +110,7 @@ RUN mkdir -p /staging/tls/trust /staging/data /staging/backup \
 # ---- Stage 2: build the PWA bundle ------------------------------------------
 # Builds every dist/*.html variant from source so the runtime image doesn't
 # depend on whatever happens to be in the host's dist/ at `docker build` time.
-FROM node:26.8.1-alpine AS pwa-builder
+FROM node:26.8.1-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3 AS pwa-builder
 WORKDIR /pwa
 # Copy lockfile + manifest first so `npm ci` layer caches when source changes.
 COPY package.json package-lock.json ./
