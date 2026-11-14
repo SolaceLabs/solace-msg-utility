@@ -278,6 +278,54 @@ func TestLoadStore_BootstrapFromEnvironmentIsNeverLogged(t *testing.T) {
 	}
 }
 
+// A supplied password outside the policy (too short or too long, from either
+// variable) does not stop the start: it is set aside with a warning that names
+// the variable and the rule, never the value, and the admin gets a generated
+// password, logged once, that must be changed at first sign-in.
+func TestLoadStore_BootstrapPasswordOutsideThePolicyIsReplacedByAGeneratedOne(t *testing.T) {
+	short, long := "tiny-pw", strings.Repeat("x", passwordMaxLen+1)
+	for _, tc := range []struct {
+		name, env, value string
+	}{
+		{"too short", envAdminPassword, short},
+		{"too long", envAdminPassword, long},
+		{"file too short", envAdminPasswordFile, short},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := bootstrapFixture(t)
+			val := tc.value
+			if tc.env == envAdminPasswordFile {
+				val = filepath.Join(t.TempDir(), "admin.pw")
+				writeFile(t, val, tc.value+"\n")
+			}
+			var buf strings.Builder
+			s, err := loadStore(f.opts(envOf(map[string]string{tc.env: val})), newCapturingLogger(&buf))
+			if err != nil {
+				t.Fatalf("a password outside the policy must not stop the start: %v", err)
+			}
+			out := buf.String()
+			if strings.Contains(out, tc.value) {
+				t.Errorf("the rejected value must never be logged: %s", out)
+			}
+			if !strings.Contains(out, "bootstrap password variable ignored") || !strings.Contains(out, "env="+tc.env) ||
+				!strings.Contains(out, "password must be 12 to 128 characters") {
+				t.Errorf("the warning must name the variable and the rule: %s", out)
+			}
+			if _, ok, _ := s.checkPassword(context.Background(), "admin", tc.value); ok {
+				t.Error("the rejected password must not sign in")
+			}
+			m := regexp.MustCompile(`password=(\S+)`).FindStringSubmatch(out)
+			if m == nil {
+				t.Fatalf("the generated password must be logged once: %s", out)
+			}
+			mustChange, ok, err := s.checkPassword(context.Background(), "admin", m[1])
+			if err != nil || !ok || !mustChange {
+				t.Fatalf("admin must sign in with the generated password and must change it: ok=%v mustChange=%v err=%v", ok, mustChange, err)
+			}
+		})
+	}
+}
+
 func TestLoadStore_BootstrapRefusesBadSources(t *testing.T) {
 	cases := []struct {
 		name string
@@ -285,23 +333,16 @@ func TestLoadStore_BootstrapRefusesBadSources(t *testing.T) {
 		want string
 	}{
 		{"both set", map[string]string{envAdminPassword: "long-enough-pw", envAdminPasswordFile: "/x"}, "not both"},
-		{"too short", map[string]string{envAdminPassword: "short"}, "SMU_ADMIN_PASSWORD: password must be 12 to 128"},
-		{"file too short", map[string]string{envAdminPasswordFile: "SHORTFILE"}, "SMU_ADMIN_PASSWORD_FILE: password must be"},
 		{"file unreadable", map[string]string{envAdminPasswordFile: "/nonexistent/admin.pw"}, `SMU_ADMIN_PASSWORD_FILE="/nonexistent/admin.pw" cannot be read`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := bootstrapFixture(t)
-			if v := tc.env[envAdminPasswordFile]; v == "SHORTFILE" {
-				p := filepath.Join(t.TempDir(), "pw")
-				writeFile(t, p, "tiny")
-				tc.env[envAdminPasswordFile] = p
-			}
 			_, err := loadStore(f.opts(envOf(tc.env)), quietLogger())
 			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), f.usersPath) {
 				t.Fatalf("want an error naming the users file and %q, got %v", tc.want, err)
 			}
-			if strings.Contains(err.Error(), "tiny") || strings.Contains(err.Error(), "short\"") {
+			if strings.Contains(err.Error(), "long-enough-pw") {
 				t.Errorf("the error must not echo the value: %v", err)
 			}
 			if _, statErr := os.Stat(f.usersPath); statErr == nil {

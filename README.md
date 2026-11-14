@@ -44,7 +44,7 @@ Then open <https://localhost:9443/>. The container connects to your broker for t
 
 ### Provisioned -- sign-in and administration
 
-From a checkout of the release you deploy, put the first administrator's password (12 to 128 characters) in `docker/admin-password`, then give it and the backup directory to the gateway's UID (65532) alone, and start it:
+From a checkout of the release you deploy, put the first administrator's password (12 to 128 characters; outside that the gateway generates one and logs it once) in `docker/admin-password`, then give it and the backup directory to the gateway's UID (65532) alone, and start it:
 
 ```bash
 cd docker

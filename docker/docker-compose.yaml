@@ -97,7 +97,8 @@ services:
       LOG_LEVEL: warn
       SMU_SSL_SKIP_CERT_VERIFY: "true"
       # Bootstrap admin password, read only when users.yaml does not exist yet
-      # (12 to 128 characters). Put it in a .env file next to this one rather
+      # (12 to 128 characters; outside that it is ignored with a warning and a
+      # generated password is logged once). Put it in a .env file next to this one rather
       # than here; never written to config.yaml or the log. For a Docker secret
       # set SMU_ADMIN_PASSWORD_FILE to its path instead.
       # SMU_ADMIN_PASSWORD: ${SMU_ADMIN_PASSWORD}

@@ -59,7 +59,7 @@ Because the browser receives a VPN's client password while it is connected, give
 You need Docker with Compose, and a host your users' browsers can reach on port 9443.
 
 1. Download [`docker/compose.provisioned.yaml`](../docker/compose.provisioned.yaml) from the release you are deploying.
-2. Beside it, put the first administrator's password, 12 to 128 characters, in a file named `admin-password`, and make the directory for scheduled backups. Give both to the gateway's user only (left to Docker, the directory would be root's and take no backups):
+2. Beside it, put the first administrator's password, 12 to 128 characters, in a file named `admin-password` (a password outside that length is ignored with a warning, and the gateway generates one as below), and make the directory for scheduled backups. Give both to the gateway's user only (left to Docker, the directory would be root's and take no backups):
 
    ```bash
    chmod 400 admin-password && sudo chown 65532 admin-password
@@ -77,7 +77,7 @@ You need Docker with Compose, and a host your users' browsers can reach on port 
 
 Then open the admin console at `https://<host>:9443/solAdmin` to add brokers and users.
 
-**Without the password file**, the gateway generates a password for `admin` and prints it **once** in its log (`docker compose logs gateway`). Lost it before signing in? Delete `users.yaml` and restart.
+**Without the password file**, or with a password outside 12 to 128 characters, the gateway generates a password for `admin` and prints it **once** in its log (`docker compose logs gateway`); a rejected password is named by its variable in a warning, never shown. Lost it before signing in? Delete `users.yaml` and restart.
 
 **Using `docker run` instead:** set `SMU_CONN_MODES=provisioned`, and mount a host directory at `/backup` (prepared as in step 2) so scheduled backups outlive the container. Without that mount they are written inside the container and the Backup & Restore page still looks healthy, but recreating the container (an upgrade) deletes them. The users and connections stay with the container too: before replacing it, export a backup and import it into the new one. The compose file keeps both across upgrades.
 

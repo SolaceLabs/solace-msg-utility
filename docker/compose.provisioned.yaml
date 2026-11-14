@@ -4,7 +4,8 @@
 # granted; they never see or type a broker's address or credentials. See
 # docs/provisioned-mode.md.
 #
-#   1. Put the first administrator's password (12 to 128 characters) in a file
+#   1. Put the first administrator's password (12 to 128 characters; outside
+#      that the gateway generates one and logs it once) in a file
 #      named admin-password next to this one, readable by the gateway's UID
 #      and no one else: chmod 400 admin-password && sudo chown 65532 admin-password
 #   2. Make the backup directory next to this file, writable by the gateway's

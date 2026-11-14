@@ -847,8 +847,8 @@ func (s *store) replaceStores(tx *fileTx, users []userRec, conns []connRec) (dro
 
 // adminSeed returns the bootstrap admin password from SMU_ADMIN_PASSWORD or the
 // file named by SMU_ADMIN_PASSWORD_FILE (a Docker secret), and which variable gave
-// it. Neither set: "" and "", and the caller generates one. The value is never
-// echoed in an error.
+// it. Neither set: "" and "", and the caller generates one. The password policy
+// is the caller's to apply. The value is never echoed in an error.
 func adminSeed(getenv func(string) string) (password, source string, err error) {
 	direct, file := getenv(envAdminPassword), getenv(envAdminPasswordFile)
 	switch {
@@ -865,19 +865,26 @@ func adminSeed(getenv func(string) string) (password, source string, err error) 
 	default:
 		return "", "", nil
 	}
-	if err := checkPasswordPolicy(password); err != nil {
-		return "", "", fmt.Errorf("%s: %w", source, err)
-	}
 	return password, source, nil
 }
 
 // bootstrapUsers writes the first users file: one admin who must change the
 // password at first sign-in. The password comes from the environment, or is
-// generated and logged once (the operator's only way to read it).
+// generated and logged once (the operator's only way to read it). A supplied
+// password that fails the policy is set aside with a warning naming the
+// variable, never the value, and a generated one takes its place: the admin
+// still has to change it at first sign-in, so the start need not stop.
 func bootstrapUsers(opts storeOptions, sl *sealer, logger *slog.Logger) (usersDoc, error) {
 	password, source, err := adminSeed(opts.getenv)
 	if err != nil {
 		return usersDoc{}, err
+	}
+	if source != "" {
+		if err := checkPasswordPolicy(password); err != nil {
+			logger.Warn("bootstrap password variable ignored: it does not meet the password policy, so a generated password is used instead",
+				"env", source, "rule", err.Error())
+			password, source = "", ""
+		}
 	}
 	generated := source == ""
 	if generated {
