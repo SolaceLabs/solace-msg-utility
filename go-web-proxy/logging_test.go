@@ -87,7 +87,7 @@ func TestLogStartup_ShowsAtEveryLevel(t *testing.T) {
 	}{
 		{"gateway", func(c *config) {
 			c.access.allow = prefixes(t, "10.0.0.0/8")
-		}, []string{"mode=gateway", "conn_modes=direct", "app_bundle=index.html", "access.allow=[10.0.0.0/8]", "access.trustedProxies=[]", "tls.insecureSkipVerify=false"}, []string{"usersFile=", "login.maxFailures=", "login.twoFactor="}},
+		}, []string{"mode=gateway", "conn_modes=direct", "app_bundle=index.html", "access.allow=[10.0.0.0/8]", "access.trustedProxies=[]", "tls.insecureSkipVerify=false"}, []string{"usersFile=", "login.maxFailures=", "login.twoFactor=", "tls.certFile=", "tls.keyFile=", "tls.trustDir="}},
 		{"provisioned", func(c *config) {
 			c.connModes = connProvisioned
 			c.access.trustedProxies = prefixes(t, "172.16.0.0/12")

@@ -5,11 +5,13 @@
  * (go-web-proxy/settings.go). Ships in the standalone `/solAdmin` app (the
  * `admin` variant); the id maps to `'admin'` in rbac.ts's MODULE_REQUIREMENTS.
  *
- * The gateway validates a save exactly as at startup and applies most keys on
- * the next request. The keys it reports as `restartOnly` are tagged "restart"
- * here, and a banner lists the ones saved but not yet running. The path keys
- * it reports as `hostOnly` are shown read-only and tagged "edit on host": only
- * a hand edit of config.yaml changes them. It refuses an
+ * The gateway validates a save exactly as at startup and applies the keys on
+ * the next request (the TLS paths are environment variables, not settings, and
+ * the certificate and trusted CAs live in the Certificates module). The keys it
+ * reports as `restartOnly` are tagged "restart" here, and a banner lists the
+ * ones saved but not yet running, pointing at the Restart gateway button of the
+ * "Gateway" card: a confirm dialog, `POST /managed/restart`, then a wait for
+ * `/hosted` to answer again and a move to the sign-in. It refuses an
  * access list that would deny this browser (`would_lock_out`, shown with the
  * gateway's reason) and a save over a hand edit of the file it has not loaded
  * (`changedOnDisk`, which also disables Save). Imports only from
@@ -22,6 +24,7 @@
  */
 import { required, setError as setErrorOn } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
+import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
 import { moduleLabel } from '../../core/utils';
 import { logger } from '../../core/logger';
@@ -35,7 +38,7 @@ type Kind = 'text' | 'bool' | 'int' | 'lines';
 /**
  * Every form field: its config.yaml key and how its input holds the value.
  * The input's id is `gw-set-` plus the key with the dot as a dash.
- * `modules.offered` is a checkbox per catalog module, handled on its own.
+ * `modules.offered` is a toggle tile per catalog module, handled on its own.
  */
 const FIELDS: ReadonlyArray<{ key: string; kind: Kind }> = [
     { key: 'connModes', kind: 'text' },
@@ -54,11 +57,28 @@ const FIELDS: ReadonlyArray<{ key: string; kind: Kind }> = [
     { key: 'audit.stdout', kind: 'bool' },
     { key: 'audit.access', kind: 'bool' },
     { key: 'audit.onFailure', kind: 'text' },
-    { key: 'tls.certFile', kind: 'text' },
-    { key: 'tls.keyFile', kind: 'text' },
-    { key: 'tls.trustDir', kind: 'text' },
     { key: 'tls.insecureSkipVerify', kind: 'bool' },
 ];
+
+/** One line under each module's name on its tile; a module not listed shows its name alone. */
+const MODULE_DESCRIPTIONS: Readonly<Record<string, string>> = {
+    'queue-browser': 'Browse, inspect and delete queued messages.',
+    'queue-copy': 'Copy or move messages between queues.',
+    'queue-subscription-explorer': 'See which topics each queue subscribes to.',
+};
+
+/** Where the gateway's own sign-in page sends an administrator back to this app. */
+const RESTART_QUESTION = 'Restart the gateway? Everyone is signed out and open broker connections close. It is back in a few seconds.';
+/** The first look at `/hosted` comes after the old process has had time to stop; later ones every second, for a minute. */
+const RESTART_FIRST_WAIT_MS = 2000;
+const RESTART_POLL_MS = 1000;
+const RESTART_ATTEMPTS = 60;
+
+/** Seams of the restart wait, for tests: how to sleep and how to reload the page. */
+export interface GatewaySettingsOptions {
+    wait?: (ms: number) => Promise<void>;
+    reload?: () => void;
+}
 
 type Tree = Record<string, unknown>;
 type Input = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
@@ -74,11 +94,11 @@ function write(tree: Tree, key: string, value: unknown): void {
 }
 
 export const GatewaySettingsModule = {
-    name: 'Settings',
+    name: 'Gateway Settings',
     id: 'gateway-settings',
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>',
 
-    async install(app: AppContext) {
+    async install(app: AppContext, opts: GatewaySettingsOptions = {}) {
         const { container, appState, eventBus } = app;
 
         const els = {
@@ -87,6 +107,11 @@ export const GatewaySettingsModule = {
             btnSave: required<HTMLButtonElement>(container, '#btn-gw-set-save'),
             disk: required<HTMLElement>(container, '#gw-set-disk'),
             pending: required<HTMLElement>(container, '#gw-set-pending'),
+            pendingText: required<HTMLElement>(container, '#gw-set-pending-text'),
+            btnGotoRestart: required<HTMLButtonElement>(container, '#btn-gw-set-goto-restart'),
+            btnRestart: required<HTMLButtonElement>(container, '#btn-gw-set-restart'),
+            restarting: required<HTMLElement>(container, '#gw-set-restarting'),
+            restartError: required<HTMLElement>(container, '#gw-set-restart-error'),
             client: required<HTMLElement>(container, '#gw-set-client'),
             offered: required<HTMLElement>(container, '#gw-set-modules-offered'),
             error: required<HTMLElement>(container, '#gw-set-error'),
@@ -94,6 +119,13 @@ export const GatewaySettingsModule = {
         const inputs = new Map(FIELDS.map(f => [f.key, required<Input>(container, `#gw-set-${f.key.replace('.', '-')}`)] as const));
 
         const service = createSettingsService();
+        const wait = opts.wait ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+        // Back at the same address, the gateway answers a browser without a session
+        // with its sign-in, which returns here; the demo restores itself the same way.
+        /* v8 ignore start -- jsdom does not implement a page reload, so every test
+           injects its own; the default is one call to the browser. */
+        const reload = opts.reload ?? (() => window.location.reload());
+        /* v8 ignore stop */
         const gate = createGate(container, {
             id: 'gw-set-gate',
             title: 'Administrator Sign-in Required',
@@ -115,6 +147,28 @@ export const GatewaySettingsModule = {
             els.btnSave.disabled = changed;
         }
 
+        /** A toggle tile for one catalog module: a button whose aria-pressed says whether it is on offer. */
+        function moduleTile(id: string, on: boolean): HTMLButtonElement {
+            const tile = document.createElement('button');
+            tile.type = 'button';
+            tile.className = 'gw-set-tile';
+            tile.dataset.module = id;
+            tile.setAttribute('aria-pressed', String(on));
+            const name = document.createElement('span');
+            name.className = 'gw-set-tile-name';
+            name.textContent = moduleLabel(id);
+            tile.appendChild(name);
+            const description = MODULE_DESCRIPTIONS[id];
+            if (description) {
+                const line = document.createElement('span');
+                line.className = 'gw-set-tile-desc';
+                line.textContent = description;
+                tile.appendChild(line);
+            }
+            tile.addEventListener('click', () => tile.setAttribute('aria-pressed', String(tile.getAttribute('aria-pressed') !== 'true')));
+            return tile;
+        }
+
         function render(view: SettingsView): void {
             loaded = view.settings;
             loadedRev = view.rev;
@@ -125,27 +179,14 @@ export const GatewaySettingsModule = {
                 if (f.kind === 'bool') (input as HTMLInputElement).checked = value as boolean;
                 else if (f.kind === 'lines') input.value = (value as string[]).join('\n');
                 else input.value = String(value);
-                input.disabled = view.hostOnly.includes(f.key);
             }
             els.offered.innerHTML = '';
-            for (const id of view.catalog) {
-                const label = document.createElement('label');
-                label.className = 'flex-row items-center gap-2 m-0';
-                const box = document.createElement('input');
-                box.type = 'checkbox';
-                box.value = id;
-                box.checked = view.settings.modules.offered.includes(id);
-                label.append(box, ` ${moduleLabel(id)}`);
-                els.offered.appendChild(label);
-            }
+            for (const id of view.catalog) els.offered.appendChild(moduleTile(id, view.settings.modules.offered.includes(id)));
             container.querySelectorAll<HTMLElement>('[data-key]').forEach(group => {
-                const key = group.dataset.key as string;
-                const hostOnly = view.hostOnly.includes(key);
-                group.classList.toggle('gw-set-host', hostOnly);
-                group.classList.toggle('gw-set-restart', !hostOnly && view.restartOnly.includes(key));
+                group.classList.toggle('gw-set-restart', view.restartOnly.includes(group.dataset.key as string));
             });
             const pending = view.pendingRestart;
-            els.pending.textContent = pending.length ? `Saved, applies when the gateway restarts: ${pending.join(', ')}.` : '';
+            els.pendingText.textContent = pending.length ? `Saved, applies when the gateway restarts: ${pending.join(', ')}.` : '';
             els.pending.classList.toggle('hidden', pending.length === 0);
             showChangedOnDisk(view.changedOnDisk);
         }
@@ -194,7 +235,9 @@ export const GatewaySettingsModule = {
                 }
                 write(next, f.key, value);
             }
-            const offered = [...els.offered.querySelectorAll<HTMLInputElement>('input')].filter(b => b.checked).map(b => b.value);
+            const offered = [...els.offered.querySelectorAll<HTMLElement>('.gw-set-tile')]
+                .filter(t => t.getAttribute('aria-pressed') === 'true')
+                .map(t => t.dataset.module as string);
             write(next, 'modules.offered', offered);
             return next as unknown as GatewaySettings;
         }
@@ -224,6 +267,35 @@ export const GatewaySettingsModule = {
             await load(); // the gateway's normalised values and the restart banner
         }
 
+        function setRestartError(msg: string | null): void {
+            setErrorOn(els.restartError, msg);
+        }
+
+        /** Ask, then restart: after the gateway's 202, wait for `/hosted` to answer again and go to the sign-in. */
+        async function restart(): Promise<void> {
+            if (!await confirmDialog(RESTART_QUESTION, { confirmLabel: 'Restart gateway' })) return;
+            setRestartError(null);
+            els.btnRestart.disabled = true;
+            const res = await service.restart();
+            if (!res.ok) {
+                els.btnRestart.disabled = false;
+                reportManagedFailure(res, eventBus, setRestartError);
+                return;
+            }
+            els.restarting.textContent = 'Restarting the gateway. This page goes to the sign-in when the gateway answers again.';
+            els.restarting.classList.remove('hidden');
+            for (let attempt = 0; attempt < RESTART_ATTEMPTS; attempt++) {
+                await wait(attempt === 0 ? RESTART_FIRST_WAIT_MS : RESTART_POLL_MS);
+                if (await service.ping()) {
+                    reload();
+                    return;
+                }
+            }
+            els.restarting.classList.add('hidden');
+            els.btnRestart.disabled = false;
+            setRestartError('The gateway has not answered after a minute. Check it on its host, then reload this page.');
+        }
+
         // The session as this module last applied it: signed-in user and admin
         // flag, null when signed out. A replayed or unrelated rbac:changed (the
         // kernel's held replay at start, a broker connect) leaves it equal.
@@ -249,6 +321,8 @@ export const GatewaySettingsModule = {
 
         els.btnReload.addEventListener('click', () => void load());
         els.btnSave.addEventListener('click', () => void save());
+        els.btnRestart.addEventListener('click', () => void restart());
+        els.btnGotoRestart.addEventListener('click', () => els.btnRestart.focus());
         eventBus.on('rbac:changed', () => {
             if (sessionKey() !== appliedKey) applyGate();
         });

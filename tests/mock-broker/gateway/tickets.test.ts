@@ -21,6 +21,15 @@ describe('mock-broker/gateway/tickets', () => {
         expect(tickets.get(id)).toBeNull();
     });
 
+    it('clears every ticket at once, as a restart does', () => {
+        const tickets = createTickets(() => 0);
+        const ids = [tickets.create(mk('admin')), tickets.create(mk('viewer', 'enrol', 'S'))];
+        tickets.clear();
+        expect(ids.map(id => tickets.get(id))).toEqual([null, null]);
+        expect(tickets.dump()).toEqual([]);
+        expect(tickets.pending()).toEqual([]);
+    });
+
     it('knows no ticket for a missing id, and ends nothing for one', () => {
         const tickets = createTickets(() => 0);
         const id = tickets.create(mk('admin'));

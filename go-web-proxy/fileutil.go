@@ -451,11 +451,18 @@ func journalTargetNames() []string {
 // store files), plus every .tmp-* file. Operators must not keep their own
 // copies under those names in the data directory.
 func recoverDataDir(dir string, logger *slog.Logger) error {
+	return recoverDir(dir, journalTargetNames(), logger)
+}
+
+// recoverDir is recoverDataDir for any directory a journal covers: bakNames
+// are the files whose .bak the sweep may remove (the certificate's directory
+// passes the certificate and key names, tls.go).
+func recoverDir(dir string, bakNames []string, logger *slog.Logger) error {
 	txnPath := filepath.Join(dir, txnFileName)
 	raw, err := os.ReadFile(txnPath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return sweepLeftovers(dir, logger)
+		return sweepLeftoversOf(dir, bakNames, logger)
 	case err != nil:
 		return fmt.Errorf("cannot read the transaction journal %s: %w", txnPath, err)
 	}
@@ -471,7 +478,7 @@ func recoverDataDir(dir string, logger *slog.Logger) error {
 	if err := restoreFiles(dir, rec.Files, os.Rename); err != nil {
 		return fmt.Errorf("cannot roll back the interrupted store write: %w; fix the cause (permissions, disk) and start again, the journal %s is kept", err, txnPath)
 	}
-	if err := sweepLeftovers(dir, logger); err != nil {
+	if err := sweepLeftoversOf(dir, bakNames, logger); err != nil {
 		return err
 	}
 	if err := os.Remove(txnPath); err != nil {
@@ -507,6 +514,11 @@ func parseTxn(raw []byte) (txnRecord, error) {
 // or interrupted commit left. A file that cannot be removed is logged, not
 // fatal: it is clutter, not state.
 func sweepLeftovers(dir string, logger *slog.Logger) error {
+	return sweepLeftoversOf(dir, journalTargetNames(), logger)
+}
+
+// sweepLeftoversOf is sweepLeftovers with the file names whose .bak may go.
+func sweepLeftoversOf(dir string, names []string, logger *slog.Logger) error {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -515,7 +527,7 @@ func sweepLeftovers(dir string, logger *slog.Logger) error {
 		return fmt.Errorf("cannot list the data directory %s: %w", dir, err)
 	}
 	backups := map[string]bool{}
-	for _, n := range journalTargetNames() {
+	for _, n := range names {
 		backups[n+backupSuffix] = true
 	}
 	var removed []string

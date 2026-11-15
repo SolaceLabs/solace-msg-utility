@@ -1,9 +1,11 @@
 // Pure helpers for scripts/e2e.mjs: throwaway TLS material, the broker details
 // and their file, the session-cookie rules, the sealed-store header, and the
-// secret sweep and masking. No network and no files, so
+// secret sweep and masking. No files, and the one helper that opens a socket
+// (tlsFingerprint) dials only the address it is given, so
 // tests/build/e2e-lib.test.ts covers them without Docker or a broker.
 import { X509Certificate, createHmac, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import net from 'node:net';
+import tls from 'node:tls';
 
 // --- X.509 -------------------------------------------------------------------
 // Just enough DER for a CA and the leaf certificate the run needs (the
@@ -126,6 +128,46 @@ export function issueCert(ca, { cn, dns = [], ip = [], now = new Date(), days = 
     const { publicKey, privateKey } = rsaKeyPair();
     const certPem = certificate({ subject: cn, issuer: ca.cn, publicKey, signingKey: ca.privateKey, ca: false, dns, ip, now, days });
     return { certPem, keyPem: privateKey.export({ type: 'pkcs1', format: 'pem' }) };
+}
+
+/**
+ * A TLS server certificate from `ca` that has expired: valid for one day,
+ * ending 29 days before `now`. Same names and key shape as issueCert.
+ * @param {ReturnType<typeof makeCA>} ca
+ * @param {{ cn: string, dns?: string[], ip?: string[], now?: Date }} names
+ */
+export function issueExpiredCert(ca, { cn, dns = [], ip = [], now = new Date() }) {
+    return issueCert(ca, { cn, dns, ip, now: new Date(now.getTime() - 30 * 86_400_000), days: 1 });
+}
+
+/**
+ * The SHA-256 fingerprint of the first certificate in a PEM text, written as
+ * the gateway shows it (GET /managed/tls: upper-case hex pairs joined by ":").
+ * Throws, like pemCertificates, when there is no certificate.
+ * @param {string} text
+ */
+export function certFingerprint(text) {
+    return pemCertificates(text)[0].fingerprint256;
+}
+
+/**
+ * The fingerprint (as certFingerprint writes it) of the certificate a TLS
+ * server presents to a new connection. The handshake is not verified: which
+ * certificate is served is the question, not who signed it. The connection is
+ * closed as soon as the handshake ends and nothing is sent. Rejects when the
+ * server cannot be reached or has not finished the handshake in `timeoutMs`.
+ * @param {{ host: string, port: number, servername?: string, timeoutMs?: number }} server
+ * @returns {Promise<string>}
+ */
+export function tlsFingerprint({ host, port, servername, timeoutMs = 10_000 }) {
+    return new Promise((resolve, reject) => {
+        const socket = tls.connect({ host, port, servername, rejectUnauthorized: false }, () => {
+            resolve(socket.getPeerCertificate().fingerprint256);
+            socket.destroy();
+        });
+        socket.setTimeout(timeoutMs, () => socket.destroy(new Error(`${host}:${port} did not finish a TLS handshake in ${timeoutMs} ms`)));
+        socket.on('error', reject);
+    });
 }
 
 /**
@@ -594,12 +636,16 @@ export function wroteFile(entry, file) {
  * (the user checks 24 to 27 enrolled and an administrator reset) it also
  * wants: an ok twofactor.enrol for that user and an ok user.twofactor.reset of
  * that user by an administrator, each having written users.yaml at a seq, and
- * a refused signin with code bad_code.
+ * a refused signin with code bad_code. With `tls` (checks 28 to 31) it wants an
+ * ok tls.certificate.replace and an ok gateway.restart, each by admin, the
+ * replace's message naming a subject and an expiry and holding no PEM text;
+ * and, when `tls.trustFile` names the CA file the run deleted and added back,
+ * an ok tls.trust.add and tls.trust.remove of that file.
  * @param {Array<Record<string, any>>} entries
- * @param {{ user: string, settingsKeys: string[], twoFactorUser?: string }} want
+ * @param {{ user: string, settingsKeys: string[], twoFactorUser?: string, tls?: { trustFile?: string } }} want
  * @returns {string[]} what is missing
  */
-export function auditMissing(entries, { user, settingsKeys, twoFactorUser }) {
+export function auditMissing(entries, { user, settingsKeys, twoFactorUser, tls: tlsChecks }) {
     const has = (pred) => entries.some(pred);
     const missing = [];
     // A refused sign-in has no actor (nobody signed in); its target is the account tried.
@@ -633,6 +679,20 @@ export function auditMissing(entries, { user, settingsKeys, twoFactorUser }) {
             missing.push(`an ok user.twofactor.reset of ${twoFactorUser} by admin that wrote users.yaml with a seq`);
         }
         if (!has((e) => e.action === 'signin' && e.outcome === 'refused' && e.code === 'bad_code')) missing.push('a refused signin with code bad_code');
+    }
+    if (tlsChecks) {
+        if (!has((e) => e.action === 'tls.certificate.replace' && e.outcome === 'ok' && e.actor === 'admin'
+            && /\(subject .+, expires \d{4}-/.test(e.msg) && !/-----|PRIVATE KEY/.test(e.msg))) {
+            missing.push('an ok tls.certificate.replace by admin whose message names the subject and the expiry and holds no key');
+        }
+        if (!has((e) => e.action === 'gateway.restart' && e.outcome === 'ok' && e.actor === 'admin')) missing.push('an ok gateway.restart by admin');
+        if (tlsChecks.trustFile) {
+            for (const action of ['tls.trust.add', 'tls.trust.remove']) {
+                if (!has((e) => e.action === action && e.outcome === 'ok' && e.actor === 'admin' && e.target === tlsChecks.trustFile)) {
+                    missing.push(`an ok ${action} of ${tlsChecks.trustFile} by admin`);
+                }
+            }
+        }
     }
     return missing;
 }

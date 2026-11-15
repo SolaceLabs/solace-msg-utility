@@ -29,6 +29,8 @@
   - [Auditing an action](#auditing-an-action)
   - [Writing to the store](#writing-to-the-store)
   - [Adding a sign-in step](#adding-a-sign-in-step)
+  - [Changing the TLS files](#changing-the-tls-files)
+  - [Laying out an admin page](#laying-out-an-admin-page)
   - [TypeScript](#typescript)
 
 ---
@@ -100,7 +102,7 @@ A variant that needs neither script (the `admin` variant: no broker, no ZIP expo
 
 `./scripts/dev.sh image up` builds the image from source and starts it twice with [docker/docker-compose.yaml](../docker/docker-compose.yaml): Gateway mode on host port `19443`, Provisioned mode on `29443` (`docker compose -f docker/docker-compose.yaml up --build gateway` starts one). The image takes both vendor scripts from the npm packages `package.json` pins (`solclientjs`, `jszip`), so `up` needs nothing in `dist/`. Bump either with `npm install --save-exact`, at or above the shell's `MIN_VERSION` in `src/index.html`: [tests/build/vendor-scripts.test.ts](../tests/build/vendor-scripts.test.ts) holds both rules and checks the Dockerfile's copy paths.
 
-**Adding a gateway `config.yaml` setting.** Classify the new key as live (a field of `liveSettings`, applied by `apply`), restart-only (`restartOnlyKeys`) or host-only (`hostOnly`); `TestFileConfig_EveryKeyIsClassifiedOnce` in `go-web-proxy/live_test.go` fails until it is exactly one. A variable that seeds it takes the `SMU_` prefix (only `LOG_LEVEL` keeps its bare name); never reuse a name Go or another tool reads itself, such as `SSL_CERT_FILE`.
+**Adding a gateway `config.yaml` setting.** Classify the new key as live (a field of `liveSettings`, applied by `apply`), or restart-only (`restartOnlyKeys`; today only `hosted`); `TestFileConfig_EveryKeyIsClassifiedOnce` in `go-web-proxy/live_test.go` fails until it is exactly one. A location the console must never be able to change (a file path to a secret or a certificate) is not a setting at all: read it from an `SMU_` variable at every start, as `tlsPathsFromEnv` does for the three TLS paths, and keep it out of `fileConfig`, the settings API, the page and the fake. A key that leaves the file stays in `fileConfig` as a removed key (see `fileTLS.RemovedCertFile`) so an old `config.yaml` still loads, and is dropped at the next write. A variable that seeds it takes the `SMU_` prefix (only `LOG_LEVEL` keeps its bare name); never reuse a name Go or another tool reads itself, such as `SSL_CERT_FILE`.
 
 ---
 
@@ -208,13 +210,14 @@ src/
     admin-login/           # /solAdmin entry point — restores the gateway session, opens no broker connection
     user-management/       # Admin-only (/solAdmin) — user + entitlement CRUD
     connection-management/ # Admin-only (/solAdmin) — broker connection CRUD
-    gateway-settings/      # Admin-only (/solAdmin) — config.yaml editor
+    gateway-settings/      # Admin-only (/solAdmin) -- config.yaml editor, as cards; Restart gateway
+    tls-certificates/      # Admin-only (/solAdmin) -- the gateway's certificate and the trusted broker CAs
     backup/                # Admin-only (/solAdmin) — encrypted export/import and scheduled backups
   variants/
     standard.ts        # Default variant -- the everyday bundle (no admin modules)
     min.ts             # Minimal variant — connections + queue-browser only
     no-queue-copy.ts   # Standard variant minus the Queue Copy module
-    admin.ts           # The /solAdmin app — admin-login, the two entitlement editors, gateway settings
+    admin.ts           # The /solAdmin app -- admin-login, the two entitlement editors, gateway settings, certificates, backup
     managed.ts         # provisioned.html, served in Provisioned mode -- standard + connections' managed entry (MODULE_ENTRIES)
     all-for-testing-only.ts  # Kitchen-sink QA build — every module, incl. the admin ones
     _active.ts         # One-line re-export from one variant (default ./standard)
@@ -634,6 +637,23 @@ Two-factor sign-in is the pattern to copy (design: [architecture.md -> Two-facto
 - **Keep secrets out of everything you write down.** The secret, recovery codes and typed codes are never in a log line, an audit entry, an error or a test name. Tests assert it with a sweep, as `TestManagedAPI_AuditNeverHoldsASecret` does for the admin routes.
 - **Stable hooks for tests and the e2e.** The form field names (`code`, `password`, `step`, `next`) and the ids `two-factor-secret`, `recovery-codes` and `two-factor-continue` are the same in `pages/login.html` and in the fake's `pages.ts`. Change one and the other, and `scripts/e2e.mjs` reads them.
 - **Mirror it in the fake and the Demo controls.** The fake follows the real pages' statuses, texts (where the two differ, the real gateway wins and the difference is listed in [demo.md](demo.md#how-it-differs-from-a-real-gateway)), ids and rev rule, and the Authenticator section of the panel shows the mock codes. The contract cases cover the JSON API only; each gateway's own tests and the e2e cover the enrolled paths.
+
+### Changing the TLS files
+
+The gateway's certificate and trusted CAs are live ([architecture.md -> Live TLS and restart](architecture.md#live-tls-and-restart); operator view: [provisioned-mode.md -> Certificates from the console](provisioned-mode.md#certificates-from-the-console)). When you extend them:
+
+- **Take the current value from a holder, never from `config`.** A new outbound TLS user takes `trustHolder.get()` when it connects, or uses `newUpstreamTransport(trust)`; a new listener takes `certHolder.getCertificate`. A value copied at start would miss the next console change.
+- **A new write goes through `tlsManager`.** Verify before the lock and before the read-only test (a refusal is `*tlsInvalidError{Field, Reason}`, `422 invalid`, and must hold no key text), take the manager's mutex, write through the journal or a temp file and a rename, then swap the holder. Return `errTLSReadOnly`, `errTLSExists`, `errTLSNotFound` or a `*tlsWriteError` and let `writeTLSFailure` in `tls_api.go` map them; add a code to `MESSAGES` in `src/core/services/managed-api.ts` if a new one reaches the console. Seams for disk faults (`tlsManager.seams`, the journal's) are what the tests inject; do not add a failure branch no test can reach.
+- **Register the route with `adminOnly`, and audit a write.** The handler writes the ok line itself once the write happened (`recordOK`, with `auditCall.detail` for the bracketed text), so the line follows the change and names the subject, expiry or file, never the key. A write to the private key's text is the one thing to keep out of every log, error, audit entry and test name.
+- **The restart hook is a seam.** `process.restart` is `restartInPlace` in `main`, a counter in tests, which assert the audit line, the `202`, the shutdown and the call without exec'ing. A test of the exec itself replaces `execProgram` in `restart_unix_test.go`.
+- **The fake follows.** Answer the same route with the same status and code in `src/mock-broker/gateway/tls.ts`, add a switch to `GatewayFaults` if the real one has a fault the demo should show, and list any code the fake cannot raise under `NOT_SIMULATED` in `tests/mock-broker/gateway/error-codes.test.ts`. The contract cases in `go-web-proxy/testdata/contract/` hold what both must answer alike.
+
+### Laying out an admin page
+
+- **Every section is its own `.card`.** Cards stack at the full width of the page and are never side by side; give the card a heading (`h3`) and, in the module's `styles.css`, a module-prefixed class (`gw-set-card`, `user-mgmt-card`, `tls-card`). A view that holds several cards is a plain wrapper, not a card itself.
+- **Short fields share a row with `.form-cols`** (in `src/css/components.css`: `display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem 1rem;`): numbers, selects, a username and a password. Text areas, lists and tables keep the full width.
+- **A choice from a short fixed list is tiles or pills, not a column of checkboxes.** Gateway Settings' offered modules are `button.gw-set-tile[aria-pressed]` (one per catalog module, with a name and a line of description; an unknown module falls back to its name alone). A user's own modules are pills (`span.user-mgmt-pill[data-module]`, a remove button each) with a **+ Add module** menu of the offered ones not yet chosen; a module no longer offered stays as a pill marked *not offered* so it can be removed. Under the deployment default the pills show what the default gives, without remove buttons.
+- **A module-owned element comes from `required()`**, as everywhere (see [DOM Access](#dom-access)); tests build the DOM with `loadModuleDOM`.
 
 ### TypeScript
 

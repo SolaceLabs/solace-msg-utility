@@ -19,7 +19,14 @@
 // expect the gateway as configureGateway left it. Checks 24-27 turn two-factor
 // sign-in on (login.twoFactor optional, then mandatory) for a scratch user and
 // put the setting back to optional and remove the user when they are done, whatever
-// a check found.
+// a check found. Checks 28-31 change the gateway's TLS from the console and
+// restart it: the Provisioned gateway's /tls is a writable mount of
+// scripts/logs/e2e/tls (the certificate, its key and trust/), the one writable
+// mount besides /data and /backup; 29 replaces the certificate and puts the
+// original back, 30 deletes the broker's CA file and adds it back, 31 restarts the
+// gateway in place and signs the administrator in again, each whatever an
+// earlier check found. The private keys 29 uploads are masked and swept like the
+// other secrets.
 //
 // E2E_BROKER_ADDR maps E2E_BROKER_HOST to that address inside both gateway
 // containers (a host alias, through a compose override under scripts/logs/e2e/),
@@ -38,7 +45,7 @@
 // so at the start and in its summary: checks 3, 4, 6, 11 and 12 and D2-D4 pass
 // without proving the broker's TLS is trusted.
 //
-// Every check prints PASS or FAIL with its id: 1-27, B1-B9 in the browser and
+// Every check prints PASS or FAIL with its id: 1-31, B1-B9 in the browser and
 // D1-D4 in Gateway mode. Any FAIL, or a setup step that cannot complete, exits
 // 1. The gateway's passwords and its TLS material are generated
 // per run, written only under scripts/logs/e2e/ (git-ignored, deleted at the
@@ -77,10 +84,11 @@ import readline from 'node:readline';
 import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import {
-    MIN_MASKED, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, basisMoved, continueLinkFromPage, createCookieJar, detailsFileText, dnsServers,
-    findTokens, freshTotp, hostRootBundle, issueCert, jsonFindings, hostAliasProblem, listedRev, listedRow, makeCA, maskSecrets, parseAuditLog,
-    parseDetailsFile, parseSetCookie, pemCertificates, recoveryCodeProblems, recoveryCodesFromPage, refusalProblem, resolutionOverride, resolveDetails,
-    resolverLookup, sealedHeaderProblem, sessionCookieProblems, signinCookieProblems, sweepSecrets, twoFactorSecretFromPage, wrongTotp,
+    MIN_MASKED, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, basisMoved, certFingerprint, continueLinkFromPage, createCookieJar, detailsFileText,
+    dnsServers, findTokens, freshTotp, hostRootBundle, issueCert, issueExpiredCert, jsonFindings, hostAliasProblem, listedRev, listedRow, makeCA, maskSecrets,
+    parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, recoveryCodeProblems, recoveryCodesFromPage, refusalProblem, resolutionOverride,
+    resolveDetails, resolverLookup, sealedHeaderProblem, sessionCookieProblems, signinCookieProblems, sweepSecrets, tlsFingerprint, twoFactorSecretFromPage,
+    wrongTotp,
 } from './e2e-lib.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -109,6 +117,7 @@ const BROKER = 'b1';            // the connection the user is entitled to
 const OTHER = 'b2';             // the same broker under a name the user is not entitled to
 const USER = 'e2e-user';
 const SCRATCH = 'e2e-scratch';  // a user the version checks (20-23) create and remove
+const TRUST_FILE = 'broker-ca.crt'; // the broker's CA file in the gateway's trust directory (writeMaterial), which check 30 deletes and adds back
 // The settings endpoint's refusal of connModes direct (go-web-proxy/settings.go).
 const DIRECT_REFUSAL = 'connModes "direct" would turn Provisioned mode off at the next restart, and this console with it. '
     + 'To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart.';
@@ -135,9 +144,15 @@ const cookies = {};
 // gateway log and the audit log (check 17), but not in the responses of check
 // 13, which runs earlier: the pages that show them are meant to.
 const twoFactor = {};
+// The private keys the run sends to /managed/tls/certificate, each as one line
+// of its base64 (a PEM key shows that line however it is wrapped or escaped):
+// the gateway's own, and the ones check 29 issues. Masked in all output; swept
+// for in the responses (check 29) and in the gateway log and the audit log (17).
+const tlsKeys = {};
+const keyLine = (pem) => pem.split('\n')[2];
 
 function say(text) {
-    const line = maskSecrets(maskSecrets(text, { ...secrets, ...cookies, ...twoFactor }), brokerSecrets, { min: 1 });
+    const line = maskSecrets(maskSecrets(text, { ...secrets, ...cookies, ...twoFactor, ...tlsKeys }), brokerSecrets, { min: 1 });
     console.log(line);
     if (LOG) fs.appendFileSync(LOG, `${line}\n`);
 }
@@ -323,31 +338,44 @@ function compose(args, { quiet = false } = {}) {
 }
 
 let caPem = '';
+// The run's CA (it signs the certificates check 29 issues), the gateway's pair
+// (check 29 puts it back) and the text of the broker's CA file (check 30 adds it back).
+let runCA = null;
+let gatewayPair = null;
+let brokerCaPem = '';
 
 function writeMaterial(brokerCerts, roots) {
     fs.rmSync(WORK, { recursive: true, force: true });
-    fs.mkdirSync(path.join(WORK, 'trust'), { recursive: true });
+    fs.mkdirSync(path.join(WORK, 'tls', 'trust'), { recursive: true });
     const ca = makeCA('smu-e2e CA');
     // `gateway` and `direct` are the names the browser container reaches them
     // by; both serve this certificate.
     const gateway = issueCert(ca, { cn: 'localhost', dns: ['localhost', 'gateway', 'direct'], ip: [GATEWAY.host] });
     caPem = ca.certPem;
-    // Read by the gateway's own user (65532), so world-readable: throwaway
-    // material for one run. chmod, not the write's mode, which a restrictive
-    // umask would narrow.
-    fs.chmodSync(path.join(WORK, 'trust'), 0o755);
+    runCA = ca;
+    gatewayPair = gateway;
+    tlsKeys['gateway key'] = keyLine(gateway.keyPem);
+    // tls/ is the gateway's /tls, mounted writable (docker/docker-compose.e2e.yaml)
+    // so the console can replace the pair and add or delete CA files: the gateway's
+    // own user (65532) has to create files in both directories, so they are
+    // world-writable here, which is throwaway material for one run. chmod, not
+    // the mkdir's mode, which a restrictive umask would narrow. The files the
+    // gateway writes stay in these directories, where teardown removes them.
+    fs.chmodSync(path.join(WORK, 'tls'), 0o777);
+    fs.chmodSync(path.join(WORK, 'tls', 'trust'), 0o777);
     const put = (name, text) => {
         const file = path.join(WORK, name);
         fs.writeFileSync(file, text);
         fs.chmodSync(file, 0o644);
     };
     // Only the certificates from the CA file, whatever else it holds.
-    put('trust/broker-ca.crt', brokerCerts.map((c) => c.toString()).join(''));
+    brokerCaPem = brokerCerts.map((c) => c.toString()).join('');
+    put(`tls/trust/${TRUST_FILE}`, brokerCaPem);
     // The host's standard roots, mounted where Go looks for the system bundle:
     // the image ships none, and a broker port may present a public chain.
     put('system-roots.crt', roots.text);
-    put('gateway.crt', gateway.certPem);
-    put('gateway.key', gateway.keyPem);
+    put('tls/tls.crt', gateway.certPem);
+    put('tls/tls.key', gateway.keyPem);
     put('admin-password', `${secrets.bootstrapPassword}\n`);
     const servers = dnsServers(broker.dns);
     if (broker.brokerIp || servers.length) put(path.basename(OVERRIDE), resolutionOverride(broker.host, broker.brokerIp, servers));
@@ -424,6 +452,47 @@ async function saveSettings(jar, keys) {
     const rev = res.status === 200 ? JSON.parse(res.body).rev : '';
     expect(typeof rev === 'string' && rev !== '', `GET /managed/settings: want 200 with a rev, got ${res.status} ${res.body.slice(0, 200)}`);
     return request('PUT', '/managed/settings', { jar, json: { ...keys, rev } });
+}
+
+/** GET /managed/tls: the certificate, the CA files and whether each can be changed, parsed. */
+async function tlsView(jar) {
+    const res = await request('GET', '/managed/tls', { jar });
+    expect(res.status === 200, `GET /managed/tls: want 200, got ${res.status} ${res.body.slice(0, 300)}`);
+    return JSON.parse(res.body);
+}
+
+/** The fingerprint of the certificate the Provisioned gateway presents to a new TLS connection now. */
+const servedFingerprint = () => tlsFingerprint({ ...GATEWAY, servername: 'localhost' });
+
+const pairBody = (pair) => ({ certificate: pair.certPem, key: pair.keyPem });
+
+/**
+ * Why a 422 invalid answer is not the refusal wanted ('' when it is): the
+ * field it names, and a reason that matches `reason`.
+ */
+function invalidProblem(res, field, reason) {
+    const problem = refusalProblem(res, { status: 422, error: 'invalid' });
+    if (problem) return problem;
+    const body = JSON.parse(res.body);
+    return body.field === field && reason.test(body.reason ?? '') ? '' : `want field ${field} with a reason matching ${reason}, got ${res.body.slice(0, 300)}`;
+}
+
+/** Puts the gateway's own certificate and key back when it shows another, and checks that the next TLS connection is served it. */
+async function restoreCertificate(jar) {
+    const want = certFingerprint(gatewayPair.certPem);
+    if ((await tlsView(jar)).certificate?.sha256 !== want) {
+        const res = await request('PUT', '/managed/tls/certificate', { jar, json: pairBody(gatewayPair) });
+        expect(res.status === 200, `want 200, got ${res.status} ${res.body.slice(0, 200)}`);
+    }
+    const served = await servedFingerprint();
+    expect(served === want, `the gateway serves ${served}, want ${want}`);
+}
+
+/** Adds the broker's CA file back when the trust directory lacks it. */
+async function restoreTrustFile(jar) {
+    if ((await tlsView(jar)).trust.some((f) => f.name === TRUST_FILE)) return;
+    const res = await request('POST', '/managed/tls/trust', { jar, json: { name: TRUST_FILE, certificate: brokerCaPem } });
+    expect(res.status === 200, `want 200, got ${res.status} ${res.body.slice(0, 200)}`);
 }
 
 /** A second administrator session: its own jar, signed in as the admin. */
@@ -1258,17 +1327,226 @@ async function runChecks(admin) {
             }
         }
 
-        // After 18 and before the restart of 15: the audit trail is plain JSON by
+        // Live TLS and the in-place restart, as the administrator over the
+        // gateway's writable /tls. Each check puts back what it changed: 29 the
+        // gateway's own certificate, 30 the broker's CA file, 31 a signed-in
+        // administrator, since the checks after them (the audit log, the compose
+        // restart of 15, the browser's) expect the gateway as it was. The finally
+        // looks again whatever a check found.
+        try {
+            await check(28, "GET /managed/tls shows the gateway's certificate by its fingerprint, the one a new TLS connection is served, and the broker's CA file, with both changeable, no path or key in the answer, and the same gate as every admin route", async () => {
+                const res = await request('GET', '/managed/tls', { jar: admin });
+                expect(res.status === 200, `GET /managed/tls: want 200, got ${res.status} ${res.body.slice(0, 300)}`);
+                const view = JSON.parse(res.body);
+                const want = certFingerprint(gatewayPair.certPem);
+                const cert = view.certificate ?? {};
+                expect(cert.sha256 === want, `the certificate's sha256: want ${want}, got ${cert.sha256}`);
+                expect(cert.selfSigned === false && cert.expired === false, `selfSigned ${cert.selfSigned}, expired ${cert.expired}: want a CA-signed certificate that is valid`);
+                for (const name of ['localhost', 'gateway', 'direct', GATEWAY.host]) {
+                    expect(Array.isArray(cert.names) && cert.names.includes(name), `the certificate's names ${JSON.stringify(cert.names)} lack ${name}`);
+                }
+                expect(view.certificateWritable === true && view.trustWritable === true,
+                    `certificateWritable ${view.certificateWritable}, trustWritable ${view.trustWritable}: want both true (the e2e stack mounts /tls writable)`);
+                const file = view.trust.find((f) => f.name === TRUST_FILE);
+                expect(file && file.problem === '', `the CA files ${JSON.stringify(view.trust.map((f) => [f.name, f.problem]))} lack a good ${TRUST_FILE}`);
+                const wantCerts = pemCertificates(brokerCaPem).map((c) => c.fingerprint256);
+                expect(JSON.stringify(file.certificates.map((c) => c.sha256)) === JSON.stringify(wantCerts),
+                    `${TRUST_FILE} holds ${JSON.stringify(file.certificates.map((c) => c.sha256))}, want ${JSON.stringify(wantCerts)}`);
+                expect(!/\/tls\/|tls\.key|PRIVATE KEY/.test(res.body), 'the answer names a path or holds key text');
+                const served = await servedFingerprint();
+                expect(served === want, `a new TLS connection is served ${served}, want ${want}`);
+                const anonymous = await request('GET', '/managed/tls');
+                expect(anonymous.status === 401, `without a session: want 401, got ${anonymous.status}`);
+                const plain = createCookieJar();
+                const signedIn = await signIn(plain, USER, secrets.userPassword);
+                expect(signedIn.status === 303, `the e2e user's sign-in: want 303, got ${signedIn.status}`);
+                const problem = refusalProblem(await request('GET', '/managed/tls', { jar: plain }), { status: 403, error: 'forbidden' });
+                expect(problem === '', `as a user who is not an administrator: ${problem}`);
+                return `${want.slice(0, 11)}..., ${view.trust.length} CA file(s)`;
+            });
+
+            await check(29, 'the check refuses a key that does not match and an expired certificate, and a refused replace swaps nothing; a replace is served by the next TLS connection with no restart, and the original certificate is put back', async () => {
+                const names = { cn: 'localhost', dns: ['localhost', 'gateway', 'direct'], ip: [GATEWAY.host] };
+                const second = issueCert(runCA, names);
+                const stranger = issueCert(runCA, names);
+                const expired = issueExpiredCert(runCA, names);
+                tlsKeys['replacement key'] = keyLine(second.keyPem);
+                tlsKeys['mismatched key'] = keyLine(stranger.keyPem);
+                tlsKeys['expired certificate key'] = keyLine(expired.keyPem);
+                const original = certFingerprint(gatewayPair.certPem);
+                const replacement = certFingerprint(second.certPem);
+                const unchanged = async (what) => {
+                    const served = await servedFingerprint();
+                    const shown = (await tlsView(admin)).certificate?.sha256;
+                    expect(served === original && shown === original, `${what}: the gateway serves ${served} and shows ${shown}, want ${original} still`);
+                };
+                const CHECK = '/managed/tls/certificate/check';
+                const REPLACE = '/managed/tls/certificate';
+                let restored = '';
+                try {
+                    const mismatched = { certificate: second.certPem, key: stranger.keyPem };
+                    for (const [what, method, route, body, field, reason] of [
+                        ['the check of a key that does not match', 'POST', CHECK, mismatched, 'key', /does not match/],
+                        ['the replace with a key that does not match', 'PUT', REPLACE, mismatched, 'key', /does not match/],
+                        ['the check of an expired certificate', 'POST', CHECK, pairBody(expired), 'certificate', /expired/],
+                        ['the replace with an expired certificate', 'PUT', REPLACE, pairBody(expired), 'certificate', /expired/],
+                    ]) {
+                        const problem = invalidProblem(await request(method, route, { jar: admin, json: body }), field, reason);
+                        expect(problem === '', `${what}: ${problem}`);
+                        await unchanged(what);
+                    }
+                    // A good pair, from someone who is not an administrator or has no session, is refused too.
+                    const plain = createCookieJar();
+                    const signedIn = await signIn(plain, USER, secrets.userPassword);
+                    expect(signedIn.status === 303, `the e2e user's sign-in: want 303, got ${signedIn.status}`);
+                    const denied = refusalProblem(await request('PUT', REPLACE, { jar: plain, json: pairBody(second) }), { status: 403, error: 'forbidden' });
+                    expect(denied === '', `a replace by a user who is not an administrator: ${denied}`);
+                    const anonymous = refusalProblem(await request('PUT', REPLACE, { json: pairBody(second) }), { status: 401, error: 'unauthenticated' });
+                    expect(anonymous === '', `a replace without a session: ${anonymous}`);
+                    await unchanged('a refused replace');
+                    // The check describes the leaf and installs nothing.
+                    const described = await request('POST', CHECK, { jar: admin, json: pairBody(second) });
+                    expect(described.status === 200 && JSON.parse(described.body).certificate?.sha256 === replacement,
+                        `the check of a good pair: want 200 describing ${replacement}, got ${described.status} ${described.body.slice(0, 300)}`);
+                    await unchanged('the check of a good pair');
+                    // The replace swaps at once: the next connection is served the new certificate and the old session still works.
+                    const put = await request('PUT', REPLACE, { jar: admin, json: pairBody(second) });
+                    expect(put.status === 200 && JSON.parse(put.body).certificate?.sha256 === replacement,
+                        `the replace: want 200 describing ${replacement}, got ${put.status} ${put.body.slice(0, 300)}`);
+                    const served = await servedFingerprint();
+                    expect(served === replacement && served !== original, `the next TLS connection is served ${served}, want ${replacement}`);
+                    expect((await tlsView(admin)).certificate?.sha256 === replacement, 'GET /managed/tls does not show the new certificate');
+                    const me = await request('GET', '/managed/me', { jar: admin });
+                    expect(me.status === 200, `the administrator's session after the replace: want 200 (no restart), got ${me.status}`);
+                } finally {
+                    try {
+                        await restoreCertificate(admin);
+                    } catch (e) {
+                        restored = e.message;
+                        say(`error: putting the gateway's own certificate back after check 29: ${e.message}`);
+                    }
+                }
+                expect(restored === '', `putting the original certificate back: ${restored}`);
+                const hits = sweepSecrets(records, tlsKeys);
+                expect(hits.length === 0, `a private key is in a response: ${hits.join('; ')}`);
+                return `${replacement.slice(0, 11)}... served, then ${original.slice(0, 11)}... again`;
+            });
+
+            await check(30, "deleting the broker's CA file makes the relay fail to verify the broker, and adding it back makes it work, both with no restart", async () => {
+                if (insecure()) return 'skipped: E2E_INSECURE=1 turns broker verification off, so the CA file proves nothing';
+                const jar = createCookieJar();
+                const signedIn = await signIn(jar, USER, secrets.userPassword);
+                expect(signedIn.status === 303, `the e2e user's sign-in: want 303, got ${signedIn.status}`);
+                const relay = () => request('GET', `/managed/relay/${BROKER}/SEMP/v2/monitor/msgVpns/${vpnPath}/queues/${enc(queue)}`, {
+                    jar, headers: { Accept: 'application/json' },
+                });
+                const before = await relay();
+                expect(before.status === 200, `with the CA file in place: want 200, got ${before.status} ${before.body.slice(0, 200)}`);
+                let detail = '';
+                let restored = '';
+                try {
+                    const deleted = await request('DELETE', `/managed/tls/trust/${TRUST_FILE}`, { jar: admin });
+                    expect(deleted.status === 200 && !JSON.parse(deleted.body).trust.some((f) => f.name === TRUST_FILE),
+                        `deleting ${TRUST_FILE}: want 200 and a list without it, got ${deleted.status} ${deleted.body.slice(0, 300)}`);
+                    const without = await relay();
+                    if (without.status === 200) {
+                        // A broker whose certificate chains to a public root is trusted through the host roots too.
+                        detail = "failure half skipped: the broker's certificate also verifies against the host's standard roots";
+                    } else {
+                        expect(without.status === 502, `without the CA file: want 502, got ${without.status} ${without.body.slice(0, 200)}`);
+                        detail = `${without.status} ${errorCode(without)} without the CA file`;
+                    }
+                    const added = await request('POST', '/managed/tls/trust', { jar: admin, json: { name: TRUST_FILE, certificate: brokerCaPem } });
+                    expect(added.status === 200 && JSON.parse(added.body).trust.some((f) => f.name === TRUST_FILE),
+                        `adding ${TRUST_FILE} back: want 200 and a list with it, got ${added.status} ${added.body.slice(0, 300)}`);
+                    const again = await relay();
+                    expect(again.status === 200, `with the CA file added back: want 200, got ${again.status} ${again.body.slice(0, 200)}`);
+                    const alive = await request('GET', '/managed/me', { jar });
+                    expect(alive.status === 200, `the user's session after both changes: want 200 (no restart), got ${alive.status}`);
+                } finally {
+                    try {
+                        await restoreTrustFile(admin);
+                    } catch (e) {
+                        restored = e.message;
+                        say(`error: adding ${TRUST_FILE} back after check 30: ${e.message}`);
+                    }
+                }
+                expect(restored === '', `adding ${TRUST_FILE} back: ${restored}`);
+                return detail;
+            });
+
+            await check(31, 'POST /managed/restart is refused without a session and for a user who is not an administrator; for the administrator it answers 202 and the gateway starts again in place: the container keeps running, the old sessions are refused, and the administrator signs in again', async () => {
+                const plain = createCookieJar();
+                const signedIn = await signIn(plain, USER, secrets.userPassword);
+                expect(signedIn.status === 303, `the e2e user's sign-in: want 303, got ${signedIn.status}`);
+                const anonymous = refusalProblem(await request('POST', '/managed/restart'), { status: 401, error: 'unauthenticated' });
+                expect(anonymous === '', `a restart without a session: ${anonymous}`);
+                const denied = refusalProblem(await request('POST', '/managed/restart', { jar: plain }), { status: 403, error: 'forbidden' });
+                expect(denied === '', `a restart by a user who is not an administrator: ${denied}`);
+                const still = await request('GET', '/managed/me', { jar: admin });
+                expect(still.status === 200, `the administrator's session after the refused restarts: want 200 (nothing restarted), got ${still.status}`);
+                const container = compose(['ps', '--quiet', 'gateway'], { quiet: true }).out.trim();
+                expect(/^[0-9a-f]{12,64}$/.test(container), `no gateway container id: ${container}`);
+                const res = await request('POST', '/managed/restart', { jar: admin });
+                expect(res.status === 202 && JSON.parse(res.body).restarting === true, `want 202 {"restarting":true}, got ${res.status} ${res.body.slice(0, 200)}`);
+                // The old process drains and goes; only the new one refuses the old session.
+                // waitFor gives up at once if the container stops (the exec failed).
+                await waitFor('the gateway after its restart', 60, async () => (await request('GET', '/managed/me', { jar: admin })).status === 401, 'gateway');
+                await waitFor('the gateway after its restart', 60, async () => (await request('GET', '/hosted')).status === 200, 'gateway');
+                const after = compose(['ps', '--quiet', 'gateway'], { quiet: true }).out.trim();
+                expect(after === container, `the gateway container was replaced (${container.slice(0, 12)} then ${after.slice(0, 12)}): it did not start itself again in place`);
+                const stale = await request('GET', '/managed/me', { jar: plain });
+                expect(stale.status === 401, `the user's session from before the restart: want 401, got ${stale.status}`);
+                const again = await signIn(admin, 'admin', secrets.adminPassword);
+                expect(again.status === 303 && again.headers.location === '/', `the administrator's sign-in: want 303 to /, got ${again.status} ${again.headers.location ?? ''}`);
+                const me = await request('GET', '/managed/me', { jar: admin });
+                expect(me.status === 200 && JSON.parse(me.body).admin === true, `/managed/me after signing in again: ${me.status} ${me.body.slice(0, 200)}`);
+                const view = await tlsView(admin);
+                const want = certFingerprint(gatewayPair.certPem);
+                expect(view.certificate?.sha256 === want && view.trust.some((f) => f.name === TRUST_FILE),
+                    `after the restart the certificate is ${view.certificate?.sha256} (want ${want}) and the CA files are ${JSON.stringify(view.trust.map((f) => f.name))}`);
+                const served = await servedFingerprint();
+                expect(served === want, `after the restart a new TLS connection is served ${served}, want ${want}`);
+                return `container ${container.slice(0, 12)} kept`;
+            });
+        } finally {
+            // Put back what 29-31 changed, even when one of them failed half way: a
+            // signed-in administrator first (the others need one), then the
+            // original certificate and the CA file.
+            for (const [what, undo] of [
+                ['the administrator', async () => {
+                    await waitFor('the gateway', 60, async () => (await request('GET', '/hosted')).status === 200, 'gateway');
+                    if ((await request('GET', '/managed/me', { jar: admin })).status !== 200) {
+                        const s = await signIn(admin, 'admin', secrets.adminPassword);
+                        expect(s.status === 303, `sign-in: want 303, got ${s.status}`);
+                    }
+                }],
+                ['the certificate', () => restoreCertificate(admin)],
+                ['the broker CA file', () => restoreTrustFile(admin)],
+            ]) {
+                try {
+                    await undo();
+                } catch (e) {
+                    say(`error: restoring ${what} after the TLS checks: ${e.message}`);
+                }
+            }
+        }
+
+        // After 31 and before the restart of 15: the audit trail is plain JSON by
         // design (so check 14's sealed-store checks do not apply to it), and
         // every sign-in, settings change and backup above has left a line.
-        await check(19, 'the audit log (/data/audit.log) holds one JSON entry per line with the decided fields: the refused and the ok sign-in, the settings change, the backup export and import, the two-factor set-up, a refused code and the administrator\'s reset', async () => {
+        await check(19, 'the audit log (/data/audit.log) holds one JSON entry per line with the decided fields: the refused and the ok sign-in, the settings change, the backup export and import, the two-factor set-up, a refused code and the administrator\'s reset, and the certificate replace, the CA file add and delete and the restart', async () => {
             const dest = path.join(WORK, 'at-rest-audit.log');
             const cp = compose(['cp', 'gateway:/data/audit.log', dest], { quiet: true });
             expect(cp.code === 0, `docker compose cp audit.log: ${cp.out.trim()}`);
             const { entries, problems } = parseAuditLog(fs.readFileSync(dest, 'utf8'));
             expect(entries.length > 0, 'audit.log is empty');
             expect(problems.length === 0, problems.slice(0, 5).join('; '));
-            const missing = auditMissing(entries, { user: USER, settingsKeys: ['connModes', 'modules.userDefault'], twoFactorUser: SCRATCH });
+            const missing = auditMissing(entries, {
+                user: USER, settingsKeys: ['connModes', 'modules.userDefault'], twoFactorUser: SCRATCH,
+                // Check 30 does not delete the CA file under E2E_INSECURE=1.
+                tls: { trustFile: insecure() ? undefined : TRUST_FILE },
+            });
             expect(missing.length === 0, `lacks ${missing.join('; ')}`);
             return `${entries.length} entries`;
         });
@@ -1305,7 +1583,7 @@ async function runChecks(admin) {
             return `exit ${run.code}`;
         });
 
-        await check(17, 'neither gateway log nor the audit log holds a password, store key, session cookie, two-factor secret or recovery code', async () => {
+        await check(17, 'neither gateway log nor the audit log holds a password, store key, session cookie, two-factor secret, recovery code or the private key a check uploaded', async () => {
             const logs = compose(['logs', '--no-color', 'gateway', 'direct'], { quiet: true });
             const text = logs.out + runOutput;
             // The key the gateway made on its fresh volume (64 hex characters).
@@ -1314,11 +1592,11 @@ async function runChecks(admin) {
             expect(cp.code === 0, `docker compose cp store.key: ${cp.out.trim()}`);
             const storeKey = fs.readFileSync(keyFile, 'utf8').trim();
             expect(storeKey.length >= MIN_MASKED, 'the gateway made no store key');
-            const found = Object.entries({ ...sweepable(), storeKey, ...cookies, ...twoFactor }).filter(([, v]) => text.includes(v)).map(([name]) => name);
+            const found = Object.entries({ ...sweepable(), storeKey, ...cookies, ...twoFactor, ...tlsKeys }).filter(([, v]) => text.includes(v)).map(([name]) => name);
             expect(found.length === 0, `found ${found.join(', ')}`);
             // The audit log, copied out by check 19, is swept the same way.
             const auditText = fs.readFileSync(path.join(WORK, 'at-rest-audit.log'), 'utf8');
-            const inAudit = Object.entries({ ...sweepable(), storeKey, ...cookies, ...twoFactor }).filter(([, v]) => auditText.includes(v)).map(([name]) => name);
+            const inAudit = Object.entries({ ...sweepable(), storeKey, ...cookies, ...twoFactor, ...tlsKeys }).filter(([, v]) => auditText.includes(v)).map(([name]) => name);
             expect(inAudit.length === 0, `audit.log holds ${inAudit.join(', ')}`);
             return `${text.split('\n').length} lines, ${auditText.split('\n').length} audit lines`;
         });
@@ -1694,19 +1972,15 @@ async function runDirectChecks() {
     const { vpn, queue } = broker;
     const wssPath = `/wss/${broker.smfPort}/${broker.host}`;
 
-    await check('D1', 'Gateway mode: /hosted says direct, / serves the Direct app, /login redirects to /, and /managed, /solAdmin and the other bundles are plain 404s', async () => {
+    await check('D1', 'Gateway mode: /hosted says direct, / serves the Direct app, and /login, an unknown path, /managed, /solAdmin and the other bundles are plain 404s', async () => {
         const hosted = await request('GET', '/hosted', { at: DIRECT });
         expect(hosted.status === 200 && hosted.body.trim() === '{"hosted":true,"connModes":"direct","defaultConn":"direct"}',
             `/hosted: ${hosted.status} ${hosted.body.trim()}`);
         const root = await request('GET', '/', { at: DIRECT });
         expect(root.status === 200 && root.body.includes('id="conn-host"') && !root.body.includes('conn-panel-managed'),
             `/: want 200 with the Direct form and no Provisioned panel, got ${root.status}`);
-        // No sign-in page in Gateway mode, and the app has no client-side routes: /login redirects to /, which serves the app.
-        const login = await request('GET', '/login', { at: DIRECT });
-        expect(login.status === 308 && login.headers.location === '/', `/login: want 308 to /, got ${login.status} ${login.headers.location ?? ''}`);
-        const followed = await request('GET', login.headers.location, { at: DIRECT });
-        expect(followed.status === 200 && followed.body === root.body, `/login followed: want the app, as /, got ${followed.status}`);
-        for (const p of ['/managed/me', '/solAdmin', '/solAdmin/', '/provisioned.html', '/solAdmin.html']) {
+        // No sign-in page in Gateway mode, and a path the gateway does not serve is never redirected: /login is a plain 404 too.
+        for (const p of ['/login', '/a/b', '/managed/me', '/solAdmin', '/solAdmin/', '/provisioned.html', '/solAdmin.html']) {
             const r = await request('GET', p, { at: DIRECT });
             expect(r.status === 404 && r.body === '404 page not found\n', `${p}: want a plain 404, got ${r.status} ${r.body.slice(0, 120)}`);
         }

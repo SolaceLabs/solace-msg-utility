@@ -159,3 +159,11 @@ describe('admin-login — sign-out requested by another module', () => {
         expect(appState.managed).not.toBeNull();
     });
 });
+
+describe('admin-login -- sidebar hint', () => {
+    it('names the admin pages as the sidebar shows them', async () => {
+        const { el } = await install();
+        const hint = [...el('#admin-session-view').querySelectorAll('strong')].map(s => s.textContent);
+        expect(hint).toEqual(['User Mgmt.', 'Conn. Mgmt', 'Gateway Settings', 'Certificates']);
+    });
+});

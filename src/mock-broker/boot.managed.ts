@@ -127,6 +127,8 @@ export function boot(opts: { reload?: () => void } = {}): ManagedDemo {
         reload();
     };
     const pages = createPages({ gateway, navigate });
+    // A restart of the gateway (POST /managed/restart) ends the sessions; once it is back the page lands on the sign-in.
+    gateway.onRestart(() => navigate('login'));
 
     // Where the browser lands: the page it was on, or, while connModes is
     // provisioned, the sign-in (or the forced change) the gateway sends a load

@@ -61,9 +61,6 @@
     "connModes": "both",
     "defaultConn": "direct",
     "tls": {
-      "certFile": "/tls/tls.crt",
-      "keyFile": "/tls/tls.key",
-      "trustDir": "/tls/trust",
       "insecureSkipVerify": false
     },
     "logLevel": "warn",

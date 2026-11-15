@@ -171,7 +171,7 @@ describe('mock-broker/gateway -- settings', () => {
         expect((await putSettings({ audit: { access: true } })).json).toEqual({ restartRequired: [], rev: '2' });
         expect(gw.settings.current().audit).toEqual({ stdout: false, access: true, onFailure: 'continue' });
         const view: any = (await call('GET', '/managed/settings')).json;
-        expect([view.restartOnly, view.hostOnly].flat().filter((k: string) => k.startsWith('audit'))).toEqual([]);
+        expect(view.restartOnly.filter((k: string) => k.startsWith('audit'))).toEqual([]);
         expect((await putSettings({ audit: { stdout: 'yes' } })).status).toBe(400);
         expect((await putSettings({ audit: { verbose: true } })).status).toBe(400);
     });

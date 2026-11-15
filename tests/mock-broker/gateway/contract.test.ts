@@ -45,15 +45,42 @@ const seed: GatewaySeed = read('seed.json');
 const cases: { name: string; steps: Step[] }[] = read('cases.json').cases;
 
 /**
- * contractNormalize in contract_test.go: a backup's next run, an export, and a
+ * contractNormalize in contract_test.go: a backup's next run, an export, a
  * settings rev (the real gateway's keyed checksum, the fake's counter), which
- * is any non-empty string.
+ * is any non-empty string, and the fields of a certificate, which the fake
+ * cannot read from X.509.
  */
 function normalize(v: any): any {
     if (v && typeof v === 'object' && typeof v.nextRun === 'string') v.nextRun = '<time>';
     for (const k of ['filename', 'content']) if (v && typeof v === 'object' && k in v) v[k] = '<file>';
     normalizeRevs(v);
+    normalizeCerts(v);
     return v;
+}
+
+const FINGERPRINT = /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/;
+const UTC_TIME = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
+
+/**
+ * contractNormalizeCerts in contract_test.go: every certificate object (a
+ * subject, an issuer and a sha256, at any depth) is described by its shape
+ * alone. A value of another shape is left as it is, so it fails to match.
+ */
+function normalizeCerts(v: any): void {
+    if (Array.isArray(v)) {
+        v.forEach(normalizeCerts);
+        return;
+    }
+    if (!v || typeof v !== 'object') return;
+    if ('subject' in v && 'issuer' in v && 'sha256' in v) {
+        for (const k of ['subject', 'issuer']) if (typeof v[k] === 'string' && v[k] !== '') v[k] = '<name>';
+        if (Array.isArray(v.names) && v.names.every((n: unknown) => typeof n === 'string')) v.names = '<names>';
+        if (typeof v.sha256 === 'string' && FINGERPRINT.test(v.sha256)) v.sha256 = '<fingerprint>';
+        for (const k of ['notBefore', 'notAfter']) if (typeof v[k] === 'string' && UTC_TIME.test(v[k])) v[k] = '<time>';
+        for (const k of ['selfSigned', 'expired']) if (typeof v[k] === 'boolean') v[k] = '<bool>';
+        return;
+    }
+    Object.values(v).forEach(normalizeCerts);
 }
 
 /**

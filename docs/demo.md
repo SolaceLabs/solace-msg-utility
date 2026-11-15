@@ -105,7 +105,7 @@ exercisable in `demo.html`.
 ## Provisioned demo (`provisioned-demo.html`)
 
 `provisioned-demo.html` is Provisioned mode without a gateway or a broker. It is the real Provisioned sign-in, Connections, Queue
-Browser, Queue Copy, Queue Subscriptions and the four administration pages, running against a fake gateway and the demo broker inside the
+Browser, Queue Copy, Queue Subscriptions and the five administration pages, running against a fake gateway and the demo broker inside the
 page. It makes no network request: anything it does not answer itself fails as if the network were down. Like
 `demo.html`, it needs no `solclient.js` (`jszip.min.js` is still needed for the ZIP download).
 
@@ -152,7 +152,7 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
 
 ### How it differs from a real gateway
 
-- **Administration is in the sidebar.** The product serves the four administration pages at `/solAdmin`; here an
+- **Administration is in the sidebar.** The product serves the five administration pages at `/solAdmin`; here an
   administrator finds them as sidebar entries.
 - **Backup & Restore keeps its backups in the page.** Export downloads a real backup file, and Import opens it, with
   the same encryption as the gateway's. The backup directory is held in this tab (it carries over a sign-in reload,
@@ -176,7 +176,7 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
   a second session in the same page changes the record first.
   The rules (a password-only change keeps a record's version, an import restamps every record it imports) follow the
   gateway's.
-- **Not simulated, beyond the list below:** a write that fails (full disk), a store file changed on the host
+- **Not simulated, beyond the list below:** a write that fails (full disk; a certificate or CA write that fails, `tls_write_failed`), a store file changed on the host
   (`store_changed_on_disk`), an audit log that cannot be written (`audit_unavailable`, with `audit.onFailure` set to
   `refuse`), and the journal and its recovery after a crash: the demo has no disk. The **Demo controls** can still make
   `config.yaml` read as edited on the host or unreadable.
@@ -187,6 +187,8 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
     simulated);
   - the limit on concurrent requests.
 - **The audit options are saved, no audit trail is written.** Gateway Settings shows the two Audit trail checkboxes (`audit.stdout`, `audit.access`, both off at first) and the `audit.onFailure` choice (`continue` at first) and saves them, but the demo keeps no audit log and has no Audit page, as the real gateway has none in the console.
+- **The Certificates page holds a demo certificate, not a parsed one.** The fake gateway cannot read X.509, so it accepts PEM that is well formed (the armour lines and base64 that decodes) and describes what it was given with fixed demo values: subject and issuer `CN=demo certificate`, no names, valid from the moment it was added to one year later, self-signed, never expired. The fingerprint is the real SHA-256 of the decoded bytes. A key is any single `PRIVATE KEY` block, and the pair is taken to match, so the page's "does not match" and "expired" refusals never appear. It starts with one certificate, both files writable and no trusted CA; an unnamed CA is saved as `demo-certificate.crt` (a second unnamed one is refused as already existing). A replace, add or delete changes what the page shows and nothing else: the demo makes no TLS connection.
+- **Restart gateway ends every session, then the page reloads onto the sign-in.** The fake drops every session, ticket and open socket at once, applies any setting waiting for a restart, and for about 1.5 seconds answers nothing, as a stopped gateway would; then the page returns to the sign-in. The users, connections, settings and the demo certificate stay, as they do over any sign-in reload.
 - **The client access list** is saved and checked against the demo's own address, `192.0.2.10`, so a list that would
   lock you out is refused. A saved list is never enforced.
 
@@ -203,6 +205,7 @@ The panel is the one in `demo.html`, with the Direct connection values replaced 
   - **Clear the sign-in lockout.**
   - The relay (the broker unreachable: `502`), the dial (rate limited: `429`) and `config.yaml` (edited on the host,
     or unreadable).
+  - **TLS files:** *writable* (the start) or *read-only*. Read-only turns both writable flags off, so the Certificates page disables replace, add and delete and says the files are read-only on the gateway host, and the writes answer `409 tls_read_only`, as a read-only mount of `/tls` does.
 
 **Queue state**, **Connection faults** and **Latency and volume** work as in `demo.html`, across every broker. A SEMP
 `401` there reaches the app as the relay's `502 upstream_auth`, as a broker refusing the gateway's account does.

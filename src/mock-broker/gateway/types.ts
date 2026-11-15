@@ -24,8 +24,14 @@ export interface TwoFactorState { mode: TwoFactorMode; enrolled: boolean }
 /** `GET /managed/me`, with the gateway's two-factor state spelled out. */
 export type ManagedProfile = ServiceProfile & { twoFactor: TwoFactorState };
 
-/** The settings file with `login.twoFactor` (the fake validates it, so it is the narrow type). */
-export type GatewaySettings = Omit<ServiceSettings, 'login'> & { login: ServiceSettings['login'] & { twoFactor: TwoFactorMode } };
+/**
+ * The settings file with `login.twoFactor` (the fake validates it, so it is the narrow type), and
+ * `tls` holding only `insecureSkipVerify`: the three TLS paths are environment variables, not keys.
+ */
+export type GatewaySettings = Omit<ServiceSettings, 'login' | 'tls'> & {
+    login: ServiceSettings['login'] & { twoFactor: TwoFactorMode };
+    tls: Pick<ServiceSettings['tls'], 'insecureSkipVerify'>;
+};
 
 /** A user as `GET /managed/users` lists one (the gateway adds the flag, the two-factor state and the record's rev). */
 export type ListedUser = ManagedUser & { mustChangePassword: boolean; twoFactor: boolean; rev: number };

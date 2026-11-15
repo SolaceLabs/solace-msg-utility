@@ -10,7 +10,7 @@ export interface GatewaySettings {
     hosted: boolean;
     connModes: string;
     defaultConn: string;
-    tls: { certFile: string; keyFile: string; trustDir: string; insecureSkipVerify: boolean };
+    tls: { insecureSkipVerify: boolean };
     logLevel: string;
     access: { allow: string[]; trustedProxies: string[] };
     session: { idleMinutes: number; absoluteMinutes: number };
@@ -27,8 +27,6 @@ export interface SettingsView {
     rev: string;
     /** Keys that apply when the gateway restarts; every other key applies at once. */
     restartOnly: string[];
-    /** Path keys a save may not change: only a hand edit of config.yaml on the host does. */
-    hostOnly: string[];
     /** Restart-only keys saved with a value the running gateway does not have yet. */
     pendingRestart: string[];
     /** The file was edited on the host since the gateway loaded it; a save is refused. */
@@ -53,6 +51,10 @@ export interface SettingsService {
     client(): Promise<ManagedResult<ClientSeen>>;
     /** PUT the whole file with the `rev` it was loaded at. `restartRequired` lists the saved keys that wait for a restart; `rev` is the file's new version. */
     save(settings: GatewaySettings, rev: string): Promise<ManagedResult<{ restartRequired: string[]; rev: string }>>;
+    /** POST /managed/restart: the gateway answers 202, then restarts itself in place. */
+    restart(): Promise<ManagedResult<{ restarting: boolean }>>;
+    /** True when `/hosted` answers: the gateway is up. A refused or dropped connection, or any other answer, is false. */
+    ping(): Promise<boolean>;
 }
 
 export function createSettingsService(): SettingsService {
@@ -60,5 +62,13 @@ export function createSettingsService(): SettingsService {
         load: () => managedRequest<SettingsView>('GET', '/managed/settings'),
         client: () => managedRequest<ClientSeen>('GET', '/managed/client'),
         save: (settings, rev) => managedRequest<{ restartRequired: string[]; rev: string }>('PUT', '/managed/settings', { ...settings, rev }),
+        restart: () => managedRequest<{ restarting: boolean }>('POST', '/managed/restart'),
+        async ping() {
+            try {
+                return (await fetch('/hosted', { method: 'GET', cache: 'no-store' })).ok;
+            } catch {
+                return false;
+            }
+        },
     };
 }

@@ -34,7 +34,11 @@ services:
     volumes:
       # The gateway's certificate (tls.crt, tls.key) and, under trust/, the CAs
       # your brokers' certificates chain to. Put them here before the first
-      # start, or let the gateway generate a self-signed pair.
+      # start, or let the gateway generate a self-signed pair. Gateway mode has
+      # no admin console, so these files change on the host and take a restart;
+      # mount the directory read-only (for example ./tls:/tls:ro) once it holds
+      # your own pair. The paths are SMU_SSL_CERTFILE, SMU_SSL_CERTKEYFILE and
+      # SMU_SSL_TRUSTDIR, read at every start.
       - tls:/tls
       # config.yaml.
       - data:/data

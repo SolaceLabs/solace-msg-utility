@@ -94,7 +94,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.twoFactor != twoFactorOptional {
 		t.Errorf("twoFactor: want optional, got %q", cfg.twoFactor)
 	}
-	if cfg.certFile != "/tls/tls.crt" {
+	if cfg.certFile != "/tls/tls.crt" { // environment only, unset here
 		t.Errorf("certFile: want /tls/tls.crt, got %q", cfg.certFile)
 	}
 	if cfg.keyFile != "/tls/tls.key" {
@@ -128,6 +128,9 @@ func TestLoadConfig_FromEnv(t *testing.T) {
 	}
 	if !cfg.insecureSkipVerify {
 		t.Errorf("insecureSkipVerify: want true")
+	}
+	if cfg.certFile != "/x/cert" || cfg.keyFile != "/x/key" || cfg.trustDir != "/x/trust" {
+		t.Errorf("the TLS paths come from the environment: got %q %q %q", cfg.certFile, cfg.keyFile, cfg.trustDir)
 	}
 	if cfg.logLevel != slog.LevelDebug {
 		t.Errorf("logLevel: want debug, got %v", cfg.logLevel)
@@ -274,17 +277,20 @@ func TestRootHandler_WithoutManagedRouting(t *testing.T) {
 	}
 }
 
-// Gateway mode end to end through the route table: /solAdmin/ and an unknown
-// extensionless path (/login included, which only Provisioned mode serves)
-// are sent to the page that can load its vendor scripts, while the real
-// routes answer as they did.
-func TestRootHandler_RedirectsInGatewayMode(t *testing.T) {
+// Gateway mode end to end through the route table: /solAdmin/ is sent to the
+// page that can load its vendor scripts, a path the gateway does not serve
+// (/login included, which only Provisioned mode serves) is a 404 and never a
+// redirect, and the real routes answer as they did.
+func TestRootHandler_UnknownPathsAreNotFoundInGatewayMode(t *testing.T) {
 	dir := writeBundles(t)
 	app := mustPWA(t, dir, directIndexFile)
 	h := newRootHandler(stubHandler("hosted"), newAdminHandler(dir, true, quietLogger()), app, stubHandler("relay"), nil)
-	for path, want := range map[string]string{"/solAdmin/": "/solAdmin", "/login": "/", "/login/": "/", "/a/b": "/"} {
-		if rec := route(h, path); rec.Code != http.StatusPermanentRedirect || rec.Header().Get("Location") != want {
-			t.Errorf("%s: want 308 to %s, got %d %q", path, want, rec.Code, rec.Header().Get("Location"))
+	if rec := route(h, "/solAdmin/"); rec.Code != http.StatusPermanentRedirect || rec.Header().Get("Location") != adminPath {
+		t.Errorf("/solAdmin/: want 308 to %s, got %d %q", adminPath, rec.Code, rec.Header().Get("Location"))
+	}
+	for _, path := range []string{"/login", "/login/", "/a/b"} {
+		if rec := route(h, path); rec.Code != http.StatusNotFound || rec.Header().Get("Location") != "" {
+			t.Errorf("%s: want 404 without a Location, got %d %q", path, rec.Code, rec.Header().Get("Location"))
 		}
 	}
 	for path, want := range map[string]string{"/": "<html>direct</html>", "/solAdmin": "<html>admin</html>", "/hosted": "hosted", "/https/943/broker/SEMP/x": "relay"} {
@@ -410,7 +416,8 @@ func (r *serveRun) result(t *testing.T) error {
 }
 
 // gatewayDir is a temp dir holding a self-signed tls.crt and tls.key, with the
-// seeding and bootstrap variables cleared.
+// seeding and bootstrap variables cleared and the TLS path variables pointing
+// at it (tls.crt, tls.key and a trust directory that does not exist yet).
 func gatewayDir(t *testing.T) string {
 	t.Helper()
 	clearSeedEnv(t)
@@ -420,19 +427,21 @@ func gatewayDir(t *testing.T) string {
 	if _, err := generateSelfSigned(filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key")); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("SMU_SSL_CERTFILE", filepath.Join(dir, "tls.crt"))
+	t.Setenv("SMU_SSL_CERTKEYFILE", filepath.Join(dir, "tls.key"))
+	t.Setenv("SMU_SSL_TRUSTDIR", filepath.Join(dir, "trust"))
 	return dir
 }
 
 // yamlPath is dir/name as a single-quoted YAML scalar (Windows paths included).
 func yamlPath(dir, name string) string { return "'" + filepath.Join(dir, name) + "'" }
 
-// writeServeConfig writes dir/config.yaml for gatewayDir's pair, logging at
-// debug, plus extra keys, and returns its path.
+// writeServeConfig writes dir/config.yaml, logging at debug, plus extra keys,
+// and returns its path. The TLS paths are gatewayDir's environment.
 func writeServeConfig(t *testing.T, dir, extra string) string {
 	t.Helper()
 	path := filepath.Join(dir, "config.yaml")
-	body := "version: 1\ntls:\n  certFile: " + yamlPath(dir, "tls.crt") + "\n  keyFile: " + yamlPath(dir, "tls.key") +
-		"\n  trustDir: " + yamlPath(dir, "trust") + "\nlogLevel: debug\n" + extra
+	body := "version: 1\nlogLevel: debug\n" + extra
 	writeFile(t, path, body)
 	return path
 }
@@ -610,6 +619,13 @@ func TestServe_FailuresStopTheStart(t *testing.T) {
 			writeFile(t, filepath.Join(dir, "tls.key"), "not a key")
 			return writeServeConfig(t, dir, "")
 		}, nil, "server certificate setup failed"},
+		{"a damaged journal beside the certificate", func(t *testing.T, dir string) string {
+			tlsDir := t.TempDir()
+			t.Setenv("SMU_SSL_CERTFILE", filepath.Join(tlsDir, "tls.crt"))
+			t.Setenv("SMU_SSL_CERTKEYFILE", filepath.Join(tlsDir, "tls.key"))
+			writeFile(t, filepath.Join(tlsDir, txnFileName), "{not json")
+			return writeServeConfig(t, dir, "")
+		}, nil, "TLS directory recovery failed"},
 		{"a trust dir that is a file", func(t *testing.T, dir string) string {
 			writeFile(t, filepath.Join(dir, "trust"), "not a directory")
 			return writeServeConfig(t, dir, "")
@@ -734,8 +750,7 @@ func TestServe_MissingAppBundleStopsTheStart(t *testing.T) {
 func TestServe_SummaryShowsAtEveryLevel(t *testing.T) {
 	dir := gatewayDir(t)
 	configFile := filepath.Join(dir, "config.yaml")
-	writeFile(t, configFile, "version: 1\ntls:\n  certFile: "+yamlPath(dir, "tls.crt")+"\n  keyFile: "+yamlPath(dir, "tls.key")+
-		"\n  trustDir: "+yamlPath(dir, "trust")+"\nlogLevel: error\naccess:\n  allow: [127.0.0.0/8, '::1/128']\n")
+	writeFile(t, configFile, "version: 1\nlogLevel: error\naccess:\n  allow: [127.0.0.0/8, '::1/128']\n")
 	r := startServe(t, process{configFile: configFile})
 	if code, _ := r.get(t, gatewayClient(t, dir), "/robots.txt"); code != http.StatusOK {
 		t.Errorf("/robots.txt: %d", code)
@@ -749,6 +764,65 @@ func TestServe_SummaryShowsAtEveryLevel(t *testing.T) {
 	if strings.Contains(log, "listening") {
 		t.Errorf("info lines stay hidden at error: %s", log)
 	}
+}
+
+// A config.yaml of an earlier release that still holds the TLS path keys
+// starts as before: the paths in use are the environment's, one warning names
+// each key that differs (not the one that agrees), and the gateway serves.
+func TestServe_AnOldConfigWithTLSPathKeysStartsAndWarnsOnce(t *testing.T) {
+	dir := gatewayDir(t)
+	configFile := writeServeConfig(t, dir, "tls:\n  certFile: /old/tls.crt\n  keyFile: "+yamlPath(dir, "tls.key")+"\n  trustDir: /old/trust\n")
+	r := startServe(t, process{configFile: configFile})
+	if code, _ := r.get(t, gatewayClient(t, dir), "/robots.txt"); code != http.StatusOK {
+		t.Errorf("/robots.txt: %d", code)
+	}
+	r.signals <- syscall.SIGTERM
+	if err := r.result(t); err != nil {
+		t.Fatalf("serve after SIGTERM: %v", err)
+	}
+	log := r.log.String()
+	expectLogged(t, log, "TLS paths that differ", "/old/tls.crt", "/old/trust")
+	if n := strings.Count(log, "TLS paths that differ"); n != 1 {
+		t.Errorf("one warning names them all, got %d", n)
+	}
+	if strings.Contains(log, "tls.keyFile") {
+		t.Errorf("a key that agrees with the path in use is not named: %s", log)
+	}
+}
+
+// An interrupted certificate replacement (the certificate renamed, the key
+// not) is rolled back before the pair is loaded, so the gateway starts on the
+// old pair instead of refusing a certificate beside another key.
+func TestServe_RollsBackAnInterruptedCertificateReplacementBeforeLoadingThePair(t *testing.T) {
+	dir := gatewayDir(t)
+	tlsDir := t.TempDir()
+	crt, key := filepath.Join(tlsDir, "tls.crt"), filepath.Join(tlsDir, "tls.key")
+	if _, err := generateSelfSigned(crt, key); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SMU_SSL_CERTFILE", crt)
+	t.Setenv("SMU_SSL_CERTKEYFILE", key)
+	// The client trusts the pair from before the interrupted replacement, read
+	// now: the gateway may answer the connection before or after its start-up
+	// rolls the files back, and only the rolled-back pair may be served.
+	original := t.TempDir()
+	writeFile(t, filepath.Join(original, "tls.crt"), string(mustRead(t, crt)))
+	next := newTestCert(t, testCertSpec{cn: "next"})
+	files := []journalFile{{path: crt, data: []byte(next.certPEM), perm: 0o644}, {path: key, data: []byte(next.keyPEM), perm: 0o600}}
+	if err := newJournal(tlsDir, files, crashAfter(stepBackups), quietLogger()).run(); !errors.Is(err, errSimulatedCrash) {
+		t.Fatalf("want the simulated crash, got %v", err)
+	}
+	writeFile(t, crt, next.certPEM) // the first rename had landed
+
+	r := startServe(t, process{configFile: writeServeConfig(t, dir, "")})
+	if code, _ := r.get(t, gatewayClient(t, original), "/robots.txt"); code != http.StatusOK {
+		t.Errorf("/robots.txt: %d\nlog:\n%s", code, r.log)
+	}
+	r.signals <- syscall.SIGTERM
+	if err := r.result(t); err != nil {
+		t.Fatalf("serve after SIGTERM: %v", err)
+	}
+	expectLogged(t, r.log.String(), "interrupted store write", "listening")
 }
 
 // Files only (hosted: false): /hosted is a 404, so the app connects to brokers

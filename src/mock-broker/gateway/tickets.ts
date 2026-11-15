@@ -54,6 +54,10 @@ export function createTickets(now: () => number) {
         end(id: string | null): void {
             if (id) byId.delete(id);
         },
+        /** Every ticket (a restart of the gateway). */
+        clear(): void {
+            byId.clear();
+        },
         dropUser(user: string): void {
             for (const [id, t] of Array.from(byId)) if (t.user === user) byId.delete(id);
         },

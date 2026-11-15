@@ -35,7 +35,7 @@ func sampleBackup(t *testing.T, h *hasher) backupDoc {
 		Connections: []connRec{{Broker: "b1", Hostname: "host1",
 			Semp:   sempRec{Port: "1943", Username: "mon", Password: "semp-b1-pw"},
 			Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v1", Username: "u1", Password: "cli-b1v1-pw"}}}}},
-		Settings: withHostPaths(fileConfigFromConfig(defaultConfig()), fileConfig{}),
+		Settings: fileConfigFromConfig(defaultConfig()),
 	}
 }
 
@@ -260,26 +260,24 @@ func mustSealer(t *testing.T) *sealer {
 	return sl
 }
 
-// withHostPaths must cover exactly the keys restartOnlyKeys marks host-only.
-func TestBackup_WithHostPathsCoversTheHostOnlyKeys(t *testing.T) {
-	appDir := "/old"
-	a := fileConfigFromConfig(defaultConfig())
-	a.RemovedAppDir, a.RemovedUsersFile, a.RemovedConnectionsFile = &appDir, &appDir, &appDir
-	b := a.clone()
-	b.TLS.CertFile, b.TLS.KeyFile, b.TLS.TrustDir = "/h/c", "/h/k", "/h/t"
-	b.Hosted, b.TLS.InsecureSkipVerify = !a.Hosted, !a.TLS.InsecureSkipVerify
-	got := withHostPaths(a, b)
-	for _, k := range restartOnlyKeys {
-		want := a
-		if k.hostOnly {
-			want = b
-		}
-		if k.value(got) != k.value(want) {
-			t.Errorf("%s: want %v, got %v", k.key, k.value(want), k.value(got))
-		}
+// A backup of an earlier release holds tls.certFile, tls.keyFile and
+// tls.trustDir in its settings. It opens, the keys are read as removed keys,
+// and they are never a change: the settings preview lists nothing for them.
+func TestBackup_ABackupWithTheRemovedTLSPathKeysOpensAndTheyAreNotChanges(t *testing.T) {
+	h := testHasher(t)
+	doc := sampleBackup(t, h)
+	cert, key, trust := "/old/tls.crt", "/old/tls.key", "/old/trust"
+	doc.Settings.TLS.RemovedCertFile, doc.Settings.TLS.RemovedKeyFile, doc.Settings.TLS.RemovedTrustDir = &cert, &key, &trust
+	data := sealed(t, h, doc, testPassphrase)
+	opened, err := openBackup(context.Background(), h, data, testPassphrase)
+	if err != nil {
+		t.Fatalf("a backup holding the removed keys must open: %v", err)
 	}
-	if got.RemovedAppDir != nil || got.RemovedUsersFile != nil || got.RemovedConnectionsFile != nil {
-		t.Error("an export or import never carries the removed appDir, usersFile or connectionsFile keys")
+	if opened.Settings.TLS.RemovedTrustDir == nil || *opened.Settings.TLS.RemovedTrustDir != trust {
+		t.Errorf("the key is read, to be ignored: %+v", opened.Settings.TLS)
+	}
+	if got := settingsChanges(fileConfigFromConfig(defaultConfig()), opened.Settings); len(got) != 0 {
+		t.Errorf("a removed key is not a settings change: %v", got)
 	}
 }
 
@@ -346,12 +344,11 @@ func userNames(users []userRec) []string {
 	return out
 }
 
-func TestBackup_SettingsChangesNamesDottedKeysAndSkipsHostPaths(t *testing.T) {
+func TestBackup_SettingsChangesNamesDottedKeys(t *testing.T) {
 	cur := fileConfigFromConfig(defaultConfig())
 	next := cur.clone()
 	next.Session.IdleMinutes++
 	next.Access.Allow = []string{"10.0.0.0/8"}
-	next.TLS.CertFile = "/elsewhere/tls.crt"
 	next.TLS.InsecureSkipVerify = true
 	if got := settingsChanges(cur, next); !reflect.DeepEqual(got, []string{"access.allow", "session.idleMinutes", "tls.insecureSkipVerify"}) {
 		t.Fatalf("got %v", got)
@@ -929,7 +926,7 @@ func TestBackupService_RunWritesOpensAndPrunes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(userNames(doc.Users), []string{"admin", "viewer"}) || len(doc.Connections) != 2 || doc.Settings.TLS.CertFile != "" {
+	if !reflect.DeepEqual(userNames(doc.Users), []string{"admin", "viewer"}) || len(doc.Connections) != 2 || doc.Settings.TLS.RemovedCertFile != nil {
 		t.Fatalf("content: %+v", doc)
 	}
 	if last := x.b.lastRun(); last.file != written[2] || last.err != "" {
@@ -1228,7 +1225,7 @@ func TestBackup_CarriesTwoFactorSealed(t *testing.T) {
 	if opened.Settings.Login.TwoFactor != twoFactorOptional || opened.Users[1].TOTP != nil {
 		t.Errorf("an older backup reads as optional and without two-factor: %q", opened.Settings.Login.TwoFactor)
 	}
-	if got := settingsChanges(withHostPaths(fileConfigFromConfig(defaultConfig()), fileConfig{}), opened.Settings); len(got) != 0 {
+	if got := settingsChanges(fileConfigFromConfig(defaultConfig()), opened.Settings); len(got) != 0 {
 		t.Errorf("an older backup previews as no change in settings: %v", got)
 	}
 }

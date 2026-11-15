@@ -4,7 +4,8 @@
  * the Authenticator (the codes two-factor sign-in asks for), and the gateway
  * events a real deployment would produce on its own (a
  * session ended or expired, an entitlement revoked, a lockout, a broker the
- * relay cannot reach, the dial window, a hand edit of config.yaml).
+ * relay cannot reach, the dial window, a hand edit of config.yaml, the TLS
+ * files on a read-only mount).
  *
  * Mock-only.
  */
@@ -13,6 +14,9 @@ import type { Gateway } from '../gateway';
 import type { Page } from '../gateway/pages';
 import { authenticatorSection } from './authenticator';
 import { button, copyable, el, section, select } from './panel';
+
+/** The id of the "TLS files" switch (a select: writable or read-only). */
+export const TLS_READ_ONLY_ID = 'mockctl-tls-readonly';
 
 export interface ManagedPanelDeps {
     gateway: Gateway;
@@ -90,7 +94,15 @@ export function managedSections({ gateway, navigate }: ManagedPanelDeps): HTMLEl
         f.unreadable = v === 'unreadable';
     });
     file.value = f.unreadable ? 'unreadable' : f.changedOnDisk ? 'changed' : 'ok';
-    events.append(relay, dial, file);
+    const tlsFiles = select([
+        { value: 'writable', label: 'TLS files: writable' },
+        { value: 'readonly', label: 'TLS files: read-only' },
+    ], v => { f.tlsReadOnly = v === 'readonly'; });
+    tlsFiles.id = TLS_READ_ONLY_ID;
+    tlsFiles.value = f.tlsReadOnly ? 'readonly' : 'writable';
+    events.append(relay, dial, file, tlsFiles);
+    events.appendChild(el('p', 'mockctl-hint',
+        'TLS files: read-only answers the certificate and CA writes with 409 tls_read_only, as a read-only mount of /tls does, and disables the console\'s buttons.'));
     events.appendChild(el('p', 'mockctl-hint',
         'A broker refusing the gateway\'s SEMP account: arm "SEMP 401 unauthorized" below, which the relay answers with 502 upstream_auth.'));
 

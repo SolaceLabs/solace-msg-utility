@@ -57,6 +57,8 @@ Left to Docker, `backup/` would be root's and the scheduled backups could not be
 
 Sign-in can also ask for a six-digit code from an authenticator app (optional by default; Gateway Settings can require it of administrators or of everyone): see [provisioned-mode.md -> Two-factor sign-in](docs/provisioned-mode.md#two-factor-sign-in). The Provisioned demo lets you try it with mock codes.
 
+The console also manages the gateway's TLS: its **Certificates** page replaces the gateway's certificate and adds or deletes the CA certificates trusted for brokers, all at once with no restart, when `/tls` is mounted writable (mount it read-only to lock it), and **Restart gateway** on Gateway Settings starts the gateway again in place. The file locations are environment variables only. See [provisioned-mode.md -> Certificates from the console](docs/provisioned-mode.md#certificates-from-the-console).
+
 ## Connecting to a broker
 
 Once the app is loaded:
@@ -123,7 +125,7 @@ Once the app is loaded:
 - **Self-contained HTML** — `index.html` includes all app code; the two vendor scripts `solclient.js` and `jszip.min.js` sit alongside it (see [deployment.md](docs/deployment.md#external-runtime-dependencies)).
 - **Demo bundle** (`demo.html`) -- every module exercised against mock data, no broker required.
 - **Provisioned demo** (`provisioned-demo.html`) -- the Provisioned sign-in, entitlements and administration pages against a fake gateway in the page; no gateway, no broker, no network request.
-- **Gateway image** -- serves the app over HTTPS and connects to your brokers for it, so browsers reach and trust only the container; Provisioned mode adds sign-in (optionally with two-factor codes) and administration. Image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#gateway-mode).
+- **Gateway image** -- serves the app over HTTPS and connects to your brokers for it, so browsers reach and trust only the container; Provisioned mode adds sign-in (optionally with two-factor codes) and administration, including the gateway's certificate and trusted CAs. Image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#gateway-mode).
 
 ## Documentation
 

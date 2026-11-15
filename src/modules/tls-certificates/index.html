@@ -1,0 +1,80 @@
+<!-- The admin gate is created at install by createGate() (see module.ts). -->
+<div id="tls-view" class="hidden">
+    <div class="card tls-card">
+        <div class="flex-row justify-between items-center mb-4">
+            <h2 class="m-0">Certificates</h2>
+            <button id="btn-tls-reload" type="button" class="btn btn-secondary" title="Reload the certificate and the trusted CAs">Reload</button>
+        </div>
+        <p class="text-secondary tls-intro">
+            The gateway's own certificate, and the CA certificates it trusts when it connects to brokers. A change
+            applies at once: new connections use it, open ones carry on. The files are named by the gateway's
+            environment, not here.
+        </p>
+        <div id="tls-error" class="text-error hidden" role="alert"></div>
+    </div>
+
+    <div id="tls-cert-card" class="card tls-card">
+        <h3 class="tls-section">Gateway certificate</h3>
+        <dl id="tls-cert-details" class="tls-details"></dl>
+        <p id="tls-cert-selfsigned" class="tls-hint hidden">
+            This certificate is self-signed (the gateway makes one for itself at first start). Browsers warn about it
+            until it is replaced with one they trust.
+        </p>
+        <p id="tls-cert-readonly" class="tls-banner hidden">
+            The certificate files are read-only on the gateway host, so the certificate cannot be replaced here.
+        </p>
+
+        <h4 class="tls-subsection">Replace certificate</h4>
+        <p class="tls-hint">
+            Choose a certificate file and a key file, or paste the PEM. The certificate may carry its chain, leaf first.
+            The gateway checks the pair before anything is written. The key is sent once and never kept.
+        </p>
+        <div class="tls-pair">
+            <div class="form-group">
+                <label for="tls-cert-file">Certificate file</label>
+                <input id="tls-cert-file" type="file" class="form-control" accept=".crt,.pem,.cer">
+                <label for="tls-cert-pem" class="tls-pem-label">Certificate (PEM)</label>
+                <textarea id="tls-cert-pem" class="form-control tls-pem" rows="6" spellcheck="false" autocomplete="off"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="tls-key-file">Key file</label>
+                <input id="tls-key-file" type="file" class="form-control" accept=".key,.pem">
+                <label for="tls-key-pem" class="tls-pem-label">Private key (PEM)</label>
+                <textarea id="tls-key-pem" class="form-control tls-pem" rows="6" spellcheck="false" autocomplete="off"></textarea>
+            </div>
+        </div>
+        <div id="tls-cert-error" class="text-error hidden" role="alert"></div>
+        <div id="tls-cert-preview" class="tls-preview hidden">
+            <p class="tls-hint">The gateway accepted the pair. This is what will be installed:</p>
+            <dl id="tls-cert-preview-details" class="tls-details"></dl>
+        </div>
+        <button id="btn-tls-cert-replace" type="button" class="btn btn-primary">Replace certificate</button>
+    </div>
+
+    <div id="tls-trust-card" class="card tls-card">
+        <h3 class="tls-section">Trusted broker CAs</h3>
+        <p class="tls-hint">
+            Besides the system's roots, the gateway trusts the certificates in these files when it checks a broker.
+        </p>
+        <p id="tls-trust-readonly" class="tls-banner hidden">
+            The trust files are read-only on the gateway host, so CA certificates cannot be added or deleted here.
+        </p>
+        <div id="tls-trust-error" class="text-error hidden" role="alert"></div>
+        <div id="tls-trust-list" class="tls-trust-list"></div>
+
+        <h4 class="tls-subsection">Add CA certificate</h4>
+        <div class="form-group">
+            <label for="tls-ca-file">CA certificate file</label>
+            <input id="tls-ca-file" type="file" class="form-control" accept=".crt,.pem,.cer">
+            <label for="tls-ca-pem" class="tls-pem-label">CA certificate (PEM)</label>
+            <textarea id="tls-ca-pem" class="form-control tls-pem" rows="6" spellcheck="false" autocomplete="off"></textarea>
+        </div>
+        <div class="form-group tls-name-field">
+            <label for="tls-ca-name">File name (optional)</label>
+            <input id="tls-ca-name" type="text" class="form-control" placeholder="my-ca.crt" autocomplete="off" spellcheck="false">
+            <p class="tls-hint">Ends in .crt or .pem. Left empty, the gateway names it after the certificate's subject.</p>
+        </div>
+        <div id="tls-ca-error" class="text-error hidden" role="alert"></div>
+        <button id="btn-tls-ca-add" type="button" class="btn btn-primary">Add CA certificate</button>
+    </div>
+</div>

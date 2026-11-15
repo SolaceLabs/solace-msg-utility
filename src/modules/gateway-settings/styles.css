@@ -2,9 +2,10 @@
  * collide in the shared (inlined) cascade. Shipped only in the admin app
  * (main-admin.css). */
 
+/* Every section is a card; cards stack at the full width. */
 .gw-set-card {
-    max-width: 720px;
-    margin: 2rem auto;
+    width: 100%;
+    margin: 0 0 1rem;
 }
 
 .gw-set-intro,
@@ -13,8 +14,12 @@
 }
 
 .gw-set-section {
-    margin: 1.25rem 0 0.5rem;
+    margin: 0 0 0.75rem;
     font-size: 0.95rem;
+}
+
+.gw-set-actions {
+    margin: 0 0 1rem;
 }
 
 .gw-set-banner {
@@ -24,11 +29,14 @@
     font-size: 0.9rem;
 }
 
-/* The "restart" and "edit on host" tags: in the intro, and after the label of
- * every key the gateway reads only at startup or never lets a save change. */
+.gw-set-goto {
+    margin-left: 0.5rem;
+}
+
+/* The "restart" tag: in the intro, and after the label of every key the
+ * gateway reads only at startup. */
 .gw-set-tag,
-.gw-set-restart > label::after,
-.gw-set-host > label::after {
+.gw-set-restart > label::after {
     border: 1px solid var(--status-warning);
     border-radius: 4px;
     padding: 0 0.4rem;
@@ -40,7 +48,50 @@
     margin-left: 0.5rem;
 }
 
-.gw-set-host > label::after {
-    content: 'edit on host';
-    margin-left: 0.5rem;
+/* Modules on offer: one toggle tile each; a pressed tile is on offer. */
+.gw-set-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+}
+
+.gw-set-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font: inherit;
+    color: var(--text-primary);
+    background-color: var(--bg-app);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+}
+
+.gw-set-tile[aria-pressed='true'] {
+    border-color: var(--accent-primary);
+    box-shadow: inset 0 0 0 1px var(--accent-primary);
+}
+
+.gw-set-tile:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
+.gw-set-tile-name {
+    font-weight: 600;
+}
+
+.gw-set-tile-name::before {
+    content: '\2610  ';
+}
+
+.gw-set-tile[aria-pressed='true'] .gw-set-tile-name::before {
+    content: '\2611  ';
+}
+
+.gw-set-tile-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
 }

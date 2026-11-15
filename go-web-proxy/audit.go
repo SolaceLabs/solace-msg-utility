@@ -58,6 +58,13 @@ const (
 	auditScheduleSet      = "schedule.set"
 	auditScheduleRemove   = "schedule.remove"
 	auditTwoFactorReset   = "user.twofactor.reset"
+
+	// admin: the gateway's TLS files and its restart (tls_api.go, restart.go)
+	auditTLSCertificateReplace = "tls.certificate.replace"
+	auditTLSTrustAdd           = "tls.trust.add"
+	auditTLSTrustRemove        = "tls.trust.remove"
+	auditRestart               = "gateway.restart"
+
 	// auth
 	auditSignin         = "signin"
 	auditSignout        = "signout"

@@ -93,7 +93,7 @@ export function demoSeed(): GatewaySeed {
             hosted: true,
             connModes: 'provisioned',
             defaultConn: 'provisioned',
-            tls: { certFile: '/tls/tls.crt', keyFile: '/tls/tls.key', trustDir: '/tls/trust', insecureSkipVerify: false },
+            tls: { insecureSkipVerify: false },
             logLevel: 'warn',
             access: { allow: [], trustedProxies: [] },
             session: { idleMinutes: 10, absoluteMinutes: 30 },

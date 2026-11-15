@@ -306,8 +306,7 @@ type importPreviewJSON struct {
 	Gateway     string   `json:"gateway"`
 	Users       nameDiff `json:"users"`
 	Connections nameDiff `json:"connections"`
-	// Settings lists the keys an import would change; the host-only paths
-	// are never imported.
+	// Settings lists the keys an import would change.
 	Settings []string `json:"settings"`
 	// SignsOutCaller says, per mode, whether importing the users would end
 	// the requesting administrator's session.
@@ -471,7 +470,7 @@ func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request, ca
 		}
 		if body.Settings != importSkip {
 			var err error
-			if settings, err = h.stageSettings(tx, r, withHostPaths(doc.Settings, h.settings.current())); err != nil {
+			if settings, err = h.stageSettings(tx, r, doc.Settings); err != nil {
 				return err
 			}
 		}

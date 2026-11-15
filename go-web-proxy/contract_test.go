@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -168,9 +169,10 @@ func newContractEnv(t *testing.T, st contractStores) (*managedEnv, *scriptedUpst
 }
 
 // contractNormalize replaces what differs between runs: a backup's next run
-// follows the clock, an export is sealed with a fresh salt and nonce, and a
+// follows the clock, an export is sealed with a fresh salt and nonce, a
 // settings rev (the real gateway's keyed checksum, the fake's counter) is any
-// non-empty string.
+// non-empty string, and a certificate's fields are what its X.509 holds, which
+// the fake cannot read (contractNormalizeCerts).
 func contractNormalize(v any) any {
 	if m, ok := v.(map[string]any); ok {
 		if _, ok := m["nextRun"].(string); ok {
@@ -183,7 +185,73 @@ func contractNormalize(v any) any {
 		}
 	}
 	contractNormalizeRevs(v)
+	contractNormalizeCerts(v)
 	return v
+}
+
+var (
+	contractFingerprint = regexp.MustCompile(`^([0-9A-F]{2}:){31}[0-9A-F]{2}$`)
+	contractUTCTime     = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$`)
+)
+
+// contractNormalizeCerts describes every certificate object (one with a
+// subject, an issuer and a sha256, at any depth) by its shape alone: names are
+// "<names>" for a list of strings, a subject or issuer "<name>" for a
+// non-empty string, a fingerprint "<fingerprint>" when it is upper-case hex
+// pairs joined by colons, a time "<time>" when it is RFC 3339 UTC, a flag
+// "<bool>" for a boolean. A value of another shape is left as it is, so it
+// fails to match the golden.
+func contractNormalizeCerts(v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		_, subject := x["subject"]
+		_, issuer := x["issuer"]
+		_, sum := x["sha256"]
+		if subject && issuer && sum {
+			contractNormalizeCert(x)
+			return
+		}
+		for _, e := range x {
+			contractNormalizeCerts(e)
+		}
+	case []any:
+		for _, e := range x {
+			contractNormalizeCerts(e)
+		}
+	}
+}
+
+func contractNormalizeCert(c map[string]any) {
+	for _, k := range []string{"subject", "issuer"} {
+		if s, ok := c[k].(string); ok && s != "" {
+			c[k] = "<name>"
+		}
+	}
+	if list, ok := c["names"].([]any); ok && contractAllStrings(list) {
+		c["names"] = "<names>"
+	}
+	if s, ok := c["sha256"].(string); ok && contractFingerprint.MatchString(s) {
+		c["sha256"] = "<fingerprint>"
+	}
+	for _, k := range []string{"notBefore", "notAfter"} {
+		if s, ok := c[k].(string); ok && contractUTCTime.MatchString(s) {
+			c[k] = "<time>"
+		}
+	}
+	for _, k := range []string{"selfSigned", "expired"} {
+		if _, ok := c[k].(bool); ok {
+			c[k] = "<bool>"
+		}
+	}
+}
+
+func contractAllStrings(list []any) bool {
+	for _, e := range list {
+		if _, ok := e.(string); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // contractNormalizeRevs turns every string "rev" and the settings entry of a

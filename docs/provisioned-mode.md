@@ -28,6 +28,12 @@ It is the same container image as [Gateway mode](deployment.md#gateway-mode), wi
   - [Backups and two-factor](#backups-and-two-factor)
 - [Administer](#administer)
   - [Two administrators at once](#two-administrators-at-once)
+- [Certificates from the console](#certificates-from-the-console)
+  - [Letting the console manage them](#letting-the-console-manage-them)
+  - [Locking them](#locking-them)
+  - [What applies at once](#what-applies-at-once)
+  - [Restart gateway](#restart-gateway)
+  - [Paths come from the environment](#paths-come-from-the-environment)
 - [Back up and restore](#back-up-and-restore)
 - [Stored files and recovery](#stored-files-and-recovery)
 - [Audit trail](#audit-trail)
@@ -169,7 +175,7 @@ These seed `config.yaml` on the first start only, except the two `SMU_ADMIN_PASS
 | `SMU_ADMIN_PASSWORD` | unset | Avoid: an environment value is visible to anyone who can inspect the container. Set this or `SMU_ADMIN_PASSWORD_FILE`, not both. |
 | `SMU_SHOW_AUDIT` | `false` | `true` or `false` (anything else stops the start). Seeds `audit.stdout`: copy each audit line to the container's standard output. Read on the first start only; after that `config.yaml` wins and a differing value is reported like the other `SMU_` variables. |
 
-The rest (TLS, log level) are the same as in Gateway mode: see [Settings](deployment.md#settings).
+The rest (log level, and the three TLS path variables, which are read at every start and never seeded into `config.yaml`) are the same as in Gateway mode: see [Settings](deployment.md#settings) and [Paths come from the environment](#paths-come-from-the-environment).
 
 ---
 
@@ -241,12 +247,13 @@ The admin console is at `https://<host>:9443/solAdmin`, for administrator accoun
 
 - **User Management:** add users, reset passwords, make someone an administrator, and grant brokers, VPNs and queues. A grant can use `*` wildcards, for example queues `orders.*`. The **Two-factor** column shows On or Off, and **Reset two-factor** on an On row removes it (see [A lost phone](#a-lost-phone)); a save never carries or clears it.
 - **Connection Management:** add brokers, their SEMP account and their VPNs' client credentials. Leave a password blank to keep the stored one. The gateway reaches each broker over TLS (`https` for SEMP, `wss` for messaging), so the ports are the broker's TLS ports, unless the connection's `scheme` names the plain one (`http` for SEMP, `ws` for messaging; each side set on its own). A connection stored before the field existed stays on TLS: an absent or blank scheme means TLS, so no record needs a migration. Pick `http` or `ws` only for a broker on a trusted network that does not serve TLS on that port: the gateway then reaches it unencrypted, and the SEMP and SMF credentials cross that hop in clear text. Set the scheme in Connections -> Add or Edit connection.
-- **Gateway Settings:** the settings above (the two-factor mode is under its own heading, **Two-factor sign-in**), and a line under Access, "Your address as the gateway sees it", saying whether the address is the TCP peer or came from `X-Forwarded-For` through a trusted proxy. If it shows your proxy's address rather than yours, see [Client addresses behind Docker and proxies](deployment.md#client-addresses-behind-docker-and-proxies).
+- **Gateway Settings:** the settings above, one card each (the two-factor mode is under its own heading, **Two-factor sign-in**; the offered modules are toggle tiles under **Modules**), **Skip broker certificate checks (insecure)** under **Broker trust**, the **Restart gateway** button in the **Gateway** card, and a line under Access, "Your address as the gateway sees it", saying whether the address is the TCP peer or came from `X-Forwarded-For` through a trusted proxy. If it shows your proxy's address rather than yours, see [Client addresses behind Docker and proxies](deployment.md#client-addresses-behind-docker-and-proxies).
 
 Every change to a user, a connection or the settings is also logged at `info` with the administrator's name and what changed (never a password), but the record to keep is the [audit trail](#audit-trail): it is always written, whatever `LOG_LEVEL` says.
+- **Certificates:** the gateway's own certificate and the CA certificates it trusts for brokers; replace the certificate, add and delete CA files. See [Certificates from the console](#certificates-from-the-console).
 - **Backup & Restore:** export the configuration to a file, import one, and schedule backups. See [Back up and restore](#back-up-and-restore).
 
-Changes apply at once. Revoking a user's access closes their broker connections. A restart signs everyone out.
+Changes apply at once, certificates included. Revoking a user's access closes their broker connections. A restart signs everyone out.
 
 ### Two administrators at once
 
@@ -259,6 +266,50 @@ A few details:
 - A user changing their own password does not make an administrator's open form stale unless it flips the forced-change flag, and the administrator's save does not overwrite that new password: a blank password on a save means "keep what is stored now".
 - **Import** is checked the same way. **Preview** notes the version of each list and of the settings it saw, and **Import** is refused ("The gateway's data changed since the preview. Run the preview again.") if a section you are importing has changed since, even by one password change. Skipped sections are not compared. Preview again and choose again.
 - Changes are applied one at a time, in the order the gateway receives them, so the gateway's own state is always whole.
+
+---
+
+## Certificates from the console
+
+The admin console's **Certificates** page shows the gateway's own certificate (subject, names, issuer, validity, SHA-256 fingerprint) and every trusted broker CA file, and can replace the certificate and add or delete CA files. Whether it may is decided by the mount, not by a setting: the gateway can change these files only where it can write them.
+
+### Letting the console manage them
+
+Mount `/tls` writable, which a named volume is (`tls:/tls` in `compose.provisioned.yaml`, `-v solace-tls:/tls` in the `docker run` above). The gateway then offers every action:
+
+- **Replace certificate** takes a certificate file and a key file, or pasted PEM (the certificate may carry its chain, leaf first). The gateway verifies them first: the certificate holds only certificate blocks, the key is exactly one private key, the pair matches, the certificate is valid now, and its key is one browsers can use: RSA of at least 2048 bits, or ECDSA on P-256 or P-384. An ECDSA P-521 or Ed25519 certificate is refused, because Chrome and Edge cannot complete a handshake with it, and since a replacement is served at once it would lock you out of this page. A refusal names the field and the reason, and nothing is written. The page shows what will be installed and asks you to confirm. The two files are written together as one journaled change (key `0600`, certificate `0644`), so a crash never leaves half a pair.
+- **Add CA certificate** takes a file or pasted PEM and an optional file name (`.crt` or `.pem`, letters, digits, `.`, `_`, `-`, up to 64 characters; left empty it is named after the certificate's subject). It accepts certificates only: a private key is refused. It never overwrites an existing file (`exists`).
+- **Delete** removes one CA file from the trust directory after a confirmation. Only regular files directly in the directory are touched.
+- **A certificate browsers cannot use, placed on the host,** is still served (the gateway does not second-guess files you put there), and the start logs a warning naming why. Every browser connection then fails with the gateway logging `tls: peer doesn't support any of the certificate's signature algorithms`. To get back in, put a usable pair in `/tls` and restart the gateway, or delete `tls.crt` and `tls.key` there and restart, which makes the gateway create a new self-signed pair.
+- The page shows each subject and issuer as `openssl` prints them, every attribute in the certificate's order (`CN=..., O=..., emailAddress=...`), and the certificate's names one per line.
+
+The certificate and its key must sit in one directory to be replaced from the console, so mount the directory, not a single file (a bind-mounted file cannot be swapped and the replace fails with `tls_write_failed`, nothing changed). The private key is read from the request only and is never echoed, logged, audited or put in an error. Each change is audited (`tls.certificate.replace`, `tls.trust.add`, `tls.trust.remove`; see [Audit trail](#audit-trail)): the line names the subject and expiry or the file name, never the key.
+
+### Locking them
+
+To keep certificates out of the console's hands, mount `/tls` read-only (`:ro`). The page still shows the certificate and the CA files, says that the files are read-only on the gateway host, and disables **Replace certificate**, **Add CA certificate** and **Delete**; a request that tries anyway is refused with `409 tls_read_only`. The same happens when the certificate and its key sit in two different directories (the certificate then cannot be replaced, though CAs still can if their directory is writable). Then you change certificates the way you did before: replace the files on the host and restart the container. A write that fails for another reason (a full disk, a permission problem) is `500 tls_write_failed`: nothing changed, the cause is in the gateway's log.
+
+### What applies at once
+
+Every TLS change takes effect with no restart:
+
+- **A new certificate:** connections to the gateway made from then on present it; connections already open keep the old one until they close.
+- **CA changes:** the trust pool is rebuilt from the directory after every add or delete, and the next connection to a broker uses it. Idle connections to brokers are closed so the next request handshakes under the new pool; requests and sockets in use carry on. Deleting the CA a broker relies on therefore makes new connections to that broker fail to verify at once, and adding it back makes them work.
+- **Skip broker certificate checks (insecure)** on Gateway Settings (`tls.insecureSkipVerify`) applies on Save and on a backup import, and the gateway logs a warning whenever it turns on.
+
+A file you drop into the trust directory by hand is read at the next start, or at the next add or delete from the console. Everyone else's settings are unchanged. A restart is needed only for what is still restart-only (the `hosted` setting) and for the three path variables.
+
+### Restart gateway
+
+**Restart gateway**, in the **Gateway** card at the foot of Gateway Settings, makes the gateway start its own program again in place: it asks for confirmation, writes the audit line `gateway.restart`, answers `202`, shuts down as it does for `SIGTERM` (requests in flight are given up to 10 seconds; the stores and the audit log close) and executes itself again with the same arguments and environment. The container keeps running, so its mounts and name stay. Every user and administrator is signed out, open broker connections and sockets close, and any setting that was waiting for a restart (the notice on Gateway Settings lists them and points at the button) is applied. The console says it is restarting, waits for the gateway to answer again and goes to the sign-in; if nothing answers within a minute it says so.
+
+You rarely need it: settings, certificates and trusted CAs apply without one. Use it to apply a restart-only setting or to load a `config.yaml` edited on the host. It restarts with the environment the container already has, so a changed variable (the three TLS paths included) still needs the container recreated. If the gateway cannot start itself again it logs `gateway restart failed` with the cause and exits with status 1, and the platform's restart policy (`restart: unless-stopped` in the compose files) brings it back; on a platform without an in-place start it exits with status 0 instead, so the policy must restart on any exit.
+
+### Paths come from the environment
+
+The three file locations are not settings. The gateway reads `SMU_SSL_CERTFILE` (default `/tls/tls.crt`), `SMU_SSL_CERTKEYFILE` (default `/tls/tls.key`) and `SMU_SSL_TRUSTDIR` (default `/tls/trust`) at every start; `config.yaml` has no key for them, the settings page and its API have no field for them (a request that names one is refused, `400 bad_request`), and no path appears in any answer. Changing one means recreating the container with the new value.
+
+An older `config.yaml` that still holds `tls.certFile`, `tls.keyFile` or `tls.trustDir` still starts. The keys are ignored, so the paths in use are the environment's (or the defaults), and the next settings save drops them from the file. When a key's value differs from the path in use, one warning at start names it, so a deployment that had moved the files with those keys sees at once that the move no longer holds and sets the variables instead. A backup that holds them imports; they are ignored there too.
 
 ---
 
@@ -308,7 +359,7 @@ The gateway keeps its state in a few files on the `/data` volume: `users.yaml`, 
 
 **After a crash or power loss.** The gateway settles any change that was in flight before it reads anything else at start. If the journal shows a change that had not finished, it puts back the previous files, as if the change had never happened, and the administrator whose save was lost gets no answer; saving again with the version they read works. If the change had finished, the new files stand and a retry with the old version is refused as changed by someone else, which is the cue to reload. No action is needed. The gateway logs a warning when it rolls a change back. If `txn` is unreadable (damaged, or it names something it should not), the gateway stops the start and says so rather than guess: restore `/data` from your volume backup, or import a backup into a fresh volume.
 
-**Changed on disk.** Before each write the gateway checks that the file on disk is still the one it last read or wrote. If a store file was replaced behind its back, or `config.yaml` was edited by hand, the save is refused with `store_changed_on_disk` or `config_changed_on_disk` and the console says the gateway must be restarted. The refusal stays for that file, on every later save, until the restart, because the file is not what the gateway holds in memory; restarting loads what is on disk. Reads keep working from memory meanwhile, so the console may show data that no longer matches the file. Editing `config.yaml` on the host is expected only for the keys that need it (the TLS paths and the other restart-only keys); stop or restart the gateway afterwards.
+**Changed on disk.** Before each write the gateway checks that the file on disk is still the one it last read or wrote. If a store file was replaced behind its back, or `config.yaml` was edited by hand, the save is refused with `store_changed_on_disk` or `config_changed_on_disk` and the console says the gateway must be restarted. The refusal stays for that file, on every later save, until the restart, because the file is not what the gateway holds in memory; restarting loads what is on disk. Reads keep working from memory meanwhile, so the console may show data that no longer matches the file. Editing `config.yaml` on the host is expected only for what the console cannot change (leaving Provisioned mode with `connModes: direct`, and the restart-only `hosted`); stop or restart the gateway afterwards (**Restart gateway** does it).
 
 ---
 
@@ -320,7 +371,7 @@ The gateway keeps a record of who did what, apart from its log. It is written in
 
 | Category | Recorded | Actions |
 | --- | --- | --- |
-| `admin` | Always | `user.create`, `user.update`, `user.delete`, `user.twofactor.reset`, `connection.create`, `connection.update`, `connection.delete`, `settings.update`, `backup.export`, `backup.import`, `schedule.set`, `schedule.remove` |
+| `admin` | Always | `user.create`, `user.update`, `user.delete`, `user.twofactor.reset`, `connection.create`, `connection.update`, `connection.delete`, `settings.update`, `backup.export`, `backup.import`, `schedule.set`, `schedule.remove`, `tls.certificate.replace`, `tls.trust.add`, `tls.trust.remove` (the target is the CA file name; the message names the certificate's subject and expiry, never the key), `gateway.restart` |
 | `auth` | Always | `signin`, `signout`, `password.change` (a user's own change, the forced first one included), `twofactor.enrol` (a user set two-factor up, or set it up again), `lockout` (the sign-in throttle starts refusing an account or a client) |
 | `access` | Only while `audit.access` is `true` | `dial` (a VPN credential issued), `smf.open` and `smf.close` (the gateway's socket to a broker), `relay` (each SEMP request through the gateway) |
 
@@ -376,6 +427,7 @@ Provisioned mode is meant for **trusted internal** networks. Before exposing it:
 - **Change the `admin` password** at the first sign-in (the gateway insists), and remove `SMU_ADMIN_PASSWORD` from the environment if you used it.
 - **Keep the store key apart** from the stores where you can: its path is fixed at `/data/store.key`, so mount a volume or secret there. It is not what restores a lost deployment: the scheduled backups are.
 - **Keep backup passphrases secret, and apart from the backups.** A backup holds every broker credential, every password hash and every two-factor secret; anyone with a file and its passphrase has them. Make `/backup` readable by the gateway's UID only.
+- **Decide who may change certificates.** A writable `/tls` lets any administrator replace the gateway's certificate and trust a new CA for broker connections: a CA added there is trusted for every broker the gateway reaches. Mount `/tls` read-only (see [Locking them](#locking-them)) where certificate changes should stay with the host. The private key is never shown again once uploaded, but keep it out of chat and tickets like any key.
 - **Restrict who can reach the gateway** with `access.allow`, and list your reverse proxy in `access.trustedProxies`.
 - **Treat administrator accounts as privileged.** They edit grants, the access list and sign-in itself.
 - **Turn on two-factor sign-in.** `optional` while people enrol, then `mandatory`; `admins` at the least (see [Two-factor sign-in](#two-factor-sign-in)). Keep the gateway's clock right and a second administrator.
@@ -402,6 +454,10 @@ Other refusals at start:
 - **A user's two-factor secret or recovery code is malformed:** `users.yaml` was damaged or replaced; the message names the user and the rule, never the value. Restore the matching file from your volume backup.
 - **`connModes=... offers Provisioned sign-in but hosted is false`:** remove `SMU_HOSTED=false`, or set `hosted: true` in `config.yaml`.
 - **`invalid config file ... field managed not found`:** a `config.yaml` from a pre-release build. Delete the `managed:` line.
+- **`TLS directory recovery failed`:** a certificate replacement was interrupted and its journal in the certificate's directory cannot be read. The log names the file and the cause; the start stops rather than load a pair that may be half written. Restore the certificate and key from your copy and see [Stored files and recovery](#stored-files-and-recovery) for how the journal is settled.
+- **Certificates page: `tls_read_only` or the read-only notes:** `/tls` is mounted read-only, or the certificate and key are in two directories. See [Locking them](#locking-them) and [Letting the console manage them](#letting-the-console-manage-them).
+- **Certificates page: `tls_write_failed`:** the write failed and was rolled back (a full disk, a permission problem, or a single-file bind mount of the certificate). The log has the cause; nothing changed.
+- **`config.yaml holds TLS paths that differ ...` at start:** an old `config.yaml` names TLS paths that are no longer read. Set `SMU_SSL_CERTFILE`, `SMU_SSL_CERTKEYFILE` or `SMU_SSL_TRUSTDIR` instead; the next settings save drops the keys. See [Paths come from the environment](#paths-come-from-the-environment).
 - **`data directory recovery failed` or a message about the `txn` journal:** a change was interrupted and the journal cannot be read. The log names the file and the cause. See [Stored files and recovery](#stored-files-and-recovery).
 - **A file's `rev` is above its `seq`, or is zero:** the store file was replaced by one from another deployment or edited. Restore the matching file from your volume backup, or delete the stores and import a backup.
 - **`read backup schedule ...` or `backup schedule ...: ...; delete it and set the schedule again`:** `backup.yaml` cannot be opened with this key, or is damaged. Delete it, start the gateway, and set the schedule again on Backup & Restore; the backups already in `/backup` are not affected.

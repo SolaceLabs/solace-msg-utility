@@ -8,6 +8,7 @@ import { createUserMgmtService } from '../../../src/modules/user-management/serv
 import { createConnMgmtService } from '../../../src/modules/connection-management/service';
 import { createSettingsService } from '../../../src/modules/gateway-settings/service';
 import { createBackupService } from '../../../src/modules/backup/service';
+import { createTlsService } from '../../../src/modules/tls-certificates/service';
 import { productSources, readSource } from '../../helpers/sources';
 import { contractSeed, seedContractBrokers } from './helpers';
 
@@ -45,7 +46,13 @@ const users = createUserMgmtService();
 const conns = createConnMgmtService();
 const settings = createSettingsService();
 const backup = createBackupService();
+const tls = createTlsService();
 const PASS = 'a long passphrase';
+/** Well-formed PEM the fake accepts (it cannot read X.509): a certificate, and a throwaway block standing for its key. */
+const PAIR = {
+    certificate: '-----BEGIN CERTIFICATE-----\nZmFrZSBjZXJ0aWZpY2F0ZQ==\n-----END CERTIFICATE-----\n',
+    key: '-----BEGIN PRIVATE KEY-----\ndGhyb3dhd2F5\n-----END PRIVATE KEY-----\n',
+};
 /** rev 0: a new schedule. */
 const DAILY = { kind: 'daily' as const, minute: 0, hour: 2, weekday: 0, day: 0, keep: 7, passphrase: PASS, rev: 0 };
 /** A backup of the fake gateway as it stands, as the page exports one. */
@@ -207,6 +214,19 @@ const ROWS: { key: string; route: string; call: () => Promise<Outcome> }[] = [
                 : preview;
         },
     },
+    { key: 'GET /managed/tls', route: 'GET /managed/tls, the certificate and the CA files', call: () => tls.view() },
+    { key: 'POST /managed/tls/certificate/check', route: 'POST /managed/tls/certificate/check, a pair verified and not installed', call: () => tls.check(PAIR) },
+    { key: 'PUT /managed/tls/certificate', route: 'PUT /managed/tls/certificate, a pair installed at once', call: () => tls.replace(PAIR) },
+    { key: 'POST /managed/tls/trust', route: 'POST /managed/tls/trust, a CA file added under a name', call: () => tls.addTrust({ name: 'broker-ca.crt', certificate: PAIR.certificate }) },
+    {
+        key: 'DELETE /managed/tls/trust/{name}',
+        route: 'DELETE /managed/tls/trust/{name}, a CA file the call added',
+        call: async () => {
+            const added = await tls.addTrust({ name: 'broker-ca.crt', certificate: PAIR.certificate });
+            return added.ok ? tls.removeTrust('broker-ca.crt') : added;
+        },
+    },
+    { key: 'POST /managed/restart', route: 'POST /managed/restart, answered 202 before the gateway is back', call: () => settings.restart() },
     { key: 'POST /managed/logout', route: 'POST /managed/logout', call: () => managed.logout() },
 ];
 

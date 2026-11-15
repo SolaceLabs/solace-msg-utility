@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -170,24 +169,17 @@ func (h *pwaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// / is the mode's bundle. The app has no client-side routes, and the
-	// bundle's relative vendor paths only resolve at /, so a path that doesn't
-	// resolve to a real file is sent there (308 for GET and HEAD; any other
-	// method has nothing to follow, so 404). A missing asset (anything with a
-	// file extension) 404s loudly.
+	// bundle's relative vendor paths only resolve at /, so there is no
+	// history-mode fallback: a path that doesn't resolve to a real file is a
+	// 404, whatever it looks like. It is never redirected: a browser keeps a
+	// permanent redirect, and would go on sending a path to / after the
+	// gateway had started to serve it.
 	if clean == "/" {
 		h.serveIndex(w, r)
 		return
 	}
 	if !fileResolvable(h.root, clean) {
-		if hasExt(clean) {
-			http.NotFound(w, r)
-			return
-		}
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.NotFound(w, r)
-			return
-		}
-		http.Redirect(w, r, "/", http.StatusPermanentRedirect)
+		http.NotFound(w, r)
 		return
 	}
 	h.fs.ServeHTTP(w, r)
@@ -237,22 +229,62 @@ type reverseProxy struct {
 const upstreamDialTimeout = 10 * time.Second
 
 // newUpstreamTransport is the one transport for every broker-bound request:
-// the Direct relay and, in the managed build, the SEMP relay. It trusts the
-// system roots plus SMU_SSL_TRUSTDIR, and never follows redirects (the
-// ReverseProxy calls RoundTrip directly).
-func newUpstreamTransport(trustPool *x509.CertPool, insecure bool) *http.Transport {
-	return &http.Transport{
-		DialContext: (&net.Dialer{Timeout: upstreamDialTimeout, KeepAlive: 30 * time.Second}).DialContext,
-		TLSClientConfig: &tls.Config{
-			RootCAs:            trustPool,
-			InsecureSkipVerify: insecure, // gated by config.yaml tls.insecureSkipVerify (SMU_SSL_SKIP_CERT_VERIFY only seeds it on first start)
+// the Direct relay, the SEMP relay and the SMF gate. It trusts what the trust
+// holder holds when each connection is made (the system roots plus the files
+// in the trust directory, and config.yaml's tls.insecureSkipVerify), so a
+// change reaches the next connection with no restart, and it never follows
+// redirects (the ReverseProxy calls RoundTrip directly). A change of trust
+// closes the idle connections, so the next request handshakes under it.
+//
+// It makes its own TLS connections (dialUpstreamTLS): crypto/tls reads a fixed
+// RootCAs, which could not follow a change, and a VerifyConnection set on the
+// transport's config cannot tell an IP address from no name at all.
+func newUpstreamTransport(trust *trustHolder) *http.Transport {
+	dialer := &net.Dialer{Timeout: upstreamDialTimeout, KeepAlive: 30 * time.Second}
+	tr := &http.Transport{
+		DialContext: dialer.DialContext,
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialUpstreamTLS(ctx, dialer, trust, network, addr)
 		},
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 	}
+	trust.onChange(tr.CloseIdleConnections)
+	return tr
+}
+
+// upstreamHandshakeTimeout bounds the TLS handshake with a broker.
+const upstreamHandshakeTimeout = 10 * time.Second
+
+// dialUpstreamTLS connects to addr and handshakes, verifying the broker's
+// certificate against the trust holder's current state and the host in addr
+// (an IP address is checked against the certificate's IP addresses). Its own
+// verification is off (InsecureSkipVerify) because verify does it, or skips it
+// when the holder says so.
+func dialUpstreamTLS(ctx context.Context, d *net.Dialer, trust *trustHolder, network, addr string) (net.Conn, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := d.DialContext(ctx, network, addr)
+	if err != nil {
+		return nil, err
+	}
+	conn := tls.Client(raw, &tls.Config{
+		ServerName:         host,
+		NextProtos:         []string{"h2", "http/1.1"},
+		InsecureSkipVerify: true,
+		VerifyConnection:   func(cs tls.ConnectionState) error { return trust.verify(cs, host) },
+	})
+	hctx, cancel := context.WithTimeout(ctx, upstreamHandshakeTimeout)
+	defer cancel()
+	if err := conn.HandshakeContext(hctx); err != nil {
+		_ = raw.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 func newReverseProxy(transport http.RoundTripper, logger *slog.Logger) *reverseProxy {

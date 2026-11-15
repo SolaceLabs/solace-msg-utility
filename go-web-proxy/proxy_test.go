@@ -1,10 +1,11 @@
 package main
 
 import (
-	"crypto/x509"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -363,28 +364,23 @@ func TestPWAHandler_ServesIndex(t *testing.T) {
 }
 
 // The app has no client-side routes and the bundle's relative vendor paths
-// only resolve at /, so an unknown extensionless path is sent there: 308 for
-// GET and HEAD, a 404 for a method with nothing to follow.
-func TestPWAHandler_UnknownPathRedirectsHome(t *testing.T) {
+// only resolve at /, so a path that is not a file is a 404 for every method:
+// never the bundle, and never a redirect a browser would keep.
+func TestPWAHandler_UnknownPathIsNotFound(t *testing.T) {
 	dir := writeBundles(t)
 	for _, provisioned := range []bool{false, true} {
 		h := mustPWA(t, dir, appIndexFile(provisioned))
-		for _, p := range []string{"/queue-browser/some/deep/route", "/login", "/login/", "/a/b?x=1"} {
-			for _, method := range []string{http.MethodGet, http.MethodHead} {
+		for _, p := range []string{"/queue-browser/some/deep/route", "/login", "/login/", "/a/b?x=1", "/missing.js"} {
+			for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
 				rec := httptest.NewRecorder()
 				h.ServeHTTP(rec, httptest.NewRequest(method, p, nil))
-				if rec.Code != http.StatusPermanentRedirect || rec.Header().Get("Location") != "/" {
-					t.Errorf("provisioned=%v %s %s: want 308 to /, got %d %q", provisioned, method, p, rec.Code, rec.Header().Get("Location"))
+				if rec.Code != http.StatusNotFound || rec.Header().Get("Location") != "" {
+					t.Errorf("provisioned=%v %s %s: want 404 without a Location, got %d %q", provisioned, method, p, rec.Code, rec.Header().Get("Location"))
 				}
 				if strings.Contains(rec.Body.String(), "<html>direct") || strings.Contains(rec.Body.String(), "<html>provisioned") {
 					t.Errorf("provisioned=%v %s %s: served a bundle: %q", provisioned, method, p, rec.Body.String())
 				}
 			}
-		}
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/a/b", strings.NewReader("x")))
-		if rec.Code != http.StatusNotFound || rec.Header().Get("Location") != "" {
-			t.Errorf("provisioned=%v POST /a/b: want 404 without a Location, got %d %q", provisioned, rec.Code, rec.Header().Get("Location"))
 		}
 	}
 }
@@ -484,7 +480,7 @@ func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
 	defer upstream.Close()
 
 	upURL, _ := url.Parse(upstream.URL)
-	rp := newReverseProxy(newUpstreamTransport(x509.NewCertPool(), false), quietLogger())
+	rp := newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger())
 
 	// Build /http/{port}/{host}/some/path?x=1 against the test server.
 	gw := httptest.NewServer(rp)
@@ -521,19 +517,40 @@ func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
 	}
 }
 
-// One transport serves the Direct relay and the SEMP relay: the trust pool and
-// skip-verify flag reach TLS, and a connect has its own bound.
+// One transport serves the Direct relay, the SEMP relay and the SMF gate: it
+// makes its own TLS connections, verified through the trust holder when each
+// is made, closes its idle connections when the trust changes, and a connect
+// has its own bound.
 func TestNewUpstreamTransport(t *testing.T) {
-	pool := x509.NewCertPool()
-	tr := newUpstreamTransport(pool, true)
-	if tr.TLSClientConfig.RootCAs != pool || !tr.TLSClientConfig.InsecureSkipVerify {
-		t.Errorf("TLS config: %+v", tr.TLSClientConfig)
+	trust := testTrust(false)
+	tr := newUpstreamTransport(trust)
+	if tr.DialTLSContext == nil || tr.TLSClientConfig != nil {
+		t.Errorf("verification belongs to dialUpstreamTLS, reading the holder: %+v", tr.TLSClientConfig)
 	}
-	if tr.DialContext == nil || tr.ResponseHeaderTimeout != 30*time.Second || tr.TLSHandshakeTimeout != 10*time.Second {
-		t.Error("the transport must bound the connect, the handshake and the wait for headers")
+	if tr.DialContext == nil || tr.ResponseHeaderTimeout != 30*time.Second {
+		t.Error("the transport must bound the connect and the wait for headers")
 	}
-	if newUpstreamTransport(pool, false).TLSClientConfig.InsecureSkipVerify {
-		t.Error("skip-verify must follow the flag")
+	if len(trust.hooks) != 1 {
+		t.Errorf("the transport must close its idle connections on a trust change: %d hooks", len(trust.hooks))
+	}
+}
+
+// An address that is not host:port, or a host that does not answer, fails
+// before any handshake and leaves no connection behind.
+func TestDialUpstreamTLS_FailsBeforeTheHandshakeWhenItCannotConnect(t *testing.T) {
+	dialer := &net.Dialer{Timeout: time.Second}
+	trust := testTrust(false)
+	if conn, err := dialUpstreamTLS(context.Background(), dialer, trust, "tcp", "no-port"); err == nil || conn != nil {
+		t.Errorf("an address with no port must be refused, got %v %v", conn, err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	if conn, err := dialUpstreamTLS(context.Background(), dialer, trust, "tcp", addr); err == nil || conn != nil {
+		t.Errorf("a closed port must fail to connect, got %v %v", conn, err)
 	}
 }
 
@@ -572,7 +589,7 @@ func TestReverseProxy_NeverForwardsTheSessionCookie(t *testing.T) {
 	}))
 	defer upstream.Close()
 	upURL, _ := url.Parse(upstream.URL)
-	gw := httptest.NewServer(newReverseProxy(newUpstreamTransport(x509.NewCertPool(), false), quietLogger()))
+	gw := httptest.NewServer(newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger()))
 	defer gw.Close()
 
 	req, _ := http.NewRequest("GET", gw.URL+"/http/"+upURL.Port()+"/"+upURL.Hostname()+"/SEMP", nil)
@@ -628,7 +645,7 @@ func TestReverseProxy_UpstreamCannotSetTheSessionCookie(t *testing.T) {
 	}))
 	defer upstream.Close()
 	upURL, _ := url.Parse(upstream.URL)
-	gw := httptest.NewServer(newReverseProxy(newUpstreamTransport(x509.NewCertPool(), false), quietLogger()))
+	gw := httptest.NewServer(newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger()))
 	defer gw.Close()
 
 	resp, err := http.Get(gw.URL + "/http/" + upURL.Port() + "/" + upURL.Hostname() + "/SEMP")
@@ -642,7 +659,7 @@ func TestReverseProxy_UpstreamCannotSetTheSessionCookie(t *testing.T) {
 }
 
 func TestReverseProxy_BadPathReturns400(t *testing.T) {
-	rp := newReverseProxy(newUpstreamTransport(x509.NewCertPool(), false), quietLogger())
+	rp := newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger())
 	gw := httptest.NewServer(rp)
 	defer gw.Close()
 
@@ -657,7 +674,7 @@ func TestReverseProxy_BadPathReturns400(t *testing.T) {
 }
 
 func TestReverseProxy_UpstreamDown_502(t *testing.T) {
-	rp := newReverseProxy(newUpstreamTransport(x509.NewCertPool(), false), quietLogger())
+	rp := newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger())
 	gw := httptest.NewServer(rp)
 	defer gw.Close()
 
@@ -912,8 +929,8 @@ func TestPWAHandler_FilesAndDirectories(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/licenses/", nil))
-	if rec.Code != http.StatusPermanentRedirect || rec.Header().Get("Location") != "/" || strings.Contains(rec.Body.String(), "LICENSE.markdown") {
-		t.Errorf("/licenses/: a directory without an index is never listed, want 308 to /, got %d %q %q", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	if rec.Code != http.StatusNotFound || rec.Header().Get("Location") != "" || strings.Contains(rec.Body.String(), "LICENSE.markdown") {
+		t.Errorf("/licenses/: a directory without an index is never listed, want 404, got %d %q %q", rec.Code, rec.Header().Get("Location"), rec.Body.String())
 	}
 }
 

@@ -49,6 +49,15 @@ describe('mock-broker/gateway/seed', () => {
         expect(DEMO_ACCOUNTS.map(a => gw.signIn(a.username, a.password)).every(r => r.ok && !('step' in r))).toBe(true);
     });
 
+    it('holds no TLS path (the real gateway reads them from its environment) and starts with one certificate and no CA file', () => {
+        expect(seed.settings.tls).toEqual({ insecureSkipVerify: false });
+        expect(gw.settings.current().tls).toEqual({ insecureSkipVerify: false });
+        expect(JSON.stringify(seed)).not.toMatch(/certFile|keyFile|trustDir/);
+        const view = gw.tls.view();
+        expect(view).toMatchObject({ certificateWritable: true, trustWritable: true, trust: [] });
+        expect(view.certificate).toMatchObject({ subject: 'CN=demo certificate', selfSigned: true, expired: false });
+    });
+
     it('shows the roles apart', () => {
         const brokers = (user: string) => me(user)!.brokers.map(b => `${b.broker}:${b.msgVpns.map(v => v.name).join(',')}`);
 

@@ -3,14 +3,15 @@ import { X509Certificate } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import tls from 'node:tls';
+import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import {
-    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, base32Decode, basisMoved, continueLinkFromPage,
+    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, base32Decode, basisMoved, certFingerprint, continueLinkFromPage,
     createCookieJar, detailsFileText, dnsServers, findTokens, freshTotp,
     hostAliasProblem, hostRootBundle,
-    issueCert, jsonFindings, listedRev, listedRow, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, recoveryCodeProblems,
+    issueCert, issueExpiredCert, jsonFindings, listedRev, listedRow, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, recoveryCodeProblems,
     recoveryCodesFromPage, refusalProblem, resolutionOverride, resolveDetails, resolverLookup, sealedHeaderProblem, sessionCookieProblems, signinCookieProblems,
-    sweepSecrets, totpAt, totpCode, totpStep, twoFactorSecretFromPage, wrongTotp, wroteFile,
+    sweepSecrets, tlsFingerprint, totpAt, totpCode, totpStep, twoFactorSecretFromPage, wrongTotp, wroteFile,
 } from '../../scripts/e2e-lib.mjs';
 import { REPO_ROOT } from '../helpers/sources';
 import { WIDENING, securityOpt, serviceBlock } from '../helpers/compose';
@@ -80,6 +81,74 @@ describe('e2e-lib -- TLS material', () => {
         } finally {
             server.close();
         }
+    });
+
+    it('issues an expired certificate the CA signed: one day of validity that ended 29 days ago', () => {
+        const now = new Date('2026-11-15T08:00:00Z');
+        const cert = new X509Certificate(issueExpiredCert(ca, { cn: 'localhost', dns: ['localhost'], ip: ['127.0.0.1'], now }).certPem);
+        expect(new Date(cert.validFrom).toISOString()).toBe('2026-10-16T07:00:00.000Z');
+        expect(new Date(cert.validTo).toISOString()).toBe('2026-10-17T08:00:00.000Z');
+        expect(cert.checkIssued(new X509Certificate(ca.certPem))).toBe(true);
+        expect(cert.subjectAltName).toBe('DNS:localhost, IP Address:127.0.0.1');
+        expect(new Date(new X509Certificate(issueExpiredCert(ca, { cn: 'x' }).certPem).validTo).getTime()).toBeLessThan(Date.now());
+    });
+
+    it('writes a fingerprint as the gateway shows one: upper-case hex pairs joined by colons, of the first certificate', () => {
+        const fp = certFingerprint(`${leaf.keyPem}${leaf.certPem}${ca.certPem}`);
+        expect(fp).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+        expect(fp).toBe(new X509Certificate(leaf.certPem).fingerprint256);
+        expect(fp).not.toBe(certFingerprint(ca.certPem));
+        expect(() => certFingerprint(leaf.keyPem)).toThrow('holds no PEM certificate');
+    });
+
+    describe('reading the certificate a server presents', () => {
+        const listen = (server: net.Server) => new Promise<number>((resolve) => {
+            server.listen(0, '127.0.0.1', () => resolve((server.address() as AddressInfo).port));
+        });
+
+        it('gives the fingerprint of the certificate served now, and the next one after the server swaps it', async () => {
+            const server = tls.createServer({ cert: leaf.certPem, key: leaf.keyPem }, (s) => { s.on('error', () => {}); s.end(); });
+            server.on('tlsClientError', () => {});
+            const port = await listen(server);
+            try {
+                expect(await tlsFingerprint({ host: '127.0.0.1', port })).toBe(certFingerprint(leaf.certPem));
+                const second = issueCert(ca, { cn: 'localhost', dns: ['localhost'], ip: ['127.0.0.1'] });
+                server.setSecureContext({ cert: second.certPem, key: second.keyPem });
+                const now = await tlsFingerprint({ host: '127.0.0.1', port, servername: 'localhost', timeoutMs: 5_000 });
+                expect(now).toBe(certFingerprint(second.certPem));
+                expect(now).not.toBe(certFingerprint(leaf.certPem));
+            } finally {
+                server.close();
+            }
+        });
+
+        it('does not need to trust the certificate: a server whose CA the client has never seen still answers', async () => {
+            const stranger = issueCert(makeCA('a CA nobody trusts'), { cn: 'stranger', dns: ['stranger'], ip: ['127.0.0.1'] });
+            const server = tls.createServer({ cert: stranger.certPem, key: stranger.keyPem }, (s) => { s.on('error', () => {}); s.end(); });
+            server.on('tlsClientError', () => {});
+            const port = await listen(server);
+            try {
+                expect(await tlsFingerprint({ host: '127.0.0.1', port })).toBe(certFingerprint(stranger.certPem));
+            } finally {
+                server.close();
+            }
+        });
+
+        it('rejects when nothing listens, and when the server never finishes the handshake', async () => {
+            const closed = net.createServer();
+            const gone = await listen(closed);
+            await new Promise((r) => closed.close(r));
+            await expect(tlsFingerprint({ host: '127.0.0.1', port: gone })).rejects.toMatchObject({ code: 'ECONNREFUSED' });
+            // Accepts the connection and says nothing, so the client waits for a ServerHello.
+            const silent = net.createServer((socket) => { socket.on('error', () => {}); });
+            const port = await listen(silent);
+            try {
+                await expect(tlsFingerprint({ host: '127.0.0.1', port, timeoutMs: 100 }))
+                    .rejects.toThrow(`127.0.0.1:${port} did not finish a TLS handshake in 100 ms`);
+            } finally {
+                silent.close();
+            }
+        });
     });
 
     it('refuses an IP SAN that is not IPv4', () => {
@@ -603,6 +672,50 @@ describe('e2e-lib -- audit log', () => {
             'an ok user.create for e2e-user that wrote users.yaml with a seq', 'an ok settings.update that wrote config.yaml',
             'an ok backup.import that wrote users.yaml, connections.yaml and config.yaml',
         ]);
+    });
+
+    describe('with the TLS checks', () => {
+        const wantTls = { ...want, tls: { trustFile: 'broker-ca.crt' } };
+        const msg = 'admin replaced the gateway certificate (subject CN=localhost, expires 2026-11-22T08:00:00Z)';
+        const tlsEntries = [
+            { action: 'tls.certificate.replace', outcome: 'ok', actor: 'admin', msg },
+            { action: 'gateway.restart', outcome: 'ok', actor: 'admin' },
+            { action: 'tls.trust.add', outcome: 'ok', actor: 'admin', target: 'broker-ca.crt' },
+            { action: 'tls.trust.remove', outcome: 'ok', actor: 'admin', target: 'broker-ca.crt' },
+        ];
+
+        it('asks nothing more when the TLS checks are not named, and names what is missing when they are', () => {
+            expect(auditMissing(complete, want)).toEqual([]);
+            expect(auditMissing(complete, wantTls)).toEqual([
+                'an ok tls.certificate.replace by admin whose message names the subject and the expiry and holds no key',
+                'an ok gateway.restart by admin',
+                'an ok tls.trust.add of broker-ca.crt by admin',
+                'an ok tls.trust.remove of broker-ca.crt by admin',
+            ]);
+        });
+
+        it('finds nothing missing once the replace, the restart and the CA file add and delete are there', () => {
+            expect(auditMissing([...complete, ...tlsEntries], wantTls)).toEqual([]);
+        });
+
+        it('wants no CA file entry when the run skipped the CA check (an insecure run)', () => {
+            expect(auditMissing([...complete, ...tlsEntries.slice(0, 2)], { ...want, tls: {} })).toEqual([]);
+            expect(auditMissing(complete, { ...want, tls: {} })).toHaveLength(2);
+        });
+
+        it('does not count a refused entry, another actor, another file, or a message that names no subject or holds a PEM block', () => {
+            const wrong = [
+                { ...tlsEntries[0], outcome: 'refused' },
+                { ...tlsEntries[0], actor: 'e2e-user' },
+                { ...tlsEntries[0], msg: 'admin replaced the gateway certificate' },
+                { ...tlsEntries[0], msg: `${msg} -----BEGIN PRIVATE KEY-----` },
+                { ...tlsEntries[1], outcome: 'refused' },
+                { ...tlsEntries[1], actor: 'e2e-user' },
+                { ...tlsEntries[2], target: 'other.crt' },
+                { ...tlsEntries[3], actor: 'e2e-user' },
+            ];
+            expect(auditMissing([...complete, ...wrong], wantTls)).toHaveLength(4);
+        });
     });
 
     describe('with the two-factor user', () => {

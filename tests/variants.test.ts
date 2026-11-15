@@ -68,12 +68,13 @@ describe('variants', () => {
             expect(Object.keys(v)).not.toContain('user-management');
             expect(Object.keys(v)).not.toContain('connection-management');
             expect(Object.keys(v)).not.toContain('gateway-settings');
+            expect(Object.keys(v)).not.toContain('tls-certificates');
             expect(Object.keys(v)).not.toContain('backup');
             expect(Object.keys(v)).not.toContain('admin-login');
         });
     });
 
-    it('admin variant ships the login plus the three editors and Backup & Restore, and no messaging modules', () => {
+    it('admin variant ships the login plus the three editors, Certificates and Backup & Restore, and no messaging modules', () => {
         // admin-login authenticates but opens no broker connection, so there is
         // nothing for the messaging modules to attach to.
         expect(Object.keys(ADMIN_VARIANT).sort()).toEqual([
@@ -81,12 +82,14 @@ describe('variants', () => {
             'backup',
             'connection-management',
             'gateway-settings',
+            'tls-certificates',
             'user-management',
         ]);
         expect(ADMIN_VARIANT['admin-login']).toBeGreaterThan(ADMIN_VARIANT['user-management']);
         expect(ADMIN_VARIANT['user-management']).toBeGreaterThan(ADMIN_VARIANT['connection-management']);
         expect(ADMIN_VARIANT['connection-management']).toBeGreaterThan(ADMIN_VARIANT['gateway-settings']);
-        expect(ADMIN_VARIANT['gateway-settings']).toBeGreaterThan(ADMIN_VARIANT['backup']);
+        expect(ADMIN_VARIANT['gateway-settings']).toBeGreaterThan(ADMIN_VARIANT['tls-certificates']);
+        expect(ADMIN_VARIANT['tls-certificates']).toBeGreaterThan(ADMIN_VARIANT['backup']);
     });
 
     it('all variant ships the all modules for visual testing purpose', () => {
@@ -101,6 +104,7 @@ describe('variants', () => {
             'queue-browser',
             'queue-copy',
             'queue-subscription-explorer',
+            'tls-certificates',
             'user-management',
         ]);
         expect(ALL_ENTRIES).toEqual({ connections: 'managed' });
@@ -148,7 +152,7 @@ describe('variants', () => {
     it('managed demo ships the managed variant\'s messaging modules and the admin pages, on the managed entry', () => {
         // The one shipped bundle with the admin pages: a demo, against a fake
         // gateway. No admin-login (the Managed panel owns the session).
-        const editors = ['backup', 'connection-management', 'gateway-settings', 'user-management'];
+        const editors = ['backup', 'connection-management', 'gateway-settings', 'tls-certificates', 'user-management'];
         const messaging = Object.keys(MANAGED_VARIANT);
         expect(Object.keys(DEMO_VARIANT).sort()).toEqual([...messaging, ...editors].sort());
         expect(DEMO_VARIANT).not.toHaveProperty('admin-login');

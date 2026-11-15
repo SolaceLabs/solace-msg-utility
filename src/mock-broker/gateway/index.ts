@@ -15,6 +15,11 @@
  * the SDK emulator's sessions, admitted by `sockets.gate` (which the managed
  * demo's boot hands to `setSocketGate`) and closed on revocation.
  *
+ * A restart (`POST /managed/restart`) ends every session, ticket and socket and
+ * applies what waited for it at once; the gateway is then unreachable (`fetch`
+ * fails, as against a stopped process) for RESTART_PAUSE_MS, after which the
+ * `onRestart` listeners run: the boot's land the page on the sign-in.
+ *
  * Mock-only.
  */
 import { delay } from '../fixtures';
@@ -27,6 +32,7 @@ import { createSessions } from './sessions';
 import { createSettings, type SettingsFaults } from './settings';
 import { createSockets } from './sockets';
 import { createStore, type GatewayStore } from './store';
+import { createTls, type TlsFaults, type TlsState } from './tls';
 import { createTickets, type Ticket } from './tickets';
 import { createThrottle, throttledText, type ThrottleState } from './throttle';
 import { PASSWORD_MAX, PASSWORD_MIN, passwordOk } from './validate';
@@ -36,7 +42,10 @@ import type { Session } from './sessions';
 /** Sent on every fake-gateway answer; `check-bundles.mjs` requires it in the demo bundle only. */
 export const DEMO_GATEWAY_MARKER = 'smu-demo-gateway/1';
 
-export type GatewayFaults = RouterFaults & SettingsFaults;
+/** How long the restarted gateway stays unreachable, the page's wait before it returns to the sign-in. */
+export const RESTART_PAUSE_MS = 1500;
+
+export type GatewayFaults = RouterFaults & SettingsFaults & TlsFaults;
 
 /** A sign-in page's answer: through (and whether the password must change first), or the error it shows. */
 export type PageResult = { ok: true; mustChange: boolean } | { ok: false; error: string; signedOut?: boolean };
@@ -80,6 +89,8 @@ export interface GatewaySnapshot {
     ticketCookie?: string | null;
     /** The last step accepted per user (the replay rule). */
     lastSteps?: [string, number][];
+    /** Absent in a snapshot from a build before the TLS console. */
+    tls?: TlsState;
 }
 
 /** The headers an answer goes out with (the gateway contract compares them). */
@@ -113,15 +124,21 @@ function toResponse(r: GatewayResponse): Response {
 export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new Date(), upstream }: {
     seed: GatewaySeed; backupIter?: number; now?: () => Date; upstream?: Upstream;
 }) {
-    const faults: GatewayFaults = { relayUnreachable: false, dialRateLimited: false, changedOnDisk: false, unreadable: false };
+    const faults: GatewayFaults = { relayUnreachable: false, dialRateLimited: false, changedOnDisk: false, unreadable: false, tlsReadOnly: false };
     const changeListeners: (() => void)[] = [];
     const store = createStore(seed, () => changeListeners.forEach(fn => fn()));
     const sessions = createSessions();
     const settings = createSettings(seed.settings, seed.client, () => faults);
     const backups = createBackups({ store, settings, sessions, iter: backupIter, now });
-    const router = createRouter({ store, sessions, settings, faults: () => faults, backupRoutes: backups.routes, client: seed.client, upstream });
+    const tls = createTls({ now, readOnly: () => faults.tlsReadOnly });
+    const router = createRouter({
+        store, sessions, settings, faults: () => faults, backupRoutes: backups.routes, tlsRoutes: tls.routes, restart, client: seed.client, upstream,
+    });
     let cookie: string | null = null;
     let ticketCookie: string | null = null;
+    /** Between a restart and the gateway being back: nothing answers. */
+    let down = false;
+    const restartListeners: (() => void)[] = [];
     /** The last TOTP step accepted per user: a step at or below it is a replay. */
     const lastStep = new Map<string, number>();
     const tickets = createTickets(() => now().getTime());
@@ -130,6 +147,24 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
     const sockets = createSockets(store, sessions, () => cookie);
     changeListeners.push(() => sockets.recheck());
     const throttle = createThrottle(() => settings.current().login);
+
+    /**
+     * The gateway restarts in place: every session, ticket and socket ends, what waited for a
+     * restart applies, and nothing answers until it is back, when the listeners run.
+     */
+    function restart(): void {
+        sessions.dropAll();
+        tickets.clear();
+        sockets.closeAll();
+        cookie = null;
+        ticketCookie = null;
+        settings.applyRestart();
+        down = true;
+        setTimeout(() => {
+            down = false;
+            restartListeners.forEach(fn => fn());
+        }, RESTART_PAUSE_MS);
+    }
 
     const endTicket = (): void => {
         tickets.end(ticketCookie);
@@ -307,6 +342,7 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
     /** The `installMockServer` route: `/hosted` and `/managed/*`, with the page's cookie. */
     const route: MockRoute = async (path, url, init) => {
         if (path !== '/hosted' && !path.startsWith('/managed/')) return null;
+        if (down) throw new TypeError('Failed to fetch');   // a stopped gateway: the connection is refused
         await delay();
         if (path === '/hosted') return toResponse(hosted());
         const req: GatewayRequest = {
@@ -329,6 +365,7 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
         sessions,
         settings,
         sockets,
+        tls,
         faults,
         signIn,
         submitCode,
@@ -359,7 +396,7 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
             return {
                 store: store.dump(), sessions: sessions.dump(), settings: settings.dump(), settingsRev: settings.rev(),
                 cookie, faults: { ...faults }, throttle: throttle.dump(), backups: backups.dump(),
-                tickets: tickets.dump(), ticketCookie, lastSteps: Array.from(lastStep),
+                tickets: tickets.dump(), ticketCookie, lastSteps: Array.from(lastStep), tls: tls.dump(),
             };
         },
         restore(s: GatewaySnapshot): void {
@@ -374,12 +411,17 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
             ticketCookie = s.ticketCookie ?? null;
             lastStep.clear();
             for (const [user, step] of s.lastSteps ?? []) lastStep.set(user, step);
+            if (s.tls) tls.load(s.tls);
         },
         /** Open a session, as a sign-in does; the caller decides whether the page holds it. */
         openSession: (user: string, mustChange: boolean): string => sessions.create(user, mustChange),
         cookie: (): string | null => cookie,
         setCookie(id: string | null): void {
             cookie = id;
+        },
+        /** The gateway came back after a restart (RESTART_PAUSE_MS later): the boot lands the page on the sign-in. */
+        onRestart(fn: () => void): void {
+            restartListeners.push(fn);
         },
         /** After every committed user or connection edit (store.onChange). */
         onStoreChange(fn: () => void): void {

@@ -45,7 +45,6 @@ const DIR = '/backup';
 /** passwordIter in password.go. */
 export const BACKUP_ITER = 600_000;
 const NAME = /^smu-backup-[0-9]{8}T[0-9]{6}Z\.json$/;
-const HOST_KEYS = ['tls.certFile', 'tls.keyFile', 'tls.trustDir'];
 
 // ----- refusals ----------------------------------------------------------------------
 
@@ -253,16 +252,6 @@ export async function openBackup(file: string, passphrase: string): Promise<Back
     }
 }
 
-/** withHostPaths: the host-only path keys from `host`. */
-export function withHostPaths(s: GatewaySettings, host: Pick<GatewaySettings, 'tls'>): GatewaySettings {
-    return {
-        ...s,
-        tls: { ...s.tls, certFile: host.tls.certFile, keyFile: host.tls.keyFile, trustDir: host.tls.trustDir },
-    };
-}
-
-const NO_PATHS = { tls: { certFile: '', keyFile: '', trustDir: '', insecureSkipVerify: false } };
-
 // ----- import planning --------------------------------------------------------------------
 
 export interface NameDiff { added: string[]; changed: string[]; removed: string[] }
@@ -314,12 +303,12 @@ function flatten(v: unknown, prefix = '', out: Record<string, string> = {}): Rec
     return out;
 }
 
-/** settingsChanges: dotted keys, sorted, never a host path. */
+/** settingsChanges: dotted keys, sorted. */
 export function settingsChanges(cur: GatewaySettings, next: GatewaySettings): string[] {
     const a = flatten(cur);
     const b = flatten(next);
     return [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()
-        .filter(k => !HOST_KEYS.includes(k) && a[k] !== b[k]);
+        .filter(k => a[k] !== b[k]);
 }
 
 /** validateUsers, as far as the fake keeps users: names, duplicates, a password, modules. */
@@ -438,7 +427,7 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
 
     const snapshot = (): BackupDoc => {
         const d = store.dump();
-        return { created: rfc3339(now()), gateway: 'demo', users: d.users, connections: d.conns, settings: withHostPaths(settings.current(), NO_PATHS) };
+        return { created: rfc3339(now()), gateway: 'demo', users: d.users, connections: d.conns, settings: settings.current() };
     };
 
     const list = () => [...files.entries()]
@@ -614,7 +603,7 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
         // first: its refusals then leave everything as it was, as the gateway's do.
         let restartRequired: string[] = [];
         if (choice.settings === 'replace') {
-            const r = settings.save(withHostPaths(doc.settings, settings.current()), now.settings);
+            const r = settings.save(doc.settings, now.settings);
             if (!r.ok) return { status: r.status, json: refusalBody(r) };
             restartRequired = r.restartRequired;
         }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mountControlPanel } from '../../../src/mock-broker/controls/panel';
-import { managedSections } from '../../../src/mock-broker/controls/managed';
+import { managedSections, TLS_READ_ONLY_ID } from '../../../src/mock-broker/controls/managed';
 import { createGateway } from '../../../src/mock-broker/gateway';
 import { DEMO_TOPOLOGY, demoSeed } from '../../../src/mock-broker/gateway/seed';
 import { seed } from '../../../src/mock-broker/broker/store';
@@ -122,19 +122,36 @@ describe('mock-broker/controls/managed -- gateway events', () => {
     it('arms the relay, dial and config.yaml faults, starting from the gateway\'s', () => {
         const events = Array.from(panel().querySelectorAll('.mockctl-section')).find(s => s.querySelector('.mockctl-title')!.textContent === 'Gateway events')!;
         const selects = Array.from(events.querySelectorAll<HTMLSelectElement>('select'));
-        expect(selects.map(s => s.value)).toEqual(['ok', 'ok', 'ok']);
+        expect(selects.map(s => s.value)).toEqual(['ok', 'ok', 'ok', 'writable']);
         const set = (s: HTMLSelectElement, v: string) => { s.value = v; s.dispatchEvent(new Event('change')); };
 
         set(selects[0], 'down');
         set(selects[1], 'limited');
         set(selects[2], 'unreadable');
-        expect(gw.faults).toEqual({ relayUnreachable: true, dialRateLimited: true, changedOnDisk: false, unreadable: true });
+        expect(gw.faults).toEqual({ relayUnreachable: true, dialRateLimited: true, changedOnDisk: false, unreadable: true, tlsReadOnly: false });
         set(selects[2], 'changed');
         expect([gw.faults.changedOnDisk, gw.faults.unreadable]).toEqual([true, false]);
     });
 
+    it('switches the TLS files to read-only and back, and shows a switch the gateway already holds', () => {
+        const sw = () => document.getElementById(TLS_READ_ONLY_ID) as HTMLSelectElement;
+        expect(sw().value).toBe('writable');
+        sw().value = 'readonly';
+        sw().dispatchEvent(new Event('change'));
+        expect(gw.faults.tlsReadOnly).toBe(true);
+        expect(gw.tls.view().certificateWritable).toBe(false);
+        sw().value = 'writable';
+        sw().dispatchEvent(new Event('change'));
+        expect(gw.faults.tlsReadOnly).toBe(false);
+
+        gw.faults.tlsReadOnly = true;
+        document.body.innerHTML = '';
+        mountControlPanel({ sections: managedSections({ gateway: gw, navigate: () => {} }), reset: () => {} });
+        expect(sw().value).toBe('readonly');
+    });
+
     it('lists every broker\'s queues in the queue-state lever', () => {
-        const options = Array.from(panel().querySelectorAll('select')[3].querySelectorAll('option'), o => o.textContent);
+        const options = Array.from(panel().querySelectorAll('select')[4].querySelectorAll('option'), o => o.textContent);
         expect(options).toContain('default / test-queue-1');
         expect(options).toContain('east-prod / orders / audit.orders');
         expect(options).toContain('lab / sandbox / sandbox.bulk');

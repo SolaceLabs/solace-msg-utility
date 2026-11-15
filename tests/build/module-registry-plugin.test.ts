@@ -270,7 +270,7 @@ describe('moduleRegistryPlugin -- module stylesheets', () => {
     it('styles the admin editors in every variant that lists them, the kitchen-sink build included', () => {
         for (const variant of ['admin', 'managed-demo', 'all-for-testing-only']) {
             const code = load(variant);
-            for (const id of ['user-management', 'connection-management', 'gateway-settings', 'backup']) {
+            for (const id of ['user-management', 'connection-management', 'gateway-settings', 'tls-certificates', 'backup']) {
                 expect(code, `${variant}: ${id}`).toMatch(new RegExp(`^import ".*/src/modules/${id}/styles\\.css";$`, 'm'));
             }
         }

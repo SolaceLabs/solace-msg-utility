@@ -60,3 +60,5 @@ go-web-proxy/graphify-out/
 
 # End-to-end broker details (scripts/e2e.mjs): may hold broker passwords
 docker/e2e-broker.env
+
+tmp

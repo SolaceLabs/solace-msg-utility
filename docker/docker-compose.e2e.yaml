@@ -13,6 +13,16 @@
 # 127.0.0.1:39445; all are bound to loopback. Both gateways reach the broker
 # over TLS only and verify it against the CA file the harness was given and
 # the host's standard roots; a broker on this machine is host.docker.internal.
+#
+# The Provisioned gateway's /tls is a writable mount of the one host directory
+# the harness fills (tls.crt, tls.key and trust/), so checks 28-31 can replace
+# the certificate and delete and add CA files through the console's API, and
+# restart the gateway in place. The posture does not change: still non-root,
+# read-only root filesystem, no capability. The gateway's user (65532) has to
+# create files in /tls and /tls/trust, so the harness makes both directories
+# world-writable, which is throwaway material for one run. A directory, never
+# single files: a file mounted by itself cannot be replaced by a rename. The
+# Gateway-mode service mounts the same directory read-only.
 name: smu-e2e
 services:
   gateway:
@@ -45,9 +55,8 @@ services:
     volumes:
       - data:/data
       - backup:/backup
-      - ../scripts/logs/e2e/gateway.crt:/tls/tls.crt:ro
-      - ../scripts/logs/e2e/gateway.key:/tls/tls.key:ro
-      - ../scripts/logs/e2e/trust:/tls/trust:ro
+      # Writable, so the console can change the certificate and the CA files.
+      - ../scripts/logs/e2e/tls:/tls
       - ../scripts/logs/e2e/system-roots.crt:/etc/ssl/certs/ca-certificates.crt:ro
       - ../scripts/logs/e2e/admin-password:/run/secrets/admin-password:ro
     ports:
@@ -81,9 +90,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - direct-data:/data
-      - ../scripts/logs/e2e/gateway.crt:/tls/tls.crt:ro
-      - ../scripts/logs/e2e/gateway.key:/tls/tls.key:ro
-      - ../scripts/logs/e2e/trust:/tls/trust:ro
+      - ../scripts/logs/e2e/tls:/tls:ro
       - ../scripts/logs/e2e/system-roots.crt:/etc/ssl/certs/ca-certificates.crt:ro
     ports:
       - "127.0.0.1:39445:9443"

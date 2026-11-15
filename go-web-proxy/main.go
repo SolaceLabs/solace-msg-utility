@@ -54,10 +54,13 @@ const appRoot = "/SolaceMsgUtility"
 // copied into a *live at startup and swapped by the settings page; read them
 // there, per request, so a save reaches them. The rest apply at restart.
 type config struct {
-	hosted             bool
-	certFile           string
-	keyFile            string
-	trustDir           string
+	hosted bool
+	// The TLS paths come from the environment at every start, never from
+	// config.yaml (tlsPathsFromEnv).
+	certFile string
+	keyFile  string
+	trustDir string
+	// insecureSkipVerify is live: the trust holder carries it (live.go).
 	insecureSkipVerify bool
 	logLevel           slog.Level
 	// Provisioned mode's stores, at fixed paths (the defaults below; serve
@@ -148,9 +151,9 @@ func newRootHandler(hosted, admin, app, relay http.Handler, mr *managedRoutes) h
 func defaultConfig() config {
 	return config{
 		hosted:          true,
-		certFile:        "/tls/tls.crt",
-		keyFile:         "/tls/tls.key",
-		trustDir:        "/tls/trust",
+		certFile:        defaultCertFile,
+		keyFile:         defaultKeyFile,
+		trustDir:        defaultTrustDir,
 		logLevel:        slog.LevelWarn,
 		usersFile:       defaultUsersFile,
 		connectionsFile: defaultConnectionsFile,
@@ -193,11 +196,12 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, fmt.Errorf("SMU_SHOW_AUDIT=%q: %w", os.Getenv("SMU_SHOW_AUDIT"), err)
 	}
+	paths := tlsPathsFromEnv()
 	return config{
 		hosted:             hosted,
-		certFile:           envOr("SMU_SSL_CERTFILE", d.certFile),
-		keyFile:            envOr("SMU_SSL_CERTKEYFILE", d.keyFile),
-		trustDir:           envOr("SMU_SSL_TRUSTDIR", d.trustDir),
+		certFile:           paths.certFile,
+		keyFile:            paths.keyFile,
+		trustDir:           paths.trustDir,
 		insecureSkipVerify: insecure,
 		logLevel:           level,
 		usersFile:          d.usersFile,
@@ -355,6 +359,7 @@ func main() {
 		listen:     func() (net.Listener, error) { return net.Listen("tcp", listenAddr) },
 		signals:    signals,
 		shutdown:   shutdownTimeout,
+		restart:    restartInPlace,
 	})
 	if err != nil {
 		os.Exit(1)
@@ -374,12 +379,32 @@ type process struct {
 	listen     func() (net.Listener, error) // listenAddr
 	signals    <-chan os.Signal             // SIGINT or SIGTERM: a graceful shutdown
 	shutdown   time.Duration                // shutdownTimeout
+	restart    func() error                 // starts the program again after a restart's shutdown: restartInPlace; tests count the call instead of exec'ing
 }
 
 // serve is the gateway proper: it returns when a signal has shut it down (nil)
 // or when it cannot start or keep serving (the error, already logged; main
-// exits 1).
+// exits 1). A restart asked for from the console (restart.go) shuts down the
+// same way and then calls p.restart, which does not return when it works; if
+// it fails, the reason is logged and serve returns it, so main exits 1 and the
+// platform's restart policy takes over.
 func serve(p process) error {
+	var restart bool
+	if err := serveUntilStopped(p, &restart); err != nil || !restart {
+		return err
+	}
+	// Everything serveUntilStopped opened is closed: the audit log, the stores,
+	// the listener.
+	if err := p.restart(); err != nil {
+		slog.New(slog.NewTextHandler(p.log, nil)).Error("gateway restart failed: the program could not be started again, so the gateway is exiting for the platform's restart policy to start it", "err", err)
+		return err
+	}
+	return nil
+}
+
+// serveUntilStopped is serve up to the end of the shutdown; *restart is set
+// when the stop was the console's restart.
+func serveUntilStopped(p process, restart *bool) error {
 	// config.yaml first: the log level lives in it, so the real logger cannot
 	// exist yet. A bootstrap logger at the default level carries the one error
 	// that can happen before it.
@@ -420,28 +445,42 @@ func serve(p process) error {
 	for _, s := range load.removed {
 		logger.Warn("setting no longer used, ignored: remove it", "setting", s.name, "instead", s.instead)
 	}
+	if len(load.tlsPathsIgnored) > 0 {
+		logger.Warn("config.yaml holds TLS paths that differ from the ones in use; they are ignored and dropped at the next save: the paths come from SMU_SSL_CERTFILE, SMU_SSL_CERTKEYFILE and SMU_SSL_TRUSTDIR at every start",
+			"keys", strings.Join(load.tlsPathsIgnored, "; "))
+	}
 
 	// The summary shows at every level: an operator diagnosing a denied
 	// client or the wrong mode needs it without raising the level first.
 	logStartup(p.log, cfg, configFile, p.appDir)
 
-	serverCert, err := loadOrGenerateServerCert(cfg.certFile, cfg.keyFile, logger.With("component", "tls"))
+	// A certificate replacement the last process left half done is rolled back
+	// (or its leftovers swept) before the pair is loaded.
+	tlsLog := logger.With("component", "tls")
+	if err := recoverTLSPair(cfg.certFile, cfg.keyFile, tlsLog); err != nil {
+		logger.Error("TLS directory recovery failed", "err", err)
+		return err
+	}
+	serverCert, err := loadOrGenerateServerCert(cfg.certFile, cfg.keyFile, tlsLog)
 	if err != nil {
 		logger.Error("server certificate setup failed", "err", err)
 		return err
 	}
 
-	trustPool, err := buildTrustPool(cfg.trustDir, logger.With("component", "tls"))
+	trustPool, err := buildTrustPool(cfg.trustDir, tlsLog)
 	if err != nil {
 		logger.Error("trust pool setup failed", "err", err)
 		return err
 	}
-	if cfg.insecureSkipVerify {
-		logger.Warn("tls.insecureSkipVerify is true (config.yaml; seeded by SMU_SSL_SKIP_CERT_VERIFY): upstream certificates will NOT be validated",
-			"component", "tls")
-	}
 
-	upstream := newUpstreamTransport(trustPool, cfg.insecureSkipVerify)
+	// The certificate and the trust are held where the listener and every
+	// outbound connection read them when they connect, so the console can
+	// change either with no restart (tls.go). The holder warns when skipping
+	// verification is on.
+	trust := newTrustHolder(trustPool, cfg.insecureSkipVerify, tlsLog)
+	lv.bindTrust(trust)
+	tm := newTLSManager(cfg.certFile, cfg.keyFile, cfg.trustDir, newCertHolder(serverCert), trust, tlsLog)
+	upstream := newUpstreamTransport(trust)
 	// Files only (hosted: false): browsers reach brokers themselves, so the
 	// relay paths are refused, not left open.
 	var relay http.Handler = newReverseProxy(upstream, logger.With("component", "direct-relay"))
@@ -457,13 +496,16 @@ func serve(p process) error {
 	if auditOut == nil {
 		auditOut = io.Discard
 	}
-	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, data: load.data}, upstream, auditOut, logger)
+	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, data: load.data}, upstream, tm, auditOut, logger)
 	if err != nil {
 		logger.Error("provisioned store load failed", "err", err)
 		return err
 	}
+	// POST /managed/restart asks for the same shutdown a signal does.
+	requestRestart, restartRequested := restartRequester()
 	if mr != nil {
 		defer func() { _ = mr.audit.close() }()
+		mr.setRestart(requestRestart)
 	}
 
 	// The mode's bundle must be there, or every page would be a 404: a
@@ -498,8 +540,8 @@ func serve(p process) error {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		TLSConfig: &tls.Config{
-			MinVersion:   tls.VersionTLS12,
-			Certificates: []tls.Certificate{serverCert},
+			MinVersion:     tls.VersionTLS12,
+			GetCertificate: tm.cert.getCertificate,
 		},
 		// net/http's own errors go to the same log, at info: they are mostly
 		// TLS handshakes a client gave up on. A handler panic never gets here
@@ -536,16 +578,19 @@ func serve(p process) error {
 		return err
 	case sig := <-p.signals:
 		logger.Info("shutdown signal received", "signal", sig.String())
-		ctx, cancel := context.WithTimeout(context.Background(), p.shutdown)
-		defer cancel()
-		err := srv.Shutdown(ctx)
-		stopBackups()
-		<-backupsDone
-		if err != nil {
-			logger.Error("graceful shutdown failed", "err", err)
-			return err
-		}
-		logger.Info("shutdown complete")
-		return nil
+	case <-restartRequested:
+		logger.Info("restart requested from the administration console; shutting down to start the program again")
+		*restart = true
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), p.shutdown)
+	defer cancel()
+	err = srv.Shutdown(ctx)
+	stopBackups()
+	<-backupsDone
+	if err != nil {
+		logger.Error("graceful shutdown failed", "err", err)
+		return err
+	}
+	logger.Info("shutdown complete")
+	return nil
 }

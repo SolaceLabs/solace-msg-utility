@@ -22,76 +22,97 @@
     <div id="user-mgmt-list-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
 </div>
 
-<!-- Create / edit form view -->
-<div id="user-mgmt-form-view" class="card user-mgmt-card hidden">
-    <div class="flex-row justify-between items-center mb-4">
-        <h2 id="user-mgmt-form-title" class="m-0">Add user</h2>
-    </div>
-    <div class="form-group">
-        <label for="user-mgmt-username">Username</label>
-        <input type="text" id="user-mgmt-username" class="form-control" autocomplete="off">
-    </div>
-    <div class="form-group">
-        <label for="user-mgmt-password">Password <span id="user-mgmt-password-hint" class="text-secondary"></span></label>
-        <input type="password" id="user-mgmt-password" class="form-control" autocomplete="new-password">
-    </div>
-    <div class="form-group">
-        <label class="flex-row items-center gap-2 m-0">
-            <input type="checkbox" id="user-mgmt-admin"> Administrator
-        </label>
-    </div>
-    <div class="form-group">
-        <label class="m-0 mb-2">Modules this user may open</label>
-        <label class="flex-row items-center gap-2 m-0">
-            <input type="checkbox" id="user-mgmt-modules-default"> Deployment default
-            <span id="user-mgmt-modules-default-hint" class="text-secondary"></span>
-        </label>
-        <div id="user-mgmt-modules" class="flex-col mt-2"></div>
-    </div>
-    <div class="form-group">
-        <div class="flex-row justify-between items-center mb-2">
-            <label class="m-0">Operate entitlements (read + write)</label>
-            <button id="btn-user-mgmt-add-operate" class="btn btn-secondary btn-sm">+ Add</button>
+<!-- Create / edit form view: one card per section, stacked -->
+<div id="user-mgmt-form-view" class="hidden">
+    <div class="card user-mgmt-card">
+        <h2 id="user-mgmt-form-title" class="m-0 mb-4">Add user</h2>
+        <div class="form-cols">
+            <div class="form-group">
+                <label for="user-mgmt-username">Username</label>
+                <input type="text" id="user-mgmt-username" class="form-control" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="user-mgmt-password">Password <span id="user-mgmt-password-hint" class="text-secondary"></span></label>
+                <input type="password" id="user-mgmt-password" class="form-control" autocomplete="new-password">
+            </div>
         </div>
-        <div id="user-mgmt-operate-rows" class="flex-col"></div>
-    </div>
-    <div class="form-group">
-        <div class="flex-row justify-between items-center mb-2">
-            <label class="m-0">Read-only entitlements</label>
-            <button id="btn-user-mgmt-add-readonly" class="btn btn-secondary btn-sm">+ Add</button>
+        <div class="form-group">
+            <label class="flex-row items-center gap-2 m-0">
+                <input type="checkbox" id="user-mgmt-admin"> Administrator
+            </label>
         </div>
-        <div id="user-mgmt-readonly-rows" class="flex-col"></div>
-        <p class="user-mgmt-hint text-secondary">
-            Each row names brokers, Message VPNs and queues; <code>*</code> matches any run of characters.
-            A user reaches a broker's Message VPN when any row, operate or read-only, matches both, and sees
-            the queues those rows' queue patterns match. The Administrator flag gives no broker access by itself.
-            The gateway enforces brokers and Message VPNs; queue patterns are applied by this app.
-        </p>
     </div>
-    <div class="flex-row gap-4 mt-2">
-        <button id="btn-user-mgmt-save" class="btn btn-primary">Save</button>
-        <button id="btn-user-mgmt-cancel" class="btn btn-secondary">Cancel</button>
+
+    <div class="card user-mgmt-card">
+        <h2 class="m-0 mb-4">Modules</h2>
+        <p class="user-mgmt-hint text-secondary mb-2">The app modules this user may open.</p>
+        <div class="flex-col gap-2">
+            <label class="flex-row items-center gap-2 m-0">
+                <input type="radio" name="user-mgmt-modules-mode" id="user-mgmt-modules-default"> Deployment default:
+                <span id="user-mgmt-modules-default-hint" class="text-secondary"></span>
+            </label>
+            <label class="flex-row items-center gap-2 m-0">
+                <input type="radio" name="user-mgmt-modules-mode" id="user-mgmt-modules-choose"> Choose for this user
+            </label>
+        </div>
+        <div id="user-mgmt-modules" class="user-mgmt-pills mt-2"></div>
+        <div id="user-mgmt-module-add" class="user-mgmt-menu-wrap mt-2">
+            <button type="button" id="btn-user-mgmt-add-module" class="btn btn-secondary btn-sm"
+                aria-haspopup="menu" aria-expanded="false">+ Add module</button>
+            <div id="user-mgmt-module-menu" class="user-mgmt-menu hidden" role="menu" aria-label="Modules to add"></div>
+        </div>
     </div>
-    <div id="user-mgmt-form-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+
+    <div class="card user-mgmt-card">
+        <h2 class="m-0 mb-4">Entitlements</h2>
+        <div class="form-group">
+            <div class="flex-row justify-between items-center mb-2">
+                <label class="m-0">Operate entitlements (read + write)</label>
+                <button id="btn-user-mgmt-add-operate" class="btn btn-secondary btn-sm">+ Add</button>
+            </div>
+            <div id="user-mgmt-operate-rows" class="flex-col"></div>
+        </div>
+        <div class="form-group">
+            <div class="flex-row justify-between items-center mb-2">
+                <label class="m-0">Read-only entitlements</label>
+                <button id="btn-user-mgmt-add-readonly" class="btn btn-secondary btn-sm">+ Add</button>
+            </div>
+            <div id="user-mgmt-readonly-rows" class="flex-col"></div>
+            <p id="user-mgmt-grants-hint" class="user-mgmt-hint text-secondary">
+                Each row names brokers, Message VPNs and queues; <code>*</code> matches any run of characters.
+                A user reaches a broker's Message VPN when any row, operate or read-only, matches both, and sees
+                the queues those rows' queue patterns match. The Administrator flag gives no broker access by itself.
+                The gateway enforces brokers and Message VPNs; queue patterns are applied by this app.
+            </p>
+        </div>
+    </div>
+
+    <div class="user-mgmt-card">
+        <div class="flex-row gap-4">
+            <button id="btn-user-mgmt-save" class="btn btn-primary">Save</button>
+            <button id="btn-user-mgmt-cancel" class="btn btn-secondary">Cancel</button>
+        </div>
+        <div id="user-mgmt-form-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+    </div>
 </div>
 
 <!-- Permission test: shown with the list view (see access-test.ts) -->
 <div id="user-mgmt-test-view" class="card user-mgmt-card hidden">
     <h2 class="m-0 mb-4">Permission test</h2>
-    <div class="form-group">
-        <label for="user-mgmt-test-user">User</label>
-        <select id="user-mgmt-test-user" class="form-control"></select>
-    </div>
-    <div class="form-group flex-row gap-2">
-        <div class="w-full">
+    <div class="form-cols">
+        <div class="form-group">
+            <label for="user-mgmt-test-user">User</label>
+            <select id="user-mgmt-test-user" class="form-control"></select>
+        </div>
+        <div class="form-group">
             <label for="user-mgmt-test-broker">Broker</label>
             <input type="text" id="user-mgmt-test-broker" class="form-control" autocomplete="off">
         </div>
-        <div class="w-full">
+        <div class="form-group">
             <label for="user-mgmt-test-vpn">Message VPN</label>
             <input type="text" id="user-mgmt-test-vpn" class="form-control" autocomplete="off">
         </div>
-        <div class="w-full">
+        <div class="form-group">
             <label for="user-mgmt-test-queue">Queue</label>
             <input type="text" id="user-mgmt-test-queue" class="form-control" autocomplete="off">
         </div>

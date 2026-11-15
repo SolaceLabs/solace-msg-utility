@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -457,8 +458,8 @@ func TestBackupAPI_Export(t *testing.T) {
 		len(settingsChanges(e.api.settings.current(), doc.Settings)) != 0 {
 		t.Fatal("an export holds the configuration as it is, and previews as no change")
 	}
-	if doc.Settings.TLS.CertFile != "" || doc.Settings.ConnModes != connBoth {
-		t.Fatalf("settings, without the host paths: %+v", doc.Settings)
+	if tls := doc.Settings.TLS; tls.RemovedCertFile != nil || tls.RemovedKeyFile != nil || tls.RemovedTrustDir != nil || doc.Settings.ConnModes != connBoth {
+		t.Fatalf("settings, without the removed TLS path keys: %+v", doc.Settings)
 	}
 	if !strings.Contains(e.log.String(), "configuration exported") {
 		t.Fatal("an export is logged")
@@ -497,7 +498,8 @@ func TestBackupAPI_PreviewSaysWhatWouldChange(t *testing.T) {
 		d.Users[0].Password = mustHash(t, e.f.h, "a new admin password")
 		d.Connections[0].Hostname = "host1-new"
 		d.Settings.Session.IdleMinutes = 5
-		d.Settings.TLS.CertFile = "/elsewhere/tls.crt" // never imported
+		elsewhere := "/elsewhere/tls.crt"
+		d.Settings.TLS.RemovedCertFile = &elsewhere // a backup of an earlier release: ignored, never listed
 	})
 	usersSeq, connsSeq := e.api.store.seqs()
 	rec := e.do("POST", "/managed/backup/preview", jsonBody(t, map[string]string{"file": file, "passphrase": testPassphrase}), e.admin())
@@ -581,18 +583,21 @@ func TestBackupAPI_ImportRefusals(t *testing.T) {
 func TestBackupAPI_ImportReplaceAll(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	viewer := e.cookie("viewer", false)
+	holder := newTrustHolder(x509.NewCertPool(), false, quietLogger())
+	e.live.bindTrust(holder)
 	file := e.exported(t, func(d *backupDoc) {
 		d.Users[1].Password = mustHash(t, e.f.h, "viewer password two")
 		d.Connections = d.Connections[:1]
 		d.Settings.Session.IdleMinutes = 5
 		d.Settings.TLS.InsecureSkipVerify = true
-		d.Settings.TLS.CertFile = "/elsewhere/tls.crt" // the deployment keeps its own
+		elsewhere := "/elsewhere/tls.crt"
+		d.Settings.TLS.RemovedCertFile = &elsewhere // a backup of an earlier release: ignored, dropped from the file
 	})
 	before := e.api.currentBasis()
 	rec := e.importWith(t, file, "replace", "replace", "replace")
 	expect(t, rec, http.StatusOK, "")
 	got := decodeTo[importResultJSON](t, rec.Body.Bytes())
-	if !reflect.DeepEqual(got, importResultJSON{RestartRequired: []string{"tls.insecureSkipVerify"}, SignedOut: false}) {
+	if !reflect.DeepEqual(got, importResultJSON{RestartRequired: []string{}, SignedOut: false}) {
 		t.Fatalf("result: %+v", got)
 	}
 	if conns := e.api.store.listConnections(); len(conns) != 1 || conns[0].Broker != "b1" {
@@ -605,8 +610,14 @@ func TestBackupAPI_ImportReplaceAll(t *testing.T) {
 	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusUnauthorized, "unauthenticated")
 	expect(t, e.do("GET", "/managed/me", "", e.admin()), http.StatusOK, "")
 	s := e.settings(t).Settings
-	if s.Session.IdleMinutes != 5 || s.TLS.CertFile != e.cfg.certFile {
-		t.Fatalf("settings: idle %d, tls.certFile %q", s.Session.IdleMinutes, s.TLS.CertFile)
+	if s.Session.IdleMinutes != 5 || !s.TLS.InsecureSkipVerify {
+		t.Fatalf("settings: idle %d, tls.insecureSkipVerify %v", s.Session.IdleMinutes, s.TLS.InsecureSkipVerify)
+	}
+	if !holder.get().skip {
+		t.Fatal("tls.insecureSkipVerify applies at once, with no restart")
+	}
+	if raw := string(mustRead(t, e.cfgPath)); strings.Contains(raw, "\n  certFile:") {
+		t.Fatalf("the removed key is dropped from config.yaml:\n%s", raw)
 	}
 	if e.live.get().session.idle.Minutes() != 5 {
 		t.Fatal("a live key applies at once")

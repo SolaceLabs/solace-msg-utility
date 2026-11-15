@@ -17,10 +17,14 @@
  * exists.
  *
  * The modules editor sets which app modules the user may open: the
- * deployment default (config.yaml's `modules.userDefault`), or a list of
- * their own. The gateway only ever grants what `modules.offered` allows, so a
- * module outside it is marked "not offered". Imports only from `src/core/*`
- * and its own files.
+ * deployment default (config.yaml's `modules.userDefault`, named in its
+ * label), or "Choose for this user". Modules show as pills; with a list of
+ * their own each pill has a remove button and the Add module menu lists the
+ * offered modules not yet chosen. The gateway only ever grants what
+ * `modules.offered` allows, so a chosen module outside it is a pill marked
+ * "not offered", which can be removed. Under the default the pills show what
+ * it grants, without remove buttons. A save sends no list for the default and
+ * the chosen list otherwise. Imports only from `src/core/*` and its own files.
  *
  * The Two-factor column shows whether a user has set up two-factor sign-in (a
  * code from an authenticator app). A row that has it carries a Reset two-factor
@@ -92,7 +96,11 @@ export const UserManagementModule = {
             admin: required<HTMLInputElement>(container, '#user-mgmt-admin'),
             modulesDefault: required<HTMLInputElement>(container, '#user-mgmt-modules-default'),
             modulesDefaultHint: required<HTMLElement>(container, '#user-mgmt-modules-default-hint'),
+            modulesChoose: required<HTMLInputElement>(container, '#user-mgmt-modules-choose'),
             modules: required<HTMLElement>(container, '#user-mgmt-modules'),
+            moduleAdd: required<HTMLElement>(container, '#user-mgmt-module-add'),
+            btnAddModule: required<HTMLButtonElement>(container, '#btn-user-mgmt-add-module'),
+            moduleMenu: required<HTMLElement>(container, '#user-mgmt-module-menu'),
             operateRows: required<HTMLElement>(container, '#user-mgmt-operate-rows'),
             readonlyRows: required<HTMLElement>(container, '#user-mgmt-readonly-rows'),
             btnAddOperate: required<HTMLButtonElement>(container, '#btn-user-mgmt-add-operate'),
@@ -192,32 +200,89 @@ export const UserManagementModule = {
             accessTest.setData(users, choices);
         }
 
-        function checkedModules(): string[] {
-            return [...els.modules.querySelectorAll<HTMLInputElement>('input')].filter(b => b.checked).map(b => b.value);
+        // The user's own module list while "Choose for this user" is selected.
+        let chosen: string[] = [];
+
+        function closeMenu(): void {
+            els.moduleMenu.classList.add('hidden');
+            els.btnAddModule.setAttribute('aria-expanded', 'false');
+        }
+
+        /** A module pill: its name, a "not offered" mark when the deployment no longer offers it, a remove button when editable. */
+        function modulePill(id: string, removable: boolean): HTMLElement {
+            const pill = document.createElement('span');
+            pill.className = 'user-mgmt-pill';
+            pill.dataset.module = id;
+            const name = document.createElement('span');
+            name.textContent = moduleLabel(id);
+            pill.append(name);
+            if (!choices.offered.includes(id)) {
+                const tag = document.createElement('span');
+                tag.className = 'user-mgmt-pill-tag';
+                tag.textContent = 'not offered';
+                pill.append(tag);
+            }
+            if (removable) {
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.className = 'user-mgmt-pill-remove';
+                remove.setAttribute('aria-label', `Remove ${moduleLabel(id)}`);
+                remove.textContent = 'x';
+                remove.addEventListener('click', () => {
+                    chosen = chosen.filter(m => m !== id);
+                    renderModules();
+                });
+                pill.append(remove);
+            }
+            return pill;
+        }
+
+        function menuItem(id: string): HTMLElement {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'user-mgmt-menu-item';
+            item.setAttribute('role', 'menuitem');
+            item.dataset.module = id;
+            item.textContent = moduleLabel(id);
+            item.addEventListener('click', () => {
+                chosen = [...chosen, id];
+                renderModules();
+            });
+            return item;
         }
 
         /**
-         * One checkbox per catalog module. Under the deployment default they
-         * show what the default grants and are locked; otherwise they edit the
-         * user's own list.
+         * Draws the modules card from the selected mode. Under the default the
+         * pills show what the default grants and cannot be removed; otherwise
+         * they are the user's own list, and the Add module menu offers the
+         * offered modules not yet in it.
          */
-        function renderModules(own: string[] | null): void {
-            const useDefault = own === null;
-            const shown = useDefault ? grantedModules(null, choices) : own;
-            els.modulesDefault.checked = useDefault;
-            els.modulesDefaultHint.textContent = choices.userDefault === 'all' ? '(every offered module)' : '(no modules)';
-            els.modules.innerHTML = '';
-            for (const id of choices.catalog) {
-                const label = document.createElement('label');
-                label.className = 'flex-row items-center gap-2 m-0';
-                const box = document.createElement('input');
-                box.type = 'checkbox';
-                box.value = id;
-                box.checked = shown.includes(id);
-                box.disabled = useDefault;
-                label.append(box, ` ${moduleLabel(id)}${choices.offered.includes(id) ? '' : ' (not offered)'}`);
-                els.modules.appendChild(label);
+        function renderModules(): void {
+            const useDefault = els.modulesDefault.checked;
+            const given = grantedModules(null, choices);
+            els.modulesDefaultHint.textContent = given.length ? given.map(moduleLabel).join(', ') : 'no modules';
+            const shown = useDefault ? given : chosen;
+            if (shown.length) {
+                els.modules.replaceChildren(...shown.map(id => modulePill(id, !useDefault)));
+            } else {
+                const none = document.createElement('p');
+                none.className = 'user-mgmt-hint text-secondary';
+                none.textContent = 'No modules.';
+                els.modules.replaceChildren(none);
             }
+            const free = choices.offered.filter(id => !chosen.includes(id));
+            els.moduleAdd.classList.toggle('hidden', useDefault);
+            els.btnAddModule.disabled = free.length === 0;
+            els.moduleMenu.replaceChildren(...free.map(menuItem));
+            closeMenu();
+        }
+
+        /** Selects the deployment default (own = null) or the user's own list, and draws it. */
+        function setModules(own: string[] | null): void {
+            chosen = own ?? [];
+            els.modulesDefault.checked = own === null;
+            els.modulesChoose.checked = own !== null;
+            renderModules();
         }
 
         function openCreate(): void {
@@ -229,7 +294,7 @@ export const UserManagementModule = {
             els.password.value = '';
             els.passwordHint.textContent = '(required)';
             els.admin.checked = false;
-            renderModules(null);
+            setModules(null);
             operateList.clear();
             readonlyList.clear();
             setError(els.formError, null);
@@ -245,7 +310,7 @@ export const UserManagementModule = {
             els.password.value = '';
             els.passwordHint.textContent = '(leave blank to keep current)';
             els.admin.checked = u.admin;
-            renderModules(u.modules ?? null);
+            setModules(u.modules ?? null);
             operateList.clear();
             (u.operate ?? []).forEach(r => operateList.addRow(r as unknown as Record<string, string>));
             readonlyList.clear();
@@ -278,7 +343,7 @@ export const UserManagementModule = {
                 admin: els.admin.checked,
                 operate: operateList.readRows() as unknown as QGlob[],
                 readOnly: readonlyList.readRows() as unknown as QGlob[],
-                modules: els.modulesDefault.checked ? null : checkedModules(),
+                modules: els.modulesDefault.checked ? null : [...chosen],
                 rev: editingRev,
             };
             els.btnSave.disabled = true;
@@ -379,8 +444,20 @@ export const UserManagementModule = {
         els.btnAddReadonly.addEventListener('click', () => readonlyList.addRow());
         // Leaving the default starts the user's own list from what the
         // default grants; returning to it shows the default again.
-        els.modulesDefault.addEventListener('change', () =>
-            renderModules(els.modulesDefault.checked ? null : checkedModules()));
+        els.modulesDefault.addEventListener('change', renderModules);
+        els.modulesChoose.addEventListener('change', () => {
+            chosen = grantedModules(null, choices);
+            renderModules();
+        });
+        els.btnAddModule.addEventListener('click', () => {
+            const open = els.moduleMenu.classList.toggle('hidden') === false;
+            els.btnAddModule.setAttribute('aria-expanded', String(open));
+        });
+        els.moduleAdd.addEventListener('keydown', e => {
+            if (e.key !== 'Escape') return;
+            closeMenu();
+            els.btnAddModule.focus();
+        });
         eventBus.on('rbac:changed', () => {
             if (sessionKey() !== appliedKey) applyGate();
         });

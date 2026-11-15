@@ -27,7 +27,8 @@ type managedEnv struct {
 	log     *strings.Builder
 	cfg     config // as the gateway started
 	live    *live
-	cfgPath string // config.yaml, seeded from cfg
+	cfgPath string  // config.yaml, seeded from cfg
+	tls     *tlsFix // the TLS manager the /managed/tls* routes call, over a temp directory
 	routes  *managedRoutes
 	api     *managedHandler
 	pages   *authPages
@@ -74,7 +75,8 @@ func newManagedEnvFrom(t *testing.T, f storeFixture, mutate func(*config), upstr
 	}
 	lv := newLive(cfg)
 	logger := newCapturingLogger(log)
-	routes, err := buildManagedRoutes(cfg, lv, configSource{path: cfgPath, data: data}, f.h, noEnv, clock.now, upstream, logger)
+	tf := newTLSFix(t)
+	routes, err := buildManagedRoutes(cfg, lv, configSource{path: cfgPath, data: data}, f.h, noEnv, clock.now, upstream, tf.m, logger)
 	if err != nil {
 		t.Fatalf("buildManagedRoutes: %v", err)
 	}
@@ -82,7 +84,7 @@ func newManagedEnvFrom(t *testing.T, f storeFixture, mutate func(*config), upstr
 	// applies, so a saved allow list is enforced on the next request.
 	root := withClient(lv, clientACL(lv, newRootHandler(named("hosted"), named("admin"), named("app"), named("relay"), routes), logger))
 	return &managedEnv{
-		f: f, clock: clock, log: log, cfg: cfg, live: lv, cfgPath: cfgPath, routes: routes,
+		f: f, clock: clock, log: log, cfg: cfg, live: lv, cfgPath: cfgPath, tls: tf, routes: routes,
 		api:   routes.api.(*managedHandler),
 		pages: routes.pages.(*authPages),
 		root:  root,

@@ -497,3 +497,21 @@ func TestAudit_TwoFactorActionsAndMessages(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// The TLS and restart actions have the names the docs list, and each has a done and an attempted phrase (a refused
+// entry would read as a bare "could not" without one).
+func TestAudit_TLSAndRestartActionsAreNamedAndPhrased(t *testing.T) {
+	for action, name := range map[string]string{
+		auditTLSCertificateReplace: "tls.certificate.replace",
+		auditTLSTrustAdd:           "tls.trust.add",
+		auditTLSTrustRemove:        "tls.trust.remove",
+		auditRestart:               "gateway.restart",
+	} {
+		if action != name {
+			t.Errorf("action %q, want %q", action, name)
+		}
+		if p := auditPhrases[action]; p.done == "" || p.attempt == "" {
+			t.Errorf("%s needs both phrases: %+v", name, p)
+		}
+	}
+}

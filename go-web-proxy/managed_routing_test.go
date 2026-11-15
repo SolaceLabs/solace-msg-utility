@@ -14,7 +14,7 @@ import (
 )
 
 func TestNewManagedRouting_DisabledIsNil(t *testing.T) {
-	routes, err := newManagedRouting(defaultConfig(), liveWith(nil), configSource{}, nil, io.Discard, quietLogger())
+	routes, err := newManagedRouting(defaultConfig(), liveWith(nil), configSource{}, nil, nil, io.Discard, quietLogger())
 	if routes != nil || err != nil {
 		t.Fatalf("Gateway mode (connModes direct): want nil, nil; got %v, %v", routes, err)
 	}
@@ -36,7 +36,7 @@ func TestNewManagedRouting_Enabled(t *testing.T) {
 	t.Setenv(envAdminPasswordFile, "")
 	var buf strings.Builder
 	var auditOut bytes.Buffer
-	routes, err := newManagedRouting(cfg, newLive(cfg), configSource{path: filepath.Join(dir, "config.yaml")}, nil, &auditOut, newCapturingLogger(&buf))
+	routes, err := newManagedRouting(cfg, newLive(cfg), configSource{path: filepath.Join(dir, "config.yaml")}, nil, newTLSFix(t).m, &auditOut, newCapturingLogger(&buf))
 	if err != nil || routes == nil {
 		t.Fatalf("want routes, got %v %v", routes, err)
 	}
@@ -94,7 +94,7 @@ func TestNewManagedRouting_AuditLogErrorIsReturned(t *testing.T) {
 	}
 	t.Setenv(envAdminPassword, "")
 	t.Setenv(envAdminPasswordFile, "")
-	routes, err := newManagedRouting(cfg, newLive(cfg), configSource{path: filepath.Join(dir, "config.yaml")}, nil, io.Discard, quietLogger())
+	routes, err := newManagedRouting(cfg, newLive(cfg), configSource{path: filepath.Join(dir, "config.yaml")}, nil, nil, io.Discard, quietLogger())
 	if routes != nil || err == nil || !strings.Contains(err.Error(), cfg.auditFile) {
 		t.Fatalf("want no routes and an error naming the audit log, got %v, %v", routes, err)
 	}
@@ -105,7 +105,7 @@ func TestBuildManagedRoutes_StoreErrorIsReturned(t *testing.T) {
 	f.writeUsers(t, "msg-utility-users: [")
 	cfg := defaultConfig()
 	cfg.connModes, cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = connBoth, f.usersPath, f.connsPath, f.keyPath
-	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, nil, quietLogger()); err == nil || !strings.Contains(err.Error(), f.usersPath) {
+	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, nil, nil, quietLogger()); err == nil || !strings.Contains(err.Error(), f.usersPath) {
 		t.Fatalf("want the store error naming the file, got %v", err)
 	}
 }
@@ -141,7 +141,7 @@ func TestBuildManagedRoutes_UnreadableScheduleIsReturned(t *testing.T) {
 	}
 	cfg := defaultConfig()
 	cfg.connModes, cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = connBoth, f.usersPath, f.connsPath, f.keyPath
-	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, nil, quietLogger()); err == nil || !strings.Contains(err.Error(), schedule) {
+	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, nil, nil, quietLogger()); err == nil || !strings.Contains(err.Error(), schedule) {
 		t.Fatalf("want an error naming the schedule path, got %v", err)
 	}
 }

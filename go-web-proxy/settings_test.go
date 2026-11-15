@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -101,6 +102,9 @@ func TestSettings_GetReportsTheFile(t *testing.T) {
 	if body := rec.Body.String(); strings.Contains(body, "version") || strings.Contains(body, "seed") || strings.Contains(body, "store.key") || strings.Contains(body, "storeKey") {
 		t.Errorf("the version and the secret paths are not the page's to see: %s", body)
 	}
+	if body := rec.Body.String(); strings.Contains(body, "certFile") || strings.Contains(body, "keyFile") || strings.Contains(body, "trustDir") || strings.Contains(body, "hostOnly") {
+		t.Errorf("the TLS paths are environment only and no key is host-only: %s", body)
+	}
 	s := e.settings(t)
 	want := fileConfigFromConfig(e.cfg)
 	want.Version = 0 // never sent
@@ -119,9 +123,6 @@ func TestSettings_GetReportsTheFile(t *testing.T) {
 	}
 	if s.Settings.Audit.OnFailure != auditOnFailureContinue {
 		t.Errorf("audit.onFailure defaults to continue, got %q", s.Settings.Audit.OnFailure)
-	}
-	if want := []string{"tls.certFile", "tls.keyFile", "tls.trustDir"}; !reflect.DeepEqual(s.HostOnly, want) {
-		t.Errorf("hostOnly: %v, want %v", s.HostOnly, want)
 	}
 	if !reflect.DeepEqual(s.Catalog, moduleCatalog()) {
 		t.Errorf("catalog: %v", s.Catalog)
@@ -151,7 +152,7 @@ func TestSettings_SaveAppliesLiveKeysAtOnce(t *testing.T) {
 		t.Errorf("connModes provisioned: the app must now need a session, got %d", rec.Code)
 	}
 	disk := e.fileOnDisk(t)
-	if disk.ConnModes != connProvisioned || disk.Session.IdleMinutes != 1 || disk.TLS.CertFile != e.cfg.certFile {
+	if disk.ConnModes != connProvisioned || disk.Session.IdleMinutes != 1 {
 		t.Errorf("file: %+v", disk)
 	}
 	line := logLine(e.log.String(), `msg="gateway settings saved"`)
@@ -196,29 +197,34 @@ func TestSettings_AuditKeysApplyLive(t *testing.T) {
 	}
 }
 
-func TestSettings_RestartOnlyKeysAreSavedAndFlagged(t *testing.T) {
+// tls.insecureSkipVerify applies at once: the trust holder takes it with the
+// save, no restart is asked for, and nothing is left pending.
+func TestSettings_SkipVerifyAppliesAtOnce(t *testing.T) {
 	e := newManagedEnv(t, nil)
+	holder := newTrustHolder(x509.NewCertPool(), false, quietLogger())
+	e.live.bindTrust(holder)
+
 	rec := e.saveSettings(t, `{"tls":{"insecureSkipVerify":true}}`)
 	expect(t, rec, http.StatusOK, "")
-	if got := decodeSave(t, rec); !reflect.DeepEqual(got.RestartRequired, []string{"tls.insecureSkipVerify"}) {
+	if got := decodeSave(t, rec); len(got.RestartRequired) != 0 {
 		t.Errorf("restartRequired: %s", rec.Body.String())
 	}
-	if got := e.settings(t).PendingRestart; !reflect.DeepEqual(got, []string{"tls.insecureSkipVerify"}) {
+	if got := e.settings(t).PendingRestart; len(got) != 0 {
 		t.Errorf("pendingRestart: %v", got)
 	}
-	if !e.fileOnDisk(t).TLS.InsecureSkipVerify {
-		t.Error("a restart-only key is still saved")
+	if !e.fileOnDisk(t).TLS.InsecureSkipVerify || !holder.get().skip {
+		t.Errorf("the key is saved and live: disk %v, holder %v", e.fileOnDisk(t).TLS.InsecureSkipVerify, holder.get().skip)
 	}
 	expect(t, e.saveSettings(t, `{"tls":{"insecureSkipVerify":false}}`), http.StatusOK, "")
-	if got := e.settings(t).PendingRestart; len(got) != 0 {
-		t.Errorf("back to the running values: want nothing pending, got %v", got)
+	if holder.get().skip {
+		t.Error("turning it off applies at once too")
 	}
 }
 
-// A path key changes only by a hand edit: pointed anywhere, it would let the
-// gateway serve its own secrets or overwrite a store at the next start. The
-// page resends every key, so the saved paths themselves are accepted.
-func TestSettings_PathKeysChangeOnlyOnTheHost(t *testing.T) {
+// The TLS paths are environment only: a body that names one is refused as an
+// unknown key and leaves the file alone, and the whole document the page holds
+// (which has none) saves.
+func TestSettings_PathKeysAreNotSettings(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	before, _ := os.ReadFile(e.cfgPath)
 	for key, body := range map[string]string{
@@ -227,15 +233,11 @@ func TestSettings_PathKeysChangeOnlyOnTheHost(t *testing.T) {
 		"tls.trustDir": `{"tls":{"trustDir":"/"}}`,
 	} {
 		t.Run(key, func(t *testing.T) {
-			rec := e.saveSettings(t, body)
-			expect(t, rec, http.StatusUnprocessableEntity, "invalid")
-			if got := errorCode(t, rec); got.Field != key || !strings.Contains(got.Reason, "only in config.yaml on the gateway host") {
-				t.Errorf("want field %q and the hand-edit reason, got %+v", key, got)
-			}
+			expect(t, e.saveSettings(t, body), http.StatusBadRequest, "bad_request")
 		})
 	}
 	if after, _ := os.ReadFile(e.cfgPath); string(after) != string(before) {
-		t.Error("a refused path change must leave the file alone")
+		t.Error("a refused body must leave the file alone")
 	}
 	whole, err := json.Marshal(e.settings(t).Settings)
 	if err != nil {
@@ -583,6 +585,8 @@ func TestStageSettings_AppliesOnlyWhenTheTransactionCommits(t *testing.T) {
 	req.RemoteAddr = "192.0.2.10:5000"
 	next := sf.current()
 	next.LogLevel, next.TLS.InsecureSkipVerify, next.Audit.OnFailure = "info", true, auditOnFailureRefuse
+	holder := newTrustHolder(x509.NewCertPool(), false, quietLogger())
+	e.live.bindTrust(holder)
 	before, revBefore := mustRead(t, e.cfgPath), sf.rev()
 
 	var staged stagedSettings
@@ -594,7 +598,7 @@ func TestStageSettings_AppliesOnlyWhenTheTransactionCommits(t *testing.T) {
 		if staged, err = e.api.stageSettings(tx, req, next); err != nil {
 			return err
 		}
-		if string(mustRead(t, e.cfgPath)) != string(before) || e.live.level.Level() != slog.LevelWarn || sf.current().LogLevel != "warn" {
+		if string(mustRead(t, e.cfgPath)) != string(before) || e.live.level.Level() != slog.LevelWarn || sf.current().LogLevel != "warn" || holder.get().skip {
 			t.Error("nothing may be written or applied before the commit")
 		}
 		return nil
@@ -602,24 +606,49 @@ func TestStageSettings_AppliesOnlyWhenTheTransactionCommits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(staged.restart, []string{"tls.insecureSkipVerify"}) || !reflect.DeepEqual(staged.changed, []string{"audit.onFailure", "logLevel", "tls.insecureSkipVerify"}) {
+	if len(staged.restart) != 0 || !reflect.DeepEqual(staged.changed, []string{"audit.onFailure", "logLevel", "tls.insecureSkipVerify"}) {
 		t.Errorf("staged: %+v", staged)
 	}
 	disk := e.fileOnDisk(t)
 	if disk.LogLevel != "info" || disk.Audit.OnFailure != auditOnFailureRefuse || !disk.TLS.InsecureSkipVerify {
 		t.Errorf("file: %+v", disk)
 	}
-	if e.live.level.Level() != slog.LevelInfo || e.live.get().audit.onFailure != auditOnFailureRefuse || sf.current().LogLevel != "info" {
-		t.Error("the live keys and the saved file must apply with the commit")
+	if e.live.level.Level() != slog.LevelInfo || e.live.get().audit.onFailure != auditOnFailureRefuse || sf.current().LogLevel != "info" || !holder.get().skip {
+		t.Error("the live keys, tls.insecureSkipVerify and the saved file must apply with the commit")
 	}
 	if rev := sf.rev(); rev == revBefore || rev != checksumRev(sf.wr.sums.sumOf(mustRead(t, e.cfgPath))) {
 		t.Errorf("the rev after the commit is the new checksum, got %q (was %q)", rev, revBefore)
 	}
 }
 
-// A document startup would refuse, a changed path key and a direct-only mode
-// are refusals returned from the staging, as the page answers them; the
-// transaction stages nothing.
+// A document that still holds the removed path keys (the settings of an old
+// backup) stages as if it did not: the keys are never refused, and the file
+// the commit writes has none of them.
+func TestStageSettings_DropsTheRemovedPathKeys(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	sf := e.api.settings
+	req := httptest.NewRequest("POST", "https://gw.example/managed/backup/import", nil)
+	req.RemoteAddr = "192.0.2.10:5000"
+	old := "/old/trust"
+	next := sf.current()
+	next.TLS.RemovedTrustDir = &old
+	next.LogLevel = "info"
+	err := sf.wr.Do(t.Context(), func(tx *txn) error {
+		_, err := e.api.stageSettings(tx, req, next)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(mustRead(t, e.cfgPath))
+	if strings.Contains(raw, "\n  trustDir:") || !strings.Contains(raw, "logLevel: info") {
+		t.Errorf("the file must carry the change and not the removed key:\n%s", raw)
+	}
+}
+
+// A document startup would refuse and a direct-only mode are refusals
+// returned from the staging, as the page answers them; the transaction stages
+// nothing.
 func TestStageSettings_RefusalsComeBackAsErrors(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	sf := e.api.settings
@@ -633,7 +662,6 @@ func TestStageSettings_RefusalsComeBackAsErrors(t *testing.T) {
 	}{
 		"bad value":  {func(f *fileConfig) { f.Session.IdleMinutes = 0 }, 422, "invalid", "settings"},
 		"bad onFail": {func(f *fileConfig) { f.Audit.OnFailure = "stop" }, 422, "invalid", "settings"},
-		"path key":   {func(f *fileConfig) { f.TLS.TrustDir = "/" }, 422, "invalid", "tls.trustDir"},
 		"direct":     {func(f *fileConfig) { f.ConnModes = connDirect }, 422, "invalid", "connModes"},
 		"lock-out":   {func(f *fileConfig) { f.Access.Allow = []string{"10.0.0.0/8"} }, 409, "would_lock_out", "access.allow"},
 	}

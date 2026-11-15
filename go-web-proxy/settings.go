@@ -12,7 +12,7 @@ import (
 // (GET and PUT /managed/settings). A save is validated exactly as at startup,
 // written through the writer's journaled commit with the usual header, and its
 // live keys (live.go) apply at once; restart-only keys are saved and reported
-// back, except the hostOnly path keys, which only a hand edit changes.
+// back.
 //
 // The settings rev is the writer's keyed checksum of config.yaml as last read
 // or written (checksums.rev): opaque, derived from the store key, never stored.
@@ -76,7 +76,6 @@ type settingsJSON struct {
 	Settings       fileConfig `json:"settings"`
 	Rev            string     `json:"rev"`            // opaque; a save sends it back
 	RestartOnly    []string   `json:"restartOnly"`    // keys that apply at restart
-	HostOnly       []string   `json:"hostOnly"`       // keys only a hand edit changes
 	PendingRestart []string   `json:"pendingRestart"` // saved, not yet running
 	ChangedOnDisk  bool       `json:"changedOnDisk"`  // hand-edited since loaded
 	Catalog        []string   `json:"catalog"`        // modules.offered choices
@@ -100,7 +99,6 @@ func (h *managedHandler) getSettings(w http.ResponseWriter, _ *http.Request) {
 			Settings:       sf.saved,
 			Rev:            sf.rev(),
 			RestartOnly:    restartOnlyKeyNames(),
-			HostOnly:       hostOnlyKeyNames(),
 			PendingRestart: pendingRestart(sf.boot, sf.saved),
 			ChangedOnDisk:  changed,
 			Catalog:        moduleCatalog(),
@@ -220,25 +218,19 @@ func invalidRefusal(field, reason string) error {
 // and for an import alike. It reads the saved file but changes nothing, and
 // returns a refusal (newRefusal, answered by writeStoreError) naming what is
 // wrong. Refusals:
-//   - 422 invalid: a changed hostOnly path key; a value startup would reject;
-//     connModes direct, which would end Provisioned mode and this console
+//   - 422 invalid: a value startup would reject; connModes direct, which
+//     would end Provisioned mode and this console
 //   - 409 would_lock_out: the new access list would deny this request's client
 //
 // The disk check and the rev are the caller's, inside the writer transaction.
 func (h *managedHandler) checkSettings(r *http.Request, body fileConfig) (config, error) {
 	sf := h.settings
-	saved := sf.current()
 	body.Version = configVersion
-	for _, k := range restartOnlyKeys {
-		if k.hostOnly && k.value(body) != k.value(saved) {
-			return config{}, invalidRefusal(k.key, k.key+" is a path, so it changes only in config.yaml on the gateway host, followed by a restart.")
-		}
-	}
 	// Named by its own field, as the settings page marks the select it came from.
 	if _, err := checkTwoFactor(body.Login.TwoFactor); err != nil {
 		return config{}, invalidRefusal("login.twoFactor", err.Error())
 	}
-	cfg, err := body.toConfig(secretPaths{storeKey: sf.boot.storeKeyFile})
+	cfg, err := body.toConfig(sf.boot.secretPaths())
 	if err != nil {
 		return config{}, invalidRefusal("settings", err.Error())
 	}

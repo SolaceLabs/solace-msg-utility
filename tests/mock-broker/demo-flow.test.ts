@@ -11,6 +11,7 @@ import { QueueSubscriptionExplorerModule } from '../../src/modules/queue-subscri
 import { UserManagementModule } from '../../src/modules/user-management/module';
 import { ConnectionManagementModule } from '../../src/modules/connection-management/module';
 import { GatewaySettingsModule } from '../../src/modules/gateway-settings/module';
+import { TlsCertificatesModule } from '../../src/modules/tls-certificates/module';
 import { BackupModule } from '../../src/modules/backup/module';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
 import { answerConfirm } from '../helpers/confirmDialog';
@@ -34,6 +35,7 @@ const MODULES: Record<string, PwaModule> = {
     'user-management': UserManagementModule,
     'connection-management': ConnectionManagementModule,
     'gateway-settings': GatewaySettingsModule,
+    'tls-certificates': TlsCertificatesModule,
     'backup': BackupModule,
 };
 
@@ -237,7 +239,7 @@ describe('managed demo end to end', () => {
     async function openOwnRow(): Promise<HTMLTableRowElement> {
         await openDemo(signInAs('admin'));
         await vi.waitFor(() => expect(ctx.appState.managed?.admin).toBe(true));
-        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer', 'user-management', 'connection-management', 'gateway-settings', 'backup']);
+        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer', 'user-management', 'connection-management', 'gateway-settings', 'tls-certificates', 'backup']);
         q('#sidebar-nav .nav-item[data-module-id="user-management"]').click();
         const own = () => Array.from(document.querySelectorAll<HTMLTableRowElement>('#user-mgmt-rows tr'))
             .find(tr => tr.querySelector('td')?.textContent === 'admin');

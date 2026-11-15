@@ -8,7 +8,8 @@
  * credential, which only `dial` hands out. It closes only on revocation: its
  * session dropped, its user's sessions dropped (a password change, a changed
  * administrator flag, a deleted user), or an edit after which the user can no
- * longer reach the VPN. There is no timer, and an expired session leaves its
+ * longer reach the VPN, or a restart of the gateway. There is no timer, and an
+ * expired session leaves its
  * socket open, as in the gateway.
  *
  * Not simulated: the `Origin` check and the per-user upgrade window.
@@ -57,6 +58,10 @@ export function createSockets(store: GatewayStore, sessions: GatewaySessions, co
         /** After a user or connection edit: close what the user can no longer reach. */
         recheck(): void {
             closeWhere(s => !store.smfTarget(s.user, s.broker, s.vpn));
+        },
+        /** A restart of the gateway: every socket closes, an expired session's included. */
+        closeAll(): void {
+            closeWhere(() => true);
         },
         /** The open sockets, for the control panel. */
         list(): { user: string; broker: string; vpn: string }[] {

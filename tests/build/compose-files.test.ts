@@ -23,14 +23,15 @@ const POSTURE = [
 ];
 
 // [file, service, its writable mounts]. Writable only where the gateway
-// writes: /tls (the self-signed certificate, unless the TLS material is
-// mounted read-only, as in the e2e stack), /data, and Provisioned mode's /backup.
+// writes: /tls (the self-signed certificate, and the certificate and CA files
+// the admin console replaces and adds; the e2e stack mounts one host directory
+// there, so its checks 28-31 can do the same), /data, and Provisioned mode's /backup.
 const SERVICES: [string, string, string[]][] = [
     ['docker/compose.gateway.yaml', 'gateway', ['tls:/tls', 'data:/data']],
     ['docker/compose.provisioned.yaml', 'gateway', ['tls:/tls', 'data:/data', './backup:/backup']],
     ['docker/docker-compose.yaml', 'gateway', ['gateway-tls:/tls', 'gateway-data:/data']],
     ['docker/docker-compose.yaml', 'provisioned', ['provisioned-tls:/tls', 'provisioned-data:/data', 'provisioned-backup:/backup']],
-    ['docker/docker-compose.e2e.yaml', 'gateway', ['data:/data', 'backup:/backup']],
+    ['docker/docker-compose.e2e.yaml', 'gateway', ['data:/data', 'backup:/backup', '../scripts/logs/e2e/tls:/tls']],
 ];
 
 describe('compose files -- posture', () => {
@@ -41,6 +42,18 @@ describe('compose files -- posture', () => {
         expect(block).not.toMatch(WIDENING);
         expect(securityOpt(block), 'security_opt holds no-new-privileges and nothing else').toBe('      - no-new-privileges=true\n');
         expect(writableMounts(block)).toEqual(writable);
+    });
+});
+
+// The e2e stack's /tls: a directory, because the console replaces the pair by a
+// rename, which a file mounted by itself refuses.
+describe('compose files -- the e2e stack\'s /tls', () => {
+    const text = read('docker/docker-compose.e2e.yaml');
+
+    it('mounts one host directory writable on the Provisioned gateway and read-only on the Gateway-mode one, and no certificate file by itself', () => {
+        expect(count(service(text, 'gateway'), '      - ../scripts/logs/e2e/tls:/tls\n')).toBe(1);
+        expect(count(service(text, 'direct'), '      - ../scripts/logs/e2e/tls:/tls:ro\n')).toBe(1);
+        expect(text).not.toMatch(/:\/tls\/(?:tls\.crt|tls\.key|trust)\b/);
     });
 });
 

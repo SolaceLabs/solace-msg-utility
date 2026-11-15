@@ -69,6 +69,14 @@
     margin-bottom: 1rem;
 }
 
+/* Short fields (numbers, selects) of one card side by side; they wrap to one
+ * column on a narrow screen. Long fields stay outside it, at full width. */
+.form-cols {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem 1rem;
+}
+
 .form-group label {
     display: block;
     margin-bottom: 0.5rem;

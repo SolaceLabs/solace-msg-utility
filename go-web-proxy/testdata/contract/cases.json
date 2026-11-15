@@ -443,14 +443,14 @@
       ]
     },
     {
-      "name": "settings: the file, its restart-only and host-only keys, and the catalog",
+      "name": "settings: the file, its restart-only key, and the catalog",
       "steps": [
         {
           "as": "admin", "method": "GET", "path": "/managed/settings", "status": 200,
           "response": {
             "settings": {
               "hosted": true, "connModes": "both", "defaultConn": "direct",
-              "tls": { "certFile": "/tls/tls.crt", "keyFile": "/tls/tls.key", "trustDir": "/tls/trust", "insecureSkipVerify": false },
+              "tls": { "insecureSkipVerify": false },
               "logLevel": "warn",
               "access": { "allow": [], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
@@ -459,8 +459,7 @@
               "audit": { "stdout": false, "access": false, "onFailure": "continue" }
             },
             "rev": "<rev>",
-            "restartOnly": ["hosted", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify"],
-            "hostOnly": ["tls.certFile", "tls.keyFile", "tls.trustDir"],
+            "restartOnly": ["hosted"],
             "pendingRestart": [],
             "changedOnDisk": false,
             "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
@@ -473,7 +472,7 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "tls": { "certFile": "/elsewhere/tls.crt" } },
-          "status": 422, "response": { "error": "invalid", "field": "tls.certFile", "reason": "tls.certFile is a path, so it changes only in config.yaml on the gateway host, followed by a restart." }
+          "status": 400, "response": { "error": "bad_request" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "session": { "absoluteMinutes": 0 } },
@@ -554,7 +553,7 @@
           "response": {
             "settings": {
               "hosted": true, "connModes": "both", "defaultConn": "direct",
-              "tls": { "certFile": "/tls/tls.crt", "keyFile": "/tls/tls.key", "trustDir": "/tls/trust", "insecureSkipVerify": false },
+              "tls": { "insecureSkipVerify": false },
               "logLevel": "warn",
               "access": { "allow": ["192.0.2.0/24", "2001:db8::/32", "2001:db8:abcd:1000::/52", "fe80::1:0:0:1/128"], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
@@ -563,8 +562,7 @@
               "audit": { "stdout": false, "access": false, "onFailure": "continue" }
             },
             "rev": "<rev>",
-            "restartOnly": ["hosted", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify"],
-            "hostOnly": ["tls.certFile", "tls.keyFile", "tls.trustDir"],
+            "restartOnly": ["hosted"],
             "pendingRestart": [],
             "changedOnDisk": false,
             "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
@@ -595,11 +593,31 @@
       ]
     },
     {
-      "name": "settings: a saved restart-only key is reported as pending",
+      "name": "settings: skipping broker certificate checks applies at once and is never pending",
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "tls": { "insecureSkipVerify": true } },
-          "status": 200, "response": { "restartRequired": ["tls.insecureSkipVerify"], "rev": "<rev>" }
+          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/settings", "status": 200,
+          "response": {
+            "settings": {
+              "hosted": true, "connModes": "both", "defaultConn": "direct",
+              "tls": { "insecureSkipVerify": true },
+              "logLevel": "warn",
+              "access": { "allow": [], "trustedProxies": [] },
+              "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
+              "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000, "twoFactor": "optional" },
+              "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
+              "audit": { "stdout": false, "access": false, "onFailure": "continue" }
+            },
+            "rev": "<rev>",
+            "restartOnly": ["hosted"],
+            "pendingRestart": [],
+            "changedOnDisk": false,
+            "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
+          }
         }
       ]
     },
@@ -1320,9 +1338,6 @@
               "connModes": "both",
               "defaultConn": "direct",
               "tls": {
-                "certFile": "/tls/tls.crt",
-                "keyFile": "/tls/tls.key",
-                "trustDir": "/tls/trust",
                 "insecureSkipVerify": false
               },
               "logLevel": "info",
@@ -1357,16 +1372,7 @@
             },
             "rev": "<rev>",
             "restartOnly": [
-              "hosted",
-              "tls.certFile",
-              "tls.keyFile",
-              "tls.trustDir",
-              "tls.insecureSkipVerify"
-            ],
-            "hostOnly": [
-              "tls.certFile",
-              "tls.keyFile",
-              "tls.trustDir"
+              "hosted"
             ],
             "pendingRestart": [],
             "changedOnDisk": false,
@@ -2106,6 +2112,63 @@
             "modules": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
           }
         }
+      ]
+    },
+    {
+      "name": "tls and restart: every route refuses no session and a non-admin before it reads the body",
+      "steps": [
+        { "method": "GET", "path": "/managed/tls", "status": 401, "response": {"error": "unauthenticated"} },
+        { "method": "POST", "path": "/managed/tls/certificate/check", "body": {"certificate": "x", "key": "y"}, "status": 401, "response": {"error": "unauthenticated"} },
+        { "method": "PUT", "path": "/managed/tls/certificate", "body": {"certificate": "x", "key": "y"}, "status": 401, "response": {"error": "unauthenticated"} },
+        { "method": "POST", "path": "/managed/tls/trust", "body": {"certificate": "x"}, "status": 401, "response": {"error": "unauthenticated"} },
+        { "method": "DELETE", "path": "/managed/tls/trust/contract-ca.crt", "status": 401, "response": {"error": "unauthenticated"} },
+        { "method": "POST", "path": "/managed/restart", "status": 401, "response": {"error": "unauthenticated"} },
+        { "as": "viewer", "method": "GET", "path": "/managed/tls", "status": 403, "response": {"error": "forbidden"} },
+        { "as": "viewer", "method": "POST", "path": "/managed/tls/certificate/check", "body": {"certificate": "x", "key": "y"}, "status": 403, "response": {"error": "forbidden"} },
+        { "as": "viewer", "method": "PUT", "path": "/managed/tls/certificate", "body": {"certificate": "x", "key": "y"}, "status": 403, "response": {"error": "forbidden"} },
+        { "as": "viewer", "method": "POST", "path": "/managed/tls/trust", "body": {"certificate": "x"}, "status": 403, "response": {"error": "forbidden"} },
+        { "as": "viewer", "method": "DELETE", "path": "/managed/tls/trust/contract-ca.crt", "status": 403, "response": {"error": "forbidden"} },
+        { "as": "viewer", "method": "POST", "path": "/managed/restart", "status": 403, "response": {"error": "forbidden"} }
+      ]
+    },
+    {
+      "name": "tls: the certificate and the CA files, every certificate field normalised",
+      "steps": [
+        { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": []} }
+      ]
+    },
+    {
+      "name": "tls: a certificate that is not a certificate is refused on the check and the replace, and nothing is read as a key",
+      "steps": [
+        { "as": "admin", "method": "POST", "path": "/managed/tls/certificate/check", "body": {"certificate": "not a certificate", "key": "not a key"}, "status": 422, "response": {"error": "invalid", "field": "certificate", "reason": "No certificate was found. Send the PEM text, from -----BEGIN CERTIFICATE----- to -----END CERTIFICATE-----."} },
+        { "as": "admin", "method": "PUT", "path": "/managed/tls/certificate", "body": {"certificate": "not a certificate", "key": "not a key"}, "status": 422, "response": {"error": "invalid", "field": "certificate", "reason": "No certificate was found. Send the PEM text, from -----BEGIN CERTIFICATE----- to -----END CERTIFICATE-----."} },
+        { "as": "admin", "method": "POST", "path": "/managed/tls/certificate/check", "body": {"certificate": "-----BEGIN PRIVATE KEY-----\ndGhyb3dhd2F5\n-----END PRIVATE KEY-----\n", "key": "-----BEGIN PRIVATE KEY-----\ndGhyb3dhd2F5\n-----END PRIVATE KEY-----\n"}, "status": 422, "response": {"error": "invalid", "field": "certificate", "reason": "A private key was found. A private key never belongs here: send only the certificate."} },
+        { "as": "admin", "method": "PUT", "path": "/managed/tls/certificate", "body": {"certificate": "-----BEGIN PRIVATE KEY-----\ndGhyb3dhd2F5\n-----END PRIVATE KEY-----\n", "key": "-----BEGIN PRIVATE KEY-----\ndGhyb3dhd2F5\n-----END PRIVATE KEY-----\n"}, "status": 422, "response": {"error": "invalid", "field": "certificate", "reason": "A private key was found. A private key never belongs here: send only the certificate."} },
+        { "as": "admin", "method": "POST", "path": "/managed/tls/certificate/check", "body": {"certificate": "x", "key": "y", "nope": true}, "status": 400, "response": {"error": "bad_request"} },
+        { "as": "admin", "method": "PUT", "path": "/managed/tls/certificate", "body": {"certificate": "x", "nope": true}, "status": 400, "response": {"error": "bad_request"} }
+      ]
+    },
+    {
+      "name": "tls: a CA file is added and listed, refused when taken, badly named or not a certificate, and deleted",
+      "steps": [
+        { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "contract-ca.crt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": [{"name": "contract-ca.crt", "certificates": [{"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}], "problem": ""}]} },
+        { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "contract-ca.crt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 409, "response": {"error": "exists"} },
+        { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": [{"name": "contract-ca.crt", "certificates": [{"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}], "problem": ""}]} },
+        { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "notes.txt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 422, "response": {"error": "invalid", "field": "name", "reason": "Use letters, digits, dots, dashes and underscores, start with a letter or digit, end in .crt or .pem, and keep the name before the extension to 64 characters."} },
+        { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "../up.crt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 422, "response": {"error": "invalid", "field": "name", "reason": "Use letters, digits, dots, dashes and underscores, start with a letter or digit, end in .crt or .pem, and keep the name before the extension to 64 characters."} },
+        { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"certificate": "not a certificate"}, "status": 422, "response": {"error": "invalid", "field": "certificate", "reason": "No certificate was found. Send the PEM text, from -----BEGIN CERTIFICATE----- to -----END CERTIFICATE-----."} },
+        { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "key.crt", "certificate": "-----BEGIN PRIVATE KEY-----\ndGhyb3dhd2F5\n-----END PRIVATE KEY-----\n"}, "status": 422, "response": {"error": "invalid", "field": "certificate", "reason": "A private key was found. A private key never belongs here: send only the certificate."} },
+        { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/notes.txt", "status": 422, "response": {"error": "invalid", "field": "name", "reason": "Use letters, digits, dots, dashes and underscores, start with a letter or digit, end in .crt or .pem, and keep the name before the extension to 64 characters."} },
+        { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/absent.crt", "status": 404, "response": {"error": "not_found"} },
+        { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/contract-ca.crt", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": []} },
+        { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/contract-ca.crt", "status": 404, "response": {"error": "not_found"} },
+        { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": []} }
+      ]
+    },
+    {
+      "name": "restart: an administrator is answered 202",
+      "steps": [
+        { "as": "admin", "method": "POST", "path": "/managed/restart", "status": 202, "response": {"restarting": true} }
       ]
     }
   ]

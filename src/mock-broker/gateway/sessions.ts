@@ -49,6 +49,10 @@ export function createSessions() {
         dropOthers(user: string, keep: string | null): void {
             for (const [id, s] of Array.from(byId)) if (s.user === user && id !== keep) drop(id);
         },
+        /** Every session, ended as a drop is (a restart of the gateway). */
+        dropAll(): void {
+            for (const id of Array.from(byId.keys())) drop(id);
+        },
         /** Gone without telling anyone, as an idle or absolute expiry is. */
         expire(id: string): void {
             byId.delete(id);

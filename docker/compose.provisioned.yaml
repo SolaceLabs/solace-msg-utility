@@ -26,10 +26,11 @@
 # Posture: non-root UID 65532, privileged off, every capability dropped, no new
 # privileges, read-only root filesystem, the default bridge network. The
 # gateway writes only /tls (a self-signed certificate on the first start, when
-# none is there), /data (config.yaml, the encrypted user and connection
-# stores, the backup schedule, and their key), both named volumes, and
-# /backup (the scheduled backups, encrypted with their own passphrase), a
-# directory on the host.
+# none is there, and what the admin console's Certificates page replaces or
+# adds), /data (config.yaml, the encrypted user and connection stores, the
+# backup schedule, and their key), both named volumes, and /backup (the
+# scheduled backups, encrypted with their own passphrase), a directory on the
+# host.
 name: solace-msg-utility
 services:
   gateway:
@@ -58,7 +59,17 @@ services:
         target: /run/secrets/admin-password
     volumes:
       # The gateway's certificate (tls.crt, tls.key) and, under trust/, the CAs
-      # your brokers' certificates chain to.
+      # your brokers' certificates chain to. Writable, as here, the admin
+      # console's Certificates page can replace the certificate and add or
+      # delete CA files, and each change applies at once with no restart. To
+      # lock the console out, mount the directory read-only (for example
+      # ./tls:/tls:ro, a host directory you fill yourself): the page then shows
+      # what is there, its actions are off, and a change is made on the host and
+      # takes a restart. Mount the directory, never tls.crt and tls.key as
+      # single files: a file mounted by itself cannot be replaced. The paths
+      # are SMU_SSL_CERTFILE, SMU_SSL_CERTKEYFILE and SMU_SSL_TRUSTDIR, read at
+      # every start; the certificate and its key must share one directory for
+      # the console to replace them.
       - tls:/tls
       # config.yaml, users.yaml, connections.yaml, backup.yaml and store.key.
       # Without the store key the stores cannot be read; the backups below

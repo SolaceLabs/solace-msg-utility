@@ -133,6 +133,8 @@ describe('core/services/managed-api — managedErrorMessage', () => {
         ['exists', 'That name already exists. Use Edit to change it.'],
         ['rev_required', 'The page did not send the version it was working from, so the gateway refused the change. Reload the page and try again.'],
         ['store_changed_on_disk', 'A data file (users, connections or backup settings) was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.'],
+        ['tls_read_only', "The gateway's certificate or trust files are read-only on its host, so they cannot be changed here."],
+        ['tls_write_failed', 'The gateway could not write its certificate or trust files, so nothing was changed. Its log has the cause.'],
         ['store_write_failed', 'The gateway could not write its data files, so nothing was changed. Its log has the cause.'],
         ['audit_unavailable', 'The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.'],
         ['config_unreadable', 'The gateway cannot read its config.yaml. Its log has the cause.'],

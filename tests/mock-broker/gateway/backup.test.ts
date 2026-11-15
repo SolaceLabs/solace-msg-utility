@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createGateway } from '../../../src/mock-broker/gateway';
 import {
     BackupProblem, diffByName, fromBase64, mergeByName, newBackupKey, nextRun, openBackup, scheduleProblem,
-    sealBackup, sessionEnders, settingsChanges, toBase64, withHostPaths, type BackupDoc, type BackupSchedule,
+    sealBackup, sessionEnders, settingsChanges, toBase64, type BackupDoc, type BackupSchedule,
 } from '../../../src/mock-broker/gateway/backup';
 import { settingsFromBackup } from '../../../src/mock-broker/gateway/settings';
 import { CONTRACT_DIR, contractSeed } from './helpers';
@@ -146,8 +146,18 @@ describe('mock-broker/gateway/backup -- the file format', () => {
 
     it('decodes settings onto a zero file: missing ones are zero, mistyped ones refused', () => {
         expect(settingsFromBackup(undefined).connModes).toBe('');
+        expect(settingsFromBackup({ tls: null }).tls).toEqual({ insecureSkipVerify: false });
         expect(settingsFromBackup(null).session).toEqual({ idleMinutes: 0, absoluteMinutes: 0 });
         expect(() => settingsFromBackup({ hosted: 'yes' })).toThrow();
+    });
+
+    it('reads a backup from before the paths left the file, and drops the three TLS paths whatever their case', () => {
+        const old = { ...settings(), tls: { certFile: '/old/tls.crt', KeyFile: '/old/tls.key', trustdir: '/old/trust', insecureSkipVerify: true } };
+        expect(settingsFromBackup(old).tls).toEqual({ insecureSkipVerify: true });
+        expect(settingsFromBackup({ TLS: { certFile: '/x' } }).tls).toEqual({ insecureSkipVerify: false });
+        expect(() => settingsFromBackup({ tls: { certfile2: '/x' } })).toThrow();
+        expect(() => settingsFromBackup({ tls: 'file' })).toThrow();
+        expect(() => settingsFromBackup({ tls: ['/x'] })).toThrow();
     });
 
     it('opens a backup from before the audit section, with both audit keys off and onFailure continue', () => {
@@ -170,11 +180,10 @@ describe('mock-broker/gateway/backup -- import planning', () => {
         expect(sessionEnders(cur, [user('admin', 'a2', true), ...cur.slice(1)])).toEqual(['admin']);
     });
 
-    it('names the settings an import changes, never a host path', () => {
+    it('names the settings an import changes, dotted and sorted', () => {
         const cur = settings();
-        const next = { ...cur, logLevel: 'info', tls: { ...cur.tls, certFile: '/elsewhere' }, access: { allow: ['10.0.0.0/8'], trustedProxies: [] } };
-        expect(settingsChanges(cur, next)).toEqual(['access.allow', 'logLevel']);
-        expect(withHostPaths(next, cur).tls.certFile).toBe(cur.tls.certFile);
+        const next = { ...cur, logLevel: 'info', tls: { insecureSkipVerify: !cur.tls.insecureSkipVerify }, access: { allow: ['10.0.0.0/8'], trustedProxies: [] } };
+        expect(settingsChanges(cur, next)).toEqual(['access.allow', 'logLevel', 'tls.insecureSkipVerify']);
     });
 });
 
@@ -305,8 +314,8 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         const ex = await call(gw, 'POST', '/managed/backup/export', { passphrase: PASS });
         expect(ex.json.filename).toBe('smu-backup-20261109T090000Z.json');
         const d = await openBackup(ex.json.content, PASS);
-        expect([d.created, d.gateway, d.users.map(u => u.username), d.settings.tls.certFile])
-            .toEqual(['2026-11-09T09:00:00Z', 'demo', ['admin', 'viewer', 'operator'], '']);
+        expect([d.created, d.gateway, d.users.map(u => u.username), d.settings.tls])
+            .toEqual(['2026-11-09T09:00:00Z', 'demo', ['admin', 'viewer', 'operator'], { insecureSkipVerify: false }]);
         expect(d.settings.logLevel).toBe('warn');
     });
 
@@ -379,10 +388,11 @@ describe('mock-broker/gateway/backup -- the routes', () => {
             expect((await imp(gw, own, 'merge', 'skip', 'skip')).json.signedOut).toBe(true);
         });
 
-        it('reports a restart-only setting as pending', async () => {
+        it('applies tls.insecureSkipVerify at once: nothing is pending a restart', async () => {
             const gw = gateway();
             const f = await file(gw, d => { d.settings.tls.insecureSkipVerify = true; });
-            expect((await imp(gw, f, 'skip', 'skip', 'replace')).json.restartRequired).toEqual(['tls.insecureSkipVerify']);
+            expect((await imp(gw, f, 'skip', 'skip', 'replace')).json.restartRequired).toEqual([]);
+            expect(gw.settings.current().tls.insecureSkipVerify).toBe(true);
         });
     });
 

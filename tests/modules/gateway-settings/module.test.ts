@@ -3,15 +3,15 @@ import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { createEventBus } from '../../../src/core/event-bus';
 import type { AppContext, AppState, ManagedSession } from '../../../src/core/types';
 
-const svcMock = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), client: vi.fn() }));
+const svcMock = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), client: vi.fn(), restart: vi.fn(), ping: vi.fn() }));
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
 
 vi.mock('../../../src/core/toast', () => ({ showToast: toastMock.showToast }));
 vi.mock('../../../src/modules/gateway-settings/service', () => ({
-    createSettingsService: () => ({ load: svcMock.load, save: svcMock.save, client: svcMock.client }),
+    createSettingsService: () => ({ load: svcMock.load, save: svcMock.save, client: svcMock.client, restart: svcMock.restart, ping: svcMock.ping }),
 }));
 
-import { GatewaySettingsModule } from '../../../src/modules/gateway-settings/module';
+import { GatewaySettingsModule, type GatewaySettingsOptions } from '../../../src/modules/gateway-settings/module';
 import { completeContext } from '../../helpers/appContext';
 import { answerConfirm } from '../../helpers/confirmDialog';
 
@@ -20,7 +20,7 @@ const ADMIN: ManagedSession = {
 };
 const SETTINGS = {
     hosted: true, connModes: 'both', defaultConn: 'direct',
-    tls: { certFile: '/tls/tls.crt', keyFile: '/tls/tls.key', trustDir: '/tls/trust', insecureSkipVerify: false },
+    tls: { insecureSkipVerify: false },
     logLevel: 'warn',
     access: { allow: ['10.0.0.0/8', '192.0.2.0/24'], trustedProxies: [] },
     session: { idleMinutes: 10, absoluteMinutes: 30 },
@@ -28,11 +28,10 @@ const SETTINGS = {
     modules: { offered: ['queue-browser'], userDefault: 'all' },
     audit: { stdout: false, access: false, onFailure: 'continue' },
 };
-const RESTART_ONLY = ['hosted', 'tls.certFile', 'tls.keyFile', 'tls.trustDir', 'tls.insecureSkipVerify'];
-const HOST_ONLY = ['tls.certFile', 'tls.keyFile', 'tls.trustDir'];
+const RESTART_ONLY = ['hosted'];
 const view = (over: Record<string, unknown> = {}) => ({
     ok: true,
-    data: { rev: 'rev-1', settings: SETTINGS, restartOnly: RESTART_ONLY, hostOnly: HOST_ONLY, pendingRestart: [], changedOnDisk: false, catalog: ['queue-browser', 'queue-copy'], ...over },
+    data: { rev: 'rev-1', settings: SETTINGS, restartOnly: RESTART_ONLY, pendingRestart: [], changedOnDisk: false, catalog: ['queue-browser', 'queue-copy'], ...over },
 });
 
 function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
@@ -40,7 +39,8 @@ function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
 }
 const hidden = (c: HTMLElement, sel: string) => el(c, sel).classList.contains('hidden');
 const value = (c: HTMLElement, id: string) => el<HTMLInputElement>(c, `#gw-set-${id}`).value;
-const offeredBoxes = (c: HTMLElement) => [...el(c, '#gw-set-modules-offered').querySelectorAll<HTMLInputElement>('input')];
+const tiles = (c: HTMLElement) => [...el(c, '#gw-set-modules-offered').querySelectorAll<HTMLButtonElement>('button.gw-set-tile')];
+const pressed = (c: HTMLElement) => tiles(c).map(t => t.getAttribute('aria-pressed') === 'true');
 const errorText = (c: HTMLElement) => el(c, '#gw-set-error').textContent;
 
 function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppContext {
@@ -56,11 +56,11 @@ function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppCon
     });
 }
 
-async function setup(managed: ManagedSession | null = ADMIN, loaded: unknown = view()) {
+async function setup(managed: ManagedSession | null = ADMIN, loaded: unknown = view(), opts: GatewaySettingsOptions = {}) {
     const container = loadModuleDOM('gateway-settings');
     const ctx = makeCtx(container, managed);
     svcMock.load.mockResolvedValue(loaded);
-    await GatewaySettingsModule.install(ctx);
+    await GatewaySettingsModule.install(ctx, opts);
     await new Promise(resolve => setTimeout(resolve, 0)); // let the first load render
     return { container, ctx };
 }
@@ -73,6 +73,8 @@ beforeEach(() => {
     svcMock.load.mockReset();
     svcMock.save.mockReset();
     svcMock.client.mockReset();
+    svcMock.restart.mockReset();
+    svcMock.ping.mockReset();
     svcMock.client.mockResolvedValue({ ok: true, data: { address: '192.0.2.10', peer: '192.0.2.10', viaProxy: false } });
     toastMock.showToast.mockReset();
 });
@@ -85,10 +87,8 @@ describe('gateway-settings — load', () => {
         expect(value(container, 'connModes')).toBe('both');
         expect(value(container, 'access-allow')).toBe('10.0.0.0/8\n192.0.2.0/24');
         expect(value(container, 'session-idleMinutes')).toBe('10');
-        expect(value(container, 'tls-certFile')).toBe('/tls/tls.crt');
         expect(el<HTMLInputElement>(container, '#gw-set-tls-insecureSkipVerify').checked).toBe(false);
-        expect(el(container, '#gw-set-modules-offered').textContent).toBe(' Queue Browser Queue Copy');
-        expect(offeredBoxes(container).map(b => b.checked)).toEqual([true, false]);
+        expect(pressed(container)).toEqual([true, false]);
         expect(hidden(container, '#gw-set-pending')).toBe(true);
         expect(hidden(container, '#gw-set-disk')).toBe(true);
         expect(el<HTMLButtonElement>(container, '#btn-gw-set-save').disabled).toBe(false);
@@ -122,26 +122,31 @@ describe('gateway-settings — load', () => {
         expect(value(container, 'connModes')).toBe('both');
     });
 
-    it('tags the restart-only keys, and shows the path keys read-only for a hand edit', async () => {
-        const { container } = await setup();
-        const tagged = (cls: string) => [...container.querySelectorAll<HTMLElement>(`.${cls}`)].map(g => g.dataset.key);
-        expect(tagged('gw-set-restart')).toEqual(['tls.insecureSkipVerify']);
-        expect(tagged('gw-set-host')).toEqual(['tls.certFile', 'tls.keyFile', 'tls.trustDir']);
-        const disabled = [...container.querySelectorAll<HTMLInputElement>('#gw-set-view .form-control:disabled')].map(i => i.id);
-        expect(disabled).toEqual(['gw-set-tls-certFile', 'gw-set-tls-keyFile', 'gw-set-tls-trustDir']);
-        // Every key the gateway may name has a field to tag, except hosted: it
-        // must stay true while Provisioned mode serves this page, so the page
-        // offers neither it nor connModes "direct".
+    it('tags a key the gateway reports as restart-only, and no other; it has no path fields', async () => {
+        const { container } = await setup(ADMIN, view({ restartOnly: ['logLevel'] }));
+        const tagged = [...container.querySelectorAll<HTMLElement>('.gw-set-restart')].map(g => g.dataset.key);
+        expect(tagged).toEqual(['logLevel']);
+        // The TLS paths are environment variables: no field, no tag.
+        expect(container.querySelector('[id^="gw-set-tls-"]:not(#gw-set-tls-insecureSkipVerify)')).toBeNull();
+        expect(container.querySelector('.gw-set-host')).toBeNull();
+        expect(container.textContent).not.toContain('edit on host');
+        // hosted must stay true while Provisioned mode serves this page, so the
+        // page offers neither it nor connModes "direct".
         const keys = [...container.querySelectorAll<HTMLElement>('[data-key]')].map(g => g.dataset.key);
-        expect(keys).toEqual(expect.arrayContaining(RESTART_ONLY.filter(k => k !== 'hosted')));
         expect(keys).not.toContain('hosted');
         expect([...container.querySelectorAll<HTMLOptionElement>('#gw-set-connModes option')].map(o => o.value)).toEqual(['provisioned', 'both']);
     });
 
+    it('tags nothing with the gateway\'s own restart-only list, and every field is enabled', async () => {
+        const { container } = await setup();
+        expect(container.querySelector('.gw-set-restart')).toBeNull();
+        expect(container.querySelectorAll('#gw-set-view .form-control:disabled')).toHaveLength(0);
+    });
+
     it('lists the keys saved but not yet running', async () => {
-        const { container } = await setup(ADMIN, view({ pendingRestart: ['tls.keyFile', 'tls.certFile'] }));
+        const { container } = await setup(ADMIN, view({ pendingRestart: ['hosted', 'logLevel'] }));
         expect(hidden(container, '#gw-set-pending')).toBe(false);
-        expect(el(container, '#gw-set-pending').textContent).toBe('Saved, applies when the gateway restarts: tls.keyFile, tls.certFile.');
+        expect(el(container, '#gw-set-pending-text').textContent).toBe('Saved, applies when the gateway restarts: hosted, logLevel.');
     });
 
     it('a hand edit on disk shows the banner and disables Save', async () => {
@@ -282,22 +287,22 @@ describe('gateway-settings -- audit trail', () => {
 describe('gateway-settings — save', () => {
     it("sends the whole file with the form's values, then reloads", async () => {
         const { container } = await setup();
-        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: ['tls.insecureSkipVerify'], rev: 'rev-2' } });
+        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
         el<HTMLInputElement>(container, '#gw-set-session-idleMinutes').value = '5';
         el<HTMLTextAreaElement>(container, '#gw-set-access-allow').value = ' 10.0.0.0/8 \n\n192.0.2.7/32\n';
         el<HTMLSelectElement>(container, '#gw-set-logLevel').value = 'debug';
         el<HTMLInputElement>(container, '#gw-set-tls-insecureSkipVerify').checked = true;
         el<HTMLInputElement>(container, '#gw-set-audit-stdout').checked = true;
         el<HTMLInputElement>(container, '#gw-set-audit-access').checked = true;
-        offeredBoxes(container)[1].checked = true;
-        svcMock.load.mockResolvedValue(view({ pendingRestart: ['tls.insecureSkipVerify'] }));
+        tiles(container)[1].click();
+        svcMock.load.mockResolvedValue(view({ pendingRestart: ['hosted'] }));
         clickSave(container);
 
         await vi.waitFor(() => expect(hidden(container, '#gw-set-pending')).toBe(false));
         expect(svcMock.save).toHaveBeenCalledWith({
             ...SETTINGS,
             logLevel: 'debug',
-            tls: { ...SETTINGS.tls, insecureSkipVerify: true },
+            tls: { insecureSkipVerify: true },
             access: { allow: ['10.0.0.0/8', '192.0.2.7/32'], trustedProxies: [] },
             session: { idleMinutes: 5, absoluteMinutes: 30 },
             modules: { offered: ['queue-browser', 'queue-copy'], userDefault: 'all' },
@@ -383,5 +388,231 @@ describe('gateway-settings -- versions', () => {
         expect(value(container, 'session-idleMinutes')).toBe('5');
         expect(svcMock.load).toHaveBeenCalledTimes(1);
         expect(errorText(container)).toBe('');
+    });
+});
+
+describe('gateway-settings -- layout', () => {
+    it('is named Gateway Settings in the sidebar', () => {
+        expect(GatewaySettingsModule.name).toBe('Gateway Settings');
+    });
+
+    it('puts every section in a card of its own, stacked directly under the page, never inside another card', async () => {
+        const { container } = await setup();
+        const sections = [...container.querySelectorAll('.gw-set-section')].map(h => h.textContent);
+        expect(sections).toEqual([
+            'Connections', 'Access', 'Sessions', 'Sign-in throttle', 'Two-factor sign-in',
+            'Modules', 'Logging', 'Audit trail', 'Broker trust', 'Gateway',
+        ]);
+        for (const h of container.querySelectorAll('.gw-set-section')) {
+            const card = h.parentElement as HTMLElement;
+            expect(card.classList.contains('card')).toBe(true);
+            expect(card.parentElement?.id).toBe('gw-set-view');
+        }
+        // One card per section plus the title card: nothing sits beside another card.
+        expect(container.querySelectorAll('#gw-set-view .card')).toHaveLength(sections.length + 1);
+        expect(container.querySelectorAll('.card .card')).toHaveLength(0);
+    });
+
+    it('lays short fields (numbers, selects) out in columns and keeps long ones outside them', async () => {
+        const { container } = await setup();
+        for (const id of ['connModes', 'defaultConn', 'session-idleMinutes', 'session-absoluteMinutes', 'login-maxFailures',
+            'login-unauthenticatedPerMinute', 'login-twoFactor', 'modules-userDefault', 'logLevel', 'audit-onFailure']) {
+            expect(el(container, `#gw-set-${id}`).closest('.form-cols'), id).not.toBeNull();
+        }
+        for (const id of ['access-allow', 'access-trustedProxies']) {
+            expect(el(container, `#gw-set-${id}`).closest('.form-cols'), id).toBeNull();
+        }
+        expect(el(container, '#gw-set-modules-offered').closest('.form-cols')).toBeNull();
+    });
+});
+
+describe('gateway-settings -- modules on offer', () => {
+    it('shows one toggle tile per catalog module, with its name, its description and whether it is offered', async () => {
+        const { container } = await setup(ADMIN, view({ catalog: ['queue-browser', 'queue-copy', 'queue-subscription-explorer', 'future-thing'] }));
+        const rows = tiles(container).map(t => [
+            t.tagName, t.type, t.dataset.module, t.getAttribute('aria-pressed'),
+            t.querySelector('.gw-set-tile-name')?.textContent, t.querySelector('.gw-set-tile-desc')?.textContent ?? null,
+        ]);
+        expect(rows).toEqual([
+            ['BUTTON', 'button', 'queue-browser', 'true', 'Queue Browser', 'Browse, inspect and delete queued messages.'],
+            ['BUTTON', 'button', 'queue-copy', 'false', 'Queue Copy', 'Copy or move messages between queues.'],
+            ['BUTTON', 'button', 'queue-subscription-explorer', 'false', 'Queue Subscriptions', 'See which topics each queue subscribes to.'],
+            ['BUTTON', 'button', 'future-thing', 'false', 'Future Thing', null],
+        ]);
+        expect(el(container, '#gw-set-modules-offered').getAttribute('role')).toBe('group');
+    });
+
+    it('a click toggles a tile on and off, and Save sends the pressed ones in catalog order', async () => {
+        const { container } = await setup(ADMIN, view({ catalog: ['queue-browser', 'queue-copy', 'queue-subscription-explorer'] }));
+        const [browser, copy, subs] = tiles(container);
+        browser.click();
+        copy.click();
+        subs.click();
+        subs.click();
+        expect(pressed(container)).toEqual([false, true, false]);
+        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        clickSave(container);
+        await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
+        expect(svcMock.save.mock.calls[0][0].modules.offered).toEqual(['queue-copy']);
+    });
+
+    it('Reload brings back what the gateway has, dropping unsaved tile clicks', async () => {
+        const { container } = await setup();
+        tiles(container)[1].click();
+        svcMock.load.mockResolvedValue(view());
+        el<HTMLButtonElement>(container, '#btn-gw-set-reload').click();
+        await vi.waitFor(() => expect(pressed(container)).toEqual([true, false]));
+    });
+});
+
+describe('gateway-settings -- broker trust', () => {
+    it('keeps Skip broker certificate checks in its card, saved with the rest, with no restart tag', async () => {
+        const { container } = await setup();
+        const box = el<HTMLInputElement>(container, '#gw-set-tls-insecureSkipVerify');
+        expect(box.closest('.card')?.querySelector('.gw-set-section')?.textContent).toBe('Broker trust');
+        expect(box.checked).toBe(false);
+        expect(el(container, '[data-key="tls.insecureSkipVerify"]').classList.contains('gw-set-restart')).toBe(false);
+        box.checked = true;
+        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        clickSave(container);
+        await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
+        expect(svcMock.save.mock.calls[0][0].tls).toEqual({ insecureSkipVerify: true });
+    });
+});
+
+describe('gateway-settings -- restart', () => {
+    const QUESTION = 'Restart the gateway? Everyone is signed out and open broker connections close. It is back in a few seconds.';
+
+    async function setupRestart() {
+        const wait = vi.fn().mockResolvedValue(undefined);
+        const reload = vi.fn();
+        const { container, ctx } = await setup(ADMIN, view(), { wait, reload });
+        const button = el<HTMLButtonElement>(container, '#btn-gw-set-restart');
+        return { container, ctx, wait, reload, button };
+    }
+
+    it('lives in its own Gateway card', async () => {
+        const { button } = await setupRestart();
+        expect(button.textContent).toBe('Restart gateway');
+        expect(button.closest('.card')?.querySelector('.gw-set-section')?.textContent).toBe('Gateway');
+        expect(button.disabled).toBe(false);
+    });
+
+    it('Cancel asks and does nothing: no request, the button stays usable', async () => {
+        const { button, reload } = await setupRestart();
+        button.click();
+        expect(await answerConfirm(false)).toBe(QUESTION);
+        expect(svcMock.restart).not.toHaveBeenCalled();
+        expect(button.disabled).toBe(false);
+        expect(reload).not.toHaveBeenCalled();
+    });
+
+    it('OK posts the restart, says it is restarting, waits for /hosted and goes to the sign-in', async () => {
+        const { container, wait, reload, button } = await setupRestart();
+        svcMock.restart.mockResolvedValue({ ok: true, data: { restarting: true } });
+        svcMock.ping.mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+        button.click();
+        expect(await answerConfirm(true)).toBe(QUESTION);
+        await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+        expect(svcMock.restart).toHaveBeenCalledTimes(1);
+        expect(svcMock.ping).toHaveBeenCalledTimes(3);
+        expect(wait.mock.calls.map(c => c[0])).toEqual([2000, 1000, 1000]);
+        expect(hidden(container, '#gw-set-restarting')).toBe(false);
+        expect(el(container, '#gw-set-restarting').textContent).toMatch(/^Restarting the gateway\./);
+        expect(button.disabled).toBe(true);
+        expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it('the confirm dialog is the app\'s, not the browser\'s', async () => {
+        const nativeConfirm = vi.spyOn(window, 'confirm');
+        const { button } = await setupRestart();
+        button.click();
+        expect(await answerConfirm(false)).toBe(QUESTION);
+        expect(nativeConfirm).not.toHaveBeenCalled();
+        nativeConfirm.mockRestore();
+    });
+
+    it.each([
+        ['an administrator is required', { ok: false, status: 403, code: 'forbidden' }, 'This needs an administrator.'],
+        ['the gateway cannot be reached', { ok: false, status: 0, code: 'network' }, 'The gateway could not be reached.'],
+    ])('when %s, it says so, waits for nothing and leaves the button usable', async (_, failure, text) => {
+        const { container, wait, reload, button } = await setupRestart();
+        svcMock.restart.mockResolvedValue(failure);
+        button.click();
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(el(container, '#gw-set-restart-error').textContent).toBe(text));
+        expect(hidden(container, '#gw-set-restart-error')).toBe(false);
+        expect(hidden(container, '#gw-set-restarting')).toBe(true);
+        expect(button.disabled).toBe(false);
+        expect(svcMock.ping).not.toHaveBeenCalled();
+        expect(wait).not.toHaveBeenCalled();
+        expect(reload).not.toHaveBeenCalled();
+    });
+
+    it('an ended session (401) asks the session owner to sign out', async () => {
+        const { ctx, button } = await setupRestart();
+        const signOut = vi.fn();
+        ctx.eventBus.on('rbac:sign-out-requested', signOut);
+        svcMock.restart.mockResolvedValue({ ok: false, status: 401, code: 'unauthenticated' });
+        button.click();
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+        expect(button.disabled).toBe(false);
+    });
+
+    it('a gateway that never answers again: gives up after a minute, says so, and the button is usable again', async () => {
+        const { container, wait, reload, button } = await setupRestart();
+        svcMock.restart.mockResolvedValue({ ok: true, data: { restarting: true } });
+        svcMock.ping.mockResolvedValue(false);
+        button.click();
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(el(container, '#gw-set-restart-error').textContent)
+            .toBe('The gateway has not answered after a minute. Check it on its host, then reload this page.'));
+        expect(wait).toHaveBeenCalledTimes(60);
+        expect(svcMock.ping).toHaveBeenCalledTimes(60);
+        expect(hidden(container, '#gw-set-restarting')).toBe(true);
+        expect(button.disabled).toBe(false);
+        expect(reload).not.toHaveBeenCalled();
+    });
+
+    it('a second try clears the earlier error', async () => {
+        const { container, button } = await setupRestart();
+        svcMock.restart.mockResolvedValueOnce({ ok: false, status: 403, code: 'forbidden' });
+        button.click();
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(hidden(container, '#gw-set-restart-error')).toBe(false));
+        svcMock.restart.mockResolvedValueOnce({ ok: true, data: { restarting: true } });
+        svcMock.ping.mockResolvedValue(true);
+        button.click();
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(hidden(container, '#gw-set-restart-error')).toBe(true));
+    });
+
+    it('sleeps with setTimeout when no wait is injected: 2 s before the first look at /hosted', async () => {
+        const reload = vi.fn();
+        const { container } = await setup(ADMIN, view(), { reload });
+        const button = el<HTMLButtonElement>(container, '#btn-gw-set-restart');
+        let answer!: (r: unknown) => void;
+        svcMock.restart.mockReturnValue(new Promise(resolve => { answer = resolve; }));
+        svcMock.ping.mockResolvedValue(true);
+        button.click();
+        await answerConfirm(true);
+        const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void) => { fn(); return 0; }) as never);
+        try {
+            answer({ ok: true, data: { restarting: true } });
+            for (let i = 0; i < 20; i++) await Promise.resolve();
+            expect(timer).toHaveBeenCalledWith(expect.any(Function), 2000);
+            expect(reload).toHaveBeenCalledTimes(1);
+        } finally {
+            timer.mockRestore();
+        }
+    });
+});
+
+describe('gateway-settings -- pending-restart notice', () => {
+    it('points at the Restart gateway button: its button moves focus there', async () => {
+        const { container } = await setup(ADMIN, view({ pendingRestart: ['hosted'] }));
+        el<HTMLButtonElement>(container, '#btn-gw-set-goto-restart').click();
+        expect(document.activeElement).toBe(el(container, '#btn-gw-set-restart'));
     });
 });

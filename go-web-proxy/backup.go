@@ -29,9 +29,9 @@ import (
 // Backups. One file format serves both an administrator's export and the
 // scheduled backups written into backupRoot, a directory the operator mounts
 // from the host. A file holds the users (with their password hashes), the
-// connections (with their SEMP and VPN passwords) and config.yaml's settings
-// minus the host-only paths, sealed with a key derived from a passphrase, so
-// it opens on any deployment, whatever its store key. On disk it is JSON:
+// connections (with their SEMP and VPN passwords) and config.yaml's settings,
+// sealed with a key derived from a passphrase, so it opens on any deployment,
+// whatever its store key. On disk it is JSON:
 //
 //	{"format":"smu-backup","version":1,
 //	 "kdf":{"name":"pbkdf2-sha256","iter":600000,"salt":"<base64>"},
@@ -240,15 +240,6 @@ func openBackup(ctx context.Context, h *hasher, data []byte, passphrase string) 
 	return doc, nil
 }
 
-// withHostPaths returns fc with the host-only path keys (restartOnlyKeys)
-// taken from host: an export clears them (host is zero), and an import keeps
-// the deployment's own.
-func withHostPaths(fc, host fileConfig) fileConfig {
-	fc.TLS.CertFile, fc.TLS.KeyFile, fc.TLS.TrustDir = host.TLS.CertFile, host.TLS.KeyFile, host.TLS.TrustDir
-	fc.RemovedAppDir, fc.RemovedUsersFile, fc.RemovedConnectionsFile = nil, nil, nil
-	return fc
-}
-
 // ----- import planning ---------------------------------------------------------------
 
 // nameDiff lists what an import of one section adds, changes and, under
@@ -334,14 +325,13 @@ func sessionEnders(cur, next []userRec) []string {
 }
 
 // settingsChanges lists the settings keys, dotted as the settings page names
-// them, on which next differs from cur. Host-only keys are never listed: an
-// import keeps the deployment's own.
+// them, on which next differs from cur. The removed keys a document may still
+// hold (json "-") are not settings and never show.
 func settingsChanges(cur, next fileConfig) []string {
 	a, b := flattenSettings(cur), flattenSettings(next)
-	host := hostOnlyKeyNames()
 	out := []string{}
 	for _, k := range sortedKeys(a, b) {
-		if !slices.Contains(host, k) && !reflect.DeepEqual(a[k], b[k]) {
+		if !reflect.DeepEqual(a[k], b[k]) {
 			out = append(out, k)
 		}
 	}
@@ -748,7 +738,7 @@ func (b *backupService) snapshot() backupDoc {
 	}
 	b.store.wr.snapshot(func() {
 		doc.Users, doc.Connections = b.store.listUsers(), b.store.listConnections()
-		doc.Settings = withHostPaths(b.settings.current(), fileConfig{})
+		doc.Settings = b.settings.current()
 	})
 	return doc
 }

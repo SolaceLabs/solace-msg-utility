@@ -7,7 +7,7 @@
  * Built via `node scripts/vite-build.mjs --mode demo --variant=managed-demo --out-filename=provisioned-demo.html`.
  *
  * The managed variant's messaging modules plus the admin pages (the three
- * editors and Backup & Restore), which
+ * editors, Certificates and Backup & Restore), which
  * the product serves at /solAdmin: here they are sidebar entries, shown to an
  * administrator only (`isModuleVisible`). No `admin-login`: the connections
  * module's Provisioned panel owns the session, as in provisioned.html, and a second
@@ -21,6 +21,7 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'user-management': 20,         // admin-only
     'connection-management': 15,   // admin-only
     'gateway-settings': 10,        // admin-only: config.yaml
+    'tls-certificates': 8,         // admin-only: gateway certificate, trusted broker CAs
     'backup': 5,                   // admin-only: export, import, scheduled backups
 };
 

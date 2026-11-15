@@ -33,10 +33,15 @@ const savedSettings = async (gw: Gw) => {
     return call(gw, 'PUT', '/managed/settings', { ...view.settings, rev: view.rev });
 };
 const USER = { password: '', admin: false, operate: [], readOnly: [], modules: null };
+/** Well-formed PEM the fake accepts: a certificate and a throwaway block standing for its key. */
+const PAIR = {
+    certificate: '-----BEGIN CERTIFICATE-----\nZmFrZSBjZXJ0aWZpY2F0ZQ==\n-----END CERTIFICATE-----\n',
+    key: '-----BEGIN PRIVATE KEY-----\ndGhyb3dhd2F5\n-----END PRIVATE KEY-----\n',
+};
 
 /**
  * Codes the fake sends in a state the contract cannot pin: once a
- * control-panel fault is armed, or (backup_unavailable) for a second backup
+ * control-panel fault is armed (tls_read_only: the TLS files switch), or (backup_unavailable) for a second backup
  * in the same second, which a fixed clock makes certain. Each row sets the
  * state and asks. The version refusals (stale, exists, rev_required) need no
  * fault, only a save that names the wrong rev; a row keeps each placed once
@@ -59,6 +64,7 @@ const FAULTS: Record<string, { status: number; ask: (gw: Gw) => ReturnType<Gw['h
     upstream_auth: { status: 502, ask: gw => { scenario.fault = FAULT.SEMP_UNAUTHORIZED; return relayed(gw); } },
     config_unreadable: { status: 500, ask: gw => { gw.faults.unreadable = true; return call(gw, 'GET', '/managed/settings'); } },
     config_changed_on_disk: { status: 409, ask: gw => { gw.faults.changedOnDisk = true; return savedSettings(gw); } },
+    tls_read_only: { status: 409, ask: gw => { gw.faults.tlsReadOnly = true; return call(gw, 'PUT', '/managed/tls/certificate', PAIR); } },
 };
 
 /** Made by managedRequest itself: no gateway sends them. */
@@ -68,10 +74,13 @@ const CLIENT = ['network', 'bad_response'];
  * Sent by the real gateway, never by the demo's: a cross-site request and an
  * oversized body cannot come from the page itself, and the fake has no
  * failure of its own to report as a server error. It has no files either, so
- * a store changed on disk, a store write that failed and an audit log that
- * cannot be written (audit.onFailure refuse) cannot happen in it.
+ * a store changed on disk, a store write that failed, an audit log that
+ * cannot be written (audit.onFailure refuse) and a certificate or CA file the
+ * disk refused (tls_write_failed) cannot happen in it.
  */
-const NOT_SIMULATED = ['cross_origin', 'too_large', 'server_error', 'store_changed_on_disk', 'store_write_failed', 'audit_unavailable'];
+const NOT_SIMULATED = [
+    'cross_origin', 'too_large', 'server_error', 'store_changed_on_disk', 'store_write_failed', 'audit_unavailable', 'tls_write_failed',
+];
 
 beforeEach(() => {
     resetScenario();

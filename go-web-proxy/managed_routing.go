@@ -19,12 +19,13 @@ import (
 // lv is the live settings every piece reads per request; src is config.yaml,
 // which the settings endpoint rewrites; upstream is the broker transport the
 // Direct relay uses too (newUpstreamTransport), for the SEMP relay and the
-// SMF gate; auditOut gets the copy of each audit line while audit.stdout is on.
+// SMF gate; tm is the TLS manager the /managed/tls* routes call (tls.go);
+// auditOut gets the copy of each audit line while audit.stdout is on.
 //
 // Provisioned mode always has an audit trail: the log at cfg.auditFile is
 // opened here, and a failure stops the start. buildManagedRoutes leaves the
 // auditor nil (no trail), so tests that do not look at it need no /data.
-func newManagedRouting(cfg config, lv *live, src configSource, upstream http.RoundTripper, auditOut io.Writer, logger *slog.Logger) (*managedRoutes, error) {
+func newManagedRouting(cfg config, lv *live, src configSource, upstream http.RoundTripper, tm *tlsManager, auditOut io.Writer, logger *slog.Logger) (*managedRoutes, error) {
 	if !cfg.provisioned() {
 		return nil, nil
 	}
@@ -34,7 +35,7 @@ func newManagedRouting(cfg config, lv *live, src configSource, upstream http.Rou
 	if err != nil {
 		return nil, fmt.Errorf("password hasher: %w", err)
 	}
-	routes, err := buildManagedRoutes(cfg, lv, src, h, os.Getenv, time.Now, upstream, logger)
+	routes, err := buildManagedRoutes(cfg, lv, src, h, os.Getenv, time.Now, upstream, tm, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -44,6 +45,13 @@ func newManagedRouting(cfg config, lv *live, src configSource, upstream http.Rou
 	}
 	routes.setAuditor(au)
 	return routes, nil
+}
+
+// setRestart gives POST /managed/restart the function that asks serve to shut
+// down and start again (restart.go). Until it is set the route answers 202 and
+// does nothing, which is what a test of the API alone wants.
+func (mr *managedRoutes) setRestart(f func()) {
+	mr.api.(*managedHandler).restart = f
 }
 
 // setAuditor hands the audit trail to every piece that records to it. Each
@@ -64,7 +72,7 @@ func (mr *managedRoutes) setAuditor(a *auditor) {
 
 // buildManagedRoutes wires the pieces; split from newManagedRouting so tests
 // can supply a cheap hasher, an environment and a clock.
-func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, getenv func(string) string, now func() time.Time, upstream http.RoundTripper, logger *slog.Logger) (*managedRoutes, error) {
+func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, getenv func(string) string, now func() time.Time, upstream http.RoundTripper, tm *tlsManager, logger *slog.Logger) (*managedRoutes, error) {
 	schedulePath := filepath.Join(filepath.Dir(cfg.usersFile), scheduleFileName)
 	st, err := loadStore(storeOptions{
 		usersPath: cfg.usersFile, connsPath: cfg.connectionsFile, keyPath: cfg.storeKeyFile,
@@ -106,7 +114,7 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	if err != nil {
 		return nil, fmt.Errorf("sign-in page template: %w", err)
 	}
-	api := newManagedHandler(st, ss, th, lv, sf, backups, managedEndpoints{
+	api := newManagedHandler(st, ss, th, lv, sf, backups, tm, managedEndpoints{
 		relay: newSEMPRelay(st, upstream, logger.With("component", "relay")),
 		smf:   newSMFGate(st, ss, sockets, connects, upstream, logger.With("component", "smf")),
 		dial:  newDialer(st, connects, logger.With("component", "dial")),

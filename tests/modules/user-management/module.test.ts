@@ -404,7 +404,7 @@ describe('user-management — create / edit form', () => {
         expect(el(container, '#user-mgmt-readonly-rows').querySelector('.row-list-empty')!.textContent).toBe(NO_READ_ONLY);
         expect(shown('.row-list-head', operate)).toBe(false);
         // The hint under both lists: what a row grants, and that the Administrator flag grants no broker.
-        expect(el(container, '.user-mgmt-hint').textContent).toContain('The Administrator flag gives no broker access by itself.');
+        expect(el(container, '#user-mgmt-grants-hint').textContent).toContain('The Administrator flag gives no broker access by itself.');
 
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add-operate').click();
         expect(shown('.row-list-empty', operate)).toBe(false);
@@ -430,66 +430,155 @@ describe('user-management — create / edit form', () => {
 });
 
 describe('user-management — modules', () => {
-    const boxes = (c: HTMLElement) => [...el(c, '#user-mgmt-modules').querySelectorAll<HTMLInputElement>('input')];
-    const defaultBox = (c: HTMLElement) => el<HTMLInputElement>(c, '#user-mgmt-modules-default');
-    function toggleDefault(c: HTMLElement, checked: boolean): void {
-        defaultBox(c).checked = checked;
-        defaultBox(c).dispatchEvent(new Event('change'));
+    const pills = (c: HTMLElement) => [...el(c, '#user-mgmt-modules').querySelectorAll<HTMLElement>('.user-mgmt-pill')];
+    const pillIds = (c: HTMLElement) => pills(c).map(p => p.dataset.module);
+    const menuIds = (c: HTMLElement) =>
+        [...el(c, '#user-mgmt-module-menu').querySelectorAll<HTMLElement>('.user-mgmt-menu-item')].map(i => i.dataset.module);
+    const defaultRadio = (c: HTMLElement) => el<HTMLInputElement>(c, '#user-mgmt-modules-default');
+    const chooseRadio = (c: HTMLElement) => el<HTMLInputElement>(c, '#user-mgmt-modules-choose');
+    const addBtn = (c: HTMLElement) => el<HTMLButtonElement>(c, '#btn-user-mgmt-add-module');
+    /** Pick "Choose for this user" the way a click does: the radio checks, then change fires. */
+    function chooseForUser(c: HTMLElement): void {
+        chooseRadio(c).click();
     }
+    function save(c: HTMLElement): void {
+        el<HTMLButtonElement>(c, '#btn-user-mgmt-save').click();
+    }
+    /** The catalog has three modules, two offered; the second offered one is not in the first user's reach. */
+    const THREE = { catalog: ['queue-browser', 'queue-copy', 'queue-subscriptions'], offered: ['queue-browser', 'queue-subscriptions'], userDefault: 'all' };
 
-    it('a new user starts on the deployment default, shown and locked', async () => {
+    it('a new user starts on the deployment default: its modules named, pills without remove buttons, no Add module', async () => {
         const { container } = await setup();
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
-        expect(defaultBox(container).checked).toBe(true);
-        expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('(every offered module)');
-        expect(el(container, '#user-mgmt-modules').textContent).toBe(' Queue Browser Queue Copy (not offered)');
-        expect(boxes(container).map(b => [b.value, b.checked, b.disabled])).toEqual([
-            ['queue-browser', true, true],
-            ['queue-copy', false, true],
-        ]);
+        expect(defaultRadio(container).checked).toBe(true);
+        expect(chooseRadio(container).checked).toBe(false);
+        expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('Queue Browser');
+        expect(pillIds(container)).toEqual(['queue-browser']);
+        expect(el(container, '#user-mgmt-modules').querySelector('.user-mgmt-pill-remove')).toBeNull();
+        expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(true);
     });
 
-    it("editing a user with a list of their own shows it, editable", async () => {
-        const { container } = await setup();
+    it("editing a user with a list of their own shows pills with remove buttons and the unchosen offered modules in the menu", async () => {
+        const container = loadModuleDOM('user-management');
+        svcMock.listUsers.mockResolvedValue(listed(USERS, THREE));
+        await UserManagementModule.install(makeCtx(container, ADMIN));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(2));
         clickRow(container, 1, '.user-mgmt-edit'); // viewer: ['queue-browser']
-        expect(defaultBox(container).checked).toBe(false);
-        expect(boxes(container).map(b => [b.checked, b.disabled])).toEqual([[true, false], [false, false]]);
+        expect(chooseRadio(container).checked).toBe(true);
+        expect(pillIds(container)).toEqual(['queue-browser']);
+        expect(el(container, '#user-mgmt-modules').querySelectorAll('.user-mgmt-pill-remove')).toHaveLength(1);
+        expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(false);
+        expect(menuIds(container)).toEqual(['queue-subscriptions']);
+        expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('Queue Browser, Queue Subscriptions');
     });
 
-    it("leaving the default starts from what it grants; the save sends the user's own list", async () => {
+    it('Add module opens the menu, picking a module adds its pill and closes the menu, and the save sends the list', async () => {
+        const container = loadModuleDOM('user-management');
+        svcMock.listUsers.mockResolvedValue(listed(USERS, THREE));
+        svcMock.saveUser.mockResolvedValue(saved());
+        await UserManagementModule.install(makeCtx(container, ADMIN));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(2));
+        clickRow(container, 1, '.user-mgmt-edit');
+        addBtn(container).click();
+        expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(false);
+        expect(addBtn(container).getAttribute('aria-expanded')).toBe('true');
+        addBtn(container).click(); // a second click closes it
+        expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(true);
+        expect(addBtn(container).getAttribute('aria-expanded')).toBe('false');
+        addBtn(container).click();
+        el<HTMLButtonElement>(container, '.user-mgmt-menu-item').click();
+        expect(pillIds(container)).toEqual(['queue-browser', 'queue-subscriptions']);
+        expect(menuIds(container)).toEqual([]);
+        expect(addBtn(container).disabled).toBe(true);
+        expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(true);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0].modules).toEqual(['queue-browser', 'queue-subscriptions']);
+    });
+
+    it('Escape closes the open menu and returns focus to Add module; another key leaves it open', async () => {
+        const container = loadModuleDOM('user-management');
+        svcMock.listUsers.mockResolvedValue(listed(USERS, THREE));
+        await UserManagementModule.install(makeCtx(container, ADMIN));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(2));
+        clickRow(container, 1, '.user-mgmt-edit');
+        addBtn(container).click();
+        el(container, '#user-mgmt-module-add').dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+        expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(false);
+        el(container, '#user-mgmt-module-add').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(true);
+        expect(addBtn(container).getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('a remove button drops its pill, the module returns to the menu, and the save sends the shorter list', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(saved());
+        clickRow(container, 1, '.user-mgmt-edit'); // viewer: ['queue-browser']
+        el<HTMLButtonElement>(container, '.user-mgmt-pill-remove').click();
+        expect(pillIds(container)).toEqual([]);
+        expect(el(container, '#user-mgmt-modules').textContent).toBe('No modules.');
+        expect(menuIds(container)).toEqual(['queue-browser']);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0].modules).toEqual([]);
+    });
+
+    it('a module no longer offered is a pill marked "not offered" that can be removed', async () => {
+        const container = loadModuleDOM('user-management');
+        const users = [{ ...USERS[1], modules: ['queue-browser', 'queue-copy'] }];
+        svcMock.listUsers.mockResolvedValue(listed(users));
+        svcMock.saveUser.mockResolvedValue(saved());
+        await UserManagementModule.install(makeCtx(container, ADMIN));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(1));
+        clickRow(container, 0, '.user-mgmt-edit');
+        const [offered, gone] = pills(container);
+        expect(offered.querySelector('.user-mgmt-pill-tag')).toBeNull();
+        expect(gone.querySelector('.user-mgmt-pill-tag')?.textContent).toBe('not offered');
+        expect(menuIds(container)).toEqual([]); // queue-copy is not offered, so never listed to add
+        (gone.querySelector('.user-mgmt-pill-remove') as HTMLButtonElement).click();
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0].modules).toEqual(['queue-browser']);
+    });
+
+    it("leaving the default starts the user's own list from what it grants; the save sends that list", async () => {
         const { container } = await setup();
         svcMock.saveUser.mockResolvedValue(saved());
         clickRow(container, 0, '.user-mgmt-edit'); // admin: default
-        toggleDefault(container, false);
-        expect(boxes(container).map(b => [b.checked, b.disabled])).toEqual([[true, false], [false, false]]);
-        boxes(container)[0].checked = false;
-        boxes(container)[1].checked = true;
-        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        chooseForUser(container);
+        expect(chooseRadio(container).checked).toBe(true);
+        expect(pillIds(container)).toEqual(['queue-browser']);
+        expect(el(container, '#user-mgmt-modules').querySelectorAll('.user-mgmt-pill-remove')).toHaveLength(1);
+        expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(false);
+        save(container);
         await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
-        expect(svcMock.saveUser.mock.calls[0][0].modules).toEqual(['queue-copy']);
+        expect(svcMock.saveUser.mock.calls[0][0].modules).toEqual(['queue-browser']);
     });
 
-    it('returning to the default shows it again and sends null', async () => {
+    it('returning to the default shows it again without remove buttons and sends no list', async () => {
         const { container } = await setup();
         svcMock.saveUser.mockResolvedValue(saved());
-        clickRow(container, 1, '.user-mgmt-edit'); // viewer
-        boxes(container)[1].checked = true;
-        toggleDefault(container, true);
-        expect(boxes(container).map(b => [b.checked, b.disabled])).toEqual([[true, true], [false, true]]);
-        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        clickRow(container, 1, '.user-mgmt-edit'); // viewer: own list
+        el<HTMLButtonElement>(container, '.user-mgmt-pill-remove').click();
+        defaultRadio(container).click();
+        expect(pillIds(container)).toEqual(['queue-browser']);
+        expect(el(container, '#user-mgmt-modules').querySelector('.user-mgmt-pill-remove')).toBeNull();
+        expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(true);
+        save(container);
         await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
         expect(svcMock.saveUser.mock.calls[0][0].modules).toBeNull();
     });
 
-    it('under a "none" default the hint says so and nothing is granted', async () => {
+    it('under a "none" default the label says so and the pills are empty', async () => {
         const container = loadModuleDOM('user-management');
         const ctx = makeCtx(container, ADMIN);
         svcMock.listUsers.mockResolvedValue(listed(USERS, { ...CHOICES, userDefault: 'none' }));
         await UserManagementModule.install(ctx);
         await vi.waitFor(() => expect(rowCount(container)).toBe(2));
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
-        expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('(no modules)');
-        expect(boxes(container).some(b => b.checked)).toBe(false);
+        expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('no modules');
+        expect(pillIds(container)).toEqual([]);
+        expect(el(container, '#user-mgmt-modules').textContent).toBe('No modules.');
     });
 });
 

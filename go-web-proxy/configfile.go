@@ -52,9 +52,13 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # audit.* apply only in Provisioned mode (connModes provisioned or both):
 # modules.offered lists the app modules a signed-in user may be given,
 # modules.userDefault (all|none) what a user without a list of their own gets.
+# The TLS paths are not settings: SMU_SSL_CERTFILE, SMU_SSL_CERTKEYFILE and
+# SMU_SSL_TRUSTDIR are read from the environment at every start. An old
+# tls.certFile, tls.keyFile or tls.trustDir key is ignored and dropped at the
+# next save. The certificate and the trusted CAs change live from the admin
+# console's Certificates page, and tls.insecureSkipVerify applies at once.
 # In Provisioned mode an administrator can also edit this file from the admin
-# console's Gateway Settings, where every key except hosted and tls.* applies
-# at once.
+# console's Gateway Settings, where every key except hosted applies at once.
 `
 
 // fileConfig is the on-disk shape. Field order is the order yaml.Marshal writes.
@@ -76,17 +80,45 @@ type fileConfig struct {
 	// always served from appRoot. A file that still has it loads, the value is
 	// ignored with a warning at start (removedInUse), and the gateway's next
 	// write of the file drops it. The same holds for the usersFile and
-	// connectionsFile keys: the stores are always at their default paths.
+	// connectionsFile keys: the stores are always at their default paths, and
+	// for tls.certFile, tls.keyFile and tls.trustDir (fileTLS).
 	RemovedAppDir          *string `yaml:"appDir,omitempty" json:"-"`
 	RemovedUsersFile       *string `yaml:"usersFile,omitempty" json:"-"`
 	RemovedConnectionsFile *string `yaml:"connectionsFile,omitempty" json:"-"`
 }
 
+// fileTLS is the tls block. The certificate, key and trust directory paths are
+// environment only (tlsPaths); an earlier release kept them here, so a file or
+// backup that still has them loads, they are ignored with one warning at start
+// (removedTLSPaths) and the next write of the file drops them.
 type fileTLS struct {
-	CertFile           string `yaml:"certFile" json:"certFile"`
-	KeyFile            string `yaml:"keyFile" json:"keyFile"`
-	TrustDir           string `yaml:"trustDir" json:"trustDir"`
-	InsecureSkipVerify bool   `yaml:"insecureSkipVerify" json:"insecureSkipVerify"`
+	InsecureSkipVerify bool    `yaml:"insecureSkipVerify" json:"insecureSkipVerify"`
+	RemovedCertFile    *string `yaml:"certFile,omitempty" json:"-"`
+	RemovedKeyFile     *string `yaml:"keyFile,omitempty" json:"-"`
+	RemovedTrustDir    *string `yaml:"trustDir,omitempty" json:"-"`
+}
+
+// tlsPaths are where the gateway keeps its certificate, its key and the CA
+// directory. They come from the environment at every start (tlsPathsFromEnv),
+// never from config.yaml or the settings page.
+type tlsPaths struct {
+	certFile, keyFile, trustDir string
+}
+
+const (
+	defaultCertFile = "/tls/tls.crt"
+	defaultKeyFile  = "/tls/tls.key"
+	defaultTrustDir = "/tls/trust"
+)
+
+// tlsPathsFromEnv reads SMU_SSL_CERTFILE, SMU_SSL_CERTKEYFILE and
+// SMU_SSL_TRUSTDIR, with the image's defaults for any that is unset.
+func tlsPathsFromEnv() tlsPaths {
+	return tlsPaths{
+		certFile: envOr("SMU_SSL_CERTFILE", defaultCertFile),
+		keyFile:  envOr("SMU_SSL_CERTKEYFILE", defaultKeyFile),
+		trustDir: envOr("SMU_SSL_TRUSTDIR", defaultTrustDir),
+	}
 }
 
 type fileAccess struct {
@@ -214,9 +246,6 @@ var seedVars = []seedVar{
 	{"SMU_HOSTED", "hosted", hostedEnv, func(c config) string { return strconv.FormatBool(c.hosted) }},
 	{"SMU_CONN_MODES", "connModes", strings.ToLower, func(c config) string { return c.connModes }},
 	{"SMU_DEFAULT_CONN", "defaultConn", strings.ToLower, func(c config) string { return c.defaultConn }},
-	{"SMU_SSL_CERTFILE", "tls.certFile", identity, func(c config) string { return c.certFile }},
-	{"SMU_SSL_CERTKEYFILE", "tls.keyFile", identity, func(c config) string { return c.keyFile }},
-	{"SMU_SSL_TRUSTDIR", "tls.trustDir", identity, func(c config) string { return c.trustDir }},
 	{"SMU_SSL_SKIP_CERT_VERIFY", "tls.insecureSkipVerify", insecureEnv, func(c config) string { return strconv.FormatBool(c.insecureSkipVerify) }},
 	{"LOG_LEVEL", "logLevel", strings.ToLower, func(c config) string { return levelName(c.logLevel) }},
 	{"SMU_SHOW_AUDIT", "audit.stdout", showAuditEnv, func(c config) string { return strconv.FormatBool(c.audit.stdout) }},
@@ -281,16 +310,22 @@ func hostedEnv(raw string) string {
 	}
 	return raw
 }
-func identity(raw string) string { return raw }
 
-// secretPaths are the locations of the gateway's secrets. toConfig takes them
-// from its caller, never from the file.
+// secretPaths are the locations of the gateway's secrets and its TLS files.
+// toConfig takes them from its caller, never from the file.
 type secretPaths struct {
 	storeKey string
+	tls      tlsPaths
 }
 
 func defaultSecretPaths() secretPaths {
-	return secretPaths{storeKey: defaultStoreKeyFile}
+	return secretPaths{storeKey: defaultStoreKeyFile, tls: tlsPathsFromEnv()}
+}
+
+// secretPaths are the paths c runs with, for a config rebuilt from a document
+// that does not hold them (a settings save, an import).
+func (c config) secretPaths() secretPaths {
+	return secretPaths{storeKey: c.storeKeyFile, tls: tlsPaths{certFile: c.certFile, keyFile: c.keyFile, trustDir: c.trustDir}}
 }
 
 func defaultFileConfig() fileConfig { return fileConfigFromConfig(defaultConfig()) }
@@ -301,13 +336,8 @@ func fileConfigFromConfig(c config) fileConfig {
 		Hosted:      c.hosted,
 		ConnModes:   c.connModes,
 		DefaultConn: c.defaultConn,
-		TLS: fileTLS{
-			CertFile:           c.certFile,
-			KeyFile:            c.keyFile,
-			TrustDir:           c.trustDir,
-			InsecureSkipVerify: c.insecureSkipVerify,
-		},
-		LogLevel: levelName(c.logLevel),
+		TLS:         fileTLS{InsecureSkipVerify: c.insecureSkipVerify},
+		LogLevel:    levelName(c.logLevel),
 		Access: fileAccess{
 			Allow:          prefixStrings(c.access.allow),
 			TrustedProxies: prefixStrings(c.access.trustedProxies),
@@ -349,7 +379,7 @@ func prefixStrings(ps []netip.Prefix) []string {
 }
 
 // toConfig validates every value and converts to the runtime config.
-// The stores and the secret paths are fixed, never read from the file.
+// The stores, the secret paths and the TLS paths are never read from the file.
 func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 	level, err := parseLogLevel(fc.LogLevel)
 	if err != nil {
@@ -385,9 +415,9 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 	}
 	cfg := config{
 		hosted:             fc.Hosted,
-		certFile:           fc.TLS.CertFile,
-		keyFile:            fc.TLS.KeyFile,
-		trustDir:           fc.TLS.TrustDir,
+		certFile:           secrets.tls.certFile,
+		keyFile:            secrets.tls.keyFile,
+		trustDir:           secrets.tls.trustDir,
 		insecureSkipVerify: fc.TLS.InsecureSkipVerify,
 		logLevel:           level,
 		usersFile:          defaultUsersFile,
@@ -549,6 +579,9 @@ type configLoad struct {
 	overrides []envOverride
 	removed   []removedSetting // still set (removedInUse); ignored
 	data      []byte           // the bytes of the file as read or seeded
+	// tlsPathsIgnored names the TLS path keys the file still holds whose value
+	// differs from the path in use (removedTLSPaths); ignored.
+	tlsPathsIgnored []string
 }
 
 // removedSetting is a setting an earlier release read that the file or the
@@ -590,6 +623,28 @@ func removedInUse(fc fileConfig) []removedSetting {
 	}
 	if os.Getenv("STORE_KEY_FILE") != "" {
 		out = append(out, removedSetting{"STORE_KEY_FILE", "the store key is always " + defaultStoreKeyFile + moveData})
+	}
+	return out
+}
+
+// removedTLSPaths names the tls.certFile, tls.keyFile and tls.trustDir keys fc
+// still holds whose value differs from the path in use, as `key="value" (in
+// use: "path")`. A key that agrees with the environment says nothing: it
+// changes nothing. serve logs them in one warning.
+func removedTLSPaths(fc fileConfig, inUse tlsPaths) []string {
+	var out []string
+	for _, k := range []struct {
+		key   string
+		value *string
+		path  string
+	}{
+		{"tls.certFile", fc.TLS.RemovedCertFile, inUse.certFile},
+		{"tls.keyFile", fc.TLS.RemovedKeyFile, inUse.keyFile},
+		{"tls.trustDir", fc.TLS.RemovedTrustDir, inUse.trustDir},
+	} {
+		if k.value != nil && *k.value != k.path {
+			out = append(out, fmt.Sprintf("%s=%q (in use: %q)", k.key, *k.value, k.path))
+		}
 	}
 	return out
 }
@@ -645,7 +700,7 @@ func resolveConfig(path string) (configLoad, error) {
 	if err != nil {
 		return configLoad{}, fmt.Errorf("config file %q: %w", path, err)
 	}
-	return configLoad{cfg: cfg, overrides: envOverrides(cfg), removed: removedInUse(fc), data: data}, nil
+	return configLoad{cfg: cfg, overrides: envOverrides(cfg), removed: removedInUse(fc), tlsPathsIgnored: removedTLSPaths(fc, secrets.tls), data: data}, nil
 }
 
 // seedConfigFile writes the first config.yaml and returns the bytes it wrote.

@@ -36,6 +36,8 @@ type managedHandler struct {
 	relay    http.Handler   // /managed/relay/*, dispatched before the mux (relay.go)
 	smf      http.Handler   // /managed/smf/*, dispatched before the mux (smf.go)
 	dial     http.Handler   // POST /managed/dial (dial.go)
+	tls      *tlsManager    // /managed/tls* (tls_api.go)
+	restart  func()         // POST /managed/restart asks serve to shut down and start again (restart.go)
 	audit    *auditor       // the audit trail (audit.go); nil records nothing
 	totp     *totpGuard     // the replay guard the sign-in pages share (managed_routing.go)
 	cop      *http.CrossOriginProtection
@@ -49,10 +51,10 @@ type managedEndpoints struct {
 	relay, smf, dial http.Handler
 }
 
-func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *settingsFile, bk *backupService, ep managedEndpoints, logger *slog.Logger) *managedHandler {
+func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *settingsFile, bk *backupService, tm *tlsManager, ep managedEndpoints, logger *slog.Logger) *managedHandler {
 	h := &managedHandler{
-		store: st, sessions: ss, throttle: th, live: lv, settings: sf, backups: bk,
-		relay: ep.relay, smf: ep.smf, dial: ep.dial,
+		store: st, sessions: ss, throttle: th, live: lv, settings: sf, backups: bk, tls: tm,
+		relay: ep.relay, smf: ep.smf, dial: ep.dial, restart: func() {},
 		totp: newTOTPGuard(), cop: http.NewCrossOriginProtection(), logger: logger,
 	}
 	mux := http.NewServeMux()
@@ -70,6 +72,8 @@ func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *sett
 	mux.HandleFunc("PUT /managed/settings", h.audited(fixedAction(auditSettingsUpdate), h.saveSettings))
 	mux.HandleFunc("GET /managed/client", h.adminOnly(h.clientSeen))
 	h.registerBackupRoutes(mux)
+	h.registerTLSRoutes(mux)
+	mux.HandleFunc("POST /managed/restart", h.audited(fixedAction(auditRestart), h.restartGateway))
 	// Anything else, including a known path with the wrong method, is a 404:
 	// a signed-in client learns nothing a 405 would add.
 	mux.HandleFunc("/managed/", func(w http.ResponseWriter, _ *http.Request) {
@@ -135,13 +139,16 @@ func (h *managedHandler) adminOnly(fn http.HandlerFunc) http.HandlerFunc {
 // auditCall is what an audited admin handler tells its wrapper beyond the
 // response: the action when it knows better than the route did (a save that
 // turned out to create), the target that is not in the path (an import's
-// backup file), the names of the parts it changed and the store files the
-// commit wrote (with their seq), which an ok entry carries as "wrote".
+// backup file), a detail the ok message adds in brackets (a replaced
+// certificate's subject and expiry), the names of the parts it changed and the
+// store files the commit wrote (with their seq), which an ok entry carries as
+// "wrote".
 // recorded says the entry is written already: a change that commits writes
 // its ok entry from an after-commit hook (committed), under the writer lock.
 type auditCall struct {
 	action   string
 	target   string
+	detail   string
 	changed  []string
 	wrote    []auditWrote
 	recorded bool
@@ -161,6 +168,9 @@ func (a *auditWriter) WriteHeader(status int) {
 	a.status = status
 	a.ResponseWriter.WriteHeader(status)
 }
+
+// Unwrap lets http.NewResponseController reach the real writer (Flush).
+func (a *auditWriter) Unwrap() http.ResponseWriter { return a.ResponseWriter }
 
 func (a *auditWriter) Write(b []byte) (int, error) {
 	if a.status >= http.StatusBadRequest && a.code == "" {
@@ -186,6 +196,11 @@ var auditPhrases = map[string]struct{ done, attempt string }{
 	auditBackupImport:     {"imported a backup", "import a backup"},
 	auditScheduleSet:      {"set the backup schedule", "set the backup schedule"},
 	auditScheduleRemove:   {"removed the backup schedule", "remove the backup schedule"},
+
+	auditTLSCertificateReplace: {"replaced the gateway certificate", "replace the gateway certificate"},
+	auditTLSTrustAdd:           {"added the CA certificate file {t}", "add a CA certificate file"},
+	auditTLSTrustRemove:        {"removed the CA certificate file {t}", "remove the CA certificate file {t}"},
+	auditRestart:               {"restarted the gateway", "restart the gateway"},
 }
 
 // auditPre names the action and target a route stands for before its handler
@@ -269,6 +284,9 @@ func (h *managedHandler) recordOK(r *http.Request, call *auditCall) {
 	e.Target = userKey(call.target)
 	e.Outcome, e.Changed, e.Wrote = auditOK, call.changed, call.wrote
 	e.Msg = e.Actor + " " + strings.Replace(auditPhrases[call.action].done, "{t}", e.Target, 1)
+	if call.detail != "" {
+		e.Msg += " (" + call.detail + ")"
+	}
 	if len(e.Changed) > 0 {
 		e.Msg += ": " + strings.Join(e.Changed, ", ")
 	}

@@ -27,6 +27,9 @@ func clearSeedEnv(t *testing.T) {
 	for _, r := range renamedEnv {
 		t.Setenv(r.old, "")
 	}
+	for _, name := range []string{"SMU_SSL_CERTFILE", "SMU_SSL_CERTKEYFILE", "SMU_SSL_TRUSTDIR"} {
+		t.Setenv(name, "") // environment only now, so not in seedVars
+	}
 	for _, name := range []string{"USERS_FILE", "CONNECTIONS_FILE", "STORE_KEY_FILE"} {
 		t.Setenv(name, "") // removed, but still read for their warning
 	}
@@ -47,9 +50,6 @@ hosted: true
 connModes: both
 defaultConn: provisioned
 tls:
-  certFile: /c/tls.crt
-  keyFile: /c/tls.key
-  trustDir: /c/trust
   insecureSkipVerify: true
 logLevel: debug
 access:
@@ -80,7 +80,7 @@ func TestDecodeConfigFile_Valid(t *testing.T) {
 	}
 	want := fileConfig{
 		Version: 1, Hosted: true, ConnModes: "both", DefaultConn: "provisioned",
-		TLS:      fileTLS{CertFile: "/c/tls.crt", KeyFile: "/c/tls.key", TrustDir: "/c/trust", InsecureSkipVerify: true},
+		TLS:      fileTLS{InsecureSkipVerify: true},
 		LogLevel: "debug",
 		Access:   fileAccess{Allow: []string{"10.0.0.0/8", "2001:db8::/32"}, TrustedProxies: []string{"10.0.0.1/32"}},
 		Session:  fileSession{IdleMinutes: 5, AbsoluteMinutes: 60},
@@ -103,12 +103,12 @@ func TestDecodeConfigFile_MissingKeysKeepDefaults(t *testing.T) {
 	if !reflect.DeepEqual(fc, defaultFileConfig()) {
 		t.Errorf("version-only file:\n%+v\nwant defaults:\n%+v", fc, defaultFileConfig())
 	}
-	fc, err = decodeConfigFile([]byte("version: 1\ntls:\n  trustDir: /other\n"), "x.yaml")
+	fc, err = decodeConfigFile([]byte("version: 1\ntls:\n  insecureSkipVerify: true\nlogLevel: info\n"), "x.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fc.TLS.TrustDir != "/other" || fc.TLS.CertFile != "/tls/tls.crt" {
-		t.Errorf("partial tls block: got %+v", fc.TLS)
+	if !fc.TLS.InsecureSkipVerify || fc.LogLevel != "info" || fc.ConnModes != connDirect {
+		t.Errorf("partial file: got %+v", fc)
 	}
 }
 
@@ -789,8 +789,7 @@ func TestEnvOverrides_EveryVariableAndBoolParsing(t *testing.T) {
 
 	differing := map[string]string{
 		"SMU_HOSTED": "false", "SMU_CONN_MODES": "both", "SMU_DEFAULT_CONN": "provisioned",
-		"SMU_SSL_CERTFILE": "/x", "SMU_SSL_CERTKEYFILE": "/x", "SMU_SSL_TRUSTDIR": "/x", "SMU_SSL_SKIP_CERT_VERIFY": "true",
-		"LOG_LEVEL": "debug", "SMU_SHOW_AUDIT": "true",
+		"SMU_SSL_SKIP_CERT_VERIFY": "true", "LOG_LEVEL": "debug", "SMU_SHOW_AUDIT": "true",
 	}
 	if len(differing) != len(seedVars) {
 		t.Fatalf("test table covers %d vars, seedVars has %d", len(differing), len(seedVars))
@@ -1052,5 +1051,85 @@ func TestConfigVerifier_RefusesWhatAStartWouldRefuse(t *testing.T) {
 	var failed *writeFailedError
 	if !errors.As(err, &failed) || readOr(t, path) != "<absent>" {
 		t.Errorf("want the commit refused with nothing written, got %v", err)
+	}
+}
+
+// A config.yaml of an earlier release still holds tls.certFile, tls.keyFile
+// and tls.trustDir. It loads as before: the paths in use are the environment's
+// (or the image's defaults), the keys are ignored, each one that differs from
+// the path in use is named for the start-up warning, and the next write of the
+// file drops all three.
+func TestResolveConfig_RemovedTLSPathKeysAreIgnoredAndDropped(t *testing.T) {
+	clearSeedEnv(t)
+	t.Setenv("SMU_SSL_CERTFILE", "/env/tls.crt")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeFile(t, path, "version: 1\ntls:\n  certFile: /env/tls.crt\n  keyFile: /old/tls.key\n  trustDir: /old/trust\n  insecureSkipVerify: true\n")
+
+	load, err := resolveConfig(path)
+	if err != nil {
+		t.Fatalf("a file with the removed keys must still load: %v", err)
+	}
+	if load.cfg.certFile != "/env/tls.crt" || load.cfg.keyFile != defaultKeyFile || load.cfg.trustDir != defaultTrustDir || !load.cfg.insecureSkipVerify {
+		t.Errorf("paths in use %q %q %q, skip %v: want the environment's and the defaults, never the file's", load.cfg.certFile, load.cfg.keyFile, load.cfg.trustDir, load.cfg.insecureSkipVerify)
+	}
+	want := []string{
+		`tls.keyFile="/old/tls.key" (in use: "/tls/tls.key")`,
+		`tls.trustDir="/old/trust" (in use: "/tls/trust")`,
+	}
+	if !reflect.DeepEqual(load.tlsPathsIgnored, want) {
+		t.Errorf("ignored keys %q, want %q (certFile agrees with the environment and says nothing)", load.tlsPathsIgnored, want)
+	}
+
+	data, err := encodeConfigFile(fileConfigFromConfig(load.cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"\n  certFile:", "\n  keyFile:", "\n  trustDir:", "<- SMU_SSL_CERTFILE", "<- SMU_SSL_CERTKEYFILE", "<- SMU_SSL_TRUSTDIR"} {
+		if strings.Contains(string(data), key) {
+			t.Errorf("the next write must drop the removed keys, but it holds %q:\n%s", key, data)
+		}
+	}
+	if !strings.Contains(string(data), "insecureSkipVerify: true") {
+		t.Errorf("tls.insecureSkipVerify stays in the file:\n%s", data)
+	}
+}
+
+// Keys that agree with the paths in use change nothing, so they are not named.
+func TestRemovedTLSPaths_AgreeingKeysAreSilent(t *testing.T) {
+	inUse := tlsPaths{certFile: "/a", keyFile: "/b", trustDir: "/c"}
+	same, other := "/a", "/z"
+	if got := removedTLSPaths(fileConfig{TLS: fileTLS{RemovedCertFile: &same}}, inUse); len(got) != 0 {
+		t.Errorf("an agreeing key was named: %v", got)
+	}
+	if got := removedTLSPaths(fileConfig{}, inUse); len(got) != 0 {
+		t.Errorf("no keys, nothing to name: %v", got)
+	}
+	got := removedTLSPaths(fileConfig{TLS: fileTLS{RemovedCertFile: &other}}, inUse)
+	if !reflect.DeepEqual(got, []string{`tls.certFile="/z" (in use: "/a")`}) {
+		t.Errorf("got %v", got)
+	}
+}
+
+// The TLS paths are read from the environment at every start, with the image's
+// defaults, and a settings page or an import never carries them.
+func TestTLSPathsFromEnv(t *testing.T) {
+	clearSeedEnv(t)
+	if got := tlsPathsFromEnv(); got != (tlsPaths{certFile: "/tls/tls.crt", keyFile: "/tls/tls.key", trustDir: "/tls/trust"}) {
+		t.Errorf("defaults: %+v", got)
+	}
+	t.Setenv("SMU_SSL_CERTFILE", "/e/c")
+	t.Setenv("SMU_SSL_CERTKEYFILE", "/e/k")
+	t.Setenv("SMU_SSL_TRUSTDIR", "/e/t")
+	if got := tlsPathsFromEnv(); got != (tlsPaths{certFile: "/e/c", keyFile: "/e/k", trustDir: "/e/t"}) {
+		t.Errorf("environment: %+v", got)
+	}
+	cfg := defaultConfig()
+	cfg.certFile, cfg.keyFile, cfg.trustDir = "/r/c", "/r/k", "/r/t"
+	rebuilt, err := fileConfigFromConfig(cfg).toConfig(cfg.secretPaths())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rebuilt.certFile != "/r/c" || rebuilt.keyFile != "/r/k" || rebuilt.trustDir != "/r/t" {
+		t.Errorf("a config rebuilt from a document keeps the running paths: %q %q %q", rebuilt.certFile, rebuilt.keyFile, rebuilt.trustDir)
 	}
 }

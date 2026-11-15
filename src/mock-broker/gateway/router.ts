@@ -23,6 +23,11 @@
  * moved only when there was two-factor to remove, which also ends that
  * user's sessions and tickets). A user's PUT never carries or clears it.
  *
+ * TLS and restart: `/managed/tls/*` (tls.ts) and `POST /managed/restart`, administrators
+ * only like the rest. A restart answers `202 { restarting: true }` and then,
+ * through `restart` (index.ts), ends every session and ticket and applies what
+ * waited for it.
+ *
  * Not simulated: the cross-site write check, the body cap and the
  * unauthenticated throttle, and the refusals of a store that cannot be
  * written (store_changed_on_disk, store_write_failed, audit_unavailable).
@@ -54,6 +59,10 @@ export interface RouterDeps {
     faults: () => RouterFaults;
     /** Backup & Restore's routes (backup.ts), admin only like the editors'. */
     backupRoutes: [string, string, Handler][];
+    /** The TLS console's routes (tls.ts), admin only too. */
+    tlsRoutes: [string, string, Handler][];
+    /** The gateway restarts: sessions and tickets end, what waited for a restart applies. */
+    restart: () => void;
     /** The browser's address as the gateway sees it (the seed's `client`). */
     client: string;
     /** The broker behind the relay, when a test scripts one; the demo broker otherwise. */
@@ -80,7 +89,7 @@ const glob = (x: unknown): QGlob => {
 
 export type Handler = (req: GatewayRequest, s: Session, sid: string, params: string[]) => GatewayResponse | Promise<GatewayResponse>;
 
-export function createRouter({ store, sessions, settings, faults, backupRoutes, client, upstream }: RouterDeps) {
+export function createRouter({ store, sessions, settings, faults, backupRoutes, tlsRoutes, restart, client, upstream }: RouterDeps) {
     const adminOnly = (fn: Handler): Handler => (req, s, sid, params) => {
         const admin = store.isAdmin(s.user);
         if (admin === null) return error(401, 'unauthenticated');
@@ -225,6 +234,12 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
         return ok(body);
     };
 
+    /** `POST /managed/restart`: 202, with the restart already done in the fake (the page returns to the sign-in after a pause). */
+    const restartGateway: Handler = () => {
+        restart();
+        return { status: 202, json: { restarting: true } };
+    };
+
     /** The mux (managedHandler's routes); `{}` is one path segment, unescaped. */
     const ROUTES: [string, string, Handler][] = [
         ['GET', '/managed/me', me],
@@ -240,6 +255,8 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
         ['GET', '/managed/settings', adminOnly(getSettings)],
         ['PUT', '/managed/settings', adminOnly(saveSettings)],
         ['GET', '/managed/client', adminOnly(clientSeen)],
+        ['POST', '/managed/restart', adminOnly(restartGateway)],
+        ...tlsRoutes.map(([m, p, fn]): [string, string, Handler] => [m, p, adminOnly(fn)]),
         ...backupRoutes.map(([m, p, fn]): [string, string, Handler] => [m, p, adminOnly(fn)]),
     ];
 

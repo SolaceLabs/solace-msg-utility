@@ -5,9 +5,12 @@
  * (connModes and defaultConn reach the next `/hosted`, modules the next
  * `/me`; audit.stdout, audit.access and audit.onFailure the next audit event,
  * which the demo does not write and cannot fail to write: the keys are saved
- * and shown only; login.twoFactor at the next sign-in); restart-only keys are
- * saved and reported as pending, and the path keys change only "on the host",
- * which the demo has none of.
+ * and shown only; login.twoFactor at the next sign-in; tls.insecureSkipVerify
+ * at once, as the gateway's trust holder takes it); restart-only keys (now
+ * `hosted` alone) are saved and reported as pending until a restart
+ * (`applyRestart`). The TLS paths are environment variables, not keys: a
+ * seed, snapshot or backup that still holds them is read and they are
+ * dropped, and a save that names one is a bad request, as for any unknown key.
  *
  * The file has one `rev`, an opaque string that changes on every save (here
  * a counter written out; the gateway's is a checksum of the file). A save
@@ -28,7 +31,7 @@ import { CATALOG, moduleIdsProblem, quote } from './validate';
 import type { GatewaySettings, SettingsView } from './types';
 
 /** `GET /managed/settings`: the view and the file's rev. */
-export type SettingsViewRev = SettingsView & { rev: string };
+export type SettingsViewRev = Omit<SettingsView, 'hostOnly'> & { rev: string };
 
 type Kind = 'bool' | 'string' | 'int' | 'strings';
 type Schema = { [key: string]: Kind | Schema };
@@ -36,7 +39,7 @@ type Schema = { [key: string]: Kind | Schema };
 /** fileConfig's JSON fields and their types. */
 const SCHEMA: Schema = {
     hosted: 'bool', connModes: 'string', defaultConn: 'string',
-    tls: { certFile: 'string', keyFile: 'string', trustDir: 'string', insecureSkipVerify: 'bool' },
+    tls: { insecureSkipVerify: 'bool' },
     logLevel: 'string',
     access: { allow: 'strings', trustedProxies: 'strings' },
     session: { idleMinutes: 'int', absoluteMinutes: 'int' },
@@ -45,14 +48,13 @@ const SCHEMA: Schema = {
     audit: { stdout: 'bool', access: 'bool', onFailure: 'string' },
 };
 
-/** restartOnlyKeys (live.go), in order; `host` marks the path keys. */
-const RESTART_ONLY: { key: string; host: boolean; value: (s: GatewaySettings) => unknown }[] = [
-    { key: 'hosted', host: false, value: s => s.hosted },
-    { key: 'tls.certFile', host: true, value: s => s.tls.certFile },
-    { key: 'tls.keyFile', host: true, value: s => s.tls.keyFile },
-    { key: 'tls.trustDir', host: true, value: s => s.tls.trustDir },
-    { key: 'tls.insecureSkipVerify', host: false, value: s => s.tls.insecureSkipVerify },
+/** restartOnlyKeys (live.go), in order. */
+const RESTART_ONLY: { key: string; value: (s: GatewaySettings) => unknown }[] = [
+    { key: 'hosted', value: s => s.hosted },
 ];
+
+/** The tls keys earlier releases kept in config.yaml; the paths are environment variables now, so a file that holds one is read and the key dropped. */
+const REMOVED_TLS_KEYS = ['certFile', 'keyFile', 'trustDir'];
 
 const clone = (s: GatewaySettings): GatewaySettings => JSON.parse(JSON.stringify(s));
 
@@ -101,7 +103,7 @@ function merge(target: Record<string, any>, patch: unknown, schema: Schema): voi
 /** A fileConfig's zero value: what the gateway decodes a backup's settings onto. */
 const ZERO: GatewaySettings = {
     hosted: false, connModes: '', defaultConn: '',
-    tls: { certFile: '', keyFile: '', trustDir: '', insecureSkipVerify: false },
+    tls: { insecureSkipVerify: false },
     logLevel: '',
     access: { allow: [], trustedProxies: [] },
     session: { idleMinutes: 0, absoluteMinutes: 0 },
@@ -110,16 +112,25 @@ const ZERO: GatewaySettings = {
     audit: { stdout: false, access: false, onFailure: 'continue' },
 };
 
+/** A backup's `tls` object without the keys that left the file; anything that is not an object is left for the decoder to refuse. */
+const withoutRemovedTls = (v: unknown): unknown =>
+    v !== null && typeof v === 'object' && !Array.isArray(v)
+        ? Object.fromEntries(Object.entries(v).filter(([t]) => fieldOf(t, REMOVED_TLS_KEYS) === undefined))
+        : v;
+
 /**
  * A backup's settings as the gateway's strict decoder reads them: onto a
  * zero file, unknown or mistyped keys refused (BadRequest). The file's own
- * `version`, and the `appDir`, `usersFile` and `connectionsFile` keys earlier
- * releases wrote, are not settings: accepted and ignored.
+ * `version`, the `appDir`, `usersFile` and `connectionsFile` keys and the
+ * `tls.certFile`, `tls.keyFile` and `tls.trustDir` keys earlier releases
+ * wrote, are not settings: accepted and ignored.
  */
 export function settingsFromBackup(raw: unknown): GatewaySettings {
     const out = clone(ZERO);
     const rest = raw && typeof raw === 'object' && !Array.isArray(raw)
-        ? Object.fromEntries(Object.entries(raw).filter(([k]) => !['version', 'appDir', 'usersFile', 'connectionsFile'].includes(k)))
+        ? Object.fromEntries(Object.entries(raw)
+            .filter(([k]) => !['version', 'appDir', 'usersFile', 'connectionsFile'].includes(k))
+            .map(([k, v]): [string, unknown] => [k, fieldOf(k, ['tls']) === 'tls' ? withoutRemovedTls(v) : v]))
         : raw;
     merge(out as unknown as Record<string, any>, rest ?? null, SCHEMA);
     return out;
@@ -326,17 +337,22 @@ export type SaveResult = { ok: true; restartRequired: string[]; rev: string } | 
 const UNREADABLE_REASON = 'The gateway cannot read config.yaml (demo: the control panel made it unreadable). '
     + 'Fix the file on the gateway host, then reload this page.';
 
-/** A file's settings with the keys it may lack (an older seed, backup or snapshot): audit and login.twoFactor, the zero value's. */
-const withAuditDefaults = (s: GatewaySettings): GatewaySettings => {
+/**
+ * A file's settings with the keys it may lack (an older seed, backup or snapshot):
+ * audit and login.twoFactor, the zero value's; and without the keys it may still
+ * hold (the three TLS paths).
+ */
+const fileDefaults = (s: GatewaySettings): GatewaySettings => {
     const c = clone(s);
     c.audit = { ...ZERO.audit, ...c.audit };
     c.login = { ...ZERO.login, ...c.login };
+    c.tls = { insecureSkipVerify: c.tls.insecureSkipVerify };
     return c;
 };
 
 export function createSettings(boot: GatewaySettings, client: string, faults: () => SettingsFaults) {
-    const running = withAuditDefaults(boot);
-    let saved = withAuditDefaults(boot);
+    let running = fileDefaults(boot);
+    let saved = fileDefaults(boot);
     let revN = 1;
 
     /** The refusals of a file that cannot be read or was edited by hand, which come before the rev. */
@@ -367,7 +383,6 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
                 rev: String(revN),
                 settings: clone(saved),
                 restartOnly: RESTART_ONLY.map(k => k.key),
-                hostOnly: RESTART_ONLY.filter(k => k.host).map(k => k.key),
                 pendingRestart: pending(),
                 changedOnDisk: faults().changedOnDisk,
                 catalog: [...CATALOG],
@@ -382,14 +397,6 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
             const disk = diskRefusal();
             if (disk) return disk;
             if (rev !== String(revN)) return { ok: false, status: 409, error: 'stale', rev: String(revN) };
-            for (const k of RESTART_ONLY) {
-                if (k.host && k.value(body) !== k.value(saved)) {
-                    return {
-                        ok: false, status: 422, error: 'invalid', field: k.key,
-                        reason: `${k.key} is a path, so it changes only in config.yaml on the gateway host, followed by a restart.`,
-                    };
-                }
-            }
             const n = normalize(body);
             if (!n.ok) return { ok: false, status: 422, error: 'invalid', field: n.field ?? 'settings', reason: n.reason };
             // saveSettings (settings.go): Direct alone would end Provisioned mode,
@@ -412,12 +419,17 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
             return { ok: true, restartRequired: pending(), rev: String(revN) };
         },
 
+        /** A restart of the gateway: it runs on the saved file now, so nothing is pending. */
+        applyRestart(): void {
+            running = clone(saved);
+        },
+
         dump(): GatewaySettings {
             return clone(saved);
         },
         /** `rev` is the file's rev at the dump. */
         load(s: GatewaySettings, rev: string): void {
-            saved = withAuditDefaults(s);
+            saved = fileDefaults(s);
             revN = Number(rev);
         },
     };

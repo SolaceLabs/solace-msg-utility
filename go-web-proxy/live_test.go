@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/x509"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -87,27 +88,50 @@ func TestPendingRestart(t *testing.T) {
 	if got := pendingRestart(running, file); len(got) != 0 {
 		t.Fatalf("live keys only: want none, got %v", got)
 	}
-	file.TLS.CertFile, file.TLS.InsecureSkipVerify, file.TLS.TrustDir = "/elsewhere/tls.crt", true, "/elsewhere/trust"
-	want := []string{"tls.certFile", "tls.trustDir", "tls.insecureSkipVerify"}
-	if got := pendingRestart(running, file); !reflect.DeepEqual(got, want) {
-		t.Errorf("want %v, got %v", want, got)
+	// tls.insecureSkipVerify is live too (the trust holder), not restart-only.
+	file.TLS.InsecureSkipVerify = true
+	if got := pendingRestart(running, file); len(got) != 0 {
+		t.Fatalf("tls.insecureSkipVerify applies at once: want none, got %v", got)
+	}
+	file.Hosted = false
+	if got := pendingRestart(running, file); !reflect.DeepEqual(got, []string{"hosted"}) {
+		t.Errorf("want [hosted], got %v", got)
+	}
+}
+
+// tls.insecureSkipVerify reaches the trust holder on apply, with the warning
+// when it turns on; apply with no holder bound (a test's live) changes nothing
+// else.
+func TestLive_ApplyCarriesSkipVerifyIntoTheTrustHolder(t *testing.T) {
+	var buf strings.Builder
+	holder := newTrustHolder(x509.NewCertPool(), false, newCapturingLogger(&buf))
+	cfg := defaultConfig()
+	lv := newLive(cfg)
+	lv.apply(cfg) // unbound: nothing to carry into
+	lv.bindTrust(holder)
+
+	cfg.insecureSkipVerify = true
+	lv.apply(cfg)
+	if !holder.get().skip || !strings.Contains(buf.String(), "upstream certificates will NOT be validated") {
+		t.Fatalf("a save with the flag on must reach the holder and warn; skip=%v log=%q", holder.get().skip, buf.String())
+	}
+	cfg.insecureSkipVerify = false
+	lv.apply(cfg)
+	if holder.get().skip {
+		t.Error("a save with the flag off must reach the holder")
 	}
 }
 
 // Every restart-only key reads its own field: changing exactly that field
 // flags exactly that key.
 func TestRestartOnlyKeys_EachReadsItsField(t *testing.T) {
-	want := []string{"hosted", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify"}
+	want := []string{"hosted"}
 	if got := restartOnlyKeyNames(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("restart-only keys: want %v, got %v", want, got)
 	}
 	running := defaultConfig()
 	edits := map[string]func(*fileConfig){
-		"hosted":                 func(f *fileConfig) { f.Hosted = false },
-		"tls.certFile":           func(f *fileConfig) { f.TLS.CertFile = "/x" },
-		"tls.keyFile":            func(f *fileConfig) { f.TLS.KeyFile = "/x" },
-		"tls.trustDir":           func(f *fileConfig) { f.TLS.TrustDir = "/x" },
-		"tls.insecureSkipVerify": func(f *fileConfig) { f.TLS.InsecureSkipVerify = true },
+		"hosted": func(f *fileConfig) { f.Hosted = false },
 	}
 	for key, edit := range edits {
 		file := fileConfigFromConfig(running)
@@ -119,7 +143,8 @@ func TestRestartOnlyKeys_EachReadsItsField(t *testing.T) {
 }
 
 // yamlLeaves lists the config.yaml keys of t at the granularity the lists use:
-// a struct field is walked into (tls.certFile), a list or scalar is a key.
+// a struct field is walked into (tls.insecureSkipVerify), a list or scalar is a
+// key.
 // Removed-setting fields (RemovedAppDir and the like, kept only so an old file
 // still loads) and the gateway-owned version are left out, and a removed one
 // must be named in removed so the exclusion is deliberate.
@@ -150,10 +175,9 @@ func yamlLeaves(t *testing.T, typ reflect.Type, prefix string, removed map[strin
 }
 
 // Every config.yaml setting is exactly one of: live (apply copies it, so a
-// save reaches it at once), restart-only (restartOnlyKeys) or host-only
-// (restartOnlyKeys with hostOnly, which the settings endpoint refuses to
-// change). A new fileConfig field that nobody classified would silently never
-// apply, or apply twice; this test fails naming it.
+// save reaches it at once) or restart-only (restartOnlyKeys). A new fileConfig
+// field that nobody classified would silently never apply, or apply twice;
+// this test fails naming it.
 func TestFileConfig_EveryKeyIsClassifiedOnce(t *testing.T) {
 	// The live keys are the top-level keys apply copies: liveSettings' fields,
 	// and logLevel, which apply sets on the logger's level instead.
@@ -177,15 +201,16 @@ func TestFileConfig_EveryKeyIsClassifiedOnce(t *testing.T) {
 		t.Errorf("liveSettings copies %v, which this test does not know as live keys", liveKeys)
 	}
 
-	leaves := yamlLeaves(t, reflect.TypeOf(fileConfig{}), "", map[string]bool{"appDir": true, "usersFile": true, "connectionsFile": true})
-	liveTops := map[string]bool{"connModes": true, "defaultConn": true, "logLevel": true, "access": true, "session": true, "login": true, "modules": true, "audit": true}
-	restartOnly, hostOnly := map[string]bool{}, map[string]bool{}
+	leaves := yamlLeaves(t, reflect.TypeOf(fileConfig{}), "", map[string]bool{
+		"appDir": true, "usersFile": true, "connectionsFile": true, "certFile": true, "keyFile": true, "trustDir": true,
+	})
+	// tls.insecureSkipVerify is live through the trust holder: apply hands it
+	// to lv.trust (TestLive_ApplyCarriesSkipVerifyIntoTheTrustHolder), so it
+	// is not a liveSettings field.
+	liveTops := map[string]bool{"connModes": true, "defaultConn": true, "logLevel": true, "access": true, "session": true, "login": true, "modules": true, "audit": true, "tls": true}
+	restartOnly := map[string]bool{}
 	for _, k := range restartOnlyKeys {
-		if k.hostOnly {
-			hostOnly[k.key] = true
-		} else {
-			restartOnly[k.key] = true
-		}
+		restartOnly[k.key] = true
 	}
 	seen := map[string]bool{}
 	for _, key := range leaves {
@@ -198,11 +223,8 @@ func TestFileConfig_EveryKeyIsClassifiedOnce(t *testing.T) {
 		if restartOnly[key] {
 			classes = append(classes, "restartOnlyKeys")
 		}
-		if hostOnly[key] {
-			classes = append(classes, "hostOnly")
-		}
 		if len(classes) != 1 {
-			t.Errorf("config.yaml key %q is classified as %v: want exactly one of live (live.go apply), restartOnlyKeys or hostOnly", key, classes)
+			t.Errorf("config.yaml key %q is classified as %v: want exactly one of live (live.go apply) or restartOnlyKeys", key, classes)
 		}
 	}
 	for _, k := range restartOnlyKeys {

@@ -18,8 +18,9 @@
 # Posture, both services: non-root UID 65532, privileged off, every capability
 # dropped, no new privileges, read-only root filesystem, the default bridge
 # network. The gateway writes only /tls (a self-signed certificate on the first
-# start) and /data, both named volumes that inherit the image's UID-65532
-# ownership.
+# start, and in the provisioned service what the admin console's Certificates
+# page replaces or adds) and /data, both named volumes that inherit the image's
+# UID-65532 ownership.
 name: sol-msg-util-svc
 services:
   gateway:
@@ -103,6 +104,11 @@ services:
       # set SMU_ADMIN_PASSWORD_FILE to its path instead.
       # SMU_ADMIN_PASSWORD: ${SMU_ADMIN_PASSWORD}
     volumes:
+      # Writable, so the admin console's Certificates page can replace the
+      # certificate and add or delete CA files, each applying at once. Mount
+      # the directory read-only (provisioned-tls:/tls:ro) to lock that out:
+      # the page then shows the files and a change takes the host and a
+      # restart. A directory, never single files.
       - provisioned-tls:/tls
       # config.yaml, users.yaml, connections.yaml and store.key. The store key
       # encrypts the two stores: back it up.

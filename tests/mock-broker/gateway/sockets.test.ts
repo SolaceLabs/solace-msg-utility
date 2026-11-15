@@ -159,6 +159,21 @@ describe('mock-broker/gateway/sockets -- revocation', () => {
         expect(codes(events)).toEqual([UP, DOWN]);
     });
 
+    it('closes every socket at a restart of the gateway, an expired session\'s too', async () => {
+        const first = await open();
+        gw.sessions.expire(sid);
+        const second = await open({ url: 'ws:///managed/smf/b1/v1' });   // refused: its session is gone
+        gw.setCookie(gw.openSession('viewer', false));
+        const third = await open();
+        expect(codes(second.events)).toEqual([FAILED]);
+        expect([gw.sockets.list().length, codes(first.events), codes(third.events)]).toEqual([2, [UP], [UP]]);
+
+        await admin('POST', '/managed/restart');
+        expect(codes(first.events)).toEqual([UP, DOWN]);
+        expect(codes(third.events)).toEqual([UP, DOWN]);
+        expect(gw.sockets.list()).toEqual([]);
+    });
+
     it('forgets a socket the app disconnects itself', async () => {
         const { session } = await open();
         session.disconnect();

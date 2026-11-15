@@ -6,14 +6,17 @@ import (
 )
 
 // live holds the config.yaml keys that take effect without a restart:
-// connModes, defaultConn, logLevel, access.*, session.*, login.*, modules.*
-// and audit.*. serve() builds it from the loaded config and passes it to
-// every reader, which loads the current value per request. The settings
-// endpoint (settings.go) is the only writer. Every other key is read once at
-// startup (restartOnlyKeys) and applies at the next restart.
+// connModes, defaultConn, logLevel, access.*, session.*, login.*, modules.*,
+// audit.* and tls.insecureSkipVerify. serve() builds it from the loaded config
+// and passes it to every reader, which loads the current value per request.
+// The settings endpoint (settings.go) is the only writer. Every other key is
+// read once at startup (restartOnlyKeys) and applies at the next restart.
 type live struct {
 	cur   atomic.Pointer[liveSettings]
 	level slog.LevelVar // the logger's level; set with the rest by apply
+	// trust takes tls.insecureSkipVerify, which outbound TLS connections read
+	// when they connect. Bound once, before the gateway serves (bindTrust).
+	trust *trustHolder
 }
 
 type liveSettings struct {
@@ -46,7 +49,14 @@ func (lv *live) apply(cfg config) {
 		audit:       cfg.audit,
 	})
 	lv.level.Set(cfg.logLevel)
+	if lv.trust != nil {
+		lv.trust.setSkip(cfg.insecureSkipVerify)
+	}
 }
+
+// bindTrust makes apply carry tls.insecureSkipVerify into h from now on. Call
+// it before the gateway serves: apply reads the binding without a lock.
+func (lv *live) bindTrust(h *trustHolder) { lv.trust = h }
 
 func (lv *live) get() *liveSettings { return lv.cur.Load() }
 
@@ -59,36 +69,20 @@ func (lv *live) twoFactor() string { return lv.get().twoFactor }
 
 // restartOnlyKeys are the config.yaml keys the gateway reads once at startup.
 // A saved change applies at the next restart; the settings page marks them.
-// The hostOnly keys name files and directories: the settings endpoint never
-// changes them, because a path an administrator could point anywhere would let
-// the gateway serve its own secrets or overwrite its stores at the next start.
-// They change only by editing config.yaml on the gateway host.
+// tls.insecureSkipVerify is not among them: it is live through the trust
+// holder (trustHolder.setSkip, reached from apply). The TLS paths are not
+// config.yaml keys at all (tlsPaths).
 var restartOnlyKeys = []struct {
-	key      string
-	hostOnly bool
-	value    func(fileConfig) any
+	key   string
+	value func(fileConfig) any
 }{
-	{"hosted", false, func(f fileConfig) any { return f.Hosted }},
-	{"tls.certFile", true, func(f fileConfig) any { return f.TLS.CertFile }},
-	{"tls.keyFile", true, func(f fileConfig) any { return f.TLS.KeyFile }},
-	{"tls.trustDir", true, func(f fileConfig) any { return f.TLS.TrustDir }},
-	{"tls.insecureSkipVerify", false, func(f fileConfig) any { return f.TLS.InsecureSkipVerify }},
+	{"hosted", func(f fileConfig) any { return f.Hosted }},
 }
 
 func restartOnlyKeyNames() []string {
 	out := make([]string, 0, len(restartOnlyKeys))
 	for _, k := range restartOnlyKeys {
 		out = append(out, k.key)
-	}
-	return out
-}
-
-func hostOnlyKeyNames() []string {
-	out := []string{}
-	for _, k := range restartOnlyKeys {
-		if k.hostOnly {
-			out = append(out, k.key)
-		}
 	}
 	return out
 }
