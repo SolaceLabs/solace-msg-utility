@@ -371,10 +371,18 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 		return
 	}
 	var id string
-	var seq int
 	err = p.store.setPassword(r.Context(), as.user, nw, check.hash, func() {
 		id = p.sessions.create(as.user, false)
-		seq, _ = p.store.seqs() // the commit's own seq: the writer lock is still held
+		// The audit line too is written while the writer lock is held, so it
+		// follows the order of the commits; the seq read is this commit's own.
+		seq, _ := p.store.seqs()
+		e := auditFor(r, auditPasswordChange)
+		e.Target, e.Outcome, e.Msg = as.user, auditOK, as.user+" changed their password"
+		e.Wrote = []auditWrote{{File: filepath.Base(p.store.usersPath), Seq: int64(seq)}}
+		if as.mustChange {
+			e.Msg = as.user + " set a new password after the forced change"
+		}
+		p.audit.record(auditAuth, e)
 	})
 	var diskChanged *changedOnDiskError
 	var writeFailed *writeFailedError
@@ -412,13 +420,6 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 	p.throttle.loginSucceeded(as.user, client, resolved)
 	p.sessions.dropOthers(as.user, id)
 	setSessionCookie(w, id)
-	e := auditFor(r, auditPasswordChange)
-	e.Target, e.Outcome, e.Msg = as.user, auditOK, as.user+" changed their password"
-	e.Wrote = []auditWrote{{File: filepath.Base(p.store.usersPath), Seq: int64(seq)}}
-	if as.mustChange {
-		e.Msg = as.user + " set a new password after the forced change"
-	}
-	p.audit.record(auditAuth, e)
 	log.Info("password changed")
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }

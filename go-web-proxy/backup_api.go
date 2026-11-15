@@ -189,14 +189,19 @@ func (h *managedHandler) saveBackupSchedule(w http.ResponseWriter, r *http.Reque
 		_, _ = writeStoreError(w, errRevRequired)
 		return
 	}
-	newRev, err := h.backups.setSchedule(r.Context(), sessionOf(r).user, body.backupSchedule, body.Keep, body.Passphrase, body.Rev.n)
+	newRev, err := h.backups.setSchedule(r.Context(), sessionOf(r).user, body.backupSchedule, body.Keep, body.Passphrase, body.Rev.n,
+		h.committed(r, call, h.wroteSchedule))
 	if err != nil {
 		h.backupFailed(w, r, "saveBackupSchedule", err)
 		return
 	}
-	call.wrote = []auditWrote{{File: filepath.Base(h.backups.schedulePath), Seq: int64(newRev)}}
 	h.log(r).Info("backup schedule saved", "kind", body.Kind, "keep", body.Keep, "new_passphrase", body.Passphrase != "", "rev", newRev)
 	writeJSON(w, http.StatusOK, map[string]int{"rev": newRev})
+}
+
+// wroteSchedule is what a commit to backup.yaml wrote, for committed.
+func (h *managedHandler) wroteSchedule() []auditWrote {
+	return []auditWrote{{File: filepath.Base(h.backups.schedulePath), Seq: int64(h.backups.counter())}}
 }
 
 // deleteBackupSchedule removes the schedule: DELETE ...?rev=N with the rev the
@@ -209,12 +214,10 @@ func (h *managedHandler) deleteBackupSchedule(w http.ResponseWriter, r *http.Req
 		_, _ = writeStoreError(w, errRevRequired)
 		return
 	}
-	seq, err := h.backups.removeSchedule(r.Context(), sessionOf(r).user, rev)
-	if err != nil {
+	if _, err := h.backups.removeSchedule(r.Context(), sessionOf(r).user, rev, h.committed(r, call, h.wroteSchedule)); err != nil {
 		h.backupFailed(w, r, "deleteBackupSchedule", err)
 		return
 	}
-	call.wrote = []auditWrote{{File: filepath.Base(h.backups.schedulePath), Seq: int64(seq)}}
 	h.log(r).Info("backup schedule removed")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -472,6 +475,19 @@ func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request, ca
 				return err
 			}
 		}
+		tx.afterCommit(h.committed(r, call, func() []auditWrote {
+			var wrote []auditWrote
+			if users != nil {
+				wrote = append(wrote, auditWrote{File: filepath.Base(h.store.usersPath), Seq: int64(staged.usersSeq)})
+			}
+			if conns != nil {
+				wrote = append(wrote, auditWrote{File: filepath.Base(h.store.connsPath), Seq: int64(staged.connsSeq)})
+			}
+			if body.Settings != importSkip {
+				wrote = append(wrote, h.wroteSettings()...)
+			}
+			return wrote
+		}))
 		return nil
 	})
 	if err != nil {
@@ -486,15 +502,6 @@ func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request, ca
 		h.sessions.dropUser(name)
 	}
 	result.SignedOut = slices.Contains(staged.drop, sessionOf(r).user)
-	if users != nil {
-		call.wrote = append(call.wrote, auditWrote{File: filepath.Base(h.store.usersPath), Seq: int64(staged.usersSeq)})
-	}
-	if conns != nil {
-		call.wrote = append(call.wrote, auditWrote{File: filepath.Base(h.store.connsPath), Seq: int64(staged.connsSeq)})
-	}
-	if body.Settings != importSkip {
-		call.wrote = append(call.wrote, auditWrote{File: filepath.Base(h.settings.path)})
-	}
 	h.log(r).Info("configuration imported", "users", body.Users, "connections", body.Connections,
 		"settings", body.Settings, "from", doc.Created, "restart_required", result.RestartRequired)
 	writeJSON(w, http.StatusOK, result)

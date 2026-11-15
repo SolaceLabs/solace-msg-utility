@@ -623,6 +623,9 @@ func toRespPerms(rows []permRow) []respPerm {
 // only after the commit point. The slow, input-only work (hashing a password)
 // happens before the lock.
 //
+// A mutator's committed funcs run after its commit, still under the writer
+// lock and after the socket re-check: the handler's audit line.
+//
 // Each file carries a seq that moves on every commit; a record's rev becomes
 // the new seq only when the record changed as the admin console shows it
 // (sameUserView, sameConnView). A password-only change moves seq and keeps rev.
@@ -814,7 +817,7 @@ func (s *store) listUsers() []userRec {
 // errBlankNewUserPassword and errLastAdmin (demoting the only admin). A write
 // that fails comes back as *writeFailedError, with memory and files as they
 // were. A refusal leaves seq alone.
-func (s *store) saveUser(ctx context.Context, caller string, u userRec, password string, rev int) (savedUser, error) {
+func (s *store) saveUser(ctx context.Context, caller string, u userRec, password string, rev int, committed ...func()) (savedUser, error) {
 	if rev < 0 {
 		return savedUser{}, errRevRequired
 	}
@@ -868,6 +871,7 @@ func (s *store) saveUser(ctx context.Context, caller string, u userRec, password
 		s.seal.stageDoc(tx, roleUsers, s.usersPath, doc)
 		tx.onPublish(func() { s.publish(&doc, nil) })
 		tx.afterCommit(s.changed)
+		tx.afterCommit(committed...)
 		out = savedUser{rev: rec.Rev, seq: newSeq, dropSessions: drop}
 		return nil
 	})
@@ -924,7 +928,7 @@ func (s *store) setPassword(ctx context.Context, username, password, expect stri
 // errLastAdmin for the only admin; a rev of 0 or less is errRevRequired.
 // seq of users.yaml moves and no record holds the new value. The handler ends
 // the user's sessions.
-func (s *store) deleteUser(ctx context.Context, caller, username string, rev int) (seq int, err error) {
+func (s *store) deleteUser(ctx context.Context, caller, username string, rev int, committed ...func()) (seq int, err error) {
 	if rev <= 0 {
 		return 0, errRevRequired
 	}
@@ -951,6 +955,7 @@ func (s *store) deleteUser(ctx context.Context, caller, username string, rev int
 		s.seal.stageDoc(tx, roleUsers, s.usersPath, doc)
 		tx.onPublish(func() { s.publish(&doc, nil) })
 		tx.afterCommit(s.changed)
+		tx.afterCommit(committed...)
 		seq = doc.Seq
 		return nil
 	})
@@ -999,7 +1004,7 @@ func (s *store) hasConnection(broker string) bool {
 // password fields on an EXISTING broker keep the stored secrets as they are
 // now (mergeConnSecrets). A change to a password alone moves seq and keeps
 // the rev. The caller validates the record (validateConn) before the call.
-func (s *store) saveConnection(ctx context.Context, caller string, c connRec, rev int) (savedConn, error) {
+func (s *store) saveConnection(ctx context.Context, caller string, c connRec, rev int, committed ...func()) (savedConn, error) {
 	if rev < 0 {
 		return savedConn{}, errRevRequired
 	}
@@ -1036,6 +1041,7 @@ func (s *store) saveConnection(ctx context.Context, caller string, c connRec, re
 		s.seal.stageDoc(tx, roleConns, s.connsPath, doc)
 		tx.onPublish(func() { s.publish(nil, &doc) })
 		tx.afterCommit(s.changed)
+		tx.afterCommit(committed...)
 		out = savedConn{rev: rec.Rev, seq: newSeq}
 		return nil
 	})
@@ -1069,7 +1075,7 @@ func mergeConnSecrets(c *connRec, old connRec) {
 // deleteConnection removes the named broker, which must stand at rev (above
 // 0); the refusals are deleteUser's without the last-admin rule. seq of
 // connections.yaml moves and no record holds the new value.
-func (s *store) deleteConnection(ctx context.Context, caller, broker string, rev int) (seq int, err error) {
+func (s *store) deleteConnection(ctx context.Context, caller, broker string, rev int, committed ...func()) (seq int, err error) {
 	if rev <= 0 {
 		return 0, errRevRequired
 	}
@@ -1093,6 +1099,7 @@ func (s *store) deleteConnection(ctx context.Context, caller, broker string, rev
 		s.seal.stageDoc(tx, roleConns, s.connsPath, doc)
 		tx.onPublish(func() { s.publish(nil, &doc) })
 		tx.afterCommit(s.changed)
+		tx.afterCommit(committed...)
 		seq = doc.Seq
 		return nil
 	})

@@ -603,6 +603,14 @@ func (b *backupService) scheduleWithRev() (*scheduleDoc, int) {
 	return b.sched, b.seq
 }
 
+// counter is backup.yaml's seq as it stands, which a delete of the schedule
+// keeps. Read in an after-commit hook it is the seq of that commit.
+func (b *backupService) counter() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.seq
+}
+
 func (b *backupService) lastRun() *backupRun {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -623,7 +631,7 @@ func (b *backupService) poke() {
 // current schedule's key, and is refused when there is none. caller is the
 // requesting administrator, re-checked inside the lock ("" skips it). The file
 // and the memory change together or not at all.
-func (b *backupService) setSchedule(ctx context.Context, caller string, s backupSchedule, keep int, passphrase string, rev int) (int, error) {
+func (b *backupService) setSchedule(ctx context.Context, caller string, s backupSchedule, keep int, passphrase string, rev int, committed ...func()) (int, error) {
 	if rev < 0 {
 		return 0, errRevRequired
 	}
@@ -673,6 +681,7 @@ func (b *backupService) setSchedule(ctx context.Context, caller string, s backup
 			b.mu.Unlock()
 		})
 		tx.afterCommit(b.poke)
+		tx.afterCommit(committed...)
 		newRev = next
 		return nil
 	})
@@ -687,7 +696,7 @@ func (b *backupService) setSchedule(ctx context.Context, caller string, s backup
 // from then on). rev must be the schedule's rev (at least 1): 404 not_found
 // when there is no schedule, 409 stale when it moved. The backups already
 // written stay.
-func (b *backupService) removeSchedule(ctx context.Context, caller string, rev int) (int, error) {
+func (b *backupService) removeSchedule(ctx context.Context, caller string, rev int, committed ...func()) (int, error) {
 	if rev < 1 {
 		return 0, errRevRequired
 	}
@@ -714,6 +723,7 @@ func (b *backupService) removeSchedule(ctx context.Context, caller string, rev i
 			b.mu.Unlock()
 		})
 		tx.afterCommit(b.poke)
+		tx.afterCommit(committed...)
 		newSeq = next
 		return nil
 	})

@@ -135,11 +135,14 @@ func (h *managedHandler) adminOnly(fn http.HandlerFunc) http.HandlerFunc {
 // turned out to create), the target that is not in the path (an import's
 // backup file), the names of the parts it changed and the store files the
 // commit wrote (with their seq), which an ok entry carries as "wrote".
+// recorded says the entry is written already: a change that commits writes
+// its ok entry from an after-commit hook (committed), under the writer lock.
 type auditCall struct {
-	action  string
-	target  string
-	changed []string
-	wrote   []auditWrote
+	action   string
+	target   string
+	changed  []string
+	wrote    []auditWrote
+	recorded bool
 }
 
 // auditWriter notes the status and error code of a response, so the wrapper
@@ -222,10 +225,11 @@ func connectionSaveAction(existed bool) string {
 	return auditConnectionCreate
 }
 
-// audited is adminOnly plus one admin audit entry per request, written once
-// fn has answered: ok when the status is below 400, else refused with the code
-// of the error body. A request the admin gate refuses is recorded too, under
-// the action pre names.
+// audited is adminOnly plus one admin audit entry per request: ok when the
+// status is below 400, else refused with the code of the error body. A change
+// that commits writes its ok entry itself, inside the transaction (committed);
+// everything else is written here once fn has answered. A request the admin
+// gate refuses is recorded too, under the action pre names.
 func (h *managedHandler) audited(pre auditPre, fn func(http.ResponseWriter, *http.Request, *auditCall)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		action, target := pre(r)
@@ -240,23 +244,57 @@ func (h *managedHandler) audited(pre auditPre, fn func(http.ResponseWriter, *htt
 // like a sign-in's username (userKey): it can be a path segment or a file
 // name the requester chose.
 func (h *managedHandler) recordAdmin(r *http.Request, call *auditCall, aw *auditWriter) {
-	if aw.status == statusClientGone {
+	switch {
+	case aw.status == statusClientGone:
 		return // the client left before the change began: nothing happened, nobody reads an answer
+	case call.recorded:
+		return // the commit's own hook wrote the entry
+	case aw.status < http.StatusBadRequest:
+		h.recordOK(r, call)
+		return
 	}
 	e := auditFor(r, call.action)
 	e.Target = userKey(call.target)
-	ph := auditPhrases[call.action]
-	if aw.status < http.StatusBadRequest {
-		e.Outcome, e.Changed, e.Wrote = auditOK, call.changed, call.wrote
-		e.Msg = e.Actor + " " + strings.Replace(ph.done, "{t}", e.Target, 1)
-		if len(e.Changed) > 0 {
-			e.Msg += ": " + strings.Join(e.Changed, ", ")
-		}
-	} else {
-		e.Outcome, e.Code = auditRefused, aw.code
-		e.Msg = e.Actor + " could not " + strings.Replace(ph.attempt, "{t}", e.Target, 1) + ": " + aw.code
+	e.Outcome, e.Code = auditRefused, aw.code
+	e.Msg = e.Actor + " could not " + strings.Replace(auditPhrases[call.action].attempt, "{t}", e.Target, 1) + ": " + aw.code
+	h.audit.record(auditAdmin, e)
+}
+
+// recordOK writes the ok entry of call.
+func (h *managedHandler) recordOK(r *http.Request, call *auditCall) {
+	e := auditFor(r, call.action)
+	e.Target = userKey(call.target)
+	e.Outcome, e.Changed, e.Wrote = auditOK, call.changed, call.wrote
+	e.Msg = e.Actor + " " + strings.Replace(auditPhrases[call.action].done, "{t}", e.Target, 1)
+	if len(e.Changed) > 0 {
+		e.Msg += ": " + strings.Join(e.Changed, ", ")
 	}
 	h.audit.record(auditAdmin, e)
+	call.recorded = true
+}
+
+// committed is the after-commit hook of an audited change: it writes the ok
+// entry while the writer lock is still held, so the audit lines follow the
+// order of the commits, and with audit.onFailure refuse a lost record refuses
+// the very next change. wrote names the files the commit wrote and their seq;
+// it runs under the same lock, so a seq it reads is that commit's own.
+func (h *managedHandler) committed(r *http.Request, call *auditCall, wrote func() []auditWrote) func() {
+	return func() {
+		call.wrote = wrote()
+		h.recordOK(r, call)
+	}
+}
+
+// wroteUsers and wroteConnections are what a commit to one store file wrote,
+// for committed.
+func (h *managedHandler) wroteUsers() []auditWrote {
+	seq, _ := h.store.seqs()
+	return []auditWrote{{File: filepath.Base(h.store.usersPath), Seq: int64(seq)}}
+}
+
+func (h *managedHandler) wroteConnections() []auditWrote {
+	_, seq := h.store.seqs()
+	return []auditWrote{{File: filepath.Base(h.store.connsPath), Seq: int64(seq)}}
 }
 
 // ----- responses ----------------------------------------------------------------
@@ -618,7 +656,7 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request, call *
 		// the rev (and is not in the list).
 		call.changed = userChanges(old, rec, body.Password != "")
 	}
-	got, err := h.store.saveUser(r.Context(), sessionOf(r).user, rec, body.Password, rev)
+	got, err := h.store.saveUser(r.Context(), sessionOf(r).user, rec, body.Password, rev, h.committed(r, call, h.wroteUsers))
 	if err != nil {
 		h.storeFailed(w, r, "saveUser", err)
 		return
@@ -626,7 +664,6 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request, call *
 	if got.dropSessions {
 		h.sessions.dropUser(name)
 	}
-	call.wrote = []auditWrote{{File: filepath.Base(h.store.usersPath), Seq: int64(got.seq)}}
 	h.log(r).Info("user saved", "target", name, "created", rev == 0, "admin", body.Admin,
 		"password_set", body.Password != "", "operate_rows", len(body.Operate), "read_only_rows", len(body.ReadOnly),
 		"modules", modulesAttr(body.Modules), "sessions_ended", got.dropSessions, "rev", got.rev)
@@ -688,13 +725,11 @@ func (h *managedHandler) deleteUser(w http.ResponseWriter, r *http.Request, call
 		_, _ = writeStoreError(w, errRevRequired)
 		return
 	}
-	seq, err := h.store.deleteUser(r.Context(), sessionOf(r).user, name, rev)
-	if err != nil {
+	if _, err := h.store.deleteUser(r.Context(), sessionOf(r).user, name, rev, h.committed(r, call, h.wroteUsers)); err != nil {
 		h.storeFailed(w, r, "deleteUser", err)
 		return
 	}
 	h.sessions.dropUser(name)
-	call.wrote = []auditWrote{{File: filepath.Base(h.store.usersPath), Seq: int64(seq)}}
 	h.log(r).Info("user deleted", "target", name)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -728,7 +763,7 @@ func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request, 
 	if old, found := connectionNamed(h.store.listConnections(), rec.Broker); rev > 0 && found {
 		call.changed = connChanges(old, rec)
 	}
-	got, err := h.store.saveConnection(r.Context(), sessionOf(r).user, rec, rev)
+	got, err := h.store.saveConnection(r.Context(), sessionOf(r).user, rec, rev, h.committed(r, call, h.wroteConnections))
 	if err != nil {
 		h.storeFailed(w, r, "saveConnection", err)
 		return
@@ -740,7 +775,6 @@ func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request, 
 			newPasswords++
 		}
 	}
-	call.wrote = []auditWrote{{File: filepath.Base(h.store.connsPath), Seq: int64(got.seq)}}
 	h.log(r).Info("connection saved", "target", rec.Broker, "created", rev == 0, "hostname", rec.Hostname,
 		"semp_scheme", orTLS(rec.Semp.Scheme, sempTLS), "semp_port", string(rec.Semp.Port), "semp_password_set", body.Semp.Pass != "",
 		"client_scheme", orTLS(rec.Client.Scheme, clientTLS), "client_port", string(rec.Client.Port),
@@ -797,12 +831,10 @@ func (h *managedHandler) deleteConnection(w http.ResponseWriter, r *http.Request
 		_, _ = writeStoreError(w, errRevRequired)
 		return
 	}
-	seq, err := h.store.deleteConnection(r.Context(), sessionOf(r).user, broker, rev)
-	if err != nil {
+	if _, err := h.store.deleteConnection(r.Context(), sessionOf(r).user, broker, rev, h.committed(r, call, h.wroteConnections)); err != nil {
 		h.storeFailed(w, r, "deleteConnection", err)
 		return
 	}
-	call.wrote = []auditWrote{{File: filepath.Base(h.store.connsPath), Seq: int64(seq)}}
 	h.log(r).Info("connection deleted", "target", broker)
 	w.WriteHeader(http.StatusNoContent)
 }

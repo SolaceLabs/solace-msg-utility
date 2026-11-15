@@ -1262,6 +1262,60 @@ func TestManagedAPI_ClientGoneWhileWaitingChangesNothing(t *testing.T) {
 	}
 }
 
+// The ok audit line of a change is written inside its transaction, so the
+// lines follow the order of the commits: for changes that raced, the seq each
+// line carries only goes up.
+func TestManagedAPI_AuditLinesFollowTheOrderOfTheCommits(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	c := e.cookie("admin", false)
+	var reqs []func() *httptest.ResponseRecorder
+	for i := range 8 {
+		name := fmt.Sprintf("racer%d", i)
+		reqs = append(reqs, func() *httptest.ResponseRecorder { return e.putUserAs(c, name, `{"password":"a-password-12"}`) })
+	}
+	for _, rec := range raced(t, reqs...) {
+		expect(t, rec, http.StatusOK, "")
+	}
+	entries := au.entries(t)
+	if len(entries) != len(reqs) {
+		t.Fatalf("want one entry per change, got %d", len(entries))
+	}
+	last := int64(0)
+	for _, en := range entries {
+		if en.Action != "user.create" || len(en.Wrote) != 1 || en.Wrote[0].Seq <= last {
+			t.Fatalf("the entries must be in commit order, each seq above the one before: %+v", entries)
+		}
+		last = en.Wrote[0].Seq
+	}
+}
+
+// audit.onFailure refuse holds for a change that was already waiting for the
+// lock: the record is lost inside the first change's transaction, so the one
+// behind it meets the gate with the failure known and is refused.
+func TestManagedAPI_AuditRefuseStopsAChangeAlreadyWaiting(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	e.setAudit(auditSettings{onFailure: auditOnFailureRefuse})
+	a, _ := e.withLoudAudit(t)
+	c := e.cookie("admin", false)
+	_ = a.f.Close() // the audit log is no longer writable
+	release := holdWriter(t, e.api.store.wr)
+	done := make(chan *httptest.ResponseRecorder, 2)
+	go func() { done <- e.putUserAs(c, "bob", `{"password":"bob-password-1"}`) }()
+	go func() { done <- e.putConnAs(c, "b3", `{"hostname":"h3","semp":{},"client":{}}`) }()
+	waitForWaiters(t, 2)
+	release()
+	codes := []int{(<-done).Code, (<-done).Code}
+	slices.Sort(codes)
+	if !slices.Equal(codes, []int{http.StatusOK, http.StatusServiceUnavailable}) {
+		t.Fatalf("the change that met the failure stands and the one waiting behind it is refused, got %v", codes)
+	}
+	_, bob := e.api.store.isAdmin("bob")
+	if bob == e.api.store.hasConnection("b3") {
+		t.Error("exactly one of the two changes may be written")
+	}
+}
+
 // ----- races -------------------------------------------------------------------------------
 
 // raced runs every request at once, each as soon as the others are ready, and

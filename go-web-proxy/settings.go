@@ -165,17 +165,22 @@ func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request, ca
 		if staged, err = h.stageSettings(tx, r, body.fileConfig); err != nil {
 			return err
 		}
-		tx.afterCommit(func() { newRev = tx.rev(sf.path) })
+		call.changed = staged.changed
+		tx.afterCommit(func() { newRev = tx.rev(sf.path) }, h.committed(r, call, h.wroteSettings))
 		return nil
 	})
 	if err != nil {
 		h.settingsFailed(w, r, err)
 		return
 	}
-	call.changed = staged.changed
-	call.wrote = []auditWrote{{File: filepath.Base(sf.path)}}
 	h.log(r).Info("gateway settings saved", "file", sf.path, "changed", staged.changed, "restart_required", staged.restart)
 	writeJSON(w, http.StatusOK, map[string]any{"restartRequired": staged.restart, "rev": newRev})
+}
+
+// wroteSettings is what a commit to config.yaml wrote, for committed: the file
+// has no seq.
+func (h *managedHandler) wroteSettings() []auditWrote {
+	return []auditWrote{{File: filepath.Base(h.settings.path)}}
 }
 
 // settingsFailed answers an error of a settings transaction: the shared store

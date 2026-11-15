@@ -587,11 +587,14 @@ err := h.store.wr.Do(r.Context(), func(tx *txn) error {
     // validate on a copy (last_admin, would_lock_out, ...), stamp seq and rev
     seal.stageDoc(tx, role, path, doc) // a document that does not encode fails the transaction
     tx.onPublish(func() { /* swap memory */ })
-    tx.afterCommit(func() { /* audit line, sockets, sessions */ })
+    tx.afterCommit(func() { /* close sockets that lost access, write the audit line */ })
     return nil
 })
 if code, ok := writeStoreError(w, err); ok { /* audit the refusal with code; return */ }
+// sign out the users the change calls for, then answer
 ```
+
+The ok audit line of a change is an after-commit hook: pass `h.committed(r, call, wrote)` to the store method (its last, optional argument) or to `tx.afterCommit`, where `wrote` names the files the commit wrote and their seq. The line is then written while the lock is held, so the lines follow the order of the commits, and with `audit.onFailure: refuse` a lost record refuses the very next change. A refusal's line is still written by the `audited` wrapper once the handler has answered. An administrator's sign-outs are not hooks: every request reads the store again, so they follow once `Do` has returned.
 
 In practice call the store's methods (`saveUser`, `deleteConnection`, `setSchedule`, `stageImport`) rather than writing a `Do` in a handler. A test double of the writer is not needed: `newManagedEnv` and the helpers in [store_test.go](../go-web-proxy/store_test.go) (`putUser`, `putConn`, `currentUser`) and [managed_test.go](../go-web-proxy/managed_test.go) (`holdWriter`, `raced`, `withRev`) run the real one over a temp directory.
 

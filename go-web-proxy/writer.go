@@ -27,10 +27,17 @@ import (
 //		... re-check the caller, find the record, compare the rev, validate ...
 //		tx.stage(usersPath, sealed, 0o600, verify)               // or sealer.stageDoc
 //		tx.onPublish(func() { /* swap the in-memory snapshot */ })
-//		tx.afterCommit(func() { /* audit line, close sockets, sign-outs */ })
+//		tx.afterCommit(func() { /* close sockets that lost access, write the audit line */ })
 //		return nil
 //	})
 //	if code, ok := writeStoreError(rw, err); ok { /* audit the refusal with code */ return }
+//	... sign out the users the change calls for, answer ...
+//
+// The ok audit line of a change is an after-commit hook: it is written while
+// the lock is held, so the lines follow the order of the commits, and with
+// audit.onFailure refuse a lost record refuses the very next change. An
+// administrator's sign-outs are not part of the transaction: every request
+// reads the store again, so they follow once Do has returned.
 //
 // Nothing the op does before it returns touches a file or live memory: it
 // plans on copies. When it returns an error nothing is written.
@@ -260,10 +267,11 @@ func (tx *txn) paths() []string {
 // quick and must not call the writer.
 func (tx *txn) onPublish(fn func()) { tx.publish = append(tx.publish, fn) }
 
-// afterCommit queues fn to run once the change is published, still under the
-// writer lock: the audit line, closing sockets, signing users out. It runs in
-// queueing order.
-func (tx *txn) afterCommit(fn func()) { tx.after = append(tx.after, fn) }
+// afterCommit queues fns to run once the change is published, still under the
+// writer lock, in queueing order: closing the sockets that lost access,
+// opening the session of an own-password change, writing the change's audit
+// line. An administrator's sign-outs are the handler's, after Do returns.
+func (tx *txn) afterCommit(fns ...func()) { tx.after = append(tx.after, fns...) }
 
 // rev is the settings rev of path as of now (writer.rev).
 func (tx *txn) rev(path string) string { return tx.w.sums.rev(path) }
