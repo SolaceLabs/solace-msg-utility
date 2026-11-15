@@ -715,10 +715,10 @@ func TestSettings_AuditOnFailureIsALiveKey(t *testing.T) {
 // names another login key keeps it, and a refused value changes nothing.
 func TestSettings_TwoFactorIsALiveKey(t *testing.T) {
 	e := newManagedEnv(t, nil)
-	if got := e.settings(t).Settings.Login.TwoFactor; got != twoFactorOff || e.live.twoFactor() != twoFactorOff {
+	if got := e.settings(t).Settings.Login.TwoFactor; got != twoFactorOptional || e.live.twoFactor() != twoFactorOptional {
 		t.Fatalf("default: shown %q, live %q", got, e.live.twoFactor())
 	}
-	for _, mode := range []string{twoFactorOptional, twoFactorAdmins, twoFactorMandatory, twoFactorOff} {
+	for _, mode := range []string{twoFactorOptional, twoFactorAdmins, twoFactorMandatory} {
 		rec := e.saveSettings(t, `{"login":{"twoFactor":"`+mode+`"}}`)
 		expect(t, rec, http.StatusOK, "")
 		if got := decodeSave(t, rec); len(got.RestartRequired) != 0 {
@@ -736,10 +736,12 @@ func TestSettings_TwoFactorIsALiveKey(t *testing.T) {
 	if e.live.twoFactor() != twoFactorAdmins || e.live.get().login.maxFailures != 9 {
 		t.Errorf("a body naming another login key must keep twoFactor: %q %+v", e.live.twoFactor(), e.live.get().login)
 	}
-	bad := e.saveSettings(t, `{"login":{"twoFactor":"everyone"}}`)
-	expect(t, bad, http.StatusUnprocessableEntity, "invalid")
-	if got := errorCode(t, bad); got.Field != "login.twoFactor" || !strings.Contains(got.Reason, `"login.twoFactor"`) || !strings.Contains(got.Reason, `"everyone"`) {
-		t.Errorf("the refusal is on the field and names the value: %+v", got)
+	for _, value := range []string{"everyone", "off"} {
+		bad := e.saveSettings(t, `{"login":{"twoFactor":"`+value+`"}}`)
+		expect(t, bad, http.StatusUnprocessableEntity, "invalid")
+		if got := errorCode(t, bad); got.Field != "login.twoFactor" || !strings.Contains(got.Reason, `"login.twoFactor"`) || !strings.Contains(got.Reason, `"`+value+`"`) {
+			t.Errorf("%s: the refusal is on the field and names the value: %+v", value, got)
+		}
 	}
 	if e.live.twoFactor() != twoFactorAdmins || e.fileOnDisk(t).Login.TwoFactor != twoFactorAdmins {
 		t.Error("a refused value must change nothing")

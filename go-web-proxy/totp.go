@@ -29,9 +29,9 @@ import (
 // Nothing here logs, and no error carries a secret, a code or a recovery code.
 
 // The values of login.twoFactor: whether the gateway asks for a second step at
-// sign-in. off is the default, also for a file or backup without the key.
+// sign-in. optional is the default, also for a file or backup without the key.
+// There is no value that asks nobody: two-factor is always available.
 const (
-	twoFactorOff       = "off"
 	twoFactorOptional  = "optional"
 	twoFactorAdmins    = "admins"
 	twoFactorMandatory = "mandatory"
@@ -41,19 +41,19 @@ const (
 // empty value (a file or backup from before the key) is the default.
 func checkTwoFactor(v string) (string, error) {
 	switch v {
-	case "", twoFactorOff:
-		return twoFactorOff, nil
+	case "":
+		return twoFactorOptional, nil
 	case twoFactorOptional, twoFactorAdmins, twoFactorMandatory:
 		return v, nil
 	}
-	return "", fmt.Errorf("key %q has invalid value %q: must be %q, %q, %q or %q", "login.twoFactor", v, twoFactorOff, twoFactorOptional, twoFactorAdmins, twoFactorMandatory)
+	return "", fmt.Errorf("key %q has invalid value %q: must be %q, %q or %q", "login.twoFactor", v, twoFactorOptional, twoFactorAdmins, twoFactorMandatory)
 }
 
 // twoFactorOrDefault is the login.twoFactor a config holds: the zero value of
 // a config built without it is the default.
 func twoFactorOrDefault(v string) string {
 	if v == "" {
-		return twoFactorOff
+		return twoFactorOptional
 	}
 	return v
 }
@@ -71,13 +71,10 @@ const (
 // need is the one rule both gateways apply once a password has matched: what
 // the sign-in still owes. It returns "" (nothing, open the session), stageCode
 // (a code from the user's authenticator) or stageEnrol (set two-factor up
-// first). off asks nobody, enrolled or not; stored secrets are kept.
+// first). optional (also the answer for a mode that is not set) asks only the
+// enrolled.
 func need(mode string, isAdmin, enrolled bool) string {
 	switch mode {
-	case twoFactorOptional:
-		if enrolled {
-			return stageCode
-		}
 	case twoFactorAdmins:
 		if enrolled {
 			return stageCode
@@ -90,6 +87,9 @@ func need(mode string, isAdmin, enrolled bool) string {
 			return stageCode
 		}
 		return stageEnrol
+	}
+	if enrolled {
+		return stageCode
 	}
 	return ""
 }

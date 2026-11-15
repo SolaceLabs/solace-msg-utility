@@ -15,7 +15,6 @@ import { CONTRACT_DIR } from './helpers';
 describe('mock-broker/gateway/authenticator -- the requirement rule', () => {
     // mode, admin, enrolled -> need (go-web-proxy/totp.go need).
     const TABLE: [string, boolean, boolean, string][] = [
-        ['off', true, true, 'none'], ['off', true, false, 'none'], ['off', false, true, 'none'], ['off', false, false, 'none'],
         ['optional', true, true, 'code'], ['optional', true, false, 'none'], ['optional', false, true, 'code'], ['optional', false, false, 'none'],
         ['admins', true, true, 'code'], ['admins', true, false, 'enrol'], ['admins', false, true, 'code'], ['admins', false, false, 'none'],
         ['mandatory', true, true, 'code'], ['mandatory', true, false, 'enrol'], ['mandatory', false, true, 'code'], ['mandatory', false, false, 'enrol'],
@@ -25,11 +24,11 @@ describe('mock-broker/gateway/authenticator -- the requirement rule', () => {
         expect(twoFactorNeed(mode, admin, enrolled)).toBe(need);
     });
 
-    it('reads a value that is not a mode as nobody being asked, and knows exactly the four modes', () => {
+    it('reads a value that is not a mode as nobody being asked, and knows exactly the three modes', () => {
         expect(twoFactorNeed('', true, true)).toBe('none');
-        expect(TWO_FACTOR_MODES).toEqual(['off', 'optional', 'admins', 'mandatory']);
+        expect(TWO_FACTOR_MODES).toEqual(['optional', 'admins', 'mandatory']);
         expect(TWO_FACTOR_MODES.every(isTwoFactorMode)).toBe(true);
-        expect(['', 'Off', 'on', 'both'].some(isTwoFactorMode)).toBe(false);
+        expect(['', 'off', 'Optional', 'on', 'both'].some(isTwoFactorMode)).toBe(false);
     });
 });
 

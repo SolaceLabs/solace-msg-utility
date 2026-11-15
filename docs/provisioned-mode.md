@@ -129,7 +129,7 @@ The Gateway Settings page switches between `provisioned` and `both`. Leaving Pro
 | `login.backoffSeconds` | `30` | Keep. The first wait; it doubles with each further failure. |
 | `login.maxBackoffSeconds` | `900` | Keep. The longest wait. |
 | `login.unauthenticatedPerMinute` | `60` | Keep, unless many users share one address (a NAT or proxy you have not listed in `access.trustedProxies`). |
-| `login.twoFactor` | `off` | `optional` while people set up, then `mandatory`; at least `admins`. See [Two-factor sign-in](#two-factor-sign-in). |
+| `login.twoFactor` | `optional` | `optional` while people set up, then `mandatory`; at least `admins`. See [Two-factor sign-in](#two-factor-sign-in). |
 
 A wrong code at the two-factor step counts as a wrong password and brings the same waits. The waits apply to the account as well as the client, so someone guessing at a known username can keep that user waiting for up to `login.maxBackoffSeconds`. The access list below, or a VPN in front of the gateway, is the answer.
 
@@ -175,7 +175,7 @@ The rest (TLS, log level) are the same as in Gateway mode: see [Settings](deploy
 
 ## Two-factor sign-in
 
-Two-factor sign-in asks for a second proof after the password: a six-digit code from an authenticator app on the user's phone. Any app that makes standard time-based codes (TOTP, RFC 6238) will do. It covers every way in: the app's sign-in and `/solAdmin`. It is off until you turn it on, and only an administrator can take it away from a user.
+Two-factor sign-in asks for a second proof after the password: a six-digit code from an authenticator app on the user's phone. Any app that makes standard time-based codes (TOTP, RFC 6238) will do. It covers every way in: the app's sign-in and `/solAdmin`. It cannot be switched off: every user can set it up, and the setting decides who must. Only an administrator can take it away from a user.
 
 ### Choosing a mode
 
@@ -183,20 +183,19 @@ One setting, `login.twoFactor`, on the Gateway Settings page (the select **Two-f
 
 | Value | Who is asked | Use it |
 | --- | --- | --- |
-| `off` | Nobody. Secrets already stored are kept, and asked for again if you turn it back on. | The default. Also the way out if everyone is locked out (see [A lost phone](#a-lost-phone)). |
-| `optional` | Users who have set it up are asked for a code. Nobody has to set it up. | While people enrol. |
+| `optional` | Users who have set it up are asked for a code. Nobody has to set it up. | The default. While people enrol. |
 | `admins` | The same, and an administrator without it must set it up at the next sign-in. | The least you should run once enrolment is done. |
 | `mandatory` | Everyone who has set it up is asked for a code, and everyone else must set it up at the next sign-in. | **Recommended** as the end state. |
 
-**Recommended.** Run `optional` while people enrol, then switch to `mandatory`; if you cannot move everyone, at least `admins`, because administrators edit grants, the access list and sign-in itself. Under `admins` and `mandatory` a user without two-factor cannot reach the app until it is set up, so tell people first, and enrol the administrators first. Keep at least two administrators (see [A lost phone](#a-lost-phone)).
+**Recommended.** Run `optional` while people enrol, then switch to `mandatory`; if you cannot move everyone, at least `admins`, because administrators edit grants, the access list and sign-in itself. Under `admins` and `mandatory` a user without two-factor cannot reach the app until it is set up, so tell people first, and enrol the administrators first. Keep at least two administrators, and tell everyone to keep their recovery codes safe (see [A lost phone](#a-lost-phone)).
 
-`config.yaml` with any other value stops the start, naming the key and the value; Gateway Settings refuses it with `422`.
+Two-factor cannot be turned off for everyone: there is no value for it, and no switch on the host. A `config.yaml` without the key reads as `optional`. Any other value, `off` included, stops the start, naming the key and the value and the three to choose from; Gateway Settings refuses it with `422`.
 
 ### Setting it up
 
 When the mode requires it, the sign-in goes on to **Set up two-factor sign-in** after the password: a QR code, the same key as text (in groups of four), and a field for the six-digit code the app shows. Entering it and pressing **Turn on two-factor sign-in** finishes the sign-in. No session exists before that, so a user who stops here is not signed in. The next page, **Recovery codes**, shows [ten codes](#recovery-codes) once.
 
-Under `optional`, or to set it up again, a signed-in user opens **Two-factor sign-in**: the lock icon in the sidebar footer of the app, or the **Two-factor sign-in** button on the Administration page of `/solAdmin`. The link is hidden while the mode is `off`. The page asks for the password, and for a current code or a recovery code when two-factor is already on, then shows the new QR code. Setting it up again replaces the secret and all recovery codes at once, for a new phone or a lost one. Setting up, or setting up again, ends the user's other sessions; the browser doing it stays signed in.
+Under `optional`, or to set it up again, a signed-in user opens **Two-factor sign-in**: the lock icon in the sidebar footer of the app, or the **Two-factor sign-in** button on the Administration page of `/solAdmin`. The link is always there. The page asks for the password, and for a current code or a recovery code when two-factor is already on, then shows the new QR code. Setting it up again replaces the secret and all recovery codes at once, for a new phone or a lost one. Setting up, or setting up again, ends the user's other sessions; the browser doing it stays signed in.
 
 A user cannot turn two-factor off. Only an administrator can reset it (see [A lost phone](#a-lost-phone)).
 
@@ -216,7 +215,15 @@ Each user gets ten at setup, shown once, as `XXXX-XXXX-XXXX-XXXX`. Each works on
 
 - **The user has a recovery code.** They sign in with it, then open **Two-factor sign-in** and set it up again with the password and another recovery code.
 - **The user has none.** An administrator opens **User Management**, finds the user (the **Two-factor** column says On), presses **Reset two-factor** on the row and confirms. The user's sessions and half-finished sign-ins end. The next sign-in needs only the password under `optional`, and goes to set-up under `admins` (administrators) or `mandatory`. The reset does not change the password and does not show anyone the old secret.
-- **A lone administrator** has no one to reset them. They sign in with a recovery code, then set it up again. If the codes are gone too, nothing in the console can help, and the way out is on the host: stop the gateway, set `login.twoFactor: off` in `config.yaml`, start it, and sign in with the password. Press **Reset two-factor** on your own row (you are signed out), sign in again with the password, set the mode back on Gateway Settings, and set two-factor up at the next sign-in. This is why you should keep a second administrator, and the recovery codes where you can find them.
+- **A lone administrator** has no one to reset them. They sign in with a recovery code, then set it up again. If the codes are gone too, nothing in the console can help, and the gateway has no switch on the host that turns two-factor off or skips it: `login.twoFactor` has no `off`, and a stopped gateway cannot reset a user. The one way back that the gateway supports starts the users store again, and costs whatever was changed since your last backup:
+  1. Stop the gateway. Move `users.yaml` out of `/data` (keep it; do not delete it). Leave `connections.yaml`, `backup.yaml` and `store.key` where they are, and have a backup file ready: a saved one from `/backup`, or an exported one, and its passphrase.
+  2. Start the gateway. With no `users.yaml` it creates the first administrator, named `admin`, again. Its password is the one in `SMU_ADMIN_PASSWORD` or `SMU_ADMIN_PASSWORD_FILE` if that is set and meets the policy; otherwise the gateway logs a generated one, once, as a warning (see [Start it](#start-it)). The connections and the settings are untouched. Every session ends with the restart.
+  3. Sign in as `admin` and change the password, as the gateway asks. If `login.twoFactor` is `admins` or `mandatory`, set two-factor up on this account too.
+  4. Create a second administrator under a name that is not in the backup, for example `recovery`.
+  5. Open **Backup & Restore**, choose the backup, preview it, and import the users with **Merge**. (**Replace** would remove `recovery` and sign you out with nobody to reset the locked administrator. If the locked account is itself named `admin`, **Merge** replaces the new `admin` with it, which is why step 4 matters.) The import brings every user back as the backup holds them, the locked administrator's two-factor included: it does not unlock anything by itself.
+  6. Sign in as `recovery` (set up two-factor if the mode asks), open **User Management**, press **Reset two-factor** on the locked administrator and confirm. Then sign in as that administrator with the password, set two-factor up again, and delete `recovery`.
+
+  What is lost: every user, password, grant and two-factor change made after the backup was written, and every user created since. A user the backup does not hold must be created again. A backup made before the administrator first set two-factor up brings them back without it, which also ends the lock. With no backup at all the users cannot be brought back: the moved `users.yaml` can only be opened by this gateway, and it still holds the locked administrator, so recreate the users by hand. The audit trail is not touched. So keep the recovery codes where you can find them, and keep two administrators, so a lost phone is a **Reset two-factor** click and never this.
 
 ### The gateway's clock
 
@@ -224,7 +231,7 @@ Codes come from the time. The gateway accepts the code of the current 30-second 
 
 ### Backups and two-factor
 
-A backup carries each user's two-factor secret and the hashes of the unused recovery codes, inside the passphrase-sealed file. Treat the file and its passphrase as you do broker credentials: with both, someone holds the secrets that make the codes. An import restores them. It replaces a user with the file's record, so a user whose record in the file has no two-factor ends up without it, and **Preview** lists a user whose two-factor differs as changed. Users whose two-factor an import adds, removes or replaces are signed out. A backup from before this release has no `login.twoFactor` and reads as `off`: importing its settings with **Replace** switches two-factor off.
+A backup carries each user's two-factor secret and the hashes of the unused recovery codes, inside the passphrase-sealed file. Treat the file and its passphrase as you do broker credentials: with both, someone holds the secrets that make the codes. An import restores them. It replaces a user with the file's record, so a user whose record in the file has no two-factor ends up without it, and **Preview** lists a user whose two-factor differs as changed. Users whose two-factor an import adds, removes or replaces are signed out. A backup made before the setting existed has no `login.twoFactor` and reads as `optional`: importing its settings with **Replace** sets the mode to `optional`, which is looser than `mandatory`, so check the mode afterwards. Import restores two-factor as the file holds it, and nothing else.
 
 ---
 
@@ -391,7 +398,7 @@ A key file other users can read is only warned about, because Docker secrets are
 
 Other refusals at start:
 
-- **`login.twoFactor` has an invalid value:** the key is not `off`, `optional`, `admins` or `mandatory`. Fix `config.yaml`.
+- **`login.twoFactor` has an invalid value:** the key is not `optional`, `admins` or `mandatory` (`off` is not a value). Fix `config.yaml`.
 - **A user's two-factor secret or recovery code is malformed:** `users.yaml` was damaged or replaced; the message names the user and the rule, never the value. Restore the matching file from your volume backup.
 - **`connModes=... offers Provisioned sign-in but hosted is false`:** remove `SMU_HOSTED=false`, or set `hosted: true` in `config.yaml`.
 - **`invalid config file ... field managed not found`:** a `config.yaml` from a pre-release build. Delete the `managed:` line.

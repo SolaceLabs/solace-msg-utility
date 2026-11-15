@@ -220,12 +220,6 @@ describe('connections/managed panel — restoring the gateway session', () => {
         expect(account().classList.contains('hidden')).toBe(false);
         expect(account().querySelector('.conn-account-name')!.textContent).toBe('admin');
         expect(account().querySelector('.conn-account-password')!.getAttribute('href')).toBe('/login/password');
-        // No two-factor in the profile: its link stays hidden.
-        expect(account().querySelector('.conn-account-twofactor')!.classList.contains('hidden')).toBe(true);
-    });
-
-    it('shows the Two-factor sign-in link in the account control while the gateway has two-factor in use', async () => {
-        await signedIn({ ...PROFILE, twoFactor: { mode: 'optional', enrolled: false } });
         const link = account().querySelector('.conn-account-twofactor')!;
         expect([link.classList.contains('hidden'), link.getAttribute('href')]).toEqual([false, '/login/two-factor']);
     });

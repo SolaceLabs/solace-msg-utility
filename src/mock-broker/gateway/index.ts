@@ -53,11 +53,10 @@ export type VerifyResult = { ok: true; secret: string } | { ok: false; error: st
 /** The last step of setting it up: the recovery codes to show once, or the error it shows. */
 export type EnrolResult = { ok: true; mustChange: boolean; recovery: string[] } | { ok: false; error: string; signedOut?: boolean };
 
-/** What `/login/two-factor` shows (showTwoFactor in pages.go): the enrol page, the set-up-again page, the "not in use" message, or a redirect to /login. */
+/** What `/login/two-factor` shows (showTwoFactor in pages.go): the enrol page, the set-up-again page, or a redirect to /login. */
 export type TwoFactorPage =
     | { kind: 'enrol'; secret: string }
     | { kind: 'setup'; enrolled: boolean }
-    | { kind: 'off' }
     | { kind: 'login' };
 
 const SIGNIN_FAILED = 'Sign-in failed. Check the username and password.';
@@ -211,14 +210,12 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
 
     /**
      * showTwoFactor (pages.go): an enrol ticket shows the enrol page; a signed-in user (not held
-     * at the password page) the set-up-again page, or "not in use" while the setting is off;
-     * anyone else is sent to /login.
+     * at the password page) the set-up-again page; anyone else is sent to /login.
      */
     function twoFactorPage(): TwoFactorPage {
         const t = tickets.get(ticketCookie);
         if (t?.stage === 'enrol') return { kind: 'enrol', secret: t.secret };
         const s = sessions.get(cookie);
-        if (s && settings.current().login.twoFactor === 'off') return { kind: 'off' };
         if (s && !s.mustChange) return { kind: 'setup', enrolled: store.totpOf(s.user) !== undefined };
         return { kind: 'login' };
     }

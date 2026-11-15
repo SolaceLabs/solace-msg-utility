@@ -32,7 +32,7 @@ export interface ManagedProfile {
     brokers: ManagedConnection[];
     /** App modules this user may open; drives module control (`rbac.ts`). */
     modules: string[];
-    /** The gateway's two-factor mode and whether this user has set it up; absent reads as not in use. */
+    /** The gateway's two-factor mode and whether this user has set it up; absent from a gateway that does not send it. */
     twoFactor?: TwoFactorState;
 }
 

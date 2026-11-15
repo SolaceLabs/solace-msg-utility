@@ -1202,7 +1202,7 @@ func TestBackup_ScheduleDocYAML(t *testing.T) {
 
 // A backup carries each user's authenticator secret and recovery hashes, only
 // inside the sealed file, and an older backup (no totp key, no
-// login.twoFactor) still opens and reads as two-factor off.
+// login.twoFactor) still opens and reads as two-factor optional.
 func TestBackup_CarriesTwoFactorSealed(t *testing.T) {
 	h := testHasher(t)
 	doc := sampleBackup(t, h)
@@ -1225,8 +1225,8 @@ func TestBackup_CarriesTwoFactorSealed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opened.Settings.Login.TwoFactor != twoFactorOff || opened.Users[1].TOTP != nil {
-		t.Errorf("an older backup reads as off and without two-factor: %q", opened.Settings.Login.TwoFactor)
+	if opened.Settings.Login.TwoFactor != twoFactorOptional || opened.Users[1].TOTP != nil {
+		t.Errorf("an older backup reads as optional and without two-factor: %q", opened.Settings.Login.TwoFactor)
 	}
 	if got := settingsChanges(withHostPaths(fileConfigFromConfig(defaultConfig()), fileConfig{}), opened.Settings); len(got) != 0 {
 		t.Errorf("an older backup previews as no change in settings: %v", got)

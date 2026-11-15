@@ -53,8 +53,8 @@ func (lv *live) get() *liveSettings { return lv.cur.Load() }
 func (lv *live) sessionLimits() sessionLimits { return lv.get().session }
 func (lv *live) loginLimits() loginLimits     { return lv.get().login }
 
-// twoFactor is login.twoFactor as the next sign-in sees it: off, optional,
-// admins or mandatory (totp.go).
+// twoFactor is login.twoFactor as the next sign-in sees it: optional, admins
+// or mandatory (totp.go).
 func (lv *live) twoFactor() string { return lv.get().twoFactor }
 
 // restartOnlyKeys are the config.yaml keys the gateway reads once at startup.

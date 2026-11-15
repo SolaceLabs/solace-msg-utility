@@ -7,7 +7,7 @@ const SETTINGS: GatewaySettings = {
     logLevel: 'warn',
     access: { allow: [], trustedProxies: [] },
     session: { idleMinutes: 10, absoluteMinutes: 30 },
-    login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60, twoFactor: 'off' },
+    login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60, twoFactor: 'optional' },
     modules: { offered: ['queue-browser'], userDefault: 'all' },
     audit: { stdout: false, access: false, onFailure: 'continue' },
 };

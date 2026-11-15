@@ -86,8 +86,8 @@ type config struct {
 	session sessionLimits
 	login   loginLimits
 	modules moduleSettings
-	// twoFactor is login.twoFactor (totp.go): off, optional, admins or
-	// mandatory. The zero value counts as off. Live.
+	// twoFactor is login.twoFactor (totp.go): optional, admins or
+	// mandatory. The zero value counts as optional. Live.
 	twoFactor string
 	// The audit stream's options (audit.go): audit.stdout is seeded by
 	// SMU_SHOW_AUDIT, audit.access and audit.onFailure have no env var. Live.
@@ -166,7 +166,7 @@ func defaultConfig() config {
 			maxBackoff:      15 * time.Minute,
 			unauthPerMinute: 60,
 		},
-		twoFactor: twoFactorOff,
+		twoFactor: twoFactorOptional,
 		modules:   moduleSettings{offered: moduleCatalog(), userDefault: modulesDefaultAll},
 		audit:     auditSettings{onFailure: auditOnFailureContinue},
 	}

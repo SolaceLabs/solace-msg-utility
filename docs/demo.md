@@ -129,9 +129,9 @@ In the Provisioned demo Queue Copy shows one Destination Connection card instead
 
 ### Trying two-factor sign-in
 
-Two-factor sign-in is off in the seed and nobody is enrolled. Turn it on yourself:
+Two-factor sign-in is always on offer: the seed's setting is *Optional* and nobody is enrolled. Set yourself up:
 
-1. Sign in as `admin`, open **Gateway Settings**, set **Two-factor sign-in (code from an authenticator app)** to *Optional* or stronger, and save.
+1. Sign in as `admin`. (**Gateway Settings** holds **Two-factor sign-in (code from an authenticator app)**, at *Optional* in the seed; *Administrators must use it* and *Everyone must use it* are the other two choices.)
 2. Press the lock icon (**Two-factor sign-in**) in the sidebar footer, enter the password, and you reach the enrol page: a grey placeholder where the QR code would be, the secret in groups of four, and "In this demo, open Demo controls > Authenticator for the code."
 3. In **Demo controls > Authenticator**, the account shows as "admin (setting up)" with its current code and the seconds left. Click the code to copy it, type it into the page and confirm. The ten recovery codes appear once; they are real random codes and work once each.
 4. Sign out and sign in again: the password now leads to the code page, which wants the Authenticator's code (or a recovery code) and refuses a used one until the next step.

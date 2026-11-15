@@ -34,7 +34,9 @@
 #   /SolaceMsgUtility -- the app, at a fixed path: index.html (the Direct
 #                  bundle), provisioned.html (the bundle with the sign-in,
 #                  served at / in Provisioned mode), solAdmin.html (the admin
-#                  console), and solclient.js, jszip.min.js and licenses/.
+#                  console), and solclient.js, jszip.min.js and licenses/ (the
+#                  notices of the JavaScript libraries and of the gateway's Go
+#                  code).
 #
 # Environment (all optional). These only SEED config.yaml (always
 # /data/config.yaml; startup fails if it cannot be written) on the first start,
@@ -107,6 +109,20 @@ RUN mkdir -p /staging/tls/trust /staging/data /staging/backup \
  && chmod 0755 /staging/tls /staging/tls/trust /staging/data \
  && chmod 0700 /staging/backup
 
+# The licence notices of the Go code the gateway binary contains: Go's own
+# standard library (BSD-3-Clause), gopkg.in/yaml.v3 (Apache-2.0 and MIT, with its
+# NOTICE) and rsc.io/qr (BSD-3-Clause). They are taken from where the toolchain
+# has them, after the go build above has downloaded the modules, so no module
+# version is written here, and land beside the JavaScript ones under the app's
+# licenses/ directory (the final COPY merges them in). A missing file fails the
+# build. tests/build/vendor-scripts.test.ts checks that every direct requirement
+# in go.mod has its licence copied here.
+RUN mkdir -p /staging/licenses/go /staging/licenses/gopkg.in-yaml.v3 /staging/licenses/rsc.io-qr \
+ && cp "$(go env GOROOT)/LICENSE" /staging/licenses/go/ \
+ && cp "$(go list -m -f '{{.Dir}}' gopkg.in/yaml.v3)/LICENSE" "$(go list -m -f '{{.Dir}}' gopkg.in/yaml.v3)/NOTICE" /staging/licenses/gopkg.in-yaml.v3/ \
+ && cp "$(go list -m -f '{{.Dir}}' rsc.io/qr)/LICENSE" /staging/licenses/rsc.io-qr/ \
+ && chmod -R a+rX /staging/licenses
+
 # ---- Stage 2: build the PWA bundle ------------------------------------------
 # Builds every dist/*.html variant from source so the runtime image doesn't
 # depend on whatever happens to be in the host's dist/ at `docker build` time.
@@ -162,6 +178,7 @@ COPY --chown=65532:65532 --from=gateway-builder /staging/tls  /tls
 COPY --chown=65532:65532 --from=gateway-builder /staging/data /data
 COPY --chown=65532:65532 --from=gateway-builder /staging/backup /backup
 COPY --chown=65532:65532 --from=pwa-builder     /staging/app/ /SolaceMsgUtility/
+COPY --chown=65532:65532 --from=gateway-builder /staging/licenses/ /SolaceMsgUtility/licenses/
 
 # 65532 is the conventional "nonroot" UID used by distroless. /tls is baked
 # into the image owned by this UID so self-signed cert generation works

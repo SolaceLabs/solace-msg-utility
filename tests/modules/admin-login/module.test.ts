@@ -78,20 +78,10 @@ describe('admin-login — restoring the gateway session', () => {
         expect(el<HTMLAnchorElement>('#admin-change-password').getAttribute('href')).toBe('/login/password?next=/solAdmin');
     });
 
-    it.each([
-        ['off', true],
-        ['optional', false],
-        ['admins', false],
-        ['mandatory', false],
-    ])('the Two-factor sign-in link, with the mode %s, is hidden: %s', async (mode, isHidden) => {
-        const { el, hidden } = await install({ ok: true, data: { ...ADMIN_PROFILE, twoFactor: { mode, enrolled: false } } });
-        expect(hidden('#admin-two-factor')).toBe(isHidden);
+    it('links Two-factor sign-in to the gateway\'s page once signed in', async () => {
+        const { el, hidden } = await install();
+        expect(hidden('#admin-two-factor')).toBe(false);
         expect(el<HTMLAnchorElement>('#admin-two-factor').getAttribute('href')).toBe('/login/two-factor?next=/solAdmin');
-    });
-
-    it('a gateway that sends no two-factor state shows no Two-factor sign-in link', async () => {
-        const { hidden } = await install();
-        expect(hidden('#admin-two-factor')).toBe(true);
     });
 
     it('never opens a broker connection', async () => {

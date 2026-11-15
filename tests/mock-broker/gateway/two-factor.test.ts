@@ -58,16 +58,6 @@ function enrolled(user: keyof typeof PW) {
 }
 
 describe('mock-broker/gateway two-factor -- who is asked', () => {
-    it('asks nobody while the setting is off, enrolled or not, and keeps the secret', () => {
-        enrol('viewer');
-        signOut();
-        setMode('off');
-        expect(gw.signIn('viewer', PW.viewer)).toEqual({ ok: true, mustChange: false });
-        expect(gw.session()).toEqual({ user: 'viewer', mustChange: false });
-        expect(gw.store.totpOf('viewer')).toBeDefined();
-        expect(gw.ticket()).toBeNull();
-    });
-
     it('optional asks for a code only of whoever is enrolled', () => {
         setMode('optional');
         expect(gw.signIn('admin', PW.admin)).toEqual({ ok: true, mustChange: false });
@@ -108,7 +98,7 @@ describe('mock-broker/gateway two-factor -- who is asked', () => {
     it('ends a standing ticket at the next password sign-in, so a stale step cannot be finished', () => {
         setMode('mandatory');
         gw.signIn('admin', PW.admin);
-        setMode('off');
+        setMode('optional');
         expect(gw.signIn('viewer', PW.viewer)).toEqual({ ok: true, mustChange: false });
         expect(gw.ticket()).toBeNull();
         expect(gw.confirmTwoFactor('123456')).toEqual({ ok: false, error: '', signedOut: true });
@@ -331,16 +321,12 @@ describe('mock-broker/gateway two-factor -- setting it up again', () => {
         expect(gw.twoFactorPage()).toEqual({ kind: 'enrol', secret: gw.ticket()!.secret });
         gw.confirmTwoFactor(codeNow(gw.ticket()!.secret));
         expect(gw.twoFactorPage()).toEqual({ kind: 'setup', enrolled: true });
-        setMode('off');
-        expect(gw.twoFactorPage()).toEqual({ kind: 'off' });
     });
 
-    it('holds a session at the password page out of the setup, and says "not in use" while off', () => {
+    it('holds a session at the password page out of the setup', () => {
         setMode('optional');
         gw.signIn('newadmin', PW.newadmin);
         expect(gw.twoFactorPage()).toEqual({ kind: 'login' });
-        setMode('off');
-        expect(gw.twoFactorPage()).toEqual({ kind: 'off' });
     });
 
     it('lets a user with none start with the password alone', () => {
@@ -576,25 +562,26 @@ describe('mock-broker/gateway two-factor -- the setting', () => {
     const call = (method: string, body?: unknown) =>
         gw.handle({ method, path: '/managed/settings', query: '', body: body === undefined ? '' : JSON.stringify(body), session: gw.openSession('admin', false) });
 
-    it('is off in the seed and in a file, backup or snapshot that has no such key', () => {
-        expect(demoSeed().settings.login.twoFactor).toBe('off');
+    it('is optional in the seed and in a file, backup or snapshot that has no such key', () => {
+        expect(demoSeed().settings.login.twoFactor).toBe('optional');
         const old = contractSeed();
         delete (old.settings.login as Partial<typeof old.settings.login>).twoFactor;
         const fromSeed = createGateway({ seed: old });
-        expect(fromSeed.settings.current().login.twoFactor).toBe('off');
+        expect(fromSeed.settings.current().login.twoFactor).toBe('optional');
 
         const snap = fromSeed.snapshot();
         delete (snap.settings.login as Partial<typeof snap.settings.login>).twoFactor;
         const restored = createGateway({ seed: contractSeed() });
+        expect(restored.settings.save({ login: { twoFactor: 'mandatory' } }, restored.settings.rev()).ok).toBe(true);
         restored.restore(snap);
-        expect(restored.settings.current().login.twoFactor).toBe('off');
+        expect(restored.settings.current().login.twoFactor).toBe('optional');
 
-        expect(settingsFromBackup({ login: { maxFailures: 3 } }).login.twoFactor).toBe('off');
+        expect(settingsFromBackup({ login: { maxFailures: 3 } }).login.twoFactor).toBe('optional');
         expect(settingsFromBackup({ login: { twoFactor: 'admins' } }).login.twoFactor).toBe('admins');
     });
 
-    it('is shown by GET and saved by PUT for each of its four values, live', async () => {
-        for (const mode of ['optional', 'admins', 'mandatory', 'off']) {
+    it('is shown by GET and saved by PUT for each of its three values, live', async () => {
+        for (const mode of ['admins', 'mandatory', 'optional']) {
             const rev = gw.settings.rev();
             expect((await call('PUT', { login: { twoFactor: mode }, rev })).status).toBe(200);
             const view: any = (await call('GET')).json;
@@ -606,12 +593,12 @@ describe('mock-broker/gateway two-factor -- the setting', () => {
 
     it('refuses any other value with 422, the key named, and leaves the file as it was', async () => {
         const rev = gw.settings.rev();
-        for (const bad of ['', 'Optional', 'on', 'required']) {
+        for (const bad of ['', 'Optional', 'off', 'on', 'required']) {
             const res: any = await call('PUT', { login: { twoFactor: bad }, rev });
             expect([res.status, res.json.error, res.json.field]).toEqual([422, 'invalid', 'login.twoFactor']);
-            expect(res.json.reason).toBe(`key "login.twoFactor" has invalid value "${bad}": must be "off", "optional", "admins" or "mandatory"`);
+            expect(res.json.reason).toBe(`key "login.twoFactor" has invalid value "${bad}": must be "optional", "admins" or "mandatory"`);
         }
-        expect(gw.settings.current().login.twoFactor).toBe('off');
+        expect(gw.settings.current().login.twoFactor).toBe('optional');
         expect(gw.settings.rev()).toBe(rev);
         expect((await call('PUT', { login: { twoFactor: true }, rev })).status).toBe(400);
     });

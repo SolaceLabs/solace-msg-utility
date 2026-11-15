@@ -293,14 +293,15 @@ func TestToConfig_AuditOnFailureIsValidated(t *testing.T) {
 	}
 }
 
-// login.twoFactor reaches the runtime config and back; it defaults to off, also
-// for a config or backup that never had the key, and an empty value is off.
+// login.twoFactor reaches the runtime config and back; it defaults to optional,
+// also for a config or backup that never had the key, and an empty value is
+// optional.
 func TestToConfig_TwoFactor(t *testing.T) {
 	cfg, err := defaultFileConfig().toConfig(secretPaths{})
-	if err != nil || cfg.twoFactor != twoFactorOff {
-		t.Fatalf("default: want off, got %q, %v", cfg.twoFactor, err)
+	if err != nil || cfg.twoFactor != twoFactorOptional {
+		t.Fatalf("default: want optional, got %q, %v", cfg.twoFactor, err)
 	}
-	for _, mode := range []string{twoFactorOff, twoFactorOptional, twoFactorAdmins, twoFactorMandatory} {
+	for _, mode := range []string{twoFactorOptional, twoFactorAdmins, twoFactorMandatory} {
 		fc := defaultFileConfig()
 		fc.Login.TwoFactor = mode
 		cfg, err := fc.toConfig(secretPaths{})
@@ -313,18 +314,18 @@ func TestToConfig_TwoFactor(t *testing.T) {
 	}
 	fc := defaultFileConfig()
 	fc.Login.TwoFactor = ""
-	if cfg, err := fc.toConfig(secretPaths{}); err != nil || cfg.twoFactor != twoFactorOff {
-		t.Errorf("an absent value is off: %q, %v", cfg.twoFactor, err)
+	if cfg, err := fc.toConfig(secretPaths{}); err != nil || cfg.twoFactor != twoFactorOptional {
+		t.Errorf("an absent value is optional: %q, %v", cfg.twoFactor, err)
 	}
-	if got := fileConfigFromConfig(config{}).Login.TwoFactor; got != twoFactorOff {
-		t.Errorf("a config built without the value is written as off, got %q", got)
+	if got := fileConfigFromConfig(config{}).Login.TwoFactor; got != twoFactorOptional {
+		t.Errorf("a config built without the value is written as optional, got %q", got)
 	}
 }
 
-// login.twoFactor takes exactly the four values; start refuses anything else
-// naming the key, the value and the choices.
+// login.twoFactor takes exactly the three values; start refuses anything else,
+// the removed off included, naming the key, the value and the choices.
 func TestToConfig_TwoFactorIsValidated(t *testing.T) {
-	for _, bad := range []string{"Off", "on", "true", " admins", "everyone"} {
+	for _, bad := range []string{"off", "Off", "on", "true", " admins", "everyone"} {
 		fc := defaultFileConfig()
 		fc.Login.TwoFactor = bad
 		_, err := fc.toConfig(secretPaths{})
@@ -332,7 +333,7 @@ func TestToConfig_TwoFactorIsValidated(t *testing.T) {
 			t.Errorf("%q must be refused", bad)
 			continue
 		}
-		for _, want := range []string{`"login.twoFactor"`, strconv.Quote(bad), `"off"`, `"mandatory"`} {
+		for _, want := range []string{`"login.twoFactor"`, strconv.Quote(bad), `"optional"`, `"admins"`, `"mandatory"`} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("%q: error %q lacks %s", bad, err, want)
 			}
@@ -340,18 +341,18 @@ func TestToConfig_TwoFactorIsValidated(t *testing.T) {
 	}
 }
 
-// A file written before the key existed loads as off, one that sets it keeps
+// A file written before the key existed loads as optional, one that sets it keeps
 // it, and the next write carries the key.
 func TestDecodeConfigFile_TwoFactorDefaultsAndIsWritten(t *testing.T) {
 	fc, err := decodeConfigFile([]byte("version: 1\nlogin:\n  maxFailures: 7\n"), "x.yaml")
-	if err != nil || fc.Login.TwoFactor != twoFactorOff || fc.Login.MaxFailures != 7 {
+	if err != nil || fc.Login.TwoFactor != twoFactorOptional || fc.Login.MaxFailures != 7 {
 		t.Fatalf("login: %+v, %v", fc.Login, err)
 	}
 	out, err := encodeConfigFile(fc)
-	if err != nil || !strings.Contains(string(out), "  twoFactor: \"off\"\n") { // quoted by the encoder: off is a boolean to older YAML readers
+	if err != nil || !strings.Contains(string(out), "  twoFactor: optional\n") {
 		t.Errorf("the file must carry the key once written: %v\n%s", err, out)
 	}
-	if !strings.Contains(string(out), "# login.twoFactor (off|optional|admins|mandatory)") {
+	if !strings.Contains(string(out), "# login.twoFactor (optional|admins|mandatory)") {
 		t.Errorf("the header must describe the key:\n%s", out)
 	}
 	fc, err = decodeConfigFile([]byte("version: 1\nlogin:\n  twoFactor: admins\n"), "x.yaml")

@@ -659,12 +659,6 @@ func TestLogin_RefusalHasNoActorEvenWithASession(t *testing.T) {
 
 // ----- two-factor sign-in ------------------------------------------------------------------
 
-// setTwoFactor changes login.twoFactor as a settings save does.
-func (e *managedEnv) setTwoFactor(mode string) {
-	e.cfg.twoFactor = mode
-	e.live.apply(e.cfg)
-}
-
 // enrolWithCodes sets two-factor up for user in the store, as the confirm
 // step does, and returns the recovery codes (the store keeps only hashes).
 func (e *managedEnv) enrolWithCodes(t *testing.T, user, secret string) []string {
@@ -825,8 +819,6 @@ func TestLogin_TwoFactorModeDecidesTheNextStep(t *testing.T) {
 		enrolled       bool
 		want           string // "" opens the session, else where the ticket goes
 	}{
-		{twoFactorOff, "admin", adminPW, true, ""},
-		{twoFactorOff, "viewer", viewerPW, false, ""},
 		{twoFactorOptional, "viewer", viewerPW, true, "/login/code"},
 		{twoFactorOptional, "viewer", viewerPW, false, ""},
 		{twoFactorOptional, "admin", adminPW, false, ""},
@@ -1359,27 +1351,6 @@ func TestSetupPage_ByStateAndMode(t *testing.T) {
 	// A code ticket is not an enrol ticket.
 	tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
 	expectRedirect(t, e.do("GET", "/login/two-factor", "", tc), "/login")
-}
-
-func TestTwoFactorOff_AnswersNotInUse(t *testing.T) {
-	e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorMandatory })
-	au := e.withAudit(t, auditSettings{})
-	c := e.cookie("viewer", false)
-	enrolTicket, secret := beginEnrol(t, e, "admin", adminPW)
-	setup := &http.Cookie{Name: signinCookie, Value: e.api.sessions.tickets.create(ticket2(e, "viewer"))}
-	e.setTwoFactor(twoFactorOff)
-	const msg = "Two-factor sign-in is not in use."
-	expectPage(t, e.do("GET", "/login/two-factor", "", c), http.StatusNotFound, msg)
-	expectPage(t, e.do("GET", "/login/two-factor", "", enrolTicket), http.StatusNotFound, msg)
-	expectPage(t, e.form("/login/two-factor", verifyForm(viewerPW, "", "/"), c), http.StatusNotFound, msg)
-	expectPage(t, e.send("POST", "/login/two-factor", confirmForm(e.nowCode(t, secret), "/"), enrolTicket), http.StatusNotFound, msg)
-	expectPage(t, e.send("POST", "/login/two-factor", confirmForm("123456", "/"), c, setup), http.StatusNotFound, msg)
-	if isEnrolled(e, "admin") || isEnrolled(e, "viewer") {
-		t.Error("nothing is stored while the mode is off")
-	}
-	if n := len(au.entries(t)); n != 0 {
-		t.Errorf("a refused page writes no entry, got %d", n)
-	}
 }
 
 // ticket2 is a setup ticket for user, as the verify step creates.

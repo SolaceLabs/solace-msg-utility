@@ -553,16 +553,6 @@ func (p *authPages) spendCode(ctx context.Context, user, secret, code string) (v
 	return valid, true, left, err
 }
 
-// twoFactorInUse answers the not-in-use page (404) while login.twoFactor is
-// off and reports whether the caller may go on.
-func (p *authPages) twoFactorInUse(w http.ResponseWriter) bool {
-	if twoFactorOrDefault(p.live.twoFactor()) == twoFactorOff {
-		p.message(w, http.StatusNotFound, twoFactorTitle, "Two-factor sign-in is not in use.")
-		return false
-	}
-	return true
-}
-
 // enrolData is the enrol page for a pending secret: the QR code (when it can be
 // drawn; otherwise a line says to type the key) and the key in groups of four.
 func (p *authPages) enrolData(r *http.Request, user, secret, next string) pageData {
@@ -697,7 +687,6 @@ func (p *authPages) showTwoFactor(w http.ResponseWriter, r *http.Request, as act
 	switch {
 	case !enrol && !(signedIn && !as.mustChange):
 		http.Redirect(w, r, loginURL(next), http.StatusSeeOther)
-	case !p.twoFactorInUse(w):
 	case enrol:
 		p.render(w, http.StatusOK, p.enrolData(r, at.user, at.secret, next))
 	default:
@@ -733,9 +722,6 @@ func (p *authPages) submitTwoFactor(w http.ResponseWriter, r *http.Request, as a
 func (p *authPages) submitSetup(w http.ResponseWriter, r *http.Request, next string, as activeSession, signedIn bool) {
 	if !signedIn || as.mustChange {
 		http.Redirect(w, r, loginURL(next), http.StatusSeeOther)
-		return
-	}
-	if !p.twoFactorInUse(w) {
 		return
 	}
 	pw, code := r.PostFormValue("password"), r.PostFormValue("code")
@@ -805,9 +791,6 @@ func (p *authPages) submitConfirm(w http.ResponseWriter, r *http.Request, next s
 		p.sessions.tickets.drop(at.id)
 		clearSigninCookie(w)
 		http.Redirect(w, r, loginURL(next), http.StatusSeeOther)
-		return
-	}
-	if !p.twoFactorInUse(w) {
 		return
 	}
 	user, code := at.user, r.PostFormValue("code")

@@ -24,7 +24,7 @@ export function authenticatorSection(gateway: Gateway): HTMLElement {
         list.replaceChildren();
         clocks = [];
         if (rows.length === 0) {
-            list.appendChild(el('p', 'mockctl-hint', 'No account has two-factor yet. Turn it on in Gateway Settings, then sign in or set it up.'));
+            list.appendChild(el('p', 'mockctl-hint', 'No account has two-factor yet. Open Two-factor sign-in from the account controls to set it up.'));
             return;
         }
         for (const r of rows) {

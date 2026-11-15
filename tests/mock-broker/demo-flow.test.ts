@@ -330,7 +330,7 @@ describe('managed demo two-factor sign-in', () => {
         return reload(demo);
     };
 
-    it('turns on, enrols with the panel\'s code, signs in with a code and then a recovery code, and loses it to an administrator\'s reset', async () => {
+    it('is made mandatory, enrols with the panel\'s code, signs in with a code and then a recovery code, and loses it to an administrator\'s reset', async () => {
         let demo = startDemo();
         await setMode(demo, 'mandatory');
 

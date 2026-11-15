@@ -18,7 +18,7 @@
 // setting, and each puts back what it changed, since the checks after them
 // expect the gateway as configureGateway left it. Checks 24-27 turn two-factor
 // sign-in on (login.twoFactor optional, then mandatory) for a scratch user and
-// put the setting back to off and remove the user when they are done, whatever
+// put the setting back to optional and remove the user when they are done, whatever
 // a check found.
 //
 // E2E_BROKER_ADDR maps E2E_BROKER_HOST to that address inside both gateway
@@ -451,10 +451,10 @@ async function removeScratch(jar) {
     expect(res.status === 204, `removing ${SCRATCH}: want 204, got ${res.status} ${res.body}`);
 }
 
-/** The login.twoFactor the harness last saved: the gateway starts with off, and the two-factor checks put it back. */
-let twoFactorMode = 'off';
+/** The login.twoFactor the harness last saved: the gateway starts with optional, and the two-factor checks put it back. */
+let twoFactorMode = 'optional';
 
-/** Sets login.twoFactor (off, optional, admins or mandatory); the gateway reads it at each sign-in. */
+/** Sets login.twoFactor (optional, admins or mandatory); the gateway reads it at each sign-in. */
 async function setTwoFactorMode(jar, mode) {
     const res = await saveSettings(jar, { login: { twoFactor: mode } });
     expect(res.status === 200, `setting login.twoFactor ${mode}: want 200, got ${res.status} ${res.body.slice(0, 200)}`);
@@ -1082,7 +1082,7 @@ async function runChecks(admin) {
         // Two-factor sign-in on the scratch user, in order: 24 sets it up (the
         // secret is read off the page), 25 and 26 sign in with a code and with a
         // recovery code, 27 resets it as an administrator under `mandatory`. Each
-        // sets the mode it needs; the finally puts the mode back to off and removes
+        // sets the mode it needs; the finally puts the mode back to optional and removes
         // the user whatever a check found, because the audit check (19) and the
         // restart (15) after them expect the gateway as it was.
         const tf = { secret: '', recovery: [], last: -1 };
@@ -1244,12 +1244,12 @@ async function runChecks(admin) {
                     twoFactor['enrol secret'] = secret;
                     expect((await request('GET', '/managed/me', { jar: fresh })).status === 401, 'a half-finished set-up already holds a session');
                 } finally {
-                    await setTwoFactorMode(admin, 'off');
+                    await setTwoFactorMode(admin, 'optional');
                 }
             });
         } finally {
             // Put back what 24-27 changed, even when one of them failed half way.
-            for (const [what, undo] of [['the mode', async () => { if (twoFactorMode !== 'off') await setTwoFactorMode(admin, 'off'); }], ['the scratch user', () => removeScratch(admin)]]) {
+            for (const [what, undo] of [['the mode', async () => { if (twoFactorMode !== 'optional') await setTwoFactorMode(admin, 'optional'); }], ['the scratch user', () => removeScratch(admin)]]) {
                 try {
                     await undo();
                 } catch (e) {

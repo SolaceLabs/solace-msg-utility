@@ -1542,7 +1542,7 @@ func TestManagedAPI_ListAndMeCarryTwoFactor(t *testing.T) {
 		}
 		return rec.Body.String(), out.TwoFactor
 	}
-	for _, mode := range []string{twoFactorOff, twoFactorOptional, twoFactorAdmins, twoFactorMandatory} {
+	for _, mode := range []string{twoFactorOptional, twoFactorAdmins, twoFactorMandatory} {
 		next := e.cfg
 		next.twoFactor = mode
 		e.live.apply(next)
@@ -1550,17 +1550,17 @@ func TestManagedAPI_ListAndMeCarryTwoFactor(t *testing.T) {
 			t.Errorf("mode %s, nobody enrolled: got %+v", mode, got)
 		}
 	}
-	// A config without the key reads as off.
+	// A config without the key reads as optional.
 	next := e.cfg
 	next.twoFactor = ""
 	e.live.apply(next)
-	if _, got := meOf(viewer); got.Mode != twoFactorOff {
-		t.Errorf("an unset mode is off, got %+v", got)
+	if _, got := meOf(viewer); got.Mode != twoFactorOptional {
+		t.Errorf("an unset mode is optional, got %+v", got)
 	}
 
 	enrolViewer(t, e.api.store, storeTOTPSecret)
 	body, got := meOf(viewer)
-	if got != (twoFactorJSON{Mode: twoFactorOff, Enrolled: true}) || !strings.Contains(body, `"twoFactor":{"mode":"off","enrolled":true}`) {
+	if got != (twoFactorJSON{Mode: twoFactorOptional, Enrolled: true}) || !strings.Contains(body, `"twoFactor":{"mode":"optional","enrolled":true}`) {
 		t.Errorf("an enrolled viewer: %s", body)
 	}
 	if _, got := meOf(admin); got.Enrolled {

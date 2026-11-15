@@ -41,9 +41,9 @@ describe('mock-broker/gateway/seed', () => {
         expect(gw.settings.rev()).not.toBe('');
     });
 
-    it('starts with two-factor sign-in off and nobody enrolled, so a visitor turns it on in Gateway Settings', () => {
-        expect(seed.settings.login.twoFactor).toBe('off');
-        expect(gw.settings.current().login.twoFactor).toBe('off');
+    it('starts with two-factor sign-in optional and nobody enrolled, so a visitor enrols from the account controls', () => {
+        expect(seed.settings.login.twoFactor).toBe('optional');
+        expect(gw.settings.current().login.twoFactor).toBe('optional');
         expect(gw.store.listUsers().filter(u => u.twoFactor)).toEqual([]);
         expect(gw.store.listTotp()).toEqual([]);
         expect(DEMO_ACCOUNTS.map(a => gw.signIn(a.username, a.password)).every(r => r.ok && !('step' in r))).toBe(true);

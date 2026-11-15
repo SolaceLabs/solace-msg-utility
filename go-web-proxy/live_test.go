@@ -50,13 +50,13 @@ func TestLive_ApplySwapsEveryLiveKey(t *testing.T) {
 }
 
 // login.twoFactor is read at each sign-in: a reader gets the value applied last,
-// and a config built without it reads as off.
+// and a config built without it reads as optional.
 func TestLive_TwoFactorIsLive(t *testing.T) {
 	lv := liveWith(nil)
-	if lv.twoFactor() != twoFactorOff {
-		t.Fatalf("default: want off, got %q", lv.twoFactor())
+	if lv.twoFactor() != twoFactorOptional {
+		t.Fatalf("default: want optional, got %q", lv.twoFactor())
 	}
-	for _, mode := range []string{twoFactorOptional, twoFactorAdmins, twoFactorMandatory, twoFactorOff} {
+	for _, mode := range []string{twoFactorOptional, twoFactorAdmins, twoFactorMandatory} {
 		cfg := defaultConfig()
 		cfg.twoFactor = mode
 		lv.apply(cfg)
@@ -69,8 +69,8 @@ func TestLive_TwoFactorIsLive(t *testing.T) {
 	lv.apply(cfg)
 	cfg.twoFactor = ""
 	lv.apply(cfg)
-	if lv.twoFactor() != twoFactorOff {
-		t.Errorf("a config without the value reads as off, got %q", lv.twoFactor())
+	if lv.twoFactor() != twoFactorOptional {
+		t.Errorf("a config without the value reads as optional, got %q", lv.twoFactor())
 	}
 }
 

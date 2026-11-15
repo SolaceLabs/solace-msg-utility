@@ -15,8 +15,8 @@
  * Mock-only.
  */
 
-/** login.twoFactor: off (the default), optional, admins, mandatory. */
-export const TWO_FACTOR_MODES = ['off', 'optional', 'admins', 'mandatory'] as const;
+/** login.twoFactor: optional (the default), admins, mandatory. */
+export const TWO_FACTOR_MODES = ['optional', 'admins', 'mandatory'] as const;
 export type TwoFactorMode = (typeof TWO_FACTOR_MODES)[number];
 
 export const isTwoFactorMode = (s: string): s is TwoFactorMode => (TWO_FACTOR_MODES as readonly string[]).includes(s);

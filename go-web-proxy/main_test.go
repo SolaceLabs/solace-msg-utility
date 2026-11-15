@@ -91,8 +91,8 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.auditFile != "/data/audit.log" || cfg.audit != (auditSettings{onFailure: auditOnFailureContinue}) {
 		t.Errorf("audit: want /data/audit.log with both options off and onFailure continue, got %q %+v", cfg.auditFile, cfg.audit)
 	}
-	if cfg.twoFactor != twoFactorOff {
-		t.Errorf("twoFactor: want off, got %q", cfg.twoFactor)
+	if cfg.twoFactor != twoFactorOptional {
+		t.Errorf("twoFactor: want optional, got %q", cfg.twoFactor)
 	}
 	if cfg.certFile != "/tls/tls.crt" {
 		t.Errorf("certFile: want /tls/tls.crt, got %q", cfg.certFile)

@@ -30,9 +30,9 @@ import type { Gateway } from './index';
 
 /**
  * Where the browser is: the app, or one of the gateway's pages over it.
- * `code` is /login/code and `two-factor` is /login/two-factor (its enrol,
- * set-up-again and "not in use" pages); the recovery codes are shown once
- * and a reload leaves them, so they count as the app.
+ * `code` is /login/code and `two-factor` is /login/two-factor (its enrol and
+ * set-up-again pages); the recovery codes are shown once and a reload leaves
+ * them, so they count as the app.
  */
 export type Page = 'app' | 'login' | 'password' | 'code' | 'two-factor';
 
@@ -205,22 +205,6 @@ export function createPages({ gateway, navigate }: PagesDeps) {
         frame(body, 'Recovery codes', 'app');
     }
 
-    /** A message page (pages.go's message mode): the title, the text and the way back. */
-    function showMessage(title: string, text: string): void {
-        const body = el('div', { class: 'mgw-body' });
-        body.appendChild(el('h1', {}, title));
-        body.appendChild(el('p', { class: 'mgw-error', role: 'alert' }, text));
-        const links = el('p', { class: 'mgw-links' });
-        const back = el('a', { href: '/' }, 'Back to the app');
-        back.addEventListener('click', (e) => {
-            e.preventDefault();
-            hide();
-        });
-        links.appendChild(back);
-        body.appendChild(links);
-        frame(body, title, 'two-factor');
-    }
-
     function showPassword(error = ''): void {
         const required = gateway.session()?.mustChange ?? false;
         const form = el('form');
@@ -264,7 +248,6 @@ export function createPages({ gateway, navigate }: PagesDeps) {
             const v = gateway.twoFactorPage();
             if (v.kind === 'enrol') showEnrol(v.secret);
             else if (v.kind === 'setup') showSetup(v.enrolled);
-            else if (v.kind === 'off') showMessage('Two-factor sign-in', 'Two-factor sign-in is not in use.');
             else open('/login');
             return;
         }

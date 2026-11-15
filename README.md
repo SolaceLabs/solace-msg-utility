@@ -55,7 +55,7 @@ SMU_VERSION=<release> docker compose -f compose.provisioned.yaml up -d
 
 Left to Docker, `backup/` would be root's and the scheduled backups could not be written. Open `https://<host>:9443/`, sign in as `admin` and change the password, add brokers and users at `/solAdmin`, and set a backup schedule and passphrase on its Backup & Restore page. The steps, settings and recommended values are in [provisioned-mode.md -> Start it](docs/provisioned-mode.md#start-it).
 
-Sign-in can also ask for a six-digit code from an authenticator app (off by default, set on Gateway Settings): see [provisioned-mode.md -> Two-factor sign-in](docs/provisioned-mode.md#two-factor-sign-in). The Provisioned demo lets you try it with mock codes.
+Sign-in can also ask for a six-digit code from an authenticator app (optional by default; Gateway Settings can require it of administrators or of everyone): see [provisioned-mode.md -> Two-factor sign-in](docs/provisioned-mode.md#two-factor-sign-in). The Provisioned demo lets you try it with mock codes.
 
 ## Connecting to a broker
 

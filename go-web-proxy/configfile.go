@@ -44,9 +44,9 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # audit.onFailure (continue|refuse) says what happens when an audit record
 # cannot be written: continue logs it loudly and carries on; refuse also
 # refuses changes until the audit log is writable again.
-# login.twoFactor (off|optional|admins|mandatory) says who signs in with a
-# code from an authenticator app as well as the password: nobody, those who
-# set it up, those plus every administrator, or everyone.
+# login.twoFactor (optional|admins|mandatory) says who signs in with a code
+# from an authenticator app as well as the password: those who set it up, those
+# plus every administrator who has not, or everyone. It cannot be switched off.
 # An empty allow list admits every client; trustedProxies lists the reverse
 # proxies whose X-Forwarded-For is believed. session.*, login.*, modules.* and
 # audit.* apply only in Provisioned mode (connModes provisioned or both):
@@ -104,8 +104,8 @@ type fileLogin struct {
 	BackoffSeconds           int `yaml:"backoffSeconds" json:"backoffSeconds"`
 	MaxBackoffSeconds        int `yaml:"maxBackoffSeconds" json:"maxBackoffSeconds"`
 	UnauthenticatedPerMinute int `yaml:"unauthenticatedPerMinute" json:"unauthenticatedPerMinute"`
-	// TwoFactor is off (the default, also for a file or backup without the
-	// key), optional, admins or mandatory (totp.go). Live.
+	// TwoFactor is optional (the default, also for a file or backup without
+	// the key), admins or mandatory (totp.go). Live.
 	TwoFactor string `yaml:"twoFactor" json:"twoFactor"`
 }
 

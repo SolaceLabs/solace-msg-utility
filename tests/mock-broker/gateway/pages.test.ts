@@ -445,16 +445,6 @@ describe('mock-broker/gateway/pages -- two-factor', () => {
             expect(title()).toBe('Sign in');
         });
 
-        it('says it is not in use while the setting is off, with a way back', () => {
-            gw.signIn('viewer', 'demo-viewer-0001');
-            pages.open('/login/two-factor');
-            expect(title()).toBe('Two-factor sign-in');
-            expect(error()).toBe('Two-factor sign-in is not in use.');
-            expect(pages.current()).toBe('two-factor');
-            layer()!.querySelector<HTMLAnchorElement>('.mgw-links a')!.click();
-            expect(layer()).toBeNull();
-        });
-
         it('sends a signed-out browser, or a forced change, to where /login goes', () => {
             pages.open('/login/two-factor');
             expect(title()).toBe('Sign in');

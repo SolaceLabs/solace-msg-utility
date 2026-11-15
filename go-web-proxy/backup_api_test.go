@@ -554,6 +554,14 @@ func TestBackupAPI_ImportRefusals(t *testing.T) {
 	expectInvalid(t, e.importRaw(t, with("file", badConn, "connections", "replace")), "file")
 	direct := e.exported(t, func(d *backupDoc) { d.Settings.ConnModes = connDirect })
 	expectInvalid(t, e.importRaw(t, with("file", direct, "settings", "replace")), "connModes")
+	// A backup that still says login.twoFactor off (the value is gone) is
+	// refused on the field, naming the value and the three choices.
+	off := e.exported(t, func(d *backupDoc) { d.Settings.Login.TwoFactor = "off" })
+	rec := e.importRaw(t, with("file", off, "settings", "replace"))
+	expectInvalid(t, rec, "login.twoFactor")
+	if got := errorCode(t, rec); !strings.Contains(got.Reason, `"off"`) || !strings.Contains(got.Reason, `must be "optional", "admins" or "mandatory"`) {
+		t.Errorf("the refusal names the value and the choices: %+v", got)
+	}
 	lockOut := e.exported(t, func(d *backupDoc) { d.Settings.Access.Allow = []string{"10.0.0.0/8"} })
 	expect(t, e.importRaw(t, with("file", lockOut, "settings", "replace")), http.StatusConflict, "would_lock_out")
 
@@ -719,6 +727,20 @@ func TestBackupAPI_ImportThatChangesTwoFactorEndsThatUsersSessions(t *testing.T)
 	expect(t, e.importWith(t, e.exported(t, func(d *backupDoc) { d.Users[1].TOTP = nil }), "replace", "skip", "skip"), http.StatusOK, "")
 	if on, _ := e.api.store.twoFactorOf("viewer"); on || !ended(c, tk) {
 		t.Errorf("removed: two-factor on %v, sessions ended %v", on, ended(c, tk))
+	}
+}
+
+// An import restores login.twoFactor as the file holds it, and a backup
+// without the key restores the default.
+func TestBackupAPI_ImportRestoresTheTwoFactorMode(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	expect(t, e.importWith(t, e.exported(t, func(d *backupDoc) { d.Settings.Login.TwoFactor = twoFactorMandatory }), "skip", "skip", "replace"), http.StatusOK, "")
+	if e.live.twoFactor() != twoFactorMandatory || e.fileOnDisk(t).Login.TwoFactor != twoFactorMandatory {
+		t.Errorf("mandatory not restored: live %q, file %q", e.live.twoFactor(), e.fileOnDisk(t).Login.TwoFactor)
+	}
+	expect(t, e.importWith(t, e.exported(t, func(d *backupDoc) { d.Settings.Login.TwoFactor = "" }), "skip", "skip", "replace"), http.StatusOK, "")
+	if e.live.twoFactor() != twoFactorOptional || e.fileOnDisk(t).Login.TwoFactor != twoFactorOptional {
+		t.Errorf("a backup without the key must restore optional: live %q, file %q", e.live.twoFactor(), e.fileOnDisk(t).Login.TwoFactor)
 	}
 }
 

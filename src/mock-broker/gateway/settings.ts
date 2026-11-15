@@ -105,7 +105,7 @@ const ZERO: GatewaySettings = {
     logLevel: '',
     access: { allow: [], trustedProxies: [] },
     session: { idleMinutes: 0, absoluteMinutes: 0 },
-    login: { maxFailures: 0, backoffSeconds: 0, maxBackoffSeconds: 0, unauthenticatedPerMinute: 0, twoFactor: 'off' },
+    login: { maxFailures: 0, backoffSeconds: 0, maxBackoffSeconds: 0, unauthenticatedPerMinute: 0, twoFactor: 'optional' },
     modules: { offered: [], userDefault: '' },
     audit: { stdout: false, access: false, onFailure: 'continue' },
 };
@@ -278,7 +278,7 @@ function normalize(f: GatewaySettings): { ok: true; value: GatewaySettings } | {
     if (!isTwoFactorMode(l.twoFactor)) {
         return {
             ok: false, field: 'login.twoFactor',
-            reason: `key "login.twoFactor" has invalid value ${quote(l.twoFactor)}: must be "off", "optional", "admins" or "mandatory"`,
+            reason: `key "login.twoFactor" has invalid value ${quote(l.twoFactor)}: must be "optional", "admins" or "mandatory"`,
         };
     }
     const value: GatewaySettings = {

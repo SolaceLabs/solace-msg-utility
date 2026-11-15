@@ -339,10 +339,6 @@ func TestNeed_RuleOverEveryModeAdminAndEnrolment(t *testing.T) {
 		admin, enrolled bool
 		want            string
 	}{
-		{twoFactorOff, false, false, ""},
-		{twoFactorOff, true, false, ""},
-		{twoFactorOff, false, true, ""},
-		{twoFactorOff, true, true, ""},
 		{twoFactorOptional, false, false, ""},
 		{twoFactorOptional, true, false, ""},
 		{twoFactorOptional, false, true, stageCode},
@@ -355,10 +351,9 @@ func TestNeed_RuleOverEveryModeAdminAndEnrolment(t *testing.T) {
 		{twoFactorMandatory, true, false, stageEnrol},
 		{twoFactorMandatory, false, true, stageCode},
 		{twoFactorMandatory, true, true, stageCode},
-		// A config without the key is off, and an unknown value is never
-		// stricter than off by accident.
-		{"", true, true, ""},
-		{"bogus", true, true, ""},
+		// A config without the key is optional: it asks only the enrolled.
+		{"", true, false, ""},
+		{"", false, true, stageCode},
 	}
 	for _, c := range cases {
 		if got := need(c.mode, c.admin, c.enrolled); got != c.want {
@@ -368,25 +363,25 @@ func TestNeed_RuleOverEveryModeAdminAndEnrolment(t *testing.T) {
 }
 
 func TestCheckTwoFactor(t *testing.T) {
-	for in, want := range map[string]string{"": "off", "off": "off", "optional": "optional", "admins": "admins", "mandatory": "mandatory"} {
+	for in, want := range map[string]string{"": "optional", "optional": "optional", "admins": "admins", "mandatory": "mandatory"} {
 		if got, err := checkTwoFactor(in); err != nil || got != want {
 			t.Errorf("%q: want %q, got %q, %v", in, want, got, err)
 		}
 	}
-	for _, bad := range []string{"Off", "on", "true", " admins", "admin", "all"} {
+	for _, bad := range []string{"off", "Off", "on", "true", " admins", "admin", "all"} {
 		_, err := checkTwoFactor(bad)
 		if err == nil {
 			t.Errorf("%q must be refused", bad)
 			continue
 		}
-		for _, want := range []string{`"login.twoFactor"`, strconv.Quote(bad), `"off"`, `"optional"`, `"admins"`, `"mandatory"`} {
+		for _, want := range []string{`"login.twoFactor"`, strconv.Quote(bad), `"optional"`, `"admins"`, `"mandatory"`} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("%q: error %q lacks %s", bad, err, want)
 			}
 		}
 	}
-	if twoFactorOrDefault("") != twoFactorOff || twoFactorOrDefault(twoFactorAdmins) != twoFactorAdmins {
-		t.Error("the zero value is off; any other value is kept")
+	if twoFactorOrDefault("") != twoFactorOptional || twoFactorOrDefault(twoFactorAdmins) != twoFactorAdmins {
+		t.Error("the zero value is optional; any other value is kept")
 	}
 }
 

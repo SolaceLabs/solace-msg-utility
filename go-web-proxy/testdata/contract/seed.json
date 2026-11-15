@@ -74,7 +74,7 @@
       "backoffSeconds": 30,
       "maxBackoffSeconds": 900,
       "unauthenticatedPerMinute": 1000,
-      "twoFactor": "off"
+      "twoFactor": "optional"
     },
     "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
     "audit": { "stdout": false, "access": false, "onFailure": "continue" }
