@@ -403,3 +403,104 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         expect((await call(third, 'GET', '/managed/backup')).json.files).toEqual([]);
     });
 });
+
+describe('mock-broker/gateway/backup -- two-factor', () => {
+    const totp = { secret: 'JBSWY3DPEHPK3PXP'.repeat(2), recovery: ['a'.repeat(64), 'b'.repeat(64)] };
+    const withTotp = (name: string, t: unknown) => JSON.stringify({
+        version: 1,
+        'msg-utility-users': [{ username: name, password: 'p', admin: true, totp: t }],
+        settings: { version: 1 },
+    });
+
+    it('seals a user\'s secret and recovery hashes in the file, and opens them again', async () => {
+        const original = doc({ users: [{ ...user('admin', 'admin-password-1', true), totp }, user('viewer', 'viewer-password-1')] });
+        const file = await sealBackup(await newBackupKey(PASS, 1000), original);
+        expect(file).not.toContain(totp.secret);
+        expect(await openBackup(file, PASS)).toEqual(original);
+    });
+
+    it('reads a user with no totp, or a null one, as having none', async () => {
+        for (const t of [undefined, null]) {
+            const d = await openBackup(await sealRaw(withTotp('u', t)), PASS);
+            expect(d.users[0]).not.toHaveProperty('totp');
+        }
+    });
+
+    it('refuses what the store\'s load check refuses: a secret not of 32 base32 characters, a recovery entry not of 64 lower-case hex, any other field', async () => {
+        const bad: [string, unknown][] = [
+            ['a short secret', { ...totp, secret: totp.secret.slice(1) }],
+            ['a lower-case secret', { ...totp, secret: totp.secret.toLowerCase() }],
+            ['a secret outside the alphabet', { ...totp, secret: '1'.repeat(32) }],
+            ['a short recovery hash', { ...totp, recovery: ['a'.repeat(63)] }],
+            ['an upper-case recovery hash', { ...totp, recovery: ['A'.repeat(64)] }],
+            ['an unknown field', { ...totp, extra: 1 }],
+            ['a mistyped record', 'secret'],
+            ['a mistyped secret', { ...totp, secret: 7 }],
+        ];
+        for (const [name, t] of bad) {
+            expect([name, ...(await problem(openBackup(await sealRaw(withTotp('u', t)), PASS)))]).toEqual([name, ...DAMAGED]);
+        }
+        expect((await openBackup(await sealRaw(withTotp('u', { secret: totp.secret })), PASS)).users[0].totp).toEqual({ secret: totp.secret, recovery: [] });
+    });
+
+    it('lists the user whose two-factor was added, removed or replaced as an end of sessions, and not one whose recovery codes were used', () => {
+        const plain = user('ops', 'o');
+        const armed = { ...plain, totp };
+        expect(sessionEnders([plain], [armed])).toEqual(['ops']);
+        expect(sessionEnders([armed], [plain])).toEqual(['ops']);
+        expect(sessionEnders([armed], [{ ...plain, totp: { ...totp, secret: 'A'.repeat(32) } }])).toEqual(['ops']);
+        expect(sessionEnders([armed], [{ ...plain, totp: { ...totp, recovery: totp.recovery.slice(1) } }])).toEqual([]);
+        expect(sessionEnders([plain], [plain])).toEqual([]);
+    });
+
+    describe('through the routes', () => {
+        const clock = NOW;
+        const gateway = () => createGateway({ seed: contractSeed(), backupIter: 1000, now: () => clock });
+        type Gw = ReturnType<typeof gateway>;
+        const call = async (gw: Gw, p: string, body: unknown) => {
+            const res = await gw.handle({ method: 'POST', path: p, query: '', body: JSON.stringify(body), session: gw.openSession('admin', false) });
+            return { status: res.status, json: res.json as any };
+        };
+        const arm = (gw: Gw, name: string) => gw.store.setTotp(name, totp, gw.store.findUser(name)!.password);
+        const exportFile = async (gw: Gw) => (await call(gw, '/managed/backup/export', { passphrase: PASS })).json.content as string;
+        const basisOf = (gw: Gw) => ({ ...gw.store.seqs(), settings: gw.settings.rev() });
+
+        it('exports a user\'s two-factor, and previews a user that differs only by it as changed', async () => {
+            const gw = gateway();
+            expect(arm(gw, 'viewer')).toBe('ok');
+            const file = await exportFile(gw);
+            expect((await openBackup(file, PASS)).users.find(u => u.username === 'viewer')!.totp).toEqual(totp);
+
+            gw.store.clearTotp('viewer');
+            const preview = await call(gw, '/managed/backup/preview', { file, passphrase: PASS });
+            expect(preview.json.users).toEqual({ added: [], changed: ['viewer'], removed: [] });
+            expect(preview.json.signsOutCaller).toEqual({ replace: false, merge: false });
+        });
+
+        it('restores it on import, and ends the sessions of a user whose two-factor changed', async () => {
+            const gw = gateway();
+            arm(gw, 'viewer');
+            const file = await exportFile(gw);
+            gw.store.clearTotp('viewer');
+            const session = gw.openSession('viewer', false);
+            const operator = gw.openSession('operator', false);
+
+            const res = await call(gw, '/managed/backup/import', { file, passphrase: PASS, users: 'replace', connections: 'skip', settings: 'skip', basis: basisOf(gw) });
+            expect(res.json).toEqual({ restartRequired: [], signedOut: false });
+            expect(gw.store.totpOf('viewer')).toEqual(totp);
+            expect(gw.sessions.get(session)).toBeNull();
+            expect(gw.sessions.get(operator)).not.toBeNull();
+        });
+
+        it('removes it on import when the file has none', async () => {
+            const gw = gateway();
+            const file = await exportFile(gw);
+            arm(gw, 'viewer');
+            const session = gw.openSession('viewer', false);
+            const res = await call(gw, '/managed/backup/import', { file, passphrase: PASS, users: 'replace', connections: 'skip', settings: 'skip', basis: basisOf(gw) });
+            expect(res.status).toBe(200);
+            expect(gw.store.totpOf('viewer')).toBeUndefined();
+            expect(gw.sessions.get(session)).toBeNull();
+        });
+    });
+});

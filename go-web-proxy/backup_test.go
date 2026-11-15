@@ -1197,3 +1197,130 @@ func TestBackup_ScheduleDocYAML(t *testing.T) {
 		t.Fatalf("round trip: %+v %v", out, err)
 	}
 }
+
+// ----- two-factor in a backup --------------------------------------------------------------
+
+// A backup carries each user's authenticator secret and recovery hashes, only
+// inside the sealed file, and an older backup (no totp key, no
+// login.twoFactor) still opens and reads as two-factor off.
+func TestBackup_CarriesTwoFactorSealed(t *testing.T) {
+	h := testHasher(t)
+	doc := sampleBackup(t, h)
+	doc.Users[1].TOTP = &userTOTP{Secret: storeTOTPSecret, Recovery: hashRecoveryCodes(newRecoveryCodes())}
+	data := sealed(t, h, doc, testPassphrase)
+	if strings.Contains(string(data), storeTOTPSecret) {
+		t.Fatal("the secret must not be in the file in clear")
+	}
+	got, err := openBackup(context.Background(), h, data, testPassphrase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, doc) || got.Users[0].TOTP != nil {
+		t.Fatalf("the secret and the codes must round trip, and only for the user who has them:\nwant %+v\ngot  %+v", doc.Users[1].TOTP, got.Users[1].TOTP)
+	}
+
+	old := sampleBackup(t, h)
+	old.Settings.Login.TwoFactor = ""
+	opened, err := openBackup(context.Background(), h, sealed(t, h, old, testPassphrase), testPassphrase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Settings.Login.TwoFactor != twoFactorOff || opened.Users[1].TOTP != nil {
+		t.Errorf("an older backup reads as off and without two-factor: %q", opened.Settings.Login.TwoFactor)
+	}
+	if got := settingsChanges(withHostPaths(fileConfigFromConfig(defaultConfig()), fileConfig{}), opened.Settings); len(got) != 0 {
+		t.Errorf("an older backup previews as no change in settings: %v", got)
+	}
+}
+
+// The preview lists a user whose two-factor differs as changed, and one whose
+// record only differs in its rev as unchanged.
+func TestBackup_DiffShowsTwoFactor(t *testing.T) {
+	u := userRec{Username: "ops", Password: "h", Operate: []permRow{}, ReadOnly: []permRow{}, Rev: 3}
+	on := u
+	on.TOTP = &userTOTP{Secret: storeTOTPSecret, Recovery: []string{}}
+	other := u
+	other.TOTP = &userTOTP{Secret: storeTOTPSecret2, Recovery: []string{}}
+	revMoved := on
+	revMoved.Rev = 9
+	for name, c := range map[string]struct {
+		cur, next userRec
+		changed   bool
+	}{
+		"added":    {u, on, true},
+		"removed":  {on, u, true},
+		"replaced": {on, other, true},
+		"same":     {on, revMoved, false},
+	} {
+		got := diffByName([]userRec{c.cur}, []userRec{c.next}, userName)
+		if (len(got.Changed) == 1) != c.changed {
+			t.Errorf("%s: %+v", name, got)
+		}
+	}
+}
+
+// A user whose two-factor was added, removed or replaced is signed out by an
+// import; one whose recovery codes alone differ is not.
+func TestBackup_SessionEndersNameTwoFactorChanges(t *testing.T) {
+	rec := func(name string, t *userTOTP) userRec {
+		return userRec{Username: name, Password: "h", Operate: []permRow{}, ReadOnly: []permRow{}, TOTP: t}
+	}
+	totp := func(secret string, codes ...string) *userTOTP { return &userTOTP{Secret: secret, Recovery: codes} }
+	cur := []userRec{rec("added", nil), rec("removed", totp(storeTOTPSecret)), rec("replaced", totp(storeTOTPSecret)),
+		rec("codes", totp(storeTOTPSecret, "a")), rec("same", totp(storeTOTPSecret)), rec("none", nil)}
+	next := []userRec{rec("added", totp(storeTOTPSecret)), rec("removed", nil), rec("replaced", totp(storeTOTPSecret2)),
+		rec("codes", totp(storeTOTPSecret, "b", "c")), rec("same", totp(storeTOTPSecret)), rec("none", nil)}
+	if got := sessionEnders(cur, next); !reflect.DeepEqual(got, []string{"added", "removed", "replaced"}) {
+		t.Errorf("want added, removed and replaced, got %v", got)
+	}
+}
+
+// Export reads it from the store, an import writes it back: a backup taken
+// with two-factor on restores it after a reset, ends that user's sessions,
+// and one taken without it removes it.
+func TestBackupService_ExportAndImportRoundTripTwoFactor(t *testing.T) {
+	x := newBackupFixture(t)
+	st := x.b.store
+	hashes := enrolViewer(t, st, storeTOTPSecret)
+
+	snap := x.b.snapshot()
+	if i := slicesIndexUser(snap.Users, "viewer"); i < 0 || snap.Users[i].TOTP == nil || snap.Users[i].TOTP.Secret != storeTOTPSecret || len(snap.Users[i].TOTP.Recovery) != len(hashes) {
+		t.Fatalf("the export must carry the viewer's two-factor: %+v", snap.Users)
+	}
+	if snap.Users[slicesIndexUser(snap.Users, "admin")].TOTP != nil {
+		t.Error("the export must carry nothing for a user without it")
+	}
+
+	if _, _, err := st.clearTOTP(context.Background(), "admin", "viewer"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := runImport(st, &sectionImport[userRec]{recs: snap.Users}, nil)
+	if err != nil || !reflect.DeepEqual(res.drop, []string{"viewer"}) {
+		t.Fatalf("restoring two-factor ends the user's sessions: %+v %v", res, err)
+	}
+	if secret, ok := st.totpSecret("viewer"); !ok || secret != storeTOTPSecret {
+		t.Error("the import must restore the secret")
+	}
+	if got := x.f.load(t).users[1].TOTP; got == nil || len(got.Recovery) != len(hashes) {
+		t.Error("the restored two-factor must be on disk")
+	}
+
+	plain := snap.Users[slicesIndexUser(snap.Users, "viewer")]
+	plain.TOTP = nil
+	res, err = runImport(st, &sectionImport[userRec]{recs: []userRec{currentUser(t, st, "admin"), plain}}, nil)
+	if err != nil || !reflect.DeepEqual(res.drop, []string{"viewer"}) {
+		t.Fatalf("a backup without it removes it and ends the sessions: %+v %v", res, err)
+	}
+	if on, _ := st.twoFactorOf("viewer"); on {
+		t.Error("the import must remove two-factor")
+	}
+}
+
+func slicesIndexUser(users []userRec, name string) int {
+	for i, u := range users {
+		if u.Username == name {
+			return i
+		}
+	}
+	return -1
+}

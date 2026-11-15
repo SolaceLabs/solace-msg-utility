@@ -500,6 +500,7 @@ func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request, ca
 	}
 	for _, name := range staged.drop {
 		h.sessions.dropUser(name)
+		h.totp.forget(name) // an imported secret is not compared with the old one's steps
 	}
 	result.SignedOut = slices.Contains(staged.drop, sessionOf(r).user)
 	h.log(r).Info("configuration imported", "users", body.Users, "connections", body.Connections,

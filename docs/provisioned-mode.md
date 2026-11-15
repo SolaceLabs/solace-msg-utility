@@ -18,6 +18,14 @@ It is the same container image as [Gateway mode](deployment.md#gateway-mode), wi
   - [What users may open](#what-users-may-open)
   - [Audit settings](#audit-settings)
   - [Environment variables](#environment-variables)
+- [Two-factor sign-in](#two-factor-sign-in)
+  - [Choosing a mode](#choosing-a-mode)
+  - [Setting it up](#setting-it-up)
+  - [Signing in with a code](#signing-in-with-a-code)
+  - [Recovery codes](#recovery-codes)
+  - [A lost phone](#a-lost-phone)
+  - [The gateway's clock](#the-gateways-clock)
+  - [Backups and two-factor](#backups-and-two-factor)
 - [Administer](#administer)
   - [Two administrators at once](#two-administrators-at-once)
 - [Back up and restore](#back-up-and-restore)
@@ -121,8 +129,9 @@ The Gateway Settings page switches between `provisioned` and `both`. Leaving Pro
 | `login.backoffSeconds` | `30` | Keep. The first wait; it doubles with each further failure. |
 | `login.maxBackoffSeconds` | `900` | Keep. The longest wait. |
 | `login.unauthenticatedPerMinute` | `60` | Keep, unless many users share one address (a NAT or proxy you have not listed in `access.trustedProxies`). |
+| `login.twoFactor` | `off` | `optional` while people set up, then `mandatory`; at least `admins`. See [Two-factor sign-in](#two-factor-sign-in). |
 
-The waits apply to the account as well as the client, so someone guessing at a known username can keep that user waiting for up to `login.maxBackoffSeconds`. The access list below, or a VPN in front of the gateway, is the answer.
+A wrong code at the two-factor step counts as a wrong password and brings the same waits. The waits apply to the account as well as the client, so someone guessing at a known username can keep that user waiting for up to `login.maxBackoffSeconds`. The access list below, or a VPN in front of the gateway, is the answer.
 
 ### Who can reach the gateway
 
@@ -164,13 +173,68 @@ The rest (TLS, log level) are the same as in Gateway mode: see [Settings](deploy
 
 ---
 
+## Two-factor sign-in
+
+Two-factor sign-in asks for a second proof after the password: a six-digit code from an authenticator app on the user's phone. Any app that makes standard time-based codes (TOTP, RFC 6238) will do. It covers every way in: the app's sign-in and `/solAdmin`. It is off until you turn it on, and only an administrator can take it away from a user.
+
+### Choosing a mode
+
+One setting, `login.twoFactor`, on the Gateway Settings page (the select **Two-factor sign-in (code from an authenticator app)**) or in `config.yaml`. It is read at each sign-in, so a change applies to the next one, with no restart. A session already open is not asked again. There is no environment variable.
+
+| Value | Who is asked | Use it |
+| --- | --- | --- |
+| `off` | Nobody. Secrets already stored are kept, and asked for again if you turn it back on. | The default. Also the way out if everyone is locked out (see [A lost phone](#a-lost-phone)). |
+| `optional` | Users who have set it up are asked for a code. Nobody has to set it up. | While people enrol. |
+| `admins` | The same, and an administrator without it must set it up at the next sign-in. | The least you should run once enrolment is done. |
+| `mandatory` | Everyone who has set it up is asked for a code, and everyone else must set it up at the next sign-in. | **Recommended** as the end state. |
+
+**Recommended.** Run `optional` while people enrol, then switch to `mandatory`; if you cannot move everyone, at least `admins`, because administrators edit grants, the access list and sign-in itself. Under `admins` and `mandatory` a user without two-factor cannot reach the app until it is set up, so tell people first, and enrol the administrators first. Keep at least two administrators (see [A lost phone](#a-lost-phone)).
+
+`config.yaml` with any other value stops the start, naming the key and the value; Gateway Settings refuses it with `422`.
+
+### Setting it up
+
+When the mode requires it, the sign-in goes on to **Set up two-factor sign-in** after the password: a QR code, the same key as text (in groups of four), and a field for the six-digit code the app shows. Entering it and pressing **Turn on two-factor sign-in** finishes the sign-in. No session exists before that, so a user who stops here is not signed in. The next page, **Recovery codes**, shows [ten codes](#recovery-codes) once.
+
+Under `optional`, or to set it up again, a signed-in user opens **Two-factor sign-in**: the lock icon in the sidebar footer of the app, or the **Two-factor sign-in** button on the Administration page of `/solAdmin`. The link is hidden while the mode is `off`. The page asks for the password, and for a current code or a recovery code when two-factor is already on, then shows the new QR code. Setting it up again replaces the secret and all recovery codes at once, for a new phone or a lost one. Setting up, or setting up again, ends the user's other sessions; the browser doing it stays signed in.
+
+A user cannot turn two-factor off. Only an administrator can reset it (see [A lost phone](#a-lost-phone)).
+
+### Signing in with a code
+
+After a correct password the gateway shows **Two-factor sign-in**: "Enter the 6-digit code from your authenticator app, or one of your recovery codes." No session exists until the code passes, and the gateway keeps the half-finished sign-in for 10 minutes. **Start again** goes back to the password.
+
+- A wrong code answers "The code is not correct." and counts as a failed sign-in, with the same waits as a wrong password.
+- A code works once. A code at or below the last step accepted for that user is refused, so wait for the app's next code. The gateway keeps that step in memory only, and forgets it at a restart.
+- With a forced password change, the two-factor step comes first; the password page follows.
+
+### Recovery codes
+
+Each user gets ten at setup, shown once, as `XXXX-XXXX-XXXX-XXXX`. Each works one time, typed in the same **Code** field: anything that is not exactly six digits is read as a recovery code, and case and hyphens do not matter. The gateway stores only a hash of each. The audit line of a sign-in with one says how many are left. Setting up again makes ten new ones and voids the rest. Tell users to keep them somewhere other than the phone.
+
+### A lost phone
+
+- **The user has a recovery code.** They sign in with it, then open **Two-factor sign-in** and set it up again with the password and another recovery code.
+- **The user has none.** An administrator opens **User Management**, finds the user (the **Two-factor** column says On), presses **Reset two-factor** on the row and confirms. The user's sessions and half-finished sign-ins end. The next sign-in needs only the password under `optional`, and goes to set-up under `admins` (administrators) or `mandatory`. The reset does not change the password and does not show anyone the old secret.
+- **A lone administrator** has no one to reset them. They sign in with a recovery code, then set it up again. If the codes are gone too, nothing in the console can help, and the way out is on the host: stop the gateway, set `login.twoFactor: off` in `config.yaml`, start it, and sign in with the password. Press **Reset two-factor** on your own row (you are signed out), sign in again with the password, set the mode back on Gateway Settings, and set two-factor up at the next sign-in. This is why you should keep a second administrator, and the recovery codes where you can find them.
+
+### The gateway's clock
+
+Codes come from the time. The gateway accepts the code of the current 30-second step and of the step on each side, so a clock that is up to about 30 seconds out still works. Beyond that every code is refused, the right ones too. Keep the gateway's host synchronised (NTP); a container uses its host's clock. Phones set their own. If every user is refused at once, compare the gateway host's time with a trusted clock before anything else.
+
+### Backups and two-factor
+
+A backup carries each user's two-factor secret and the hashes of the unused recovery codes, inside the passphrase-sealed file. Treat the file and its passphrase as you do broker credentials: with both, someone holds the secrets that make the codes. An import restores them. It replaces a user with the file's record, so a user whose record in the file has no two-factor ends up without it, and **Preview** lists a user whose two-factor differs as changed. Users whose two-factor an import adds, removes or replaces are signed out. A backup from before this release has no `login.twoFactor` and reads as `off`: importing its settings with **Replace** switches two-factor off.
+
+---
+
 ## Administer
 
 The admin console is at `https://<host>:9443/solAdmin`, for administrator accounts only.
 
-- **User Management:** add users, reset passwords, make someone an administrator, and grant brokers, VPNs and queues. A grant can use `*` wildcards, for example queues `orders.*`.
+- **User Management:** add users, reset passwords, make someone an administrator, and grant brokers, VPNs and queues. A grant can use `*` wildcards, for example queues `orders.*`. The **Two-factor** column shows On or Off, and **Reset two-factor** on an On row removes it (see [A lost phone](#a-lost-phone)); a save never carries or clears it.
 - **Connection Management:** add brokers, their SEMP account and their VPNs' client credentials. Leave a password blank to keep the stored one. The gateway reaches each broker over TLS (`https` for SEMP, `wss` for messaging), so the ports are the broker's TLS ports, unless the connection's `scheme` names the plain one (`http` for SEMP, `ws` for messaging; each side set on its own). A connection stored before the field existed stays on TLS: an absent or blank scheme means TLS, so no record needs a migration. Pick `http` or `ws` only for a broker on a trusted network that does not serve TLS on that port: the gateway then reaches it unencrypted, and the SEMP and SMF credentials cross that hop in clear text. Set the scheme in Connections -> Add or Edit connection.
-- **Gateway Settings:** the settings above, and a line under Access, "Your address as the gateway sees it", saying whether the address is the TCP peer or came from `X-Forwarded-For` through a trusted proxy. If it shows your proxy's address rather than yours, see [Client addresses behind Docker and proxies](deployment.md#client-addresses-behind-docker-and-proxies).
+- **Gateway Settings:** the settings above (the two-factor mode is under its own heading, **Two-factor sign-in**), and a line under Access, "Your address as the gateway sees it", saying whether the address is the TCP peer or came from `X-Forwarded-For` through a trusted proxy. If it shows your proxy's address rather than yours, see [Client addresses behind Docker and proxies](deployment.md#client-addresses-behind-docker-and-proxies).
 
 Every change to a user, a connection or the settings is also logged at `info` with the administrator's name and what changed (never a password), but the record to keep is the [audit trail](#audit-trail): it is always written, whatever `LOG_LEVEL` says.
 - **Backup & Restore:** export the configuration to a file, import one, and schedule backups. See [Back up and restore](#back-up-and-restore).
@@ -184,6 +248,7 @@ Each user, connection, the settings and the backup schedule carry a version that
 A few details:
 
 - Adding a user or connection whose name already exists is refused by the gateway (`exists`), whoever got there first.
+- Setting up two-factor for the first time, or an administrator's reset, changes what the console shows and moves the user's version; setting it up again, or using a recovery code, does not, and neither does an administrator's save overwrite a user's two-factor.
 - A user changing their own password does not make an administrator's open form stale unless it flips the forced-change flag, and the administrator's save does not overwrite that new password: a blank password on a save means "keep what is stored now".
 - **Import** is checked the same way. **Preview** notes the version of each list and of the settings it saw, and **Import** is refused ("The gateway's data changed since the preview. Run the preview again.") if a section you are importing has changed since, even by one password change. Skipped sections are not compared. Preview again and choose again.
 - Changes are applied one at a time, in the order the gateway receives them, so the gateway's own state is always whole.
@@ -194,7 +259,7 @@ A few details:
 
 The admin console's **Backup & Restore** page keeps copies of the configuration: the users, the connections and the settings.
 
-**What a backup holds.** The users with their password hashes (never the passwords), the connections with their SEMP and VPN credentials, and the gateway settings except the file paths (`tls.certFile`, `tls.keyFile`, `tls.trustDir`), which belong to each host. A backup is one JSON file, encrypted with AES-256-GCM under a key derived from a passphrase (PBKDF2-SHA256, 600,000 iterations, the cost of a user password). It does not use the store key, so it restores on any deployment. **Without the passphrase it cannot be opened**: keep the passphrase somewhere other than the backups.
+**What a backup holds.** The users with their password hashes (never the passwords) and their two-factor secrets and recovery-code hashes (see [Backups and two-factor](#backups-and-two-factor)), the connections with their SEMP and VPN credentials, and the gateway settings except the file paths (`tls.certFile`, `tls.keyFile`, `tls.trustDir`), which belong to each host. A backup is one JSON file, encrypted with AES-256-GCM under a key derived from a passphrase (PBKDF2-SHA256, 600,000 iterations, the cost of a user password). It does not use the store key, so it restores on any deployment. **Without the passphrase it cannot be opened**: keep the passphrase somewhere other than the backups.
 
 **Export** downloads a backup to the browser, encrypted with the passphrase you type for it (12 to 128 characters).
 
@@ -218,7 +283,7 @@ Each saved backup's download icon saves the file as the gateway wrote it, to kee
 | Connections | **Skip**, **Merge**, **Replace**, by broker name |
 | Settings | **Skip**, **Replace** (the file paths stay this deployment's own) |
 
-The gateway checks everything before it writes anything: an import that would leave no administrator is refused, and imported settings get the same checks as a save on Gateway Settings (an access list that would lock you out, or `connModes: direct`, is refused). The chosen sections are then written together as one change: if any file cannot be written, none is changed and the page reports `store_write_failed`, so nothing was imported. If the data changed after the preview, the import is refused and you preview again (see [Two administrators at once](#two-administrators-at-once)). Users removed, or whose password or administrator flag changed, are signed out, you included: the page warns you before you import. A setting that applies only at restart is reported.
+The gateway checks everything before it writes anything: an import that would leave no administrator is refused, and imported settings get the same checks as a save on Gateway Settings (an access list that would lock you out, or `connModes: direct`, is refused). The chosen sections are then written together as one change: if any file cannot be written, none is changed and the page reports `store_write_failed`, so nothing was imported. If the data changed after the preview, the import is refused and you preview again (see [Two administrators at once](#two-administrators-at-once)). Users removed, or whose password, administrator flag or two-factor changed, are signed out, you included: the page warns you before you import. A setting that applies only at restart is reported.
 
 To move a deployment: export (or copy a file from `/backup`), start the new gateway, sign in with its bootstrap admin, and import with **Replace**. The imported users sign in with their old passwords.
 
@@ -228,7 +293,7 @@ To move a deployment: export (or copy a file from `/backup`), start the new gate
 
 The gateway keeps its state in a few files on the `/data` volume: `users.yaml`, `connections.yaml` and `backup.yaml` (sealed with the store key), `config.yaml` (plain), the key itself and the audit log. Treat them as the gateway's: change them through the console, never by hand, and do not copy one in or out while the gateway runs.
 
-**Versions in the files.** Each sealed file begins with a counter, `seq`, that goes up by one on every change written to that file. Each user and each connection also holds a `rev`, the value of `seq` when that record last changed in a way the console shows; the console sends it back with a save. A password change moves `seq` but not `rev`, because the console never shows a password. The schedule's version is the `seq` of `backup.yaml`; removing the schedule keeps the file with its counter, so a schedule created later gets a number nobody holds. `config.yaml` has no counter, because people may edit it: its version is a checksum of the file, which the gateway computes in memory and never stores. At start the gateway refuses to run if any `rev` is zero or above its file's `seq` (a file restored from somewhere else), and says which. A backup does not carry versions: an import gives every record in the sections it imports a fresh one.
+**Versions in the files.** Each sealed file begins with a counter, `seq`, that goes up by one on every change written to that file. Each user and each connection also holds a `rev`, the value of `seq` when that record last changed in a way the console shows; the console sends it back with a save. A password change moves `seq` but not `rev`, because the console never shows a password. Two-factor is shown as On or Off: setting it up the first time and an administrator's reset move `rev`; setting it up again and spending a recovery code move only `seq`. The schedule's version is the `seq` of `backup.yaml`; removing the schedule keeps the file with its counter, so a schedule created later gets a number nobody holds. `config.yaml` has no counter, because people may edit it: its version is a checksum of the file, which the gateway computes in memory and never stores. At start the gateway refuses to run if any `rev` is zero or above its file's `seq` (a file restored from somewhere else), and says which. A backup does not carry versions: an import gives every record in the sections it imports a fresh one.
 
 **Every write is one journaled change.** The gateway writes the new content to temporary files, checks that it can read each one back, and swaps them in, with a small journal file called `txn` that says what is in flight. Saving a user changes one file; an import changes three, and they change together or not at all. The data directory may therefore briefly hold `txn`, `<name>.bak` copies of the files being replaced and `.tmp-*` files. Do not keep your own `config.yaml.bak`, `users.yaml.bak`, `connections.yaml.bak` or `backup.yaml.bak` in `/data`: the gateway overwrites or deletes those names.
 
@@ -248,13 +313,13 @@ The gateway keeps a record of who did what, apart from its log. It is written in
 
 | Category | Recorded | Actions |
 | --- | --- | --- |
-| `admin` | Always | `user.create`, `user.update`, `user.delete`, `connection.create`, `connection.update`, `connection.delete`, `settings.update`, `backup.export`, `backup.import`, `schedule.set`, `schedule.remove` |
-| `auth` | Always | `signin`, `signout`, `password.change` (a user's own change, the forced first one included), `lockout` (the sign-in throttle starts refusing an account or a client) |
+| `admin` | Always | `user.create`, `user.update`, `user.delete`, `user.twofactor.reset`, `connection.create`, `connection.update`, `connection.delete`, `settings.update`, `backup.export`, `backup.import`, `schedule.set`, `schedule.remove` |
+| `auth` | Always | `signin`, `signout`, `password.change` (a user's own change, the forced first one included), `twofactor.enrol` (a user set two-factor up, or set it up again), `lockout` (the sign-in throttle starts refusing an account or a client) |
 | `access` | Only while `audit.access` is `true` | `dial` (a VPN credential issued), `smf.open` and `smf.close` (the gateway's socket to a broker), `relay` (each SEMP request through the gateway) |
 
-Refusals are recorded as well, with `outcome` `refused` and the code the gateway answered: a user form that did not validate (`invalid`), a request by someone who is not an administrator (`forbidden`), removing the last administrator (`last_admin`), an unknown name (`not_found`), a save made from an out-of-date version (`stale`), a store file changed outside the gateway (`store_changed_on_disk`, `config_changed_on_disk`), a write that failed and was rolled back (`store_write_failed`), a change refused because the audit log is down (`audit_unavailable`), a wrong password (`bad_credentials`), a throttled sign-in (`throttled`). Three things are not recorded: a forged cross-site form post (refused before the form is read, so no account is known), the refused access events (a denied dial, socket or relay request), and a backup run, download or preview.
+Refusals are recorded as well, with `outcome` `refused` and the code the gateway answered: a user form that did not validate (`invalid`), a request by someone who is not an administrator (`forbidden`), removing the last administrator (`last_admin`), an unknown name (`not_found`), a save made from an out-of-date version (`stale`), a store file changed outside the gateway (`store_changed_on_disk`, `config_changed_on_disk`), a write that failed and was rolled back (`store_write_failed`), a change refused because the audit log is down (`audit_unavailable`), a wrong password (`bad_credentials`), a wrong two-factor code at sign-in or set-up (`bad_code`), a throttled sign-in (`throttled`). Three things are not recorded: a forged cross-site form post (refused before the form is read, so no account is known), the refused access events (a denied dial, socket or relay request), and a backup run, download or preview.
 
-**What is never recorded.** No password or password hash, no store key or backup key, no backup passphrase, no session cookie or token, no VPN client or SEMP credential, no settings value (only the names of the keys changed) and no backup file content. Where an entry says what changed, it names the parts (`password`, `grants`, `vpn prod`, `modules.userDefault`), never what they were set to.
+**What is never recorded.** No password or password hash, no store key or backup key, no backup passphrase, no session cookie or token, no VPN client or SEMP credential, no two-factor secret, recovery code or typed code, no settings value (only the names of the keys changed) and no backup file content. Where an entry says what changed, it names the parts (`password`, `grants`, `vpn prod`, `modules.userDefault`), never what they were set to.
 
 **Where it is.** `/data/audit.log`, mode `0600`, owned by the gateway's user (UID `65532`), appended one JSON object per line. The gateway cannot start in Provisioned mode if it cannot open the file, and says why; check that `/data` is writable by UID `65532`. Gateway mode writes none.
 
@@ -303,9 +368,10 @@ Provisioned mode is meant for **trusted internal** networks. Before exposing it:
 - **Give each VPN a client username** scoped to what its users may do. A signed-in browser receives its password to connect, and the password works outside the app too. Keep the brokers' own ports off networks users can reach.
 - **Change the `admin` password** at the first sign-in (the gateway insists), and remove `SMU_ADMIN_PASSWORD` from the environment if you used it.
 - **Keep the store key apart** from the stores where you can: its path is fixed at `/data/store.key`, so mount a volume or secret there. It is not what restores a lost deployment: the scheduled backups are.
-- **Keep backup passphrases secret, and apart from the backups.** A backup holds every broker credential and every password hash; anyone with a file and its passphrase has them. Make `/backup` readable by the gateway's UID only.
+- **Keep backup passphrases secret, and apart from the backups.** A backup holds every broker credential, every password hash and every two-factor secret; anyone with a file and its passphrase has them. Make `/backup` readable by the gateway's UID only.
 - **Restrict who can reach the gateway** with `access.allow`, and list your reverse proxy in `access.trustedProxies`.
 - **Treat administrator accounts as privileged.** They edit grants, the access list and sign-in itself.
+- **Turn on two-factor sign-in.** `optional` while people enrol, then `mandatory`; `admins` at the least (see [Two-factor sign-in](#two-factor-sign-in)). Keep the gateway's clock right and a second administrator.
 - **Keep the audit trail.** It is not in backups: copy `/data/audit.log*` off the volume on a schedule, and keep the copies as long as your policy needs (see [Audit trail](#audit-trail)).
 
 ---
@@ -325,8 +391,12 @@ A key file other users can read is only warned about, because Docker secrets are
 
 Other refusals at start:
 
+- **`login.twoFactor` has an invalid value:** the key is not `off`, `optional`, `admins` or `mandatory`. Fix `config.yaml`.
+- **A user's two-factor secret or recovery code is malformed:** `users.yaml` was damaged or replaced; the message names the user and the rule, never the value. Restore the matching file from your volume backup.
 - **`connModes=... offers Provisioned sign-in but hosted is false`:** remove `SMU_HOSTED=false`, or set `hosted: true` in `config.yaml`.
 - **`invalid config file ... field managed not found`:** a `config.yaml` from a pre-release build. Delete the `managed:` line.
 - **`data directory recovery failed` or a message about the `txn` journal:** a change was interrupted and the journal cannot be read. The log names the file and the cause. See [Stored files and recovery](#stored-files-and-recovery).
 - **A file's `rev` is above its `seq`, or is zero:** the store file was replaced by one from another deployment or edited. Restore the matching file from your volume backup, or delete the stores and import a backup.
 - **`read backup schedule ...` or `backup schedule ...: ...; delete it and set the schedule again`:** `backup.yaml` cannot be opened with this key, or is damaged. Delete it, start the gateway, and set the schedule again on Backup & Restore; the backups already in `/backup` are not affected.
+
+If every user's code is refused, including right ones, the gateway's clock is out by more than about 30 seconds: see [The gateway's clock](#the-gateways-clock).

@@ -5,16 +5,19 @@
  * page and through a broker connection; signing out while connected
  * disconnects first, as the Managed panel's sign-out always has.
  *
- * Change password is a plain link to the gateway's own page, like the
- * panel's Sign in. In a collapsed sidebar the name hides with the other
+ * Change password and Two-factor sign-in are plain links to the gateway's own
+ * pages, like the panel's Sign in. The two-factor link shows only while the
+ * gateway's mode is not off. In a collapsed sidebar the name hides with the other
  * status labels and the two actions stay as icons.
  *
  * Managed entry only: the Direct `module.ts` that every Release bundle
  * installs never imports it.
  */
 import { required } from '../../core/dom';
+import { twoFactorInUse, type TwoFactorState } from '../../core/services/managed-api';
 
-export interface AccountUser { username: string; admin: boolean }
+/** `twoFactor` as `/managed/me` gave it; absent from a gateway that does not send it. */
+export interface AccountUser { username: string; admin: boolean; twoFactor?: TwoFactorState }
 
 export interface AccountControl {
     /** The element to hand to `mountSidebarAccount`. */
@@ -30,6 +33,7 @@ const TEMPLATE = `
 <span class="status-label conn-account-name"></span>
 <span class="status-label conn-account-role hidden">admin</span>
 <a class="btn-icon conn-account-password" href="/login/password" title="Change password" aria-label="Change password"><svg ${ICON}><circle cx="7.5" cy="15.5" r="5.5"></circle><path d="M21 2l-9.6 9.6"></path><path d="M15.5 7.5l3 3L22 7l-3-3"></path></svg></a>
+<a class="btn-icon conn-account-twofactor hidden" href="/login/two-factor" title="Two-factor sign-in" aria-label="Two-factor sign-in"><svg ${ICON}><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></a>
 <button type="button" class="btn-icon conn-account-signout" title="Sign out" aria-label="Sign out"><svg ${ICON}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></button>`;
 
 export function createAccountControl(onSignOut: () => void): AccountControl {
@@ -38,6 +42,7 @@ export function createAccountControl(onSignOut: () => void): AccountControl {
     element.innerHTML = TEMPLATE;
     const name = required<HTMLElement>(element, '.conn-account-name');
     const role = required<HTMLElement>(element, '.conn-account-role');
+    const twoFactor = required<HTMLElement>(element, '.conn-account-twofactor');
     required<HTMLButtonElement>(element, '.conn-account-signout').addEventListener('click', onSignOut);
 
     return {
@@ -47,6 +52,7 @@ export function createAccountControl(onSignOut: () => void): AccountControl {
             name.textContent = user?.username ?? '';
             name.title = user ? `Signed in as ${user.username}` : '';
             role.classList.toggle('hidden', !user?.admin);
+            twoFactor.classList.toggle('hidden', !twoFactorInUse(user?.twoFactor));
         },
     };
 }

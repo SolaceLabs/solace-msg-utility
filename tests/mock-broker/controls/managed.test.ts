@@ -5,6 +5,7 @@ import { createGateway } from '../../../src/mock-broker/gateway';
 import { DEMO_TOPOLOGY, demoSeed } from '../../../src/mock-broker/gateway/seed';
 import { seed } from '../../../src/mock-broker/broker/store';
 import { resetScenario, scenario, setBrokers } from '../../../src/mock-broker/fixtures';
+import { mockCode, stepOf } from '../../../src/mock-broker/gateway/authenticator';
 import type { Page } from '../../../src/mock-broker/gateway/pages';
 
 /**
@@ -38,7 +39,7 @@ const who = () => panel().querySelector('.mockctl-section .mockctl-hint')!.textC
 
 describe('mock-broker/controls/managed -- accounts', () => {
     it('replaces the Direct connection reference with the demo\'s sections', () => {
-        expect(titles()).toEqual(['Demo accounts', 'Gateway events', 'Queue state', 'Connection faults', 'Latency and volume']);
+        expect(titles()).toEqual(['Demo accounts', 'Authenticator', 'Gateway events', 'Queue state', 'Connection faults', 'Latency and volume']);
     });
 
     it('lists every account and its password, click to copy', () => {
@@ -64,6 +65,19 @@ describe('mock-broker/controls/managed -- accounts', () => {
         btn('Clear the sign-in lockout').click();
         btn('Sign in as admin').click();
         expect(landed).toEqual(['app']);
+    });
+
+    it('lands on the code page, or the enrol page, when the setting asks for a second step', () => {
+        const mode = (m: string) => expect(gw.settings.save({ login: { twoFactor: m } }, gw.settings.rev()).ok).toBe(true);
+        mode('mandatory');
+        btn('Sign in as admin').click();
+        expect([landed, gw.session()]).toEqual([['two-factor'], null]);
+
+        const secret = gw.ticket()!.secret;
+        expect(gw.confirmTwoFactor(mockCode(secret, stepOf(Date.now()))).ok).toBe(true);
+        btn('Sign out').click();
+        btn('Sign in as admin').click();
+        expect(landed).toEqual(['two-factor', 'app', 'code']);
     });
 
     it('signs out and reloads', () => {

@@ -2091,3 +2091,526 @@ func TestStore_ConnectionSchemes(t *testing.T) {
 		t.Error("a save stores TLS as blank and keeps the plain scheme")
 	}
 }
+
+// ----- two-factor (the totp field of a user) --------------------------------------------------
+
+// Two valid secrets (base32, 32 characters): the RFC 6238 test key and another.
+const (
+	storeTOTPSecret  = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+	storeTOTPSecret2 = "MFRGGZDFMZTWQ2LKNNWG23TPOBYXE43U"
+)
+
+// writerHeld reports whether the writer's lock is held now: true inside a
+// committed hook, which runs under it.
+func writerHeld(s *store) bool { return len(s.wr.slot) == 1 }
+
+// enrolViewer sets two-factor up for the viewer as the sign-in's confirm step
+// does, and returns the stored recovery hashes. Fails the test on a refusal.
+func enrolViewer(t *testing.T, s *store, secret string) []string {
+	t.Helper()
+	hashes := hashRecoveryCodes(newRecoveryCodes())
+	if err := s.setTOTP(context.Background(), "viewer", secret, hashes, storedHash(s, "viewer"), func() {}); err != nil {
+		t.Fatalf("enrol: %v", err)
+	}
+	return hashes
+}
+
+// usersWithTOTP is the fixture users file with a totp block on the viewer.
+func usersWithTOTP(t *testing.T, f storeFixture, secret string, recovery ...string) string {
+	t.Helper()
+	doc := fmt.Sprintf(usersYAMLTemplate, mustHash(t, f.h, adminPW), mustHash(t, f.h, viewerPW)) + "    totp:\n      secret: " + secret + "\n      recovery:\n"
+	if len(recovery) == 0 {
+		return doc + "        []\n"
+	}
+	for _, r := range recovery {
+		doc += "        - " + r + "\n"
+	}
+	return doc
+}
+
+func TestStore_Load_TwoFactorRecordsAreHeldToTheirRules(t *testing.T) {
+	good := hashRecoveryCode("ABCD-EFGH-JKLM-NPQR")
+	cases := []struct {
+		name, secret string
+		recovery     []string
+		rule         string // "" loads
+	}{
+		{"a full record", storeTOTPSecret, []string{good, good}, ""},
+		{"every recovery code spent", storeTOTPSecret, nil, ""},
+		{"a secret too short", "GEZDGNBV", []string{good}, totpSecretRule},
+		{"a secret in lower case", strings.ToLower(storeTOTPSecret), []string{good}, totpSecretRule},
+		{"a secret with a character outside base32", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJ1", []string{good}, totpSecretRule},
+		{"a recovery entry in upper case", storeTOTPSecret, []string{good, strings.ToUpper(good)}, recoveryHashRule + " (entry 2)"},
+		{"a recovery entry too short", storeTOTPSecret, []string{good[:63]}, recoveryHashRule + " (entry 1)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newStoreFixture(t)
+			f.writeUsers(t, usersWithTOTP(t, f, c.secret, c.recovery...))
+			s, err := loadStore(f.opts(noEnv), quietLogger())
+			if c.rule == "" {
+				if err != nil {
+					t.Fatalf("must load: %v", err)
+				}
+				u := currentUser(t, s, "viewer")
+				if u.TOTP == nil || u.TOTP.Secret != c.secret || len(u.TOTP.Recovery) != len(c.recovery) {
+					t.Errorf("the record must load as written: %+v", u.TOTP)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("a broken two-factor record must stop the load")
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, `user "viewer"`) || !strings.Contains(msg, c.rule) {
+				t.Errorf("the error must name the user and the rule, got %q", msg)
+			}
+			for _, secret := range append([]string{c.secret}, c.recovery...) {
+				if strings.Contains(msg, secret) {
+					t.Errorf("the error must not quote a value: %q", msg)
+				}
+			}
+		})
+	}
+}
+
+func TestStore_TwoFactorReaders(t *testing.T) {
+	s := newStoreWithFixtures(t)
+	if on, exists := s.twoFactorOf("viewer"); on || !exists {
+		t.Errorf("before enrolment: on=%v exists=%v", on, exists)
+	}
+	if _, ok := s.totpSecret("viewer"); ok {
+		t.Error("no secret before enrolment")
+	}
+	if _, exists := s.twoFactorOf("ghost"); exists {
+		t.Error("an unknown user does not exist")
+	}
+	if _, ok := s.totpSecret("ghost"); ok {
+		t.Error("an unknown user has no secret")
+	}
+	enrolViewer(t, s, storeTOTPSecret)
+	if on, _ := s.twoFactorOf("viewer"); !on {
+		t.Error("enrolled")
+	}
+	if secret, ok := s.totpSecret("viewer"); !ok || secret != storeTOTPSecret {
+		t.Errorf("secret = %q, %v", secret, ok)
+	}
+	if !currentUser(t, s, "viewer").twoFactorOn() || currentUser(t, s, "admin").twoFactorOn() {
+		t.Error("the list view flag follows the record")
+	}
+}
+
+// listUsers hands out copies: changing the two-factor record of one leaves the
+// store alone.
+func TestStore_ListUsersCopiesTheTwoFactorRecord(t *testing.T) {
+	s := newStoreWithFixtures(t)
+	hashes := enrolViewer(t, s, storeTOTPSecret)
+	got := currentUser(t, s, "viewer")
+	got.TOTP.Secret = "changed"
+	got.TOTP.Recovery[0] = "changed"
+	if secret, _ := s.totpSecret("viewer"); secret != storeTOTPSecret {
+		t.Error("the stored secret must not change through a listed copy")
+	}
+	if now := currentUser(t, s, "viewer"); now.TOTP.Recovery[0] != hashes[0] {
+		t.Error("the stored recovery list must not change through a listed copy")
+	}
+}
+
+// Enrolling moves the rev (the list's twoFactor flag flips), setting up again
+// does not; each is one commit, and the password and grants stay as they are.
+func TestStore_SetTOTP_EnrolMovesTheRevAndSetUpAgainKeepsIt(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	hashes := hashRecoveryCodes(newRecoveryCodes())
+	ran := 0
+	err := s.setTOTP(context.Background(), "viewer", storeTOTPSecret, hashes, storedHash(s, "viewer"), func() {
+		ran++
+		if !writerHeld(s) {
+			t.Error("committed must run under the writer lock")
+		}
+		if secret, ok := s.totpSecret("viewer"); !ok || secret != storeTOTPSecret {
+			t.Error("the new secret must be published before committed runs")
+		}
+	})
+	if err != nil || ran != 1 {
+		t.Fatalf("enrol: err %v, committed ran %d times", err, ran)
+	}
+	if u := currentUser(t, s, "viewer"); u.Rev != 3 || u.TOTP == nil || !slices.Equal(u.TOTP.Recovery, hashes) {
+		t.Errorf("enrol moves the rev to the new seq 3 and stores the hashes: %+v", u)
+	}
+	if seq, _ := s.seqs(); seq != 3 {
+		t.Errorf("seq = %d, want 3", seq)
+	}
+	if !signsIn(t, s, "viewer", viewerPW) || len(currentUser(t, s, "viewer").ReadOnly) != 1 {
+		t.Error("the password and the grants must stay")
+	}
+	if currentUser(t, s, "admin").Rev != 1 {
+		t.Error("another user's rev must not move")
+	}
+
+	again := hashRecoveryCodes(newRecoveryCodes())
+	if err := s.setTOTP(context.Background(), "viewer", storeTOTPSecret2, again, storedHash(s, "viewer"), func() {}); err != nil {
+		t.Fatal(err)
+	}
+	u := currentUser(t, s, "viewer")
+	if u.Rev != 3 || u.TOTP.Secret != storeTOTPSecret2 || !slices.Equal(u.TOTP.Recovery, again) {
+		t.Errorf("setting up again replaces both and keeps the rev: %+v", u.TOTP)
+	}
+	if seq, _ := s.seqs(); seq != 4 {
+		t.Errorf("seq = %d, want 4", seq)
+	}
+	doc, _ := f.readDocs(t)
+	if doc.Seq != 4 || doc.Users[1].Rev != 3 || doc.Users[1].TOTP == nil || doc.Users[1].TOTP.Secret != storeTOTPSecret2 {
+		t.Errorf("the file agrees: %+v", doc.Users[1])
+	}
+	if got := f.load(t).users[1].TOTP; got == nil || got.Secret != storeTOTPSecret2 {
+		t.Error("the change must survive a restart")
+	}
+}
+
+// Every refusal leaves the file, seq and memory as they were and never runs
+// committed.
+func TestStore_SetTOTP_Refusals(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name   string
+		user   string
+		expect func(f storeFixture, s *store) string
+		want   func(error) bool
+	}{
+		{"an unknown user", "ghost", func(_ storeFixture, s *store) string { return storedHash(s, "viewer") },
+			func(err error) bool { return errors.Is(err, errUserNotFound) }},
+		{"an account that changed while its password was checked", "viewer", func(_ storeFixture, s *store) string {
+			checked := storedHash(s, "viewer")
+			putUser(t, s, currentUser(t, s, "viewer"), "reset-by-admin-1")
+			return checked
+		}, func(err error) bool { return errors.Is(err, errAccountChanged) }},
+		{"a users file that changed on disk", "viewer", func(f storeFixture, s *store) string {
+			f.writeUsers(t, fmt.Sprintf(usersYAMLTemplate, mustHash(t, f.h, "someone-else-1"), mustHash(t, f.h, "someone-else-2")))
+			return storedHash(s, "viewer")
+		}, func(err error) bool {
+			var disk *changedOnDiskError
+			return errors.As(err, &disk) && disk.file == "users.yaml"
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newStoreFixture(t)
+			s := f.load(t)
+			expect := c.expect(f, s)
+			seq, _ := s.seqs()
+			before, _ := os.ReadFile(f.usersPath)
+			ran := false
+			err := s.setTOTP(ctx, c.user, storeTOTPSecret, hashRecoveryCodes(newRecoveryCodes()), expect, func() { ran = true })
+			if !c.want(err) {
+				t.Fatalf("got %v", err)
+			}
+			now, _ := s.seqs()
+			after, _ := os.ReadFile(f.usersPath)
+			if ran || now != seq || !bytes.Equal(before, after) {
+				t.Errorf("a refusal writes nothing: committed ran %v, seq %d -> %d", ran, seq, now)
+			}
+			if on, _ := s.twoFactorOf("viewer"); on {
+				t.Error("a refusal must not turn two-factor on")
+			}
+		})
+	}
+}
+
+// A recovery code works once: the hash leaves the list in a commit that moves
+// seq and keeps the rev, and the same code again, or any other value, is not
+// used and writes nothing.
+func TestStore_UseRecoveryCode_OnceAndNotTwice(t *testing.T) {
+	ctx := context.Background()
+	f := newStoreFixture(t)
+	s := f.load(t)
+	hashes := enrolViewer(t, s, storeTOTPSecret) // seq 3, rev 3
+
+	used, left, err := s.useRecoveryCode(ctx, "viewer", hashes[4])
+	if err != nil || !used || left != 9 {
+		t.Fatalf("first use: used=%v left=%d err=%v", used, left, err)
+	}
+	u := currentUser(t, s, "viewer")
+	if u.Rev != 3 || len(u.TOTP.Recovery) != 9 || slices.Contains(u.TOTP.Recovery, hashes[4]) || u.TOTP.Secret != storeTOTPSecret {
+		t.Errorf("the hash leaves, the secret and rev stay: %+v rev %d", u.TOTP, u.Rev)
+	}
+	if seq, _ := s.seqs(); seq != 4 {
+		t.Errorf("a used code is a commit: seq = %d, want 4", seq)
+	}
+	if got := f.load(t).users[1].TOTP; len(got.Recovery) != 9 {
+		t.Error("the spent code must stay spent after a restart")
+	}
+
+	before, _ := os.ReadFile(f.usersPath)
+	for name, hash := range map[string]string{"the same code again": hashes[4], "a code that was never issued": hashRecoveryCode("ZZZZ-ZZZZ-ZZZZ-ZZZZ")} {
+		used, left, err := s.useRecoveryCode(ctx, "viewer", hash)
+		if err != nil || used || left != 9 {
+			t.Errorf("%s: used=%v left=%d err=%v", name, used, left, err)
+		}
+	}
+	if after, _ := os.ReadFile(f.usersPath); !bytes.Equal(before, after) {
+		t.Error("a code that is not used writes nothing")
+	}
+	if seq, _ := s.seqs(); seq != 4 {
+		t.Errorf("seq must not move: %d", seq)
+	}
+
+	// The last code leaves an enrolled user with an empty list.
+	for _, h := range hashes {
+		if _, _, err := s.useRecoveryCode(ctx, "viewer", h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if u := currentUser(t, s, "viewer"); u.TOTP == nil || len(u.TOTP.Recovery) != 0 {
+		t.Errorf("every code spent: %+v", u.TOTP)
+	}
+	if got := f.load(t).users[1].TOTP; got == nil || len(got.Recovery) != 0 {
+		t.Error("an empty list must load")
+	}
+}
+
+func TestStore_UseRecoveryCode_Refusals(t *testing.T) {
+	ctx := context.Background()
+	f := newStoreFixture(t)
+	s := f.load(t)
+	hash := hashRecoveryCode("ABCD-EFGH-JKLM-NPQR")
+	if _, _, err := s.useRecoveryCode(ctx, "ghost", hash); !errors.Is(err, errUserNotFound) {
+		t.Errorf("unknown user: want errUserNotFound, got %v", err)
+	}
+	// Nobody to spend from: not used, not a commit.
+	seq, _ := s.seqs()
+	if used, left, err := s.useRecoveryCode(ctx, "viewer", hash); err != nil || used || left != 0 {
+		t.Errorf("a user without two-factor: used=%v left=%d err=%v", used, left, err)
+	}
+	if now, _ := s.seqs(); now != seq {
+		t.Error("nothing to spend must not commit")
+	}
+	hashes := enrolViewer(t, s, storeTOTPSecret)
+	f.writeUsers(t, fmt.Sprintf(usersYAMLTemplate, mustHash(t, f.h, "someone-else-1"), mustHash(t, f.h, "someone-else-2")))
+	var disk *changedOnDiskError
+	if _, _, err := s.useRecoveryCode(ctx, "viewer", hashes[0]); !errors.As(err, &disk) {
+		t.Errorf("changed on disk: want *changedOnDiskError, got %v", err)
+	}
+	if u := currentUser(t, s, "viewer"); len(u.TOTP.Recovery) != len(hashes) {
+		t.Error("a refused use must leave the list alone")
+	}
+}
+
+// Two requests carrying the same recovery code: the writer serves one at a
+// time, so exactly one is let in and the file holds one removal.
+func TestStore_Race_OneRecoveryCodeUsedByTwoRequests(t *testing.T) {
+	for round := 0; round < 5; round++ {
+		f := newStoreFixture(t)
+		s := f.load(t)
+		hashes := enrolViewer(t, s, storeTOTPSecret)
+		var mu sync.Mutex
+		wins := 0
+		attempt := func() {
+			used, _, err := s.useRecoveryCode(context.Background(), "viewer", hashes[0])
+			if err != nil {
+				t.Errorf("round %d: %v", round, err)
+				return
+			}
+			if used {
+				mu.Lock()
+				wins++
+				mu.Unlock()
+			}
+		}
+		together(attempt, attempt, attempt)
+		doc, _ := f.readDocs(t)
+		if wins != 1 || doc.Seq != 4 || len(doc.Users[1].TOTP.Recovery) != 9 {
+			t.Fatalf("round %d: one use, one commit: wins=%d seq=%d", round, wins, doc.Seq)
+		}
+	}
+}
+
+func TestStore_ClearTOTP(t *testing.T) {
+	ctx := context.Background()
+	f := newStoreFixture(t)
+	s := f.load(t)
+	changed := 0
+	s.onChange = func() { changed++ }
+	enrolViewer(t, s, storeTOTPSecret) // seq 3, rev 3
+
+	ran := 0
+	rev, removed, err := s.clearTOTP(ctx, "admin", "viewer", func() {
+		ran++
+		if !writerHeld(s) {
+			t.Error("committed must run under the writer lock")
+		}
+		if on, _ := s.twoFactorOf("viewer"); on {
+			t.Error("the removal must be published before committed runs")
+		}
+	})
+	if err != nil || !removed || rev != 4 || ran != 1 || changed != 1 {
+		t.Fatalf("reset: rev=%d removed=%v err=%v committed=%d onChange=%d", rev, removed, err, ran, changed)
+	}
+	if u := currentUser(t, s, "viewer"); u.TOTP != nil || u.Rev != 4 {
+		t.Errorf("a reset moves the rev to the new seq: %+v rev %d", u.TOTP, u.Rev)
+	}
+	if seq, _ := s.seqs(); seq != 4 {
+		t.Errorf("seq = %d, want 4", seq)
+	}
+	if !signsIn(t, s, "viewer", viewerPW) {
+		t.Error("the password stays")
+	}
+	if got := f.load(t).users[1]; got.TOTP != nil || got.Rev != 4 {
+		t.Errorf("the file agrees: %+v", got)
+	}
+
+	// Nothing to remove: the rev as it is, no commit, no hooks, no re-check.
+	before, _ := os.ReadFile(f.usersPath)
+	rev, removed, err = s.clearTOTP(ctx, "admin", "viewer", func() { ran++ })
+	if err != nil || removed || rev != 4 || ran != 1 || changed != 1 {
+		t.Errorf("again: rev=%d removed=%v err=%v committed=%d onChange=%d", rev, removed, err, ran, changed)
+	}
+	if after, _ := os.ReadFile(f.usersPath); !bytes.Equal(before, after) {
+		t.Error("nothing to remove writes nothing")
+	}
+	if seq, _ := s.seqs(); seq != 4 {
+		t.Errorf("seq must not move: %d", seq)
+	}
+	// A caller of "" is the gateway itself, as for every change.
+	enrolViewer(t, s, storeTOTPSecret2)
+	if _, removed, err := s.clearTOTP(ctx, "", "viewer"); err != nil || !removed {
+		t.Errorf("no caller: removed=%v err=%v", removed, err)
+	}
+}
+
+// The refusals come in the pinned order (caller, disk, existence) and leave
+// the record alone.
+func TestStore_ClearTOTP_Refusals(t *testing.T) {
+	ctx := context.Background()
+	f := newStoreFixture(t)
+	s := f.load(t)
+	enrolViewer(t, s, storeTOTPSecret)
+	seq, _ := s.seqs()
+	ran := false
+	hook := func() { ran = true }
+
+	if _, _, err := s.clearTOTP(ctx, "ghost", "viewer", hook); !errors.Is(err, errCallerGone) {
+		t.Errorf("a caller who is gone: want errCallerGone, got %v", err)
+	}
+	if _, _, err := s.clearTOTP(ctx, "viewer", "viewer", hook); !errors.Is(err, errCallerNotAdmin) {
+		t.Errorf("a caller who is not an admin: want errCallerNotAdmin, got %v", err)
+	}
+	if _, _, err := s.clearTOTP(ctx, "admin", "ghost", hook); !errors.Is(err, errNotFound) {
+		t.Errorf("an unknown user: want errNotFound, got %v", err)
+	}
+	if on, _ := s.twoFactorOf("viewer"); !on || ran {
+		t.Error("a refusal must leave two-factor on and run nothing")
+	}
+	if now, _ := s.seqs(); now != seq {
+		t.Errorf("a refusal leaves seq alone: %d -> %d", seq, now)
+	}
+
+	f.writeUsers(t, fmt.Sprintf(usersYAMLTemplate, mustHash(t, f.h, "someone-else-1"), mustHash(t, f.h, "someone-else-2")))
+	var disk *changedOnDiskError
+	if _, _, err := s.clearTOTP(ctx, "admin", "ghost", hook); !errors.As(err, &disk) {
+		t.Errorf("the disk check comes before existence: got %v", err)
+	}
+	if _, _, err := s.clearTOTP(ctx, "viewer", "viewer", hook); !errors.Is(err, errCallerNotAdmin) {
+		t.Errorf("the caller check comes before the disk check: got %v", err)
+	}
+	if on, _ := s.twoFactorOf("viewer"); !on || ran {
+		t.Error("a refusal must leave two-factor on and run nothing")
+	}
+}
+
+// An administrator's save never carries or clears two-factor, as a blank
+// password keeps the hash; a body that names one is ignored by the store.
+func TestStore_SaveUser_KeepsTwoFactor(t *testing.T) {
+	ctx := context.Background()
+	s := newStoreWithFixtures(t)
+	hashes := enrolViewer(t, s, storeTOTPSecret) // seq 3, rev 3
+
+	// Carrying other values, or none, changes nothing about the stored record.
+	for name, carried := range map[string]*userTOTP{"none": nil, "another secret": {Secret: storeTOTPSecret2, Recovery: []string{"x"}}} {
+		u := currentUser(t, s, "viewer")
+		u.TOTP = carried
+		saved, err := s.saveUser(ctx, "admin", u, "", currentUser(t, s, "viewer").Rev)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		got := currentUser(t, s, "viewer")
+		if got.TOTP == nil || got.TOTP.Secret != storeTOTPSecret || !slices.Equal(got.TOTP.Recovery, hashes) {
+			t.Errorf("%s: the stored two-factor must stay: %+v", name, got.TOTP)
+		}
+		if saved.rev != 3 {
+			t.Errorf("%s: nothing visible changed, so the rev stays 3, got %d", name, saved.rev)
+		}
+	}
+
+	// A visible change moves the rev and still keeps it.
+	u := currentUser(t, s, "viewer")
+	u.TOTP = nil
+	u.ReadOnly = []permRow{{Brokers: "b2", MsgVpns: "*", Queues: "*"}}
+	saved, err := s.saveUser(ctx, "admin", u, "", u.Rev)
+	if err != nil || saved.rev != saved.seq {
+		t.Fatalf("grant change: %+v %v", saved, err)
+	}
+	if on, _ := s.twoFactorOf("viewer"); !on {
+		t.Error("a grant change must keep two-factor")
+	}
+
+	// A new user starts without it, whatever the body carried.
+	if _, err := s.saveUser(ctx, "admin", userRec{Username: "bob", TOTP: &userTOTP{Secret: storeTOTPSecret}}, "bob-password-1", 0); err != nil {
+		t.Fatal(err)
+	}
+	if on, _ := s.twoFactorOf("bob"); on {
+		t.Error("a new user has no two-factor")
+	}
+}
+
+// What the admin console shows decides the rev: the flag counts, the secret
+// and the codes left do not.
+func TestSameUserView_TwoFactor(t *testing.T) {
+	off := userRec{Username: "u"}
+	on := userRec{Username: "u", TOTP: &userTOTP{Secret: storeTOTPSecret, Recovery: []string{"a"}}}
+	again := userRec{Username: "u", TOTP: &userTOTP{Secret: storeTOTPSecret2}}
+	if sameUserView(off, on) || sameUserView(on, off) {
+		t.Error("two-factor on and off look different")
+	}
+	if !sameUserView(on, again) || !sameUserView(off, off) {
+		t.Error("another secret or fewer codes look the same")
+	}
+}
+
+// An import takes two-factor from the backup, names the users it added,
+// removed or replaced for sign-out, and holds it to the load rules.
+func TestStore_StageImport_TwoFactor(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	admin, viewer := currentUser(t, s, "admin"), currentUser(t, s, "viewer")
+	viewer.TOTP = &userTOTP{Secret: storeTOTPSecret, Recovery: hashRecoveryCodes(newRecoveryCodes())}
+	res, err := runImport(s, &sectionImport[userRec]{recs: []userRec{admin, viewer}}, nil)
+	if err != nil || !reflect.DeepEqual(res.drop, []string{"viewer"}) {
+		t.Fatalf("an added two-factor ends the user's sessions: %+v %v", res, err)
+	}
+	if secret, ok := s.totpSecret("viewer"); !ok || secret != storeTOTPSecret {
+		t.Error("the import must restore the secret")
+	}
+
+	bad := viewer
+	bad.TOTP = &userTOTP{Secret: "not-a-secret"}
+	var invalid *importInvalidError
+	seq, _ := s.seqs()
+	if _, err := runImport(s, &sectionImport[userRec]{recs: []userRec{admin, bad}}, nil); !errors.As(err, &invalid) || invalid.section != "users" {
+		t.Fatalf("a broken record is an invalid users section, got %v", err)
+	}
+	if strings.Contains(err2s(invalid), "not-a-secret") {
+		t.Error("the refusal must not quote the secret")
+	}
+	if now, _ := s.seqs(); now != seq {
+		t.Error("a refused import writes nothing")
+	}
+}
+
+// err2s is an error's text, "" for nil.
+func err2s(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}

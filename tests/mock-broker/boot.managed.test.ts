@@ -4,6 +4,7 @@ import { NETWORK_DISABLED } from '../../src/mock-broker/network';
 import { getQueue, removeMessage } from '../../src/mock-broker/broker/store';
 import { BROKERS, resetScenario, scenario, setBrokers } from '../../src/mock-broker/fixtures';
 import { setSocketGate } from '../../src/mock-broker/sdk/session';
+import { mockCode, stepOf } from '../../src/mock-broker/gateway/authenticator';
 
 /**
  * The managed demo's boot. It shares the shell work with demo.html's boot
@@ -49,6 +50,7 @@ const start = () => {
     return demo;
 };
 const layerTitle = () => document.querySelector('.mgw-page h1')?.textContent ?? null;
+const codeFor = (secret: string) => mockCode(secret, stepOf(Date.now()));
 
 function signInThroughThePage(username: string, password: string): void {
     (document.querySelector('#mgw-username') as HTMLInputElement).value = username;
@@ -115,6 +117,45 @@ describe('mock-broker/boot.managed -- the sign-in and the reloads', () => {
         document.body.innerHTML = '';
         start();
         expect(layerTitle()).toBe('Change password');
+    });
+
+    describe('with two-factor sign-in on', () => {
+        const turnOn = (demo: ReturnType<typeof boot>) =>
+            expect(demo.gateway.settings.save({ login: { twoFactor: 'mandatory' } }, demo.gateway.settings.rev()).ok).toBe(true);
+        const shownSecret = () => document.querySelector('#two-factor-secret')!.textContent!.replace(/ /g, '');
+
+        it('carries a standing ticket across an ordinary reload: the enrol page comes back with the same secret', () => {
+            const demo = start();
+            turnOn(demo);
+            signInThroughThePage('viewer', 'demo-viewer-0001');
+            expect([reloads, layerTitle(), demo.gateway.session()]).toEqual([0, 'Set up two-factor sign-in', null]);   // shown in place, no session
+            const secret = shownSecret();
+            window.dispatchEvent(new Event('pagehide'));
+
+            document.body.innerHTML = '';
+            const again = start();
+            expect(layerTitle()).toBe('Set up two-factor sign-in');
+            expect([shownSecret(), again.gateway.ticket()!.secret]).toEqual([secret, secret]);
+            expect(again.gateway.session()).toBeNull();
+        });
+
+        it('lands on the code page after the reload of a panel sign-in, and lists the account in the panel\'s Authenticator', () => {
+            const demo = start();
+            turnOn(demo);
+            const enrol = demo.gateway.signIn('viewer', 'demo-viewer-0001');
+            expect(enrol).toEqual({ ok: true, step: 'enrol' });
+            expect(demo.gateway.confirmTwoFactor(codeFor(demo.gateway.ticket()!.secret)).ok).toBe(true);
+            demo.gateway.sessions.drop(demo.gateway.cookie()!);
+            demo.gateway.setCookie(null);
+            Array.from(document.querySelectorAll<HTMLButtonElement>('#mock-controls .mockctl-btn')).find(b => b.textContent === 'Sign in as viewer')!.click();
+            expect(reloads).toBe(1);
+
+            document.body.innerHTML = '';
+            start();
+            expect(layerTitle()).toBe('Two-factor sign-in');
+            const rows = Array.from(document.querySelectorAll('#mock-controls .mockctl-account'), r => r.querySelector('.mockctl-key')?.textContent);
+            expect(rows).toContain('viewer');
+        });
     });
 
     it('keeps what changed on an ordinary reload, through pagehide', () => {

@@ -87,11 +87,11 @@ func TestLogStartup_ShowsAtEveryLevel(t *testing.T) {
 	}{
 		{"gateway", func(c *config) {
 			c.access.allow = prefixes(t, "10.0.0.0/8")
-		}, []string{"mode=gateway", "conn_modes=direct", "app_bundle=index.html", "access.allow=[10.0.0.0/8]", "access.trustedProxies=[]", "tls.insecureSkipVerify=false"}, []string{"usersFile=", "login.maxFailures="}},
+		}, []string{"mode=gateway", "conn_modes=direct", "app_bundle=index.html", "access.allow=[10.0.0.0/8]", "access.trustedProxies=[]", "tls.insecureSkipVerify=false"}, []string{"usersFile=", "login.maxFailures=", "login.twoFactor="}},
 		{"provisioned", func(c *config) {
 			c.connModes = connProvisioned
 			c.access.trustedProxies = prefixes(t, "172.16.0.0/12")
-		}, []string{"mode=provisioned", "app_bundle=provisioned.html", "access.trustedProxies=[172.16.0.0/12]", "usersFile=/data/users.yaml", "store_key_file=", "login.maxFailures=5", "session.idle=10m0s", "modules.userDefault=all"}, nil},
+		}, []string{"mode=provisioned", "app_bundle=provisioned.html", "access.trustedProxies=[172.16.0.0/12]", "usersFile=/data/users.yaml", "store_key_file=", "login.maxFailures=5", "login.twoFactor=off", "session.idle=10m0s", "modules.userDefault=all"}, nil},
 		{"files only", func(c *config) { c.hosted = false }, []string{"mode=files-only"}, nil},
 	}
 	for _, c := range cases {

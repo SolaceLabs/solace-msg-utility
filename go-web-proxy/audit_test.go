@@ -474,3 +474,26 @@ func TestAuditor_ADroppedAccessEntryDoesNotClearTheFailingState(t *testing.T) {
 		t.Errorf("want still failing, got %v", err)
 	}
 }
+
+// The two-factor actions are named once here and used by the pages and the
+// managed API; the messages never carry a code, a secret or a recovery code.
+func TestAudit_TwoFactorActionsAndMessages(t *testing.T) {
+	if auditTwoFactorEnrol != "twofactor.enrol" || auditTwoFactorReset != "user.twofactor.reset" || auditBadCode != "bad_code" {
+		t.Errorf("action names: %q %q %q", auditTwoFactorEnrol, auditTwoFactorReset, auditBadCode)
+	}
+	if got := signedInMsg("alice"); got != "alice signed in" {
+		t.Errorf("got %q", got)
+	}
+	if got := signedInRecoveryMsg("alice", 7); got != "alice signed in with a recovery code (7 left)" {
+		t.Errorf("got %q", got)
+	}
+	if got := signedInRecoveryMsg("alice", 0); got != "alice signed in with a recovery code (0 left)" {
+		t.Errorf("the last code leaves none: %q", got)
+	}
+	if got := twoFactorEnrolMsg("alice", false); got != "alice set up two-factor sign-in" {
+		t.Errorf("got %q", got)
+	}
+	if got := twoFactorEnrolMsg("alice", true); got != "alice set up two-factor sign-in again" {
+		t.Errorf("got %q", got)
+	}
+}

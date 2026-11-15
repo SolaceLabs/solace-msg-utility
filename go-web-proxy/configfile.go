@@ -44,6 +44,9 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # audit.onFailure (continue|refuse) says what happens when an audit record
 # cannot be written: continue logs it loudly and carries on; refuse also
 # refuses changes until the audit log is writable again.
+# login.twoFactor (off|optional|admins|mandatory) says who signs in with a
+# code from an authenticator app as well as the password: nobody, those who
+# set it up, those plus every administrator, or everyone.
 # An empty allow list admits every client; trustedProxies lists the reverse
 # proxies whose X-Forwarded-For is believed. session.*, login.*, modules.* and
 # audit.* apply only in Provisioned mode (connModes provisioned or both):
@@ -101,6 +104,9 @@ type fileLogin struct {
 	BackoffSeconds           int `yaml:"backoffSeconds" json:"backoffSeconds"`
 	MaxBackoffSeconds        int `yaml:"maxBackoffSeconds" json:"maxBackoffSeconds"`
 	UnauthenticatedPerMinute int `yaml:"unauthenticatedPerMinute" json:"unauthenticatedPerMinute"`
+	// TwoFactor is off (the default, also for a file or backup without the
+	// key), optional, admins or mandatory (totp.go). Live.
+	TwoFactor string `yaml:"twoFactor" json:"twoFactor"`
 }
 
 type fileModules struct {
@@ -315,6 +321,7 @@ func fileConfigFromConfig(c config) fileConfig {
 			BackoffSeconds:           int(c.login.backoff / time.Second),
 			MaxBackoffSeconds:        int(c.login.maxBackoff / time.Second),
 			UnauthenticatedPerMinute: c.login.unauthPerMinute,
+			TwoFactor:                twoFactorOrDefault(c.twoFactor),
 		},
 		Modules: fileModules{
 			Offered:     append([]string{}, c.modules.offered...),
@@ -372,6 +379,10 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	twoFactor, err := checkTwoFactor(fc.Login.TwoFactor)
+	if err != nil {
+		return config{}, err
+	}
 	cfg := config{
 		hosted:             fc.Hosted,
 		certFile:           fc.TLS.CertFile,
@@ -389,6 +400,7 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 		access:             accessConfig{allow: allow, trustedProxies: trusted},
 		session:            session,
 		login:              login,
+		twoFactor:          twoFactor,
 		modules:            modules,
 		audit:              auditSettings{stdout: fc.Audit.Stdout, access: fc.Audit.Access, onFailure: onFailure},
 	}

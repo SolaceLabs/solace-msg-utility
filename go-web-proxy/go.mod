@@ -4,7 +4,10 @@ go 1.26.3
 
 toolchain go1.27.4
 
-require gopkg.in/yaml.v3 v3.0.1
+require (
+	gopkg.in/yaml.v3 v3.0.1
+	rsc.io/qr v0.2.0
+)
 
 require (
 	golang.org/x/mod v0.39.0 // indirect

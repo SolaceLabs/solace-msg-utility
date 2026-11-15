@@ -135,6 +135,11 @@ const ROWS: { key: string; route: string; call: () => Promise<Outcome> }[] = [
             return list.ok ? users.deleteUser('viewer', list.data.users.find(u => u.username === 'viewer')!.rev) : list;
         },
     },
+    {
+        key: 'DELETE /managed/users/{name}/totp',
+        route: 'DELETE /managed/users/{name}/totp, an administrator\'s reset of the user\'s two-factor (no rev is sent)',
+        call: () => users.resetTwoFactor('viewer'),
+    },
     { key: 'GET /managed/connections', route: 'GET /managed/connections', call: () => conns.listConnections() },
     {
         key: 'PUT /managed/connections/{broker}',

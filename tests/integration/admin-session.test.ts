@@ -52,8 +52,8 @@ import { completeContext } from '../helpers/appContext';
 import { answerConfirm } from '../helpers/confirmDialog';
 
 const USERS = [
-    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null, rev: 1 },
-    { username: 'viewer', admin: false, operate: [], readOnly: [], modules: null, rev: 1 },
+    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null, rev: 1, twoFactor: false },
+    { username: 'viewer', admin: false, operate: [], readOnly: [], modules: null, rev: 1, twoFactor: true },
 ];
 const CHOICES = { catalog: ['queue-browser', 'queue-copy'], offered: ['queue-browser', 'queue-copy'], userDefault: 'all' };
 

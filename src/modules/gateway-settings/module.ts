@@ -48,6 +48,7 @@ const FIELDS: ReadonlyArray<{ key: string; kind: Kind }> = [
     { key: 'login.backoffSeconds', kind: 'int' },
     { key: 'login.maxBackoffSeconds', kind: 'int' },
     { key: 'login.unauthenticatedPerMinute', kind: 'int' },
+    { key: 'login.twoFactor', kind: 'text' },
     { key: 'modules.userDefault', kind: 'text' },
     { key: 'logLevel', kind: 'text' },
     { key: 'audit.stdout', kind: 'bool' },

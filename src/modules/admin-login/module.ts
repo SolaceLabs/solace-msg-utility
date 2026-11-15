@@ -4,7 +4,8 @@
  * The gateway serves `/solAdmin` only to an administrator's session (sign-in
  * happens on its own `/login` page), so this module does not sign anyone in:
  * it reads the session back (`GET /managed/me`), publishes it, and shows
- * who is signed in with Change password and Sign out. It never creates a
+ * who is signed in with Change password, Two-factor sign-in (only while the
+ * gateway's mode is not off) and Sign out. It never creates a
  * Solace or SEMP connection, so `AppState.isConnected` / `isSempConnected`
  * stay false for the app's whole lifetime.
  *
@@ -19,7 +20,7 @@
  */
 import { required } from '../../core/dom';
 import { createManagedService } from '../../core/services/managed-service';
-import { managedErrorMessage } from '../../core/services/managed-api';
+import { managedErrorMessage, twoFactorInUse, type TwoFactorState } from '../../core/services/managed-api';
 import { logger } from '../../core/logger';
 import type { AppContext } from '../../core/types';
 
@@ -42,6 +43,7 @@ export const AdminLoginModule = {
 
             sessionView: required<HTMLElement>(container, '#admin-session-view'),
             sessionSummary: required<HTMLElement>(container, '#admin-session-summary'),
+            twoFactor: required<HTMLAnchorElement>(container, '#admin-two-factor'),
             btnLogout: required<HTMLButtonElement>(container, '#btn-admin-logout'),
         };
 
@@ -54,7 +56,8 @@ export const AdminLoginModule = {
             els.sessionView.classList.add('hidden');
         }
 
-        function showSession(username: string): void {
+        function showSession(username: string, twoFactor: TwoFactorState | undefined): void {
+            els.twoFactor.classList.toggle('hidden', !twoFactorInUse(twoFactor));
             els.sessionSummary.textContent = `Signed in as ${username} (administrator).`;
             els.loginView.classList.add('hidden');
             els.sessionView.classList.remove('hidden');
@@ -87,7 +90,7 @@ export const AdminLoginModule = {
             });
             signedIn = true;
             eventBus.emit('rbac:changed');
-            showSession(p.username);
+            showSession(p.username, p.twoFactor);
         }
 
         function doLogout(): void {

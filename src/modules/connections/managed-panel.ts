@@ -280,7 +280,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
      */
     function adopt(p: ManagedProfile): void {
         profile.setProfile(p);
-        account.show({ username: p.username, admin: p.admin });
+        account.show({ username: p.username, admin: p.admin, twoFactor: p.twoFactor });
         const broker = appState.managed?.broker ?? '';
         app.setState('managed', {
             admin: p.admin, username: p.username, operate: p.operate, readOnly: p.readOnly,

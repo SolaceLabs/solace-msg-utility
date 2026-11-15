@@ -28,6 +28,7 @@
   - [Logging standard](#logging-standard)
   - [Auditing an action](#auditing-an-action)
   - [Writing to the store](#writing-to-the-store)
+  - [Adding a sign-in step](#adding-a-sign-in-step)
   - [TypeScript](#typescript)
 
 ---
@@ -601,9 +602,9 @@ In practice call the store's methods (`saveUser`, `deleteConnection`, `setSchedu
 **The two kinds of write.**
 
 - A **whole-record save** (a `PUT` or `DELETE` of a user, connection, the settings or the schedule, and an import) carries the rev the administrator read. `PUT` carries it in the JSON body, `DELETE` as `?rev=N`, an import as `basis`; rev 0 on a `PUT` creates. A missing or malformed rev is `400 rev_required`: there is no way to save without one.
-- A **field-scoped change** carries no rev. Inside the lock it sets only its own fields on the current record and keeps the rest. The one today is a user's own password (`setPassword`): check the old password and hash the new one before the lock, then inside the lock confirm the stored hash is still the one you checked. Add another only for a field no administrator form sends back, and say so in a comment.
+- A **field-scoped change** carries no rev. Inside the lock it sets only its own fields on the current record and keeps the rest. Four today: a user's own password (`setPassword`: check the old password and hash the new one before the lock, then inside the lock confirm the stored hash is still the one you checked) and the two-factor writes `setTOTP` (same `expect` check, a `committed` hook under the lock), `useRecoveryCode` (removes one hash, reports how many are left) and `clearTOTP` (an administrator's reset; no commit and no hook when there is nothing to remove). Add another only for a field no administrator form sends back, and say so in a comment. `saveUser` copies the stored `TOTP` onto the record it writes, so a whole-record save can neither carry nor clear a field of this kind.
 
-**The rev rule.** `seq` of a file moves by one on every commit. A record's `rev` becomes the new seq only when the record changes as the admin console sees it (what `userToOutput` or `connToOutput` returns, compared by `sameUserView` and `sameConnView`), otherwise it stays; a create and an import always stamp it. So a password-only change moves seq and not rev. If you add a field to a record, decide whether the console shows it: if it does, add it to the view, to the `same...View` function and to the parity test (`TestStore_SameViewAgreesWithTheOutput`), or a change to it will not move the rev. The settings rev is the file's keyed checksum and the schedule's is `backup.yaml`'s seq, so neither needs this.
+**The rev rule.** `seq` of a file moves by one on every commit. A record's `rev` becomes the new seq only when the record changes as the admin console sees it (what `userToOutput` or `connToOutput` returns, compared by `sameUserView` and `sameConnView`), otherwise it stays; a create and an import always stamp it. So a password-only change moves seq and not rev. Two-factor is the worked example: the console shows one bit (`twoFactor`), so the first set-up and a reset move the rev, while setting up again and a used recovery code move only seq. If you add a field to a record, decide whether the console shows it: if it does, add it to the view, to the `same...View` function and to the parity test (`TestStore_SameViewAgreesWithTheOutput`), or a change to it will not move the rev. The settings rev is the file's keyed checksum and the schedule's is `backup.yaml`'s seq, so neither needs this.
 
 **Error codes, and how a handler maps them.** A transaction returns typed errors; the handler hands them to `writeStoreError`, which answers the ones below and returns the audit code, and keeps its own mapping (`storeFailed`, `backupFailed`) for the rest.
 
@@ -622,6 +623,17 @@ In practice call the store's methods (`saveUser`, `deleteConnection`, `setSchedu
 **The browser side.** A module keeps the `rev` from its load and sends it on save and delete (0 on Add). A `409 stale` or `404 not_found` goes to `handleConflict` in [src/core/admin-conflict.ts](../src/core/admin-conflict.ts), which shows "changed by someone else" with a Reload button, or says the record was deleted by someone else, and reloads. A stale import clears the preview and asks for a new one. Add a module's own message only for a case that function does not cover (the schedule's `exists`).
 
 **Tests.** Every refusal above, on every endpoint it applies to, with the files, seq and memory unchanged afterwards; a race test (the `test` task runs with `-race` where gcc is available) for a new write path: two saves of one record, a delete against a save, an import against a save; and a crash test through the journal's hooks for anything that changes the commit steps. Test cross-references use the file and test name, as elsewhere.
+
+### Adding a sign-in step
+
+Two-factor sign-in is the pattern to copy (design: [architecture.md -> Two-factor sign-in](architecture.md#two-factor-sign-in); operator view: [provisioned-mode.md -> Two-factor sign-in](provisioned-mode.md#two-factor-sign-in)).
+
+- **No session until the last step passes.** A half-finished sign-in is a ticket (`session.go`, cookie `__Host-smu-signin`), never a session in a new state. Do not teach the gate, the relay or `/managed/*` about it; a ticket opens only its own pages. Give the ticket a stage, and let `need` in `totp.go` (and `twoFactorNeed` in the fake's `authenticator.ts`) say when a step is due, so both gateways answer by one rule.
+- **Count wrong answers.** Every step that checks a secret goes through the sign-in throttle (`takeTurn`), and a refusal writes its audit entry with a code (`bad_code`). A replayable proof (a code) is recorded under the same lock as its check (`totpGuard.check`), never after.
+- **Write through the writer.** A step that stores something is a field-scoped write (`setTOTP`): the proof it relied on is re-checked inside the lock (`expect`), and the session and the audit line are created in its `committed` hook, so the session cannot exist without the change.
+- **Keep secrets out of everything you write down.** The secret, recovery codes and typed codes are never in a log line, an audit entry, an error or a test name. Tests assert it with a sweep, as `TestManagedAPI_AuditNeverHoldsASecret` does for the admin routes.
+- **Stable hooks for tests and the e2e.** The form field names (`code`, `password`, `step`, `next`) and the ids `two-factor-secret`, `recovery-codes` and `two-factor-continue` are the same in `pages/login.html` and in the fake's `pages.ts`. Change one and the other, and `scripts/e2e.mjs` reads them.
+- **Mirror it in the fake and the Demo controls.** The fake follows the real pages' statuses, texts (where the two differ, the real gateway wins and the difference is listed in [demo.md](demo.md#how-it-differs-from-a-real-gateway)), ids and rev rule, and the Authenticator section of the panel shows the mock codes. The contract cases cover the JSON API only; each gateway's own tests and the e2e cover the enrolled paths.
 
 ### TypeScript
 

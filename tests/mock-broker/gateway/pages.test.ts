@@ -2,11 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createGateway } from '../../../src/mock-broker/gateway';
 import { createPages, type Page } from '../../../src/mock-broker/gateway/pages';
 import { demoSeed } from '../../../src/mock-broker/gateway/seed';
+import { mockCode, stepOf } from '../../../src/mock-broker/gateway/authenticator';
 
 /**
  * The gateway's sign-in and password pages (go-web-proxy/pages.go), as the
  * managed demo shows them: the copy, every refusal, the throttle, where a
- * submit lands, and the capture of the app's sign-in links.
+ * submit lands, and the capture of the app's sign-in links. The two-factor
+ * pages (the code page, the enrol page, setting it up again, the recovery
+ * codes) are the last section; the rules behind them are in two-factor.test.ts.
  */
 let gw: ReturnType<typeof createGateway>;
 let landed: Page[];
@@ -233,5 +236,256 @@ describe('mock-broker/gateway/pages -- the app\'s sign-in links', () => {
         expect(pages.current()).toBe('login');
         pages.show('app');
         expect(layer()).toBeNull();
+    });
+});
+
+describe('mock-broker/gateway/pages -- two-factor', () => {
+    const codeNow = (secret: string, step = 0) => mockCode(secret, stepOf(Date.now()) + step);
+    const setMode = (mode: string) => {
+        expect(gw.settings.save({ login: { twoFactor: mode } }, gw.settings.rev()).ok).toBe(true);
+    };
+    const secretShown = () => layer()!.querySelector('#two-factor-secret')!.textContent!;
+    const title = () => layer()?.querySelector('h1')?.textContent ?? null;
+    const signOut = () => {
+        gw.sessions.drop(gw.cookie()!);
+        gw.setCookie(null);
+    };
+    /** `user` has two-factor under `optional`, with the browser signed out; its secret and recovery codes. */
+    function enrolled(user: string, password: string) {
+        setMode('mandatory');
+        gw.signIn(user, password);
+        const secret = gw.ticket()!.secret;
+        const r = gw.confirmTwoFactor(codeNow(secret));
+        if (!r.ok) throw new Error(r.error);
+        signOut();
+        setMode('optional');
+        return { secret, recovery: r.recovery };
+    }
+
+    describe('the enrol page', () => {
+        beforeEach(() => {
+            setMode('mandatory');
+            pages.open('/login');
+            submit({ username: 'viewer', password: 'demo-viewer-0001' });
+        });
+
+        it('follows a password that passes, with no session: the secret in groups of four, a placeholder for the QR code, and where the demo\'s code is', () => {
+            expect(landed).toEqual([]);
+            expect(gw.session()).toBeNull();
+            expect(title()).toBe('Set up two-factor sign-in');
+            expect(secretShown()).toBe(gw.ticket()!.secret.replace(/(.{4})(?=.)/g, '$1 '));
+            expect(secretShown().split(' ')).toHaveLength(8);
+            const qr = layer()!.querySelector('.mgw-qr')!;
+            expect([qr.getAttribute('role'), qr.querySelector('img, svg')]).toEqual(['img', null]);
+            expect(layer()!.textContent).toContain('In this demo, open Demo controls > Authenticator for the code.');
+            expect(layer()!.querySelector<HTMLInputElement>('input[name="step"]')!.value).toBe('confirm');
+            expect(input('code').name).toBe('code');
+            expect(pages.current()).toBe('two-factor');
+        });
+
+        it('refuses a wrong code with the same secret shown again, and stores nothing', () => {
+            const secret = gw.ticket()!.secret;
+            submit({ code: ['000000', '111111'].find(c => ![-1, 0, 1].map(d => codeNow(secret, d)).includes(c))! });
+            expect(error()).toBe('The code is not correct.');
+            expect(secretShown().replace(/ /g, '')).toBe(secret);
+            expect(gw.store.totpOf('viewer')).toBeUndefined();
+            expect(gw.session()).toBeNull();
+        });
+
+        it('shows the ten recovery codes once, as a list, and Continue lands on the app', () => {
+            submit({ code: codeNow(gw.ticket()!.secret) });
+            expect(title()).toBe('Recovery codes');
+            const codes = Array.from(layer()!.querySelectorAll('ol#recovery-codes > li'), li => li.textContent!);
+            expect(codes).toHaveLength(10);
+            for (const c of codes) expect(c).toMatch(/^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/);
+            expect(layer()!.textContent).toContain('They are shown only now.');
+            expect(gw.session()).toEqual({ user: 'viewer', mustChange: false });
+            expect(pages.current()).toBe('app');   // a reload leaves this page
+
+            const next = layer()!.querySelector<HTMLAnchorElement>('a#two-factor-continue')!;
+            const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+            next.dispatchEvent(click);
+            expect([click.defaultPrevented, landed]).toEqual([true, ['app']]);
+        });
+
+        it('sends Continue to the password page when the password must change', () => {
+            pages.open('/login');
+            submit({ username: 'newadmin', password: 'demo-change-me-01' });
+            submit({ code: codeNow(gw.ticket()!.secret) });
+            layer()!.querySelector<HTMLAnchorElement>('#two-factor-continue')!.click();
+            expect(landed).toEqual(['password']);
+        });
+
+        it('sends the browser back to the sign-in when the ticket is gone', () => {
+            gw.tickets.dropUser('viewer');
+            submit({ code: '123456' });
+            expect(title()).toBe('Sign in');
+            expect(error()).toBeNull();
+        });
+    });
+
+    describe('the code page', () => {
+        let secret: string;
+        let recovery: string[];
+        beforeEach(() => {
+            ({ secret, recovery } = enrolled('viewer', 'demo-viewer-0001'));
+            pages.open('/login');
+            submit({ username: 'viewer', password: 'demo-viewer-0001' });
+        });
+
+        it('follows a password that passes, with no session and no way to submit anywhere', () => {
+            expect(title()).toBe('Two-factor sign-in');
+            expect(layer()!.querySelector('form')!.hasAttribute('action')).toBe(false);
+            expect(layer()!.textContent).toContain('Enter the 6-digit code from your authenticator app, or one of your recovery codes.');
+            expect(layer()!.textContent).toContain('In this demo, open Demo controls > Authenticator for the code.');
+            expect(input('code').getAttribute('autocomplete')).toBe('one-time-code');
+            expect([gw.session(), landed, pages.current()]).toEqual([null, [], 'code']);
+            expect(document.activeElement).toBe(input('code'));
+        });
+
+        it('signs in with the code and lands on the app', () => {
+            submit({ code: codeNow(secret) });
+            expect(landed).toEqual(['app']);
+            expect(gw.session()).toEqual({ user: 'viewer', mustChange: false });
+        });
+
+        it('signs in with a recovery code', () => {
+            submit({ code: recovery[0] });
+            expect(landed).toEqual(['app']);
+        });
+
+        it('refuses a wrong code, with the form again and no session', () => {
+            submit({ code: '000000' });
+            expect(error()).toBe('The code is not correct.');
+            expect(title()).toBe('Two-factor sign-in');
+            expect([gw.session(), landed]).toEqual([null, []]);
+        });
+
+        it('sends a forced change on to the password page', () => {
+            const other = enrolled('newadmin', 'demo-change-me-01');
+            pages.open('/login');
+            submit({ username: 'newadmin', password: 'demo-change-me-01' });
+            submit({ code: codeNow(other.secret) });
+            expect(landed).toEqual(['password']);
+        });
+
+        it('says how long to wait when the throttle holds, and refuses the right code', () => {
+            for (let i = 0; i < 5; i++) submit({ code: '000000' });
+            submit({ code: codeNow(secret) });
+            expect(error()).toMatch(/^Too many attempts\. Try again in \d+ seconds\.$/);
+            expect(landed).toEqual([]);
+        });
+
+        it('goes back to the sign-in with the message when the account changed meanwhile', () => {
+            gw.store.setPassword('viewer', 'another-password-1');
+            submit({ code: codeNow(secret) });
+            expect(title()).toBe('Sign in');
+            expect(error()).toBe('Sign-in failed. Check the username and password.');
+        });
+
+        it('is only for a ticket that waits for a code: no ticket is the sign-in, and a session the app', () => {
+            gw.tickets.dropUser('viewer');
+            pages.open('/login/code');
+            expect(title()).toBe('Sign in');
+            gw.signIn('admin', 'demo-admin-0001');   // optional and not enrolled: a session
+            pages.open('/login/code');
+            expect(layer()).toBeNull();
+        });
+    });
+
+    describe('setting it up again', () => {
+        it('offers a signed-in user with none the password alone, then the enrol page and the codes', () => {
+            setMode('optional');
+            gw.signIn('viewer', 'demo-viewer-0001');
+            pages.open('/login/two-factor');
+            expect(title()).toBe('Two-factor sign-in');
+            expect(layer()!.textContent).not.toContain('Setting it up again replaces');
+            expect(layer()!.querySelector<HTMLInputElement>('input[name="step"]')!.value).toBe('verify');
+            expect(layer()!.querySelector('#mgw-code')).toBeNull();
+            expect(pages.current()).toBe('two-factor');
+
+            submit({ password: 'wrong-password' });
+            expect(error()).toBe('The password or the code is not correct.');
+            submit({ password: 'demo-viewer-0001' });
+            expect(layer()!.querySelector('#two-factor-secret')).not.toBeNull();
+            submit({ code: codeNow(gw.ticket()!.secret) });
+            expect(title()).toBe('Recovery codes');
+            expect(gw.store.totpOf('viewer')).toBeDefined();
+        });
+
+        it('asks an enrolled user for a code or a recovery code as well', () => {
+            const { secret } = enrolled('viewer', 'demo-viewer-0001');
+            pages.open('/login');
+            submit({ username: 'viewer', password: 'demo-viewer-0001' });
+            submit({ code: codeNow(secret) });   // the code page, to be signed in
+            pages.open('/login/two-factor');
+            expect(title()).toBe('Two-factor sign-in');
+            expect(layer()!.textContent).toContain('Setting it up again replaces the current one and its recovery codes');
+            expect(layer()!.querySelector('label[for="mgw-code"]')!.textContent).toBe('Current code or a recovery code');
+
+            submit({ password: 'demo-viewer-0001', code: '000000' });
+            expect(error()).toBe('The password or the code is not correct.');
+            expect(title()).toBe('Two-factor sign-in');
+        });
+
+        it('has Cancel back to the app', () => {
+            setMode('optional');
+            gw.signIn('viewer', 'demo-viewer-0001');
+            pages.open('/login/two-factor');
+            layer()!.querySelector<HTMLAnchorElement>('.mgw-links a')!.click();
+            expect([layer(), pages.current()]).toEqual([null, 'app']);
+        });
+
+        it('goes to the sign-in when the session ended before the password was sent', () => {
+            setMode('optional');
+            gw.signIn('viewer', 'demo-viewer-0001');
+            pages.open('/login/two-factor');
+            gw.sessions.expire(gw.cookie()!);
+            submit({ password: 'demo-viewer-0001' });
+            expect(title()).toBe('Sign in');
+        });
+
+        it('says it is not in use while the setting is off, with a way back', () => {
+            gw.signIn('viewer', 'demo-viewer-0001');
+            pages.open('/login/two-factor');
+            expect(title()).toBe('Two-factor sign-in');
+            expect(error()).toBe('Two-factor sign-in is not in use.');
+            expect(pages.current()).toBe('two-factor');
+            layer()!.querySelector<HTMLAnchorElement>('.mgw-links a')!.click();
+            expect(layer()).toBeNull();
+        });
+
+        it('sends a signed-out browser, or a forced change, to where /login goes', () => {
+            pages.open('/login/two-factor');
+            expect(title()).toBe('Sign in');
+            setMode('optional');
+            gw.signIn('newadmin', 'demo-change-me-01');
+            pages.open('/login/two-factor');
+            expect(title()).toBe('Change password');
+        });
+    });
+
+    describe('the app\'s links and a reload', () => {
+        it('catches the Two-factor sign-in link and the code link', () => {
+            setMode('optional');
+            gw.signIn('viewer', 'demo-viewer-0001');
+            link('/login/two-factor').click();
+            expect(pages.current()).toBe('two-factor');
+            pages.hide();
+            link('/login/code').click();
+            expect(layer()).toBeNull();   // a session and no ticket: the app
+        });
+
+        it('shows the page the browser lands on, from the ticket the reload carried', () => {
+            const { secret } = enrolled('viewer', 'demo-viewer-0001');
+            gw.signIn('viewer', 'demo-viewer-0001');
+            pages.show('code');
+            expect(title()).toBe('Two-factor sign-in');
+            gw.submitCode(codeNow(secret));
+            pages.show('two-factor');
+            expect(title()).toBe('Two-factor sign-in');
+            pages.show('app');
+            expect(layer()).toBeNull();
+        });
     });
 });

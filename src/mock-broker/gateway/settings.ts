@@ -5,7 +5,7 @@
  * (connModes and defaultConn reach the next `/hosted`, modules the next
  * `/me`; audit.stdout, audit.access and audit.onFailure the next audit event,
  * which the demo does not write and cannot fail to write: the keys are saved
- * and shown only); restart-only keys are
+ * and shown only; login.twoFactor at the next sign-in); restart-only keys are
  * saved and reported as pending, and the path keys change only "on the host",
  * which the demo has none of.
  *
@@ -23,6 +23,7 @@
  * Mock-only.
  */
 import { BadRequest, fieldOf, string } from './strict';
+import { isTwoFactorMode } from './authenticator';
 import { CATALOG, moduleIdsProblem, quote } from './validate';
 import type { GatewaySettings, SettingsView } from './types';
 
@@ -39,7 +40,7 @@ const SCHEMA: Schema = {
     logLevel: 'string',
     access: { allow: 'strings', trustedProxies: 'strings' },
     session: { idleMinutes: 'int', absoluteMinutes: 'int' },
-    login: { maxFailures: 'int', backoffSeconds: 'int', maxBackoffSeconds: 'int', unauthenticatedPerMinute: 'int' },
+    login: { maxFailures: 'int', backoffSeconds: 'int', maxBackoffSeconds: 'int', unauthenticatedPerMinute: 'int', twoFactor: 'string' },
     modules: { offered: 'strings', userDefault: 'string' },
     audit: { stdout: 'bool', access: 'bool', onFailure: 'string' },
 };
@@ -104,7 +105,7 @@ const ZERO: GatewaySettings = {
     logLevel: '',
     access: { allow: [], trustedProxies: [] },
     session: { idleMinutes: 0, absoluteMinutes: 0 },
-    login: { maxFailures: 0, backoffSeconds: 0, maxBackoffSeconds: 0, unauthenticatedPerMinute: 0 },
+    login: { maxFailures: 0, backoffSeconds: 0, maxBackoffSeconds: 0, unauthenticatedPerMinute: 0, twoFactor: 'off' },
     modules: { offered: [], userDefault: '' },
     audit: { stdout: false, access: false, onFailure: 'continue' },
 };
@@ -251,7 +252,7 @@ export function connModesProblem(s: { connModes: string; defaultConn: string; ho
 }
 
 /** toConfig plus fileConfigFromConfig: the file as the gateway would save it, or the first problem. */
-function normalize(f: GatewaySettings): { ok: true; value: GatewaySettings } | { ok: false; reason: string } {
+function normalize(f: GatewaySettings): { ok: true; value: GatewaySettings } | { ok: false; reason: string; field?: string } {
     const level = parseLogLevel(f.logLevel);
     if (!level) return { ok: false, reason: `key "logLevel" has invalid value ${quote(f.logLevel)}: must be one of debug, info, warn, error` };
     const allow = cidrList('access.allow', f.access.allow);
@@ -274,6 +275,12 @@ function normalize(f: GatewaySettings): { ok: true; value: GatewaySettings } | {
         ?? (['continue', 'refuse'].includes(f.audit.onFailure) ? null
             : `key "audit.onFailure" has invalid value ${quote(f.audit.onFailure)}: must be "continue" or "refuse"`);
     if (modulesProblem) return { ok: false, reason: modulesProblem };
+    if (!isTwoFactorMode(l.twoFactor)) {
+        return {
+            ok: false, field: 'login.twoFactor',
+            reason: `key "login.twoFactor" has invalid value ${quote(l.twoFactor)}: must be "off", "optional", "admins" or "mandatory"`,
+        };
+    }
     const value: GatewaySettings = {
         ...clone(f),
         connModes: f.connModes.toLowerCase(),
@@ -319,10 +326,11 @@ export type SaveResult = { ok: true; restartRequired: string[]; rev: string } | 
 const UNREADABLE_REASON = 'The gateway cannot read config.yaml (demo: the control panel made it unreadable). '
     + 'Fix the file on the gateway host, then reload this page.';
 
-/** A file's settings with the audit keys it may lack (an older seed, backup or snapshot): the zero value's. */
+/** A file's settings with the keys it may lack (an older seed, backup or snapshot): audit and login.twoFactor, the zero value's. */
 const withAuditDefaults = (s: GatewaySettings): GatewaySettings => {
     const c = clone(s);
     c.audit = { ...ZERO.audit, ...c.audit };
+    c.login = { ...ZERO.login, ...c.login };
     return c;
 };
 
@@ -383,7 +391,7 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
                 }
             }
             const n = normalize(body);
-            if (!n.ok) return { ok: false, status: 422, error: 'invalid', field: 'settings', reason: n.reason };
+            if (!n.ok) return { ok: false, status: 422, error: 'invalid', field: n.field ?? 'settings', reason: n.reason };
             // saveSettings (settings.go): Direct alone would end Provisioned mode,
             // and the console with it, at the next restart.
             if (n.value.connModes === 'direct') {

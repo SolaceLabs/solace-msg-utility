@@ -77,6 +77,17 @@
         <input type="number" id="gw-set-login-unauthenticatedPerMinute" class="form-control" min="1" step="1">
     </div>
 
+    <h3 class="gw-set-section">Two-factor sign-in</h3>
+    <div class="form-group" data-key="login.twoFactor">
+        <label for="gw-set-login-twoFactor">Two-factor sign-in (code from an authenticator app)</label>
+        <select id="gw-set-login-twoFactor" class="form-control">
+            <option value="off">Off</option>
+            <option value="optional">Optional</option>
+            <option value="admins">Administrators must use it</option>
+            <option value="mandatory">Everyone must use it</option>
+        </select>
+    </div>
+
     <h3 class="gw-set-section">Modules</h3>
     <div class="form-group" data-key="modules.offered">
         <label>Modules signed-in users may be given</label>

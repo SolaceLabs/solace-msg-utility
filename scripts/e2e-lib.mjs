@@ -2,7 +2,7 @@
 // and their file, the session-cookie rules, the sealed-store header, and the
 // secret sweep and masking. No network and no files, so
 // tests/build/e2e-lib.test.ts covers them without Docker or a broker.
-import { X509Certificate, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
+import { X509Certificate, createHmac, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import net from 'node:net';
 
 // --- X.509 -------------------------------------------------------------------
@@ -377,6 +377,7 @@ export function detailsFileText(existing, additions) {
 // --- cookies -----------------------------------------------------------------
 
 export const SESSION_COOKIE = '__Host-smu-session';
+export const SIGNIN_COOKIE = '__Host-smu-signin';
 
 /** One Set-Cookie line as { name, value, attrs }, attribute names lower-cased; null when it has no name=value. */
 export function parseSetCookie(line) {
@@ -412,25 +413,31 @@ export function createCookieJar() {
 }
 
 /**
- * What is wrong with the gateway's sign-in cookie in a response's Set-Cookie
- * lines; empty when it is right: exactly one __Host-smu-session with a value,
- * Secure, HttpOnly, SameSite=Lax, Path=/, no Domain, and no Max-Age or Expires
- * (it lasts the browser session).
+ * What is wrong with one of the gateway's cookies in a response's Set-Cookie
+ * lines; empty when it is right: exactly one cookie of that name with a value,
+ * Secure, HttpOnly, the SameSite value wanted, Path=/, no Domain, and no
+ * Max-Age or Expires (it lasts the browser session).
  */
-export function sessionCookieProblems(lines = []) {
-    const found = lines.map(parseSetCookie).filter((c) => c && c.name === SESSION_COOKIE);
-    if (found.length !== 1) return [`want one ${SESSION_COOKIE} cookie, got ${found.length}`];
+function cookieProblems(lines, name, sameSite) {
+    const found = lines.map(parseSetCookie).filter((c) => c && c.name === name);
+    if (found.length !== 1) return [`want one ${name} cookie, got ${found.length}`];
     const { value, attrs } = found[0];
     const problems = [];
     if (!value) problems.push('empty value');
     if (attrs.secure !== true) problems.push('not Secure');
     if (attrs.httponly !== true) problems.push('not HttpOnly');
-    if (String(attrs.samesite).toLowerCase() !== 'lax') problems.push(`SameSite=${attrs.samesite ?? '(absent)'}, want Lax`);
+    if (String(attrs.samesite).toLowerCase() !== sameSite.toLowerCase()) problems.push(`SameSite=${attrs.samesite ?? '(absent)'}, want ${sameSite}`);
     if (attrs.path !== '/') problems.push(`Path=${attrs.path ?? '(absent)'}, want /`);
     if ('domain' in attrs) problems.push('has a Domain');
     if ('max-age' in attrs || 'expires' in attrs) problems.push('outlives the browser session (Max-Age or Expires)');
     return problems;
 }
+
+/** The session cookie: SameSite=Lax. */
+export const sessionCookieProblems = (lines = []) => cookieProblems(lines, SESSION_COOKIE, 'Lax');
+
+/** The sign-in ticket cookie of a half-finished sign-in (a code or a set-up is due): SameSite=Strict. */
+export const signinCookieProblems = (lines = []) => cookieProblems(lines, SIGNIN_COOKIE, 'Strict');
 
 // --- stores ------------------------------------------------------------------
 
@@ -583,12 +590,16 @@ export function wroteFile(entry, file) {
  * of `settingsKeys`, and backup.export and backup.import entries, all ok; and
  * the files the changes wrote: the ok user.create of `user` wrote users.yaml
  * at a seq, an ok settings.update wrote config.yaml, and an ok backup.import
- * wrote users.yaml, connections.yaml and config.yaml.
+ * wrote users.yaml, connections.yaml and config.yaml. With `twoFactorUser`
+ * (the user checks 24 to 27 enrolled and an administrator reset) it also
+ * wants: an ok twofactor.enrol for that user and an ok user.twofactor.reset of
+ * that user by an administrator, each having written users.yaml at a seq, and
+ * a refused signin with code bad_code.
  * @param {Array<Record<string, any>>} entries
- * @param {{ user: string, settingsKeys: string[] }} want
+ * @param {{ user: string, settingsKeys: string[], twoFactorUser?: string }} want
  * @returns {string[]} what is missing
  */
-export function auditMissing(entries, { user, settingsKeys }) {
+export function auditMissing(entries, { user, settingsKeys, twoFactorUser }) {
     const has = (pred) => entries.some(pred);
     const missing = [];
     // A refused sign-in has no actor (nobody signed in); its target is the account tried.
@@ -613,6 +624,15 @@ export function auditMissing(entries, { user, settingsKeys }) {
     if (!has((e) => e.action === 'backup.import' && e.outcome === 'ok'
         && ['users.yaml', 'connections.yaml', 'config.yaml'].every((f) => wroteFile(e, f)))) {
         missing.push('an ok backup.import that wrote users.yaml, connections.yaml and config.yaml');
+    }
+    if (twoFactorUser) {
+        if (!has((e) => e.action === 'twofactor.enrol' && e.outcome === 'ok' && e.target === twoFactorUser && wroteFile(e, 'users.yaml'))) {
+            missing.push(`an ok twofactor.enrol for ${twoFactorUser} that wrote users.yaml with a seq`);
+        }
+        if (!has((e) => e.action === 'user.twofactor.reset' && e.outcome === 'ok' && e.actor === 'admin' && e.target === twoFactorUser && wroteFile(e, 'users.yaml'))) {
+            missing.push(`an ok user.twofactor.reset of ${twoFactorUser} by admin that wrote users.yaml with a seq`);
+        }
+        if (!has((e) => e.action === 'signin' && e.outcome === 'refused' && e.code === 'bad_code')) missing.push('a refused signin with code bad_code');
     }
     return missing;
 }
@@ -667,4 +687,129 @@ export function refusalProblem(res, want) {
  */
 export function basisMoved(seen, now) {
     return ['users', 'connections', 'settings'].filter((k) => seen?.[k] !== now?.[k]);
+}
+
+/**
+ * One record of a list answer ({ users: [...] }, { connections: [...] }), as
+ * the admin console reads it.
+ * @param {string} text the response body
+ * @param {string} list the key that holds the array
+ * @param {string} key the field that names a record ("username", "broker")
+ * @param {string} name
+ * @returns {Record<string, any> | null} null when the record is absent or the answer is not a list
+ */
+export function listedRow(text, list, key, name) {
+    let rows;
+    try {
+        rows = JSON.parse(text)?.[list];
+    } catch {
+        return null;
+    }
+    return (Array.isArray(rows) ? rows.find((r) => r?.[key] === name) : undefined) ?? null;
+}
+
+// --- two-factor sign-in --------------------------------------------------------
+// TOTP as RFC 6238 gives it for the gateway: HMAC-SHA-1, 6 digits, 30 s steps,
+// T0 = 0, the secret as unpadded upper-case base32. The gateway accepts the
+// step now and one either side, and refuses a step at or below the last one it
+// accepted for the user. The page readers hold to the ids the sign-in pages
+// carry (go-web-proxy/pages/login.html).
+
+const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+export const TOTP_STEP_SECONDS = 30;
+
+/** The bytes of an unpadded upper-case base32 text (RFC 4648). Throws on any other character. */
+export function base32Decode(text) {
+    let bits = 0;
+    let acc = 0;
+    const out = [];
+    for (const ch of String(text)) {
+        const v = BASE32.indexOf(ch);
+        if (v < 0) throw new Error(`not base32 (A-Z 2-7): ${JSON.stringify(ch)}`);
+        acc = (acc << 5) | v;
+        bits += 5;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push((acc >>> bits) & 0xff);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    return Buffer.from(out);
+}
+
+/** The 30-second step a time in milliseconds falls in. */
+export const totpStep = (ms) => Math.floor(ms / 1000 / TOTP_STEP_SECONDS);
+
+/** The 6-digit code of a base32 secret for a step number. */
+export function totpCode(secret, step) {
+    const counter = Buffer.alloc(8);
+    counter.writeBigUInt64BE(BigInt(step));
+    const h = createHmac('sha1', base32Decode(secret)).update(counter).digest();
+    const o = h[h.length - 1] & 0x0f;
+    const bin = ((h[o] & 0x7f) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3];
+    return String(bin % 1_000_000).padStart(6, '0');
+}
+
+/** The code for a time in seconds since the epoch (the RFC's test vectors are given that way). */
+export const totpAt = (secret, seconds) => totpCode(secret, Math.floor(seconds / TOTP_STEP_SECONDS));
+
+/**
+ * A code the gateway will accept now and has not accepted yet: the current
+ * step, or the next one when the current is used up (steps at or below
+ * `lastStep` are refused). null when even the next step is used up, so the
+ * caller waits for the clock. A wait is at most one step.
+ * @param {string} secret
+ * @param {number} nowMs
+ * @param {number} [lastStep] the last step the gateway accepted, -1 for none
+ * @returns {{ code: string, step: number } | null}
+ */
+export function freshTotp(secret, nowMs, lastStep = -1) {
+    const now = totpStep(nowMs);
+    const step = Math.max(now, lastStep + 1);
+    return step > now + 1 ? null : { code: totpCode(secret, step), step };
+}
+
+/** A 6-digit code that is none of the codes of the steps around now, so it is refused whatever the clock skew. */
+export function wrongTotp(secret, nowMs) {
+    const now = totpStep(nowMs);
+    const near = new Set([-2, -1, 0, 1, 2].map((d) => totpCode(secret, now + d)));
+    // Six candidates against at most five codes: one is always free.
+    return ['000000', '000001', '000002', '000003', '000004', '000005'].find((code) => !near.has(code));
+}
+
+const TAG = (id, tagName) => new RegExp(`<${tagName}\\b[^>]*\\bid="${id}"[^>]*>`);
+const unescapeHtml = (t) => t.replace(/&(amp|lt|gt|quot|#34|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#34': '"', '#39': "'" })[e]);
+
+/**
+ * The secret an enrol page shows in <code id="two-factor-secret">: eight
+ * groups of four base32 characters separated by single spaces, returned
+ * without the spaces. null when the page has none or it is not in that shape.
+ */
+export function twoFactorSecretFromPage(html) {
+    const m = /<code\b[^>]*\bid="two-factor-secret"[^>]*>([^<]*)<\/code>/.exec(String(html));
+    const text = m ? unescapeHtml(m[1]).trim() : '';
+    return /^[A-Z2-7]{4}( [A-Z2-7]{4}){7}$/.test(text) ? text.replace(/ /g, '') : null;
+}
+
+/** The <li> texts of the recovery page's <ol id="recovery-codes">; an empty list when the page has none. */
+export function recoveryCodesFromPage(html) {
+    const m = /<ol\b[^>]*\bid="recovery-codes"[^>]*>([\s\S]*?)<\/ol>/.exec(String(html));
+    return m ? [...m[1].matchAll(/<li>([^<]*)<\/li>/g)].map((x) => unescapeHtml(x[1]).trim()) : [];
+}
+
+const RECOVERY_SHAPE = /^[A-HJ-NP-Z2-9]{4}(-[A-HJ-NP-Z2-9]{4}){3}$/;
+
+/** Why a recovery code list is not what the gateway shows (ten distinct XXXX-XXXX-XXXX-XXXX codes), or ''. Never repeats a code. */
+export function recoveryCodeProblems(codes) {
+    if (codes.length !== 10) return `want 10 recovery codes, got ${codes.length}`;
+    const bad = codes.filter((c) => !RECOVERY_SHAPE.test(c)).length;
+    if (bad) return `${bad} of the recovery codes are not XXXX-XXXX-XXXX-XXXX`;
+    return new Set(codes).size === codes.length ? '' : 'the recovery codes are not all different';
+}
+
+/** The href of the recovery page's <a id="two-factor-continue">; null when the page has no such link. */
+export function continueLinkFromPage(html) {
+    const tag = TAG('two-factor-continue', 'a').exec(String(html));
+    const href = tag ? /\bhref="([^"]*)"/.exec(tag[0]) : null;
+    return href ? unescapeHtml(href[1]) : null;
 }

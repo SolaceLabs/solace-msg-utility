@@ -16,7 +16,10 @@
 // credentials it was given. What the run does change is the Provisioned
 // gateway: checks 11, 12 and B3 take the e2e user's grant away or change a
 // setting, and each puts back what it changed, since the checks after them
-// expect the gateway as configureGateway left it.
+// expect the gateway as configureGateway left it. Checks 24-27 turn two-factor
+// sign-in on (login.twoFactor optional, then mandatory) for a scratch user and
+// put the setting back to off and remove the user when they are done, whatever
+// a check found.
 //
 // E2E_BROKER_ADDR maps E2E_BROKER_HOST to that address inside both gateway
 // containers (a host alias, through a compose override under scripts/logs/e2e/),
@@ -35,7 +38,7 @@
 // so at the start and in its summary: checks 3, 4, 6, 11 and 12 and D2-D4 pass
 // without proving the broker's TLS is trusted.
 //
-// Every check prints PASS or FAIL with its id: 1-23, B1-B9 in the browser and
+// Every check prints PASS or FAIL with its id: 1-27, B1-B9 in the browser and
 // D1-D4 in Gateway mode. Any FAIL, or a setup step that cannot complete, exits
 // 1. The gateway's passwords and its TLS material are generated
 // per run, written only under scripts/logs/e2e/ (git-ignored, deleted at the
@@ -74,9 +77,10 @@ import readline from 'node:readline';
 import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import {
-    MIN_MASKED, SESSION_COOKIE, aliasAddress, auditMissing, basisMoved, createCookieJar, detailsFileText, dnsServers, findTokens, hostRootBundle, issueCert,
-    jsonFindings, hostAliasProblem, listedRev, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates,
-    refusalProblem, resolutionOverride, resolveDetails, resolverLookup, sealedHeaderProblem, sessionCookieProblems, sweepSecrets,
+    MIN_MASKED, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, basisMoved, continueLinkFromPage, createCookieJar, detailsFileText, dnsServers,
+    findTokens, freshTotp, hostRootBundle, issueCert, jsonFindings, hostAliasProblem, listedRev, listedRow, makeCA, maskSecrets, parseAuditLog,
+    parseDetailsFile, parseSetCookie, pemCertificates, recoveryCodeProblems, recoveryCodesFromPage, refusalProblem, resolutionOverride, resolveDetails,
+    resolverLookup, sealedHeaderProblem, sessionCookieProblems, signinCookieProblems, sweepSecrets, twoFactorSecretFromPage, wrongTotp,
 } from './e2e-lib.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -125,9 +129,15 @@ const brokerSecrets = {};
 // Session cookie values as they are issued: masked like the secrets, and
 // swept for in the gateway log.
 const cookies = {};
+// What checks 24-27 learn from the sign-in pages: the scratch user's TOTP
+// secret (as one text and as the page groups it) and their recovery codes (as
+// shown and without hyphens). Masked in all output and swept for in the
+// gateway log and the audit log (check 17), but not in the responses of check
+// 13, which runs earlier: the pages that show them are meant to.
+const twoFactor = {};
 
 function say(text) {
-    const line = maskSecrets(maskSecrets(text, { ...secrets, ...cookies }), brokerSecrets, { min: 1 });
+    const line = maskSecrets(maskSecrets(text, { ...secrets, ...cookies, ...twoFactor }), brokerSecrets, { min: 1 });
     console.log(line);
     if (LOG) fs.appendFileSync(LOG, `${line}\n`);
 }
@@ -356,6 +366,7 @@ function noteCookies(lines) {
     for (const line of lines) {
         const c = parseSetCookie(line);
         if (c?.name === SESSION_COOKIE && c.value) cookies[`session cookie ${Object.keys(cookies).length + 1}`] = c.value;
+        if (c?.name === SIGNIN_COOKIE && c.value) cookies[`sign-in ticket ${Object.keys(cookies).length + 1}`] = c.value;
     }
 }
 
@@ -438,6 +449,38 @@ async function removeScratch(jar) {
     if (rev === null) return;
     const res = await request('DELETE', `/managed/users/${SCRATCH}?rev=${rev}`, { jar });
     expect(res.status === 204, `removing ${SCRATCH}: want 204, got ${res.status} ${res.body}`);
+}
+
+/** The login.twoFactor the harness last saved: the gateway starts with off, and the two-factor checks put it back. */
+let twoFactorMode = 'off';
+
+/** Sets login.twoFactor (off, optional, admins or mandatory); the gateway reads it at each sign-in. */
+async function setTwoFactorMode(jar, mode) {
+    const res = await saveSettings(jar, { login: { twoFactor: mode } });
+    expect(res.status === 200, `setting login.twoFactor ${mode}: want 200, got ${res.status} ${res.body.slice(0, 200)}`);
+    twoFactorMode = mode;
+}
+
+/** The Set-Cookie lines that issue a session cookie with a value. */
+const issuesSession = (res) => res.setCookie.some((l) => {
+    const c = parseSetCookie(l);
+    return c?.name === SESSION_COOKIE && c.value !== '';
+});
+
+/** Where a response redirects to, without its query: the redirect's page. */
+const redirectPage = (res) => (res.status === 303 ? (res.headers.location ?? '').split('?')[0] : `${res.status}`);
+
+/**
+ * A code the gateway will take now and has not taken yet for this secret (the
+ * steps at or below `last` are used up): waits for the next 30 second step when
+ * both of the usable ones are spent. { code, step }.
+ */
+async function freshCode(secret, last) {
+    for (;;) {
+        const f = freshTotp(secret, Date.now(), last);
+        if (f) return f;
+        await sleep(1000);
+    }
 }
 
 /** False once the compose service has no running container. A failed `ps` counts as running. */
@@ -1036,17 +1079,196 @@ async function runChecks(admin) {
             }
         });
 
+        // Two-factor sign-in on the scratch user, in order: 24 sets it up (the
+        // secret is read off the page), 25 and 26 sign in with a code and with a
+        // recovery code, 27 resets it as an administrator under `mandatory`. Each
+        // sets the mode it needs; the finally puts the mode back to off and removes
+        // the user whatever a check found, because the audit check (19) and the
+        // restart (15) after them expect the gateway as it was.
+        const tf = { secret: '', recovery: [], last: -1 };
+        try {
+            await check(24, "with login.twoFactor optional the user sets two-factor up on /login/two-factor with their password and a code for the secret on the page, is shown 10 recovery codes once, and their other session ends", async () => {
+                await createScratch(admin);
+                await setTwoFactorMode(admin, 'optional');
+                const other = createCookieJar();
+                const here = createCookieJar();
+                for (const jar of [other, here]) {
+                    const s = await signIn(jar, SCRATCH, secrets.scratchPassword);
+                    expect(s.status === 303 && s.headers.location === '/', `sign-in before set-up (optional asks nobody for a code): want 303 to /, got ${s.status} ${s.headers.location ?? ''}`);
+                }
+                const before = await request('GET', '/managed/me', { jar: other });
+                expect(before.status === 200 && JSON.parse(before.body).twoFactor?.enrolled === false, `/managed/me before set-up: ${before.status} ${before.body.slice(0, 300)}`);
+                const page = await request('GET', '/login/two-factor', { jar: here });
+                expect(page.status === 200 && page.body.includes('name="step" value="verify"'), `GET /login/two-factor signed in: want the set-up page, got ${page.status}`);
+                expect(!page.body.includes('name="code"'), 'a user without two-factor is asked for no code on the set-up page');
+                // The wrong password stops before a secret exists.
+                const wrongPassword = await request('POST', '/login/two-factor', { jar: here, form: { step: 'verify', password: secrets.scratchNewPassword, next: '/' } });
+                expect(wrongPassword.status === 401 && !twoFactorSecretFromPage(wrongPassword.body) && !here.get(SIGNIN_COOKIE),
+                    `a wrong password at the set-up: want 401, no secret and no ticket cookie, got ${wrongPassword.status}`);
+                const verify = await request('POST', '/login/two-factor', { jar: here, form: { step: 'verify', password: secrets.scratchPassword, next: '/' } });
+                expect(verify.status === 200, `the set-up password step: want 200 with the enrol page, got ${verify.status} ${verify.body.slice(0, 200)}`);
+                const secret = twoFactorSecretFromPage(verify.body);
+                expect(secret !== null, 'the enrol page has no <code id="two-factor-secret"> of eight groups of four base32 characters');
+                twoFactor.secret = secret;
+                twoFactor['secret in groups'] = secret.match(/.{4}/g).join(' ');
+                const ticket = signinCookieProblems(verify.setCookie);
+                expect(ticket.length === 0, `the set-up ticket cookie: ${ticket.join(', ')}`);
+                // Nothing is stored until a right code arrives: the wrong one is refused with the same secret.
+                const wrong = await request('POST', '/login/two-factor', { jar: here, form: { step: 'confirm', code: wrongTotp(secret, Date.now()), next: '/' } });
+                expect(wrong.status === 401 && wrong.body.includes('The code is not correct.') && twoFactorSecretFromPage(wrong.body) === secret,
+                    `a wrong code at the confirm step: want 401 with the same secret, got ${wrong.status}`);
+                const stillOff = await request('GET', '/managed/users', { jar: admin });
+                expect(listedRow(stillOff.body, 'users', 'username', SCRATCH)?.twoFactor === false, 'the user list shows two-factor On after a wrong code');
+                const f = await freshCode(secret, -1);
+                const confirm = await request('POST', '/login/two-factor', { jar: here, form: { step: 'confirm', code: f.code, next: '/' } });
+                expect(confirm.status === 200, `the confirm step: want 200 with the recovery page, got ${confirm.status} ${confirm.body.slice(0, 200)}`);
+                tf.secret = secret;
+                tf.last = f.step;
+                const codes = recoveryCodesFromPage(confirm.body);
+                const bad = recoveryCodeProblems(codes);
+                expect(bad === '', `the recovery page: ${bad}`);
+                codes.forEach((c, i) => {
+                    twoFactor[`recovery code ${i + 1}`] = c;
+                    twoFactor[`recovery code ${i + 1} plain`] = c.replace(/-/g, '');
+                });
+                tf.recovery = codes;
+                expect(continueLinkFromPage(confirm.body) === '/', `the Continue link: want /, got ${continueLinkFromPage(confirm.body)}`);
+                expect(!here.get(SIGNIN_COOKIE), 'the ticket cookie outlived the set-up');
+                // The browser that set it up stays signed in; the other session ends.
+                const mine = await request('GET', '/managed/me', { jar: here });
+                expect(mine.status === 200 && JSON.parse(mine.body).twoFactor?.enrolled === true, `/managed/me for the browser that set it up: ${mine.status} ${mine.body.slice(0, 300)}`);
+                const ended = await request('GET', '/managed/me', { jar: other });
+                expect(ended.status === 401, `the other session after the set-up: want 401, got ${ended.status}`);
+                // The codes are shown once: the page that follows asks for a code and lists none.
+                const again = await request('GET', '/login/two-factor', { jar: here });
+                expect(again.status === 200 && again.body.includes('name="code"') && recoveryCodesFromPage(again.body).length === 0,
+                    `/login/two-factor after the set-up: want the set-up-again page asking for a code and listing none, got ${again.status}`);
+                const listed = await request('GET', '/managed/users', { jar: admin });
+                expect(listedRow(listed.body, 'users', 'username', SCRATCH)?.twoFactor === true, 'the user list does not show two-factor On');
+            });
+
+            await check(25, 'the next sign-in stops at /login/code with no session cookie, a wrong code is refused, the right one signs in, and the same code again is refused', async () => {
+                expect(tf.secret !== '', 'check 24 set no two-factor up, so there is nothing to sign in with');
+                await setTwoFactorMode(admin, 'optional');
+                const signedIn = async (jar) => (await request('GET', '/managed/me', { jar })).status === 200;
+                const jar = createCookieJar();
+                const first = await signIn(jar, SCRATCH, secrets.scratchPassword);
+                expect(redirectPage(first) === '/login/code', `password sign-in of a user with two-factor: want 303 to /login/code, got ${first.status} ${first.headers.location ?? ''}`);
+                expect(!issuesSession(first) && !jar.get(SESSION_COOKIE), 'a session cookie was issued before the code');
+                const ticket = signinCookieProblems(first.setCookie);
+                expect(ticket.length === 0, `the sign-in ticket cookie: ${ticket.join(', ')}`);
+                expect(!(await signedIn(jar)), 'the half-finished sign-in already holds a session');
+                const page = await request('GET', '/login/code', { jar });
+                expect(page.status === 200 && page.body.includes('name="code"'), `GET /login/code with the ticket: want the code page, got ${page.status}`);
+                const wrong = await request('POST', '/login/code', { jar, form: { code: wrongTotp(tf.secret, Date.now()), next: '/' } });
+                expect(wrong.status === 401 && wrong.body.includes('The code is not correct.') && !issuesSession(wrong), `a wrong code: want 401 and no session, got ${wrong.status}`);
+                expect(!(await signedIn(jar)), 'a wrong code opened a session');
+                const f = await freshCode(tf.secret, tf.last);
+                const right = await request('POST', '/login/code', { jar, form: { code: f.code, next: '/' } });
+                expect(right.status === 303 && right.headers.location === '/', `the right code: want 303 to /, got ${right.status} ${right.headers.location ?? ''}`);
+                const problems = sessionCookieProblems(right.setCookie);
+                expect(problems.length === 0, `the session cookie after the code: ${problems.join(', ')}`);
+                expect(!jar.get(SIGNIN_COOKIE), 'the ticket cookie outlived the sign-in');
+                expect(await signedIn(jar), 'the right code did not open a session');
+                tf.last = f.step;
+                // The same code from a second, fresh sign-in is a replay.
+                const replayJar = createCookieJar();
+                const second = await signIn(replayJar, SCRATCH, secrets.scratchPassword);
+                expect(redirectPage(second) === '/login/code', `second password sign-in: want 303 to /login/code, got ${second.status}`);
+                const replay = await request('POST', '/login/code', { jar: replayJar, form: { code: f.code, next: '/' } });
+                expect(replay.status === 401 && !issuesSession(replay) && !(await signedIn(replayJar)), `the same code again: want 401 and no session, got ${replay.status}`);
+            });
+
+            await check(26, 'a recovery code signs in once and not twice', async () => {
+                expect(tf.recovery.length === 10, 'check 24 recorded no recovery codes');
+                await setTwoFactorMode(admin, 'optional');
+                const code = tf.recovery[0];
+                const jar = createCookieJar();
+                const first = await signIn(jar, SCRATCH, secrets.scratchPassword);
+                expect(redirectPage(first) === '/login/code', `password sign-in: want 303 to /login/code, got ${first.status}`);
+                const used = await request('POST', '/login/code', { jar, form: { code, next: '/' } });
+                expect(used.status === 303 && used.headers.location === '/', `a recovery code: want 303 to /, got ${used.status} ${used.headers.location ?? ''}`);
+                const me = await request('GET', '/managed/me', { jar });
+                expect(me.status === 200, `/managed/me after a recovery code: want 200, got ${me.status}`);
+                const again = createCookieJar();
+                const second = await signIn(again, SCRATCH, secrets.scratchPassword);
+                expect(redirectPage(second) === '/login/code', `second password sign-in: want 303 to /login/code, got ${second.status}`);
+                const replay = await request('POST', '/login/code', { jar: again, form: { code, next: '/' } });
+                expect(replay.status === 401 && replay.body.includes('The code is not correct.') && !issuesSession(replay),
+                    `the same recovery code again: want 401 and no session, got ${replay.status}`);
+                const gone = await request('GET', '/managed/me', { jar: again });
+                expect(gone.status === 401, `/managed/me after the refused code: want 401, got ${gone.status}`);
+            });
+
+            await check(27, "with login.twoFactor mandatory a user without two-factor is sent to set it up, and an administrator's reset shows Off in the list, ends the user's sessions and is repeatable", async () => {
+                expect(tf.recovery.length === 10, 'check 24 recorded no recovery codes');
+                await setTwoFactorMode(admin, 'mandatory');
+                try {
+                    const jar = createCookieJar();
+                    const first = await signIn(jar, SCRATCH, secrets.scratchPassword);
+                    expect(redirectPage(first) === '/login/code', `mandatory, enrolled: want 303 to /login/code, got ${first.status}`);
+                    const used = await request('POST', '/login/code', { jar, form: { code: tf.recovery[1], next: '/' } });
+                    expect(used.status === 303, `a recovery code under mandatory: want 303, got ${used.status}`);
+                    const me = await request('GET', '/managed/me', { jar });
+                    const profile = me.status === 200 ? JSON.parse(me.body) : {};
+                    expect(profile.twoFactor?.mode === 'mandatory' && profile.twoFactor?.enrolled === true, `/managed/me: ${me.status} ${me.body.slice(0, 300)}`);
+                    // A reset needs an administrator's session: without one nothing changes.
+                    const anonymous = await request('DELETE', `/managed/users/${SCRATCH}/totp`, {});
+                    expect(anonymous.status === 401, `a reset without a session: want 401, got ${anonymous.status}`);
+                    const listed = await request('GET', '/managed/users', { jar: admin });
+                    const row = listedRow(listed.body, 'users', 'username', SCRATCH);
+                    expect(row?.twoFactor === true, `the user list before the reset: ${JSON.stringify(row)}`);
+                    const reset = await request('DELETE', `/managed/users/${SCRATCH}/totp`, { jar: admin });
+                    const rev = reset.status === 200 ? JSON.parse(reset.body).rev : null;
+                    expect(Number.isInteger(rev) && rev > row.rev, `the reset: want 200 with a rev above ${row.rev}, got ${reset.status} ${reset.body}`);
+                    const after = listedRow((await request('GET', '/managed/users', { jar: admin })).body, 'users', 'username', SCRATCH);
+                    expect(after?.twoFactor === false && after.rev === rev, `the user list after the reset: want Off at rev ${rev}, got ${JSON.stringify(after)}`);
+                    const ended = await request('GET', '/managed/me', { jar });
+                    expect(ended.status === 401, `the user's session after the reset: want 401, got ${ended.status}`);
+                    // Nothing left to remove: the same answer, the rev where it was. An unknown user is not_found.
+                    const repeat = await request('DELETE', `/managed/users/${SCRATCH}/totp`, { jar: admin });
+                    expect(repeat.status === 200 && JSON.parse(repeat.body).rev === rev, `a second reset: want 200 at rev ${rev}, got ${repeat.status} ${repeat.body}`);
+                    const unknown = await request('DELETE', '/managed/users/e2e-nobody/totp', { jar: admin });
+                    const refusal = refusalProblem(unknown, { status: 404, error: 'not_found' });
+                    expect(refusal === '', `a reset of an unknown user: ${refusal}`);
+                    // Under mandatory the next sign-in has to set it up before any session exists.
+                    const fresh = createCookieJar();
+                    const next = await signIn(fresh, SCRATCH, secrets.scratchPassword);
+                    expect(redirectPage(next) === '/login/two-factor', `mandatory, not enrolled: want 303 to /login/two-factor, got ${next.status} ${next.headers.location ?? ''}`);
+                    expect(!issuesSession(next) && !fresh.get(SESSION_COOKIE), 'a session cookie was issued before two-factor was set up');
+                    const ticket = signinCookieProblems(next.setCookie);
+                    expect(ticket.length === 0, `the enrol ticket cookie: ${ticket.join(', ')}`);
+                    const enrol = await request('GET', '/login/two-factor', { jar: fresh });
+                    const secret = enrol.status === 200 ? twoFactorSecretFromPage(enrol.body) : null;
+                    expect(secret !== null, `GET /login/two-factor with the ticket: want the enrol page with a secret, got ${enrol.status}`);
+                    twoFactor['enrol secret'] = secret;
+                    expect((await request('GET', '/managed/me', { jar: fresh })).status === 401, 'a half-finished set-up already holds a session');
+                } finally {
+                    await setTwoFactorMode(admin, 'off');
+                }
+            });
+        } finally {
+            // Put back what 24-27 changed, even when one of them failed half way.
+            for (const [what, undo] of [['the mode', async () => { if (twoFactorMode !== 'off') await setTwoFactorMode(admin, 'off'); }], ['the scratch user', () => removeScratch(admin)]]) {
+                try {
+                    await undo();
+                } catch (e) {
+                    say(`error: restoring ${what} after the two-factor checks: ${e.message}`);
+                }
+            }
+        }
+
         // After 18 and before the restart of 15: the audit trail is plain JSON by
         // design (so check 14's sealed-store checks do not apply to it), and
         // every sign-in, settings change and backup above has left a line.
-        await check(19, 'the audit log (/data/audit.log) holds one JSON entry per line with the decided fields: the refused and the ok sign-in, the settings change, the backup export and import', async () => {
+        await check(19, 'the audit log (/data/audit.log) holds one JSON entry per line with the decided fields: the refused and the ok sign-in, the settings change, the backup export and import, the two-factor set-up, a refused code and the administrator\'s reset', async () => {
             const dest = path.join(WORK, 'at-rest-audit.log');
             const cp = compose(['cp', 'gateway:/data/audit.log', dest], { quiet: true });
             expect(cp.code === 0, `docker compose cp audit.log: ${cp.out.trim()}`);
             const { entries, problems } = parseAuditLog(fs.readFileSync(dest, 'utf8'));
             expect(entries.length > 0, 'audit.log is empty');
             expect(problems.length === 0, problems.slice(0, 5).join('; '));
-            const missing = auditMissing(entries, { user: USER, settingsKeys: ['connModes', 'modules.userDefault'] });
+            const missing = auditMissing(entries, { user: USER, settingsKeys: ['connModes', 'modules.userDefault'], twoFactorUser: SCRATCH });
             expect(missing.length === 0, `lacks ${missing.join('; ')}`);
             return `${entries.length} entries`;
         });
@@ -1083,7 +1305,7 @@ async function runChecks(admin) {
             return `exit ${run.code}`;
         });
 
-        await check(17, 'neither gateway log nor the audit log holds a password, store key or session cookie', async () => {
+        await check(17, 'neither gateway log nor the audit log holds a password, store key, session cookie, two-factor secret or recovery code', async () => {
             const logs = compose(['logs', '--no-color', 'gateway', 'direct'], { quiet: true });
             const text = logs.out + runOutput;
             // The key the gateway made on its fresh volume (64 hex characters).
@@ -1092,11 +1314,11 @@ async function runChecks(admin) {
             expect(cp.code === 0, `docker compose cp store.key: ${cp.out.trim()}`);
             const storeKey = fs.readFileSync(keyFile, 'utf8').trim();
             expect(storeKey.length >= MIN_MASKED, 'the gateway made no store key');
-            const found = Object.entries({ ...sweepable(), storeKey, ...cookies }).filter(([, v]) => text.includes(v)).map(([name]) => name);
+            const found = Object.entries({ ...sweepable(), storeKey, ...cookies, ...twoFactor }).filter(([, v]) => text.includes(v)).map(([name]) => name);
             expect(found.length === 0, `found ${found.join(', ')}`);
             // The audit log, copied out by check 19, is swept the same way.
             const auditText = fs.readFileSync(path.join(WORK, 'at-rest-audit.log'), 'utf8');
-            const inAudit = Object.entries({ ...sweepable(), storeKey, ...cookies }).filter(([, v]) => auditText.includes(v)).map(([name]) => name);
+            const inAudit = Object.entries({ ...sweepable(), storeKey, ...cookies, ...twoFactor }).filter(([, v]) => auditText.includes(v)).map(([name]) => name);
             expect(inAudit.length === 0, `audit.log holds ${inAudit.join(', ')}`);
             return `${text.split('\n').length} lines, ${auditText.split('\n').length} audit lines`;
         });

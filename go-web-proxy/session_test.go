@@ -216,3 +216,181 @@ func TestSessions_RevocationHooksFireOnlyOnPurpose(t *testing.T) {
 		t.Errorf("expiry fired a revocation hook: %q %q", dropped, droppedUsers)
 	}
 }
+
+// ----- sign-in tickets ---------------------------------------------------------------
+
+func newTestTickets() (*signinTickets, *fakeClock) {
+	clock := newFakeClock()
+	return newSigninTickets(clock.now), clock
+}
+
+func TestTickets_CreateAndLookupKeepEveryField(t *testing.T) {
+	tk, clock := newTestTickets()
+	id := tk.create(ticket{user: "alice", stage: stageEnrol, hash: "h1", mustChange: true, secret: "SECRET"})
+	if len(id) != 43 {
+		t.Errorf("want 32 random bytes in base64url, got %q", id)
+	}
+	got, ok := tk.lookup(id)
+	want := ticket{user: "alice", stage: stageEnrol, hash: "h1", mustChange: true, secret: "SECRET", created: clock.now()}
+	if !ok || got != want {
+		t.Errorf("got %+v, %v; want %+v", got, ok, want)
+	}
+	if _, ok := tk.lookup("not-a-ticket"); ok {
+		t.Error("an unknown id is absent")
+	}
+	// A returned copy cannot edit the table.
+	got.stage = stageCode
+	if again, _ := tk.lookup(id); again.stage != stageEnrol {
+		t.Error("lookup must hand out a copy")
+	}
+}
+
+// Creating a ticket replaces nothing: the caller drops the browser's old one.
+func TestTickets_CreateReplacesNothing(t *testing.T) {
+	tk, _ := newTestTickets()
+	a := tk.create(ticket{user: "alice", stage: stageCode})
+	b := tk.create(ticket{user: "alice", stage: stageCode})
+	if a == b {
+		t.Fatal("every ticket has its own id")
+	}
+	if _, ok := tk.lookup(a); !ok {
+		t.Error("the earlier ticket must still be live until the caller drops it")
+	}
+	tk.drop(a)
+	if _, ok := tk.lookup(a); ok {
+		t.Error("a dropped ticket is gone")
+	}
+	if _, ok := tk.lookup(b); !ok {
+		t.Error("dropping one ticket must leave the other")
+	}
+	tk.drop("unknown") // not an error
+}
+
+// A ticket lives ticketTTL from create; using it does not extend it.
+func TestTickets_ExpireTenMinutesAfterCreate(t *testing.T) {
+	tk, clock := newTestTickets()
+	id := tk.create(ticket{user: "alice", stage: stageCode})
+	clock.advance(ticketTTL - time.Second)
+	if _, ok := tk.lookup(id); !ok {
+		t.Fatal("a ticket must be live just before its time is up")
+	}
+	clock.advance(time.Second)
+	if _, ok := tk.lookup(id); ok {
+		t.Fatal("a ticket must end ticketTTL after it was made, however often it was used")
+	}
+	if len(tk.byID) != 0 {
+		t.Error("an expired ticket must be removed when seen")
+	}
+}
+
+func TestTickets_SweepOnCreateRemovesTheExpired(t *testing.T) {
+	tk, clock := newTestTickets()
+	old := tk.create(ticket{user: "alice", stage: stageCode})
+	clock.advance(ticketTTL / 2)
+	fresh := tk.create(ticket{user: "bob", stage: stageCode})
+	clock.advance(ticketTTL/2 + time.Second) // alice's is past its time, bob's is not
+	tk.create(ticket{user: "carol", stage: stageCode})
+	if _, held := tk.byID[old]; held {
+		t.Error("the sweep must remove an expired ticket nobody asked for")
+	}
+	if _, ok := tk.lookup(fresh); !ok || len(tk.byID) != 2 {
+		t.Errorf("the sweep must keep the live ones: %d held", len(tk.byID))
+	}
+}
+
+func TestTickets_DropUserEndsOnlyThatUsersTickets(t *testing.T) {
+	tk, _ := newTestTickets()
+	a1 := tk.create(ticket{user: "alice", stage: stageCode})
+	a2 := tk.create(ticket{user: "alice", stage: stageSetup})
+	b := tk.create(ticket{user: "bob", stage: stageCode})
+	tk.dropUser("alice")
+	for _, id := range []string{a1, a2} {
+		if _, ok := tk.lookup(id); ok {
+			t.Error("every ticket of the user must end")
+		}
+	}
+	if _, ok := tk.lookup(b); !ok {
+		t.Error("another user's ticket must survive")
+	}
+	tk.dropUser("nobody") // not an error
+}
+
+// The sessions table owns a ticket table, and the two revocations that end a
+// user's sessions end that user's tickets too: one call for both.
+func TestSessions_DropUserAndDropOthersEndTheUsersTickets(t *testing.T) {
+	clock := newFakeClock()
+	s := newSessions(fixed(testSessionLimits), clock.now)
+	keep := s.create("alice", false)
+	a1 := s.tickets.create(ticket{user: "alice", stage: stageCode})
+	b := s.tickets.create(ticket{user: "bob", stage: stageCode})
+	s.dropOthers("alice", keep)
+	if _, ok := s.tickets.lookup(a1); ok {
+		t.Error("dropOthers must end the user's tickets")
+	}
+	if !s.has(keep) {
+		t.Error("dropOthers must keep the session it was asked to spare")
+	}
+	a2 := s.tickets.create(ticket{user: "alice", stage: stageSetup})
+	s.dropUser("alice")
+	if _, ok := s.tickets.lookup(a2); ok || s.has(keep) {
+		t.Error("dropUser must end the user's sessions and tickets")
+	}
+	if _, ok := s.tickets.lookup(b); !ok {
+		t.Error("another user's ticket must survive")
+	}
+}
+
+func TestSigninCookie_Attributes(t *testing.T) {
+	rec := httptest.NewRecorder()
+	setSigninCookie(rec, "the-id")
+	cs := rec.Result().Cookies()
+	if len(cs) != 1 {
+		t.Fatalf("want one cookie, got %d", len(cs))
+	}
+	c := cs[0]
+	if c.Name != "__Host-smu-signin" || c.Value != "the-id" || c.Path != "/" || c.Domain != "" {
+		t.Errorf("a __Host- cookie needs Path=/ and no Domain: %+v", c)
+	}
+	if !c.Secure || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode {
+		t.Errorf("want Secure, HttpOnly and SameSite=Strict: %+v", c)
+	}
+	if c.MaxAge != 0 || !c.Expires.IsZero() {
+		t.Errorf("a browser-session cookie carries no lifetime: %+v", c)
+	}
+
+	rec = httptest.NewRecorder()
+	clearSigninCookie(rec)
+	c = rec.Result().Cookies()[0]
+	if c.Name != "__Host-smu-signin" || c.Value != "" || c.MaxAge != -1 || c.Path != "/" || !c.Secure || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode {
+		t.Errorf("the clearing cookie must keep the attributes and expire at once: %+v", c)
+	}
+}
+
+func TestTickets_FromRequest(t *testing.T) {
+	tk, clock := newTestTickets()
+	id := tk.create(ticket{user: "alice", stage: stageCode, hash: "h"})
+	req := func(cookies ...*http.Cookie) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/login/code", nil)
+		for _, c := range cookies {
+			r.AddCookie(c)
+		}
+		return r
+	}
+	got, ok := tk.fromRequest(req(&http.Cookie{Name: signinCookie, Value: id}))
+	if !ok || got.id != id || got.user != "alice" || got.stage != stageCode || got.hash != "h" {
+		t.Errorf("got %+v, %v", got, ok)
+	}
+	if _, ok := tk.fromRequest(req()); ok {
+		t.Error("no cookie, no ticket")
+	}
+	if _, ok := tk.fromRequest(req(&http.Cookie{Name: sessionCookie, Value: id})); ok {
+		t.Error("a session cookie is not a ticket cookie")
+	}
+	if _, ok := tk.fromRequest(req(&http.Cookie{Name: signinCookie, Value: "forged"})); ok {
+		t.Error("an unknown id is no ticket")
+	}
+	clock.advance(ticketTTL)
+	if _, ok := tk.fromRequest(req(&http.Cookie{Name: signinCookie, Value: id})); ok {
+		t.Error("an expired ticket is no ticket")
+	}
+}

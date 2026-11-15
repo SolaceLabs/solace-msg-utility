@@ -1,7 +1,8 @@
 /**
  * The control panel's managed-demo sections, in place of the Direct
  * connection reference: the demo accounts (click to copy, or sign in as one),
- * and the gateway events a real deployment would produce on its own (a
+ * the Authenticator (the codes two-factor sign-in asks for), and the gateway
+ * events a real deployment would produce on its own (a
  * session ended or expired, an entitlement revoked, a lockout, a broker the
  * relay cannot reach, the dial window, a hand edit of config.yaml).
  *
@@ -10,6 +11,7 @@
 import { DEMO_ACCOUNTS } from '../gateway/seed';
 import type { Gateway } from '../gateway';
 import type { Page } from '../gateway/pages';
+import { authenticatorSection } from './authenticator';
 import { button, copyable, el, section, select } from './panel';
 
 export interface ManagedPanelDeps {
@@ -32,8 +34,9 @@ export function managedSections({ gateway, navigate }: ManagedPanelDeps): HTMLEl
         const row = el('div', 'mockctl-account');
         row.append(copyable(a.username), copyable(a.password), button(`Sign in as ${a.username}`, () => {
             const r = gateway.signIn(a.username, a.password);
-            if (r.ok) navigate(r.mustChange ? 'password' : 'app');
-            else who.textContent = r.error;   // the lockout
+            if (!r.ok) who.textContent = r.error;   // the lockout
+            else if ('step' in r) navigate(r.step === 'code' ? 'code' : 'two-factor');
+            else navigate(r.mustChange ? 'password' : 'app');
         }));
         row.appendChild(el('p', 'mockctl-hint', a.role));
         accounts.appendChild(row);
@@ -92,5 +95,5 @@ export function managedSections({ gateway, navigate }: ManagedPanelDeps): HTMLEl
         'A broker refusing the gateway\'s SEMP account: arm "SEMP 401 unauthorized" below, which the relay answers with 502 upstream_auth.'));
 
     refresh();
-    return [accounts, events];
+    return [accounts, authenticatorSection(gateway), events];
 }

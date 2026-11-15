@@ -45,6 +45,10 @@ export function createSessions() {
             for (const [id, s] of Array.from(byId)) if (s.user === user) drop(id);
             onDropUser.forEach(fn => fn(user));
         },
+        /** Every session of the user but `keep`, which is this browser's: ended as a drop is, with no user-wide notice. */
+        dropOthers(user: string, keep: string | null): void {
+            for (const [id, s] of Array.from(byId)) if (s.user === user && id !== keep) drop(id);
+        },
         /** Gone without telling anyone, as an idle or absolute expiry is. */
         expire(id: string): void {
             byId.delete(id);

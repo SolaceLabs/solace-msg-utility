@@ -39,6 +39,24 @@ describe('connections/account', () => {
         expect(element.querySelector('.conn-account-signout')!.getAttribute('aria-label')).toBe('Sign out');
     });
 
+    it('links Two-factor sign-in to the gateway\'s page, only while the mode is not off', () => {
+        const c = createAccountControl(vi.fn());
+        const link = c.element.querySelector<HTMLAnchorElement>('a.conn-account-twofactor')!;
+        expect(link.getAttribute('href')).toBe('/login/two-factor');
+        expect(link.getAttribute('aria-label')).toBe('Two-factor sign-in');
+
+        const shown = (mode: 'off' | 'optional' | 'admins' | 'mandatory') => {
+            c.show({ username: 'operator', admin: false, twoFactor: { mode, enrolled: false } });
+            return !link.classList.contains('hidden');
+        };
+        expect([shown('off'), shown('optional'), shown('admins'), shown('mandatory')]).toEqual([false, true, true, true]);
+
+        c.show({ username: 'operator', admin: false });
+        expect(link.classList.contains('hidden')).toBe(true);
+        c.show(null);
+        expect(link.classList.contains('hidden')).toBe(true);
+    });
+
     it('signs out through the panel\'s own sign-out', () => {
         const onSignOut = vi.fn();
         const { element } = createAccountControl(onSignOut);

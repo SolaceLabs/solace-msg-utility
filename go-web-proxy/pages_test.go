@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -650,4 +655,998 @@ func TestLogin_RefusalHasNoActorEvenWithASession(t *testing.T) {
 	au := e.withAudit(t, auditSettings{})
 	e.form("/login", signInForm("ghost", "wrong-password", "/"), e.cookie("viewer", false))
 	au.expect(t, auditEntry{Action: "signin", Target: "ghost", Outcome: "refused", Code: "bad_credentials", Msg: "sign-in refused for ghost: bad credentials"})
+}
+
+// ----- two-factor sign-in ------------------------------------------------------------------
+
+// setTwoFactor changes login.twoFactor as a settings save does.
+func (e *managedEnv) setTwoFactor(mode string) {
+	e.cfg.twoFactor = mode
+	e.live.apply(e.cfg)
+}
+
+// enrolWithCodes sets two-factor up for user in the store, as the confirm
+// step does, and returns the recovery codes (the store keeps only hashes).
+func (e *managedEnv) enrolWithCodes(t *testing.T, user, secret string) []string {
+	t.Helper()
+	codes := newRecoveryCodes()
+	s := e.api.store
+	if err := s.setTOTP(context.Background(), user, secret, hashRecoveryCodes(codes), storedHash(s, user), func() {}); err != nil {
+		t.Fatalf("enrol %s: %v", user, err)
+	}
+	return codes
+}
+
+// nowCode is the code an authenticator holding secret shows at the test clock.
+func (e *managedEnv) nowCode(t *testing.T, secret string) string {
+	t.Helper()
+	c, err := totpCode(secret, totpStepAt(e.clock.now()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// send is a request carrying any number of cookies (e.do and e.form carry one).
+func (e *managedEnv) send(method, path string, v url.Values, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, "https://gw.example"+path, strings.NewReader(v.Encode()))
+	req.RemoteAddr = "192.0.2.10:5000"
+	if method == "POST" {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	e.root.ServeHTTP(rec, req)
+	return rec
+}
+
+func codeForm(code, next string) url.Values { return url.Values{"code": {code}, "next": {next}} }
+
+func confirmForm(code, next string) url.Values {
+	return url.Values{"step": {"confirm"}, "code": {code}, "next": {next}}
+}
+
+func verifyForm(pw, code, next string) url.Values {
+	return url.Values{"step": {"verify"}, "password": {pw}, "code": {code}, "next": {next}}
+}
+
+func ticketCookie(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == signinCookie && c.Value != "" {
+			return c
+		}
+	}
+	t.Fatalf("no sign-in ticket cookie issued: %v", rec.Header())
+	return nil
+}
+
+// noSession fails when the response opened a session.
+func noSession(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookie && c.Value != "" {
+			t.Fatalf("a session was opened: %v", rec.Header())
+		}
+	}
+}
+
+// cookieEnded reports whether the response clears the named cookie.
+func cookieEnded(rec *httptest.ResponseRecorder, name string) bool {
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == name && c.Value == "" && c.MaxAge < 0 {
+			return true
+		}
+	}
+	return false
+}
+
+var (
+	secretOnPage = regexp.MustCompile(`<code id="two-factor-secret"[^>]*>([A-Z2-7 ]+)</code>`)
+	codesOnPage  = regexp.MustCompile(`<li>([A-Z2-9]{4}(?:-[A-Z2-9]{4}){3})</li>`)
+)
+
+// pageSecret is the secret the enrol page shows, ungrouped.
+func pageSecret(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	m := secretOnPage.FindStringSubmatch(rec.Body.String())
+	if m == nil {
+		t.Fatalf("no secret on the page:\n%s", rec.Body.String())
+	}
+	if groups := strings.Fields(m[1]); len(groups) != 8 || len(groups[0]) != 4 {
+		t.Fatalf("the secret is shown in 8 groups of four: %q", m[1])
+	}
+	return strings.ReplaceAll(m[1], " ", "")
+}
+
+// pageCodes are the ten recovery codes the recovery page lists.
+func pageCodes(t *testing.T, rec *httptest.ResponseRecorder) []string {
+	t.Helper()
+	var out []string
+	for _, m := range codesOnPage.FindAllStringSubmatch(rec.Body.String(), -1) {
+		out = append(out, m[1])
+	}
+	if len(out) != recoveryCount {
+		t.Fatalf("want %d recovery codes on the page, got %d:\n%s", recoveryCount, len(out), rec.Body.String())
+	}
+	return out
+}
+
+// expectNoSecrets fails when any of secrets is in the application log or the
+// audit file. The failure never prints the secret.
+func (e *managedEnv) expectNoSecrets(t *testing.T, au *auditLog, secrets ...string) {
+	t.Helper()
+	hay := e.log.String() + string(mustRead(t, au.path))
+	for i, s := range secrets {
+		if s != "" && strings.Contains(hay, s) {
+			t.Errorf("secret #%d reached the log or the audit trail", i)
+		}
+	}
+}
+
+func isEnrolled(e *managedEnv, user string) bool {
+	on, _ := e.api.store.twoFactorOf(user)
+	return on
+}
+
+func recoveryLeft(e *managedEnv, user string) int {
+	u, _ := e.api.store.findUser(user)
+	if u.TOTP == nil {
+		return -1
+	}
+	return len(u.TOTP.Recovery)
+}
+
+func optionalEnv(t *testing.T) (*managedEnv, *auditLog) {
+	t.Helper()
+	e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorOptional })
+	return e, e.withAudit(t, auditSettings{})
+}
+
+// beginEnrol signs user in under a mode that asks for enrolment and returns
+// the ticket cookie and the secret the enrol page shows.
+func beginEnrol(t *testing.T, e *managedEnv, user, pw string) (*http.Cookie, string) {
+	t.Helper()
+	rec := e.form("/login", signInForm(user, pw, "/"), nil)
+	expectRedirect(t, rec, "/login/two-factor")
+	tc := ticketCookie(t, rec)
+	page := e.do("GET", "/login/two-factor", "", tc)
+	expectPage(t, page, http.StatusOK, `name="step" value="confirm"`)
+	return tc, pageSecret(t, page)
+}
+
+// ----- the sign-in's second step -----------------------------------------------------------
+
+func TestLogin_TwoFactorModeDecidesTheNextStep(t *testing.T) {
+	cases := []struct {
+		mode, user, pw string
+		enrolled       bool
+		want           string // "" opens the session, else where the ticket goes
+	}{
+		{twoFactorOff, "admin", adminPW, true, ""},
+		{twoFactorOff, "viewer", viewerPW, false, ""},
+		{twoFactorOptional, "viewer", viewerPW, true, "/login/code"},
+		{twoFactorOptional, "viewer", viewerPW, false, ""},
+		{twoFactorOptional, "admin", adminPW, false, ""},
+		{twoFactorAdmins, "admin", adminPW, true, "/login/code"},
+		{twoFactorAdmins, "admin", adminPW, false, "/login/two-factor"},
+		{twoFactorAdmins, "viewer", viewerPW, false, ""},
+		{twoFactorAdmins, "viewer", viewerPW, true, "/login/code"},
+		{twoFactorMandatory, "viewer", viewerPW, false, "/login/two-factor"},
+		{twoFactorMandatory, "admin", adminPW, false, "/login/two-factor"},
+		{twoFactorMandatory, "viewer", viewerPW, true, "/login/code"},
+	}
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("%s/%s/enrolled=%t", c.mode, c.user, c.enrolled), func(t *testing.T) {
+			e := newManagedEnv(t, func(cfg *config) { cfg.twoFactor = c.mode })
+			if c.enrolled {
+				e.enrolWithCodes(t, c.user, storeTOTPSecret)
+			}
+			rec := e.form("/login", signInForm(c.user, c.pw, "/"), nil)
+			if c.want == "" {
+				expectRedirect(t, rec, "/")
+				issuedCookie(t, rec)
+				return
+			}
+			expectRedirect(t, rec, c.want)
+			ticketCookie(t, rec)
+			noSession(t, rec)
+		})
+	}
+}
+
+func TestLoginCode_NoSessionUntilTheCodePasses(t *testing.T) {
+	e, au := optionalEnv(t)
+	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	rec := e.form("/login", signInForm("viewer", viewerPW, "/"), nil)
+	expectRedirect(t, rec, "/login/code")
+	tc := ticketCookie(t, rec)
+	if !tc.Secure || !tc.HttpOnly || tc.SameSite != http.SameSiteStrictMode || tc.MaxAge != 0 {
+		t.Errorf("ticket cookie flags: %+v", tc)
+	}
+	noSession(t, rec)
+	expect(t, e.do("GET", "/managed/me", "", nil), http.StatusUnauthorized, "unauthenticated")
+	expect(t, e.do("GET", "/managed/me", "", tc), http.StatusUnauthorized, "unauthenticated") // a ticket opens nothing
+	if n := len(au.entries(t)); n != 0 {
+		t.Fatalf("the password step writes no audit entry, got %d", n)
+	}
+	page := e.do("GET", "/login/code", "", tc)
+	expectPage(t, page, http.StatusOK, `action="/login/code"`)
+	if page.Header().Get("Content-Security-Policy") != pageCSP || strings.Contains(page.Body.String(), "<script") {
+		t.Error("the code page keeps the content policy and carries no script")
+	}
+
+	code := e.nowCode(t, storeTOTPSecret)
+	rec = e.form("/login/code", codeForm(code, "/"), tc)
+	expectRedirect(t, rec, "/")
+	c := issuedCookie(t, rec)
+	if !cookieEnded(rec, signinCookie) {
+		t.Error("the ticket ends with the sign-in")
+	}
+	expect(t, e.do("GET", "/managed/me", "", c), http.StatusOK, "")
+	expectRedirect(t, e.do("GET", "/login/code", "", tc), "/login") // the ticket is spent
+	au.expect(t, auditEntry{Actor: "viewer", Action: "signin", Target: "viewer", Outcome: "ok", Msg: "viewer signed in"})
+	e.expectNoSecrets(t, au, storeTOTPSecret, code)
+}
+
+func TestLoginCode_NextAndForcedPasswordChangeFollowTheCode(t *testing.T) {
+	e, au := optionalEnv(t)
+	e.enrolWithCodes(t, "admin", storeTOTPSecret)
+	e.api.store.users[0].MustChangePassword = true
+	rec := e.form("/login", signInForm("admin", adminPW, "/solAdmin"), nil)
+	expectRedirect(t, rec, "/login/code?next=%2FsolAdmin")
+	tc := ticketCookie(t, rec)
+	expectPage(t, e.do("GET", "/login/code?next=/solAdmin", "", tc), http.StatusOK, `name="next" value="/solAdmin"`)
+	rec = e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/solAdmin"), tc)
+	expectRedirect(t, rec, "/login/password?next=%2FsolAdmin") // the two-factor step came first
+	expectPage(t, e.do("GET", "/login/password", "", issuedCookie(t, rec)), http.StatusOK, "You must set a new password")
+	au.expect(t, auditEntry{Actor: "admin", Action: "signin", Target: "admin", Outcome: "ok", Msg: "admin signed in; a password change is required"})
+
+	// Without a forced change, next is where it ends.
+	e.api.store.users[0].MustChangePassword = false
+	e.clock.advance(totpPeriod)
+	tc = ticketCookie(t, e.form("/login", signInForm("admin", adminPW, "/solAdmin"), nil))
+	expectRedirect(t, e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/solAdmin"), tc), "/solAdmin")
+}
+
+func TestLoginCode_WrongCodeIsRefusedAndCounted(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) {
+		c.twoFactor = twoFactorOptional
+		c.login = testLoginLimits
+		c.login.unauthPerMinute = 1000
+	})
+	au := e.withAudit(t, auditSettings{})
+	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	seq0, _ := e.api.store.seqs()
+	tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+
+	rec := e.form("/login/code", codeForm("000000", "/"), tc)
+	expectPage(t, rec, http.StatusUnauthorized, "The code is not correct.")
+	noSession(t, rec)
+	au.expect(t, auditEntry{Action: "signin", Target: "viewer", Outcome: "refused", Code: "bad_code", Msg: "sign-in refused for viewer: bad code"})
+	expectPage(t, e.do("GET", "/login/code", "", tc), http.StatusOK, `action="/login/code"`) // the ticket stands: try again
+
+	// Anything that is not six digits is tried as a recovery code, and fails the same way.
+	expectPage(t, e.form("/login/code", codeForm("not-a-code", "/"), tc), http.StatusUnauthorized, "The code is not correct.")
+	if seq, _ := e.api.store.seqs(); seq != seq0 || recoveryLeft(e, "viewer") != recoveryCount {
+		t.Error("a refused code writes nothing")
+	}
+
+	// The third failure blocks the account: even the right code waits.
+	expectPage(t, e.form("/login/code", codeForm("000000", "/"), tc), http.StatusUnauthorized, "The code is not correct.")
+	rec = e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc)
+	expectPage(t, rec, http.StatusTooManyRequests, "Too many attempts. Try again in 30 seconds.")
+	if rec.Header().Get("Retry-After") != "30" {
+		t.Errorf("Retry-After: got %q", rec.Header().Get("Retry-After"))
+	}
+	noSession(t, rec)
+	var throttled bool
+	for _, en := range au.entries(t) {
+		throttled = throttled || (en.Action == "signin" && en.Code == "throttled")
+	}
+	if !throttled {
+		t.Errorf("the blocked attempt is audited: %+v", au.entries(t))
+	}
+	e.clock.advance(testLoginLimits.backoff)
+	expectRedirect(t, e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc), "/")
+}
+
+// A wrong code counts with the wrong passwords before it: one budget for the
+// whole sign-in.
+func TestLoginCode_FailureCountIncludesThePasswordStep(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) {
+		c.twoFactor = twoFactorOptional
+		c.login = testLoginLimits
+		c.login.unauthPerMinute = 1000
+	})
+	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	for range 2 {
+		expectPage(t, e.form("/login", signInForm("viewer", "wrong-password", "/"), nil), http.StatusUnauthorized, "Sign-in failed")
+	}
+	tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil)) // the right password does not clear them
+	expectPage(t, e.form("/login/code", codeForm("000000", "/"), tc), http.StatusUnauthorized, "The code is not correct.")
+	rec := e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc)
+	expectPage(t, rec, http.StatusTooManyRequests, "Too many attempts")
+	noSession(t, rec)
+}
+
+func TestLoginCode_ReplayedCodeIsRefused(t *testing.T) {
+	e, _ := optionalEnv(t)
+	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	code := e.nowCode(t, storeTOTPSecret)
+	tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	expectRedirect(t, e.form("/login/code", codeForm(code, "/"), tc), "/")
+
+	tc = ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	rec := e.form("/login/code", codeForm(code, "/"), tc)
+	expectPage(t, rec, http.StatusUnauthorized, "The code is not correct.")
+	noSession(t, rec)
+	e.clock.advance(totpPeriod)
+	expectRedirect(t, e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc), "/") // the next step's code is fresh
+}
+
+func TestLoginCode_RecoveryCodeWorksOnce(t *testing.T) {
+	e, au := optionalEnv(t)
+	codes := e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	typed := strings.ToLower(formatRecoveryCode(codes[0])) // as a person types it
+	tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	rec := e.form("/login/code", codeForm(typed, "/"), tc)
+	expectRedirect(t, rec, "/")
+	issuedCookie(t, rec)
+	if recoveryLeft(e, "viewer") != recoveryCount-1 {
+		t.Fatalf("a used code is removed: %d left", recoveryLeft(e, "viewer"))
+	}
+
+	tc = ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	rec = e.form("/login/code", codeForm(typed, "/"), tc)
+	expectPage(t, rec, http.StatusUnauthorized, "The code is not correct.")
+	noSession(t, rec)
+	other := strings.ReplaceAll(formatRecoveryCode(codes[1]), "-", " ")
+	expectRedirect(t, e.form("/login/code", codeForm(other, "/"), tc), "/")
+	au.expect(t,
+		auditEntry{Actor: "viewer", Action: "signin", Target: "viewer", Outcome: "ok", Msg: "viewer signed in with a recovery code (9 left)"},
+		auditEntry{Action: "signin", Target: "viewer", Outcome: "refused", Code: "bad_code", Msg: "sign-in refused for viewer: bad code"},
+		auditEntry{Actor: "viewer", Action: "signin", Target: "viewer", Outcome: "ok", Msg: "viewer signed in with a recovery code (8 left)"},
+	)
+	e.expectNoSecrets(t, au, codes[0], codes[1], typed, other, storeTOTPSecret)
+}
+
+func TestLoginCode_NeedsALiveCodeTicket(t *testing.T) {
+	e, _ := optionalEnv(t)
+	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	expectRedirect(t, e.do("GET", "/login/code?next=/solAdmin", "", nil), "/login?next=%2FsolAdmin")
+	expectRedirect(t, e.form("/login/code", codeForm("123456", "/solAdmin"), nil), "/login?next=%2FsolAdmin")
+
+	tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	e.clock.advance(ticketTTL)
+	expectRedirect(t, e.do("GET", "/login/code", "", tc), "/login")
+	rec := e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc)
+	expectRedirect(t, rec, "/login")
+	noSession(t, rec)
+
+	// A ticket of another stage grants nothing on this page.
+	id := e.api.sessions.tickets.create(ticket{user: "viewer", stage: stageSetup, hash: storedHash(e.api.store, "viewer"), secret: newTOTPSecret()})
+	setup := &http.Cookie{Name: signinCookie, Value: id}
+	expectRedirect(t, e.do("GET", "/login/code", "", setup), "/login")
+	rec = e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), setup)
+	expectRedirect(t, rec, "/login")
+	noSession(t, rec)
+}
+
+func TestLoginCode_ANewPasswordStepReplacesTheTicket(t *testing.T) {
+	e, _ := optionalEnv(t)
+	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	first := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	second := ticketCookie(t, e.send("POST", "/login", signInForm("viewer", viewerPW, "/"), first))
+	expectRedirect(t, e.do("GET", "/login/code", "", first), "/login")
+	expectPage(t, e.do("GET", "/login/code", "", second), http.StatusOK, `action="/login/code"`)
+}
+
+func TestLoginCode_EndsThePreviousSessionOfTheBrowser(t *testing.T) {
+	e, _ := optionalEnv(t)
+	e.enrolWithCodes(t, "admin", storeTOTPSecret)
+	old := e.cookie("viewer", false)
+	rec := e.form("/login", signInForm("admin", adminPW, "/"), old)
+	noSession(t, rec)
+	expect(t, e.do("GET", "/managed/me", "", old), http.StatusUnauthorized, "unauthenticated") // ended at the password step
+	tc := ticketCookie(t, rec)
+
+	stray := e.cookie("viewer", false) // a session this browser gained meanwhile
+	rec = e.send("POST", "/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc, stray)
+	expectRedirect(t, rec, "/")
+	expect(t, e.do("GET", "/managed/me", "", stray), http.StatusUnauthorized, "unauthenticated")
+	expect(t, e.do("GET", "/managed/me", "", issuedCookie(t, rec)), http.StatusOK, "")
+}
+
+func TestLoginCode_AccountChangedBetweenThePasswordAndTheCode(t *testing.T) {
+	signInAndWait := func(t *testing.T) (*managedEnv, *auditLog, *http.Cookie) {
+		e, au := optionalEnv(t)
+		e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+		return e, au, ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	}
+	refusedChanged := auditEntry{Action: "signin", Target: "viewer", Outcome: "refused", Code: "account_changed", Msg: "sign-in refused for viewer: account changed"}
+	check := func(t *testing.T, e *managedEnv, au *auditLog, rec *httptest.ResponseRecorder) {
+		t.Helper()
+		expectPage(t, rec, http.StatusUnauthorized, "Sign-in failed. Check the username and password.")
+		noSession(t, rec)
+		if !cookieEnded(rec, signinCookie) {
+			t.Error("the ticket ends")
+		}
+		au.expect(t, refusedChanged)
+		if !strings.Contains(e.log.String(), "the account changed while the code step was open") {
+			t.Errorf("the refusal is logged: %s", e.log.String())
+		}
+	}
+	t.Run("password reset", func(t *testing.T) {
+		e, au, tc := signInAndWait(t)
+		reset := mustHash(t, e.f.h, "reset-by-admin-1")
+		e.api.store.mu.Lock()
+		e.api.store.users[1].Password = reset
+		e.api.store.mu.Unlock()
+		check(t, e, au, e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc))
+	})
+	t.Run("two-factor removed by an administrator", func(t *testing.T) {
+		e, au, tc := signInAndWait(t)
+		if _, removed, err := e.api.store.clearTOTP(context.Background(), "admin", "viewer"); err != nil || !removed {
+			t.Fatalf("clear: %v %v", removed, err)
+		}
+		check(t, e, au, e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc))
+	})
+	t.Run("store unavailable for a recovery code", func(t *testing.T) {
+		e, au := optionalEnv(t)
+		codes := e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+		tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+		if err := os.WriteFile(e.f.usersPath, []byte("not the file the gateway wrote"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		rec := e.form("/login/code", codeForm(formatRecoveryCode(codes[0]), "/"), tc)
+		expectPage(t, rec, http.StatusServiceUnavailable, "could not be checked")
+		noSession(t, rec)
+		au.expect(t, auditEntry{Action: "signin", Target: "viewer", Outcome: "refused", Code: "unavailable", Msg: "sign-in refused for viewer: unavailable"})
+	})
+}
+
+func TestLoginCode_RefusedRequests(t *testing.T) {
+	e, _ := optionalEnv(t)
+	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	expectPage(t, e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc, "Sec-Fetch-Site", "cross-site"),
+		http.StatusForbidden, "submitted from another site")
+	expectPage(t, e.do("GET", "/login/code", "", tc), http.StatusOK, `action="/login/code"`) // the ticket is untouched
+	expectPage(t, e.form("/login/code", url.Values{"code": {strings.Repeat("9", maxBodyBytes)}}, tc), http.StatusBadRequest, "could not be read")
+	expectPage(t, e.form("/login/two-factor", confirmForm("123456", "/"), tc, "Sec-Fetch-Site", "cross-site"),
+		http.StatusForbidden, "submitted from another site")
+	expectPage(t, e.form("/login/two-factor", url.Values{"step": {"nope"}}, tc), http.StatusBadRequest, "could not be read")
+}
+
+// ----- enrolling with a ticket -------------------------------------------------------------
+
+func TestEnrol_WithATicketOpensTheSessionOnlyAfterTheFirstCode(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorMandatory })
+	au := e.withAudit(t, auditSettings{})
+	other := e.cookie("viewer", false) // another browser's session
+	rec := e.form("/login", signInForm("viewer", viewerPW, "/"), nil)
+	expectRedirect(t, rec, "/login/two-factor")
+	tc := ticketCookie(t, rec)
+	noSession(t, rec)
+	expectRedirect(t, e.do("GET", "/login/two-factor", "", nil), "/login")
+
+	page := e.do("GET", "/login/two-factor", "", tc)
+	expectPage(t, page, http.StatusOK, `name="step" value="confirm"`)
+	for _, want := range []string{"<svg", `role="img"`, `aria-label="QR code for your authenticator app"`} {
+		if !strings.Contains(page.Body.String(), want) {
+			t.Errorf("the enrol page lacks %q", want)
+		}
+	}
+	for _, banned := range []string{"<script", "<img"} {
+		if strings.Contains(page.Body.String(), banned) {
+			t.Errorf("the page content policy forbids %q", banned)
+		}
+	}
+	secret := pageSecret(t, page)
+	if isEnrolled(e, "viewer") {
+		t.Fatal("nothing is stored before the first code")
+	}
+
+	// A wrong code keeps the secret on the page and stores nothing.
+	rec = e.form("/login/two-factor", confirmForm("000000", "/"), tc)
+	expectPage(t, rec, http.StatusUnauthorized, "The code is not correct.")
+	if pageSecret(t, rec) != secret || isEnrolled(e, "viewer") {
+		t.Error("a wrong code keeps the same secret and stores nothing")
+	}
+	noSession(t, rec)
+
+	code := e.nowCode(t, secret)
+	rec = e.form("/login/two-factor", confirmForm(code, "/"), tc)
+	expectPage(t, rec, http.StatusOK, `id="recovery-codes"`)
+	expectPage(t, rec, http.StatusOK, `id="two-factor-continue"`)
+	expectPage(t, rec, http.StatusOK, `href="/"`)
+	codes := pageCodes(t, rec)
+	c := issuedCookie(t, rec)
+	if !cookieEnded(rec, signinCookie) {
+		t.Error("the ticket ends")
+	}
+	expect(t, e.do("GET", "/managed/me", "", c), http.StatusOK, "")
+	expect(t, e.do("GET", "/managed/me", "", other), http.StatusUnauthorized, "unauthenticated") // the other session ended
+
+	u, _ := e.api.store.findUser("viewer")
+	if u.TOTP == nil || u.TOTP.Secret != secret || !slices.Equal(u.TOTP.Recovery, hashRecoveryCodes(codes)) {
+		t.Fatalf("the stored secret and recovery hashes are those of the page: %+v", u.TOTP)
+	}
+	seq, _ := e.api.store.seqs()
+	au.expect(t,
+		auditEntry{Actor: "viewer", Action: "twofactor.enrol", Target: "viewer", Outcome: "refused", Code: "bad_code", Msg: "viewer could not set up two-factor sign-in: bad code"},
+		auditEntry{Actor: "viewer", Action: "twofactor.enrol", Target: "viewer", Outcome: "ok", Msg: "viewer set up two-factor sign-in",
+			Wrote: []auditWrote{{File: filepath.Base(e.f.usersPath), Seq: int64(seq)}}},
+		auditEntry{Actor: "viewer", Action: "signin", Target: "viewer", Outcome: "ok", Msg: "viewer signed in"},
+	)
+
+	// The code that confirmed cannot also sign in; the next one can.
+	tc = ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	expectPage(t, e.form("/login/code", codeForm(code, "/"), tc), http.StatusUnauthorized, "The code is not correct.")
+	e.clock.advance(totpPeriod)
+	expectRedirect(t, e.form("/login/code", codeForm(e.nowCode(t, secret), "/"), tc), "/")
+	secrets := []string{secret, code}
+	for _, c := range codes {
+		secrets = append(secrets, c, strings.ReplaceAll(c, "-", ""))
+	}
+	e.expectNoSecrets(t, au, secrets...)
+}
+
+func TestEnrol_ForcedPasswordChangeAndNextFollow(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorAdmins })
+	e.api.store.users[0].MustChangePassword = true
+	rec := e.form("/login", signInForm("admin", adminPW, "/solAdmin"), nil)
+	expectRedirect(t, rec, "/login/two-factor?next=%2FsolAdmin")
+	tc := ticketCookie(t, rec)
+	secret := pageSecret(t, e.do("GET", "/login/two-factor?next=/solAdmin", "", tc))
+	rec = e.form("/login/two-factor", confirmForm(e.nowCode(t, secret), "/solAdmin"), tc)
+	expectPage(t, rec, http.StatusOK, `href="/login/password?next=%2FsolAdmin"`)
+	expectPage(t, e.do("GET", "/login/password", "", issuedCookie(t, rec)), http.StatusOK, "You must set a new password")
+}
+
+func TestEnrol_ARaceNeverReplacesAnExistingSecretOrOpensASession(t *testing.T) {
+	mandatory := func(t *testing.T) (*managedEnv, *auditLog, *http.Cookie, string) {
+		e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorMandatory })
+		au := e.withAudit(t, auditSettings{})
+		tc, secret := beginEnrol(t, e, "viewer", viewerPW)
+		return e, au, tc, secret
+	}
+	refused := func(code, msg string) auditEntry {
+		return auditEntry{Actor: "viewer", Action: "twofactor.enrol", Target: "viewer", Outcome: "refused", Code: code, Msg: "viewer could not set up two-factor sign-in: " + msg}
+	}
+	t.Run("enrolled elsewhere meanwhile", func(t *testing.T) {
+		e, au, tc, secret := mandatory(t)
+		e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+		rec := e.form("/login/two-factor", confirmForm(e.nowCode(t, secret), "/"), tc)
+		expectPage(t, rec, http.StatusConflict, "Your account was changed")
+		noSession(t, rec)
+		if s, _ := e.api.store.totpSecret("viewer"); s != storeTOTPSecret {
+			t.Error("an enrol ticket must not replace a secret that exists")
+		}
+		au.expect(t, refused("account_changed", "account changed"))
+		expectRedirect(t, e.do("GET", "/login/two-factor", "", tc), "/login") // the ticket ended
+	})
+	t.Run("password reset meanwhile", func(t *testing.T) {
+		e, au, tc, secret := mandatory(t)
+		reset := mustHash(t, e.f.h, "reset-by-admin-1")
+		e.api.store.mu.Lock()
+		e.api.store.users[1].Password = reset
+		e.api.store.mu.Unlock()
+		rec := e.form("/login/two-factor", confirmForm(e.nowCode(t, secret), "/"), tc)
+		expectPage(t, rec, http.StatusConflict, "Sign in again")
+		noSession(t, rec)
+		if isEnrolled(e, "viewer") {
+			t.Error("nothing is stored over a reset")
+		}
+		au.expect(t, refused("account_changed", "account changed"))
+	})
+	t.Run("user deleted meanwhile", func(t *testing.T) {
+		e, au, tc, secret := mandatory(t)
+		e.api.store.mu.Lock()
+		e.api.store.users = e.api.store.users[:1]
+		e.api.store.mu.Unlock()
+		rec := e.form("/login/two-factor", confirmForm(e.nowCode(t, secret), "/"), tc)
+		expectPage(t, rec, http.StatusConflict, "Sign in again")
+		noSession(t, rec)
+		au.expect(t, refused("account_changed", "account changed"))
+	})
+	t.Run("audit log unavailable", func(t *testing.T) {
+		e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorMandatory })
+		e.setAudit(auditSettings{onFailure: auditOnFailureRefuse})
+		a, _ := e.withLoudAudit(t)
+		_ = a.f.Close()
+		e.api.audit.record(auditAdmin, auditEntry{Actor: "admin", Action: auditUserCreate, Outcome: auditOK, Msg: "admin created user x"}) // the lost record
+		tc, secret := beginEnrol(t, e, "viewer", viewerPW)
+		rec := e.form("/login/two-factor", confirmForm(e.nowCode(t, secret), "/"), tc)
+		expectPage(t, rec, http.StatusServiceUnavailable, "cannot record changes")
+		noSession(t, rec)
+		if isEnrolled(e, "viewer") {
+			t.Error("a refused change stores nothing")
+		}
+	})
+	t.Run("store file changed on disk", func(t *testing.T) {
+		e, au, tc, secret := mandatory(t)
+		if err := os.WriteFile(e.f.usersPath, []byte("not the file the gateway wrote"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		rec := e.form("/login/two-factor", confirmForm(e.nowCode(t, secret), "/"), tc)
+		expectPage(t, rec, http.StatusConflict, "restart the gateway")
+		noSession(t, rec)
+		au.expect(t, refused("store_changed_on_disk", "store changed on disk"))
+	})
+}
+
+// A browser that went away before the change began is not answered or audited.
+func TestEnrol_ClientGoneIsNotAudited(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorMandatory })
+	au := e.withAudit(t, auditSettings{})
+	tc, secret := beginEnrol(t, e, "viewer", viewerPW)
+	release := holdWriter(t, e.api.store.wr)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan *httptest.ResponseRecorder)
+	code := e.nowCode(t, secret)
+	go func() { done <- e.formFrom(ctx, "192.0.2.10:5000", "/login/two-factor", confirmForm(code, "/"), tc) }()
+	waitForWaiters(t, 1)
+	cancel()
+	rec := <-done
+	release()
+	if rec.Body.Len() != 0 || len(au.entries(t)) != 0 {
+		t.Errorf("nothing to answer and nothing to audit: %d %q %+v", rec.Code, rec.Body.String(), au.entries(t))
+	}
+	if isEnrolled(e, "viewer") {
+		t.Error("nothing may be stored")
+	}
+}
+
+func TestEnrol_QRCodeThatCannotBeDrawnLeavesTheKey(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorMandatory })
+	id := e.api.sessions.tickets.create(ticket{user: strings.Repeat("u", 5000), stage: stageEnrol, secret: newTOTPSecret()})
+	rec := e.do("GET", "/login/two-factor", "", &http.Cookie{Name: signinCookie, Value: id})
+	expectPage(t, rec, http.StatusOK, "The picture could not be drawn")
+	if strings.Contains(rec.Body.String(), "<svg") || !strings.Contains(rec.Body.String(), `id="two-factor-secret"`) {
+		t.Error("the key is shown to type, with no picture")
+	}
+	if !strings.Contains(e.log.String(), "QR code could not be drawn") {
+		t.Errorf("the failure is logged: %s", e.log.String())
+	}
+}
+
+func TestTwoFactorRefusal(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{"account changed", errAccountChanged, http.StatusConflict, "account_changed"},
+		{"user gone", errUserNotFound, http.StatusConflict, "account_changed"},
+		{"audit unavailable", fmt.Errorf("wrapped: %w", errAuditUnavailable), http.StatusServiceUnavailable, "audit_unavailable"},
+		{"changed on disk", &changedOnDiskError{}, http.StatusConflict, "store_changed_on_disk"},
+		{"write failed", &writeFailedError{err: errors.New("disk full")}, http.StatusInternalServerError, "store_write_failed"},
+		{"anything else", errors.New("boom"), http.StatusInternalServerError, "server_error"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			status, code, msg := twoFactorRefusal(c.err)
+			if status != c.status || code != c.code || msg == "" || strings.Contains(msg, "disk full") || strings.Contains(msg, "boom") {
+				t.Errorf("got %d %q %q", status, code, msg)
+			}
+		})
+	}
+}
+
+// ----- setting up while signed in ----------------------------------------------------------
+
+func TestSetupPage_ByStateAndMode(t *testing.T) {
+	e, _ := optionalEnv(t)
+	c := e.cookie("viewer", false)
+	page := e.do("GET", "/login/two-factor", "", c)
+	expectPage(t, page, http.StatusOK, `name="step" value="verify"`)
+	if strings.Contains(page.Body.String(), `name="code"`) {
+		t.Error("a user without two-factor is not asked for a code")
+	}
+	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	expectPage(t, e.do("GET", "/login/two-factor", "", c), http.StatusOK, `name="code"`)
+
+	expectRedirect(t, e.do("GET", "/login/two-factor?next=/solAdmin", "", nil), "/login?next=%2FsolAdmin")
+	expectRedirect(t, e.do("GET", "/login/two-factor", "", e.cookie("viewer", true)), "/login")
+	expectRedirect(t, e.form("/login/two-factor", verifyForm(viewerPW, "", "/"), nil), "/login")
+	expectRedirect(t, e.form("/login/two-factor", verifyForm(viewerPW, "", "/"), e.cookie("viewer", true)), "/login")
+
+	// A code ticket is not an enrol ticket.
+	tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	expectRedirect(t, e.do("GET", "/login/two-factor", "", tc), "/login")
+}
+
+func TestTwoFactorOff_AnswersNotInUse(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorMandatory })
+	au := e.withAudit(t, auditSettings{})
+	c := e.cookie("viewer", false)
+	enrolTicket, secret := beginEnrol(t, e, "admin", adminPW)
+	setup := &http.Cookie{Name: signinCookie, Value: e.api.sessions.tickets.create(ticket2(e, "viewer"))}
+	e.setTwoFactor(twoFactorOff)
+	const msg = "Two-factor sign-in is not in use."
+	expectPage(t, e.do("GET", "/login/two-factor", "", c), http.StatusNotFound, msg)
+	expectPage(t, e.do("GET", "/login/two-factor", "", enrolTicket), http.StatusNotFound, msg)
+	expectPage(t, e.form("/login/two-factor", verifyForm(viewerPW, "", "/"), c), http.StatusNotFound, msg)
+	expectPage(t, e.send("POST", "/login/two-factor", confirmForm(e.nowCode(t, secret), "/"), enrolTicket), http.StatusNotFound, msg)
+	expectPage(t, e.send("POST", "/login/two-factor", confirmForm("123456", "/"), c, setup), http.StatusNotFound, msg)
+	if isEnrolled(e, "admin") || isEnrolled(e, "viewer") {
+		t.Error("nothing is stored while the mode is off")
+	}
+	if n := len(au.entries(t)); n != 0 {
+		t.Errorf("a refused page writes no entry, got %d", n)
+	}
+}
+
+// ticket2 is a setup ticket for user, as the verify step creates.
+func ticket2(e *managedEnv, user string) ticket {
+	return ticket{user: user, stage: stageSetup, hash: storedHash(e.api.store, user), secret: newTOTPSecret()}
+}
+
+func TestSetupVerify_RefusalsStoreNothingAndOpenNothing(t *testing.T) {
+	e, au := optionalEnv(t)
+	codes := e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	c := e.cookie("viewer", false)
+	seq0, _ := e.api.store.seqs()
+	const msg = "The password or the code is not correct."
+	for name, form := range map[string]url.Values{
+		"wrong password, right recovery code": verifyForm("not-the-password", formatRecoveryCode(codes[0]), "/"),
+		"right password, wrong code":          verifyForm(viewerPW, "000000", "/"),
+		"right password, no code":             verifyForm(viewerPW, "", "/"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := e.form("/login/two-factor", form, c)
+			expectPage(t, rec, http.StatusUnauthorized, msg)
+			if len(rec.Result().Cookies()) != 0 {
+				t.Errorf("no ticket is issued: %v", rec.Header())
+			}
+		})
+	}
+	if seq, _ := e.api.store.seqs(); seq != seq0 || recoveryLeft(e, "viewer") != recoveryCount {
+		t.Error("a refused verify writes nothing and keeps every recovery code")
+	}
+	bad := auditEntry{Actor: "viewer", Action: "twofactor.enrol", Target: "viewer", Outcome: "refused", Code: "bad_credentials", Msg: "viewer could not set up two-factor sign-in: bad credentials"}
+	entries := au.entries(t)
+	if len(entries) != 3 {
+		t.Fatalf("one refused entry per attempt: %+v", entries)
+	}
+	for _, en := range entries {
+		bad.Time, bad.Client = en.Time, en.Client
+		if !reflect.DeepEqual(en, bad) {
+			t.Errorf("audit entry: got %+v want %+v", en, bad)
+		}
+	}
+	// Without two-factor there is no code to give, and a wrong password still fails.
+	expectPage(t, e.form("/login/two-factor", verifyForm("not-the-password", "", "/"), e.cookie("admin", false)), http.StatusUnauthorized, msg)
+}
+
+func TestSetup_ReplacesTheSecretAndTheRecoveryCodes(t *testing.T) {
+	e, au := optionalEnv(t)
+	old := e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	c, other := e.cookie("viewer", false), e.cookie("viewer", false)
+	rev0 := e.userRev("viewer")
+
+	rec := e.send("POST", "/login/two-factor", verifyForm(viewerPW, e.nowCode(t, storeTOTPSecret), "/"), c)
+	expectPage(t, rec, http.StatusOK, `name="step" value="confirm"`)
+	tc := ticketCookie(t, rec)
+	secret := pageSecret(t, rec)
+	if secret == storeTOTPSecret {
+		t.Fatal("a new secret is made")
+	}
+	if s, _ := e.api.store.totpSecret("viewer"); s != storeTOTPSecret {
+		t.Fatal("nothing is replaced before the first code")
+	}
+
+	expectPage(t, e.send("POST", "/login/two-factor", confirmForm("000000", "/"), c, tc), http.StatusUnauthorized, "The code is not correct.")
+	if s, _ := e.api.store.totpSecret("viewer"); s != storeTOTPSecret {
+		t.Fatal("a wrong code replaces nothing")
+	}
+
+	// The code the verify step spent belongs to the old secret: the new one's first code works in the same step.
+	rec = e.send("POST", "/login/two-factor", confirmForm(e.nowCode(t, secret), "/"), c, tc)
+	expectPage(t, rec, http.StatusOK, `id="recovery-codes"`)
+	codes := pageCodes(t, rec)
+	noSession(t, rec)
+	expect(t, e.do("GET", "/managed/me", "", c), http.StatusOK, "")
+	expect(t, e.do("GET", "/managed/me", "", other), http.StatusUnauthorized, "unauthenticated")
+	u, _ := e.api.store.findUser("viewer")
+	if u.TOTP == nil || u.TOTP.Secret != secret || !slices.Equal(u.TOTP.Recovery, hashRecoveryCodes(codes)) {
+		t.Fatalf("the new secret and codes are stored: %+v", u.TOTP)
+	}
+	for _, oc := range old {
+		if recoveryIndex(u.TOTP.Recovery, hashRecoveryCode(oc)) >= 0 {
+			t.Error("an old recovery code must stop working")
+		}
+	}
+	if e.userRev("viewer") != rev0 {
+		t.Error("setting up again keeps the rev")
+	}
+	seq, _ := e.api.store.seqs()
+	au.expect(t,
+		auditEntry{Actor: "viewer", Action: "twofactor.enrol", Target: "viewer", Outcome: "refused", Code: "bad_code", Msg: "viewer could not set up two-factor sign-in: bad code"},
+		auditEntry{Actor: "viewer", Action: "twofactor.enrol", Target: "viewer", Outcome: "ok", Msg: "viewer set up two-factor sign-in again",
+			Wrote: []auditWrote{{File: filepath.Base(e.f.usersPath), Seq: int64(seq)}}},
+	)
+	e.expectNoSecrets(t, au, secret, storeTOTPSecret, codes[0], old[0])
+}
+
+func TestSetup_FirstTimeFromASessionAndWithARecoveryCode(t *testing.T) {
+	e, au := optionalEnv(t)
+	c := e.cookie("viewer", false)
+	rev0 := e.userRev("viewer")
+	rec := e.form("/login/two-factor", verifyForm(viewerPW, "", "/"), c)
+	expectPage(t, rec, http.StatusOK, `name="step" value="confirm"`)
+	secret := pageSecret(t, rec)
+	rec = e.send("POST", "/login/two-factor", confirmForm(e.nowCode(t, secret), "/"), c, ticketCookie(t, rec))
+	expectPage(t, rec, http.StatusOK, `id="recovery-codes"`)
+	if e.userRev("viewer") == rev0 {
+		t.Error("the first set-up moves the rev")
+	}
+	seq, _ := e.api.store.seqs()
+	au.expect(t, auditEntry{Actor: "viewer", Action: "twofactor.enrol", Target: "viewer", Outcome: "ok", Msg: "viewer set up two-factor sign-in",
+		Wrote: []auditWrote{{File: filepath.Base(e.f.usersPath), Seq: int64(seq)}}})
+
+	// Now enrolled: a recovery code stands in for the current code, and is spent.
+	codes := pageCodes(t, rec)
+	rec = e.form("/login/two-factor", verifyForm(viewerPW, strings.ToLower(codes[0]), "/"), c)
+	expectPage(t, rec, http.StatusOK, `name="step" value="confirm"`)
+	if recoveryLeft(e, "viewer") != recoveryCount-1 {
+		t.Errorf("the recovery code is used up: %d left", recoveryLeft(e, "viewer"))
+	}
+}
+
+func TestSetupConfirm_BelongsToTheSignedInBrowserThatAsked(t *testing.T) {
+	e, _ := optionalEnv(t)
+	post := func(tk ticket, cookies ...*http.Cookie) (*httptest.ResponseRecorder, *http.Cookie) {
+		tc := &http.Cookie{Name: signinCookie, Value: e.api.sessions.tickets.create(tk)}
+		return e.send("POST", "/login/two-factor", confirmForm(e.nowCode(t, tk.secret), "/"), append(cookies, tc)...), tc
+	}
+	for name, cookies := range map[string][]*http.Cookie{
+		"no session":              nil,
+		"another user's session":  {e.cookie("admin", false)},
+		"a forced-change session": {e.cookie("viewer", true)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec, tc := post(ticket2(e, "viewer"), cookies...)
+			expectRedirect(t, rec, "/login")
+			if _, ok := e.api.sessions.tickets.lookup(tc.Value); ok || isEnrolled(e, "viewer") {
+				t.Error("the ticket ends and nothing is stored")
+			}
+		})
+	}
+	// A code ticket is no set-up ticket either.
+	rec, _ := post(ticket{user: "viewer", stage: stageCode, hash: storedHash(e.api.store, "viewer")}, e.cookie("viewer", false))
+	expectRedirect(t, rec, "/login")
+}
+
+func TestTwoFactorSteps_ThrottledLikeAPassword(t *testing.T) {
+	newEnv := func(t *testing.T) (*managedEnv, *auditLog) {
+		e := newManagedEnv(t, func(c *config) {
+			c.twoFactor = twoFactorOptional
+			c.login = testLoginLimits
+			c.login.unauthPerMinute = 1000
+		})
+		return e, e.withAudit(t, auditSettings{})
+	}
+	blocked := func(t *testing.T, au *auditLog, rec *httptest.ResponseRecorder) {
+		t.Helper()
+		expectPage(t, rec, http.StatusTooManyRequests, "Too many attempts. Try again in 30 seconds.")
+		if rec.Header().Get("Retry-After") != "30" {
+			t.Errorf("Retry-After: got %q", rec.Header().Get("Retry-After"))
+		}
+		var found bool
+		for _, en := range au.entries(t) {
+			found = found || (en.Action == "twofactor.enrol" && en.Code == "throttled")
+		}
+		if !found {
+			t.Errorf("the blocked attempt is audited: %+v", au.entries(t))
+		}
+	}
+	t.Run("verify", func(t *testing.T) {
+		e, au := newEnv(t)
+		c := e.cookie("viewer", false)
+		for range testLoginLimits.maxFailures {
+			expectPage(t, e.form("/login/two-factor", verifyForm("not-the-password", "", "/"), c), http.StatusUnauthorized, "not correct")
+		}
+		rec := e.form("/login/two-factor", verifyForm(viewerPW, "", "/"), c)
+		blocked(t, au, rec)
+		if len(rec.Result().Cookies()) != 0 {
+			t.Error("a blocked verify issues no ticket")
+		}
+		e.clock.advance(testLoginLimits.backoff)
+		expectPage(t, e.form("/login/two-factor", verifyForm(viewerPW, "", "/"), c), http.StatusOK, `name="step" value="confirm"`)
+	})
+	t.Run("confirm", func(t *testing.T) {
+		e, au := newEnv(t)
+		c := e.cookie("viewer", false)
+		rec := e.form("/login/two-factor", verifyForm(viewerPW, "", "/"), c)
+		secret, tc := pageSecret(t, rec), ticketCookie(t, rec)
+		for range testLoginLimits.maxFailures {
+			expectPage(t, e.send("POST", "/login/two-factor", confirmForm("000000", "/"), c, tc), http.StatusUnauthorized, "not correct")
+		}
+		rec = e.send("POST", "/login/two-factor", confirmForm(e.nowCode(t, secret), "/"), c, tc)
+		blocked(t, au, rec)
+		if pageSecret(t, rec) != secret || isEnrolled(e, "viewer") {
+			t.Error("a blocked confirm shows the same secret and stores nothing")
+		}
+	})
+}
+
+// A check that cannot run (the client left while queued, or the hash slots are
+// busy) is a 503 on each step, and nothing is stored or opened.
+func TestTwoFactorSteps_CheckUnavailableIs503(t *testing.T) {
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	post := func(e *managedEnv, ctx context.Context, path string, v url.Values, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "https://gw.example"+path, strings.NewReader(v.Encode())).WithContext(ctx)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = "192.0.2.10:5000"
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		e.root.ServeHTTP(rec, req)
+		return rec
+	}
+	t.Run("queued behind another sign-in of the account", func(t *testing.T) {
+		e, au := optionalEnv(t)
+		e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+		tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+		release, wait, err := e.pages.throttle.loginTurn(context.Background(), "viewer")
+		if err != nil || wait != 0 {
+			t.Fatalf("take the turn: %v %v", wait, err)
+		}
+		defer release()
+		c := e.cookie("viewer", false)
+		setupTicket := &http.Cookie{Name: signinCookie, Value: e.api.sessions.tickets.create(ticket2(e, "viewer"))}
+		for _, rec := range []*httptest.ResponseRecorder{
+			post(e, gone, "/login/code", codeForm("123456", "/"), tc),
+			post(e, gone, "/login/two-factor", verifyForm(viewerPW, "123456", "/"), c),
+			post(e, gone, "/login/two-factor", confirmForm("123456", "/"), c, setupTicket),
+		} {
+			expectPage(t, rec, http.StatusServiceUnavailable, "could not be checked")
+			noSession(t, rec)
+		}
+		var codes []string
+		for _, en := range au.entries(t) {
+			codes = append(codes, en.Action+":"+en.Code)
+		}
+		if want := []string{"signin:unavailable", "twofactor.enrol:unavailable", "twofactor.enrol:unavailable"}; !slices.Equal(codes, want) {
+			t.Errorf("audit: got %v want %v", codes, want)
+		}
+	})
+	t.Run("password check cannot run", func(t *testing.T) {
+		e, _ := optionalEnv(t)
+		c := e.cookie("viewer", false)
+		e.api.store.hasher = &hasher{iter: 1, slots: make(chan struct{}, 1)}
+		e.api.store.hasher.slots <- struct{}{}                                      // every slot busy...
+		rec := post(e, gone, "/login/two-factor", verifyForm(viewerPW, "", "/"), c) // ...and the client gone
+		expectPage(t, rec, http.StatusServiceUnavailable, "could not be checked")
+	})
+	t.Run("store cannot spend the recovery code", func(t *testing.T) {
+		e, _ := optionalEnv(t)
+		codes := e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+		if err := os.WriteFile(e.f.usersPath, []byte("not the file the gateway wrote"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		rec := e.form("/login/two-factor", verifyForm(viewerPW, formatRecoveryCode(codes[0]), "/"), e.cookie("viewer", false))
+		expectPage(t, rec, http.StatusServiceUnavailable, "could not be checked")
+		if len(rec.Result().Cookies()) != 0 {
+			t.Error("no ticket is issued")
+		}
+	})
+}
+
+func TestEnrol_EndsAnotherSessionLeftInTheBrowser(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorMandatory })
+	tc, secret := beginEnrol(t, e, "viewer", viewerPW)
+	stray := e.cookie("admin", false) // a session this browser gained meanwhile
+	rec := e.send("POST", "/login/two-factor", confirmForm(e.nowCode(t, secret), "/"), tc, stray)
+	expectPage(t, rec, http.StatusOK, `id="recovery-codes"`)
+	expect(t, e.do("GET", "/managed/me", "", stray), http.StatusUnauthorized, "unauthenticated")
+	expect(t, e.do("GET", "/managed/me", "", issuedCookie(t, rec)), http.StatusOK, "")
 }

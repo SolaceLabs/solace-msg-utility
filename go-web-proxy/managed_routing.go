@@ -106,14 +106,18 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	if err != nil {
 		return nil, fmt.Errorf("sign-in page template: %w", err)
 	}
+	api := newManagedHandler(st, ss, th, lv, sf, backups, managedEndpoints{
+		relay: newSEMPRelay(st, upstream, logger.With("component", "relay")),
+		smf:   newSMFGate(st, ss, sockets, connects, upstream, logger.With("component", "smf")),
+		dial:  newDialer(st, connects, logger.With("component", "dial")),
+	}, logger.With("component", "managed"))
+	// One replay guard for the pages and the API: a reset or an import forgets
+	// the steps of the secret it removes or replaces.
+	api.totp = pages.totp
 	// gateApp passes everything through unless connModes is provisioned, which
 	// it reads per request: the settings page can change it.
 	routes := &managedRoutes{
-		api: newManagedHandler(st, ss, th, lv, sf, backups, managedEndpoints{
-			relay: newSEMPRelay(st, upstream, logger.With("component", "relay")),
-			smf:   newSMFGate(st, ss, sockets, connects, upstream, logger.With("component", "smf")),
-			dial:  newDialer(st, connects, logger.With("component", "dial")),
-		}, logger.With("component", "managed")),
+		api:       api,
 		pages:     pages,
 		gateApp:   pages.gateApp,
 		gateAdmin: pages.gateAdmin,

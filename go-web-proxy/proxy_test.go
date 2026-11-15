@@ -548,6 +548,7 @@ func TestDropSessionCookie(t *testing.T) {
 		{"session among others", []string{"a=1; __Host-smu-session=abc; b=2"}, []string{"a=1; b=2"}},
 		{"one line per cookie", []string{"__Host-smu-session=abc", "c=3"}, []string{"c=3"}},
 		{"empty parts dropped", []string{" ; d=4 ;"}, []string{"d=4"}},
+		{"the sign-in ticket too", []string{"a=1; __Host-smu-signin=tkt; __Host-smu-session=abc"}, []string{"a=1"}},
 		{"look-alike name kept", []string{"__Host-smu-session2=x"}, []string{"__Host-smu-session2=x"}},
 	}
 	for _, c := range cases {
@@ -602,6 +603,7 @@ func TestDropSessionSetCookie(t *testing.T) {
 		{"an expiry", []string{"__Host-smu-session=; Max-Age=0; Secure; Path=/"}, nil},
 		{"spaces around the name", []string{" __Host-smu-session =x; Secure; Path=/"}, nil},
 		{"others kept in order", []string{"a=1; Path=/", "__Host-smu-session=x; Secure; Path=/", "b=2"}, []string{"a=1; Path=/", "b=2"}},
+		{"a replacement sign-in ticket", []string{"__Host-smu-signin=theirs; Secure; Path=/; HttpOnly"}, nil},
 		{"look-alike name kept", []string{"__Host-smu-session2=x; Secure; Path=/"}, []string{"__Host-smu-session2=x; Secure; Path=/"}},
 		{"name only in the value kept", []string{"a=__Host-smu-session; Path=/"}, []string{"a=__Host-smu-session; Path=/"}},
 	}

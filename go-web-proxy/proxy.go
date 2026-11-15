@@ -295,8 +295,9 @@ func newReverseProxy(transport http.RoundTripper, logger *slog.Logger) *reverseP
 // relay, which must strip it in every mode.
 const sessionCookie = "__Host-smu-session"
 
-// dropSessionCookie removes the gateway's own sign-in cookie from a request
-// bound upstream. The Direct relay forwards every other header unchanged, so
+// dropSessionCookie removes the gateway's own sign-in cookies (the session and
+// the half-finished sign-in's ticket, session.go) from a request bound
+// upstream. The Direct relay forwards every other header unchanged, so
 // without this a Direct connection to any host would hand that host a live
 // gateway session. Every Cookie line is rebuilt; other cookies pass as sent.
 func dropSessionCookie(h http.Header) {
@@ -310,7 +311,7 @@ func dropSessionCookie(h http.Header) {
 		for _, part := range strings.Split(line, ";") {
 			part = strings.TrimSpace(part)
 			name, _, _ := strings.Cut(part, "=")
-			if part == "" || name == sessionCookie {
+			if part == "" || name == sessionCookie || name == signinCookie {
 				continue
 			}
 			kept = append(kept, part)
@@ -321,11 +322,11 @@ func dropSessionCookie(h http.Header) {
 	}
 }
 
-// dropSessionSetCookie removes every Set-Cookie line naming the gateway's
-// sign-in cookie from a Direct upstream's answer. That answer is served on the
-// gateway's own origin, so without this any host a user connects to could
-// replace the cookie (signing the user in to an account of the host's
-// choosing) or expire it. Other cookies pass as sent.
+// dropSessionSetCookie removes every Set-Cookie line naming one of the
+// gateway's sign-in cookies (session and ticket) from a Direct upstream's
+// answer. That answer is served on the gateway's own origin, so without this
+// any host a user connects to could replace a cookie (signing the user in to
+// an account of the host's choosing) or expire it. Other cookies pass as sent.
 func dropSessionSetCookie(h http.Header) {
 	lines := h.Values("Set-Cookie")
 	if len(lines) == 0 {
@@ -335,7 +336,7 @@ func dropSessionSetCookie(h http.Header) {
 	for _, line := range lines {
 		pair, _, _ := strings.Cut(line, ";")
 		name, _, _ := strings.Cut(pair, "=")
-		if strings.TrimSpace(name) != sessionCookie {
+		if n := strings.TrimSpace(name); n != sessionCookie && n != signinCookie {
 			h.Add("Set-Cookie", line)
 		}
 	}

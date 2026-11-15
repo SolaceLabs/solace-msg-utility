@@ -63,6 +63,7 @@ login:
   backoffSeconds: 10
   maxBackoffSeconds: 600
   unauthenticatedPerMinute: 20
+  twoFactor: admins
 modules:
   offered: [queue-copy]
   userDefault: none
@@ -83,7 +84,7 @@ func TestDecodeConfigFile_Valid(t *testing.T) {
 		LogLevel: "debug",
 		Access:   fileAccess{Allow: []string{"10.0.0.0/8", "2001:db8::/32"}, TrustedProxies: []string{"10.0.0.1/32"}},
 		Session:  fileSession{IdleMinutes: 5, AbsoluteMinutes: 60},
-		Login:    fileLogin{MaxFailures: 3, BackoffSeconds: 10, MaxBackoffSeconds: 600, UnauthenticatedPerMinute: 20},
+		Login:    fileLogin{MaxFailures: 3, BackoffSeconds: 10, MaxBackoffSeconds: 600, UnauthenticatedPerMinute: 20, TwoFactor: "admins"},
 		Modules:  fileModules{Offered: []string{"queue-copy"}, UserDefault: "none"},
 		Audit:    fileAudit{Stdout: true, Access: true, OnFailure: "refuse"},
 	}
@@ -289,6 +290,73 @@ func TestToConfig_AuditOnFailureIsValidated(t *testing.T) {
 				t.Errorf("%q: error %q lacks %s", bad, err, want)
 			}
 		}
+	}
+}
+
+// login.twoFactor reaches the runtime config and back; it defaults to off, also
+// for a config or backup that never had the key, and an empty value is off.
+func TestToConfig_TwoFactor(t *testing.T) {
+	cfg, err := defaultFileConfig().toConfig(secretPaths{})
+	if err != nil || cfg.twoFactor != twoFactorOff {
+		t.Fatalf("default: want off, got %q, %v", cfg.twoFactor, err)
+	}
+	for _, mode := range []string{twoFactorOff, twoFactorOptional, twoFactorAdmins, twoFactorMandatory} {
+		fc := defaultFileConfig()
+		fc.Login.TwoFactor = mode
+		cfg, err := fc.toConfig(secretPaths{})
+		if err != nil || cfg.twoFactor != mode {
+			t.Errorf("%q: got %q, %v", mode, cfg.twoFactor, err)
+		}
+		if back := fileConfigFromConfig(cfg).Login.TwoFactor; back != mode {
+			t.Errorf("%q: round trip gave %q", mode, back)
+		}
+	}
+	fc := defaultFileConfig()
+	fc.Login.TwoFactor = ""
+	if cfg, err := fc.toConfig(secretPaths{}); err != nil || cfg.twoFactor != twoFactorOff {
+		t.Errorf("an absent value is off: %q, %v", cfg.twoFactor, err)
+	}
+	if got := fileConfigFromConfig(config{}).Login.TwoFactor; got != twoFactorOff {
+		t.Errorf("a config built without the value is written as off, got %q", got)
+	}
+}
+
+// login.twoFactor takes exactly the four values; start refuses anything else
+// naming the key, the value and the choices.
+func TestToConfig_TwoFactorIsValidated(t *testing.T) {
+	for _, bad := range []string{"Off", "on", "true", " admins", "everyone"} {
+		fc := defaultFileConfig()
+		fc.Login.TwoFactor = bad
+		_, err := fc.toConfig(secretPaths{})
+		if err == nil {
+			t.Errorf("%q must be refused", bad)
+			continue
+		}
+		for _, want := range []string{`"login.twoFactor"`, strconv.Quote(bad), `"off"`, `"mandatory"`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%q: error %q lacks %s", bad, err, want)
+			}
+		}
+	}
+}
+
+// A file written before the key existed loads as off, one that sets it keeps
+// it, and the next write carries the key.
+func TestDecodeConfigFile_TwoFactorDefaultsAndIsWritten(t *testing.T) {
+	fc, err := decodeConfigFile([]byte("version: 1\nlogin:\n  maxFailures: 7\n"), "x.yaml")
+	if err != nil || fc.Login.TwoFactor != twoFactorOff || fc.Login.MaxFailures != 7 {
+		t.Fatalf("login: %+v, %v", fc.Login, err)
+	}
+	out, err := encodeConfigFile(fc)
+	if err != nil || !strings.Contains(string(out), "  twoFactor: \"off\"\n") { // quoted by the encoder: off is a boolean to older YAML readers
+		t.Errorf("the file must carry the key once written: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "# login.twoFactor (off|optional|admins|mandatory)") {
+		t.Errorf("the header must describe the key:\n%s", out)
+	}
+	fc, err = decodeConfigFile([]byte("version: 1\nlogin:\n  twoFactor: admins\n"), "x.yaml")
+	if err != nil || fc.Login.TwoFactor != twoFactorAdmins {
+		t.Errorf("a file that sets it keeps it: %+v, %v", fc.Login, err)
 	}
 }
 

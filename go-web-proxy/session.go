@@ -29,6 +29,11 @@ type sessions struct {
 	limits func() sessionLimits
 	now    func() time.Time
 
+	// tickets are the sign-ins that have passed the password and still owe a
+	// second step (below). dropUser and dropOthers end a user's tickets with
+	// their sessions, so one call revokes both.
+	tickets *signinTickets
+
 	// Revocation hooks (sockets.go): set once before serving, called outside
 	// mu. drop calls onDrop with the id, dropUser calls onDropUser with the
 	// user. Expiry and the sweep call neither: an SMF socket ends only on
@@ -38,7 +43,7 @@ type sessions struct {
 }
 
 func newSessions(limits func() sessionLimits, now func() time.Time) *sessions {
-	return &sessions{byID: map[string]*session{}, limits: limits, now: now}
+	return &sessions{byID: map[string]*session{}, limits: limits, now: now, tickets: newSigninTickets(now)}
 }
 
 func expired(ss *session, now time.Time, lim sessionLimits) bool {
@@ -91,13 +96,15 @@ func (s *sessions) drop(id string) {
 	}
 }
 
-// dropUser ends every session of one user: their password, admin flag or
-// account changed. onDropUser fires even when no session was left, so a
-// socket that outlived its session is still closed.
+// dropUser ends every session and sign-in ticket of one user: their password,
+// admin flag, account or two-factor changed. onDropUser fires even when no
+// session was left, so a socket that outlived its session is still closed.
 func (s *sessions) dropUser(user string) { s.dropOthers(user, "") }
 
 // dropOthers is dropUser sparing the session keep: the browser that changed
 // the user's own password keeps the session it was just given. No id is "".
+// The user's tickets all end: a half-finished sign-in of an account that has
+// just changed must not finish.
 func (s *sessions) dropOthers(user, keep string) {
 	s.mu.Lock()
 	for k, ss := range s.byID {
@@ -106,6 +113,7 @@ func (s *sessions) dropOthers(user, keep string) {
 		}
 	}
 	s.mu.Unlock()
+	s.tickets.dropUser(user)
 	if s.onDropUser != nil {
 		s.onDropUser(user)
 	}
@@ -165,4 +173,133 @@ func withSession(ctx context.Context, as activeSession) context.Context {
 func sessionOf(r *http.Request) activeSession {
 	as, _ := r.Context().Value(sessionCtxKey{}).(activeSession)
 	return as
+}
+
+// ----- sign-in tickets ---------------------------------------------------------------
+
+// signinCookie carries the id of a sign-in ticket (below). Like the session
+// cookie it is __Host- prefixed, so a browser accepts it only from this host
+// over TLS with Path=/, and the Direct relay strips it as it strips the
+// session cookie (proxy.go).
+const signinCookie = "__Host-smu-signin"
+
+// ticketTTL is how long a half-finished sign-in waits for its next step.
+const ticketTTL = 10 * time.Minute
+
+// ticket is a sign-in that has passed the password and still owes a step. It
+// is never a session: no session exists until every step has passed, so
+// nothing that checks sessions needs to know a half-finished state. A ticket
+// grants nothing but its own page.
+type ticket struct {
+	user       string
+	stage      string // stageCode, stageEnrol or stageSetup (totp.go)
+	hash       string // the password hash that was checked, for ifUnchanged
+	mustChange bool
+	secret     string // the pending new secret, for stageEnrol and stageSetup
+	created    time.Time
+}
+
+// signinTickets is the in-memory ticket table, beside the sessions (a restart
+// ends every half-finished sign-in). Ids are 32 random bytes.
+type signinTickets struct {
+	mu   sync.Mutex
+	byID map[string]*ticket
+	now  func() time.Time
+}
+
+func newSigninTickets(now func() time.Time) *signinTickets {
+	return &signinTickets{byID: map[string]*ticket{}, now: now}
+}
+
+func ticketExpired(tk *ticket, now time.Time) bool { return now.Sub(tk.created) >= ticketTTL }
+
+// create stores tk (its created time is set here) and returns its id. It
+// replaces nothing: a caller that holds the browser's earlier ticket drops it.
+// Expired tickets are swept here, so the table never outgrows the sign-ins
+// begun in the last ticketTTL.
+func (t *signinTickets) create(tk ticket) string {
+	b := make([]byte, 32)
+	rand.Read(b) // never fails: since Go 1.24 it crashes the process instead
+	id := base64.RawURLEncoding.EncodeToString(b)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := t.now()
+	for k, old := range t.byID {
+		if ticketExpired(old, now) {
+			delete(t.byID, k)
+		}
+	}
+	tk.created = now
+	t.byID[id] = &tk
+	return id
+}
+
+// lookup returns a copy of a live ticket. An expired one is dropped and
+// reported as absent. A lookup does not extend it: ticketTTL runs from create.
+func (t *signinTickets) lookup(id string) (ticket, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	tk, ok := t.byID[id]
+	if !ok {
+		return ticket{}, false
+	}
+	if ticketExpired(tk, t.now()) {
+		delete(t.byID, id)
+		return ticket{}, false
+	}
+	return *tk, true
+}
+
+// drop ends one ticket: the sign-in finished, failed for good or was replaced.
+func (t *signinTickets) drop(id string) {
+	t.mu.Lock()
+	delete(t.byID, id)
+	t.mu.Unlock()
+}
+
+// dropUser ends every ticket of one user.
+func (t *signinTickets) dropUser(user string) {
+	t.mu.Lock()
+	for k, tk := range t.byID {
+		if tk.user == user {
+			delete(t.byID, k)
+		}
+	}
+	t.mu.Unlock()
+}
+
+// activeTicket is a looked-up ticket plus its id, as handlers see it.
+type activeTicket struct {
+	id string
+	ticket
+}
+
+// fromRequest looks up the request's sign-in cookie.
+func (t *signinTickets) fromRequest(r *http.Request) (activeTicket, bool) {
+	c, err := r.Cookie(signinCookie)
+	if err != nil {
+		return activeTicket{}, false
+	}
+	tk, ok := t.lookup(c.Value)
+	if !ok {
+		return activeTicket{}, false
+	}
+	return activeTicket{id: c.Value, ticket: tk}, true
+}
+
+// setSigninCookie issues the ticket cookie. SameSite=Strict: only a request
+// from this site continues a sign-in. No Max-Age: the ticket's own expiry
+// applies, not the browser's.
+func setSigninCookie(w http.ResponseWriter, id string) {
+	http.SetCookie(w, &http.Cookie{
+		Name: signinCookie, Value: id, Path: "/",
+		Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func clearSigninCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name: signinCookie, Value: "", Path: "/", MaxAge: -1,
+		Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
+	})
 }

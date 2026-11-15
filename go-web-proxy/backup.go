@@ -235,6 +235,8 @@ func openBackup(ctx context.Context, h *hasher, data []byte, passphrase string) 
 	// A backup written before audit.onFailure existed holds none. It reads as
 	// the default, so it previews as no change and imports as continue.
 	doc.Settings.Audit.OnFailure = onFailureOrDefault(doc.Settings.Audit.OnFailure)
+	// The same for login.twoFactor, which a backup of an older gateway lacks.
+	doc.Settings.Login.TwoFactor = twoFactorOrDefault(doc.Settings.Login.TwoFactor)
 	return doc, nil
 }
 
@@ -318,12 +320,13 @@ func connName(c connRec) string { return c.Broker }
 
 // sessionEnders lists the users of cur whose sessions must end when next
 // replaces it: removed, or with a new password hash or admin flag (the rule
-// upsertUser applies to one user).
+// upsertUser applies to one user), or with two-factor added, removed or
+// replaced (another secret). Recovery codes alone do not end a session.
 func sessionEnders(cur, next []userRec) []string {
 	out := []string{}
 	for _, c := range cur {
 		i := slices.IndexFunc(next, func(n userRec) bool { return n.Username == c.Username })
-		if i < 0 || next[i].Password != c.Password || next[i].Admin != c.Admin {
+		if i < 0 || next[i].Password != c.Password || next[i].Admin != c.Admin || secretOf(next[i].TOTP) != secretOf(c.TOTP) {
 			out = append(out, c.Username)
 		}
 	}

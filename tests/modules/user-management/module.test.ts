@@ -4,13 +4,14 @@ import { createEventBus } from '../../../src/core/event-bus';
 import type { AppContext, AppState, ManagedSession } from '../../../src/core/types';
 
 // --- mocked dependencies (hoisted so vi.mock factories can close over them) ---
-const svcMock = vi.hoisted(() => ({ listUsers: vi.fn(), saveUser: vi.fn(), deleteUser: vi.fn() }));
+const svcMock = vi.hoisted(() => ({ listUsers: vi.fn(), saveUser: vi.fn(), deleteUser: vi.fn(), resetTwoFactor: vi.fn() }));
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
 
 vi.mock('../../../src/core/toast', () => ({ showToast: toastMock.showToast }));
 vi.mock('../../../src/modules/user-management/service', () => ({
     createUserMgmtService: () => ({
         listUsers: svcMock.listUsers, saveUser: svcMock.saveUser, deleteUser: svcMock.deleteUser,
+        resetTwoFactor: svcMock.resetTwoFactor,
     }),
 }));
 
@@ -23,8 +24,8 @@ const ADMIN: ManagedSession = {
     admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
 };
 const USERS = [
-    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null, rev: 3 },
-    { username: 'viewer', admin: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'v1', queues: '*' }], modules: ['queue-browser'], rev: 5 },
+    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null, rev: 3, twoFactor: false },
+    { username: 'viewer', admin: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'v1', queues: '*' }], modules: ['queue-browser'], rev: 5, twoFactor: true },
 ];
 /** The gateway's 200 answer to a save: the record's new rev. */
 const saved = (rev = 6) => ({ ok: true, data: { rev } });
@@ -87,6 +88,7 @@ beforeEach(() => {
     svcMock.listUsers.mockReset();
     svcMock.saveUser.mockReset();
     svcMock.deleteUser.mockReset();
+    svcMock.resetTwoFactor.mockReset();
     toastMock.showToast.mockReset();
 });
 
@@ -245,6 +247,7 @@ describe('user-management -- list rows and search', () => {
         const container = await setupMany();
         search(container, '<img src=x>');
         expect(el(container, '#user-mgmt-rows').textContent).toBe('No users match "<img src=x>".');
+        expect(el(container, '#user-mgmt-rows').querySelector('td')!.colSpan).toBe(4); // the row spans the Two-factor column too
         expect(el(container, '#user-mgmt-rows').querySelector('img')).toBeNull();
     });
 
@@ -754,5 +757,104 @@ describe('user-management -- versions', () => {
         await answerConfirm(true);
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('This user was deleted by someone else.', 'error'));
         await vi.waitFor(() => expect(rowCount(container)).toBe(1));
+    });
+});
+
+// Two-factor sign-in: the column, and the Reset two-factor row action (a lost
+// phone). The gateway ends the user's sessions when a reset removes something.
+describe('user-management -- two-factor', () => {
+    const resetBtn = (c: HTMLElement, i: number) =>
+        el(c, '#user-mgmt-rows').querySelectorAll('tr')[i].querySelector<HTMLButtonElement>('.user-mgmt-reset-2fa');
+
+    it('shows On or Off per user, and Reset two-factor only on the rows that are On', async () => {
+        const { container } = await setup();
+        const cells = [...el(container, '#user-mgmt-rows').querySelectorAll('tr')].map(tr => tr.cells[2].textContent);
+        expect(cells).toEqual(['Off', 'On']);
+        expect(resetBtn(container, 0)).toBeNull();
+        expect(resetBtn(container, 1)!.getAttribute('aria-label')).toBe('Reset two-factor for user "viewer"');
+    });
+
+    it('keeps the button on the right row when the search narrows the list', async () => {
+        const { container } = await setup();
+        const input = el<HTMLInputElement>(container, '#user-mgmt-search');
+        input.value = 'viewer';
+        input.dispatchEvent(new Event('input'));
+        expect(rowCount(container)).toBe(1);
+        expect(resetBtn(container, 0)).not.toBeNull();
+        input.value = 'nobody';
+        input.dispatchEvent(new Event('input'));
+        expect(el(container, '#user-mgmt-rows').querySelector('.user-mgmt-reset-2fa')).toBeNull();
+    });
+
+    it('resets after confirmation: names the user, toasts, and reloads the list', async () => {
+        const { container } = await setup();
+        svcMock.resetTwoFactor.mockResolvedValue({ ok: true, data: { rev: 6 } });
+        svcMock.listUsers.mockResolvedValue(listed([USERS[0], { ...USERS[1], twoFactor: false, rev: 6 }]));
+        resetBtn(container, 1)!.click();
+        expect(await answerConfirm(true)).toBe('Reset two-factor sign-in for "viewer"? They will have to set it up again.');
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Two-factor sign-in reset', 'ok'));
+        expect(svcMock.resetTwoFactor).toHaveBeenCalledWith('viewer');
+        await vi.waitFor(() => expect(resetBtn(container, 1)).toBeNull());
+    });
+
+    it('does nothing when the reset is cancelled', async () => {
+        const { container } = await setup();
+        resetBtn(container, 1)!.click();
+        await answerConfirm(false);
+        expect(svcMock.resetTwoFactor).not.toHaveBeenCalled();
+        expect(toastMock.showToast).not.toHaveBeenCalled();
+    });
+
+    it('a user deleted meanwhile: says so and shows the reloaded list', async () => {
+        const { container } = await setup();
+        svcMock.resetTwoFactor.mockResolvedValue(failed(404, 'not_found'));
+        svcMock.listUsers.mockResolvedValue(listed([USERS[0]]));
+        resetBtn(container, 1)!.click();
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('This user was deleted by someone else.', 'error'));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(1));
+    });
+
+    it("toasts the gateway's reason for any other refusal and leaves the list as it is", async () => {
+        const { container } = await setup();
+        svcMock.resetTwoFactor.mockResolvedValue(failed(500, 'store_write_failed'));
+        svcMock.listUsers.mockClear();
+        resetBtn(container, 1)!.click();
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(
+            'The gateway could not write its data files, so nothing was changed. Its log has the cause.', 'error'));
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+    });
+
+    it('resetting your own two-factor signs you out instead of reloading the list', async () => {
+        const { container, ctx } = await setup(ADMIN);
+        const signOut = answerSignOut(ctx);
+        svcMock.listUsers.mockResolvedValue(listed([{ ...USERS[0], twoFactor: true }, USERS[1]]));
+        el(container, '#btn-user-mgmt-refresh').click();
+        await vi.waitFor(() => expect(resetBtn(container, 0)).not.toBeNull());
+        svcMock.resetTwoFactor.mockResolvedValue({ ok: true, data: { rev: 3 } });
+        svcMock.listUsers.mockClear();
+        resetBtn(container, 0)!.click();
+        expect(await answerConfirm(true)).toBe('Reset your own two-factor sign-in? You will be signed out and must set it up again.');
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+        expect(toastMock.showToast).toHaveBeenCalledWith('Two-factor sign-in reset. You have been signed out.', 'ok', 5000);
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+    });
+
+    it('the reset is a no-op if the managed session vanished', async () => {
+        const { container, ctx } = await setup();
+        ctx.setState('managed', null);
+        resetBtn(container, 1)!.click();
+        await Promise.resolve();
+        expect(svcMock.resetTwoFactor).not.toHaveBeenCalled();
+    });
+
+    it('a save never carries the two-factor field', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(saved());
+        clickRow(container, 1, '.user-mgmt-edit');
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0]).not.toHaveProperty('twoFactor');
     });
 });

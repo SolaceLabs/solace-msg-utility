@@ -234,6 +234,10 @@ func (h *managedHandler) checkSettings(r *http.Request, body fileConfig) (config
 			return config{}, invalidRefusal(k.key, k.key+" is a path, so it changes only in config.yaml on the gateway host, followed by a restart.")
 		}
 	}
+	// Named by its own field, as the settings page marks the select it came from.
+	if _, err := checkTwoFactor(body.Login.TwoFactor); err != nil {
+		return config{}, invalidRefusal("login.twoFactor", err.Error())
+	}
 	cfg, err := body.toConfig(secretPaths{storeKey: sf.boot.storeKeyFile})
 	if err != nil {
 		return config{}, invalidRefusal("settings", err.Error())

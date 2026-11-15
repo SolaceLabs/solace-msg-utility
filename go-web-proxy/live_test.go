@@ -49,6 +49,31 @@ func TestLive_ApplySwapsEveryLiveKey(t *testing.T) {
 	}
 }
 
+// login.twoFactor is read at each sign-in: a reader gets the value applied last,
+// and a config built without it reads as off.
+func TestLive_TwoFactorIsLive(t *testing.T) {
+	lv := liveWith(nil)
+	if lv.twoFactor() != twoFactorOff {
+		t.Fatalf("default: want off, got %q", lv.twoFactor())
+	}
+	for _, mode := range []string{twoFactorOptional, twoFactorAdmins, twoFactorMandatory, twoFactorOff} {
+		cfg := defaultConfig()
+		cfg.twoFactor = mode
+		lv.apply(cfg)
+		if lv.twoFactor() != mode {
+			t.Errorf("applied %q, read %q", mode, lv.twoFactor())
+		}
+	}
+	cfg := defaultConfig()
+	cfg.twoFactor = twoFactorMandatory
+	lv.apply(cfg)
+	cfg.twoFactor = ""
+	lv.apply(cfg)
+	if lv.twoFactor() != twoFactorOff {
+		t.Errorf("a config without the value reads as off, got %q", lv.twoFactor())
+	}
+}
+
 func TestPendingRestart(t *testing.T) {
 	running := defaultConfig()
 	file := fileConfigFromConfig(running)
@@ -143,6 +168,11 @@ func TestFileConfig_EveryKeyIsClassifiedOnce(t *testing.T) {
 		}
 		delete(liveKeys, top)
 	}
+	// login.twoFactor is live as well, in a field of its own beside the login limits.
+	if !liveKeys["twoFactor"] {
+		t.Error("login.twoFactor is not copied by liveSettings/apply")
+	}
+	delete(liveKeys, "twoFactor")
 	if len(liveKeys) != 0 {
 		t.Errorf("liveSettings copies %v, which this test does not know as live keys", liveKeys)
 	}

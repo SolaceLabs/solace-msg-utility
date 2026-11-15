@@ -14,11 +14,17 @@
  * passes a rev is checked against it (exists, not_found, stale); one that
  * passes none is the control panel's or a test's own edit and is not.
  *
+ * Two-factor (store.go `userRec.TOTP`) is part of the admin view as a flag
+ * (`twoFactor`), so enrolling and an administrator's reset move the rev while
+ * setting it up again, or a used recovery code, moves only the seq. A save
+ * through `upsertUser` never carries or clears it: it keeps the stored record,
+ * as a blank password keeps the hash.
+ *
  * Mock-only.
  */
 import { matchGlob } from '../../core/rbac';
 import type { QGlob } from '../../core/types';
-import type { ConnRec, GatewaySeed, ListedConn, ListedUser, ManagedProfile, UserRec } from './types';
+import type { ConnRec, GatewaySeed, ListedConn, ListedUser, ManagedProfile, UserRec, UserTotp } from './types';
 
 /** The modules block a profile is computed with (configfile.go moduleSettings). */
 export interface ModuleSettings {
@@ -51,7 +57,12 @@ const userView = (u: UserRec): Omit<ListedUser, 'rev'> => ({
     operate: rows(u.operate),
     readOnly: rows(u.readOnly),
     modules: u.modules ? [...u.modules] : null,
+    twoFactor: u.totp !== undefined,
 });
+
+/** The user's two-factor record copied, or nothing for a user without one (a spread). */
+const cloneTotp = (u: UserRec): { totp?: UserTotp } =>
+    (u.totp ? { totp: { secret: u.totp.secret, recovery: [...u.totp.recovery] } } : {});
 
 /** What `GET /managed/connections` shows of a record, but its rev: no password, both schemes named. */
 const connView = (c: ConnRec): Omit<ListedConn, 'rev'> => ({
@@ -115,8 +126,8 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
     return {
         findUser,
 
-        /** profile: names only, recomputed on every call; null for a deleted user. */
-        profile(name: string, ms: ModuleSettings): ManagedProfile | null {
+        /** profile: names only, recomputed on every call; null for a deleted user. The router adds the two-factor state. */
+        profile(name: string, ms: ModuleSettings): Omit<ManagedProfile, 'twoFactor'> | null {
             const u = findUser(name);
             if (!u) return null;
             return {
@@ -166,7 +177,7 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
          * and refuses a missing name or any rev but the current one, in that order, before the
          * rules about the record. Without one, an unconditional edit.
          */
-        upsertUser(rec: Omit<UserRec, 'password' | 'mustChangePassword'>, password: string, rev?: number): UpsertUserResult {
+        upsertUser(rec: Omit<UserRec, 'password' | 'mustChangePassword' | 'totp'>, password: string, rev?: number): UpsertUserResult {
             const old = findUser(rec.username);
             if (rev !== undefined) {
                 if (old && rev === 0) return { ok: false, error: 'exists' };
@@ -179,6 +190,7 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
                 ...rec,
                 password: password !== '' ? password : old!.password,
                 mustChangePassword: password !== '' ? false : (old?.mustChangePassword ?? false),
+                ...(old ? cloneTotp(old) : {}),
             };
             users = old ? users.map(u => (u === old ? next : u)) : [...users, next];
             usersSeq += 1;
@@ -196,6 +208,57 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
             usersSeq += 1;
             if (!sameView(userView(u), userView(next))) userRevs.set(name, usersSeq);
             return true;
+        },
+
+        /** The user's two-factor record; undefined when there is none (or no such user). */
+        totpOf: (name: string): UserTotp | undefined => findUser(name)?.totp,
+
+        /** Every user that has two-factor, with the secret, for the Demo controls' Authenticator. */
+        listTotp(): { user: string; secret: string }[] {
+            return users.flatMap(u => (u.totp ? [{ user: u.username, secret: u.totp.secret }] : []));
+        },
+
+        /**
+         * setTOTP: set two-factor up, or up again, replacing the secret and every recovery code in one
+         * commit. `expect` is the password the check saw, as setPassword's. The rev moves only when the
+         * user had none (the admin view's flag flipped).
+         */
+        setTotp(name: string, totp: UserTotp, expect: string): 'ok' | 'not_found' | 'account_changed' {
+            const u = findUser(name);
+            if (!u) return 'not_found';
+            if (u.password !== expect) return 'account_changed';
+            const next: UserRec = { ...u, totp: { secret: totp.secret, recovery: [...totp.recovery] } };
+            users = users.map(x => (x === u ? next : x));
+            usersSeq += 1;
+            if (!sameView(userView(u), userView(next))) userRevs.set(name, usersSeq);
+            return 'ok';
+        },
+
+        /** useRecoveryCode: remove a used code's hash; the number left, or null when the user has no such code. The rev stays. */
+        useRecovery(name: string, hash: string): number | null {
+            const u = findUser(name);
+            const t = u?.totp;
+            if (!u || !t || !t.recovery.includes(hash)) return null;
+            const recovery = t.recovery.filter(h => h !== hash);
+            users = users.map(x => (x === u ? { ...u, totp: { secret: t.secret, recovery } } : x));
+            usersSeq += 1;
+            return recovery.length;
+        },
+
+        /**
+         * clearTOTP (an administrator's reset): null for an unknown user, else the user's rev, which
+         * moves only when there was two-factor to remove (`removed`).
+         */
+        clearTotp(name: string): { rev: number; removed: boolean } | null {
+            const u = findUser(name);
+            if (!u) return null;
+            if (!u.totp) return { rev: userRevs.get(name)!, removed: false };
+            const next: UserRec = { ...u };
+            delete next.totp;
+            users = users.map(x => (x === u ? next : x));
+            usersSeq += 1;
+            userRevs.set(name, usersSeq);
+            return { rev: usersSeq, removed: true };
         },
 
         /** deleteUser; with a `rev`, a rev other than the current one is 'stale' (after 'not_found', before the last-admin rule). */
@@ -260,7 +323,7 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
 
         /** replaceUsers (an import): the whole list, already validated; every record is restamped. */
         replaceUsers(next: UserRec[]): void {
-            users = next.map(u => ({ ...u, operate: rows(u.operate), readOnly: rows(u.readOnly), modules: u.modules ? [...u.modules] : null }));
+            users = next.map(u => ({ ...u, operate: rows(u.operate), readOnly: rows(u.readOnly), modules: u.modules ? [...u.modules] : null, ...cloneTotp(u) }));
             usersSeq += 1;
             userRevs = new Map<string, number>(users.map(u => [u.username, usersSeq] as const));
             onChange();
@@ -277,7 +340,7 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
         /** Everything, for the snapshot a reload restores. */
         dump(): StoreDump {
             return {
-                users: users.map(u => ({ ...u, operate: rows(u.operate), readOnly: rows(u.readOnly) })),
+                users: users.map(u => ({ ...u, operate: rows(u.operate), readOnly: rows(u.readOnly), ...cloneTotp(u) })),
                 conns: conns.map(cloneConn),
                 versions: {
                     users: { seq: usersSeq, revs: Object.fromEntries(userRevs) },
@@ -286,7 +349,7 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
             };
         },
         load(d: StoreDump): void {
-            users = d.users.map(u => ({ ...u, operate: rows(u.operate), readOnly: rows(u.readOnly) }));
+            users = d.users.map(u => ({ ...u, operate: rows(u.operate), readOnly: rows(u.readOnly), ...cloneTotp(u) }));
             conns = d.conns.map(cloneConn);
             usersSeq = d.versions.users.seq;
             userRevs = new Map(Object.entries(d.versions.users.revs));

@@ -24,7 +24,7 @@ const SETTINGS = {
     logLevel: 'warn',
     access: { allow: ['10.0.0.0/8', '192.0.2.0/24'], trustedProxies: [] },
     session: { idleMinutes: 10, absoluteMinutes: 30 },
-    login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60 },
+    login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60, twoFactor: 'off' },
     modules: { offered: ['queue-browser'], userDefault: 'all' },
     audit: { stdout: false, access: false, onFailure: 'continue' },
 };
@@ -250,6 +250,25 @@ describe('gateway-settings -- audit trail', () => {
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
         expect(svcMock.save.mock.calls[0][0].audit.onFailure).toBe('continue');
+    });
+
+    it('offers the four two-factor modes by their labels, shows the loaded one, and sends the chosen one', async () => {
+        const { container } = await setup(ADMIN, view({
+            settings: { ...SETTINGS, login: { ...SETTINGS.login, twoFactor: 'admins' } },
+        }));
+        const select = el<HTMLSelectElement>(container, '#gw-set-login-twoFactor');
+        expect([...select.options].map(o => [o.value, o.textContent])).toEqual([
+            ['off', 'Off'],
+            ['optional', 'Optional'],
+            ['admins', 'Administrators must use it'],
+            ['mandatory', 'Everyone must use it'],
+        ]);
+        expect(select.value).toBe('admins');
+        select.value = 'mandatory';
+        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        clickSave(container);
+        await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
+        expect(svcMock.save.mock.calls[0][0].login).toEqual({ ...SETTINGS.login, twoFactor: 'mandatory' });
     });
 
     it('sends an unchanged audit section back as loaded', async () => {

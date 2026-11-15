@@ -178,3 +178,12 @@ func TestBuildManagedRoutes_GatesByMode(t *testing.T) {
 		t.Errorf("after switching to both: want the relay, got %q", got)
 	}
 }
+
+// The pages and the API hold one replay guard: a reset or an import through the
+// API forgets steps the pages recorded.
+func TestBuildManagedRoutes_PagesAndAPIShareTheReplayGuard(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	if e.api.totp == nil || e.api.totp != e.pages.totp {
+		t.Fatalf("one guard for both: api %p, pages %p", e.api.totp, e.pages.totp)
+	}
+}

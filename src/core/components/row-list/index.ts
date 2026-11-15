@@ -144,6 +144,8 @@ export function createRowList(container: HTMLElement, fields: RowField[], opts: 
 export interface AdminTableOptions<T> {
     /** Plural noun for the empty rows: "No <plural>." / "No <plural> match "<q>"." */
     plural: string;
+    /** Columns of the table, actions included, which the empty row spans; 3 when not given. */
+    columns?: number;
     /** Prefix of the action classes: `<prefix>-edit`, `<prefix>-delete`, `<prefix>-actions-col`. */
     classPrefix: string;
     /** Inner HTML of the row's data cells; the caller escapes every value. */
@@ -166,7 +168,7 @@ export function renderAdminRows<T>(tbody: HTMLElement, items: T[], total: number
     tbody.innerHTML = '';
     if (items.length === 0) {
         const td = document.createElement('td');
-        td.colSpan = 3;
+        td.colSpan = opts.columns ?? 3;
         td.className = 'text-secondary';
         td.textContent = total === 0 ? `No ${opts.plural}.` : `No ${opts.plural} match "${query}".`;
         tbody.appendChild(document.createElement('tr')).appendChild(td);

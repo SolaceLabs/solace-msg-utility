@@ -26,6 +26,14 @@
   .note { color: var(--muted); font-size: .85rem; margin: 8px 0 0; }
   .links { margin-top: 16px; font-size: .9rem; text-align: center; }
   a { color: #009193; }
+  .qr { text-align: center; margin: 8px 0; }
+  .qr svg { max-width: 100%; height: auto; }
+  .secret { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1rem; word-break: break-word; }
+  .codes { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1rem; padding-left: 28px; margin: 12px 0; }
+  .codes li { margin: 4px 0; }
+  .link-button { display: block; margin-top: 20px; padding: 10px; text-align: center; font-weight: 600; color: #fff;
+                 background: var(--green); border-radius: 4px; text-decoration: none; }
+  .link-button:hover { background: var(--green-hover); }
 </style>
 </head>
 <body>
@@ -58,6 +66,54 @@
     <button type="submit">Change password</button>
     {{if not .Required}}<p class="links"><a href="{{.Next}}">Cancel</a></p>{{end}}
   </form>
+  {{else if eq .Mode "code"}}
+  <form method="post" action="/login/code" autocomplete="off">
+    <h1>{{.Title}}</h1>
+    <p class="note">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
+    {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+    <input type="hidden" name="next" value="{{.Next}}">
+    <label for="code">Code</label>
+    <input id="code" name="code" autocomplete="one-time-code" required autofocus maxlength="32">
+    <button type="submit">Continue</button>
+    <p class="links"><a href="/login">Start again</a></p>
+  </form>
+  {{else if eq .Mode "setup"}}
+  <form method="post" action="/login/two-factor" autocomplete="off">
+    <h1>{{.Title}}</h1>
+    <p class="note">Confirm it is you before a new authenticator is set up.{{if .Enrolled}} Setting it up again replaces the current one and its recovery codes, and signs you out everywhere else.{{end}}</p>
+    {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+    <input type="hidden" name="step" value="verify">
+    <input type="hidden" name="next" value="{{.Next}}">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required autofocus maxlength="128">
+    {{if .Enrolled}}
+    <label for="code">Current code or a recovery code</label>
+    <input id="code" name="code" autocomplete="one-time-code" required maxlength="32">
+    {{end}}
+    <button type="submit">Continue</button>
+    <p class="links"><a href="{{.Next}}">Cancel</a></p>
+  </form>
+  {{else if eq .Mode "enrol"}}
+  <form method="post" action="/login/two-factor" autocomplete="off">
+    <h1>{{.Title}}</h1>
+    <p class="note">Scan the picture with an authenticator app, or type the key into it, then enter the 6-digit code the app shows.</p>
+    {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+    {{if .QR}}<div class="qr">{{.QR}}</div>{{end}}
+    {{if .Note}}<p class="note">{{.Note}}</p>{{end}}
+    <p class="note">Key: <code id="two-factor-secret" class="secret">{{.Secret}}</code></p>
+    <input type="hidden" name="step" value="confirm">
+    <input type="hidden" name="next" value="{{.Next}}">
+    <label for="code">Code</label>
+    <input id="code" name="code" autocomplete="one-time-code" inputmode="numeric" required autofocus maxlength="6" pattern="[0-9]{6}">
+    <button type="submit">Turn on two-factor sign-in</button>
+  </form>
+  {{else if eq .Mode "recovery"}}
+  <div class="body">
+    <h1>{{.Title}}</h1>
+    <p class="note">Two-factor sign-in is on. Keep these recovery codes somewhere safe: each works once if you lose your authenticator. They are shown only now.</p>
+    <ol id="recovery-codes" class="codes">{{range .Codes}}<li>{{.}}</li>{{end}}</ol>
+    <a id="two-factor-continue" class="link-button" href="{{.Continue}}">Continue</a>
+  </div>
   {{else}}
   <div class="body">
     <h1>{{.Title}}</h1>

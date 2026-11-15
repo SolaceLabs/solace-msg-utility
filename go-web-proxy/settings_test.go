@@ -709,6 +709,52 @@ func TestSettings_AuditOnFailureIsALiveKey(t *testing.T) {
 	}
 }
 
+// ----- login.twoFactor ---------------------------------------------------------------
+
+// login.twoFactor is saved, shown, validated and applied at once, a body that
+// names another login key keeps it, and a refused value changes nothing.
+func TestSettings_TwoFactorIsALiveKey(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	if got := e.settings(t).Settings.Login.TwoFactor; got != twoFactorOff || e.live.twoFactor() != twoFactorOff {
+		t.Fatalf("default: shown %q, live %q", got, e.live.twoFactor())
+	}
+	for _, mode := range []string{twoFactorOptional, twoFactorAdmins, twoFactorMandatory, twoFactorOff} {
+		rec := e.saveSettings(t, `{"login":{"twoFactor":"`+mode+`"}}`)
+		expect(t, rec, http.StatusOK, "")
+		if got := decodeSave(t, rec); len(got.RestartRequired) != 0 {
+			t.Errorf("%s: a live key needs no restart: %s", mode, rec.Body.String())
+		}
+		if e.live.twoFactor() != mode || e.settings(t).Settings.Login.TwoFactor != mode || e.fileOnDisk(t).Login.TwoFactor != mode {
+			t.Errorf("%s: not applied, shown and written", mode)
+		}
+	}
+	expect(t, e.saveSettings(t, `{"login":{"twoFactor":"admins"}}`), http.StatusOK, "")
+	if line := logLine(e.log.String(), `msg="gateway settings saved"`, "login.twoFactor"); line == "" {
+		t.Errorf("the save must name login.twoFactor as changed: %s", e.log.String())
+	}
+	expect(t, e.saveSettings(t, `{"login":{"maxFailures":9}}`), http.StatusOK, "")
+	if e.live.twoFactor() != twoFactorAdmins || e.live.get().login.maxFailures != 9 {
+		t.Errorf("a body naming another login key must keep twoFactor: %q %+v", e.live.twoFactor(), e.live.get().login)
+	}
+	bad := e.saveSettings(t, `{"login":{"twoFactor":"everyone"}}`)
+	expect(t, bad, http.StatusUnprocessableEntity, "invalid")
+	if got := errorCode(t, bad); got.Field != "login.twoFactor" || !strings.Contains(got.Reason, `"login.twoFactor"`) || !strings.Contains(got.Reason, `"everyone"`) {
+		t.Errorf("the refusal is on the field and names the value: %+v", got)
+	}
+	if e.live.twoFactor() != twoFactorAdmins || e.fileOnDisk(t).Login.TwoFactor != twoFactorAdmins {
+		t.Error("a refused value must change nothing")
+	}
+}
+
+// settingsChanges lists login.twoFactor by its dotted name.
+func TestSettingsChanges_ListsTwoFactor(t *testing.T) {
+	a, b := defaultFileConfig(), defaultFileConfig()
+	b.Login.TwoFactor = twoFactorMandatory
+	if got := settingsChanges(a, b); !reflect.DeepEqual(got, []string{"login.twoFactor"}) {
+		t.Errorf("got %v", got)
+	}
+}
+
 // settingsChanges lists audit.onFailure by its dotted name.
 func TestSettingsChanges_ListsAuditOnFailure(t *testing.T) {
 	a, b := defaultFileConfig(), defaultFileConfig()

@@ -59,6 +59,21 @@ type userRec struct {
 	// within config.yaml's modules.offered. nil (key absent) means the
 	// deployment's modules.userDefault; an empty list means none.
 	Modules *[]string `yaml:"modules,omitempty"`
+	// TOTP is the user's two-factor sign-in: nil (key absent) when they have
+	// not set it up. Only the field-scoped writes below (setTOTP,
+	// useRecoveryCode, clearTOTP) and an import change it; an administrator's
+	// save keeps what is stored. A stored value is never mutated in place, so
+	// copies of a record may share the pointer.
+	TOTP *userTOTP `yaml:"totp,omitempty"`
+}
+
+// userTOTP is a user's authenticator secret and their unused recovery codes.
+// Both are secrets: they live only inside the sealed file and never reach a
+// log, an audit line, an error or a browser (but for the one page that shows
+// them at enrolment).
+type userTOTP struct {
+	Secret   string   `yaml:"secret"`   // base32, 32 characters (totp.go)
+	Recovery []string `yaml:"recovery"` // lower-case hex SHA-256 of each unused code (hashRecoveryCode)
 }
 
 // usersDoc is users.yaml. Seq moves on every commit of the file and is stored,
@@ -316,6 +331,11 @@ func validateUsers(users []userRec) error {
 				return fmt.Errorf("user %q: %w", u.Username, err)
 			}
 		}
+		if u.TOTP != nil {
+			if err := validateTOTP(*u.TOTP); err != nil {
+				return fmt.Errorf("user %q: two-factor %w", u.Username, err)
+			}
+		}
 		if u.Admin {
 			admins++
 		}
@@ -336,6 +356,30 @@ func validateConns(conns []connRec) error {
 			return fmt.Errorf("broker %q appears more than once", c.Broker)
 		}
 		seen[c.Broker] = true
+	}
+	return nil
+}
+
+var (
+	totpSecretPattern   = regexp.MustCompile(`^[A-Z2-7]{32}$`)
+	recoveryHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
+
+const (
+	totpSecretRule   = "secret must be 32 characters from A-Z 2-7 (base32)"
+	recoveryHashRule = "recovery entry must be 64 lower-case hex characters (a SHA-256)"
+)
+
+// validateTOTP is the load check on a stored two-factor record. The errors
+// name the rule and the position, never the value: both fields are secrets.
+func validateTOTP(t userTOTP) error {
+	if !totpSecretPattern.MatchString(t.Secret) {
+		return errors.New(totpSecretRule)
+	}
+	for i, h := range t.Recovery {
+		if !recoveryHashPattern.MatchString(h) {
+			return fmt.Errorf("%s (entry %d)", recoveryHashRule, i+1)
+		}
 	}
 	return nil
 }
@@ -563,6 +607,39 @@ func (s *store) isAdmin(username string) (admin, exists bool) {
 	return u.Admin, ok
 }
 
+// twoFactorOn is the user list's twoFactor flag: whether the record has
+// two-factor set up.
+func (u userRec) twoFactorOn() bool { return u.TOTP != nil }
+
+// twoFactorOf reports whether the user has two-factor set up now; exists is
+// false for a user that was deleted.
+func (s *store) twoFactorOf(username string) (enrolled, exists bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	u, ok := s.findUser(username)
+	return u.twoFactorOn(), ok
+}
+
+// totpSecret is the user's stored secret, for verifying a code; ok is false
+// when the user is gone or has none.
+func (s *store) totpSecret(username string) (secret string, ok bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if u, found := s.findUser(username); found && u.TOTP != nil {
+		return u.TOTP.Secret, true
+	}
+	return "", false
+}
+
+// secretOf is a record's authenticator secret, "" for none: what a backup
+// import compares to tell a user whose two-factor changed.
+func secretOf(t *userTOTP) string {
+	if t == nil {
+		return ""
+	}
+	return t.Secret
+}
+
 // passwordCheck is a sign-in's verdict and the record it was made against:
 // hash is the stored hash pw was checked with, so what follows can insist
 // that the record still stands (ifUnchanged, setPassword).
@@ -772,9 +849,12 @@ func checkRev(found bool, cur, rev int) error {
 // sameUserView reports whether two users look the same in the admin console:
 // what userToOutput shows. The password hash is never shown, and neither is
 // the rev. Absent grant lists equal empty ones; an absent module list differs
-// from an empty one.
+// from an empty one. Whether two-factor is set is shown (the list's twoFactor
+// flag), but not the secret nor which recovery codes are left: setting up
+// again, or using a recovery code, is not a visible change.
 func sameUserView(a, b userRec) bool {
 	return a.Username == b.Username && a.Admin == b.Admin && a.MustChangePassword == b.MustChangePassword &&
+		a.twoFactorOn() == b.twoFactorOn() &&
 		slices.Equal(a.Operate, b.Operate) && slices.Equal(a.ReadOnly, b.ReadOnly) && sameModules(a.Modules, b.Modules)
 }
 
@@ -802,6 +882,9 @@ func (s *store) listUsers() []userRec {
 			c := slices.Clone(*m)
 			out[i].Modules = &c
 		}
+		if t := out[i].TOTP; t != nil {
+			out[i].TOTP = &userTOTP{Secret: t.Secret, Recovery: slices.Clone(t.Recovery)}
+		}
 	}
 	return out
 }
@@ -814,7 +897,9 @@ func (s *store) listUsers() []userRec {
 // hash is computed before the lock. Order of refusals once inside: caller
 // (errCallerGone, errCallerNotAdmin), disk (*changedOnDiskError), existence
 // (errExists, errNotFound), rev (a stale error naming the current rev), then
-// errBlankNewUserPassword and errLastAdmin (demoting the only admin). A write
+// errBlankNewUserPassword and errLastAdmin (demoting the only admin). Like a
+// blank password, the save never carries or clears two-factor: an existing
+// record keeps the TOTP stored now and a new one has none. A write
 // that fails comes back as *writeFailedError, with memory and files as they
 // were. A refusal leaves seq alone.
 func (s *store) saveUser(ctx context.Context, caller string, u userRec, password string, rev int, committed ...func()) (savedUser, error) {
@@ -846,6 +931,7 @@ func (s *store) saveUser(ctx context.Context, caller string, u userRec, password
 			return err
 		}
 		next, rec, newSeq := slices.Clone(cur), u, seq+1
+		rec.TOTP = old.TOTP
 		drop := false
 		if i >= 0 {
 			if old.Admin && !u.Admin && countAdmins(cur) <= 1 {
@@ -921,6 +1007,129 @@ func (s *store) setPassword(ctx context.Context, username, password, expect stri
 		tx.afterCommit(committed)
 		return nil
 	})
+}
+
+// setTOTP is a user setting up two-factor (secret) or setting it up again,
+// the field-scoped write of setPassword: it sends no rev, and inside the lock
+// it replaces only the secret and the recovery list (recovery holds the
+// hashes, hashRecoveryCodes) of the record as it is now. Order of refusals:
+// disk (*changedOnDiskError), errUserNotFound, errAccountChanged (the record
+// no longer holds expect, the password hash the user's password was checked
+// against). seq moves. The rev moves when two-factor was off (enrol) and stays
+// when it was on (set up again). committed runs under the writer lock once the
+// new secret is published: the handler opens the session and writes the audit
+// line there. The caller ends the user's other sessions and forgets the old
+// secret's replay state (totpGuard.forget).
+func (s *store) setTOTP(ctx context.Context, username, secret string, recovery []string, expect string, committed func()) error {
+	return s.wr.Do(ctx, func(tx *txn) error {
+		if err := tx.check(s.usersPath); err != nil {
+			return err
+		}
+		cur, seq := s.usersNow()
+		i := slices.IndexFunc(cur, func(r userRec) bool { return r.Username == username })
+		switch {
+		case i < 0:
+			return errUserNotFound
+		case cur[i].Password != expect:
+			return errAccountChanged
+		}
+		next, newSeq := slices.Clone(cur), seq+1
+		rec := cur[i]
+		if rec.TOTP == nil {
+			rec.Rev = newSeq
+		}
+		rec.TOTP = &userTOTP{Secret: secret, Recovery: slices.Clone(recovery)}
+		next[i] = rec
+		doc := usersDoc{Seq: newSeq, Users: next}
+		s.seal.stageDoc(tx, roleUsers, s.usersPath, doc)
+		tx.onPublish(func() { s.publish(&doc, nil) })
+		tx.afterCommit(committed)
+		return nil
+	})
+}
+
+// useRecoveryCode spends a recovery code: when hash (hashRecoveryCode) is in
+// the user's list it is removed, used is true and left is how many remain.
+// Otherwise nothing is written and used is false (left is what remains). Order
+// of refusals: disk (*changedOnDiskError), errUserNotFound. A user without
+// two-factor has nothing to spend. A spent code moves seq and keeps the rev;
+// the writer runs one change at a time, so a code used by two requests at once
+// passes once.
+func (s *store) useRecoveryCode(ctx context.Context, username, hash string) (used bool, left int, err error) {
+	err = s.wr.Do(ctx, func(tx *txn) error {
+		if err := tx.check(s.usersPath); err != nil {
+			return err
+		}
+		cur, seq := s.usersNow()
+		i := slices.IndexFunc(cur, func(r userRec) bool { return r.Username == username })
+		if i < 0 {
+			return errUserNotFound
+		}
+		used, left = false, 0
+		if cur[i].TOTP == nil {
+			return nil
+		}
+		left = len(cur[i].TOTP.Recovery)
+		at := recoveryIndex(cur[i].TOTP.Recovery, hash)
+		if at < 0 {
+			return nil
+		}
+		next, rec := slices.Clone(cur), cur[i]
+		rec.TOTP = &userTOTP{Secret: rec.TOTP.Secret, Recovery: slices.Delete(slices.Clone(rec.TOTP.Recovery), at, at+1)}
+		next[i] = rec
+		doc := usersDoc{Seq: seq + 1, Users: next}
+		s.seal.stageDoc(tx, roleUsers, s.usersPath, doc)
+		tx.onPublish(func() { s.publish(&doc, nil) })
+		used, left = true, left-1
+		return nil
+	})
+	if err != nil {
+		return false, 0, err
+	}
+	return used, left, nil
+}
+
+// clearTOTP is an administrator removing a user's two-factor. caller is the
+// requesting admin, re-checked inside the lock ("" skips it). It sends no rev.
+// Order of refusals: caller (errCallerGone, errCallerNotAdmin), disk
+// (*changedOnDiskError), errNotFound for an unknown user. A user without
+// two-factor is not an error and not a commit: removed is false, seq and rev
+// stay, and committed does not run (the handler writes its own entry). When it
+// removes, seq and the user's rev move to the new seq, the sockets re-check
+// and committed runs under the writer lock. rev is the user's rev after the
+// call. The handler ends the user's sessions and tickets.
+func (s *store) clearTOTP(ctx context.Context, caller, username string, committed ...func()) (rev int, removed bool, err error) {
+	err = s.wr.Do(ctx, func(tx *txn) error {
+		if err := s.checkCaller(caller); err != nil {
+			return err
+		}
+		if err := tx.check(s.usersPath); err != nil {
+			return err
+		}
+		cur, seq := s.usersNow()
+		i := slices.IndexFunc(cur, func(r userRec) bool { return r.Username == username })
+		if i < 0 {
+			return errNotFound
+		}
+		rev, removed = cur[i].Rev, false
+		if cur[i].TOTP == nil {
+			return nil
+		}
+		next, rec, newSeq := slices.Clone(cur), cur[i], seq+1
+		rec.TOTP, rec.Rev = nil, newSeq
+		next[i] = rec
+		doc := usersDoc{Seq: newSeq, Users: next}
+		s.seal.stageDoc(tx, roleUsers, s.usersPath, doc)
+		tx.onPublish(func() { s.publish(&doc, nil) })
+		tx.afterCommit(s.changed)
+		tx.afterCommit(committed...)
+		rev, removed = newSeq, true
+		return nil
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	return rev, removed, nil
 }
 
 // deleteUser removes the named user, which must stand at rev (above 0). The

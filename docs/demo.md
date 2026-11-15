@@ -23,6 +23,7 @@ request. For what each module does, see the [User Guide](user-guide.md).
   - [What is not in the demo](#what-is-not-in-the-demo)
 - [Provisioned demo (`provisioned-demo.html`)](#provisioned-demo-provisioned-demohtml)
   - [Demo accounts](#demo-accounts)
+  - [Trying two-factor sign-in](#trying-two-factor-sign-in)
   - [The demo brokers](#the-demo-brokers)
   - [How it differs from a real gateway](#how-it-differs-from-a-real-gateway)
   - [Demo controls](#demo-controls-1)
@@ -126,6 +127,18 @@ panel opens on the first load in a browser tab, as in `demo.html`.
 
 In the Provisioned demo Queue Copy shows one Destination Connection card instead of the typed destination cards: sign in as operator, connect to east-prod / orders, untick Same Message VPN, pick the payments VPN and press Connect; the fake gateway dials the VPN's client credential and the demo broker answers. Operator may only write to `orders.*` on east-prod/orders, so the run gate refuses the other VPN's queues. The Direct demo (`demo.html`) keeps the typed destination cards.
 
+### Trying two-factor sign-in
+
+Two-factor sign-in is off in the seed and nobody is enrolled. Turn it on yourself:
+
+1. Sign in as `admin`, open **Gateway Settings**, set **Two-factor sign-in (code from an authenticator app)** to *Optional* or stronger, and save.
+2. Press the lock icon (**Two-factor sign-in**) in the sidebar footer, enter the password, and you reach the enrol page: a grey placeholder where the QR code would be, the secret in groups of four, and "In this demo, open Demo controls > Authenticator for the code."
+3. In **Demo controls > Authenticator**, the account shows as "admin (setting up)" with its current code and the seconds left. Click the code to copy it, type it into the page and confirm. The ten recovery codes appear once; they are real random codes and work once each.
+4. Sign out and sign in again: the password now leads to the code page, which wants the Authenticator's code (or a recovery code) and refuses a used one until the next step.
+5. In **User Management**, **Reset two-factor** on a row that is On removes it and signs that user out.
+
+With the setting at *Administrators must use it* or *Everyone must use it*, a sign-in of an account without two-factor goes straight to the enrol page. **Sign in as** in the panel lands on the code or enrol page when the setting asks for a step. The state, including a half-finished sign-in and the last accepted code, carries over a sign-in reload in this tab.
+
 ### The demo brokers
 
 | Broker | Message VPN | Queues |
@@ -147,6 +160,7 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
   **Back up now**: the demo keeps no timer. The
   demo's accounts keep plain-text passwords, so its backups do too; import one into the demo, not a real gateway,
   which refuses those users.
+- **The authenticator codes are mock numbers.** The demo does not compute TOTP: a code is a hash of the account's secret and the 30-second step, accepted for the step before, this one and the next, and once only, like the gateway's. No real authenticator app can produce one; the panel's **Authenticator** shows them. The enrol page draws a placeholder instead of a QR code and says where to find the code; otherwise the pages read as the gateway's do. The demo writes no audit lines for two-factor events.
 - **Sign-in reloads the page,** as the gateway's redirect does. The users, connections, settings, sessions, queues and
   panel settings carry over in this tab. A new tab starts from the seed, and **Reset demo data** starts over.
 - **A damaged saved state does not lock the tab.** If the saved state has the current version but cannot be loaded,
@@ -181,6 +195,7 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
 The panel is the one in `demo.html`, with the Direct connection values replaced by two sections:
 
 - **Demo accounts:** every account and password (click to copy), **Sign in as** each, and **Sign out**.
+- **Authenticator:** every account that has a two-factor secret, enrolled or being set up (shown as "name (setting up)"), with its current mock code (click to copy) and the seconds left in the step. It refreshes every second while it is on the page, and says how to get a secret while nobody has one.
 - **Gateway events:**
   - **End my session** closes its broker connections, as a sign-out does; **Expire my session** does not, as an
     expiry does not.

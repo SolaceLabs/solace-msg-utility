@@ -6,7 +6,7 @@
  * panel and the standalone admin app read the session through it.
  */
 import type { QGlob } from '../types';
-import { managedRequest, type ManagedResult } from './managed-api';
+import { managedRequest, type ManagedResult, type TwoFactorState } from './managed-api';
 
 /** A single Message VPN the user may connect to on a broker. */
 export interface ManagedVpn {
@@ -32,6 +32,8 @@ export interface ManagedProfile {
     brokers: ManagedConnection[];
     /** App modules this user may open; drives module control (`rbac.ts`). */
     modules: string[];
+    /** The gateway's two-factor mode and whether this user has set it up; absent reads as not in use. */
+    twoFactor?: TwoFactorState;
 }
 
 /**

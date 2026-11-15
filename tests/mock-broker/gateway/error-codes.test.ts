@@ -98,6 +98,13 @@ describe('mock-broker/gateway -- the error codes', () => {
         expect(MANAGED_ERROR_CODES).not.toContain(REASON_ONLY);
     });
 
+    it('answers a reset of an unknown user\'s two-factor with a code the app has a message for', async () => {
+        const res = await call(createGateway({ seed: contractSeed() }), 'DELETE', '/managed/users/ghost/totp');
+        const code = (res.json as { error?: string }).error;
+        expect([res.status, code]).toEqual([404, 'not_found']);
+        expect(MANAGED_ERROR_CODES).toContain(code);
+    });
+
     for (const [code, f] of Object.entries(FAULTS)) {
         it(`sends ${code} once its fault is armed`, async () => {
             const res = await f.ask(createGateway({ seed: contractSeed() }));

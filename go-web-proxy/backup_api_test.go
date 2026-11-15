@@ -675,6 +675,53 @@ func TestBackupAPI_ImportMergeAndTheCallersOwnSession(t *testing.T) {
 	expect(t, e.do("GET", "/managed/me", "", me), http.StatusUnauthorized, "unauthenticated")
 }
 
+// An import that adds, removes or replaces a user's two-factor ends that
+// user's sessions and sign-in tickets and no one else's; one that only changes
+// the recovery codes left does not.
+func TestBackupAPI_ImportThatChangesTwoFactorEndsThatUsersSessions(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	hashes := func(codes ...string) []string { return hashRecoveryCodes(codes) }
+	withTOTP := func(secret string, recovery []string) string {
+		return e.exported(t, func(d *backupDoc) { d.Users[1].TOTP = &userTOTP{Secret: secret, Recovery: recovery} })
+	}
+	viewerSession := func() (*http.Cookie, string) {
+		return e.cookie("viewer", false), e.api.sessions.tickets.create(ticket{user: "viewer", stage: stageCode})
+	}
+	ended := func(c *http.Cookie, tk string) bool {
+		_, open := e.api.sessions.tickets.lookup(tk)
+		return e.do("GET", "/managed/me", "", c).Code == http.StatusUnauthorized && !open
+	}
+
+	// Added.
+	c, tk := viewerSession()
+	expect(t, e.importWith(t, withTOTP(storeTOTPSecret, hashes("ABCD-EFGH-JKLM-NPQR")), "replace", "skip", "skip"), http.StatusOK, "")
+	if on, _ := e.api.store.twoFactorOf("viewer"); !on || !ended(c, tk) {
+		t.Errorf("added: two-factor on %v, sessions ended %v", on, ended(c, tk))
+	}
+	expect(t, e.do("GET", "/managed/me", "", e.admin()), http.StatusOK, "")
+
+	// Only the codes left differ: the secret is the same.
+	c, tk = viewerSession()
+	expect(t, e.importWith(t, withTOTP(storeTOTPSecret, hashes("WXYZ-2345-6789-ABCD")), "replace", "skip", "skip"), http.StatusOK, "")
+	expect(t, e.do("GET", "/managed/me", "", c), http.StatusOK, "")
+	if _, open := e.api.sessions.tickets.lookup(tk); !open {
+		t.Error("recovery codes alone end no ticket")
+	}
+
+	// Replaced.
+	expect(t, e.importWith(t, withTOTP(storeTOTPSecret2, hashes("WXYZ-2345-6789-ABCD")), "replace", "skip", "skip"), http.StatusOK, "")
+	if !ended(c, tk) {
+		t.Error("replaced: the sessions and tickets end")
+	}
+
+	// Removed.
+	c, tk = viewerSession()
+	expect(t, e.importWith(t, e.exported(t, func(d *backupDoc) { d.Users[1].TOTP = nil }), "replace", "skip", "skip"), http.StatusOK, "")
+	if on, _ := e.api.store.twoFactorOf("viewer"); on || !ended(c, tk) {
+		t.Errorf("removed: two-factor on %v, sessions ended %v", on, ended(c, tk))
+	}
+}
+
 // A section that moved since the preview makes the import stale (409, with the
 // current basis) and nothing is written; a skipped section is not compared;
 // the same import at the current basis then passes.

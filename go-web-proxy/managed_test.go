@@ -1520,3 +1520,296 @@ func TestManagedAPI_OwnPasswordRacingAnAdminSave(t *testing.T) {
 		t.Errorf("the admin's save must stand: %+v", got)
 	}
 }
+
+// ----- two-factor sign-in in the API ---------------------------------------------------
+
+// The user list says who has two-factor on and never what it holds, and /me
+// carries the setting and whether the signed-in user has set it up, in every
+// mode, so the apps can offer the setup link only when it is in use.
+func TestManagedAPI_ListAndMeCarryTwoFactor(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	admin, viewer := e.cookie("admin", false), e.cookie("viewer", false)
+	meOf := func(c *http.Cookie) (string, twoFactorJSON) {
+		t.Helper()
+		rec := e.do("GET", "/managed/me", "", c)
+		expect(t, rec, http.StatusOK, "")
+		var out struct {
+			Username  string
+			TwoFactor twoFactorJSON
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return rec.Body.String(), out.TwoFactor
+	}
+	for _, mode := range []string{twoFactorOff, twoFactorOptional, twoFactorAdmins, twoFactorMandatory} {
+		next := e.cfg
+		next.twoFactor = mode
+		e.live.apply(next)
+		if _, got := meOf(viewer); got != (twoFactorJSON{Mode: mode, Enrolled: false}) {
+			t.Errorf("mode %s, nobody enrolled: got %+v", mode, got)
+		}
+	}
+	// A config without the key reads as off.
+	next := e.cfg
+	next.twoFactor = ""
+	e.live.apply(next)
+	if _, got := meOf(viewer); got.Mode != twoFactorOff {
+		t.Errorf("an unset mode is off, got %+v", got)
+	}
+
+	enrolViewer(t, e.api.store, storeTOTPSecret)
+	body, got := meOf(viewer)
+	if got != (twoFactorJSON{Mode: twoFactorOff, Enrolled: true}) || !strings.Contains(body, `"twoFactor":{"mode":"off","enrolled":true}`) {
+		t.Errorf("an enrolled viewer: %s", body)
+	}
+	if _, got := meOf(admin); got.Enrolled {
+		t.Error("the admin has not set two-factor up")
+	}
+
+	rec := e.do("GET", "/managed/users", "", admin)
+	expect(t, rec, http.StatusOK, "")
+	var out struct{ Users []userListJSON }
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.Users) != 2 {
+		t.Fatalf("users: %v %s", err, rec.Body.String())
+	}
+	if out.Users[0].TwoFactor || !out.Users[1].TwoFactor {
+		t.Errorf("want admin off and viewer on, got %v and %v", out.Users[0].TwoFactor, out.Users[1].TwoFactor)
+	}
+	if !strings.Contains(rec.Body.String(), `"twoFactor":true`) || !strings.Contains(rec.Body.String(), `"twoFactor":false`) {
+		t.Errorf("every row names the flag: %s", rec.Body.String())
+	}
+	for _, leak := range []string{storeTOTPSecret, "totp", "recovery"} {
+		if strings.Contains(rec.Body.String(), leak) {
+			t.Errorf("the list must not carry %q: %s", leak, rec.Body.String())
+		}
+	}
+}
+
+// An administrator's reset: an unknown user is not found; a user without
+// two-factor is 200 with the rev as it was, nothing written, and an ok line
+// without "wrote"; an enrolled user loses it, the rev and seq move, their
+// sessions and sign-in tickets end and the ok line carries the commit's seq,
+// written inside the transaction.
+func TestManagedAPI_ResetTwoFactor(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	admin := e.cookie("admin", false)
+	viewer := e.cookie("viewer", false)
+	reset := func(user string) *httptest.ResponseRecorder {
+		return e.do("DELETE", "/managed/users/"+user+"/totp", "", admin)
+	}
+	revOf := func(rec *httptest.ResponseRecorder) int {
+		t.Helper()
+		return decodeTo[map[string]int](t, rec.Body.Bytes())["rev"]
+	}
+
+	expect(t, reset("ghost"), http.StatusNotFound, "not_found")
+
+	seq, _ := e.api.store.seqs()
+	tk := e.api.sessions.tickets.create(ticket{user: "viewer", stage: stageCode})
+	rec := reset("viewer")
+	expect(t, rec, http.StatusOK, "")
+	if got := revOf(rec); got != 2 || e.userRev("viewer") != 2 {
+		t.Errorf("nothing to remove: the rev stays 2, got %d", got)
+	}
+	if now, _ := e.api.store.seqs(); now != seq {
+		t.Errorf("nothing to remove writes nothing: seq %d -> %d", seq, now)
+	}
+	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusOK, "")
+	if _, ok := e.api.sessions.tickets.lookup(tk); !ok {
+		t.Error("nothing was removed: the user's sessions and tickets stand")
+	}
+
+	enrolViewer(t, e.api.store, storeTOTPSecret)
+	now := time.Now()
+	code, err := totpCode(storeTOTPSecret, totpStepAt(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.api.totp.check("viewer", storeTOTPSecret, code, now) {
+		t.Fatal("the code opens the replay guard's record")
+	}
+	rec = reset("viewer")
+	expect(t, rec, http.StatusOK, "")
+	if got := revOf(rec); got != 4 || e.userRev("viewer") != 4 {
+		t.Errorf("a reset moves the rev to the commit's seq (4), got %d", got)
+	}
+	if on, exists := e.api.store.twoFactorOf("viewer"); on || !exists {
+		t.Errorf("two-factor is gone and the user stays: on %v exists %v", on, exists)
+	}
+	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusUnauthorized, "unauthenticated")
+	if _, ok := e.api.sessions.tickets.lookup(tk); ok {
+		t.Error("the user's tickets end with their sessions")
+	}
+	enrolViewer(t, e.api.store, storeTOTPSecret)
+	if !e.api.totp.check("viewer", storeTOTPSecret, code, now) {
+		t.Error("a reset forgets the replay record, so a new setup is not held to the old steps")
+	}
+
+	au.expect(t,
+		auditEntry{Actor: "admin", Action: "user.twofactor.reset", Target: "ghost", Outcome: "refused", Code: "not_found",
+			Msg: "admin could not reset two-factor sign-in for ghost: not_found"},
+		auditEntry{Actor: "admin", Action: "user.twofactor.reset", Target: "viewer", Outcome: "ok",
+			Msg: "admin reset two-factor sign-in for viewer"},
+		auditEntry{Actor: "admin", Action: "user.twofactor.reset", Target: "viewer", Outcome: "ok", Wrote: usersWrote(4),
+			Msg: "admin reset two-factor sign-in for viewer"},
+	)
+}
+
+// Every refusal a write has, on the reset route: the admin gate (a user cannot
+// remove their own two-factor), the caller re-check in the lock, a store file
+// that changed on disk, a failed write and an unavailable audit trail. Each is
+// audited as refused, and the user keeps two-factor.
+func TestManagedAPI_ResetTwoFactorRefusals(t *testing.T) {
+	enrolled := func(e *managedEnv) bool {
+		on, _ := e.api.store.twoFactorOf("viewer")
+		return on
+	}
+	const path = "/managed/users/viewer/totp"
+	refused := func(t *testing.T, au *auditLog, code string) {
+		t.Helper()
+		got := au.entries(t)
+		if len(got) != 1 || got[0].Action != "user.twofactor.reset" || got[0].Outcome != auditRefused || got[0].Code != code || got[0].Wrote != nil {
+			t.Errorf("want one refused entry with code %s and no wrote, got %+v", code, got)
+		}
+	}
+
+	t.Run("not an administrator", func(t *testing.T) {
+		e := newManagedEnv(t, nil)
+		au := e.withAudit(t, auditSettings{})
+		enrolViewer(t, e.api.store, storeTOTPSecret)
+		expect(t, e.do("DELETE", path, "", e.cookie("viewer", false)), http.StatusForbidden, "forbidden")
+		if !enrolled(e) {
+			t.Error("a refused reset must leave two-factor on")
+		}
+		refused(t, au, "forbidden")
+	})
+
+	for _, gone := range []bool{false, true} {
+		name, status, code := "the caller demoted meanwhile", http.StatusForbidden, "forbidden"
+		if gone {
+			name, status, code = "the caller removed meanwhile", http.StatusUnauthorized, "unauthenticated"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := newManagedEnv(t, nil)
+			au := e.withAudit(t, auditSettings{})
+			putUser(t, e.api.store, userRec{Username: "boss", Admin: true}, "boss-password-1")
+			enrolViewer(t, e.api.store, storeTOTPSecret)
+			caller := e.cookie("boss", false)
+			seq, _ := e.api.store.seqs()
+			release := holdWriter(t, e.api.store.wr)
+			done := make(chan *httptest.ResponseRecorder)
+			go func() { done <- e.do("DELETE", path, "", caller) }()
+			waitForWaiters(t, 1)
+			changeUsersBehindTheWriter(e.api.store, func(users []userRec) []userRec {
+				i := slices.IndexFunc(users, func(u userRec) bool { return u.Username == "boss" })
+				if gone {
+					return slices.Delete(slices.Clone(users), i, i+1)
+				}
+				next := slices.Clone(users)
+				next[i].Admin = false
+				return next
+			})
+			release()
+			expect(t, <-done, status, code)
+			if _, now := e.api.store.usersNow(); now != seq+1 || !enrolled(e) {
+				t.Error("a refused reset must write nothing")
+			}
+			refused(t, au, code)
+		})
+	}
+
+	t.Run("store changed on disk", func(t *testing.T) {
+		e := newManagedEnv(t, nil)
+		au := e.withAudit(t, auditSettings{})
+		enrolViewer(t, e.api.store, storeTOTPSecret)
+		if err := os.WriteFile(e.f.usersPath, []byte("not the file the gateway wrote"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		expect(t, e.do("DELETE", path, "", e.cookie("admin", false)), http.StatusConflict, "store_changed_on_disk")
+		if !enrolled(e) {
+			t.Error("a refused reset must leave two-factor on")
+		}
+		refused(t, au, "store_changed_on_disk")
+	})
+
+	t.Run("a failed write", func(t *testing.T) {
+		e := newManagedEnv(t, nil)
+		au := e.withAudit(t, auditSettings{})
+		enrolViewer(t, e.api.store, storeTOTPSecret)
+		viewer := e.cookie("viewer", false)
+		blockWrites(t, &e.api.store.usersPath)
+		expect(t, e.do("DELETE", path, "", e.cookie("admin", false)), http.StatusInternalServerError, "store_write_failed")
+		if !enrolled(e) {
+			t.Error("a failed write must leave two-factor on")
+		}
+		expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusOK, "") // nothing was removed: the session stands
+		for _, want := range []string{"admin request failed", "op=resetTwoFactor", "target=viewer", "user=admin"} {
+			if !strings.Contains(e.log.String(), want) {
+				t.Errorf("the failure must name %q in the log: %s", want, e.log.String())
+			}
+		}
+		refused(t, au, "store_write_failed")
+	})
+
+	t.Run("audit unavailable", func(t *testing.T) {
+		e := newManagedEnv(t, nil)
+		e.setAudit(auditSettings{onFailure: auditOnFailureRefuse})
+		a, _ := e.withLoudAudit(t)
+		enrolViewer(t, e.api.store, storeTOTPSecret)
+		admin := e.cookie("admin", false)
+		_ = a.f.Close()                                                                          // the audit log is no longer writable
+		expect(t, e.putUserAs(admin, "bob", `{"password":"bob-password-1"}`), http.StatusOK, "") // meets the failure: stands
+		seq, _ := e.api.store.seqs()
+		expect(t, e.do("DELETE", path, "", admin), http.StatusServiceUnavailable, "audit_unavailable")
+		if now, _ := e.api.store.seqs(); now != seq || !enrolled(e) {
+			t.Error("a refused reset must write nothing")
+		}
+	})
+}
+
+// A reset whose commit loses its audit line under audit.onFailure refuse
+// stands, as every change does, and the very next change is refused: the line
+// is written inside the transaction, so the gate is closed by the time the
+// lock is given back.
+func TestManagedAPI_ResetTwoFactorStopsTheNextChangeWhenItsAuditLineIsLost(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	e.setAudit(auditSettings{onFailure: auditOnFailureRefuse})
+	a, _ := e.withLoudAudit(t)
+	enrolViewer(t, e.api.store, storeTOTPSecret)
+	admin := e.cookie("admin", false)
+	_ = a.f.Close()
+	expect(t, e.do("DELETE", "/managed/users/viewer/totp", "", admin), http.StatusOK, "")
+	if on, _ := e.api.store.twoFactorOf("viewer"); on {
+		t.Error("the reset that met the failure stands")
+	}
+	expect(t, e.putUserAs(admin, "bob", `{"password":"bob-password-1"}`), http.StatusServiceUnavailable, "audit_unavailable")
+}
+
+// An administrator's PUT never carries or clears two-factor: the body field is
+// unknown (400), two-factor stays as it was, and a plain edit of the same user
+// keeps it.
+func TestManagedAPI_SaveUserCannotCarryTwoFactor(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	admin := e.cookie("admin", false)
+	enrolViewer(t, e.api.store, storeTOTPSecret)
+	seq, _ := e.api.store.seqs()
+	for _, body := range []string{
+		`{"twoFactor":false}`,
+		`{"twoFactor":true,"readOnly":[]}`,
+		`{"totp":{"secret":"` + storeTOTPSecret2 + `","recovery":[]}}`,
+	} {
+		expect(t, e.putUserAs(admin, "viewer", body), http.StatusBadRequest, "bad_request")
+	}
+	if now, _ := e.api.store.seqs(); now != seq {
+		t.Errorf("a refused body writes nothing: seq %d -> %d", seq, now)
+	}
+	if secret, ok := e.api.store.totpSecret("viewer"); !ok || secret != storeTOTPSecret {
+		t.Error("two-factor must be as it was")
+	}
+	expect(t, e.putUserAs(admin, "viewer", `{"readOnly":[]}`), http.StatusOK, "")
+	if secret, ok := e.api.store.totpSecret("viewer"); !ok || secret != storeTOTPSecret {
+		t.Error("an edit of the user keeps their two-factor")
+	}
+}

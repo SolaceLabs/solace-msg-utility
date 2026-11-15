@@ -5,16 +5,20 @@ import path from 'node:path';
 import tls from 'node:tls';
 import type { AddressInfo } from 'node:net';
 import {
-    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, aliasAddress, auditMissing, basisMoved, createCookieJar, detailsFileText, dnsServers, findTokens,
+    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, base32Decode, basisMoved, continueLinkFromPage,
+    createCookieJar, detailsFileText, dnsServers, findTokens, freshTotp,
     hostAliasProblem, hostRootBundle,
-    issueCert, jsonFindings, listedRev, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, refusalProblem,
-    resolutionOverride, resolveDetails, resolverLookup, sealedHeaderProblem, sessionCookieProblems, sweepSecrets, wroteFile,
+    issueCert, jsonFindings, listedRev, listedRow, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, recoveryCodeProblems,
+    recoveryCodesFromPage, refusalProblem, resolutionOverride, resolveDetails, resolverLookup, sealedHeaderProblem, sessionCookieProblems, signinCookieProblems,
+    sweepSecrets, totpAt, totpCode, totpStep, twoFactorSecretFromPage, wrongTotp, wroteFile,
 } from '../../scripts/e2e-lib.mjs';
 import { REPO_ROOT } from '../helpers/sources';
 import { WIDENING, securityOpt, serviceBlock } from '../helpers/compose';
 
 // The gateway's own Set-Cookie for a sign-in (go-web-proxy/session.go).
 const GATEWAY_COOKIE = `${SESSION_COOKIE}=c2Vzc2lvbi12YWx1ZQ; Path=/; HttpOnly; Secure; SameSite=Lax`;
+// The ticket cookie of a half-finished sign-in (setSigninCookie in go-web-proxy/session.go).
+const TICKET_COOKIE = `${SIGNIN_COOKIE}=dGlja2V0; Path=/; HttpOnly; Secure; SameSite=Strict`;
 
 describe('e2e-lib -- TLS material', () => {
     let ca: ReturnType<typeof makeCA>;
@@ -423,6 +427,30 @@ describe('e2e-lib -- cookies', () => {
         expect(sessionCookieProblems()).toEqual([`want one ${SESSION_COOKIE} cookie, got 0`]);
         expect(sessionCookieProblems([GATEWAY_COOKIE, GATEWAY_COOKIE])).toEqual([`want one ${SESSION_COOKIE} cookie, got 2`]);
     });
+
+    it("accepts the gateway's sign-in ticket cookie, which is SameSite=Strict where the session cookie is Lax", () => {
+        expect(signinCookieProblems([TICKET_COOKIE, 'unrelated=1'])).toEqual([]);
+        expect(signinCookieProblems([TICKET_COOKIE.replace('Strict', 'Lax')])).toEqual(['SameSite=Lax, want Strict']);
+        expect(sessionCookieProblems([TICKET_COOKIE])).toEqual([`want one ${SESSION_COOKIE} cookie, got 0`]);
+    });
+
+    it('names each way the ticket cookie can be wrong, and wants exactly one', () => {
+        expect(signinCookieProblems([`${SIGNIN_COOKIE}=; Domain=example.com; Max-Age=60`])).toEqual([
+            'empty value', 'not Secure', 'not HttpOnly', 'SameSite=(absent), want Strict', 'Path=(absent), want /',
+            'has a Domain', 'outlives the browser session (Max-Age or Expires)',
+        ]);
+        expect(signinCookieProblems()).toEqual([`want one ${SIGNIN_COOKIE} cookie, got 0`]);
+        expect(signinCookieProblems([TICKET_COOKIE, TICKET_COOKIE])).toEqual([`want one ${SIGNIN_COOKIE} cookie, got 2`]);
+    });
+
+    it('drops the ticket cookie when the gateway ends it, and keeps it apart from the session cookie', () => {
+        const jar = createCookieJar();
+        jar.store([TICKET_COOKIE]);
+        expect(jar.header()).toBe(`${SIGNIN_COOKIE}=dGlja2V0`);
+        jar.store([GATEWAY_COOKIE, `${SIGNIN_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`]);
+        expect(jar.get(SIGNIN_COOKIE)).toBeUndefined();
+        expect(jar.get(SESSION_COOKIE)).toBe('c2Vzc2lvbi12YWx1ZQ');
+    });
 });
 
 describe('e2e-lib -- sealed store header', () => {
@@ -577,6 +605,39 @@ describe('e2e-lib -- audit log', () => {
         ]);
     });
 
+    describe('with the two-factor user', () => {
+        const wantTf = { ...want, twoFactorUser: 'e2e-scratch' };
+        const tf = [
+            { action: 'twofactor.enrol', outcome: 'ok', actor: 'e2e-scratch', target: 'e2e-scratch', wrote: [{ file: 'users.yaml', seq: 5 }] },
+            { action: 'user.twofactor.reset', outcome: 'ok', actor: 'admin', target: 'e2e-scratch', wrote: [{ file: 'users.yaml', seq: 8 }] },
+            { action: 'signin', outcome: 'refused', code: 'bad_code', actor: '' },
+        ];
+
+        it('asks nothing more when no two-factor user is named', () => {
+            expect(auditMissing(complete, want)).toEqual([]);
+            expect(auditMissing(complete, wantTf)).toEqual([
+                'an ok twofactor.enrol for e2e-scratch that wrote users.yaml with a seq',
+                'an ok user.twofactor.reset of e2e-scratch by admin that wrote users.yaml with a seq',
+                'a refused signin with code bad_code',
+            ]);
+        });
+
+        it('finds nothing missing once the enrolment, the reset and the refused code are there', () => {
+            expect(auditMissing([...complete, ...tf], wantTf)).toEqual([]);
+        });
+
+        it('does not count another user, a reset by someone else, a refused enrolment, or one that wrote no file', () => {
+            const wrong = [
+                { ...tf[0], target: 'someone-else' },
+                { ...tf[1], actor: 'e2e-scratch' },
+                { ...tf[0], outcome: 'refused', code: 'bad_code' },
+                { ...tf[1], wrote: undefined },
+                { ...tf[2], code: 'bad_credentials' },
+            ];
+            expect(auditMissing([...complete, ...wrong], wantTf)).toHaveLength(3);
+        });
+    });
+
     it('reads wrote as the gateway writes it: a seq on a store file, none on config.yaml', () => {
         expect(wroteFile({ wrote: [{ file: 'users.yaml', seq: 1 }] }, 'users.yaml')).toBe(true);
         expect(wroteFile({ wrote: [{ file: 'config.yaml' }] }, 'config.yaml')).toBe(true);
@@ -608,6 +669,15 @@ describe('e2e-lib -- versions', () => {
         expect(listedRev('not json', 'users', 'username', 'admin')).toBeNull();
     });
 
+    it('reads one whole row of a list, or none', () => {
+        const rows = JSON.stringify({ users: [{ username: 'a', rev: 1, twoFactor: false }, { username: 'b', rev: 2, twoFactor: true }] });
+        expect(listedRow(rows, 'users', 'username', 'b')).toEqual({ username: 'b', rev: 2, twoFactor: true });
+        expect(listedRow(rows, 'users', 'username', 'c')).toBeNull();
+        expect(listedRow(rows, 'connections', 'broker', 'b1')).toBeNull();
+        expect(listedRow('{"error":"forbidden"}', 'users', 'username', 'a')).toBeNull();
+        expect(listedRow('not json', 'users', 'username', 'a')).toBeNull();
+    });
+
     it('accepts a refusal that has the wanted status, code and current rev', () => {
         const stale = { status: 409, body: '{"error":"stale","rev":5}' };
         expect(refusalProblem(stale, { status: 409, error: 'stale', rev: 5 })).toBe('');
@@ -629,5 +699,101 @@ describe('e2e-lib -- versions', () => {
         expect(basisMoved(seen, { users: 2, connections: 3, settings: 'xyz' })).toEqual(['users', 'connections', 'settings']);
         expect(basisMoved(seen, { ...seen })).toEqual([]);
         expect(basisMoved(seen, undefined as unknown as Record<string, unknown>)).toEqual(['users', 'connections', 'settings']);
+    });
+});
+
+describe('e2e-lib -- two-factor sign-in', () => {
+    // The RFC 6238 SHA-1 vectors the gateway's own tests read too (go-web-proxy/totp_test.go).
+    const vectors: { secret: string; vectors: { time: number; code: string }[] } = JSON.parse(
+        fs.readFileSync(path.join(REPO_ROOT, 'go-web-proxy', 'testdata', 'contract', 'totp.json'), 'utf8'));
+    const SECRET = vectors.secret;
+
+    it('decodes the vectors file secret to the RFC ASCII secret', () => {
+        expect(base32Decode(SECRET).toString('ascii')).toBe('12345678901234567890');
+        expect(base32Decode('')).toEqual(Buffer.alloc(0));
+    });
+
+    it('refuses a character outside the base32 alphabet, lower case and padding included', () => {
+        expect(() => base32Decode('GEZD1')).toThrow(/not base32/);
+        expect(() => base32Decode('gezd')).toThrow(/not base32/);
+        expect(() => base32Decode('GEZD====')).toThrow(/not base32/);
+    });
+
+    it('gives each RFC 6238 vector its code, by time and by step', () => {
+        expect(vectors.vectors.length).toBeGreaterThanOrEqual(6);
+        for (const v of vectors.vectors) {
+            expect({ time: v.time, code: totpAt(SECRET, v.time) }).toEqual({ time: v.time, code: v.code });
+            expect({ time: v.time, code: totpCode(SECRET, totpStep(v.time * 1000)) }).toEqual({ time: v.time, code: v.code });
+        }
+    });
+
+    it('keeps leading zeros and holds one code for the whole 30 second step', () => {
+        expect(totpAt(SECRET, 1234567890)).toBe('005924');
+        expect(totpAt(SECRET, 1111111109)).toBe(totpAt(SECRET, 1111111109 - 1111111109 % 30 + 29));
+        expect(totpAt(SECRET, 1111111109)).not.toBe(totpAt(SECRET, 1111111109 + 30));
+    });
+
+    // Ten seconds into a step, so the arithmetic below is exact.
+    const mid = (37037037 * 30 + 10) * 1000;
+    const step = totpStep(mid);
+
+    it('offers the current step, or the next one when the current is used up, and none when both are', () => {
+        expect(freshTotp(SECRET, mid)).toEqual({ code: totpCode(SECRET, step), step });
+        expect(freshTotp(SECRET, mid, step - 1)).toEqual({ code: totpCode(SECRET, step), step });
+        expect(freshTotp(SECRET, mid, step)).toEqual({ code: totpCode(SECRET, step + 1), step: step + 1 });
+        expect(freshTotp(SECRET, mid, step + 1)).toBeNull();
+        expect(freshTotp(SECRET, mid, step + 7)).toBeNull();
+    });
+
+    it('makes a wrong code that is none of the codes the gateway would take around now', () => {
+        const wrong = wrongTotp(SECRET, mid);
+        expect(wrong).toMatch(/^\d{6}$/);
+        for (const d of [-2, -1, 0, 1, 2]) expect(wrong).not.toBe(totpCode(SECRET, step + d));
+    });
+
+    const enrolPage = `<form><p class="note">Key: <code id="two-factor-secret" class="secret">${SECRET.match(/.{4}/g)!.join(' ')}</code></p></form>`;
+
+    it('reads the secret off an enrol page without its spaces', () => {
+        expect(twoFactorSecretFromPage(enrolPage)).toBe(SECRET);
+        expect(twoFactorSecretFromPage(`<code class="secret" id="two-factor-secret">${SECRET.match(/.{4}/g)!.join(' ')}</code>`)).toBe(SECRET);
+    });
+
+    it('reads no secret from a page without one, or one not in groups of four', () => {
+        expect(twoFactorSecretFromPage('<p>no secret</p>')).toBeNull();
+        expect(twoFactorSecretFromPage('<code id="two-factor-secret">')).toBeNull();
+        expect(twoFactorSecretFromPage(`<code id="two-factor-secret">${SECRET}</code>`)).toBeNull();
+        expect(twoFactorSecretFromPage('<code id="two-factor-secret">GEZD GEZD</code>')).toBeNull();
+        expect(twoFactorSecretFromPage(enrolPage.toLowerCase())).toBeNull();
+    });
+
+    const codes = ['ABCD-EFGH-JKLM-NPQR', 'STUV-WXYZ-2345-6789', ...Array.from({ length: 8 }, (_, i) => `AAAA-BBBB-CCCC-DDD${i + 2}`)];
+    const recoveryPage = `<ol id="recovery-codes" class="codes">${codes.map((c) => `<li>${c}</li>`).join('')}</ol>`
+        + '<a id="two-factor-continue" class="link-button" href="/solAdmin?a=1&amp;b=2">Continue</a>';
+
+    it('reads the recovery codes in page order and the Continue link, unescaped', () => {
+        expect(recoveryCodesFromPage(recoveryPage)).toEqual(codes);
+        expect(continueLinkFromPage(recoveryPage)).toBe('/solAdmin?a=1&b=2');
+        expect(continueLinkFromPage('<a id="two-factor-continue" href="/">Continue</a>')).toBe('/');
+    });
+
+    it('reads none from a page without them', () => {
+        expect(recoveryCodesFromPage('<p>nothing</p>')).toEqual([]);
+        expect(recoveryCodesFromPage('<ol id="recovery-codes"></ol>')).toEqual([]);
+        expect(continueLinkFromPage('<p>nothing</p>')).toBeNull();
+        expect(continueLinkFromPage('<a id="two-factor-continue">Continue</a>')).toBeNull();
+        expect(continueLinkFromPage('<a href="/">Continue</a>')).toBeNull();
+    });
+
+    it('accepts ten different codes in the gateway\'s shape', () => {
+        expect(recoveryCodeProblems(codes)).toBe('');
+    });
+
+    it('names what is wrong with a recovery code list without repeating a code', () => {
+        expect(recoveryCodeProblems(codes.slice(1))).toBe('want 10 recovery codes, got 9');
+        expect(recoveryCodeProblems([...codes.slice(1), 'abcd-efgh-jklm-npqr'])).toBe('1 of the recovery codes are not XXXX-XXXX-XXXX-XXXX');
+        expect(recoveryCodeProblems([...codes.slice(1), 'ABCD-EFGH-IJKL-NPQR'])).toBe('1 of the recovery codes are not XXXX-XXXX-XXXX-XXXX');
+        expect(recoveryCodeProblems([...codes.slice(1), codes[1]])).toBe('the recovery codes are not all different');
+        const message = [recoveryCodeProblems([...codes.slice(1), 'abcd-efgh-jklm-npqr']), recoveryCodeProblems([...codes.slice(1), codes[1]])].join(' ');
+        for (const c of [...codes, 'abcd-efgh-jklm-npqr']) expect(message).not.toContain(c);
     });
 });

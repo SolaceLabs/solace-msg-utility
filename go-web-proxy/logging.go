@@ -149,6 +149,7 @@ func logStartup(w io.Writer, cfg config, configFile, appDir string) {
 			"login.backoff", cfg.login.backoff,
 			"login.maxBackoff", cfg.login.maxBackoff,
 			"login.unauthenticatedPerMinute", cfg.login.unauthPerMinute,
+			"login.twoFactor", twoFactorOrDefault(cfg.twoFactor),
 			"modules.offered", cfg.modules.offered,
 			"modules.userDefault", cfg.modules.userDefault,
 		)

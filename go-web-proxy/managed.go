@@ -37,6 +37,7 @@ type managedHandler struct {
 	smf      http.Handler   // /managed/smf/*, dispatched before the mux (smf.go)
 	dial     http.Handler   // POST /managed/dial (dial.go)
 	audit    *auditor       // the audit trail (audit.go); nil records nothing
+	totp     *totpGuard     // the replay guard the sign-in pages share (managed_routing.go)
 	cop      *http.CrossOriginProtection
 	logger   *slog.Logger
 	mux      *http.ServeMux
@@ -52,7 +53,7 @@ func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *sett
 	h := &managedHandler{
 		store: st, sessions: ss, throttle: th, live: lv, settings: sf, backups: bk,
 		relay: ep.relay, smf: ep.smf, dial: ep.dial,
-		cop: http.NewCrossOriginProtection(), logger: logger,
+		totp: newTOTPGuard(), cop: http.NewCrossOriginProtection(), logger: logger,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /managed/me", h.me)
@@ -61,6 +62,7 @@ func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *sett
 	mux.HandleFunc("GET /managed/users", h.adminOnly(h.listUsers))
 	mux.HandleFunc("PUT /managed/users/{name}", h.audited(h.userAction, h.saveUser))
 	mux.HandleFunc("DELETE /managed/users/{name}", h.audited(fixedAction(auditUserDelete), h.deleteUser))
+	mux.HandleFunc("DELETE /managed/users/{name}/totp", h.audited(fixedAction(auditTwoFactorReset), h.resetTwoFactor))
 	mux.HandleFunc("GET /managed/connections", h.adminOnly(h.listConnections))
 	mux.HandleFunc("PUT /managed/connections/{broker}", h.audited(h.connectionAction, h.saveConnection))
 	mux.HandleFunc("DELETE /managed/connections/{broker}", h.audited(fixedAction(auditConnectionDelete), h.deleteConnection))
@@ -175,6 +177,7 @@ var auditPhrases = map[string]struct{ done, attempt string }{
 	auditUserCreate:       {"created user {t}", "create user {t}"},
 	auditUserUpdate:       {"updated user {t}", "update user {t}"},
 	auditUserDelete:       {"deleted user {t}", "delete user {t}"},
+	auditTwoFactorReset:   {"reset two-factor sign-in for {t}", "reset two-factor sign-in for {t}"},
 	auditConnectionCreate: {"created connection {t}", "create connection {t}"},
 	auditConnectionUpdate: {"updated connection {t}", "update connection {t}"},
 	auditConnectionDelete: {"deleted connection {t}", "delete connection {t}"},
@@ -388,7 +391,24 @@ func (h *managedHandler) me(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
-	writeJSON(w, http.StatusOK, profile)
+	enrolled, _ := h.store.twoFactorOf(profile.Username)
+	writeJSON(w, http.StatusOK, meJSON{
+		profileResponse: profile,
+		TwoFactor:       twoFactorJSON{Mode: h.live.twoFactor(), Enrolled: enrolled},
+	})
+}
+
+// twoFactorJSON is what the apps need to know of two-factor sign-in: the
+// setting, and whether this user has set it up.
+type twoFactorJSON struct {
+	Mode     string `json:"mode"`
+	Enrolled bool   `json:"enrolled"`
+}
+
+// meJSON is GET /managed/me: the profile plus the user's two-factor state.
+type meJSON struct {
+	*profileResponse
+	TwoFactor twoFactorJSON `json:"twoFactor"`
 }
 
 func (h *managedHandler) logout(w http.ResponseWriter, r *http.Request) {
@@ -425,7 +445,8 @@ type userJSON struct {
 // what sameUserView compares, and a rev is not part of it.
 type userListJSON struct {
 	userJSON
-	Rev int `json:"rev"`
+	Rev       int  `json:"rev"`
+	TwoFactor bool `json:"twoFactor"` // two-factor sign-in is set up; the secret never leaves the gateway
 }
 
 // bodyRev is the "rev" of a whole-record save. A body without one, or with
@@ -575,7 +596,7 @@ func connToOutput(c connRec) connJSON {
 func (h *managedHandler) listUsers(w http.ResponseWriter, _ *http.Request) {
 	out := []userListJSON{}
 	for _, u := range h.store.listUsers() {
-		out = append(out, userListJSON{userJSON: userToOutput(u), Rev: u.Rev})
+		out = append(out, userListJSON{userJSON: userToOutput(u), Rev: u.Rev, TwoFactor: u.twoFactorOn()})
 	}
 	ms := h.live.get().modules
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -732,6 +753,27 @@ func (h *managedHandler) deleteUser(w http.ResponseWriter, r *http.Request, call
 	h.sessions.dropUser(name)
 	h.log(r).Info("user deleted", "target", name)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// resetTwoFactor removes a user's two-factor sign-in (a lost phone) and
+// answers 200 with the user's rev: the rev moves only when something was set
+// up, and then the user's sessions and sign-in tickets end and their replay
+// record is dropped. A user without two-factor is not an error and not a
+// commit: the rev is as it was and the ok entry carries no "wrote". No rev is
+// sent: the reset is field-scoped, as the user's own password change is.
+func (h *managedHandler) resetTwoFactor(w http.ResponseWriter, r *http.Request, call *auditCall) {
+	name := r.PathValue("name")
+	rev, removed, err := h.store.clearTOTP(r.Context(), sessionOf(r).user, name, h.committed(r, call, h.wroteUsers))
+	if err != nil {
+		h.storeFailed(w, r, "resetTwoFactor", err)
+		return
+	}
+	if removed {
+		h.sessions.dropUser(name)
+		h.totp.forget(name)
+	}
+	h.log(r).Info("two-factor reset", "target", name, "removed", removed, "rev", rev)
+	writeJSON(w, http.StatusOK, map[string]int{"rev": rev})
 }
 
 func (h *managedHandler) listConnections(w http.ResponseWriter, _ *http.Request) {

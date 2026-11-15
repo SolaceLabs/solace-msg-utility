@@ -9,7 +9,8 @@
  * sealed here with WebCrypto exactly as the gateway's `sealer` seals it, so
  * go-web-proxy/testdata/contract/backup.json opens in both. The fake keeps
  * passwords in plain text, so a demo backup carries them that way: it imports
- * into the demo, and a real gateway refuses its users.
+ * into the demo, and a real gateway refuses its users. A user's two-factor
+ * (`totp`: the secret and the recovery hashes) travels in the sealed file.
  *
  * The schedule is the one record of backup.yaml, versioned by that file's
  * `seq`: it moves on every save and delete, the schedule's rev is the seq it
@@ -25,12 +26,13 @@
  */
 import { BadRequest, boolean, integer, list, nullableList, object, parseBody, string } from './strict';
 import { connectionProblem, moduleIdsProblem, passwordOk, PASSWORD_MAX, PASSWORD_MIN, quote, validUsername } from './validate';
+import { HASH_RULE, SECRET_RULE } from './authenticator';
 import { refusalBody, settingsFromBackup } from './settings';
 import { bodyRev, exists, notFound, queryRev, revRequired, stale } from './versions';
 import type { GatewaySessions, Session } from './sessions';
 import type { GatewaySettingsFile } from './settings';
 import type { GatewayStore } from './store';
-import type { ConnRec, GatewayRequest, GatewayResponse, GatewaySettings, UserRec } from './types';
+import type { ConnRec, GatewayRequest, GatewayResponse, GatewaySettings, UserRec, UserTotp } from './types';
 import type { QGlob } from '../../core/types';
 
 const FORMAT = 'smu-backup';
@@ -137,6 +139,7 @@ function plainOf(d: BackupDoc): string {
             operate: globRows(u.operate),
             'read-only': globRows(u.readOnly),
             ...(u.modules ? { modules: [...u.modules] } : {}),
+            ...(u.totp ? { totp: { secret: u.totp.secret, recovery: [...u.totp.recovery] } } : {}),
         })),
         'msg-utility-connections': d.connections,
         settings: { version: 1, ...d.settings },
@@ -158,6 +161,18 @@ const glob = (x: unknown): QGlob => {
     return { brokers: string(o.brokers), msgVpns: string(o.msgVpns), queues: string(o.queues) };
 };
 
+/**
+ * A backed-up user's `totp`, held to the store's load check: a secret of 32
+ * base32 characters and recovery hashes of 64 lower-case hex. Throws BadRequest.
+ */
+function totpDoc(x: unknown): UserTotp {
+    const o = object(x, ['secret', 'recovery']);
+    const secret = string(o.secret);
+    const recovery = list(o.recovery, string);
+    if (!SECRET_RULE.test(secret) || !recovery.every(h => HASH_RULE.test(h))) throw new BadRequest('totp');
+    return { secret, recovery };
+}
+
 /** flexStr: a port written as a number or a string. */
 const port = (v: unknown): string => (typeof v === 'number' && Number.isInteger(v) ? String(v) : string(v));
 
@@ -173,11 +188,12 @@ function docOf(raw: unknown): BackupDoc {
         created: string(o.created),
         gateway: string(o.gateway),
         users: list(o['msg-utility-users'], x => {
-            const u = object(x, ['username', 'password', 'mustChangePassword', 'admin', 'operate', 'read-only', 'modules', 'rev']);
+            const u = object(x, ['username', 'password', 'mustChangePassword', 'admin', 'operate', 'read-only', 'modules', 'totp', 'rev']);
             return {
                 username: string(u.username), password: string(u.password), admin: boolean(u.admin),
                 mustChangePassword: boolean(u.mustChangePassword),
                 operate: list(u.operate, glob), readOnly: list(u['read-only'], glob), modules: nullableList(u.modules, string),
+                ...(u.totp === undefined || u.totp === null ? {} : { totp: totpDoc(u.totp) }),
             };
         }),
         connections: list(o['msg-utility-connections'], x => {
@@ -252,7 +268,8 @@ const NO_PATHS = { tls: { certFile: '', keyFile: '', trustDir: '', insecureSkipV
 export interface NameDiff { added: string[]; changed: string[]; removed: string[] }
 
 const canonRows = (rs: QGlob[]) => rs.map(r => [r.brokers, r.msgVpns, r.queues]);
-const canonUser = (u: UserRec) => JSON.stringify([u.username, u.password, u.mustChangePassword, u.admin, canonRows(u.operate), canonRows(u.readOnly), u.modules]);
+const canonUser = (u: UserRec) => JSON.stringify([u.username, u.password, u.mustChangePassword, u.admin, canonRows(u.operate), canonRows(u.readOnly), u.modules,
+    u.totp ? [u.totp.secret, u.totp.recovery] : null]);
 const canonConn = (c: ConnRec) => JSON.stringify([c.broker, c.hostname, c.semp.scheme ?? '', c.semp.port, c.semp.username, c.semp.password,
     c.client.scheme ?? '', c.client.port, c.client.msgVpns.map(v => [v.name, v.username, v.password])]);
 
@@ -281,11 +298,11 @@ export function mergeByName<T>(cur: T[], file: T[], name: (x: T) => string): T[]
 const userName = (u: UserRec) => u.username;
 const connName = (c: ConnRec) => c.broker;
 
-/** sessionEnders: removed, or a new password or admin flag. */
+/** sessionEnders: removed, or a new password or admin flag, or two-factor added, removed or replaced (a used recovery code is not). */
 export function sessionEnders(cur: UserRec[], next: UserRec[]): string[] {
     return cur.filter(c => {
         const n = next.find(x => x.username === c.username);
-        return !n || n.password !== c.password || n.admin !== c.admin;
+        return !n || n.password !== c.password || n.admin !== c.admin || n.totp?.secret !== c.totp?.secret;
     }).map(c => c.username);
 }
 

@@ -57,17 +57,42 @@ const (
 	auditBackupImport     = "backup.import"
 	auditScheduleSet      = "schedule.set"
 	auditScheduleRemove   = "schedule.remove"
+	auditTwoFactorReset   = "user.twofactor.reset"
 	// auth
 	auditSignin         = "signin"
 	auditSignout        = "signout"
 	auditPasswordChange = "password.change"
 	auditLockout        = "lockout"
+	auditTwoFactorEnrol = "twofactor.enrol"
 	// access
 	auditDial     = "dial"
 	auditSMFOpen  = "smf.open"
 	auditSMFClose = "smf.close"
 	auditRelay    = "relay"
 )
+
+// auditBadCode is the Code of a refused signin or twofactor.enrol whose one-time
+// code was wrong. The entry never holds the code typed.
+const auditBadCode = "bad_code"
+
+// signedInMsg is the msg of an ok signin: the session opened after the password
+// (and the code, when one was asked).
+func signedInMsg(user string) string { return user + " signed in" }
+
+// signedInRecoveryMsg is the msg of an ok signin made with a recovery code, and
+// how many that user has left.
+func signedInRecoveryMsg(user string, left int) string {
+	return fmt.Sprintf("%s signed in with a recovery code (%d left)", user, left)
+}
+
+// twoFactorEnrolMsg is the msg of an ok twofactor.enrol: the first set-up of a
+// user's two-factor, or a later one that replaced it.
+func twoFactorEnrolMsg(user string, again bool) string {
+	if again {
+		return user + " set up two-factor sign-in again"
+	}
+	return user + " set up two-factor sign-in"
+}
 
 // auditEntry is one line of the audit log; the field order is the order of the
 // JSON keys. record sets Time (RFC 3339, UTC). Actor is the username, "" for an

@@ -7,7 +7,7 @@
           "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,
           "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": {
-            "username": "admin", "admin": true,
+            "username": "admin", "admin": true, "twoFactor": { "mode": "off", "enrolled": false },
             "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }],
             "readOnly": [],
             "brokers": [
@@ -26,7 +26,7 @@
         {
           "as": "viewer", "method": "GET", "path": "/managed/me", "status": 200,
           "response": {
-            "username": "viewer", "admin": false,
+            "username": "viewer", "admin": false, "twoFactor": { "mode": "off", "enrolled": false },
             "operate": [],
             "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }],
             "brokers": [{ "broker": "b1", "msgVpns": [{ "name": "v1" }] }],
@@ -41,7 +41,7 @@
         {
           "as": "operator", "method": "GET", "path": "/managed/me", "status": 200,
           "response": {
-            "username": "operator", "admin": false,
+            "username": "operator", "admin": false, "twoFactor": { "mode": "off", "enrolled": false },
             "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
             "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }],
             "brokers": [
@@ -164,15 +164,15 @@
           "response": {
             "users": [
               {
-                "username": "admin", "rev": 1, "admin": true, "mustChangePassword": false,
+                "username": "admin", "rev": 1, "admin": true, "mustChangePassword": false, "twoFactor": false,
                 "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }], "readOnly": [], "modules": null
               },
               {
-                "username": "viewer", "rev": 1, "admin": false, "mustChangePassword": false,
+                "username": "viewer", "rev": 1, "admin": false, "mustChangePassword": false, "twoFactor": false,
                 "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"]
               },
               {
-                "username": "operator", "rev": 1, "admin": false, "mustChangePassword": false,
+                "username": "operator", "rev": 1, "admin": false, "mustChangePassword": false, "twoFactor": false,
                 "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
                 "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }], "modules": null
               }
@@ -242,20 +242,20 @@
           "response": {
             "users": [
               {
-                "username": "admin", "rev": 1, "admin": true, "mustChangePassword": false,
+                "username": "admin", "rev": 1, "admin": true, "mustChangePassword": false, "twoFactor": false,
                 "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }], "readOnly": [], "modules": null
               },
               {
-                "username": "viewer", "rev": 1, "admin": false, "mustChangePassword": false,
+                "username": "viewer", "rev": 1, "admin": false, "mustChangePassword": false, "twoFactor": false,
                 "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"]
               },
               {
-                "username": "operator", "rev": 1, "admin": false, "mustChangePassword": false,
+                "username": "operator", "rev": 1, "admin": false, "mustChangePassword": false, "twoFactor": false,
                 "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
                 "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }], "modules": null
               },
               {
-                "username": "newbie", "rev": 2, "admin": false, "mustChangePassword": false,
+                "username": "newbie", "rev": 2, "admin": false, "mustChangePassword": false, "twoFactor": false,
                 "operate": [], "readOnly": [{ "brokers": "b2", "msgVpns": "v9", "queues": "q.*" }], "modules": []
               }
             ],
@@ -275,7 +275,7 @@
         {
           "as": "viewer", "method": "GET", "path": "/managed/me", "status": 200,
           "response": {
-            "username": "viewer", "admin": false,
+            "username": "viewer", "admin": false, "twoFactor": { "mode": "off", "enrolled": false },
             "operate": [],
             "readOnly": [{ "brokers": "b1", "msgVpns": "v2", "queues": "*" }],
             "brokers": [{ "broker": "b1", "msgVpns": [{ "name": "v2" }] }],
@@ -416,7 +416,7 @@
         {
           "as": "viewer", "method": "GET", "path": "/managed/me", "status": 200,
           "response": {
-            "username": "viewer", "admin": false,
+            "username": "viewer", "admin": false, "twoFactor": { "mode": "off", "enrolled": false },
             "operate": [],
             "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }],
             "brokers": [],
@@ -433,7 +433,7 @@
         {
           "as": "operator", "method": "GET", "path": "/managed/me", "status": 200,
           "response": {
-            "username": "operator", "admin": false,
+            "username": "operator", "admin": false, "twoFactor": { "mode": "off", "enrolled": false },
             "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
             "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }],
             "brokers": [{ "broker": "b1", "msgVpns": [{ "name": "v2" }] }],
@@ -454,7 +454,7 @@
               "logLevel": "warn",
               "access": { "allow": [], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
-              "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
+              "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000, "twoFactor": "off" },
               "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
               "audit": { "stdout": false, "access": false, "onFailure": "continue" }
             },
@@ -558,7 +558,7 @@
               "logLevel": "warn",
               "access": { "allow": ["192.0.2.0/24", "2001:db8::/32", "2001:db8:abcd:1000::/52", "fe80::1:0:0:1/128"], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
-              "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
+              "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000, "twoFactor": "off" },
               "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
               "audit": { "stdout": false, "access": false, "onFailure": "continue" }
             },
@@ -582,7 +582,7 @@
         {
           "as": "operator", "method": "GET", "path": "/managed/me", "status": 200,
           "response": {
-            "username": "operator", "admin": false,
+            "username": "operator", "admin": false, "twoFactor": { "mode": "off", "enrolled": false },
             "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
             "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }],
             "brokers": [
@@ -1338,7 +1338,8 @@
                 "maxFailures": 5,
                 "backoffSeconds": 30,
                 "maxBackoffSeconds": 900,
-                "unauthenticatedPerMinute": 1000
+                "unauthenticatedPerMinute": 1000,
+                "twoFactor": "off"
               },
               "modules": {
                 "offered": [
@@ -1389,6 +1390,10 @@
           "response": {
             "username": "viewer",
             "admin": false,
+            "twoFactor": {
+              "mode": "off",
+              "enrolled": false
+            },
             "operate": [],
             "readOnly": [
               {
@@ -1982,6 +1987,139 @@
           "response": { "address": "192.0.2.10", "peer": "192.0.2.10", "viaProxy": false }
         },
         { "as": "viewer", "method": "GET", "path": "/managed/client", "status": 403, "response": { "error": "forbidden" } }
+      ]
+    },
+    {
+      "name": "users: a reset of two-factor is for administrators, and an unknown user is not_found",
+      "steps": [
+        { "method": "DELETE", "path": "/managed/users/viewer/totp", "status": 401, "response": { "error": "unauthenticated" } },
+        { "as": "viewer", "method": "DELETE", "path": "/managed/users/viewer/totp", "status": 403, "response": { "error": "forbidden" } },
+        { "as": "admin", "method": "DELETE", "path": "/managed/users/ghost/totp", "status": 404, "response": { "error": "not_found" } }
+      ]
+    },
+    {
+      "name": "users: a reset for a user without two-factor changes nothing, the rev and the sessions included",
+      "steps": [
+        { "as": "admin", "method": "DELETE", "path": "/managed/users/viewer/totp", "status": 200, "response": { "rev": 1 } },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "viewer", "admin": false, "twoFactor": { "mode": "off", "enrolled": false },
+            "operate": [],
+            "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }],
+            "brokers": [{ "broker": "b1", "msgVpns": [{ "name": "v1" }] }],
+            "modules": ["queue-browser"]
+          }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "rev": 1, "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"] },
+          "status": 200, "response": { "rev": 1 }
+        }
+      ]
+    },
+    {
+      "name": "settings: each login.twoFactor mode is saved and applies to the next profile",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactor": "optional" } },
+          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "admin", "admin": true, "twoFactor": { "mode": "optional", "enrolled": false },
+            "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }],
+            "readOnly": [],
+            "brokers": [
+              { "broker": "b1", "msgVpns": [{ "name": "v1" }, { "name": "v2" }] },
+              { "broker": "b2", "msgVpns": [{ "name": "v9" }] },
+              { "broker": "b3", "msgVpns": [{ "name": "v3" }] }
+            ],
+            "modules": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
+          }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactor": "admins" } },
+          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "admin", "admin": true, "twoFactor": { "mode": "admins", "enrolled": false },
+            "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }],
+            "readOnly": [],
+            "brokers": [
+              { "broker": "b1", "msgVpns": [{ "name": "v1" }, { "name": "v2" }] },
+              { "broker": "b2", "msgVpns": [{ "name": "v9" }] },
+              { "broker": "b3", "msgVpns": [{ "name": "v3" }] }
+            ],
+            "modules": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
+          }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactor": "mandatory" } },
+          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "admin", "admin": true, "twoFactor": { "mode": "mandatory", "enrolled": false },
+            "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }],
+            "readOnly": [],
+            "brokers": [
+              { "broker": "b1", "msgVpns": [{ "name": "v1" }, { "name": "v2" }] },
+              { "broker": "b2", "msgVpns": [{ "name": "v9" }] },
+              { "broker": "b3", "msgVpns": [{ "name": "v3" }] }
+            ],
+            "modules": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
+          }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactor": "off" } },
+          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "admin", "admin": true, "twoFactor": { "mode": "off", "enrolled": false },
+            "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }],
+            "readOnly": [],
+            "brokers": [
+              { "broker": "b1", "msgVpns": [{ "name": "v1" }, { "name": "v2" }] },
+              { "broker": "b2", "msgVpns": [{ "name": "v9" }] },
+              { "broker": "b3", "msgVpns": [{ "name": "v3" }] }
+            ],
+            "modules": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "settings: a login.twoFactor that is not a mode is refused with its field, and nothing is saved",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactor": "sometimes" } },
+          "status": 422, "response": { "error": "invalid", "field": "login.twoFactor", "reason": "key \"login.twoFactor\" has invalid value \"sometimes\": must be \"off\", \"optional\", \"admins\" or \"mandatory\"" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactor": "on" } },
+          "status": 422, "response": { "error": "invalid", "field": "login.twoFactor", "reason": "key \"login.twoFactor\" has invalid value \"on\": must be \"off\", \"optional\", \"admins\" or \"mandatory\"" }
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "admin", "admin": true, "twoFactor": { "mode": "off", "enrolled": false },
+            "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }],
+            "readOnly": [],
+            "brokers": [
+              { "broker": "b1", "msgVpns": [{ "name": "v1" }, { "name": "v2" }] },
+              { "broker": "b2", "msgVpns": [{ "name": "v9" }] },
+              { "broker": "b3", "msgVpns": [{ "name": "v3" }] }
+            ],
+            "modules": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
+          }
+        }
       ]
     }
   ]

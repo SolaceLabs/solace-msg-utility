@@ -34,6 +34,18 @@ export interface ManagedError {
     basis?: unknown;
 }
 
+/** `login.twoFactor`: who signs in with a code from an authenticator app. */
+export type TwoFactorMode = 'off' | 'optional' | 'admins' | 'mandatory';
+
+/** The `twoFactor` member of `GET /managed/me`: the gateway's mode, and whether this user has set it up. */
+export interface TwoFactorState {
+    mode: TwoFactorMode;
+    enrolled: boolean;
+}
+
+/** Whether the gateway uses two-factor at all, so a "Two-factor sign-in" link is worth showing; false while the state is unknown. */
+export const twoFactorInUse = (state: TwoFactorState | undefined): boolean => !!state && state.mode !== 'off';
+
 export type ManagedResult<T> = { ok: true; data: T } | ManagedError;
 
 type Method = 'GET' | 'PUT' | 'POST' | 'DELETE';

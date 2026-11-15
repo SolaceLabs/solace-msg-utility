@@ -91,6 +91,9 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.auditFile != "/data/audit.log" || cfg.audit != (auditSettings{onFailure: auditOnFailureContinue}) {
 		t.Errorf("audit: want /data/audit.log with both options off and onFailure continue, got %q %+v", cfg.auditFile, cfg.audit)
 	}
+	if cfg.twoFactor != twoFactorOff {
+		t.Errorf("twoFactor: want off, got %q", cfg.twoFactor)
+	}
 	if cfg.certFile != "/tls/tls.crt" {
 		t.Errorf("certFile: want /tls/tls.crt, got %q", cfg.certFile)
 	}
@@ -321,13 +324,15 @@ func TestRootHandler_WithManagedRouting(t *testing.T) {
 	mr := &managedRoutes{api: stubHandler("api"), pages: stubHandler("pages"), gateApp: gate("appgate"), gateAdmin: gate("admingate"), gateRelay: gate("relaygate")}
 	h := newRootHandler(stubHandler("hosted"), stubHandler("admin"), stubHandler("app"), stubHandler("relay"), mr)
 	for path, want := range map[string]string{
-		"/managed/me":     "api",
-		"/login":          "pages",
-		"/login/password": "pages",
-		"/solAdmin":       "admingate>admin",
-		"/":               "appgate>app",
-		"/hosted":         "hosted",
-		"/http/80/host/x": "relaygate>relay",
+		"/managed/me":       "api",
+		"/login":            "pages",
+		"/login/password":   "pages",
+		"/login/code":       "pages",
+		"/login/two-factor": "pages",
+		"/solAdmin":         "admingate>admin",
+		"/":                 "appgate>app",
+		"/hosted":           "hosted",
+		"/http/80/host/x":   "relaygate>relay",
 	} {
 		if got := route(h, path).Body.String(); got != want {
 			t.Errorf("%s: want %s, got %q", path, want, got)

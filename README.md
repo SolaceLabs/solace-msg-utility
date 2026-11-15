@@ -55,6 +55,8 @@ SMU_VERSION=<release> docker compose -f compose.provisioned.yaml up -d
 
 Left to Docker, `backup/` would be root's and the scheduled backups could not be written. Open `https://<host>:9443/`, sign in as `admin` and change the password, add brokers and users at `/solAdmin`, and set a backup schedule and passphrase on its Backup & Restore page. The steps, settings and recommended values are in [provisioned-mode.md -> Start it](docs/provisioned-mode.md#start-it).
 
+Sign-in can also ask for a six-digit code from an authenticator app (off by default, set on Gateway Settings): see [provisioned-mode.md -> Two-factor sign-in](docs/provisioned-mode.md#two-factor-sign-in). The Provisioned demo lets you try it with mock codes.
+
 ## Connecting to a broker
 
 Once the app is loaded:
@@ -121,7 +123,7 @@ Once the app is loaded:
 - **Self-contained HTML** — `index.html` includes all app code; the two vendor scripts `solclient.js` and `jszip.min.js` sit alongside it (see [deployment.md](docs/deployment.md#external-runtime-dependencies)).
 - **Demo bundle** (`demo.html`) -- every module exercised against mock data, no broker required.
 - **Provisioned demo** (`provisioned-demo.html`) -- the Provisioned sign-in, entitlements and administration pages against a fake gateway in the page; no gateway, no broker, no network request.
-- **Gateway image** -- serves the app over HTTPS and connects to your brokers for it, so browsers reach and trust only the container; Provisioned mode adds sign-in and administration. Image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#gateway-mode).
+- **Gateway image** -- serves the app over HTTPS and connects to your brokers for it, so browsers reach and trust only the container; Provisioned mode adds sign-in (optionally with two-factor codes) and administration. Image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#gateway-mode).
 
 ## Documentation
 

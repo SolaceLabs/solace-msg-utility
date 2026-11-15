@@ -14,7 +14,7 @@ export interface GatewaySettings {
     logLevel: string;
     access: { allow: string[]; trustedProxies: string[] };
     session: { idleMinutes: number; absoluteMinutes: number };
-    login: { maxFailures: number; backoffSeconds: number; maxBackoffSeconds: number; unauthenticatedPerMinute: number };
+    login: { maxFailures: number; backoffSeconds: number; maxBackoffSeconds: number; unauthenticatedPerMinute: number; twoFactor: string };
     modules: { offered: string[]; userDefault: string };
     /** `onFailure`: "continue" logs a lost audit record and carries on; "refuse" refuses changes while the audit log cannot be written. */
     audit: { stdout: boolean; access: boolean; onFailure: string };

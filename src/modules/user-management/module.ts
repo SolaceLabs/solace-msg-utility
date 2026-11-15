@@ -22,6 +22,12 @@
  * module outside it is marked "not offered". Imports only from `src/core/*`
  * and its own files.
  *
+ * The Two-factor column shows whether a user has set up two-factor sign-in (a
+ * code from an authenticator app). A row that has it carries a Reset two-factor
+ * button (`DELETE /managed/users/{name}/totp`): the user sets it up again at
+ * their next sign-in. A save never carries the field. Resetting your own
+ * account ends your session, so it asks the session owner to sign out.
+ *
  * The list filters as you type in its search box (`matchContains`: contains,
  * case-insensitive, `*` = any run), from the last load without a refetch. The
  * Permission test card below it (`./access-test`) shows what a saved user gets
@@ -37,6 +43,7 @@
 import { required, setError } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import { createRowList, renderAdminRows } from '../../core/components/row-list';
+import { iconButton } from '../../core/icons';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
 import { escapeHtml, matchContains, moduleLabel } from '../../core/utils';
@@ -56,6 +63,9 @@ const GLOB_FIELDS = [
 /** What an empty entitlement list means, shown in its place. */
 export const NO_OPERATE = 'None: this user changes no queue (no delete, no copy into one). Read-only rows still let them browse.';
 export const NO_READ_ONLY = 'None. With no operate rows either, this user can sign in but reaches no broker.';
+
+/** The Reset two-factor row button's icon: a shield with a bar through it. */
+const RESET_TWO_FACTOR_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><line x1="9" y1="9" x2="15" y2="15"></line></svg>';
 
 export const UserManagementModule = {
     name: 'User Mgmt.',
@@ -128,12 +138,21 @@ export const UserManagementModule = {
             const shown = users.filter(u => matchContains(u.username, query));
             renderAdminRows(els.rows, shown, users.length, query, {
                 plural: 'users',
+                columns: 4,
                 noun: 'user',
                 classPrefix: 'user-mgmt',
-                cells: u => `<td>${escapeHtml(u.username)}</td><td>${u.admin ? 'Admin' : 'User'}</td>`,
+                cells: u => `<td>${escapeHtml(u.username)}</td><td>${u.admin ? 'Admin' : 'User'}</td><td>${u.twoFactor ? 'On' : 'Off'}</td>`,
                 label: u => u.username,
                 onEdit: openEdit,
                 onDelete: u => void removeUser(u.username, u.rev),
+            });
+            // Reset two-factor sits beside Edit and Delete on the rows that have it on.
+            // A row exists per shown user, in order, whenever there are any.
+            shown.forEach((u, i) => {
+                if (!u.twoFactor) return;
+                const actions = required<HTMLElement>(els.rows.children[i] as HTMLElement, '.flex-row');
+                actions.prepend(iconButton(RESET_TWO_FACTOR_ICON, `Reset two-factor for user "${u.username}"`,
+                    'user-mgmt-reset-2fa', () => void resetTwoFactor(u.username)));
             });
         }
 
@@ -324,6 +343,30 @@ export const UserManagementModule = {
                 return;
             }
             showToast('User deleted', 'ok');
+            await loadList();
+        }
+
+        async function resetTwoFactor(username: string): Promise<void> {
+            const m = appState.managed;
+            if (!m) return;
+            const own = username === m.username;
+            const question = own
+                ? `Reset your own two-factor sign-in? You will be signed out and must set it up again.`
+                : `Reset two-factor sign-in for "${username}"? They will have to set it up again.`;
+            if (!(await confirmDialog(question, { confirmLabel: 'Reset' }))) return;
+            const res = await service.resetTwoFactor(username);
+            if (!res.ok) {
+                if (await handleConflict(res, 'This user', loadList)) return;
+                reportManagedFailure(res, eventBus, msg => showToast(msg, 'error'));
+                return;
+            }
+            if (own) {
+                // The gateway ended this user's sessions with the reset.
+                showToast('Two-factor sign-in reset. You have been signed out.', 'ok', SIGNED_OUT_TOAST_MS);
+                eventBus.emit('rbac:sign-out-requested');
+                return;
+            }
+            showToast('Two-factor sign-in reset', 'ok');
             await loadList();
         }
 

@@ -299,3 +299,96 @@ describe('managed demo end to end', () => {
         expect(demo.gateway.signIn('viewer', 'demo-viewer-0001').ok).toBe(true);
     }, 20_000);
 });
+
+describe('managed demo two-factor sign-in', () => {
+    const PASSWORD = 'demo-viewer-0001';
+    /** The reload a sign-in or sign-out causes: what `navigate` saved, booted again. */
+    const reload = (demo: ManagedDemo): ManagedDemo => {
+        demo.dispose();
+        document.body.innerHTML = '';
+        return startDemo();
+    };
+    const title = () => document.querySelector('.mgw-page h1')?.textContent ?? null;
+    const alertText = () => document.querySelector('.mgw-page [role="alert"]')?.textContent ?? null;
+    function submitPage(values: Record<string, string>): void {
+        for (const [id, v] of Object.entries(values)) q<HTMLInputElement>(`#mgw-${id}`).value = v;
+        q('.mgw-page form').dispatchEvent(new Event('submit', { cancelable: true }));
+    }
+    /** The code the panel's Authenticator shows for a row, as a visitor reads it off. */
+    const panelCode = (who: string) => Array.from(document.querySelectorAll('#mock-controls .mockctl-account'))
+        .find(r => r.querySelector('.mockctl-key')?.textContent === who)?.querySelector('.mockctl-copy')?.textContent;
+    const setMode = async (demo: ManagedDemo, mode: string) => {
+        const res = await demo.gateway.handle({
+            method: 'PUT', path: '/managed/settings', query: '',
+            body: JSON.stringify({ login: { twoFactor: mode }, rev: demo.gateway.settings.rev() }),
+            session: demo.gateway.openSession('admin', false),
+        });
+        expect(res.status).toBe(200);
+    };
+    const signOutAndBackIn = (demo: ManagedDemo): ManagedDemo => {
+        panelButton('Sign out').click();
+        return reload(demo);
+    };
+
+    it('turns on, enrols with the panel\'s code, signs in with a code and then a recovery code, and loses it to an administrator\'s reset', async () => {
+        let demo = startDemo();
+        await setMode(demo, 'mandatory');
+
+        // Setting it up: the panel holds the code, the page shows the secret.
+        panelButton('Sign in as viewer').click();
+        demo = reload(demo);
+        expect([title(), demo.gateway.session()]).toEqual(['Set up two-factor sign-in', null]);
+        expect(q('#two-factor-secret').textContent!.replace(/ /g, '')).toBe(demo.gateway.ticket()!.secret);
+        submitPage({ code: '000000' });
+        expect(alertText()).toBe('The code is not correct.');
+        expect(demo.gateway.store.totpOf('viewer')).toBeUndefined();
+        submitPage({ code: panelCode('viewer (setting up)')! });
+        expect(title()).toBe('Recovery codes');
+        const recovery = Array.from(document.querySelectorAll('#recovery-codes li'), li => li.textContent!);
+        expect(recovery).toHaveLength(10);
+        q('#two-factor-continue').click();
+        demo = reload(demo);
+        expect([demo.gateway.session(), title()]).toEqual([{ user: 'viewer', mustChange: false }, null]);
+
+        // Signed out, the password leads to the code page, and only the code opens a session.
+        demo = signOutAndBackIn(demo);
+        expect(title()).toBe('Sign in');
+        submitPage({ username: 'viewer', password: PASSWORD });
+        expect([title(), demo.gateway.session()]).toEqual(['Two-factor sign-in', null]);
+        submitPage({ code: '000000' });
+        expect([alertText(), demo.gateway.session()]).toEqual(['The code is not correct.', null]);
+        submitPage({ code: panelCode('viewer')! });
+        demo = reload(demo);
+        expect(demo.gateway.session()!.user).toBe('viewer');
+
+        // A recovery code signs in once.
+        demo = signOutAndBackIn(demo);
+        submitPage({ username: 'viewer', password: PASSWORD });
+        submitPage({ code: recovery[0] });
+        demo = reload(demo);
+        expect(demo.gateway.session()!.user).toBe('viewer');
+        demo = signOutAndBackIn(demo);
+        submitPage({ username: 'viewer', password: PASSWORD });
+        submitPage({ code: recovery[0] });
+        expect([alertText(), demo.gateway.session()]).toEqual(['The code is not correct.', null]);
+
+        // An administrator resets it (two-factor optional again, so the administrator is not asked), and the panel lets go of the account.
+        await setMode(demo, 'optional');
+        panelButton('Sign in as admin').click();
+        demo = reload(demo);
+        expect(demo.gateway.session()!.user).toBe('admin');
+        expect(panelCode('viewer')).toBeDefined();
+        const res = await fetch('/managed/users/viewer/totp', { method: 'DELETE' });
+        expect(res.status).toBe(200);
+        expect(demo.gateway.store.totpOf('viewer')).toBeUndefined();
+        Array.from(document.querySelectorAll('#mock-controls .mockctl-section'))
+            .find(s => s.querySelector('.mockctl-title')!.textContent === 'Authenticator')!.dispatchEvent(new Event('pointerenter'));
+        expect(panelCode('viewer')).toBeUndefined();
+
+        // The user signs in with the password alone.
+        demo = signOutAndBackIn(demo);
+        submitPage({ username: 'viewer', password: PASSWORD });
+        demo = reload(demo);
+        expect(demo.gateway.session()!.user).toBe('viewer');
+    }, 20_000);
+});

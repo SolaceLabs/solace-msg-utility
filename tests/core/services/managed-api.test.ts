@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
-    managedRequest, managedErrorMessage, reportManagedFailure, SIGNED_OUT_TOAST_MS, type ManagedError,
+    managedRequest, managedErrorMessage, reportManagedFailure, twoFactorInUse, SIGNED_OUT_TOAST_MS, type ManagedError,
 } from '../../../src/core/services/managed-api';
 import { createEventBus } from '../../../src/core/event-bus';
 import { REQUEST_TIMEOUT_MS } from '../../../src/core/timing';
@@ -175,5 +175,18 @@ describe('core/services/managed-api — reportManagedFailure', () => {
         reportManagedFailure({ ok: false, status: 409, code: 'last_admin' }, bus, show);
         expect(show).toHaveBeenCalledWith('At least one administrator must remain.');
         expect(signOut).not.toHaveBeenCalled();
+    });
+});
+
+describe('core/services/managed-api -- twoFactorInUse', () => {
+    it('is true for every mode but off, enrolled or not', () => {
+        expect(twoFactorInUse({ mode: 'off', enrolled: true })).toBe(false);
+        expect(twoFactorInUse({ mode: 'optional', enrolled: false })).toBe(true);
+        expect(twoFactorInUse({ mode: 'admins', enrolled: false })).toBe(true);
+        expect(twoFactorInUse({ mode: 'mandatory', enrolled: true })).toBe(true);
+    });
+
+    it('is false while the gateway has not said (an older gateway)', () => {
+        expect(twoFactorInUse(undefined)).toBe(false);
     });
 });

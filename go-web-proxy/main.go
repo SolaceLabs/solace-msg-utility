@@ -86,6 +86,9 @@ type config struct {
 	session sessionLimits
 	login   loginLimits
 	modules moduleSettings
+	// twoFactor is login.twoFactor (totp.go): off, optional, admins or
+	// mandatory. The zero value counts as off. Live.
+	twoFactor string
 	// The audit stream's options (audit.go): audit.stdout is seeded by
 	// SMU_SHOW_AUDIT, audit.access and audit.onFailure have no env var. Live.
 	audit auditSettings
@@ -95,7 +98,7 @@ type config struct {
 // mode.
 type managedRoutes struct {
 	api       http.Handler                    // /managed/*
-	pages     http.Handler                    // /login, /login/password
+	pages     http.Handler                    // /login, /login/password, /login/code, /login/two-factor
 	gateApp   func(http.Handler) http.Handler // the PWA; a session under connModes=provisioned
 	gateAdmin func(http.Handler) http.Handler // /solAdmin; an admin session, every mode
 	gateRelay func(http.Handler) http.Handler // the Direct relay; 404 under connModes=provisioned
@@ -130,7 +133,7 @@ func newRootHandler(hosted, admin, app, relay http.Handler, mr *managedRoutes) h
 				return
 			}
 			mr.api.ServeHTTP(w, r)
-		case mr != nil && (p == "/login" || p == "/login/password"):
+		case mr != nil && (p == "/login" || p == "/login/password" || p == "/login/code" || p == "/login/two-factor"):
 			mr.pages.ServeHTTP(w, r)
 		case isProxyPath(p):
 			relay.ServeHTTP(w, r)
@@ -163,8 +166,9 @@ func defaultConfig() config {
 			maxBackoff:      15 * time.Minute,
 			unauthPerMinute: 60,
 		},
-		modules: moduleSettings{offered: moduleCatalog(), userDefault: modulesDefaultAll},
-		audit:   auditSettings{onFailure: auditOnFailureContinue},
+		twoFactor: twoFactorOff,
+		modules:   moduleSettings{offered: moduleCatalog(), userDefault: modulesDefaultAll},
+		audit:     auditSettings{onFailure: auditOnFailureContinue},
 	}
 }
 
@@ -203,6 +207,7 @@ func loadConfig() (config, error) {
 		defaultConn:        strings.ToLower(envOr("SMU_DEFAULT_CONN", d.defaultConn)),
 		session:            d.session,
 		login:              d.login,
+		twoFactor:          d.twoFactor,
 		modules:            d.modules,
 		auditFile:          d.auditFile,
 		audit:              auditSettings{stdout: showAudit, onFailure: d.audit.onFailure},

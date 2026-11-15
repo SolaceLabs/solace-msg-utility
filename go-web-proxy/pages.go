@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"html/template"
@@ -25,15 +26,24 @@ var pageFiles embed.FS
 const pageCSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
 
 // pageData feeds pages/login.html. Mode picks the form: "login", "password"
-// or "message" (a title and an error, nothing to submit).
+// or "message" (a title and an error, nothing to submit), and for two-factor
+// "code" (the sign-in's second step), "setup" (a signed-in user proving who
+// they are before a new authenticator), "enrol" (the secret and its QR code,
+// asking for the first code) and "recovery" (the ten codes, shown once).
 type pageData struct {
 	Mode, Title, Error, Next string
 	Required                 bool
 	MinLen, MaxLen           int
+	Enrolled                 bool          // setup: the user has two-factor now, so a code is asked too
+	Secret, Note             string        // enrol: the secret in groups of four, and a line for when the QR code is missing
+	QR                       template.HTML // enrol: inline SVG from qrSVG, trusted markup the gateway drew
+	Codes                    []string      // recovery: the formatted codes
+	Continue                 string        // recovery: where the Continue link goes
 }
 
-// authPages serves the gateway's own pages, /login and /login/password, and
-// gates the app bundles on the session they create.
+// authPages serves the gateway's own pages, /login, /login/password and the
+// two-factor steps (/login/code, /login/two-factor), and gates the app bundles
+// on the session they create.
 type authPages struct {
 	store    *store
 	sessions *sessions
@@ -44,6 +54,7 @@ type authPages struct {
 	tmpl     *template.Template
 	watch    *clientWatch // warns when every recent sign-in looks like one client
 	audit    *auditor     // the audit trail (audit.go); nil records nothing
+	totp     *totpGuard   // the last code step accepted per user (totp.go): a code works once
 }
 
 func newAuthPages(st *store, ss *sessions, th *throttle, lv *live, logger *slog.Logger) (*authPages, error) {
@@ -53,7 +64,7 @@ func newAuthPages(st *store, ss *sessions, th *throttle, lv *live, logger *slog.
 	}
 	return &authPages{
 		store: st, sessions: ss, throttle: th, live: lv, cop: http.NewCrossOriginProtection(), logger: logger, tmpl: tmpl,
-		watch: newClientWatch(sameClientWindow),
+		watch: newClientWatch(sameClientWindow), totp: newTOTPGuard(),
 	}, nil
 }
 
@@ -66,8 +77,10 @@ func safeNext(next string) string {
 	return "/"
 }
 
-func loginURL(next string) string    { return withNext("/login", next) }
-func passwordURL(next string) string { return withNext("/login/password", next) }
+func loginURL(next string) string     { return withNext("/login", next) }
+func passwordURL(next string) string  { return withNext("/login/password", next) }
+func codeURL(next string) string      { return withNext("/login/code", next) }
+func twoFactorURL(next string) string { return withNext("/login/two-factor", next) }
 
 func withNext(base, next string) string {
 	if next == "/" {
@@ -171,6 +184,14 @@ func (p *authPages) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.submitPassword(w, r, as, signedIn)
 	case r.URL.Path == "/login/password":
 		p.showPassword(w, r, as, signedIn)
+	case r.URL.Path == "/login/code" && post:
+		p.submitCode(w, r, as, signedIn)
+	case r.URL.Path == "/login/code":
+		p.showCode(w, r)
+	case r.URL.Path == "/login/two-factor" && post:
+		p.submitTwoFactor(w, r, as, signedIn)
+	case r.URL.Path == "/login/two-factor":
+		p.showTwoFactor(w, r, as, signedIn)
 	default:
 		http.NotFound(w, r)
 	}
@@ -264,6 +285,27 @@ func (p *authPages) submitLogin(w http.ResponseWriter, r *http.Request, prior ac
 		refused()
 		return
 	}
+	if stage := p.signinNeed(user); stage != "" {
+		// The password matched but a second step is owed: a ticket, no session.
+		// This browser's earlier session ends; the throttle's failure count
+		// stays until the last step passes.
+		if hadSession {
+			p.sessions.drop(prior.id)
+			clearSessionCookie(w)
+		}
+		tk := ticket{user: user, stage: stage, hash: check.hash, mustChange: check.mustChange}
+		if stage == stageEnrol {
+			tk.secret = newTOTPSecret() // the enrol page and its confirmation share one secret
+		}
+		p.startTicket(w, r, tk)
+		log.Info("password accepted, a second step is owed", "step", stage)
+		to := codeURL(next)
+		if stage == stageEnrol {
+			to = twoFactorURL(next)
+		}
+		http.Redirect(w, r, to, http.StatusSeeOther)
+		return
+	}
 	id, ok := p.startSession(user, check)
 	if !ok {
 		p.signinRefused(r, user, "account_changed")
@@ -271,15 +313,41 @@ func (p *authPages) submitLogin(w http.ResponseWriter, r *http.Request, prior ac
 		refused()
 		return
 	}
-	p.throttle.loginSucceeded(user, client, resolved)
 	if hadSession {
 		p.sessions.drop(prior.id)
 	}
+	p.sessionOpened(w, r, log, user, id, signedInMsg(user), check.mustChange, client, resolved)
+	http.Redirect(w, r, p.onwardURL(next, check.mustChange), http.StatusSeeOther)
+}
+
+// signinNeed is what a matched password still owes (need): "" when the session
+// may open, else stageCode or stageEnrol.
+func (p *authPages) signinNeed(user string) string {
+	admin, _ := p.store.isAdmin(user)
+	enrolled, _ := p.store.twoFactorOf(user)
+	return need(p.live.twoFactor(), admin, enrolled)
+}
+
+// onwardURL is where a signed-in browser goes next: the forced password change
+// first, else next.
+func (p *authPages) onwardURL(next string, mustChange bool) string {
+	if mustChange {
+		return passwordURL(next)
+	}
+	return next
+}
+
+// sessionOpened is everything that follows a session's creation at sign-in:
+// the throttle forgets the user's failures, the cookie is set, the audit entry
+// (an ok signin, only now that the session exists) and the log line are
+// written, and the client watch may warn.
+func (p *authPages) sessionOpened(w http.ResponseWriter, r *http.Request, log *slog.Logger, user, id, msg string, mustChange bool, client netip.Addr, resolved bool) {
+	p.throttle.loginSucceeded(user, client, resolved)
 	setSessionCookie(w, id)
 	setRequestUser(r, user)
 	e := auditFor(r, auditSignin)
-	e.Target, e.Outcome, e.Msg = user, auditOK, user+" signed in"
-	if check.mustChange {
+	e.Target, e.Outcome, e.Msg = user, auditOK, msg
+	if mustChange {
 		e.Msg += "; a password change is required"
 	}
 	p.audit.record(auditAuth, e)
@@ -288,11 +356,6 @@ func (p *authPages) submitLogin(w http.ResponseWriter, r *http.Request, prior ac
 		log.Warn("every recent sign-in came from this one private address: a reverse proxy or Docker's userland proxy the gateway does not trust is likely in front of it, so all users share one throttle and one access-list entry; list the proxy in access.trustedProxies (config.yaml), see docs/deployment.md",
 			"sign_ins", len(p.watch.recent))
 	}
-	if check.mustChange {
-		http.Redirect(w, r, passwordURL(next), http.StatusSeeOther)
-		return
-	}
-	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 func (p *authPages) showPassword(w http.ResponseWriter, r *http.Request, as activeSession, signedIn bool) {
@@ -422,6 +485,424 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 	setSessionCookie(w, id)
 	log.Info("password changed")
 	http.Redirect(w, r, next, http.StatusSeeOther)
+}
+
+// ----- two-factor steps ----------------------------------------------------------------
+
+const twoFactorTitle = "Two-factor sign-in"
+
+// startTicket begins a half-finished sign-in in this browser: the ticket the
+// browser held before (if any) ends, the new one is created and its cookie
+// set. It returns the new ticket's id.
+func (p *authPages) startTicket(w http.ResponseWriter, r *http.Request, tk ticket) string {
+	if old, ok := p.sessions.tickets.fromRequest(r); ok {
+		p.sessions.tickets.drop(old.id)
+	}
+	id := p.sessions.tickets.create(tk)
+	setSigninCookie(w, id)
+	return id
+}
+
+// enrolRefused records a refused set-up of two-factor (the first one or a
+// replacement). The actor is the user: the password has matched, or they are
+// signed in. A code is never in the entry.
+func (p *authPages) enrolRefused(r *http.Request, user, code string) {
+	e := auditFor(r, auditTwoFactorEnrol)
+	e.Target, e.Outcome, e.Code = user, auditRefused, code
+	e.Msg = user + " could not set up two-factor sign-in: " + strings.ReplaceAll(code, "_", " ")
+	p.audit.record(auditAuth, e)
+}
+
+// stepAnswers are how a two-factor step answers a refusal of its own kind, so
+// takeTurn can serve all three steps: refused writes the audit entry, page
+// renders the step's form again with a message, unavailable answers 503.
+type stepAnswers struct {
+	refused     func(code string)
+	page        func(status int, msg string)
+	unavailable func(err error)
+}
+
+// takeTurn is checkTurn for a two-factor step: the user's sign-in turn, then
+// the throttle's verdict, with the refusals answered through a. On ok the
+// caller defers release.
+func (p *authPages) takeTurn(w http.ResponseWriter, r *http.Request, user string, client netip.Addr, resolved bool, a stepAnswers) (release func(), ok bool) {
+	release, wait, err := p.checkTurn(r, user, client, resolved)
+	switch {
+	case err != nil:
+		a.unavailable(err)
+		return nil, false
+	case wait > 0:
+		a.refused("throttled")
+		w.Header().Set("Retry-After", strconv.Itoa(retrySeconds(wait)))
+		a.page(http.StatusTooManyRequests, throttledText(wait))
+		return nil, false
+	}
+	return release, true
+}
+
+// spendCode checks the one code field of a user who has two-factor with the
+// given secret: exactly six digits is a TOTP code (a replayed one is refused),
+// anything else is tried as a recovery code, which is used up. left is the
+// recovery codes remaining and means something only when byRecovery. err is a
+// store failure.
+func (p *authPages) spendCode(ctx context.Context, user, secret, code string) (valid, byRecovery bool, left int, err error) {
+	if totpShaped(code) {
+		return p.totp.check(user, secret, code, p.sessions.now()), false, 0, nil
+	}
+	valid, left, err = p.store.useRecoveryCode(ctx, user, hashRecoveryCode(code))
+	return valid, true, left, err
+}
+
+// twoFactorInUse answers the not-in-use page (404) while login.twoFactor is
+// off and reports whether the caller may go on.
+func (p *authPages) twoFactorInUse(w http.ResponseWriter) bool {
+	if twoFactorOrDefault(p.live.twoFactor()) == twoFactorOff {
+		p.message(w, http.StatusNotFound, twoFactorTitle, "Two-factor sign-in is not in use.")
+		return false
+	}
+	return true
+}
+
+// enrolData is the enrol page for a pending secret: the QR code (when it can be
+// drawn; otherwise a line says to type the key) and the key in groups of four.
+func (p *authPages) enrolData(r *http.Request, user, secret, next string) pageData {
+	d := pageData{Mode: "enrol", Title: "Set up two-factor sign-in", Next: next, Secret: groupSecret(secret)}
+	qr, err := qrSVG(totpURI(user, secret))
+	if err != nil {
+		requestLogger(p.logger, r).Error("two-factor QR code could not be drawn", "err", err)
+		d.Note = "The picture could not be drawn. Type the key into your app instead."
+		return d
+	}
+	d.QR = qr
+	return d
+}
+
+// twoFactorRefusal maps an error of store.setTOTP to its answer: the status,
+// the audit code and the sentence the page shows. Nothing was changed in any
+// of these cases.
+func twoFactorRefusal(err error) (status int, code, msg string) {
+	var diskChanged *changedOnDiskError
+	var writeFailed *writeFailedError
+	switch {
+	case errors.Is(err, errAccountChanged), errors.Is(err, errUserNotFound):
+		return http.StatusConflict, "account_changed", "Your account was changed while this request ran. Sign in again."
+	case errors.Is(err, errAuditUnavailable):
+		return http.StatusServiceUnavailable, "audit_unavailable", "The gateway cannot record changes right now, so it refused this one. Try again later or tell an administrator."
+	case errors.As(err, &diskChanged):
+		return http.StatusConflict, "store_changed_on_disk", "The gateway's user file was changed outside the gateway. An administrator must restart the gateway before two-factor can be set up."
+	case errors.As(err, &writeFailed):
+		return http.StatusInternalServerError, "store_write_failed", "Two-factor sign-in could not be saved."
+	}
+	return http.StatusInternalServerError, "server_error", "Two-factor sign-in could not be saved."
+}
+
+// showCode is the sign-in's code step: it needs a code ticket.
+func (p *authPages) showCode(w http.ResponseWriter, r *http.Request) {
+	next := safeNext(r.URL.Query().Get("next"))
+	if at, ok := p.sessions.tickets.fromRequest(r); !ok || at.stage != stageCode {
+		http.Redirect(w, r, loginURL(next), http.StatusSeeOther)
+		return
+	}
+	p.render(w, http.StatusOK, pageData{Mode: "code", Title: twoFactorTitle, Next: next})
+}
+
+// submitCode finishes a sign-in whose password matched: the code is a current
+// TOTP code or a recovery code. The throttle applies as for a password (same
+// turn, same counters); a wrong code counts as a failed sign-in. The session
+// is created only here, once the code passed, and only while the account is
+// the one the password was checked against.
+func (p *authPages) submitCode(w http.ResponseWriter, r *http.Request, prior activeSession, hadSession bool) {
+	if !p.readForm(w, r) {
+		return
+	}
+	next := safeNext(r.PostFormValue("next"))
+	at, ok := p.sessions.tickets.fromRequest(r)
+	if !ok || at.stage != stageCode {
+		http.Redirect(w, r, loginURL(next), http.StatusSeeOther)
+		return
+	}
+	user, code := at.user, r.PostFormValue("code")
+	page := pageData{Mode: "code", Title: twoFactorTitle, Next: next}
+	client, resolved := clientOf(r)
+	log := clientLogger(p.logger, r).With("user", userKey(user))
+	endTicket := func() {
+		p.sessions.tickets.drop(at.id)
+		clearSigninCookie(w)
+	}
+	unavailable := func(err error) {
+		log.Error("sign-in check failed", "err", err)
+		p.signinRefused(r, user, "unavailable")
+		p.message(w, http.StatusServiceUnavailable, "Sign-in unavailable", "Sign-in could not be checked. Try again.")
+	}
+	changed := func() {
+		endTicket()
+		p.signinRefused(r, user, "account_changed")
+		log.Warn("sign-in refused: the account changed while the code step was open")
+		p.render(w, http.StatusUnauthorized, pageData{Mode: "login", Title: "Sign in", Next: next, Error: "Sign-in failed. Check the username and password."})
+	}
+	release, ok := p.takeTurn(w, r, user, client, resolved, stepAnswers{
+		refused: func(c string) { p.signinRefused(r, user, c) },
+		page: func(status int, msg string) {
+			page.Error = msg
+			p.render(w, status, page)
+		},
+		unavailable: unavailable,
+	})
+	if !ok {
+		return
+	}
+	defer release()
+	secret, enrolled := p.store.totpSecret(user)
+	if !enrolled {
+		changed() // two-factor was removed, or the account deleted, after the password step
+		return
+	}
+	valid, byRecovery, left, err := p.spendCode(r.Context(), user, secret, code)
+	if err != nil {
+		unavailable(err)
+		return
+	}
+	if !valid {
+		p.throttle.loginFailed(user, client, resolved)
+		p.signinRefused(r, user, auditBadCode)
+		log.Warn("sign-in failed: the code is not correct")
+		page.Error = "The code is not correct."
+		p.render(w, http.StatusUnauthorized, page)
+		return
+	}
+	var id string
+	if !p.store.ifUnchanged(user, at.hash, func() { id = p.sessions.create(user, at.mustChange) }) {
+		changed()
+		return
+	}
+	endTicket()
+	if hadSession {
+		p.sessions.drop(prior.id)
+	}
+	msg := signedInMsg(user)
+	if byRecovery {
+		msg = signedInRecoveryMsg(user, left)
+	}
+	p.sessionOpened(w, r, log, user, id, msg, at.mustChange, client, resolved)
+	http.Redirect(w, r, p.onwardURL(next, at.mustChange), http.StatusSeeOther)
+}
+
+// showTwoFactor is the page for setting two-factor up: the enrol page (secret
+// and QR code) for a browser with an enrol ticket, or the setup page (password,
+// and a code when the user has two-factor) for a signed-in user.
+func (p *authPages) showTwoFactor(w http.ResponseWriter, r *http.Request, as activeSession, signedIn bool) {
+	next := safeNext(r.URL.Query().Get("next"))
+	at, hasTicket := p.sessions.tickets.fromRequest(r)
+	enrol := hasTicket && at.stage == stageEnrol
+	switch {
+	case !enrol && !(signedIn && !as.mustChange):
+		http.Redirect(w, r, loginURL(next), http.StatusSeeOther)
+	case !p.twoFactorInUse(w):
+	case enrol:
+		p.render(w, http.StatusOK, p.enrolData(r, at.user, at.secret, next))
+	default:
+		enrolled, _ := p.store.twoFactorOf(as.user)
+		p.render(w, http.StatusOK, pageData{Mode: "setup", Title: twoFactorTitle, Next: next, Enrolled: enrolled})
+	}
+}
+
+// submitTwoFactor routes the form of /login/two-factor by its step field:
+// verify (a signed-in user proving who they are) or confirm (the first code of
+// the new secret).
+func (p *authPages) submitTwoFactor(w http.ResponseWriter, r *http.Request, as activeSession, signedIn bool) {
+	if !p.readForm(w, r) {
+		return
+	}
+	next := safeNext(r.PostFormValue("next"))
+	switch r.PostFormValue("step") {
+	case "verify":
+		p.submitSetup(w, r, next, as, signedIn)
+	case "confirm":
+		p.submitConfirm(w, r, next, as, signedIn)
+	default:
+		p.message(w, http.StatusBadRequest, "Request refused", "The form could not be read.")
+	}
+}
+
+// submitSetup is step verify: a signed-in user asks to set two-factor up (or
+// again). The password counts like the own-password change's (a wrong one is a
+// failed sign-in under the same turn), and so does the current code or a
+// recovery code when they already have two-factor; one message covers either.
+// Only then does a setup ticket with a new secret exist, and the enrol page
+// shows it. Nothing is stored yet.
+func (p *authPages) submitSetup(w http.ResponseWriter, r *http.Request, next string, as activeSession, signedIn bool) {
+	if !signedIn || as.mustChange {
+		http.Redirect(w, r, loginURL(next), http.StatusSeeOther)
+		return
+	}
+	if !p.twoFactorInUse(w) {
+		return
+	}
+	pw, code := r.PostFormValue("password"), r.PostFormValue("code")
+	secret, enrolled := p.store.totpSecret(as.user)
+	page := pageData{Mode: "setup", Title: twoFactorTitle, Next: next, Enrolled: enrolled}
+	client, resolved := clientOf(r)
+	log := requestLogger(p.logger, r)
+	unavailable := func(err error) {
+		log.Error("two-factor set-up check failed", "err", err)
+		p.enrolRefused(r, as.user, "unavailable")
+		page.Error = "The password could not be checked. Try again."
+		p.render(w, http.StatusServiceUnavailable, page)
+	}
+	release, ok := p.takeTurn(w, r, as.user, client, resolved, stepAnswers{
+		refused: func(c string) { p.enrolRefused(r, as.user, c) },
+		page: func(status int, msg string) {
+			page.Error = msg
+			p.render(w, status, page)
+		},
+		unavailable: unavailable,
+	})
+	if !ok {
+		return
+	}
+	defer release()
+	check, err := p.store.verifyPassword(r.Context(), as.user, pw)
+	if err != nil {
+		unavailable(err)
+		return
+	}
+	valid := check.ok
+	if valid && enrolled {
+		// A wrong password never spends a recovery code.
+		if valid, _, _, err = p.spendCode(r.Context(), as.user, secret, code); err != nil {
+			unavailable(err)
+			return
+		}
+	}
+	if !valid {
+		p.throttle.loginFailed(as.user, client, resolved)
+		p.enrolRefused(r, as.user, "bad_credentials")
+		log.Warn("two-factor set-up refused: the password or the code is not correct")
+		page.Error = "The password or the code is not correct."
+		p.render(w, http.StatusUnauthorized, page)
+		return
+	}
+	pending := newTOTPSecret()
+	p.startTicket(w, r, ticket{user: as.user, stage: stageSetup, hash: check.hash, secret: pending})
+	p.render(w, http.StatusOK, p.enrolData(r, as.user, pending, next))
+}
+
+// submitConfirm is step confirm: the first code of the new secret. A wrong
+// one counts as a failed sign-in and the page shows the same secret again. A
+// right one stores the secret and ten recovery codes in one commit; inside
+// that commit (writer lock held) an enrol ticket's session is created and the
+// audit line written, so the session exists only once two-factor does. The
+// user's other sessions then end, and the recovery page shows the codes this
+// once.
+func (p *authPages) submitConfirm(w http.ResponseWriter, r *http.Request, next string, prior activeSession, hadSession bool) {
+	at, ok := p.sessions.tickets.fromRequest(r)
+	if !ok || (at.stage != stageEnrol && at.stage != stageSetup) {
+		http.Redirect(w, r, loginURL(next), http.StatusSeeOther)
+		return
+	}
+	if at.stage == stageSetup && !(hadSession && prior.user == at.user && !prior.mustChange) {
+		// A set-up belongs to the signed-in browser that asked for it.
+		p.sessions.tickets.drop(at.id)
+		clearSigninCookie(w)
+		http.Redirect(w, r, loginURL(next), http.StatusSeeOther)
+		return
+	}
+	if !p.twoFactorInUse(w) {
+		return
+	}
+	user, code := at.user, r.PostFormValue("code")
+	setRequestUser(r, user)
+	page := p.enrolData(r, user, at.secret, next)
+	client, resolved := clientOf(r)
+	log := requestLogger(p.logger, r)
+	endTicket := func() {
+		p.sessions.tickets.drop(at.id)
+		clearSigninCookie(w)
+	}
+	refuseWrite := func(status int, reason, title, msg string) {
+		endTicket()
+		p.enrolRefused(r, user, reason)
+		p.message(w, status, title, msg)
+	}
+	unavailable := func(err error) {
+		log.Error("two-factor set-up check failed", "err", err)
+		p.enrolRefused(r, user, "unavailable")
+		p.message(w, http.StatusServiceUnavailable, "Two-factor not set up", "The code could not be checked. Try again.")
+	}
+	release, ok := p.takeTurn(w, r, user, client, resolved, stepAnswers{
+		refused: func(c string) { p.enrolRefused(r, user, c) },
+		page: func(status int, msg string) {
+			page.Error = msg
+			p.render(w, status, page)
+		},
+		unavailable: unavailable,
+	})
+	if !ok {
+		return
+	}
+	defer release()
+	wasEnrolled, exists := p.store.twoFactorOf(user)
+	if !exists || (at.stage == stageEnrol && wasEnrolled) {
+		// Deleted meanwhile, or enrolled elsewhere since the password step: an
+		// enrol ticket never replaces a secret that exists.
+		status, reason, msg := twoFactorRefusal(errAccountChanged)
+		log.Warn("two-factor set-up refused: the account changed since the password step")
+		refuseWrite(status, reason, "Two-factor not set up", msg)
+		return
+	}
+	// The new secret has no replay history of its own, so the code is checked
+	// without the guard and recorded in it only once the secret is stored.
+	if _, valid := totpVerify(at.secret, code, p.sessions.now()); !valid {
+		p.throttle.loginFailed(user, client, resolved)
+		p.enrolRefused(r, user, auditBadCode)
+		log.Warn("two-factor set-up refused: the code is not correct")
+		page.Error = "The code is not correct."
+		p.render(w, http.StatusUnauthorized, page)
+		return
+	}
+	codes := newRecoveryCodes()
+	var id string
+	err := p.store.setTOTP(r.Context(), user, at.secret, hashRecoveryCodes(codes), at.hash, func() {
+		id = prior.id
+		if at.stage == stageEnrol {
+			id = p.sessions.create(user, at.mustChange)
+		}
+		seq, _ := p.store.seqs()
+		e := auditFor(r, auditTwoFactorEnrol)
+		e.Target, e.Outcome, e.Msg = user, auditOK, twoFactorEnrolMsg(user, wasEnrolled)
+		e.Wrote = []auditWrote{{File: filepath.Base(p.store.usersPath), Seq: int64(seq)}}
+		p.audit.record(auditAuth, e)
+	})
+	var clientGone *clientGoneError
+	if errors.As(err, &clientGone) {
+		return // the browser left before the change began: nothing happened and nobody reads an answer
+	}
+	if err != nil {
+		status, reason, msg := twoFactorRefusal(err)
+		log.Warn("two-factor set-up refused", "code", reason, "err", err)
+		refuseWrite(status, reason, "Two-factor not set up", msg)
+		return
+	}
+	// Stored. The old secret's replay history means nothing for the new one;
+	// the code just used is recorded so it cannot also sign in.
+	p.totp.forget(user)
+	p.totp.check(user, at.secret, code, p.sessions.now())
+	p.sessions.dropOthers(user, id)
+	endTicket()
+	if at.stage == stageEnrol {
+		if hadSession {
+			p.sessions.drop(prior.id)
+		}
+		p.sessionOpened(w, r, log, user, id, signedInMsg(user), at.mustChange, client, resolved)
+	} else {
+		p.throttle.loginSucceeded(user, client, resolved)
+	}
+	log.Info("two-factor sign-in set up", "again", wasEnrolled)
+	formatted := make([]string, len(codes))
+	for i, c := range codes {
+		formatted[i] = formatRecoveryCode(c)
+	}
+	p.render(w, http.StatusOK, pageData{Mode: "recovery", Title: "Recovery codes", Codes: formatted, Continue: p.onwardURL(next, at.mustChange)})
 }
 
 // gateApp guards the PWA while connModes is provisioned (read live, so a settings

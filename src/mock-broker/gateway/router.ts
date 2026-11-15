@@ -17,6 +17,12 @@
  * alone settles (422, then rev_required), then the record, then its rev, then
  * the rules that need the rest of the store.
  *
+ * Two-factor: `me` carries the setting and whether the caller is enrolled, the
+ * user list a flag per user, and `DELETE /managed/users/{name}/totp` is an
+ * administrator's reset (no rev is sent; the answer carries the user's rev,
+ * moved only when there was two-factor to remove, which also ends that
+ * user's sessions and tickets). A user's PUT never carries or clears it.
+ *
  * Not simulated: the cross-site write check, the body cap and the
  * unauthenticated throttle, and the refusals of a store that cannot be
  * written (store_changed_on_disk, store_write_failed, audit_unavailable).
@@ -30,7 +36,7 @@ import type { GatewayStore } from './store';
 import type { GatewaySessions, Session } from './sessions';
 import { refusalBody, splitRev, type GatewaySettingsFile, type Refusal } from './settings';
 import { bodyRev, exists, notFound, queryRev, revRequired, stale } from './versions';
-import type { ClientSeen, ConnRec, DialResponse, GatewayRequest, GatewayResponse, UserList } from './types';
+import type { ClientSeen, ConnRec, DialResponse, GatewayRequest, GatewayResponse, ManagedProfile, UserList } from './types';
 import type { QGlob } from '../../core/types';
 
 /** The control panel's gateway faults. */
@@ -84,7 +90,9 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
 
     const me: Handler = (_req, s) => {
         const p = store.profile(s.user, settings.current().modules);
-        return p ? ok(p) : error(401, 'unauthenticated');
+        if (!p) return error(401, 'unauthenticated');
+        const body: ManagedProfile = { ...p, twoFactor: { mode: settings.current().login.twoFactor, enrolled: store.totpOf(s.user) !== undefined } };
+        return ok(body);
     };
 
     const logout: Handler = (_req, _s, sid) => {
@@ -149,6 +157,14 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
         if (r === 'stale') return stale(store.userRev(name)!);
         sessions.dropUser(name);
         return noContent;
+    };
+
+    /** An administrator's reset of a user's two-factor: 200 with the user's rev; 404 for an unknown user. */
+    const resetTotp: Handler = (_req, _s, _sid, [name]) => {
+        const r = store.clearTotp(name);
+        if (!r) return notFound;
+        if (r.removed) sessions.dropUser(name);
+        return ok({ rev: r.rev });
     };
 
     const listConnections: Handler = () => ok({ connections: store.listConnections() });
@@ -217,6 +233,7 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
         ['GET', '/managed/users', adminOnly(listUsers)],
         ['PUT', '/managed/users/{}', adminOnly(saveUser)],
         ['DELETE', '/managed/users/{}', adminOnly(deleteUser)],
+        ['DELETE', '/managed/users/{}/totp', adminOnly(resetTotp)],
         ['GET', '/managed/connections', adminOnly(listConnections)],
         ['PUT', '/managed/connections/{}', adminOnly(saveConnection)],
         ['DELETE', '/managed/connections/{}', adminOnly(deleteConnection)],

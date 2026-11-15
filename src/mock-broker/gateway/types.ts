@@ -8,16 +8,30 @@
  * Mock-only.
  */
 import type { QGlob } from '../../core/types';
+import type { ManagedProfile as ServiceProfile } from '../../core/services/managed-service';
 import type { ManagedUser } from '../../modules/user-management/service';
-import type { GatewaySettings } from '../../modules/gateway-settings/service';
+import type { GatewaySettings as ServiceSettings } from '../../modules/gateway-settings/service';
+import type { TwoFactorMode } from './authenticator';
 
-export type { DialResponse, ManagedProfile } from '../../core/services/managed-service';
+export type { DialResponse } from '../../core/services/managed-service';
 export type { UserList } from '../../modules/user-management/service';
 export type { ManagedConnRecord } from '../../modules/connection-management/service';
-export type { GatewaySettings, SettingsView } from '../../modules/gateway-settings/service';
+export type { SettingsView } from '../../modules/gateway-settings/service';
 
-/** A user as `GET /managed/users` lists one (the gateway adds the flag and the record's rev). */
-export type ListedUser = ManagedUser & { mustChangePassword: boolean; rev: number };
+/** What `GET /managed/me` carries beside the profile: the setting and whether this user has two-factor. */
+export interface TwoFactorState { mode: TwoFactorMode; enrolled: boolean }
+
+/** `GET /managed/me`, with the gateway's two-factor state spelled out. */
+export type ManagedProfile = ServiceProfile & { twoFactor: TwoFactorState };
+
+/** The settings file with `login.twoFactor` (the fake validates it, so it is the narrow type). */
+export type GatewaySettings = Omit<ServiceSettings, 'login'> & { login: ServiceSettings['login'] & { twoFactor: TwoFactorMode } };
+
+/** A user as `GET /managed/users` lists one (the gateway adds the flag, the two-factor state and the record's rev). */
+export type ListedUser = ManagedUser & { mustChangePassword: boolean; twoFactor: boolean; rev: number };
+
+/** A user's two-factor record (store.go `userTOTP`): the base32 secret and the SHA-256 hex of each unused recovery code. */
+export interface UserTotp { secret: string; recovery: string[] }
 
 /** A users-file record (store.go `userRec`), the password in plain text: it is fake. */
 export interface UserRec {
@@ -29,6 +43,8 @@ export interface UserRec {
     readOnly: QGlob[];
     /** null: the deployment default. */
     modules: string[] | null;
+    /** Absent: no two-factor. */
+    totp?: UserTotp;
 }
 
 export interface VpnRec { name: string; username: string; password: string }
