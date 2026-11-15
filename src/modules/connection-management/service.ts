@@ -6,6 +6,10 @@
  * Broker passwords travel as typed, over TLS; the gateway keeps them in its
  * encrypted connections file. The list response omits them, so editing a
  * connection with blank password fields keeps the stored ones.
+ *
+ * Every listed connection carries its `rev`: a save sends the rev of the record
+ * the form opened (0 creates) and gets the new rev back; a delete sends it as
+ * `?rev=N`. The gateway refuses a rev that is no longer current (`stale`).
  */
 import { managedRequest, type ManagedResult } from '../../core/services/managed-api';
 
@@ -17,6 +21,8 @@ export interface ManagedConnVpn {
 
 /** A blank or missing scheme is TLS: https for SEMP, wss for SMF. */
 export interface ManagedConnRecord {
+    /** The record's version, as listed; a save sends it back (0 = a new connection). */
+    rev: number;
     broker: string;
     hostname: string;
     semp: { scheme?: 'https' | 'http'; port: string; user: string; pass: string };
@@ -25,9 +31,10 @@ export interface ManagedConnRecord {
 
 export interface ConnMgmtService {
     listConnections(): Promise<ManagedResult<ManagedConnRecord[]>>;
-    /** PUT /managed/connections/{broker}: create, or edit an existing broker. */
-    saveConnection(connection: ManagedConnRecord): Promise<ManagedResult<void>>;
-    deleteConnection(broker: string): Promise<ManagedResult<void>>;
+    /** PUT /managed/connections/{broker}: create (rev 0), or edit an existing broker. Answers the new rev. */
+    saveConnection(connection: ManagedConnRecord): Promise<ManagedResult<{ rev: number }>>;
+    /** DELETE /managed/connections/{broker}?rev=N. */
+    deleteConnection(broker: string, rev: number): Promise<ManagedResult<void>>;
 }
 
 const connPath = (broker: string) => `/managed/connections/${encodeURIComponent(broker)}`;
@@ -38,7 +45,7 @@ export function createConnMgmtService(): ConnMgmtService {
             const res = await managedRequest<{ connections: ManagedConnRecord[] }>('GET', '/managed/connections');
             return res.ok ? { ok: true, data: res.data.connections } : res;
         },
-        saveConnection: ({ broker, ...body }) => managedRequest('PUT', connPath(broker), body),
-        deleteConnection: (broker) => managedRequest('DELETE', connPath(broker)),
+        saveConnection: ({ broker, ...body }) => managedRequest<{ rev: number }>('PUT', connPath(broker), body),
+        deleteConnection: (broker, rev) => managedRequest('DELETE', `${connPath(broker)}?rev=${rev}`),
     };
 }

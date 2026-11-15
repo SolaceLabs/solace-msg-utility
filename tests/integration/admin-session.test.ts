@@ -52,8 +52,8 @@ import { completeContext } from '../helpers/appContext';
 import { answerConfirm } from '../helpers/confirmDialog';
 
 const USERS = [
-    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null },
-    { username: 'viewer', admin: false, operate: [], readOnly: [], modules: null },
+    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null, rev: 1 },
+    { username: 'viewer', admin: false, operate: [], readOnly: [], modules: null, rev: 1 },
 ];
 const CHOICES = { catalog: ['queue-browser', 'queue-copy'], offered: ['queue-browser', 'queue-copy'], userDefault: 'all' };
 
@@ -145,7 +145,7 @@ describe('integration — admin app session lifecycle', () => {
 
     it('changing your own password signs the admin app out instead of leaving a list that cannot load', async () => {
         const app = await openAdminApp();
-        umSvc.saveUser.mockResolvedValue({ ok: true });
+        umSvc.saveUser.mockResolvedValue({ ok: true, data: { rev: 2 } });
 
         rowButton(app.users, 0, '.user-mgmt-edit').click();
         q<HTMLInputElement>(app.users, '#user-mgmt-password').value = 'new-password-1';
@@ -158,7 +158,7 @@ describe('integration — admin app session lifecycle', () => {
 
     it('clearing your own Administrator flag signs the admin app out', async () => {
         const app = await openAdminApp();
-        umSvc.saveUser.mockResolvedValue({ ok: true });
+        umSvc.saveUser.mockResolvedValue({ ok: true, data: { rev: 2 } });
 
         rowButton(app.users, 0, '.user-mgmt-edit').click();
         q<HTMLInputElement>(app.users, '#user-mgmt-admin').checked = false;
@@ -190,7 +190,7 @@ describe('integration — admin app session lifecycle', () => {
 
     it('editing your own entitlements keeps the admin app signed in', async () => {
         const app = await openAdminApp();
-        umSvc.saveUser.mockResolvedValue({ ok: true });
+        umSvc.saveUser.mockResolvedValue({ ok: true, data: { rev: 2 } });
 
         rowButton(app.users, 0, '.user-mgmt-edit').click();
         q<HTMLButtonElement>(app.users, '#btn-user-mgmt-save').click();

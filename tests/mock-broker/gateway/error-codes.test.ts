@@ -29,25 +29,31 @@ const call = (gw: Gw, method: string, p: string, body?: unknown) => gw.handle({
 });
 const relayed = (gw: Gw) => call(gw, 'GET', '/managed/relay/b1/SEMP/v2/monitor/msgVpns');
 const savedSettings = async (gw: Gw) => {
-    const view = await call(gw, 'GET', '/managed/settings');
-    return call(gw, 'PUT', '/managed/settings', (view.json as { settings: unknown }).settings);
+    const view = (await call(gw, 'GET', '/managed/settings')).json as { settings: object; rev: string };
+    return call(gw, 'PUT', '/managed/settings', { ...view.settings, rev: view.rev });
 };
+const USER = { password: '', admin: false, operate: [], readOnly: [], modules: null };
 
 /**
  * Codes the fake sends in a state the contract cannot pin: once a
  * control-panel fault is armed, or (backup_unavailable) for a second backup
  * in the same second, which a fixed clock makes certain. Each row sets the
- * state and asks. The relay's upstream_* codes are pinned by the contract
+ * state and asks. The version refusals (stale, exists, rev_required) need no
+ * fault, only a save that names the wrong rev; a row keeps each placed once
+ * whether or not the contract pins it. The relay's upstream_* codes are pinned by the contract
  * too (the broker's own odd answers); the switches here stand for a broker
  * the gateway cannot reach or that refuses its credential.
  */
 const FAULTS: Record<string, { status: number; ask: (gw: Gw) => ReturnType<Gw['handle']> }> = {
     backup_unavailable: { status: 409, ask: async () => {
         const gw = createGateway({ seed: contractSeed(), backupIter: 1000, now: () => new Date(Date.UTC(2026, 10, 9, 2)) });
-        await call(gw, 'PUT', '/managed/backup/schedule', { kind: 'daily', hour: 2, keep: 7, passphrase: 'a long passphrase' });
+        await call(gw, 'PUT', '/managed/backup/schedule', { kind: 'daily', hour: 2, keep: 7, passphrase: 'a long passphrase', rev: 0 });
         await call(gw, 'POST', '/managed/backup/run');
         return call(gw, 'POST', '/managed/backup/run');
     } },
+    stale: { status: 409, ask: gw => call(gw, 'PUT', '/managed/users/viewer', { ...USER, rev: 99 }) },
+    exists: { status: 409, ask: gw => call(gw, 'PUT', '/managed/users/viewer', { ...USER, rev: 0 }) },
+    rev_required: { status: 400, ask: gw => call(gw, 'PUT', '/managed/users/viewer', USER) },
     rate_limited: { status: 429, ask: gw => { gw.faults.dialRateLimited = true; return call(gw, 'POST', '/managed/dial', { broker: 'b1', vpn: 'v1' }); } },
     upstream_unavailable: { status: 502, ask: gw => { gw.faults.relayUnreachable = true; return relayed(gw); } },
     upstream_auth: { status: 502, ask: gw => { scenario.fault = FAULT.SEMP_UNAUTHORIZED; return relayed(gw); } },
@@ -61,9 +67,11 @@ const CLIENT = ['network', 'bad_response'];
 /**
  * Sent by the real gateway, never by the demo's: a cross-site request and an
  * oversized body cannot come from the page itself, and the fake has no
- * failure of its own to report as a server error.
+ * failure of its own to report as a server error. It has no files either, so
+ * a store changed on disk, a store write that failed and an audit log that
+ * cannot be written (audit.onFailure refuse) cannot happen in it.
  */
-const NOT_SIMULATED = ['cross_origin', 'too_large', 'server_error'];
+const NOT_SIMULATED = ['cross_origin', 'too_large', 'server_error', 'store_changed_on_disk', 'store_write_failed', 'audit_unavailable'];
 
 beforeEach(() => {
     resetScenario();

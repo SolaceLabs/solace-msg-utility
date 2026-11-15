@@ -33,6 +33,14 @@ describe('mock-broker/gateway/seed', () => {
         for (const a of DEMO_ACCOUNTS) expect(gw.signIn(a.username, a.password).ok).toBe(true);
     });
 
+    it('starts every user and connection at a valid rev, and the audit failure policy at continue', () => {
+        const { users, connections } = gw.store.seqs();
+        for (const u of gw.store.listUsers()) expect({ user: u.username, ok: u.rev >= 1 && u.rev <= users }).toEqual({ user: u.username, ok: true });
+        for (const c of gw.store.listConnections()) expect({ broker: c.broker, ok: c.rev >= 1 && c.rev <= connections }).toEqual({ broker: c.broker, ok: true });
+        expect(seed.settings.audit.onFailure).toBe('continue');
+        expect(gw.settings.rev()).not.toBe('');
+    });
+
     it('shows the roles apart', () => {
         const brokers = (user: string) => me(user)!.brokers.map(b => `${b.broker}:${b.msgVpns.map(v => v.name).join(',')}`);
 

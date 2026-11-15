@@ -76,7 +76,7 @@
       "unauthenticatedPerMinute": 1000
     },
     "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
-    "audit": { "stdout": false, "access": false }
+    "audit": { "stdout": false, "access": false, "onFailure": "continue" }
   },
   "client": "192.0.2.10"
 }

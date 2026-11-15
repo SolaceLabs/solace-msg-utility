@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -72,21 +73,57 @@ const (
 // JSON keys. record sets Time (RFC 3339, UTC). Actor is the username, "" for an
 // unauthenticated attempt; Client the address withClient resolved; Target the
 // user, connection or broker acted on; Code the code the API answered on a
-// refusal or error; Changed the names of the parts changed, never values.
+// refusal or error; Changed the names of the parts changed, never values;
+// Wrote the store files a committed change wrote (auditWrote).
 type auditEntry struct {
-	Time    string   `json:"time"`
-	Actor   string   `json:"actor"`
-	Client  string   `json:"client"`
-	Action  string   `json:"action"`
-	Target  string   `json:"target,omitempty"`
-	Outcome string   `json:"outcome"`
-	Code    string   `json:"code,omitempty"`
-	Changed []string `json:"changed,omitempty"`
-	Msg     string   `json:"msg"`
+	Time    string       `json:"time"`
+	Actor   string       `json:"actor"`
+	Client  string       `json:"client"`
+	Action  string       `json:"action"`
+	Target  string       `json:"target,omitempty"`
+	Outcome string       `json:"outcome"`
+	Code    string       `json:"code,omitempty"`
+	Changed []string     `json:"changed,omitempty"`
+	Wrote   []auditWrote `json:"wrote,omitempty"`
+	Msg     string       `json:"msg"`
 }
 
-// auditSettings are the live audit.* keys.
-type auditSettings struct{ stdout, access bool }
+// auditWrote names a store file a committed change wrote: the base name and,
+// for the sealed stores and the schedule, the seq the commit gave the file.
+// config.yaml has no seq (its rev is a checksum), so it is left out. Only an
+// ok entry that wrote a file carries the list.
+type auditWrote struct {
+	File string `json:"file"`
+	Seq  int64  `json:"seq,omitempty"`
+}
+
+// audit.onFailure values: what the gateway does once an audit record could
+// not be written. continue (the default) logs the lost record loudly and goes
+// on; refuse also refuses every change (503 audit_unavailable) until a record
+// can be written again. Sign-ins and reads are never refused.
+const (
+	auditOnFailureContinue = "continue"
+	auditOnFailureRefuse   = "refuse"
+)
+
+// auditSettings are the live audit.* keys. onFailure is auditOnFailureContinue
+// or auditOnFailureRefuse; the zero value counts as continue.
+type auditSettings struct {
+	stdout, access bool
+	onFailure      string
+}
+
+// checkAuditOnFailure validates an audit.onFailure value as the file holds
+// it; the empty value (a file or backup from before the key) is the default.
+func checkAuditOnFailure(v string) (string, error) {
+	switch v {
+	case "", auditOnFailureContinue:
+		return auditOnFailureContinue, nil
+	case auditOnFailureRefuse:
+		return v, nil
+	}
+	return "", fmt.Errorf("key %q has invalid value %q: must be %q or %q", "audit.onFailure", v, auditOnFailureContinue, auditOnFailureRefuse)
+}
 
 // Rotation: a write that would take the file past auditMaxBytes renames it to
 // .1, shifting .1 to .2 and so on up to .auditKeepFiles; the oldest beyond
@@ -112,6 +149,9 @@ type auditor struct {
 	mu   sync.Mutex // one whole line at a time, and the rotation
 	f    *os.File   // nil between a failed rotation and the next open
 	size int64      // bytes in f
+	// failing is true while the last write lost its record. Any write that
+	// succeeds clears it. gate reads it for audit.onFailure refuse.
+	failing atomic.Bool
 }
 
 // openAuditor opens (creating, 0600) the audit log at path. A failure is
@@ -152,9 +192,11 @@ func auditFor(r *http.Request, action string) auditEntry {
 }
 
 // record appends e. It sets the time, drops an access entry while audit.access
-// is off and copies the line to stdout while audit.stdout is on. A failed
-// write is logged at ERROR, without the entry, and never fails the caller's
-// request.
+// is off and copies the line to stdout while audit.stdout is on. A record that
+// could not be written is logged at ERROR as "AUDIT RECORD LOST" with every
+// field of the entry (an entry never holds a secret), so the loss is in the
+// application log and the stdout copy; it never fails the caller's request.
+// What happens to later changes is audit.onFailure's (gate).
 func (a *auditor) record(cat auditCategory, e auditEntry) {
 	if a == nil {
 		return
@@ -168,30 +210,52 @@ func (a *auditor) record(cat auditCategory, e auditEntry) {
 	line = append(line, '\n')
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err := a.write(line); err != nil {
-		a.logger.Error("audit log write failed, so the trail may be missing entries (the request was not affected)", "path", a.path, "err", err)
+	rotateErr, writeErr := a.write(line)
+	a.failing.Store(writeErr != nil)
+	if rotateErr != nil {
+		a.logger.Error("audit log rotation failed; the entry was written to the current file, which keeps growing until the cause is fixed", "path", a.path, "err", rotateErr)
+	}
+	if writeErr != nil {
+		a.logger.Error("AUDIT RECORD LOST", "path", a.path, "err", writeErr,
+			"entry_time", e.Time, "actor", e.Actor, "client", e.Client, "action", e.Action, "target", e.Target,
+			"outcome", e.Outcome, "code", e.Code, "changed", e.Changed, "wrote", e.Wrote, "entry_msg", e.Msg)
 	}
 	if set.stdout {
 		_, _ = a.stdout.Write(line)
 	}
 }
 
+// gate is the writer's gate (writer.gate) for audit.onFailure: while the value
+// is refuse and the last audit write lost its record, it returns
+// errAuditUnavailable and the writer refuses the change with 503. The refusal
+// is itself audited by the handler that got it (outcome refused, code
+// audit_unavailable); that write succeeding clears the failing state, so the
+// next change goes through once the log is writable again. Sign-ins and reads
+// never call it. Nil-safe: Gateway mode has no auditor.
+func (a *auditor) gate() error {
+	if a == nil || a.lv.get().audit.onFailure != auditOnFailureRefuse || !a.failing.Load() {
+		return nil
+	}
+	return errAuditUnavailable
+}
+
 // write appends line, rotating first when it would take the file past
-// maxSize. A rotation that fails is reported with the write's result, and the
-// line goes to the file as it is rather than being lost. a.mu must be held.
-func (a *auditor) write(line []byte) error {
-	var rotateErr error
+// maxSize. It returns the rotation's error and the write's own, separately: a
+// rotation that fails still lets the line go to the file as it is (rotateErr
+// set, writeErr nil), and only writeErr means the record was lost. a.mu must
+// be held.
+func (a *auditor) write(line []byte) (rotateErr, writeErr error) {
 	if a.size > 0 && a.size+int64(len(line)) > a.maxSize {
 		rotateErr = a.rotate()
 	}
 	if a.f == nil {
 		if err := a.open(); err != nil {
-			return errors.Join(rotateErr, err)
+			return rotateErr, err
 		}
 	}
 	n, err := a.f.Write(line)
 	a.size += int64(n)
-	return errors.Join(rotateErr, err)
+	return rotateErr, err
 }
 
 // slot is the name of the i-th file: the log itself for 0, else the log with

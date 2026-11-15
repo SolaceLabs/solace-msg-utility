@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -62,14 +61,11 @@ func newRelayEnv(t *testing.T, answer http.HandlerFunc) (*managedEnv, *fakeBroke
 	t.Cleanup(fb.srv.Close)
 	e := newManagedEnvWith(t, nil, fb.srv.Client().Transport)
 	host, port, _ := net.SplitHostPort(fb.srv.Listener.Addr().String())
-	err := e.api.store.upsertConnection(connRec{
+	putConn(t, e.api.store, connRec{
 		Broker: "b1", Hostname: host,
 		Semp:   sempRec{Port: flexStr(port), Username: "mon", Password: "semp-pw"},
 		Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v1", Username: "u1", Password: "vpn-pw"}}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	return e, fb
 }
 
@@ -315,15 +311,11 @@ func TestRelay_EntitlementIsTheBrokers(t *testing.T) {
 	expect(t, e.do("GET", "/managed/relay/b1/SEMP/v2/monitor/about", "", c), http.StatusOK, "")
 
 	// An edit applies to the next call: no entitlement, no relay.
-	if _, err := e.api.store.upsertUser(context.Background(), userRec{Username: "viewer", Operate: []permRow{}, ReadOnly: []permRow{}}, ""); err != nil {
-		t.Fatal(err)
-	}
+	putUser(t, e.api.store, userRec{Username: "viewer", Operate: []permRow{}, ReadOnly: []permRow{}}, "")
 	expect(t, e.do("GET", "/managed/relay/b1/SEMP/v2/monitor/about", "", c), http.StatusNotFound, "not_found")
 
 	// A broker without SEMP has nothing to relay to.
-	if err := e.api.store.upsertConnection(connRec{Broker: "b1", Hostname: "h", Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}}}); err != nil {
-		t.Fatal(err)
-	}
+	putConn(t, e.api.store, connRec{Broker: "b1", Hostname: "h", Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}}})
 	expect(t, e.do("GET", "/managed/relay/b1/SEMP/v2/monitor/about", "", e.cookie("admin", false)), http.StatusNotFound, "not_found")
 	if fb.hits() != 1 {
 		t.Errorf("only the entitled call may reach the broker, got %d calls", fb.hits())
@@ -363,13 +355,11 @@ func TestRelay_UsesTheConnectionsScheme(t *testing.T) {
 	for scheme, want := range map[string]string{"": "https://host1:8080/SEMP/v2/monitor/msgVpns", sempPlain: "http://host1:8080/SEMP/v2/monitor/msgVpns"} {
 		up := &urlRecorder{}
 		e := newManagedEnvWith(t, nil, up)
-		if err := e.api.store.upsertConnection(connRec{
+		putConn(t, e.api.store, connRec{
 			Broker: "b1", Hostname: "host1",
 			Semp:   sempRec{Scheme: scheme, Port: "8080", Username: "mon"},
 			Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}},
-		}); err != nil {
-			t.Fatal(err)
-		}
+		})
 		expect(t, e.do("GET", "/managed/relay/b1/SEMP/v2/monitor/msgVpns", "", e.cookie("viewer", false)), http.StatusBadGateway, "upstream_unavailable")
 		if got := up.last(t); got != want {
 			t.Errorf("scheme %q: the relay asked for %s, want %s", scheme, got, want)

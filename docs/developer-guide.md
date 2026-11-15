@@ -27,6 +27,7 @@
   - [Error Handling](#error-handling)
   - [Logging standard](#logging-standard)
   - [Auditing an action](#auditing-an-action)
+  - [Writing to the store](#writing-to-the-store)
   - [TypeScript](#typescript)
 
 ---
@@ -560,6 +561,64 @@ The gateway's audit trail (design: [architecture.md -> The audit trail](architec
 - **Naming.** `noun.verb` in lower case (`user.update`, `schedule.remove`); a single word for an event with no noun (`signin`, `dial`). Categories: `auditAdmin` and `auditAuth` are always written, `auditAccess` only while `audit.access` is on, so use it for high-volume broker traffic. `msg` is a plain sentence naming actor, verb and target.
 - **Names, never values.** `changed` lists parts (`password`, `grants`, `vpn prod`, a settings key such as `modules.userDefault`), never what they were set to. An entry never holds a password or hash, store or backup key, passphrase, session cookie or token, a VPN or SEMP credential, a settings value or backup content. A target that came from the requester (a path segment, a file name, a username) is cut to 64 bytes (`userKey`) so it cannot flood the line.
 - **Tests.** A test that looks at the trail sets `e.api.audit` (`env.setAudit` in [managed_test.go](../go-web-proxy/managed_test.go) opens an auditor over a temp file with a fixed clock and the `auditLog` helper reads it back). Cover the entry for the new event, its refusal, and keep `TestManagedAPI_AuditNeverHoldsASecret` (`managed_test.go`, the secret sweep) passing: it submits known secrets through every audited route and fails if any appears in the file.
+
+### Writing to the store
+
+The gateway's store files (`users.yaml`, `connections.yaml`, `backup.yaml`, `config.yaml`) have one writer. Design: [architecture.md -> The single writer](architecture.md#the-single-writer); operator view: [provisioned-mode.md -> Stored files and recovery](provisioned-mode.md#stored-files-and-recovery).
+
+**The rules for every write path**, today's and any future file or data store:
+
+- Every write to a store file goes through `writer.Do(ctx, op)` ([writer.go](../go-web-proxy/writer.go)). No other code writes these files. The two exceptions run before a writer exists and use the same journal: the bootstrap admin on a fresh volume and the one-time seed of `config.yaml`. Saved backup files, the TLS files and the store key are outside the writer by design.
+- One lock covers all store files. Do not add a second lock or a second writer for a new file; stage it in the same `Do`.
+- The read path never takes the writer lock. Readers use memory, which is replaced only at publish, in one critical section. Code that must read several things as one state (a backup) does it inside `writer.snapshot`; that lock is not re-entrant, so do not call `Do` or another snapshot inside it.
+- Plan on copies. The `op` returns an error before it stages anything, and live memory changes only in a function you hand to `tx.onPublish`.
+- Slow and input-only work (hashing, key derivation, decoding) is done before `Do`, never while holding the lock.
+- A new file lives in the data directory (the journal covers one directory), gets a `seq` and is remembered in `checksums` at load (`rememberDisk`), so the disk check covers it.
+
+**Shape of a write.** Decode the body, do every check that needs no store state (`invalid`, `rev_required`), then:
+
+```go
+err := h.store.wr.Do(r.Context(), func(tx *txn) error {
+    // re-check the caller against the current snapshot (401 or 403)
+    if err := tx.check(path); err != nil { // store_changed_on_disk
+        return err
+    }
+    // existence: errExists, errNotFound; rev: newStale(cur.Rev)
+    // validate on a copy (last_admin, would_lock_out, ...), stamp seq and rev
+    seal.stageDoc(tx, role, path, doc) // a document that does not encode fails the transaction
+    tx.onPublish(func() { /* swap memory */ })
+    tx.afterCommit(func() { /* audit line, sockets, sessions */ })
+    return nil
+})
+if code, ok := writeStoreError(w, err); ok { /* audit the refusal with code; return */ }
+```
+
+In practice call the store's methods (`saveUser`, `deleteConnection`, `setSchedule`, `stageImport`) rather than writing a `Do` in a handler. A test double of the writer is not needed: `newManagedEnv` and the helpers in [store_test.go](../go-web-proxy/store_test.go) (`putUser`, `putConn`, `currentUser`) and [managed_test.go](../go-web-proxy/managed_test.go) (`holdWriter`, `raced`, `withRev`) run the real one over a temp directory.
+
+**The two kinds of write.**
+
+- A **whole-record save** (a `PUT` or `DELETE` of a user, connection, the settings or the schedule, and an import) carries the rev the administrator read. `PUT` carries it in the JSON body, `DELETE` as `?rev=N`, an import as `basis`; rev 0 on a `PUT` creates. A missing or malformed rev is `400 rev_required`: there is no way to save without one.
+- A **field-scoped change** carries no rev. Inside the lock it sets only its own fields on the current record and keeps the rest. The one today is a user's own password (`setPassword`): check the old password and hash the new one before the lock, then inside the lock confirm the stored hash is still the one you checked. Add another only for a field no administrator form sends back, and say so in a comment.
+
+**The rev rule.** `seq` of a file moves by one on every commit. A record's `rev` becomes the new seq only when the record changes as the admin console sees it (what `userToOutput` or `connToOutput` returns, compared by `sameUserView` and `sameConnView`), otherwise it stays; a create and an import always stamp it. So a password-only change moves seq and not rev. If you add a field to a record, decide whether the console shows it: if it does, add it to the view, to the `same...View` function and to the parity test (`TestStore_SameViewAgreesWithTheOutput`), or a change to it will not move the rev. The settings rev is the file's keyed checksum and the schedule's is `backup.yaml`'s seq, so neither needs this.
+
+**Error codes, and how a handler maps them.** A transaction returns typed errors; the handler hands them to `writeStoreError`, which answers the ones below and returns the audit code, and keeps its own mapping (`storeFailed`, `backupFailed`) for the rest.
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 400 | `rev_required` | no rev, a rev that is not a whole number, a `DELETE` without `?rev=` or with 0, an import without `basis` |
+| 404 | `not_found` | rev above 0 and the record is gone |
+| 409 | `exists` | rev 0 and the name exists (a schedule is already set) |
+| 409 | `stale` | the rev is not the current one; the body carries the current `rev` (or `basis` for an import) |
+| 409 | `store_changed_on_disk`, `config_changed_on_disk` | a store file or `config.yaml` changed outside the gateway; sticky until restart |
+| 500 | `store_write_failed` | the write failed and was rolled back; nothing changed. Replaces `server_error` for store writes, in the answer and in the audit entry |
+| 503 | `audit_unavailable` | `audit.onFailure` is `refuse` and the audit log cannot be written |
+
+`last_admin`, `would_lock_out`, `invalid`, `forbidden` and `unauthenticated` keep their meaning. A new error that a transaction can return gets a type in `writer.go` and one case in `classifyStoreError`, so every handler answers it alike; do not map it in one handler only. Order of checks: input without store state, the lock, the audit gate, the caller, the disk, existence, the rev, cross-record rules, the commit. The fake gateway ([src/mock-broker/gateway/](../src/mock-broker/gateway)) must keep the same order and the same codes, and the contract cases ([go-web-proxy/testdata/contract/](../go-web-proxy/testdata/contract)) hold both to it.
+
+**The browser side.** A module keeps the `rev` from its load and sends it on save and delete (0 on Add). A `409 stale` or `404 not_found` goes to `handleConflict` in [src/core/admin-conflict.ts](../src/core/admin-conflict.ts), which shows "changed by someone else" with a Reload button, or says the record was deleted by someone else, and reloads. A stale import clears the preview and asks for a new one. Add a module's own message only for a case that function does not cover (the schedule's `exists`).
+
+**Tests.** Every refusal above, on every endpoint it applies to, with the files, seq and memory unchanged afterwards; a race test (the `test` task runs with `-race` where gcc is available) for a new write path: two saves of one record, a delete against a save, an import against a save; and a crash test through the journal's hooks for anything that changes the commit steps. Test cross-references use the file and test name, as elsewhere.
 
 ### TypeScript
 

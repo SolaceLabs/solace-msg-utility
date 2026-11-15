@@ -87,7 +87,7 @@ type config struct {
 	login   loginLimits
 	modules moduleSettings
 	// The audit stream's options (audit.go): audit.stdout is seeded by
-	// SMU_SHOW_AUDIT, audit.access has no env var. Live.
+	// SMU_SHOW_AUDIT, audit.access and audit.onFailure have no env var. Live.
 	audit auditSettings
 }
 
@@ -164,6 +164,7 @@ func defaultConfig() config {
 			unauthPerMinute: 60,
 		},
 		modules: moduleSettings{offered: moduleCatalog(), userDefault: modulesDefaultAll},
+		audit:   auditSettings{onFailure: auditOnFailureContinue},
 	}
 }
 
@@ -204,7 +205,7 @@ func loadConfig() (config, error) {
 		login:              d.login,
 		modules:            d.modules,
 		auditFile:          d.auditFile,
-		audit:              auditSettings{stdout: showAudit},
+		audit:              auditSettings{stdout: showAudit, onFailure: d.audit.onFailure},
 	}, nil
 }
 
@@ -378,9 +379,24 @@ func serve(p process) error {
 	// exist yet. A bootstrap logger at the default level carries the one error
 	// that can happen before it.
 	configFile := p.configFile
+	boot := slog.New(slog.NewTextHandler(p.log, nil))
+
+	// Before anything reads config.yaml: a store write the last process left
+	// half done is rolled back, or its leftovers are swept (fileutil.go). The
+	// data directory is the one config.yaml sits in, which is where the stores
+	// live too.
+	dataDir := p.dataDir
+	if dataDir == "" {
+		dataDir = filepath.Dir(configFile)
+	}
+	if err := recoverDataDir(dataDir, boot); err != nil {
+		boot.Error("data directory recovery failed", "err", err)
+		return err
+	}
+
 	load, err := resolveConfig(configFile)
 	if err != nil {
-		slog.New(slog.NewTextHandler(p.log, nil)).Error("configuration failed", "err", err)
+		boot.Error("configuration failed", "err", err)
 		return err
 	}
 	cfg := load.cfg.inDataDir(p.dataDir)
@@ -436,7 +452,7 @@ func serve(p process) error {
 	if auditOut == nil {
 		auditOut = io.Discard
 	}
-	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, sum: load.sum}, upstream, auditOut, logger)
+	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, data: load.data}, upstream, auditOut, logger)
 	if err != nil {
 		logger.Error("provisioned store load failed", "err", err)
 		return err

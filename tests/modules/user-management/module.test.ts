@@ -23,9 +23,12 @@ const ADMIN: ManagedSession = {
     admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
 };
 const USERS = [
-    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null },
-    { username: 'viewer', admin: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'v1', queues: '*' }], modules: ['queue-browser'] },
+    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null, rev: 3 },
+    { username: 'viewer', admin: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'v1', queues: '*' }], modules: ['queue-browser'], rev: 5 },
 ];
+/** The gateway's 200 answer to a save: the record's new rev. */
+const saved = (rev = 6) => ({ ok: true, data: { rev } });
+const failed = (status: number, code: string, extra: object = {}) => ({ ok: false, status, code, ...extra });
 /** The deployment offers only queue-browser of the two catalog modules. */
 const CHOICES = { catalog: ['queue-browser', 'queue-copy'], offered: ['queue-browser'], userDefault: 'all' };
 const listed = (users: unknown[], modules: unknown = CHOICES) => ({ ok: true, data: { users, modules } });
@@ -305,7 +308,7 @@ describe('user-management — create / edit form', () => {
 
     it('creates a user: sends the password as typed (the gateway hashes it)', async () => {
         const { container } = await setup();
-        svcMock.saveUser.mockResolvedValue({ ok: true });
+        svcMock.saveUser.mockResolvedValue(saved());
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
         el<HTMLInputElement>(container, '#user-mgmt-username').value = 'newbie';
         el<HTMLInputElement>(container, '#user-mgmt-password').value = 'pw';
@@ -322,7 +325,7 @@ describe('user-management — create / edit form', () => {
         await vi.waitFor(() => expect(hidden(container, '#user-mgmt-list-view')).toBe(false));
         expect(svcMock.saveUser).toHaveBeenCalledWith({
             username: 'newbie', password: 'pw', admin: true,
-            operate: [{ brokers: '*', msgVpns: '*', queues: 'orders.*' }], readOnly: [], modules: null,
+            operate: [{ brokers: '*', msgVpns: '*', queues: 'orders.*' }], readOnly: [], modules: null, rev: 0,
         });
         expect(toastMock.showToast).toHaveBeenCalledWith('User saved', 'ok');
     });
@@ -357,7 +360,7 @@ describe('user-management — create / edit form', () => {
 
     it('editing keeps the password blank in the payload', async () => {
         const { container } = await setup();
-        svcMock.saveUser.mockResolvedValue({ ok: true });
+        svcMock.saveUser.mockResolvedValue(saved());
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
             .querySelector<HTMLButtonElement>('.user-mgmt-edit')!.click();
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
@@ -452,7 +455,7 @@ describe('user-management — modules', () => {
 
     it("leaving the default starts from what it grants; the save sends the user's own list", async () => {
         const { container } = await setup();
-        svcMock.saveUser.mockResolvedValue({ ok: true });
+        svcMock.saveUser.mockResolvedValue(saved());
         clickRow(container, 0, '.user-mgmt-edit'); // admin: default
         toggleDefault(container, false);
         expect(boxes(container).map(b => [b.checked, b.disabled])).toEqual([[true, false], [false, false]]);
@@ -465,7 +468,7 @@ describe('user-management — modules', () => {
 
     it('returning to the default shows it again and sends null', async () => {
         const { container } = await setup();
-        svcMock.saveUser.mockResolvedValue({ ok: true });
+        svcMock.saveUser.mockResolvedValue(saved());
         clickRow(container, 1, '.user-mgmt-edit'); // viewer
         boxes(container)[1].checked = true;
         toggleDefault(container, true);
@@ -495,7 +498,7 @@ describe('user-management — delete', () => {
             .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
         expect(await answerConfirm(true)).toBe('Delete user "viewer"?');
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('User deleted', 'ok'));
-        expect(svcMock.deleteUser).toHaveBeenCalledWith('viewer');
+        expect(svcMock.deleteUser).toHaveBeenCalledWith('viewer', 5);
     });
 
     it('does nothing when the delete is cancelled', async () => {
@@ -508,11 +511,12 @@ describe('user-management — delete', () => {
 
     it("toasts the gateway's reason when the delete is rejected", async () => {
         const { container } = await setup();
-        svcMock.deleteUser.mockResolvedValue({ ok: false, status: 404, code: 'not_found' });
+        svcMock.deleteUser.mockResolvedValue(failed(500, 'store_write_failed'));
         el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
             .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
         await answerConfirm(true);
-        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Not found. It may already have been removed.', 'error'));
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(
+            'The gateway could not write its data files, so nothing was changed. Its log has the cause.', 'error'));
     });
 
     it('delete is a no-op if the managed session vanished', async () => {
@@ -532,7 +536,7 @@ describe('user-management — your own session', () => {
     it('changing your own password asks the session owner to sign out, with a sign-in-again message', async () => {
         const { container, ctx } = await setup();
         const signOut = answerSignOut(ctx);
-        svcMock.saveUser.mockResolvedValue({ ok: true });
+        svcMock.saveUser.mockResolvedValue(saved());
         svcMock.listUsers.mockClear();
         clickRow(container, 0, '.user-mgmt-edit'); // admin = own record
         el<HTMLInputElement>(container, '#user-mgmt-password').value = 'new-pw';
@@ -552,7 +556,7 @@ describe('user-management — your own session', () => {
     it('clearing your own Administrator flag signs you out too', async () => {
         const { container, ctx } = await setup();
         const signOut = answerSignOut(ctx);
-        svcMock.saveUser.mockResolvedValue({ ok: true });
+        svcMock.saveUser.mockResolvedValue(saved());
         clickRow(container, 0, '.user-mgmt-edit');
         el<HTMLInputElement>(container, '#user-mgmt-admin').checked = false;
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
@@ -566,7 +570,7 @@ describe('user-management — your own session', () => {
         const signOut = answerSignOut(ctx);
         const rbac = vi.fn();
         ctx.eventBus.on('rbac:changed', rbac);
-        svcMock.saveUser.mockResolvedValue({ ok: true });
+        svcMock.saveUser.mockResolvedValue(saved());
         svcMock.listUsers.mockClear();
         clickRow(container, 0, '.user-mgmt-edit');
         el(container, '#user-mgmt-operate-rows').querySelectorAll<HTMLInputElement>('input')[2].value = 'orders.*';
@@ -586,7 +590,7 @@ describe('user-management — your own session', () => {
     it("changing another user's password keeps you signed in", async () => {
         const { container, ctx } = await setup();
         const signOut = answerSignOut(ctx);
-        svcMock.saveUser.mockResolvedValue({ ok: true });
+        svcMock.saveUser.mockResolvedValue(saved());
         svcMock.listUsers.mockClear();
         clickRow(container, 1, '.user-mgmt-edit'); // viewer
         el<HTMLInputElement>(container, '#user-mgmt-password').value = 'pw2';
@@ -622,7 +626,7 @@ describe('user-management — your own session', () => {
         expect(await answerConfirm(true)).toBe('Delete your own account "admin"? You will be signed out.');
         await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
 
-        expect(svcMock.deleteUser).toHaveBeenCalledWith('admin');
+        expect(svcMock.deleteUser).toHaveBeenCalledWith('admin', 3);
         expect(toastMock.showToast).toHaveBeenCalledWith('Account deleted. You have been signed out.', 'ok', 5000);
         expect(svcMock.listUsers).not.toHaveBeenCalled();
         expect(hidden(container, '#user-mgmt-gate')).toBe(false);
@@ -638,5 +642,117 @@ describe('user-management — your own session', () => {
 
         expect(signOut).not.toHaveBeenCalled();
         expect(ctx.appState.managed).toBe(ADMIN);
+    });
+});
+
+// The rev each row came with goes back with a save or a delete; when someone
+// else moved the record first, the admin is told and the list is reloaded.
+describe('user-management -- versions', () => {
+    const editViewer = (c: HTMLElement) => clickRow(c, 1, '.user-mgmt-edit');
+    const save = (c: HTMLElement) => el<HTMLButtonElement>(c, '#btn-user-mgmt-save').click();
+
+    it('a save of an opened user sends the rev the list gave it, and a create sends 0', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(saved());
+        editViewer(container);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalledTimes(1));
+        expect(svcMock.saveUser.mock.calls[0][0]).toMatchObject({ username: 'viewer', rev: 5 });
+
+        await vi.waitFor(() => expect(hidden(container, '#user-mgmt-list-view')).toBe(false));
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-username').value = 'newbie';
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'long-enough-pw';
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalledTimes(2));
+        expect(svcMock.saveUser.mock.calls[1][0]).toMatchObject({ username: 'newbie', rev: 0 });
+    });
+
+    it('a refused save leaves the form open on the same rev: the retry sends it again', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValueOnce(failed(422, 'invalid', { reason: 'Modules must be known.' })).mockResolvedValue(saved());
+        editViewer(container);
+        save(container);
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toBe('Modules must be known.'));
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalledTimes(2));
+        expect(svcMock.saveUser.mock.calls.map(c => c[0].rev)).toEqual([5, 5]);
+    });
+
+    it('stale save: the dialog says so; Reload reloads the list (new revs) and closes the form', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(failed(409, 'stale', { rev: 9 }));
+        // Someone made viewer an admin: the reloaded row says Admin, with rev 9.
+        svcMock.listUsers.mockResolvedValue(listed([USERS[0], { ...USERS[1], admin: true, rev: 9 }]));
+        editViewer(container);
+        save(container);
+        expect(await answerConfirm(true)).toBe('This user was changed by someone else since you opened it.');
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').querySelectorAll('tr')[1].textContent).toContain('Admin'));
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(true);
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+        expect(toastMock.showToast).not.toHaveBeenCalledWith('User saved', 'ok');
+
+        svcMock.saveUser.mockResolvedValue(saved());
+        editViewer(container);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalledTimes(2));
+        expect(svcMock.saveUser.mock.calls[1][0].rev).toBe(9);
+    });
+
+    it('stale save: Cancel keeps the form and the admin\'s edits, and reloads nothing', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(failed(409, 'stale', { rev: 9 }));
+        editViewer(container);
+        el<HTMLInputElement>(container, '#user-mgmt-admin').checked = true;
+        save(container);
+        await answerConfirm(false);
+        await vi.waitFor(() => expect(el<HTMLButtonElement>(container, '#btn-user-mgmt-save').disabled).toBe(false));
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(false);
+        expect(el<HTMLInputElement>(container, '#user-mgmt-admin').checked).toBe(true);
+        expect(svcMock.listUsers).toHaveBeenCalledTimes(1);
+    });
+
+    it('save of a user deleted meanwhile: says so and shows the reloaded list', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(failed(404, 'not_found'));
+        svcMock.listUsers.mockResolvedValue(listed([USERS[0]]));
+        editViewer(container);
+        save(container);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('This user was deleted by someone else.', 'error'));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(1));
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(true);
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+    });
+
+    it('Add of a name that someone else created meanwhile: the existing already-exists message, form stays', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(failed(409, 'exists'));
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-username').value = 'newbie';
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'long-enough-pw';
+        save(container);
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toBe('User "newbie" already exists. Use Edit to change it.'));
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(false);
+    });
+
+    it('stale delete: the dialog offers Reload, which reloads the list', async () => {
+        const { container } = await setup();
+        svcMock.deleteUser.mockResolvedValue(failed(409, 'stale', { rev: 8 }));
+        clickRow(container, 1, '.user-mgmt-delete');
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(svcMock.deleteUser).toHaveBeenCalledTimes(1));
+        expect(await answerConfirm(true)).toBe('This user was changed by someone else since you opened it.');
+        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledTimes(2));
+        expect(svcMock.deleteUser).toHaveBeenCalledWith('viewer', 5);
+    });
+
+    it('delete of a user already deleted: says so and shows the reloaded list', async () => {
+        const { container } = await setup();
+        svcMock.deleteUser.mockResolvedValue(failed(404, 'not_found'));
+        svcMock.listUsers.mockResolvedValue(listed([USERS[0]]));
+        clickRow(container, 1, '.user-mgmt-delete');
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('This user was deleted by someone else.', 'error'));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(1));
     });
 });

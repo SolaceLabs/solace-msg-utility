@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -246,35 +247,48 @@ func TestOpenAuditor_FailureIsActionable(t *testing.T) {
 	}
 }
 
-// A write that fails is logged at ERROR with the path and the cause, never the
-// entry, the stdout copy still goes out, and record returns as normal.
-func TestAudit_FailedWriteIsLoggedAndNotFatal(t *testing.T) {
+// A record that cannot be written is logged at ERROR as AUDIT RECORD LOST,
+// once per record, with the path, the cause and every field of the entry, so
+// the loss is in the application log; the stdout copy still goes out and
+// record returns as normal.
+func TestAudit_ALostRecordIsLoggedLoudlyWithItsFields(t *testing.T) {
 	e := newAuditEnv(t, auditSettings{stdout: true})
 	_ = e.a.f.Close() // every write now fails
-	e.rec("TOP-SECRET-MARKER")
-	e.rec("TOP-SECRET-MARKER")
+	e.a.record(auditAdmin, auditEntry{
+		Actor: "alice", Client: "192.0.2.10", Action: auditUserCreate, Target: "bob", Outcome: auditOK,
+		Changed: []string{"password"}, Wrote: []auditWrote{{File: "users.yaml", Seq: 43}}, Msg: "alice created user bob",
+	})
+	e.rec("second")
 	log := e.log.String()
-	if strings.Count(log, "level=ERROR") != 2 || !strings.Contains(log, "audit log write failed") || !strings.Contains(log, e.path) {
-		t.Errorf("want one ERROR per failed write naming the path: %s", log)
+	if strings.Count(log, "level=ERROR") != 2 || strings.Count(log, `msg="AUDIT RECORD LOST"`) != 2 {
+		t.Fatalf("want one ERROR per lost record: %s", log)
 	}
-	if strings.Contains(log, "TOP-SECRET-MARKER") {
-		t.Errorf("the application log must not carry the entry: %s", log)
+	first := strings.Split(log, "\n")[0]
+	for _, want := range []string{e.path, "actor=alice", "client=192.0.2.10", "action=user.create", "target=bob", "outcome=ok",
+		"password", "users.yaml", `entry_msg="alice created user bob"`, "entry_time=2026-11-12T08:30:00Z", "err="} {
+		if !strings.Contains(first, want) {
+			t.Errorf("the lost record's log line lacks %q: %s", want, first)
+		}
 	}
-	if strings.Count(e.stdout.String(), "TOP-SECRET-MARKER") != 2 {
+	if strings.Count(e.stdout.String(), "alice created user bob") != 1 || strings.Count(e.stdout.String(), "second") != 1 {
 		t.Errorf("the stdout copy must still go out: %q", e.stdout)
 	}
 }
 
-// A log that cannot be reopened (its directory is gone) is logged the same way.
-func TestAudit_ReopenFailureIsLogged(t *testing.T) {
+// A log that cannot be reopened (its directory is gone) loses the record the
+// same way.
+func TestAudit_ReopenFailureLosesTheRecordLoudly(t *testing.T) {
 	var log strings.Builder
 	a := &auditor{
 		lv: liveWith(nil), stdout: &bytes.Buffer{}, logger: newCapturingLogger(&log), now: time.Now,
 		path: filepath.Join(t.TempDir(), "gone", "audit.log"), maxSize: auditMaxBytes, keep: auditKeepFiles,
 	}
-	a.record(auditAdmin, auditEntry{Action: auditUserCreate, Outcome: auditOK, Msg: "TOP-SECRET-MARKER"})
-	if !strings.Contains(log.String(), "level=ERROR") || !strings.Contains(log.String(), "audit log write failed") || strings.Contains(log.String(), "TOP-SECRET-MARKER") {
-		t.Errorf("want an ERROR without the entry: %s", log.String())
+	a.record(auditAdmin, auditEntry{Action: auditUserCreate, Outcome: auditOK, Msg: "alice created user bob"})
+	if !strings.Contains(log.String(), "level=ERROR") || !strings.Contains(log.String(), "AUDIT RECORD LOST") || !strings.Contains(log.String(), `entry_msg="alice created user bob"`) {
+		t.Errorf("want an ERROR with the entry: %s", log.String())
+	}
+	if !a.failing.Load() {
+		t.Error("a lost record must set the failing state")
 	}
 }
 
@@ -297,6 +311,9 @@ func TestAudit_RotationFailureIsLoggedAndTheLineIsKept(t *testing.T) {
 	}
 	if log := e.log.String(); !strings.Contains(log, "level=ERROR") || !strings.Contains(log, "rotate") || !strings.Contains(log, filepath.Base(e.path)+".2") {
 		t.Errorf("want the rotation failure logged with the file: %s", log)
+	}
+	if log := e.log.String(); strings.Contains(log, "AUDIT RECORD LOST") || e.a.failing.Load() {
+		t.Errorf("the line was written, so no record was lost and the log is not failing: %s", log)
 	}
 }
 
@@ -385,5 +402,75 @@ func TestAuditFor_ActorAndClient(t *testing.T) {
 	// Outside the gateway's chain nothing is known.
 	if bare := auditFor(httptest.NewRequest(http.MethodGet, "/x", nil), auditRelay); bare.Actor != "" || bare.Client != "unknown" {
 		t.Errorf("no chain: %+v", bare)
+	}
+}
+
+// wrote names the store files a commit wrote, after changed and before msg;
+// config.yaml has no seq, and an entry without it has no key.
+func TestAudit_WroteFieldShapeAndOrder(t *testing.T) {
+	e := newAuditEnv(t, auditSettings{})
+	e.a.record(auditAdmin, auditEntry{
+		Actor: "alice", Client: "192.0.2.10", Action: auditBackupImport, Target: "b.smubak", Outcome: auditOK,
+		Changed: []string{"users", "settings"}, Wrote: []auditWrote{{File: "users.yaml", Seq: 43}, {File: "config.yaml"}},
+		Msg: "alice imported a backup",
+	})
+	e.a.record(auditAdmin, auditEntry{Actor: "alice", Client: "192.0.2.10", Action: auditUserDelete, Target: "bob", Outcome: auditRefused, Code: "stale", Msg: "alice could not delete user bob: stale"})
+	want := []string{
+		`{"time":"2026-11-12T08:30:00Z","actor":"alice","client":"192.0.2.10","action":"backup.import","target":"b.smubak","outcome":"ok","changed":["users","settings"],"wrote":[{"file":"users.yaml","seq":43},{"file":"config.yaml"}],"msg":"alice imported a backup"}`,
+		`{"time":"2026-11-12T08:30:00Z","actor":"alice","client":"192.0.2.10","action":"user.delete","target":"bob","outcome":"refused","code":"stale","msg":"alice could not delete user bob: stale"}`,
+	}
+	if got := fileLines(t, e.path); !reflect.DeepEqual(got, want) {
+		t.Errorf("lines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// audit.onFailure refuse: while the last write lost its record the gate
+// refuses with errAuditUnavailable; any write that succeeds clears it, and
+// continue (also the zero value) and a nil auditor never refuse.
+func TestAuditor_GateFollowsOnFailureAndTheLastWrite(t *testing.T) {
+	e := newAuditEnv(t, auditSettings{onFailure: auditOnFailureRefuse})
+	if err := e.a.gate(); err != nil {
+		t.Fatalf("a healthy log must not refuse: %v", err)
+	}
+	_ = e.a.f.Close()
+	e.rec("lost")
+	if err := e.a.gate(); !errors.Is(err, errAuditUnavailable) {
+		t.Fatalf("refuse while the last write failed: got %v", err)
+	}
+	for _, set := range []auditSettings{{onFailure: auditOnFailureContinue}, {}} {
+		e.setAudit(set)
+		if err := e.a.gate(); err != nil {
+			t.Errorf("onFailure %q must never refuse: %v", set.onFailure, err)
+		}
+	}
+	e.setAudit(auditSettings{onFailure: auditOnFailureRefuse})
+	if err := e.a.gate(); !errors.Is(err, errAuditUnavailable) {
+		t.Fatalf("switching back to refuse sees the failing log: got %v", err)
+	}
+	e.a.mu.Lock()
+	e.a.f = nil // the next write reopens the file, as it would once the disk has room
+	e.a.mu.Unlock()
+	e.rec("the refusal line")
+	if err := e.a.gate(); err != nil {
+		t.Errorf("a write that succeeds clears the failing state: %v", err)
+	}
+	if got := fileLines(t, e.path); len(got) != 1 || !strings.Contains(got[0], "the refusal line") {
+		t.Errorf("only the written record is on disk: %q", got)
+	}
+	var none *auditor
+	if err := none.gate(); err != nil {
+		t.Errorf("no auditor, no refusal: %v", err)
+	}
+}
+
+// An access entry dropped by audit.access off touches nothing: a failing log
+// stays failing, since no write was tried.
+func TestAuditor_ADroppedAccessEntryDoesNotClearTheFailingState(t *testing.T) {
+	e := newAuditEnv(t, auditSettings{onFailure: auditOnFailureRefuse})
+	_ = e.a.f.Close()
+	e.rec("lost")
+	e.a.record(auditAccess, auditEntry{Action: auditRelay, Outcome: auditOK, Msg: "GET /x"})
+	if err := e.a.gate(); !errors.Is(err, errAuditUnavailable) {
+		t.Errorf("want still failing, got %v", err)
 	}
 }

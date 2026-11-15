@@ -6,6 +6,11 @@
  * The password travels as typed, over TLS; the gateway hashes it and never
  * sends a hash back, so the list carries none and a blank password on edit
  * keeps the stored one.
+ *
+ * Every listed user carries its `rev`. A save sends the rev of the record the
+ * form opened (0 creates) and gets the record's new rev back; a delete sends
+ * the rev as `?rev=N`. The gateway refuses a rev that is no longer current
+ * (`stale`).
  */
 import { managedRequest, type ManagedResult } from '../../core/services/managed-api';
 import type { QGlob } from '../../core/types';
@@ -17,6 +22,8 @@ export interface ManagedUser {
     readOnly: QGlob[];
     /** App modules this user may open; null = the deployment default. */
     modules: string[] | null;
+    /** The record's version, as listed; a save sends it back (0 = a new user). */
+    rev: number;
 }
 
 /** What the modules editor offers: config.yaml's `modules.*` and the catalog. */
@@ -34,16 +41,17 @@ export interface UserList {
     modules: ModuleChoices;
 }
 
-/** A user as written back: `password` as typed, or '' to keep the stored one. */
+/** A user as written back: `password` as typed, or '' to keep the stored one; `rev` is the opened record's (0 to create). */
 export interface UserPayload extends ManagedUser {
     password: string;
 }
 
 export interface UserMgmtService {
     listUsers(): Promise<ManagedResult<UserList>>;
-    /** PUT /managed/users/{username}: create, or edit an existing user. */
-    saveUser(user: UserPayload): Promise<ManagedResult<void>>;
-    deleteUser(username: string): Promise<ManagedResult<void>>;
+    /** PUT /managed/users/{username}: create (rev 0), or edit an existing user. Answers the new rev. */
+    saveUser(user: UserPayload): Promise<ManagedResult<{ rev: number }>>;
+    /** DELETE /managed/users/{username}?rev=N. */
+    deleteUser(username: string, rev: number): Promise<ManagedResult<void>>;
 }
 
 const userPath = (username: string) => `/managed/users/${encodeURIComponent(username)}`;
@@ -51,7 +59,7 @@ const userPath = (username: string) => `/managed/users/${encodeURIComponent(user
 export function createUserMgmtService(): UserMgmtService {
     return {
         listUsers: () => managedRequest<UserList>('GET', '/managed/users'),
-        saveUser: ({ username, ...body }) => managedRequest('PUT', userPath(username), body),
-        deleteUser: (username) => managedRequest('DELETE', userPath(username)),
+        saveUser: ({ username, ...body }) => managedRequest<{ rev: number }>('PUT', userPath(username), body),
+        deleteUser: (username, rev) => managedRequest('DELETE', `${userPath(username)}?rev=${rev}`),
     };
 }

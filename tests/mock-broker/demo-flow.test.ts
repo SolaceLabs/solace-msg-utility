@@ -138,7 +138,7 @@ describe('managed demo end to end', () => {
         await openDemo(async first => {
             const put = await first.gateway.handle({
                 method: 'PUT', path: '/managed/settings', query: '',
-                body: JSON.stringify({ ...first.gateway.settings.current(), connModes: 'both' }),
+                body: JSON.stringify({ ...first.gateway.settings.current(), connModes: 'both', rev: first.gateway.settings.rev() }),
                 session: first.gateway.openSession('admin', false),
             });
             expect(put.status).toBe(200);

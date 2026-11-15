@@ -26,6 +26,13 @@
  * case-insensitive, `*` = any run), from the last load without a refetch. The
  * Permission test card below it (`./access-test`) shows what a saved user gets
  * on a given broker, Message VPN and queue.
+ *
+ * Every listed user carries a `rev`. The form keeps the rev of the record it
+ * opened (0 for a new user) and a save sends it; the 200 answer carries the
+ * new rev. A delete sends the rev of its row. When someone else got there first
+ * the gateway answers `stale` (a dialog with a Reload button, which reloads
+ * the list and closes the form) or `not_found` (the user was deleted meanwhile:
+ * a message and the reloaded list), see `src/core/admin-conflict.ts`.
  */
 import { required, setError } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
@@ -34,6 +41,7 @@ import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
 import { escapeHtml, matchContains, moduleLabel } from '../../core/utils';
 import { logger } from '../../core/logger';
+import { handleConflict } from '../../core/admin-conflict';
 import { reportManagedFailure, SIGNED_OUT_TOAST_MS } from '../../core/services/managed-api';
 import { createUserMgmtService, type ManagedUser, type ModuleChoices, type UserPayload } from './service';
 import { createAccessTest, grantedModules } from './access-test';
@@ -96,6 +104,8 @@ export const UserManagementModule = {
 
         // null = creating a new user; otherwise the username being edited.
         let editing: string | null = null;
+        // The rev of the record the form opened: 0 when creating.
+        let editingRev = 0;
         // From the last list load; empty until then.
         let choices: ModuleChoices = { catalog: [], offered: [], userDefault: 'all' };
         let users: ManagedUser[] = [];
@@ -123,7 +133,7 @@ export const UserManagementModule = {
                 cells: u => `<td>${escapeHtml(u.username)}</td><td>${u.admin ? 'Admin' : 'User'}</td>`,
                 label: u => u.username,
                 onEdit: openEdit,
-                onDelete: u => void removeUser(u.username),
+                onDelete: u => void removeUser(u.username, u.rev),
             });
         }
 
@@ -193,6 +203,7 @@ export const UserManagementModule = {
 
         function openCreate(): void {
             editing = null;
+            editingRev = 0;
             els.formTitle.textContent = 'Add user';
             els.username.value = '';
             els.username.disabled = false;
@@ -208,6 +219,7 @@ export const UserManagementModule = {
 
         function openEdit(u: ManagedUser): void {
             editing = u.username;
+            editingRev = u.rev;
             els.formTitle.textContent = `Edit user "${u.username}"`;
             els.username.value = u.username;
             els.username.disabled = true; // username is the key; rename = delete + recreate
@@ -236,8 +248,7 @@ export const UserManagementModule = {
                 setError(els.formError, 'A password is required for a new user.');
                 return;
             }
-            // The gateway's save replaces a user of the same name, so Add
-            // must not reach an existing one.
+            // Early check; the gateway refuses it too (exists) when the list is out of date.
             if (!editing && users.some(u => u.username === username)) {
                 setError(els.formError, `User "${username}" already exists. Use Edit to change it.`);
                 return;
@@ -249,15 +260,22 @@ export const UserManagementModule = {
                 operate: operateList.readRows() as unknown as QGlob[],
                 readOnly: readonlyList.readRows() as unknown as QGlob[],
                 modules: els.modulesDefault.checked ? null : checkedModules(),
+                rev: editingRev,
             };
             els.btnSave.disabled = true;
             setError(els.formError, null);
             const res = await service.saveUser(payload);
             els.btnSave.disabled = false;
             if (!res.ok) {
+                if (res.code === 'exists') {
+                    setError(els.formError, `User "${username}" already exists. Use Edit to change it.`);
+                    return;
+                }
+                if (await handleConflict(res, 'This user', () => applyGate())) return;
                 reportManagedFailure(res, eventBus, msg => setError(els.formError, msg));
                 return;
             }
+            editingRev = res.data.rev;
             // Don't leave the typed password in the hidden form.
             els.password.value = '';
             const own = username === m.username;
@@ -284,7 +302,7 @@ export const UserManagementModule = {
             applyGate(); // back to the list, reloaded
         }
 
-        async function removeUser(username: string): Promise<void> {
+        async function removeUser(username: string, rev: number): Promise<void> {
             const m = appState.managed;
             if (!m) return;
             const own = username === m.username;
@@ -292,8 +310,9 @@ export const UserManagementModule = {
                 ? `Delete your own account "${username}"? You will be signed out.`
                 : `Delete user "${username}"?`;
             if (!(await confirmDialog(question, { confirmLabel: 'Delete' }))) return;
-            const res = await service.deleteUser(username);
+            const res = await service.deleteUser(username, rev);
             if (!res.ok) {
+                if (await handleConflict(res, 'This user', loadList)) return;
                 reportManagedFailure(res, eventBus, msg => showToast(msg, 'error'));
                 return;
             }

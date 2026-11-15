@@ -243,7 +243,7 @@ func TestPasswordChange_SuccessEndsOtherSessionsAndClearsFlag(t *testing.T) {
 	if !ok || mustChange {
 		t.Errorf("new password must work and clear the flag: ok=%v mustChange=%v", ok, mustChange)
 	}
-	au.expect(t, auditEntry{Actor: "viewer", Action: "password.change", Target: "viewer", Outcome: "ok", Msg: "viewer set a new password after the forced change"})
+	au.expect(t, auditEntry{Actor: "viewer", Action: "password.change", Target: "viewer", Outcome: "ok", Wrote: usersWrote(3), Msg: "viewer set a new password after the forced change"})
 }
 
 // A change the user chose to make reads differently from the forced one, and
@@ -252,7 +252,7 @@ func TestPasswordChange_VoluntaryChangeIsAudited(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	au := e.withAudit(t, auditSettings{})
 	expectRedirect(t, e.form("/login/password", passwordForm(viewerPW, "viewer-new-pw-1", "viewer-new-pw-1"), e.cookie("viewer", false)), "/")
-	au.expect(t, auditEntry{Actor: "viewer", Action: "password.change", Target: "viewer", Outcome: "ok", Msg: "viewer changed their password"})
+	au.expect(t, auditEntry{Actor: "viewer", Action: "password.change", Target: "viewer", Outcome: "ok", Wrote: usersWrote(3), Msg: "viewer changed their password"})
 	data, err := os.ReadFile(au.path)
 	if err != nil {
 		t.Fatal(err)
@@ -302,8 +302,71 @@ func TestPasswordChange_ThrottledAndFailures(t *testing.T) {
 	au.expect(t,
 		refused("", "bad_credentials"), refused("", "bad_credentials"),
 		lockout("viewer", "user"), lockout("192.0.2.10/32", "client"), refused("", "bad_credentials"),
-		refused("", "throttled"), refused("", "server_error"), refused("192.0.2.1", "unavailable"),
+		refused("", "throttled"), refused("", "store_write_failed"), refused("192.0.2.1", "unavailable"),
 	)
+}
+
+// The refusals the writer adds, each with its own audit code and an answer the
+// user can act on: the audit log cannot be written (audit.onFailure refuse), a
+// store file changed outside the gateway. The password stays as it was.
+func TestPasswordChange_WriterRefusals(t *testing.T) {
+	change := func(e *managedEnv, c *http.Cookie) *httptest.ResponseRecorder {
+		return e.form("/login/password", passwordForm(viewerPW, "viewer-new-pw-1", "viewer-new-pw-1"), c)
+	}
+	t.Run("audit log unavailable", func(t *testing.T) {
+		e := newManagedEnv(t, nil)
+		e.setAudit(auditSettings{onFailure: auditOnFailureRefuse})
+		a, _ := e.withLoudAudit(t)
+		_ = a.f.Close()
+		e.api.audit.record(auditAdmin, auditEntry{Actor: "admin", Action: auditUserCreate, Outcome: auditOK, Msg: "admin created user x"}) // the lost record
+		expectPage(t, change(e, e.cookie("viewer", false)), http.StatusServiceUnavailable, "cannot record changes")
+		if !signsIn(t, e.api.store, "viewer", viewerPW) {
+			t.Error("a refused change leaves the password")
+		}
+		if got := mustRead(t, a.path); len(got) != 0 {
+			t.Errorf("the audit file is closed, so no line: %q", got)
+		}
+	})
+	t.Run("store file changed on disk", func(t *testing.T) {
+		e := newManagedEnv(t, nil)
+		au := e.withAudit(t, auditSettings{})
+		if err := os.WriteFile(e.f.usersPath, []byte("not the file the gateway wrote"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		expectPage(t, change(e, e.cookie("viewer", false)), http.StatusConflict, "restart the gateway")
+		if !signsIn(t, e.api.store, "viewer", viewerPW) {
+			t.Error("a refused change leaves the password")
+		}
+		au.expect(t, auditEntry{Actor: "viewer", Action: "password.change", Target: "viewer", Outcome: "refused", Code: "store_changed_on_disk",
+			Msg: "viewer could not change their password: store changed on disk"})
+	})
+}
+
+// A browser that went away before the change began is not answered or audited.
+func TestPasswordChange_ClientGoneIsNotAudited(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	release := holdWriter(t, e.api.store.wr)
+	req := httptest.NewRequest("POST", "https://gw.example/login/password", strings.NewReader(passwordForm(viewerPW, "viewer-new-pw-1", "viewer-new-pw-1").Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(e.cookie("viewer", false))
+	ctx, cancel := context.WithCancel(req.Context())
+	done := make(chan *httptest.ResponseRecorder)
+	go func() {
+		rec := httptest.NewRecorder()
+		e.root.ServeHTTP(rec, req.WithContext(ctx))
+		done <- rec
+	}()
+	waitForWaiters(t, 1)
+	cancel()
+	rec := <-done
+	release()
+	if rec.Body.Len() != 0 || len(au.entries(t)) != 0 {
+		t.Errorf("nothing to answer and nothing to audit: %d %q %+v", rec.Code, rec.Body.String(), au.entries(t))
+	}
+	if !signsIn(t, e.api.store, "viewer", viewerPW) {
+		t.Error("the password must be unchanged")
+	}
 }
 
 // ----- gates ------------------------------------------------------------------------------

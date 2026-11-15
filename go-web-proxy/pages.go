@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -307,7 +308,10 @@ func (p *authPages) showPassword(w http.ResponseWriter, r *http.Request, as acti
 // current password counts as a failed sign-in, under the same one-at-a-time
 // turn. The new hash is stored only while the record is the one the current
 // password was checked against, and this browser's fresh session is created
-// in the same store write; then every other session of the user ends.
+// in the same store write; then every other session of the user ends. The
+// current password is checked and the new one hashed before the writer lock;
+// inside it the store refuses when the hash changed meanwhile (an
+// administrator's reset), as a wrong current password would be.
 func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as activeSession, signedIn bool) {
 	if !p.readForm(w, r) {
 		return
@@ -367,15 +371,40 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 		return
 	}
 	var id string
-	err = p.store.setPassword(r.Context(), as.user, nw, check.hash, func() { id = p.sessions.create(as.user, false) })
+	var seq int
+	err = p.store.setPassword(r.Context(), as.user, nw, check.hash, func() {
+		id = p.sessions.create(as.user, false)
+		seq, _ = p.store.seqs() // the commit's own seq: the writer lock is still held
+	})
+	var diskChanged *changedOnDiskError
+	var writeFailed *writeFailedError
+	var clientGone *clientGoneError
 	switch {
 	case errors.Is(err, errAccountChanged), errors.Is(err, errUserNotFound):
 		p.passwordRefused(r, "account_changed")
 		log.Warn("password change refused: the account changed while its password was checked")
 		p.message(w, http.StatusConflict, "Password not changed", "Your account was changed while this request ran. Sign in again.")
 		return
+	case errors.As(err, &clientGone):
+		return // the browser left before the change began: nothing happened and nobody reads an answer
+	case errors.Is(err, errAuditUnavailable):
+		p.passwordRefused(r, "audit_unavailable")
+		log.Error("password change refused: the audit log cannot be written", "err", err)
+		p.message(w, http.StatusServiceUnavailable, "Password not changed", "The gateway cannot record changes right now, so it refused this one. Try again later or tell an administrator.")
+		return
+	case errors.As(err, &diskChanged):
+		p.passwordRefused(r, "store_changed_on_disk")
+		log.Error("password change refused: a store file was changed outside the gateway", "err", err)
+		p.message(w, http.StatusConflict, "Password not changed", "The gateway's user file was changed outside the gateway. An administrator must restart the gateway before passwords can be changed.")
+		return
 	case err != nil:
-		p.passwordRefused(r, "server_error")
+		// A store write that failed and was rolled back, or a hash that could
+		// not run: either way nothing changed.
+		code := "server_error"
+		if errors.As(err, &writeFailed) {
+			code = "store_write_failed"
+		}
+		p.passwordRefused(r, code)
 		log.Error("password change failed", "err", err)
 		fail(http.StatusInternalServerError, "The password could not be saved.")
 		return
@@ -385,6 +414,7 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 	setSessionCookie(w, id)
 	e := auditFor(r, auditPasswordChange)
 	e.Target, e.Outcome, e.Msg = as.user, auditOK, as.user+" changed their password"
+	e.Wrote = []auditWrote{{File: filepath.Base(p.store.usersPath), Seq: int64(seq)}}
 	if as.mustChange {
 		e.Msg = as.user + " set a new password after the forced change"
 	}

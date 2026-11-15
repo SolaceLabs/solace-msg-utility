@@ -42,6 +42,8 @@ export interface GatewaySnapshot {
     store: ReturnType<GatewayStore['dump']>;
     sessions: [string, Session][];
     settings: GatewaySettings;
+    /** The settings file's rev at the dump (a counter written out). */
+    settingsRev: string;
     cookie: string | null;
     faults: GatewayFaults;
     throttle: ThrottleState;
@@ -173,14 +175,14 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
         session: (): Session | null => sessions.get(cookie),
         snapshot(): GatewaySnapshot {
             return {
-                store: store.dump(), sessions: sessions.dump(), settings: settings.dump(),
+                store: store.dump(), sessions: sessions.dump(), settings: settings.dump(), settingsRev: settings.rev(),
                 cookie, faults: { ...faults }, throttle: throttle.dump(), backups: backups.dump(),
             };
         },
         restore(s: GatewaySnapshot): void {
             store.load(s.store);
             sessions.load(s.sessions);
-            settings.load(s.settings);
+            settings.load(s.settings, s.settingsRev);
             cookie = s.cookie;
             Object.assign(faults, s.faults);
             throttle.load(s.throttle);

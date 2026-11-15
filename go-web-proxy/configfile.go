@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -39,8 +39,11 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # Environment variables seed this file on first start only, when it does not
 # exist. Afterwards the file wins; a changed env var is ignored and logged.
 # Edit this file and restart the gateway, or delete it to re-seed from env.
-# access.*, session.*, login.*, modules.* and audit.access have no env var: edit
-# them here. audit.stdout is seeded by SMU_SHOW_AUDIT.
+# access.*, session.*, login.*, modules.*, audit.access and audit.onFailure have
+# no env var: edit them here. audit.stdout is seeded by SMU_SHOW_AUDIT.
+# audit.onFailure (continue|refuse) says what happens when an audit record
+# cannot be written: continue logs it loudly and carries on; refuse also
+# refuses changes until the audit log is writable again.
 # An empty allow list admits every client; trustedProxies lists the reverse
 # proxies whose X-Forwarded-For is believed. session.*, login.*, modules.* and
 # audit.* apply only in Provisioned mode (connModes provisioned or both):
@@ -105,11 +108,13 @@ type fileModules struct {
 	UserDefault string   `yaml:"userDefault" json:"userDefault"`
 }
 
-// fileAudit holds the audit stream's two options (audit.go). Both apply at the
-// next event; the log file itself is always on in Provisioned mode.
+// fileAudit holds the audit stream's options (audit.go). All apply at the next
+// event; the log file itself is always on in Provisioned mode. OnFailure is
+// continue (the default, also for a file without the key) or refuse.
 type fileAudit struct {
-	Stdout bool `yaml:"stdout" json:"stdout"`
-	Access bool `yaml:"access" json:"access"`
+	Stdout    bool   `yaml:"stdout" json:"stdout"`
+	Access    bool   `yaml:"access" json:"access"`
+	OnFailure string `yaml:"onFailure" json:"onFailure"`
 }
 
 // clone copies fc deeply enough that decoding into the copy cannot write
@@ -315,8 +320,17 @@ func fileConfigFromConfig(c config) fileConfig {
 			Offered:     append([]string{}, c.modules.offered...),
 			UserDefault: c.modules.userDefault,
 		},
-		Audit: fileAudit{Stdout: c.audit.stdout, Access: c.audit.access},
+		Audit: fileAudit{Stdout: c.audit.stdout, Access: c.audit.access, OnFailure: onFailureOrDefault(c.audit.onFailure)},
 	}
+}
+
+// onFailureOrDefault is the audit.onFailure a config holds: the zero value of
+// a config built without it is the default.
+func onFailureOrDefault(v string) string {
+	if v == "" {
+		return auditOnFailureContinue
+	}
+	return v
 }
 
 func prefixStrings(ps []netip.Prefix) []string {
@@ -354,6 +368,10 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	onFailure, err := checkAuditOnFailure(fc.Audit.OnFailure)
+	if err != nil {
+		return config{}, err
+	}
 	cfg := config{
 		hosted:             fc.Hosted,
 		certFile:           fc.TLS.CertFile,
@@ -372,7 +390,7 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 		session:            session,
 		login:              login,
 		modules:            modules,
-		audit:              auditSettings{stdout: fc.Audit.Stdout, access: fc.Audit.Access},
+		audit:              auditSettings{stdout: fc.Audit.Stdout, access: fc.Audit.Access, onFailure: onFailure},
 	}
 	// Value and cross checks on the connection modes.
 	if err := validateConnModes(cfg); err != nil {
@@ -518,7 +536,7 @@ type configLoad struct {
 	seeded    bool
 	overrides []envOverride
 	removed   []removedSetting // still set (removedInUse); ignored
-	sum       [32]byte         // SHA-256 of the file as read or seeded
+	data      []byte           // the bytes of the file as read or seeded
 }
 
 // removedSetting is a setting an earlier release read that the file or the
@@ -564,12 +582,13 @@ func removedInUse(fc fileConfig) []removedSetting {
 	return out
 }
 
-// configSource is where the running config came from: the file and the
-// SHA-256 of the bytes the gateway last read or wrote, so a settings save can
-// tell a hand edit it has not loaded from its own last write.
+// configSource is where the running config came from: the file and the bytes
+// the gateway read or seeded. newSettingsFile hands them to the writer's
+// checksums, so the settings rev and the changed-on-disk check start from what
+// was loaded, not from what the file holds by the time the stores are up.
 type configSource struct {
 	path string
-	sum  [32]byte
+	data []byte
 }
 
 // resolveConfig loads config.yaml, seeding it from the environment when it does
@@ -598,11 +617,11 @@ func resolveConfig(path string) (configLoad, error) {
 		if err != nil {
 			return configLoad{}, fmt.Errorf("cannot seed config file %q from the environment: %w", path, err)
 		}
-		sum, err := seedConfigFile(path, cfg)
+		seeded, err := seedConfigFile(path, cfg)
 		if err != nil {
 			return configLoad{}, err
 		}
-		return configLoad{cfg: cfg, seeded: true, removed: removedInUse(fileConfig{}), sum: sum}, nil
+		return configLoad{cfg: cfg, seeded: true, removed: removedInUse(fileConfig{}), data: seeded}, nil
 	case err != nil:
 		return configLoad{}, fmt.Errorf("cannot read config file %q: %w", path, err)
 	}
@@ -614,20 +633,38 @@ func resolveConfig(path string) (configLoad, error) {
 	if err != nil {
 		return configLoad{}, fmt.Errorf("config file %q: %w", path, err)
 	}
-	return configLoad{cfg: cfg, overrides: envOverrides(cfg), removed: removedInUse(fc), sum: sha256.Sum256(data)}, nil
+	return configLoad{cfg: cfg, overrides: envOverrides(cfg), removed: removedInUse(fc), data: data}, nil
 }
 
-// seedConfigFile writes the first config.yaml and returns the SHA-256 of what
-// it wrote. Readable by operators (0644): it holds no secret.
-func seedConfigFile(path string, cfg config) ([32]byte, error) {
+// seedConfigFile writes the first config.yaml and returns the bytes it wrote.
+// Readable by operators (0644): it holds no secret. It goes through the
+// journaled commit like every other write of the file, on a writer of its own:
+// this runs at start, before the store key is loaded, so there is no checksum
+// to keep and nothing else to exclude.
+func seedConfigFile(path string, cfg config) ([]byte, error) {
 	data, err := encodeConfigFile(fileConfigFromConfig(cfg))
 	if err != nil {
-		return [32]byte{}, fmt.Errorf("cannot encode config file %q: %w", path, err)
+		return nil, fmt.Errorf("cannot encode config file %q: %w", path, err)
 	}
-	if err := writeFileAtomic(path, data, 0o644); err != nil {
-		return [32]byte{}, fmt.Errorf("cannot write config file %q: %w. The gateway creates it on first start. Fix: make the directory writable by the gateway user (UID 65532), e.g. mount a writable volume at /data", path, err)
+	wr := newWriter(filepath.Dir(path), nil, nil)
+	err = wr.Do(context.Background(), func(tx *txn) error {
+		tx.stage(path, data, 0o644, configVerifier(path))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cannot write config file %q: %w. The gateway creates it on first start. Fix: make the directory writable by the gateway user (UID 65532), e.g. mount a writable volume at /data", path, err)
 	}
-	return sha256.Sum256(data), nil
+	return data, nil
+}
+
+// configVerifier is the round-trip check of every config.yaml commit: the
+// bytes read back from the temp file must parse as strictly as a start would
+// parse them. config.yaml holds no secret, so the parse error is shown whole.
+func configVerifier(path string) func([]byte) error {
+	return func(data []byte) error {
+		_, err := decodeConfigFile(data, path)
+		return err
+	}
 }
 
 // envOverrides lists the seeding variables that are set but disagree with the

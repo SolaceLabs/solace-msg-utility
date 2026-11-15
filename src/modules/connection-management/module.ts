@@ -13,6 +13,14 @@
  * on broker or hostname: contains, case-insensitive, `*` = any run), from the
  * last load without a refetch. Imports only from `src/core/*` and its own
  * service.
+ *
+ * Every listed connection carries a `rev`. The form keeps the rev of the record
+ * it opened (0 for a new connection) and a save sends it; the 200 answer
+ * carries the new rev. A delete sends the rev of its row. When someone else got
+ * there first the gateway answers `stale` (a dialog with a Reload button, which
+ * reloads the list and closes the form) or `not_found` (the connection was
+ * deleted meanwhile: a message and the reloaded list), see
+ * `src/core/admin-conflict.ts`.
  */
 import { required, setError } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
@@ -21,6 +29,7 @@ import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
 import { escapeHtml, matchContains } from '../../core/utils';
 import { logger } from '../../core/logger';
+import { handleConflict } from '../../core/admin-conflict';
 import { reportManagedFailure } from '../../core/services/managed-api';
 import { createConnMgmtService, type ManagedConnRecord } from './service';
 import type { AppContext } from '../../core/types';
@@ -78,6 +87,8 @@ export const ConnectionManagementModule = {
 
         // null = adding a connection; otherwise the broker being edited.
         let editing: string | null = null;
+        // The rev of the record the form opened: 0 when adding.
+        let editingRev = 0;
         // Connections from the last list load, and the VPNs the edited
         // connection has a stored password for (none when adding).
         let conns: ManagedConnRecord[] = [];
@@ -105,7 +116,7 @@ export const ConnectionManagementModule = {
                 cells: c => `<td>${escapeHtml(c.broker)}</td><td>${escapeHtml(c.hostname)}</td>`,
                 label: c => c.broker,
                 onEdit: openEdit,
-                onDelete: c => void removeConn(c.broker),
+                onDelete: c => void removeConn(c.broker, c.rev),
             });
         }
 
@@ -145,6 +156,7 @@ export const ConnectionManagementModule = {
 
         function openCreate(): void {
             editing = null;
+            editingRev = 0;
             storedVpns = new Set();
             els.formTitle.textContent = 'Add connection';
             els.broker.value = '';
@@ -164,6 +176,7 @@ export const ConnectionManagementModule = {
 
         function openEdit(c: ManagedConnRecord): void {
             editing = c.broker;
+            editingRev = c.rev;
             storedVpns = new Set((c.client.msgVpns ?? []).map(v => v.name));
             els.formTitle.textContent = `Edit connection "${c.broker}"`;
             els.broker.value = c.broker;
@@ -190,8 +203,7 @@ export const ConnectionManagementModule = {
                 setError(els.formError, 'Broker name is required.');
                 return;
             }
-            // The gateway's save replaces a connection of the same name, so
-            // Add must not reach an existing one.
+            // Early check; the gateway refuses it too (exists) when the list is out of date.
             if (!editing && conns.some(c => c.broker === broker)) {
                 setError(els.formError, `Connection "${broker}" already exists. Use Edit to change it.`);
                 return;
@@ -209,6 +221,7 @@ export const ConnectionManagementModule = {
             try {
                 // A blank password is sent blank: the gateway keeps the stored one.
                 const connection: ManagedConnRecord = {
+                    rev: editingRev,
                     broker,
                     hostname: els.hostname.value.trim(),
                     semp: {
@@ -225,9 +238,15 @@ export const ConnectionManagementModule = {
                 };
                 const res = await service.saveConnection(connection);
                 if (!res.ok) {
+                    if (res.code === 'exists') {
+                        setError(els.formError, `Connection "${broker}" already exists. Use Edit to change it.`);
+                        return;
+                    }
+                    if (await handleConflict(res, 'This connection', () => applyGate())) return;
                     reportManagedFailure(res, eventBus, msg => setError(els.formError, msg));
                     return;
                 }
+                editingRev = res.data.rev;
                 showToast('Connection saved', 'ok');
                 applyGate(); // back to the list, reloaded
             } finally {
@@ -235,10 +254,11 @@ export const ConnectionManagementModule = {
             }
         }
 
-        async function removeConn(broker: string): Promise<void> {
+        async function removeConn(broker: string, rev: number): Promise<void> {
             if (!(await confirmDialog(`Delete connection "${broker}"?`, { confirmLabel: 'Delete' }))) return;
-            const res = await service.deleteConnection(broker);
+            const res = await service.deleteConnection(broker, rev);
             if (!res.ok) {
+                if (await handleConflict(res, 'This connection', loadList)) return;
                 reportManagedFailure(res, eventBus, msg => showToast(msg, 'error'));
                 return;
             }

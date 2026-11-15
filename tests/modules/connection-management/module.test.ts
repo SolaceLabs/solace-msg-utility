@@ -21,9 +21,12 @@ const ADMIN: ManagedSession = {
     admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
 };
 const CONNS = [
-    { broker: 'b1', hostname: 'host1', semp: { port: '1943', user: 'mon', pass: '' }, client: { port: '1443', msgVpns: [{ name: 'v1', user: 'u1', pass: '' }] } },
-    { broker: 'b2', hostname: 'host2', semp: { port: '1943', user: 'mon', pass: '' }, client: { port: '1443', msgVpns: [] } },
+    { rev: 4, broker: 'b1', hostname: 'host1', semp: { port: '1943', user: 'mon', pass: '' }, client: { port: '1443', msgVpns: [{ name: 'v1', user: 'u1', pass: '' }] } },
+    { rev: 6, broker: 'b2', hostname: 'host2', semp: { port: '1943', user: 'mon', pass: '' }, client: { port: '1443', msgVpns: [] } },
 ];
+/** The gateway's 200 answer to a save: the record's new rev. */
+const saved = (rev = 7) => ({ ok: true, data: { rev } });
+const failed = (status: number, code: string, extra: object = {}) => ({ ok: false, status, code, ...extra });
 
 function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
     return c.querySelector(sel) as T;
@@ -222,7 +225,7 @@ describe('connection-management — create / edit form', () => {
 
     it('creates a connection: sends the SEMP + VPN passwords as typed (TLS to the gateway)', async () => {
         const { container } = await setup();
-        svcMock.saveConnection.mockResolvedValue({ ok: true });
+        svcMock.saveConnection.mockResolvedValue(saved());
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
         el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'b9';
         el<HTMLInputElement>(container, '#conn-mgmt-hostname').value = 'h9';
@@ -239,6 +242,7 @@ describe('connection-management — create / edit form', () => {
         // call (with its captured args) has necessarily already happened.
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Connection saved', 'ok'));
         expect(svcMock.saveConnection).toHaveBeenCalledWith({
+            rev: 0,
             broker: 'b9', hostname: 'h9',
             semp: { scheme: 'https', port: '1943', user: 'mon', pass: 'secret' },
             client: { scheme: 'wss', port: '1443', msgVpns: [{ name: 'v1', user: 'u1', pass: 'vpnpw' }] },
@@ -247,7 +251,7 @@ describe('connection-management — create / edit form', () => {
 
     it('sends the plain schemes when the operator picks http and ws', async () => {
         const { container } = await setup();
-        svcMock.saveConnection.mockResolvedValue({ ok: true });
+        svcMock.saveConnection.mockResolvedValue(saved());
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
         el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'b8';
         el<HTMLSelectElement>(container, '#conn-mgmt-semp-scheme').value = 'http';
@@ -306,7 +310,7 @@ describe('connection-management — create / edit form', () => {
 
     it('keeps blank SEMP + VPN passwords blank on edit, so the gateway keeps the stored ones', async () => {
         const { container } = await setup();
-        svcMock.saveConnection.mockResolvedValue({ ok: true });
+        svcMock.saveConnection.mockResolvedValue(saved());
         // Edit b1 (first row) — passwords arrive blank from the list.
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
             .querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
@@ -388,7 +392,7 @@ describe('connection-management — create / edit form', () => {
 
     it('a renamed VPN needs its password: a blank one has nothing stored to keep', async () => {
         const { container } = await setup();
-        svcMock.saveConnection.mockResolvedValue({ ok: true });
+        svcMock.saveConnection.mockResolvedValue(saved());
         el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
             .querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
         const vpnInputs = el(container, '#conn-mgmt-vpn-rows').querySelectorAll<HTMLInputElement>('input');
@@ -438,7 +442,7 @@ describe('connection-management — delete', () => {
             .querySelector<HTMLButtonElement>('.conn-mgmt-delete')!.click();
         expect(await answerConfirm(true)).toBe('Delete connection "b1"?');
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Connection deleted', 'ok'));
-        expect(svcMock.deleteConnection).toHaveBeenCalledWith('b1');
+        expect(svcMock.deleteConnection).toHaveBeenCalledWith('b1', 4);
     });
 
     it('does nothing when cancelled', async () => {
@@ -457,5 +461,108 @@ describe('connection-management — delete', () => {
         await answerConfirm(true);
         await vi.waitFor(() => expect(toastMock.showToast)
             .toHaveBeenCalledWith('The gateway could not complete the request. Its log has the cause.', 'error'));
+    });
+});
+
+// The rev each row came with goes back with a save or a delete; when someone
+// else moved the record first, the admin is told and the list is reloaded.
+describe('connection-management -- versions', () => {
+    const editB1 = (c: HTMLElement) => el(c, '#conn-mgmt-rows').querySelectorAll('tr')[0].querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
+    const delB1 = (c: HTMLElement) => el(c, '#conn-mgmt-rows').querySelectorAll('tr')[0].querySelector<HTMLButtonElement>('.conn-mgmt-delete')!.click();
+    const save = (c: HTMLElement) => el<HTMLButtonElement>(c, '#btn-conn-mgmt-save').click();
+
+    it('a save of an opened connection sends the rev the list gave it', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue(saved());
+        editB1(container);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalledTimes(1));
+        expect(svcMock.saveConnection.mock.calls[0][0]).toMatchObject({ broker: 'b1', rev: 4 });
+    });
+
+    it('a refused save leaves the form open on the same rev: the retry sends it again', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValueOnce(failed(422, 'invalid', { reason: 'bad port' })).mockResolvedValue(saved());
+        editB1(container);
+        save(container);
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe('bad port'));
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalledTimes(2));
+        expect(svcMock.saveConnection.mock.calls.map(c => c[0].rev)).toEqual([4, 4]);
+    });
+
+    it('stale save: the dialog says so; Reload reloads the list (new revs) and closes the form', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue(failed(409, 'stale', { rev: 9 }));
+        // Someone moved b1 to host-new, rev 9.
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: [{ ...CONNS[0], hostname: 'host-new', rev: 9 }, CONNS[1]] });
+        editB1(container);
+        save(container);
+        expect(await answerConfirm(true)).toBe('This connection was changed by someone else since you opened it.');
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0].textContent).toContain('host-new'));
+        expect(hidden(container, '#conn-mgmt-form-view')).toBe(true);
+        expect(hidden(container, '#conn-mgmt-list-view')).toBe(false);
+        expect(toastMock.showToast).not.toHaveBeenCalledWith('Connection saved', 'ok');
+
+        svcMock.saveConnection.mockResolvedValue(saved());
+        editB1(container);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalledTimes(2));
+        expect(svcMock.saveConnection.mock.calls[1][0].rev).toBe(9);
+    });
+
+    it("stale save: Cancel keeps the form and the admin's edits, and reloads nothing", async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue(failed(409, 'stale', { rev: 9 }));
+        editB1(container);
+        el<HTMLInputElement>(container, '#conn-mgmt-hostname').value = 'typed-host';
+        save(container);
+        await answerConfirm(false);
+        await vi.waitFor(() => expect(el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').disabled).toBe(false));
+        expect(hidden(container, '#conn-mgmt-form-view')).toBe(false);
+        expect(el<HTMLInputElement>(container, '#conn-mgmt-hostname').value).toBe('typed-host');
+        expect(svcMock.listConnections).toHaveBeenCalledTimes(1);
+    });
+
+    it('save of a connection deleted meanwhile: says so and shows the reloaded list', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue(failed(404, 'not_found'));
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: [CONNS[1]] });
+        editB1(container);
+        save(container);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('This connection was deleted by someone else.', 'error'));
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').querySelectorAll('tr').length).toBe(1));
+        expect(hidden(container, '#conn-mgmt-form-view')).toBe(true);
+    });
+
+    it('Add of a broker that someone else created meanwhile: the existing already-exists message, form stays', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue(failed(409, 'exists'));
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'b9';
+        save(container);
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe('Connection "b9" already exists. Use Edit to change it.'));
+        expect(hidden(container, '#conn-mgmt-form-view')).toBe(false);
+    });
+
+    it('stale delete: the dialog offers Reload, which reloads the list', async () => {
+        const { container } = await setup();
+        svcMock.deleteConnection.mockResolvedValue(failed(409, 'stale', { rev: 8 }));
+        delB1(container);
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(svcMock.deleteConnection).toHaveBeenCalledTimes(1));
+        expect(await answerConfirm(true)).toBe('This connection was changed by someone else since you opened it.');
+        await vi.waitFor(() => expect(svcMock.listConnections).toHaveBeenCalledTimes(2));
+        expect(svcMock.deleteConnection).toHaveBeenCalledWith('b1', 4);
+    });
+
+    it('delete of a connection already deleted: says so and shows the reloaded list', async () => {
+        const { container } = await setup();
+        svcMock.deleteConnection.mockResolvedValue(failed(404, 'not_found'));
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: [CONNS[1]] });
+        delB1(container);
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('This connection was deleted by someone else.', 'error'));
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').querySelectorAll('tr').length).toBe(1));
     });
 });

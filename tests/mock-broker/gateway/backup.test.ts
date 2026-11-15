@@ -120,14 +120,14 @@ describe('mock-broker/gateway/backup -- the file format', () => {
         expect(await problem(openBackup(JSON.stringify(good), 'not the passphrase'))).toEqual(WRONG);
     });
 
-    it('refuses content the gateway would not have written, and reads ports written as numbers', async () => {
+    it('refuses content the gateway would not have written, reads ports written as numbers, and drops a record\'s rev', async () => {
         for (const plain of ['{"version":2}', '{"version":1,"extra":true}', 'not JSON', '{"version":1,"settings":[]}']) {
             expect(await problem(openBackup(await sealRaw(plain), PASS))).toEqual(DAMAGED);
         }
         const d = await openBackup(await sealRaw(JSON.stringify({
             version: 1,
-            'msg-utility-connections': [{ broker: 'b9', hostname: 'h', semp: { port: 1943 }, client: { port: '1443', msgVpns: [{ name: 'v' }] } }],
-            'msg-utility-users': [{ username: 'u', password: 'p', 'read-only': [{ brokers: 'b', msgVpns: 'v', queues: 'q' }], modules: null }],
+            'msg-utility-connections': [{ broker: 'b9', hostname: 'h', semp: { port: 1943 }, client: { port: '1443', msgVpns: [{ name: 'v' }] }, rev: 7 }],
+            'msg-utility-users': [{ username: 'u', password: 'p', 'read-only': [{ brokers: 'b', msgVpns: 'v', queues: 'q' }], modules: null, rev: 3 }],
             settings: { version: 1, appDir: '/old', usersFile: '/old/u.yaml', connectionsFile: '/old/c.yaml', connModes: 'both' },
         })), PASS);
         expect(d.connections[0]).toEqual({ broker: 'b9', hostname: 'h', semp: { port: '1943', username: '', password: '' }, client: { port: '1443', msgVpns: [{ name: 'v', username: '', password: '' }] } });
@@ -150,11 +150,11 @@ describe('mock-broker/gateway/backup -- the file format', () => {
         expect(() => settingsFromBackup({ hosted: 'yes' })).toThrow();
     });
 
-    it('opens a backup from before the audit section, with both audit keys off', () => {
+    it('opens a backup from before the audit section, with both audit keys off and onFailure continue', () => {
         const { audit, ...old } = settings();
-        expect(audit).toEqual({ stdout: false, access: false });
-        expect(settingsFromBackup(old).audit).toEqual({ stdout: false, access: false });
-        expect(settingsFromBackup({ ...old, audit: { stdout: true } }).audit).toEqual({ stdout: true, access: false });
+        expect(audit).toEqual({ stdout: false, access: false, onFailure: 'continue' });
+        expect(settingsFromBackup(old).audit).toEqual({ stdout: false, access: false, onFailure: 'continue' });
+        expect(settingsFromBackup({ ...old, audit: { stdout: true } }).audit).toEqual({ stdout: true, access: false, onFailure: 'continue' });
     });
 });
 
@@ -224,8 +224,10 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         return createGateway({ seed: contractSeed(), backupIter: 1000, now: () => clock });
     };
     type Gw = ReturnType<typeof gateway>;
+    /** `p` may end in `?query`, as a delete's `?rev=N` does. */
     const call = async (gw: Gw, method: string, p: string, body?: unknown, as = 'admin') => {
-        const res = await gw.handle({ method, path: p, query: '', body: body === undefined ? '' : JSON.stringify(body), session: gw.openSession(as, false) });
+        const [path, query = ''] = p.split('?');
+        const res = await gw.handle({ method, path, query, body: body === undefined ? '' : JSON.stringify(body), session: gw.openSession(as, false) });
         return { status: res.status, json: res.json as any };
     };
     const daily = { kind: 'daily', minute: 0, hour: 2, weekday: 0, day: 0 };
@@ -233,10 +235,10 @@ describe('mock-broker/gateway/backup -- the routes', () => {
     it('keeps a schedule, runs it, names each file by the clock and keeps the newest', async () => {
         const gw = gateway();
         expect((await call(gw, 'POST', '/managed/backup/run')).status).toBe(404);
-        expect((await call(gw, 'DELETE', '/managed/backup/schedule')).status).toBe(404);
-        expect((await call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 2, passphrase: PASS })).status).toBe(204);
+        expect((await call(gw, 'DELETE', '/managed/backup/schedule?rev=1')).status).toBe(404);
+        expect(await call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 2, passphrase: PASS, rev: 0 })).toEqual({ status: 200, json: { rev: 1 } });
         expect((await call(gw, 'GET', '/managed/backup')).json).toEqual({
-            schedule: { ...daily, keep: 2 }, nextRun: '2026-11-10T02:00:00Z', lastRun: null, dirProblem: '', files: [],
+            schedule: { ...daily, keep: 2, rev: 1 }, nextRun: '2026-11-10T02:00:00Z', lastRun: null, dirProblem: '', files: [],
         });
         for (const minute of [0, 1, 2]) {
             clock = new Date(Date.UTC(2026, 10, 9, 9, minute));
@@ -256,13 +258,13 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         expect((await call(gw, 'GET', '/managed/backup')).json.lastRun.error).toContain('already exists');
 
         // An edit keeps the key: the files it writes open with the first passphrase.
-        expect((await call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 5, passphrase: '' })).status).toBe(204);
+        expect(await call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 5, passphrase: '', rev: 1 })).toEqual({ status: 200, json: { rev: 2 } });
         clock = new Date(Date.UTC(2026, 10, 9, 10));
         await call(gw, 'POST', '/managed/backup/run');
         const preview = await call(gw, 'POST', '/managed/backup/preview', { backup: 'smu-backup-20261109T100000Z.json', passphrase: PASS });
         expect(preview.status).toBe(200);
 
-        expect((await call(gw, 'DELETE', '/managed/backup/schedule')).status).toBe(204);
+        expect((await call(gw, 'DELETE', '/managed/backup/schedule?rev=2')).status).toBe(204);
         expect((await call(gw, 'GET', '/managed/backup')).json.schedule).toBeNull();
     });
 
@@ -272,7 +274,7 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         for (const p of [name, 'users.yaml', '..%2Fusers.yaml']) {
             expect(await call(gw, 'GET', `/managed/backup/files/${p}`)).toEqual({ status: 404, json: { error: 'not_found' } });
         }
-        await call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 2, passphrase: PASS });
+        await call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 2, passphrase: PASS, rev: 0 });
         await call(gw, 'POST', '/managed/backup/run');
         const got = await call(gw, 'GET', `/managed/backup/files/${name}`);
         expect([got.status, got.json.filename, gw.snapshot().backups?.files[0]]).toEqual([200, name, [name, got.json.content]]);
@@ -282,7 +284,7 @@ describe('mock-broker/gateway/backup -- the routes', () => {
 
     it('refuses a schedule as the gateway does', async () => {
         const gw = gateway();
-        const put = (body: unknown) => call(gw, 'PUT', '/managed/backup/schedule', body);
+        const put = (body: object) => call(gw, 'PUT', '/managed/backup/schedule', { rev: 0, ...body });
         expect((await put({ ...daily, kind: 'yearly', keep: 1, passphrase: PASS })).json.field).toBe('schedule');
         expect((await put({ ...daily, keep: 0, passphrase: PASS })).json.field).toBe('keep');
         expect((await put({ ...daily, keep: 366, passphrase: PASS })).json.field).toBe('keep');
@@ -294,7 +296,7 @@ describe('mock-broker/gateway/backup -- the routes', () => {
     it('lets a crypto failure through: it is no refusal of the request', async () => {
         const gw = gateway();
         vi.spyOn(crypto.subtle, 'deriveKey').mockRejectedValueOnce(new Error('no crypto'));
-        await expect(call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 1, passphrase: PASS })).rejects.toThrow('no crypto');
+        await expect(call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 1, passphrase: PASS, rev: 0 })).rejects.toThrow('no crypto');
     });
 
     it('exports a file the next import opens, and refuses a short passphrase', async () => {
@@ -314,14 +316,16 @@ describe('mock-broker/gateway/backup -- the routes', () => {
             edit(d);
             return sealBackup(await newBackupKey(PASS, 1000), d);
         }
-        const imp = (gw: Gw, f: string, users: string, connections: string, s: string) =>
-            call(gw, 'POST', '/managed/backup/import', { file: f, passphrase: PASS, users, connections, settings: s });
+        /** The basis a preview would return now: the versions the import is checked against. */
+        const basisOf = (gw: Gw) => ({ ...gw.store.seqs(), settings: gw.settings.rev() });
+        const imp = (gw: Gw, f: string, users: string, connections: string, s: string, basis: object = basisOf(gw)) =>
+            call(gw, 'POST', '/managed/backup/import', { file: f, passphrase: PASS, users, connections, settings: s, basis });
 
         it('refuses a missing source, a missing saved backup and a file it cannot open', async () => {
             const gw = gateway();
             const f = await file(gw);
             expect((await imp(gw, '', 'merge', 'skip', 'skip')).json.field).toBe('file');
-            expect((await call(gw, 'POST', '/managed/backup/import', { file: f, backup: 'x', passphrase: PASS, users: 'merge', connections: 'skip', settings: 'skip' })).json.field).toBe('file');
+            expect((await call(gw, 'POST', '/managed/backup/import', { file: f, backup: 'x', passphrase: PASS, users: 'merge', connections: 'skip', settings: 'skip', basis: basisOf(gw) })).json.field).toBe('file');
             expect((await call(gw, 'POST', '/managed/backup/preview', { backup: 'smu-backup-20261109T090000Z.json', passphrase: PASS })).json)
                 .toEqual({ error: 'invalid', field: 'backup', reason: 'There is no backup named "smu-backup-20261109T090000Z.json".' });
             expect((await call(gw, 'POST', '/managed/backup/preview', { file: 'x', passphrase: PASS })).json.reason).toBe(NOT_BACKUP[1]);
@@ -384,7 +388,7 @@ describe('mock-broker/gateway/backup -- the routes', () => {
 
     it('carries the backup directory and the last run across a reload, but not the schedule', async () => {
         const gw = gateway();
-        await call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 3, passphrase: PASS });
+        await call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 3, passphrase: PASS, rev: 0 });
         await call(gw, 'POST', '/managed/backup/run');
         const snap = gw.snapshot();
         const next = gateway();

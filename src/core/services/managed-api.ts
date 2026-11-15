@@ -8,7 +8,7 @@
  * `/login/password`), which the UI reaches by plain links.
  *
  * Every call resolves — it never rejects. A non-2xx answer carries the
- * gateway's `{ error, field?, reason? }` code; `managedErrorMessage` turns it
+ * gateway's `{ error, field?, reason?, rev?, basis? }` code; `managedErrorMessage` turns it
  * into text for the user. Lives in core because the Managed panel and the
  * three admin modules all talk to the gateway through it.
  */
@@ -28,6 +28,10 @@ export interface ManagedError {
     /** For `invalid`: which field, and a reason fit to show the admin. */
     field?: string;
     reason?: string;
+    /** For `stale`: the record's current rev (a number; the settings rev is text). */
+    rev?: number | string;
+    /** For a `stale` import: the gateway's current basis, opaque to the browser. */
+    basis?: unknown;
 }
 
 export type ManagedResult<T> = { ok: true; data: T } | ManagedError;
@@ -77,8 +81,8 @@ export async function managedRequest<T = void>(method: Method, path: string, bod
         if (ans.status === 204) return { ok: true, data: undefined as T };
         return ans.parsed ? { ok: true, data: ans.body as T } : { ok: false, status: ans.status, code: 'bad_response' };
     }
-    const err = (ans.parsed ? ans.body : {}) as { error?: string; field?: string; reason?: string };
-    return { ok: false, status: ans.status, code: err.error ?? `http_${ans.status}`, field: err.field, reason: err.reason };
+    const err = (ans.parsed ? ans.body : {}) as { error?: string; field?: string; reason?: string; rev?: number | string; basis?: unknown };
+    return { ok: false, status: ans.status, code: err.error ?? `http_${ans.status}`, field: err.field, reason: err.reason, rev: err.rev, basis: err.basis };
 }
 
 const MESSAGES: Record<string, string> = {
@@ -93,6 +97,12 @@ const MESSAGES: Record<string, string> = {
     rate_limited: 'Too many requests. Wait a minute and try again.',
     would_lock_out: 'This change would lock this browser out of the gateway.',
     config_changed_on_disk: 'config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.',
+    stale: 'This was changed by someone else since you opened it. Reload to see the current version.',
+    exists: 'That name already exists. Use Edit to change it.',
+    rev_required: 'The page did not send the version it was working from, so the gateway refused the change. Reload the page and try again.',
+    store_changed_on_disk: 'A data file (users, connections or backup settings) was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.',
+    store_write_failed: 'The gateway could not write its data files, so nothing was changed. Its log has the cause.',
+    audit_unavailable: 'The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.',
     config_unreadable: 'The gateway cannot read its config.yaml. Its log has the cause.',
     backup_unavailable: 'The gateway could not write the backup. Its log has the cause.',
     server_error: 'The gateway could not complete the request. Its log has the cause.',

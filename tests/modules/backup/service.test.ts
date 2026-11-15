@@ -25,17 +25,23 @@ describe('backup/service', () => {
         expect(sent()[0]).toBe('/managed/backup/files/..%2Fusers.yaml');
     });
 
-    it('saveSchedule PUTs the schedule, the keep count and the passphrase', async () => {
-        answer(204);
-        const body = { kind: 'weekly' as const, minute: 15, hour: 2, weekday: 1, day: 0, keep: 14, passphrase: '' };
-        expect(await createBackupService().saveSchedule(body)).toEqual({ ok: true, data: undefined });
+    it('saveSchedule PUTs the schedule, the keep count, the passphrase and the rev, and answers the new rev', async () => {
+        answer(200, { rev: 5 });
+        const body = { kind: 'weekly' as const, minute: 15, hour: 2, weekday: 1, day: 0, keep: 14, passphrase: '', rev: 4 };
+        expect(await createBackupService().saveSchedule(body)).toEqual({ ok: true, data: { rev: 5 } });
         expect(sent()).toEqual(['/managed/backup/schedule', expect.objectContaining({ method: 'PUT', body: JSON.stringify(body) })]);
     });
 
-    it('removeSchedule DELETEs it, and runNow POSTs a run', async () => {
+    it('a stale schedule save carries the current rev', async () => {
+        answer(409, { error: 'stale', rev: 9 });
+        const body = { kind: 'daily' as const, minute: 0, hour: 2, weekday: 0, day: 0, keep: 7, passphrase: '', rev: 4 };
+        expect(await createBackupService().saveSchedule(body)).toEqual(expect.objectContaining({ ok: false, code: 'stale', rev: 9 }));
+    });
+
+    it('removeSchedule DELETEs it with the rev in the query, and runNow POSTs a run', async () => {
         answer(204);
-        await createBackupService().removeSchedule();
-        expect(sent()[0]).toBe('/managed/backup/schedule');
+        await createBackupService().removeSchedule(4);
+        expect(sent()[0]).toBe('/managed/backup/schedule?rev=4');
         expect(sent()[1].method).toBe('DELETE');
         fetchMock().mockClear();
         answer(200, { file: 'smu-backup-20261109T020000Z.json' });
@@ -58,9 +64,16 @@ describe('backup/service', () => {
         })]);
         fetchMock().mockClear();
         answer(200, { restartRequired: [], signedOut: false });
-        await createBackupService().importFile({ file: '{}' }, 'pp', { users: 'merge', connections: 'skip', settings: 'replace' });
+        await createBackupService().importFile({ file: '{}' }, 'pp', { users: 'merge', connections: 'skip', settings: 'replace' }, { users: 3, connections: 2, settings: 'cfg' });
         expect(sent()).toEqual(['/managed/backup/import', expect.objectContaining({
-            method: 'POST', body: JSON.stringify({ file: '{}', passphrase: 'pp', users: 'merge', connections: 'skip', settings: 'replace' }),
+            method: 'POST', body: JSON.stringify({ file: '{}', passphrase: 'pp', users: 'merge', connections: 'skip', settings: 'replace', basis: { users: 3, connections: 2, settings: 'cfg' } }),
         })]);
+    });
+
+    it('a stale import carries the current basis', async () => {
+        const basis = { users: 4, connections: 2, settings: 'cfg-2' };
+        answer(409, { error: 'stale', basis });
+        const res = await createBackupService().importFile({ file: '{}' }, 'pp', { users: 'merge', connections: 'skip', settings: 'skip' }, {});
+        expect(res).toEqual(expect.objectContaining({ ok: false, code: 'stale', basis }));
     });
 });

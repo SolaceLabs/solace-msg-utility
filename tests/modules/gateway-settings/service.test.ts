@@ -9,14 +9,14 @@ const SETTINGS: GatewaySettings = {
     session: { idleMinutes: 10, absoluteMinutes: 30 },
     login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60 },
     modules: { offered: ['queue-browser'], userDefault: 'all' },
-    audit: { stdout: false, access: false },
+    audit: { stdout: false, access: false, onFailure: 'continue' },
 };
 
 const fetchMock = () => globalThis.fetch as any;
 
 describe('gateway-settings/service', () => {
     it('load GETs /managed/settings', async () => {
-        const view = { settings: SETTINGS, restartOnly: ['tls.keyFile'], pendingRestart: [], changedOnDisk: false, catalog: ['queue-browser'] };
+        const view = { rev: 'abc', settings: SETTINGS, restartOnly: ['tls.keyFile'], pendingRestart: [], changedOnDisk: false, catalog: ['queue-browser'] };
         fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => view });
 
         expect(await createSettingsService().load()).toEqual({ ok: true, data: view });
@@ -31,12 +31,17 @@ describe('gateway-settings/service', () => {
         expect(fetchMock()).toHaveBeenCalledWith('/managed/client', { method: 'GET', credentials: 'same-origin' });
     });
 
-    it('save PUTs the whole file and returns the keys that wait for a restart', async () => {
-        fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => ({ restartRequired: ['tls.keyFile'] }) });
+    it('save PUTs the whole file with the rev at top level, and returns the restart keys and the new rev', async () => {
+        fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => ({ restartRequired: ['tls.keyFile'], rev: 'next' }) });
 
-        expect(await createSettingsService().save(SETTINGS)).toEqual({ ok: true, data: { restartRequired: ['tls.keyFile'] } });
+        expect(await createSettingsService().save(SETTINGS, 'abc')).toEqual({ ok: true, data: { restartRequired: ['tls.keyFile'], rev: 'next' } });
         expect(fetchMock()).toHaveBeenCalledWith('/managed/settings', expect.objectContaining({
-            method: 'PUT', body: JSON.stringify(SETTINGS),
+            method: 'PUT', body: JSON.stringify({ ...SETTINGS, rev: 'abc' }),
         }));
+    });
+
+    it('a stale save carries the current rev text', async () => {
+        fetchMock().mockResolvedValue({ ok: false, status: 409, json: async () => ({ error: 'stale', rev: 'cur' }) });
+        expect(await createSettingsService().save(SETTINGS, 'old')).toEqual(expect.objectContaining({ ok: false, code: 'stale', rev: 'cur' }));
     });
 });

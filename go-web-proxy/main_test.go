@@ -88,8 +88,8 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.usersFile != "/data/users.yaml" || cfg.connectionsFile != "/data/connections.yaml" || cfg.storeKeyFile != "/data/store.key" {
 		t.Errorf("stores: want them under /data, got %q %q %q", cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile)
 	}
-	if cfg.auditFile != "/data/audit.log" || cfg.audit != (auditSettings{}) {
-		t.Errorf("audit: want /data/audit.log with both options off, got %q %+v", cfg.auditFile, cfg.audit)
+	if cfg.auditFile != "/data/audit.log" || cfg.audit != (auditSettings{onFailure: auditOnFailureContinue}) {
+		t.Errorf("audit: want /data/audit.log with both options off and onFailure continue, got %q %+v", cfg.auditFile, cfg.audit)
 	}
 	if cfg.certFile != "/tls/tls.crt" {
 		t.Errorf("certFile: want /tls/tls.crt, got %q", cfg.certFile)
@@ -551,6 +551,40 @@ func TestServe_ProvisionedModeStartsAndShutsDownOnASignal(t *testing.T) {
 	)
 }
 
+// A write the last process was cut short in is rolled back before config.yaml
+// is read: here config.yaml was half replaced (garbage) and its backup holds
+// the good one, so the start works only if recovery ran first. The journal and
+// the backup are gone afterwards.
+func TestServe_RollsBackAnInterruptedWriteBeforeReadingConfig(t *testing.T) {
+	dir := gatewayDir(t)
+	configFile := writeServeConfig(t, dir, "")
+	good, err := os.ReadFile(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, configFile+backupSuffix, string(good))
+	writeFile(t, configFile, "bogus: [not yaml")
+	writeFile(t, filepath.Join(dir, txnFileName), `{"version":1,"files":[{"name":"config.yaml","existed":true}]}`)
+
+	r := startServe(t, process{configFile: configFile, dataDir: dir})
+	if code, _ := r.get(t, gatewayClient(t, dir), "/robots.txt"); code != http.StatusOK {
+		t.Errorf("/robots.txt after recovery: want 200, got %d", code)
+	}
+	r.signals <- syscall.SIGTERM
+	if err := r.result(t); err != nil {
+		t.Fatalf("serve after SIGTERM: %v", err)
+	}
+	expectLogged(t, r.log.String(), "an interrupted store write was found")
+	if got := readOr(t, configFile); got != string(good) {
+		t.Errorf("config.yaml was not restored: %q", got)
+	}
+	for _, name := range []string{txnFileName, "config.yaml" + backupSuffix} {
+		if got := readOr(t, filepath.Join(dir, name)); got != "<absent>" {
+			t.Errorf("%s was left behind", name)
+		}
+	}
+}
+
 // Every way a start can fail ends serve with an error, logged with what failed:
 // main exits 1 on it.
 func TestServe_FailuresStopTheStart(t *testing.T) {
@@ -563,6 +597,10 @@ func TestServe_FailuresStopTheStart(t *testing.T) {
 		{"a config.yaml it cannot use", func(t *testing.T, dir string) string {
 			return writeServeConfig(t, dir, "bogus: 1\n")
 		}, nil, "configuration failed"},
+		{"a damaged transaction journal", func(t *testing.T, dir string) string {
+			writeFile(t, filepath.Join(dir, txnFileName), "{not json")
+			return writeServeConfig(t, dir, "")
+		}, nil, "data directory recovery failed"},
 		{"a certificate pair that does not load", func(t *testing.T, dir string) string {
 			writeFile(t, filepath.Join(dir, "tls.key"), "not a key")
 			return writeServeConfig(t, dir, "")

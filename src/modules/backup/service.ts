@@ -2,6 +2,11 @@
  * Backup & Restore service -- the gateway's `/managed/backup*` API
  * (go-web-proxy/backup_api.go), authenticated by the session cookie (see
  * `src/core/services/managed-api.ts`).
+ *
+ * Versions: the schedule carries a `rev` (0 when there is none) that a save or
+ * delete sends back, and a preview carries a `basis` (opaque to this page) that
+ * the import sends back untouched. The gateway refuses either once the data has
+ * moved on (`stale`).
  */
 import { managedRequest } from '../../core/services/managed-api';
 
@@ -27,7 +32,7 @@ export interface BackupFile {
 
 /** The GET /managed/backup body. */
 export interface BackupStatus {
-    schedule: (BackupSchedule & { keep: number }) | null;
+    schedule: (BackupSchedule & { keep: number; rev: number }) | null;
     nextRun: string | null;
     lastRun: { at: string; file: string; error: string } | null;
     /** Why the gateway cannot write to its backup directory; "" when it can. */
@@ -52,6 +57,8 @@ export interface ImportPreview {
     settings: string[];
     /** Whether importing the users that way ends the requester's own session. */
     signsOutCaller: { replace: boolean; merge: boolean };
+    /** The versions of the gateway's data this preview was made against; opaque, sent back with the import. */
+    basis: unknown;
 }
 
 /** A file to import: its content, or the name of a saved backup. */
@@ -75,14 +82,15 @@ export function createBackupService() {
         status: () => managedRequest<BackupStatus>('GET', '/managed/backup'),
         /** A saved backup as written, still sealed with its schedule's passphrase. */
         download: (name: string) => managedRequest<{ filename: string; content: string }>('GET', `/managed/backup/files/${encodeURIComponent(name)}`),
-        /** `passphrase` "" keeps the current schedule's. */
-        saveSchedule: (s: BackupSchedule & { keep: number; passphrase: string }) => managedRequest('PUT', '/managed/backup/schedule', s),
-        removeSchedule: () => managedRequest('DELETE', '/managed/backup/schedule'),
+        /** `passphrase` "" keeps the current schedule's; `rev` is the schedule's (0 when there is none). Answers the new rev. */
+        saveSchedule: (s: BackupSchedule & { keep: number; passphrase: string; rev: number }) => managedRequest<{ rev: number }>('PUT', '/managed/backup/schedule', s),
+        removeSchedule: (rev: number) => managedRequest('DELETE', `/managed/backup/schedule?rev=${rev}`),
         runNow: () => managedRequest<{ file: string }>('POST', '/managed/backup/run'),
         exportFile: (passphrase: string) => managedRequest<{ filename: string; content: string }>('POST', '/managed/backup/export', { passphrase }),
         preview: (source: ImportSource, passphrase: string) => managedRequest<ImportPreview>('POST', '/managed/backup/preview', { ...source, passphrase }),
-        importFile: (source: ImportSource, passphrase: string, choices: ImportChoices) =>
-            managedRequest<ImportResult>('POST', '/managed/backup/import', { ...source, passphrase, ...choices }),
+        /** `basis` is the preview's, sent untouched. */
+        importFile: (source: ImportSource, passphrase: string, choices: ImportChoices, basis: unknown) =>
+            managedRequest<ImportResult>('POST', '/managed/backup/import', { ...source, passphrase, ...choices, basis }),
     };
 }
 

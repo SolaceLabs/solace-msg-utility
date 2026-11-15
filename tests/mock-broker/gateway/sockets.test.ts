@@ -109,26 +109,27 @@ describe('mock-broker/gateway/sockets -- revocation', () => {
         gw.setCookie(sid);
     });
 
+    // Every seeded record is at rev 1 and each case starts from a fresh gateway.
     const admin = (method: string, path: string, body?: unknown) => gw.handle({
-        method, path, query: '', body: body === undefined ? '' : JSON.stringify(body), session: gw.openSession('admin', false),
+        method, path, query: method === 'DELETE' ? 'rev=1' : '', body: body === undefined ? '' : JSON.stringify(body), session: gw.openSession('admin', false),
     });
     const viewerRow = { brokers: 'b1', msgVpns: 'v1', queues: '*' };
 
     it.each([
         ['sign-out', async () => { await gw.handle({ method: 'POST', path: '/managed/logout', query: '', body: '', session: sid }); }],
         ['a new password', async () => {
-            await admin('PUT', '/managed/users/viewer', { password: 'viewer-password-9', admin: false, operate: [], readOnly: [viewerRow], modules: null });
+            await admin('PUT', '/managed/users/viewer', { password: 'viewer-password-9', admin: false, operate: [], readOnly: [viewerRow], modules: null, rev: 1 });
         }],
         ['a changed administrator flag', async () => {
-            await admin('PUT', '/managed/users/viewer', { password: '', admin: true, operate: [], readOnly: [viewerRow], modules: null });
+            await admin('PUT', '/managed/users/viewer', { password: '', admin: true, operate: [], readOnly: [viewerRow], modules: null, rev: 1 });
         }],
         ['the user deleted', async () => { await admin('DELETE', '/managed/users/viewer'); }],
         ['the entitlement removed', async () => {
-            await admin('PUT', '/managed/users/viewer', { password: '', admin: false, operate: [], readOnly: [], modules: null });
+            await admin('PUT', '/managed/users/viewer', { password: '', admin: false, operate: [], readOnly: [], modules: null, rev: 1 });
         }],
         ['the VPN removed from the broker', async () => {
             await admin('PUT', '/managed/connections/b1', {
-                hostname: 'host1', semp: { port: '1943', user: 'mon', pass: '' }, client: { port: '1443', msgVpns: [{ name: 'v2', user: 'u2', pass: '' }] },
+                hostname: 'host1', semp: { port: '1943', user: 'mon', pass: '' }, client: { port: '1443', msgVpns: [{ name: 'v2', user: 'u2', pass: '' }] }, rev: 1,
             });
         }],
         ['the broker deleted', async () => { await admin('DELETE', '/managed/connections/b1'); }],
@@ -141,7 +142,7 @@ describe('mock-broker/gateway/sockets -- revocation', () => {
 
     it('keeps it open across an edit that leaves the VPN reachable', async () => {
         const { events } = await open();
-        await admin('PUT', '/managed/users/viewer', { password: '', admin: false, operate: [], readOnly: [viewerRow, { brokers: 'b2', msgVpns: '*', queues: '*' }], modules: null });
+        await admin('PUT', '/managed/users/viewer', { password: '', admin: false, operate: [], readOnly: [viewerRow, { brokers: 'b2', msgVpns: '*', queues: '*' }], modules: null, rev: 1 });
         expect(codes(events)).toEqual([UP]);
     });
 
@@ -154,7 +155,7 @@ describe('mock-broker/gateway/sockets -- revocation', () => {
     it('still closes on a password change after the session expired', async () => {
         const { events } = await open();
         gw.sessions.expire(sid);
-        await admin('PUT', '/managed/users/viewer', { password: 'viewer-password-9', admin: false, operate: [], readOnly: [viewerRow], modules: null });
+        await admin('PUT', '/managed/users/viewer', { password: 'viewer-password-9', admin: false, operate: [], readOnly: [viewerRow], modules: null, rev: 1 });
         expect(codes(events)).toEqual([UP, DOWN]);
     });
 

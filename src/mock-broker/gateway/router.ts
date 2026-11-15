@@ -11,8 +11,15 @@
  *      `403 forbidden` for a non-admin;
  *   5. a body that is not strict JSON is `400 bad_request`.
  *
+ * Whole-record saves carry a version (versions.ts, store.ts): a PUT's `rev`
+ * (0 creates) and a DELETE's `?rev=`, refused as 400 rev_required, 404
+ * not_found, 409 exists or 409 stale in the gateway's order: what the body
+ * alone settles (422, then rev_required), then the record, then its rev, then
+ * the rules that need the rest of the store.
+ *
  * Not simulated: the cross-site write check, the body cap and the
- * unauthenticated throttle.
+ * unauthenticated throttle, and the refusals of a store that cannot be
+ * written (store_changed_on_disk, store_write_failed, audit_unavailable).
  *
  * Mock-only.
  */
@@ -21,7 +28,8 @@ import { canonScheme, CATALOG, connectionProblem, moduleIdsProblem, passwordOk, 
 import { relay, RELAY_PREFIX, type Upstream } from './relay';
 import type { GatewayStore } from './store';
 import type { GatewaySessions, Session } from './sessions';
-import type { GatewaySettingsFile } from './settings';
+import { refusalBody, splitRev, type GatewaySettingsFile, type Refusal } from './settings';
+import { bodyRev, exists, notFound, queryRev, revRequired, stale } from './versions';
 import type { ClientSeen, ConnRec, DialResponse, GatewayRequest, GatewayResponse, UserList } from './types';
 import type { QGlob } from '../../core/types';
 
@@ -104,8 +112,9 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
         return ok(body);
     };
 
+    /** The user's PUT: 200 with the record's rev after the save. */
     const saveUser: Handler = (req, _s, _sid, [name]) => {
-        const b = object(parseBody(req.body), ['password', 'admin', 'operate', 'readOnly', 'modules']);
+        const b = object(parseBody(req.body), ['password', 'admin', 'operate', 'readOnly', 'modules', 'rev']);
         const password = string(b.password);
         const modules = nullableList(b.modules, string);
         const rec = { username: name, admin: boolean(b.admin), operate: list(b.operate, glob), readOnly: list(b.readOnly, glob), modules };
@@ -115,16 +124,29 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
         }
         const modulesProblem = modules && moduleIdsProblem('modules', modules);
         if (modulesProblem) return invalid('modules', modulesProblem);
-        const r = store.upsertUser(rec, password);
-        if (!r.ok) return r.error === 'last_admin' ? error(409, 'last_admin') : invalid('password', 'A new user needs a password.');
+        const rev = bodyRev(b.rev);
+        if (rev === null) return revRequired;
+        const r = store.upsertUser(rec, password, rev);
+        if (!r.ok) {
+            switch (r.error) {
+                case 'exists': return exists;
+                case 'not_found': return notFound;
+                case 'stale': return stale(store.userRev(name)!);
+                case 'last_admin': return error(409, 'last_admin');
+                default: return invalid('password', 'A new user needs a password.');
+            }
+        }
         if (r.dropSessions) sessions.dropUser(name);
-        return noContent;
+        return ok({ rev: r.rev });
     };
 
-    const deleteUser: Handler = (_req, _s, _sid, [name]) => {
-        const r = store.deleteUser(name);
+    const deleteUser: Handler = (req, _s, _sid, [name]) => {
+        const rev = queryRev(req.query);
+        if (rev === null) return revRequired;
+        const r = store.deleteUser(name, rev);
         if (r === 'last_admin') return error(409, 'last_admin');
-        if (r === 'not_found') return error(404, 'not_found');
+        if (r === 'not_found') return notFound;
+        if (r === 'stale') return stale(store.userRev(name)!);
         sessions.dropUser(name);
         return noContent;
     };
@@ -133,7 +155,7 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
 
     /** saveConnection: a scheme left out, or the TLS one, is stored as the default (canonScheme). */
     const saveConnection: Handler = (req, _s, _sid, [broker]) => {
-        const b = object(parseBody(req.body), ['hostname', 'semp', 'client']);
+        const b = object(parseBody(req.body), ['hostname', 'semp', 'client', 'rev']);
         const semp = object(b.semp, ['scheme', 'port', 'user', 'pass']);
         const cl = object(b.client, ['scheme', 'port', 'msgVpns']);
         const sempScheme = canonScheme(string(semp.scheme), 'https');
@@ -153,17 +175,22 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
         };
         const problem = connectionProblem(rec);
         if (problem) return invalid('connection', problem);
-        store.upsertConnection(rec);
-        return noContent;
+        const rev = bodyRev(b.rev);
+        if (rev === null) return revRequired;
+        const r = store.upsertConnection(rec, rev);
+        if (r.ok) return ok({ rev: r.rev });
+        return r.error === 'exists' ? exists : r.error === 'not_found' ? notFound : stale(store.connRev(broker)!);
     };
 
-    const deleteConnection: Handler = (_req, _s, _sid, [broker]) =>
-        (store.deleteConnection(broker) ? noContent : error(404, 'not_found'));
+    const deleteConnection: Handler = (req, _s, _sid, [broker]) => {
+        const rev = queryRev(req.query);
+        if (rev === null) return revRequired;
+        const r = store.deleteConnection(broker, rev);
+        if (r === 'not_found') return notFound;
+        return r === 'stale' ? stale(store.connRev(broker)!) : noContent;
+    };
 
-    const refusal = (r: { status: number; error: string; field?: string; reason?: string }): GatewayResponse => ({
-        status: r.status,
-        json: { error: r.error, ...(r.field ? { field: r.field } : {}), ...(r.reason ? { reason: r.reason } : {}) },
-    });
+    const refusal = (r: Refusal): GatewayResponse => ({ status: r.status, json: refusalBody(r) });
 
     const getSettings: Handler = () => {
         const v = settings.view();
@@ -171,8 +198,9 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
     };
 
     const saveSettings: Handler = (req) => {
-        const r = settings.save(parseBody(req.body));
-        return r.ok ? ok({ restartRequired: r.restartRequired }) : refusal(r);
+        const { patch, rev } = splitRev(parseBody(req.body));
+        const r = settings.save(patch, rev);
+        return r.ok ? ok({ restartRequired: r.restartRequired, rev: r.rev }) : refusal(r);
     };
 
     /** clientSeen: the demo has one browser, seen directly. */

@@ -16,12 +16,15 @@ export interface GatewaySettings {
     session: { idleMinutes: number; absoluteMinutes: number };
     login: { maxFailures: number; backoffSeconds: number; maxBackoffSeconds: number; unauthenticatedPerMinute: number };
     modules: { offered: string[]; userDefault: string };
-    audit: { stdout: boolean; access: boolean };
+    /** `onFailure`: "continue" logs a lost audit record and carries on; "refuse" refuses changes while the audit log cannot be written. */
+    audit: { stdout: boolean; access: boolean; onFailure: string };
 }
 
 /** The GET /managed/settings body. */
 export interface SettingsView {
     settings: GatewaySettings;
+    /** The file's version, opaque text; a save sends it back, and the gateway refuses it once it is out of date (`stale`). */
+    rev: string;
     /** Keys that apply when the gateway restarts; every other key applies at once. */
     restartOnly: string[];
     /** Path keys a save may not change: only a hand edit of config.yaml on the host does. */
@@ -48,14 +51,14 @@ export interface SettingsService {
     load(): Promise<ManagedResult<SettingsView>>;
     /** The caller's address as the gateway resolves it (go-web-proxy/managed.go clientSeen). */
     client(): Promise<ManagedResult<ClientSeen>>;
-    /** PUT the whole file. `restartRequired` lists the saved keys that wait for a restart. */
-    save(settings: GatewaySettings): Promise<ManagedResult<{ restartRequired: string[] }>>;
+    /** PUT the whole file with the `rev` it was loaded at. `restartRequired` lists the saved keys that wait for a restart; `rev` is the file's new version. */
+    save(settings: GatewaySettings, rev: string): Promise<ManagedResult<{ restartRequired: string[]; rev: string }>>;
 }
 
 export function createSettingsService(): SettingsService {
     return {
         load: () => managedRequest<SettingsView>('GET', '/managed/settings'),
         client: () => managedRequest<ClientSeen>('GET', '/managed/client'),
-        save: (settings) => managedRequest('PUT', '/managed/settings', settings),
+        save: (settings, rev) => managedRequest<{ restartRequired: string[]; rev: string }>('PUT', '/managed/settings', { ...settings, rev }),
     };
 }

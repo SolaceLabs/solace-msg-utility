@@ -8,12 +8,14 @@ const OPS: ManagedUser = {
     operate: [{ brokers: 'prod', msgVpns: 'vpn-*', queues: 'orders.*' }],
     readOnly: [{ brokers: 'prod', msgVpns: 'vpn-a', queues: '*' }],
     modules: ['queue-browser', 'queue-copy'],
+    rev: 1,
 };
 const READER: ManagedUser = {
     username: 'reader', admin: false,
     operate: [],
     readOnly: [{ brokers: '*', msgVpns: 'vpn-a', queues: 'audit.*' }],
     modules: null,
+    rev: 2,
 };
 /** The deployment offers only queue-browser of the two catalog modules. */
 const CHOICES: ModuleChoices = { catalog: ['queue-browser', 'queue-copy'], offered: ['queue-browser'], userDefault: 'all' };

@@ -19,7 +19,9 @@ It is the same container image as [Gateway mode](deployment.md#gateway-mode), wi
   - [Audit settings](#audit-settings)
   - [Environment variables](#environment-variables)
 - [Administer](#administer)
+  - [Two administrators at once](#two-administrators-at-once)
 - [Back up and restore](#back-up-and-restore)
+- [Stored files and recovery](#stored-files-and-recovery)
 - [Audit trail](#audit-trail)
 - [Security checklist](#security-checklist)
 - [Troubleshooting](#troubleshooting)
@@ -143,7 +145,9 @@ The waits apply to the account as well as the client, so someone guessing at a k
 | `audit.stdout` | `false` | `true` if a log shipper reads the container's output and should carry the audit lines too; the file is written either way. Seeded by `SMU_SHOW_AUDIT`. |
 | `audit.access` | `false` | Leave off unless you need to know who opened which broker: it adds a line for every dial, socket and SEMP relay request, which is a high volume (see [Audit trail](#audit-trail)). No environment variable. |
 
-Both are on the Gateway Settings page and apply at the next audited event, with no restart.
+| `audit.onFailure` | `continue` | `continue` unless losing an audit record is worse for you than refusing changes. `refuse` stops every change to users, connections, settings and the backup schedule (`503 audit_unavailable`) while the audit log cannot be written, until it can; sign-ins and reads carry on. Use `refuse` only with something watching the gateway's log for `AUDIT RECORD LOST` and the disk holding `/data`. No environment variable. See [If a line cannot be written](#audit-trail). |
+
+All three are on the Gateway Settings page (`audit.onFailure` is a select beside the two checkboxes) and apply at the next audited event, with no restart.
 
 ### Environment variables
 
@@ -172,6 +176,17 @@ Every change to a user, a connection or the settings is also logged at `info` wi
 - **Backup & Restore:** export the configuration to a file, import one, and schedule backups. See [Back up and restore](#back-up-and-restore).
 
 Changes apply at once. Revoking a user's access closes their broker connections. A restart signs everyone out.
+
+### Two administrators at once
+
+Each user, connection, the settings and the backup schedule carry a version that the console reads with them and sends back with a save. If someone else saved the same thing after you opened it, your save is refused, not merged: the console says it was changed by someone else since you opened it and offers **Reload**. Reload shows the current values and you redo your edit. If someone deleted it meanwhile, the console says so and returns to the list. The unit is the whole record, so two administrators changing different fields of one user cannot both save: the second reloads and repeats the edit. Two changes to different users, or to a user and a connection, both go through.
+
+A few details:
+
+- Adding a user or connection whose name already exists is refused by the gateway (`exists`), whoever got there first.
+- A user changing their own password does not make an administrator's open form stale unless it flips the forced-change flag, and the administrator's save does not overwrite that new password: a blank password on a save means "keep what is stored now".
+- **Import** is checked the same way. **Preview** notes the version of each list and of the settings it saw, and **Import** is refused ("The gateway's data changed since the preview. Run the preview again.") if a section you are importing has changed since, even by one password change. Skipped sections are not compared. Preview again and choose again.
+- Changes are applied one at a time, in the order the gateway receives them, so the gateway's own state is always whole.
 
 ---
 
@@ -203,9 +218,25 @@ Each saved backup's download icon saves the file as the gateway wrote it, to kee
 | Connections | **Skip**, **Merge**, **Replace**, by broker name |
 | Settings | **Skip**, **Replace** (the file paths stay this deployment's own) |
 
-The gateway checks everything before it writes anything: an import that would leave no administrator is refused, and imported settings get the same checks as a save on Gateway Settings (an access list that would lock you out, or `connModes: direct`, is refused). The chosen sections are then written together: if any file cannot be written, none is changed and the page reports a server error, so nothing was imported. Users removed, or whose password or administrator flag changed, are signed out, you included: the page warns you before you import. A setting that applies only at restart is reported.
+The gateway checks everything before it writes anything: an import that would leave no administrator is refused, and imported settings get the same checks as a save on Gateway Settings (an access list that would lock you out, or `connModes: direct`, is refused). The chosen sections are then written together as one change: if any file cannot be written, none is changed and the page reports `store_write_failed`, so nothing was imported. If the data changed after the preview, the import is refused and you preview again (see [Two administrators at once](#two-administrators-at-once)). Users removed, or whose password or administrator flag changed, are signed out, you included: the page warns you before you import. A setting that applies only at restart is reported.
 
 To move a deployment: export (or copy a file from `/backup`), start the new gateway, sign in with its bootstrap admin, and import with **Replace**. The imported users sign in with their old passwords.
+
+---
+
+## Stored files and recovery
+
+The gateway keeps its state in a few files on the `/data` volume: `users.yaml`, `connections.yaml` and `backup.yaml` (sealed with the store key), `config.yaml` (plain), the key itself and the audit log. Treat them as the gateway's: change them through the console, never by hand, and do not copy one in or out while the gateway runs.
+
+**Versions in the files.** Each sealed file begins with a counter, `seq`, that goes up by one on every change written to that file. Each user and each connection also holds a `rev`, the value of `seq` when that record last changed in a way the console shows; the console sends it back with a save. A password change moves `seq` but not `rev`, because the console never shows a password. The schedule's version is the `seq` of `backup.yaml`; removing the schedule keeps the file with its counter, so a schedule created later gets a number nobody holds. `config.yaml` has no counter, because people may edit it: its version is a checksum of the file, which the gateway computes in memory and never stores. At start the gateway refuses to run if any `rev` is zero or above its file's `seq` (a file restored from somewhere else), and says which. A backup does not carry versions: an import gives every record in the sections it imports a fresh one.
+
+**Every write is one journaled change.** The gateway writes the new content to temporary files, checks that it can read each one back, and swaps them in, with a small journal file called `txn` that says what is in flight. Saving a user changes one file; an import changes three, and they change together or not at all. The data directory may therefore briefly hold `txn`, `<name>.bak` copies of the files being replaced and `.tmp-*` files. Do not keep your own `config.yaml.bak`, `users.yaml.bak`, `connections.yaml.bak` or `backup.yaml.bak` in `/data`: the gateway overwrites or deletes those names.
+
+**A write that fails** (full disk, a read-only volume, a permissions problem) is rolled back at once: the console shows `store_write_failed`, nothing changed, and the cause is in the gateway's log. Fix the cause and save again.
+
+**After a crash or power loss.** The gateway settles any change that was in flight before it reads anything else at start. If the journal shows a change that had not finished, it puts back the previous files, as if the change had never happened, and the administrator whose save was lost gets no answer; saving again with the version they read works. If the change had finished, the new files stand and a retry with the old version is refused as changed by someone else, which is the cue to reload. No action is needed. The gateway logs a warning when it rolls a change back. If `txn` is unreadable (damaged, or it names something it should not), the gateway stops the start and says so rather than guess: restore `/data` from your volume backup, or import a backup into a fresh volume.
+
+**Changed on disk.** Before each write the gateway checks that the file on disk is still the one it last read or wrote. If a store file was replaced behind its back, or `config.yaml` was edited by hand, the save is refused with `store_changed_on_disk` or `config_changed_on_disk` and the console says the gateway must be restarted. The refusal stays for that file, on every later save, until the restart, because the file is not what the gateway holds in memory; restarting loads what is on disk. Reads keep working from memory meanwhile, so the console may show data that no longer matches the file. Editing `config.yaml` on the host is expected only for the keys that need it (the TLS paths and the other restart-only keys); stop or restart the gateway afterwards.
 
 ---
 
@@ -221,7 +252,7 @@ The gateway keeps a record of who did what, apart from its log. It is written in
 | `auth` | Always | `signin`, `signout`, `password.change` (a user's own change, the forced first one included), `lockout` (the sign-in throttle starts refusing an account or a client) |
 | `access` | Only while `audit.access` is `true` | `dial` (a VPN credential issued), `smf.open` and `smf.close` (the gateway's socket to a broker), `relay` (each SEMP request through the gateway) |
 
-Refusals are recorded as well, with `outcome` `refused` and the code the gateway answered: a user form that did not validate (`invalid`), a request by someone who is not an administrator (`forbidden`), removing the last administrator (`last_admin`), an unknown name (`not_found`), a wrong password (`bad_credentials`), a throttled sign-in (`throttled`). Three things are not recorded: a forged cross-site form post (refused before the form is read, so no account is known), the refused access events (a denied dial, socket or relay request), and a backup run, download or preview.
+Refusals are recorded as well, with `outcome` `refused` and the code the gateway answered: a user form that did not validate (`invalid`), a request by someone who is not an administrator (`forbidden`), removing the last administrator (`last_admin`), an unknown name (`not_found`), a save made from an out-of-date version (`stale`), a store file changed outside the gateway (`store_changed_on_disk`, `config_changed_on_disk`), a write that failed and was rolled back (`store_write_failed`), a change refused because the audit log is down (`audit_unavailable`), a wrong password (`bad_credentials`), a throttled sign-in (`throttled`). Three things are not recorded: a forged cross-site form post (refused before the form is read, so no account is known), the refused access events (a denied dial, socket or relay request), and a backup run, download or preview.
 
 **What is never recorded.** No password or password hash, no store key or backup key, no backup passphrase, no session cookie or token, no VPN client or SEMP credential, no settings value (only the names of the keys changed) and no backup file content. Where an entry says what changed, it names the parts (`password`, `grants`, `vpn prod`, `modules.userDefault`), never what they were set to.
 
@@ -237,10 +268,11 @@ Refusals are recorded as well, with `outcome` `refused` and the code the gateway
 | `outcome` | `ok` or `refused` |
 | `code` | The refusal or error code. Left out for `ok` |
 | `changed` | The names of the parts changed. Left out when there are none |
+| `wrote` | On an `ok` entry that changed a store file: one element per file written, `{"file": "users.yaml", "seq": 43}` (`config.yaml` has no `seq`). Left out otherwise |
 | `msg` | The event as a sentence |
 
 ```json
-{"time":"2026-11-12T09:30:01Z","actor":"alice","client":"10.1.2.3","action":"user.update","target":"bob","outcome":"ok","changed":["vpn prod"],"msg":"alice updated user bob: vpn prod"}
+{"time":"2026-11-12T09:30:01Z","actor":"alice","client":"10.1.2.3","action":"user.update","target":"bob","outcome":"ok","changed":["vpn prod"],"wrote":[{"file":"users.yaml","seq":43}],"msg":"alice updated user bob: vpn prod"}
 {"time":"2026-11-12T09:31:40Z","actor":"","client":"10.1.2.9","action":"signin","target":"bob","outcome":"refused","code":"bad_credentials","msg":"sign-in refused for bob: bad credentials"}
 ```
 
@@ -250,7 +282,12 @@ Refusals are recorded as well, with `outcome` `refused` and the code the gateway
 
 **Broker access.** `audit.access` adds the `access` category. Expect one line for each dial and each SMF socket (two lines, open and close) and one for every SEMP request the app makes through the gateway, which is a steady stream while someone browses queues. Turn it on when you need to show who opened which broker, and plan for the rotation to cover less time.
 
-**If a line cannot be written.** The request goes ahead: the gateway never refuses a user's action because the trail failed. It logs an error in its own log (the file and the cause, never the entry) and tries again with the next event.
+**If a line cannot be written.** The change that was already made stands: the gateway never undoes it because the line was lost. What happens next is yours to choose with `audit.onFailure`:
+
+- `continue` (the default): for every lost record the gateway logs an error, `AUDIT RECORD LOST`, in its own log (standard error), with the fields of the entry (who, what, when, never a secret) and the cause, so the record can be rebuilt from the log. Requests carry on and the next event tries the file again.
+- `refuse`: while the last audit write failed, every change to users, connections, settings or the backup schedule is refused with `503 audit_unavailable`, before anything is checked or written. Sign-ins, sign-outs and reads are not refused. The gateway does not exit, because a restart does not cure a full disk. The first audit write that succeeds ends the refusal. A refused change tries to write its own audit line, so once the log is writable again the next refused attempt writes it and ends the refusal, and the attempt after that goes through.
+
+**Recommendation.** Keep `continue` for most deployments, and ship the gateway's standard error to a log store you watch for `AUDIT RECORD LOST`. Choose `refuse` when your policy says no administrative change may happen without a record, and then also alert on free space for the `/data` volume, since a full disk is the usual cause and the console stops accepting changes until you free it.
 
 **Keep it.** The audit trail is not part of a backup, and a backup restore does not bring it back. To keep it, copy `/data/audit.log` and `/data/audit.log.*` off the volume (a scheduled copy, or a shipper reading the standard output copy), and keep the copies for as long as your policy and any dispute need: the 500 MB cap can be a few weeks on a busy deployment. Anyone who can read the volume can read the trail, and it names users and client addresses, so give the copies the same care as the gateway's logs. The gateway's user can also rewrite the file, so for evidence you must rely on, ship it off the host as it is written.
 
@@ -290,4 +327,6 @@ Other refusals at start:
 
 - **`connModes=... offers Provisioned sign-in but hosted is false`:** remove `SMU_HOSTED=false`, or set `hosted: true` in `config.yaml`.
 - **`invalid config file ... field managed not found`:** a `config.yaml` from a pre-release build. Delete the `managed:` line.
+- **`data directory recovery failed` or a message about the `txn` journal:** a change was interrupted and the journal cannot be read. The log names the file and the cause. See [Stored files and recovery](#stored-files-and-recovery).
+- **A file's `rev` is above its `seq`, or is zero:** the store file was replaced by one from another deployment or edited. Restore the matching file from your volume backup, or delete the stores and import a backup.
 - **`read backup schedule ...` or `backup schedule ...: ...; delete it and set the schedule again`:** `backup.yaml` cannot be opened with this key, or is damaged. Delete it, start the gateway, and set the schedule again on Backup & Restore; the backups already in `/backup` are not affected.

@@ -183,6 +183,7 @@ const plain = (v) => (v === '' ? 'is empty' : CONTROL.test(v) ? 'holds a control
 const hostRule = (v) => plain(v)
     || ((net.isIP(v) && !v.includes('%')) || HOST_NAME.test(v) ? '' : `is not a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port: ${v}`);
 const ipRule = (v) => (net.isIP(v) && !v.includes('%') ? '' : `is not an IP address: ${v}`);
+const dnsRule = (v) => (dnsServers(v).every((s) => !ipRule(s)) ? '' : `is not a list of IP addresses separated by commas: ${v}`);
 const portRule = (v) => (/^\d{1,5}$/.test(v) && Number(v) >= 1 && Number(v) <= 65535 ? '' : `is not a port number (1-65535): ${v}`);
 const sempUserRule = (v) => plain(v) || (v.includes(':') ? 'holds a ":", which a SEMP username cannot' : '');
 // A VPN or queue name travels as one relay path segment, so it must pass the
@@ -202,8 +203,10 @@ const flagRule = (v) => (v === '0' || v === '1' ? '' : `is not 0 or 1: ${v}`);
 export const BROKER_FIELDS = [
     { key: 'host', env: 'E2E_BROKER_HOST', check: hostRule,
         label: "broker host the gateway containers dial; it must match the broker's TLS certificate (a broker on this machine: host.docker.internal)" },
-    { key: 'brokerIp', env: 'E2E_BROKER_IP', fallback: '', optional: true, check: ipRule,
-        label: 'address both gateway containers map E2E_BROKER_HOST to (a host alias), for a name they cannot resolve' },
+    { key: 'brokerAddr', env: 'E2E_BROKER_ADDR', fallback: '', optional: true, check: hostRule,
+        label: 'IP address or DNS name both gateway containers map E2E_BROKER_HOST to (a host alias), for a name they cannot resolve' },
+    { key: 'dns', env: 'E2E_DNS', fallback: '', optional: true, check: dnsRule,
+        label: 'DNS server addresses, separated by commas: both gateway containers resolve through them, and so does the harness for an E2E_BROKER_ADDR name' },
     { key: 'caFile', env: 'E2E_BROKER_CA', check: plain,
         label: "PEM file with the CA that signed the broker's TLS certificate, or that certificate itself" },
     { key: 'sempPort', env: 'E2E_SEMP_PORT', fallback: '1943', check: portRule, label: 'SEMP over TLS port' },
@@ -221,11 +224,16 @@ export const BROKER_FIELDS = [
         label: '0: skip the browser checks B1-B9 and D4 and do not start the browser container' },
 ];
 
+// Details that changed name: the old one is refused with the new one named,
+// since an ignored alias would only show later, as a broker nothing reaches.
+/** @type {Record<string, string>} */
+const RENAMED = { E2E_BROKER_IP: 'E2E_BROKER_ADDR' };
+
 /**
  * The KEY=value lines of a details file as { values, lines }, keyed by the
  * env name. Blank lines and '#' comments are skipped, keys and values are
  * trimmed, and an empty value counts as unset. Throws on a line without '=',
- * an unknown key or a repeated one, naming the line but never its value.
+ * an unknown, renamed or repeated key, naming the line but never its value.
  */
 export function parseDetailsFile(text, name) {
     const known = BROKER_FIELDS.map((f) => f.env);
@@ -238,6 +246,7 @@ export function parseDetailsFile(text, name) {
         const eq = line.indexOf('=');
         if (eq < 1) throw new Error(`${where}: want KEY=value`);
         const key = line.slice(0, eq).trim();
+        if (key in RENAMED) throw new Error(`${where}: ${key} is now ${RENAMED[key]}; rename the key`);
         if (!known.includes(key)) throw new Error(`${where}: unknown key ${key}; the keys are ${known.join(', ')}`);
         if (key in lines) throw new Error(`${where}: ${key} is already set on line ${lines[key]}`);
         lines[key] = i + 1;
@@ -252,7 +261,8 @@ export function parseDetailsFile(text, name) {
  * { values, missing, errors }. `values` is keyed by field key; `missing`
  * lists the fields neither gives, each with the answer to offer (an optional
  * one takes its fallback instead); `errors`
- * names where each refused value came from.
+ * names where each refused value came from, and each renamed variable the
+ * environment still sets under its old name.
  */
 export function resolveDetails(env, file = { values: {}, lines: {} }, fileName = 'the details file') {
     /** @type {Record<string, string>} */
@@ -271,28 +281,74 @@ export function resolveDetails(env, file = { values: {}, lines: {} }, fileName =
         if (problem) errors.push(`${f.env} (${fromEnv ? 'environment' : `${fileName} line ${file.lines[f.env]}`}) ${problem}`);
         else values[f.key] = raw;
     }
+    for (const [old, now] of Object.entries(RENAMED)) {
+        if (env[old]) errors.push(`${old} (environment) is now ${now}; set that instead`);
+    }
     return { values, missing, errors };
 }
 
 /**
- * Why E2E_BROKER_IP cannot alias this host, or '': an alias maps a name, so
+ * Why E2E_BROKER_ADDR cannot alias this host, or '': an alias maps a name, so
  * the host must be one (the name in the broker's certificate), not an address.
  */
-export function hostAliasProblem(host, ip) {
-    return ip && net.isIP(host)
-        ? `E2E_BROKER_IP needs E2E_BROKER_HOST to be a name in the broker's certificate, not an address: ${host}` : '';
+export function hostAliasProblem(host, addr) {
+    return addr && net.isIP(host)
+        ? `E2E_BROKER_ADDR needs E2E_BROKER_HOST to be a name in the broker's certificate, not an address: ${host}` : '';
+}
+
+/** The server addresses of an E2E_DNS value, in order; none when it is unset. */
+export function dnsServers(value) {
+    return value ? value.split(',').map((s) => s.trim()) : [];
 }
 
 /**
- * The compose override that maps `host` to `ip` inside both gateway
- * containers (`gateway` and `direct`), as docker/docker-compose.e2e.yaml's
- * extra_hosts does for host.docker.internal. JSON is YAML; both values have
- * passed their rules, so neither holds a quote, a colon in the name, or a line
- * break.
+ * The IP address a host alias maps to: E2E_BROKER_ADDR itself when it is one,
+ * else the address `lookup` finds for that name, because a compose extra_hosts
+ * entry takes an address only. `lookup` is dns.promises.lookup (this machine's
+ * resolver) or resolverLookup over the E2E_DNS servers, and `asked` names it
+ * for the error. Throws, naming the variable, when the name does not resolve,
+ * or resolves to an address the gateway would not parse (an IPv6 zone).
+ * @param {string} addr
+ * @param {(name: string) => Promise<{ address: string }>} lookup
+ * @param {string} [asked]
  */
-export function hostAliasOverride(host, ip) {
-    const alias = { extra_hosts: [`${host}:${ip}`] };
-    return `${JSON.stringify({ services: { gateway: alias, direct: alias } }, null, 2)}\n`;
+export async function aliasAddress(addr, lookup, asked = "this machine's resolver") {
+    if (net.isIP(addr)) return addr;
+    let found;
+    try {
+        found = (await lookup(addr)).address;
+    } catch (e) {
+        throw new Error(`E2E_BROKER_ADDR ${addr} does not resolve (${e.code ?? e.message}, asked ${asked}): give an IP address, or a name that resolver knows`);
+    }
+    if (ipRule(found)) throw new Error(`E2E_BROKER_ADDR ${addr} resolved to ${found}, which the gateway containers cannot use: give an IP address instead`);
+    return found;
+}
+
+/**
+ * A lookup for aliasAddress that asks `resolver` (a dns.promises.Resolver set
+ * to the E2E_DNS servers) instead of this machine's resolver: the name's
+ * first A record, else its first AAAA record. A name with neither rejects
+ * with the AAAA query's error.
+ * @param {{ resolve4: (name: string) => Promise<string[]>, resolve6: (name: string) => Promise<string[]> }} resolver
+ */
+export function resolverLookup(resolver) {
+    return async (name) => {
+        const found = await resolver.resolve4(name).catch(() => resolver.resolve6(name));
+        return { address: found[0] };
+    };
+}
+
+/**
+ * The compose override that says how both gateway containers (`gateway` and
+ * `direct`) find the broker: `host` mapped to `ip` when there is an alias
+ * (extra_hosts, as docker/docker-compose.e2e.yaml does for
+ * host.docker.internal), and `dns` as their resolvers when E2E_DNS names any.
+ * JSON is YAML; every value has passed its rule, so none holds a quote, a
+ * colon in the name, or a line break.
+ */
+export function resolutionOverride(host, ip, dns = []) {
+    const service = { ...(ip ? { extra_hosts: [`${host}:${ip}`] } : {}), ...(dns.length ? { dns } : {}) };
+    return `${JSON.stringify({ services: { gateway: service, direct: service } }, null, 2)}\n`;
 }
 
 const DETAILS_FILE_HEADER = [
@@ -465,7 +521,7 @@ export function sweepSecrets(records, secrets, allow = () => false) {
 
 // The audit trail's entry fields, in the order the gateway writes them
 // (go-web-proxy/audit.go); the first six are always present.
-const AUDIT_FIELDS = ['time', 'actor', 'client', 'action', 'target', 'outcome', 'code', 'changed', 'msg'];
+const AUDIT_FIELDS = ['time', 'actor', 'client', 'action', 'target', 'outcome', 'code', 'changed', 'wrote', 'msg'];
 const AUDIT_REQUIRED = ['time', 'actor', 'client', 'action', 'outcome', 'msg'];
 const RFC3339_UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/;
 
@@ -509,9 +565,25 @@ export function parseAuditLog(text) {
 }
 
 /**
+ * Whether an audit entry's `wrote` list names `file`: a store file with the
+ * seq its commit gave it (a whole number from 1), or config.yaml, which has no
+ * seq (its rev is a checksum) and so must carry none.
+ * @param {Record<string, any>} entry
+ * @param {string} file
+ * @returns {boolean}
+ */
+export function wroteFile(entry, file) {
+    return Array.isArray(entry.wrote) && entry.wrote.some((w) => w?.file === file
+        && (file === 'config.yaml' ? w.seq === undefined : Number.isInteger(w.seq) && w.seq >= 1));
+}
+
+/**
  * What the e2e run must have left in the audit log: a refused sign-in with
  * code bad_credentials and an ok one for `user`, a settings.update naming each
- * of `settingsKeys`, and backup.export and backup.import entries, all ok.
+ * of `settingsKeys`, and backup.export and backup.import entries, all ok; and
+ * the files the changes wrote: the ok user.create of `user` wrote users.yaml
+ * at a seq, an ok settings.update wrote config.yaml, and an ok backup.import
+ * wrote users.yaml, connections.yaml and config.yaml.
  * @param {Array<Record<string, any>>} entries
  * @param {{ user: string, settingsKeys: string[] }} want
  * @returns {string[]} what is missing
@@ -532,5 +604,67 @@ export function auditMissing(entries, { user, settingsKeys }) {
     for (const action of ['backup.export', 'backup.import']) {
         if (!has((e) => e.action === action && e.outcome === 'ok')) missing.push(`an ok ${action}`);
     }
+    if (!has((e) => e.action === 'user.create' && e.outcome === 'ok' && e.target === user && wroteFile(e, 'users.yaml'))) {
+        missing.push(`an ok user.create for ${user} that wrote users.yaml with a seq`);
+    }
+    if (!has((e) => e.action === 'settings.update' && e.outcome === 'ok' && wroteFile(e, 'config.yaml'))) {
+        missing.push('an ok settings.update that wrote config.yaml');
+    }
+    if (!has((e) => e.action === 'backup.import' && e.outcome === 'ok'
+        && ['users.yaml', 'connections.yaml', 'config.yaml'].every((f) => wroteFile(e, f)))) {
+        missing.push('an ok backup.import that wrote users.yaml, connections.yaml and config.yaml');
+    }
     return missing;
+}
+
+/**
+ * The rev of one record in a list answer ({ users: [...] }, { connections: [...] }),
+ * as the admin console reads it before a save.
+ * @param {string} text the response body
+ * @param {string} list the key that holds the array
+ * @param {string} key the field that names a record ("username", "broker")
+ * @param {string} name
+ * @returns {number | null} null when the record is absent or carries no whole-number rev from 1
+ */
+export function listedRev(text, list, key, name) {
+    let rows;
+    try {
+        rows = JSON.parse(text)?.[list];
+    } catch {
+        return null;
+    }
+    const row = Array.isArray(rows) ? rows.find((r) => r?.[key] === name) : undefined;
+    return Number.isInteger(row?.rev) && row.rev >= 1 ? row.rev : null;
+}
+
+/**
+ * What is wrong with an answer that should be a refusal: another status, another
+ * error code, or (when `want` has a rev) another current rev in the body. Empty
+ * when it is as wanted.
+ * @param {{ status: number, body: string }} res
+ * @param {{ status: number, error: string, rev?: number | string }} want
+ * @returns {string}
+ */
+export function refusalProblem(res, want) {
+    let body = null;
+    try {
+        body = JSON.parse(res.body);
+    } catch {
+        // not JSON: reported below with the text
+    }
+    const got = `${res.status} ${String(res.body).slice(0, 200)}`;
+    if (res.status !== want.status || body?.error !== want.error) return `want ${want.status} ${want.error}, got ${got}`;
+    if ('rev' in want && body.rev !== want.rev) return `want ${want.error} carrying rev ${want.rev}, got ${got}`;
+    return '';
+}
+
+/**
+ * The sections whose version differs between the basis a preview gave and the
+ * basis the gateway names in a stale refusal.
+ * @param {Record<string, unknown>} seen
+ * @param {Record<string, unknown>} now
+ * @returns {string[]} users, connections and/or settings
+ */
+export function basisMoved(seen, now) {
+    return ['users', 'connections', 'settings'].filter((k) => seen?.[k] !== now?.[k]);
 }

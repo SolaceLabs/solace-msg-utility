@@ -3,10 +3,18 @@
  * live.go): what `GET /managed/settings` shows and what a `PUT` may change,
  * refused in the gateway's order with its reasons. Live keys apply at once
  * (connModes and defaultConn reach the next `/hosted`, modules the next
- * `/me`; audit.stdout and audit.access the next audit event, which the demo
- * does not write: the keys are saved and shown only); restart-only keys are
+ * `/me`; audit.stdout, audit.access and audit.onFailure the next audit event,
+ * which the demo does not write and cannot fail to write: the keys are saved
+ * and shown only); restart-only keys are
  * saved and reported as pending, and the path keys change only "on the host",
  * which the demo has none of.
+ *
+ * The file has one `rev`, an opaque string that changes on every save (here
+ * a counter written out; the gateway's is a checksum of the file). A save
+ * must carry the rev it read: a missing or empty one is `400 rev_required`,
+ * another one `409 stale` with the current rev. The disk check (unreadable,
+ * changed on disk) comes before the rev, and the rev before the rules about
+ * the new content (422, would_lock_out).
  *
  * Not simulated: the access list is saved and shown but never enforced, so
  * the demo cannot lock its viewer out; `would_lock_out` still refuses a list
@@ -14,9 +22,12 @@
  *
  * Mock-only.
  */
-import { BadRequest, fieldOf } from './strict';
+import { BadRequest, fieldOf, string } from './strict';
 import { CATALOG, moduleIdsProblem, quote } from './validate';
 import type { GatewaySettings, SettingsView } from './types';
+
+/** `GET /managed/settings`: the view and the file's rev. */
+export type SettingsViewRev = SettingsView & { rev: string };
 
 type Kind = 'bool' | 'string' | 'int' | 'strings';
 type Schema = { [key: string]: Kind | Schema };
@@ -30,7 +41,7 @@ const SCHEMA: Schema = {
     session: { idleMinutes: 'int', absoluteMinutes: 'int' },
     login: { maxFailures: 'int', backoffSeconds: 'int', maxBackoffSeconds: 'int', unauthenticatedPerMinute: 'int' },
     modules: { offered: 'strings', userDefault: 'string' },
-    audit: { stdout: 'bool', access: 'bool' },
+    audit: { stdout: 'bool', access: 'bool', onFailure: 'string' },
 };
 
 /** restartOnlyKeys (live.go), in order; `host` marks the path keys. */
@@ -43,6 +54,23 @@ const RESTART_ONLY: { key: string; host: boolean; value: (s: GatewaySettings) =>
 ];
 
 const clone = (s: GatewaySettings): GatewaySettings => JSON.parse(JSON.stringify(s));
+
+/**
+ * A PUT body split into its top-level `rev` (matched without regard to case,
+ * a later key winning, as everywhere) and the settings keys. A rev that is
+ * absent or null is '' (no rev); one that is not a string is a bad request,
+ * as the decoder refuses it.
+ */
+export function splitRev(body: unknown): { patch: unknown; rev: string } {
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) return { patch: body, rev: '' };
+    let rev = '';
+    const patch: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(body)) {
+        if (fieldOf(k, ['rev']) === 'rev') rev = string(v);
+        else patch[k] = v;
+    }
+    return { patch, rev };
+}
 
 /** A PUT body decoded onto the saved file: unknown or mistyped fields are a bad request. */
 function merge(target: Record<string, any>, patch: unknown, schema: Schema): void {
@@ -78,7 +106,7 @@ const ZERO: GatewaySettings = {
     session: { idleMinutes: 0, absoluteMinutes: 0 },
     login: { maxFailures: 0, backoffSeconds: 0, maxBackoffSeconds: 0, unauthenticatedPerMinute: 0 },
     modules: { offered: [], userDefault: '' },
-    audit: { stdout: false, access: false },
+    audit: { stdout: false, access: false, onFailure: 'continue' },
 };
 
 /**
@@ -242,7 +270,9 @@ function normalize(f: GatewaySettings): { ok: true; value: GatewaySettings } | {
     if (loginProblem) return { ok: false, reason: loginProblem };
     const modulesProblem = moduleIdsProblem('modules.offered', f.modules.offered)
         ?? (['all', 'none'].includes(f.modules.userDefault) ? null
-            : `key "modules.userDefault" has invalid value ${quote(f.modules.userDefault)}: must be "all" or "none"`);
+            : `key "modules.userDefault" has invalid value ${quote(f.modules.userDefault)}: must be "all" or "none"`)
+        ?? (['continue', 'refuse'].includes(f.audit.onFailure) ? null
+            : `key "audit.onFailure" has invalid value ${quote(f.audit.onFailure)}: must be "continue" or "refuse"`);
     if (modulesProblem) return { ok: false, reason: modulesProblem };
     const value: GatewaySettings = {
         ...clone(f),
@@ -277,16 +307,36 @@ export interface SettingsFaults {
 }
 
 /** A refusal: the status and the gateway's error body. */
-export interface Refusal { ok: false; status: number; error: string; field?: string; reason?: string }
+export interface Refusal { ok: false; status: number; error: string; field?: string; reason?: string; rev?: string }
 
-export type SaveResult = { ok: true; restartRequired: string[] } | Refusal;
+/** A refusal's JSON body: the code and whichever of field, reason and rev it has. */
+export function refusalBody(r: Refusal): Record<string, string> {
+    return { error: r.error, ...(r.field ? { field: r.field } : {}), ...(r.reason ? { reason: r.reason } : {}), ...(r.rev ? { rev: r.rev } : {}) };
+}
+
+export type SaveResult = { ok: true; restartRequired: string[]; rev: string } | Refusal;
 
 const UNREADABLE_REASON = 'The gateway cannot read config.yaml (demo: the control panel made it unreadable). '
     + 'Fix the file on the gateway host, then reload this page.';
 
+/** A file's settings with the audit keys it may lack (an older seed, backup or snapshot): the zero value's. */
+const withAuditDefaults = (s: GatewaySettings): GatewaySettings => {
+    const c = clone(s);
+    c.audit = { ...ZERO.audit, ...c.audit };
+    return c;
+};
+
 export function createSettings(boot: GatewaySettings, client: string, faults: () => SettingsFaults) {
-    const running = clone(boot);
-    let saved = clone(boot);
+    const running = withAuditDefaults(boot);
+    let saved = withAuditDefaults(boot);
+    let revN = 1;
+
+    /** The refusals of a file that cannot be read or was edited by hand, which come before the rev. */
+    const diskRefusal = (): Refusal | null => {
+        if (faults().unreadable) return { ok: false, status: 500, error: 'config_unreadable', reason: UNREADABLE_REASON };
+        if (faults().changedOnDisk) return { ok: false, status: 409, error: 'config_changed_on_disk' };
+        return null;
+    };
 
     const pending = () => RESTART_ONLY.filter(k => k.value(running) !== k.value(saved)).map(k => k.key);
 
@@ -296,9 +346,17 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
             return saved;
         },
 
-        view(): { ok: true; view: SettingsView } | Refusal {
+        /** The file's rev: what a save must carry, and what an import's basis holds. */
+        rev(): string {
+            return String(revN);
+        },
+
+        diskRefusal,
+
+        view(): { ok: true; view: SettingsViewRev } | Refusal {
             if (faults().unreadable) return { ok: false, status: 500, error: 'config_unreadable', reason: UNREADABLE_REASON };
             return { ok: true, view: {
+                rev: String(revN),
                 settings: clone(saved),
                 restartOnly: RESTART_ONLY.map(k => k.key),
                 hostOnly: RESTART_ONLY.filter(k => k.host).map(k => k.key),
@@ -308,10 +366,14 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
             } };
         },
 
-        /** saveSettings, in its order. Throws BadRequest for a body the decoder refuses. */
-        save(patch: unknown): SaveResult {
+        /** saveSettings, in its order. Throws BadRequest for a body the decoder refuses. `rev` is the one the save carried ('' for none). */
+        save(patch: unknown, rev: string): SaveResult {
             const body = clone(saved);
             merge(body as unknown as Record<string, any>, patch, SCHEMA);
+            if (rev === '') return { ok: false, status: 400, error: 'rev_required' };
+            const disk = diskRefusal();
+            if (disk) return disk;
+            if (rev !== String(revN)) return { ok: false, status: 409, error: 'stale', rev: String(revN) };
             for (const k of RESTART_ONLY) {
                 if (k.host && k.value(body) !== k.value(saved)) {
                     return {
@@ -337,17 +399,18 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
                     reason: `This allow list would deny your own address (${client}). Add it, or a range that contains it.`,
                 };
             }
-            if (faults().unreadable) return { ok: false, status: 500, error: 'config_unreadable', reason: UNREADABLE_REASON };
-            if (faults().changedOnDisk) return { ok: false, status: 409, error: 'config_changed_on_disk' };
             saved = n.value;
-            return { ok: true, restartRequired: pending() };
+            revN += 1;
+            return { ok: true, restartRequired: pending(), rev: String(revN) };
         },
 
         dump(): GatewaySettings {
             return clone(saved);
         },
-        load(s: GatewaySettings): void {
-            saved = clone(s);
+        /** `rev` is the file's rev at the dump. */
+        load(s: GatewaySettings, rev: string): void {
+            saved = withAuditDefaults(s);
+            revN = Number(rev);
         },
     };
 }

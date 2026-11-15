@@ -110,16 +110,14 @@ func newSMFEnv(t *testing.T, a fakeAnswer) *smfEnv {
 	fb := newFakeSMFBroker(t, a)
 	e := newManagedEnvWith(t, nil, fb.srv.Client().Transport)
 	host, port, _ := net.SplitHostPort(fb.srv.Listener.Addr().String())
-	if err := e.api.store.upsertConnection(connRec{
+	putConn(t, e.api.store, connRec{
 		Broker: "b1", Hostname: host,
 		Semp: sempRec{Port: "1943", Username: "mon", Password: "semp-pw"},
 		Client: clientRec{Port: flexStr(port), MsgVpns: []vpnRec{
 			{Name: "v1", Username: "u1", Password: "vpn-pw"},
 			{Name: "v2", Username: "u2", Password: "vpn-pw2"},
 		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 	gw := httptest.NewTLSServer(e.root)
 	t.Cleanup(gw.Close)
 	roots := x509.NewCertPool()
@@ -356,7 +354,7 @@ func TestSMF_BrokerFailuresAre502(t *testing.T) {
 	_ = l.Close()
 	admin := s.cookie("admin", false)
 	b1 := strings.Replace(s.b1Body(`{"name":"v1","user":"u1","pass":""}`), `"port":"`+s.brokerPort+`"`, `"port":"`+closed+`"`, 1)
-	expect(t, s.do("PUT", "/managed/connections/b1", b1, admin), http.StatusNoContent, "")
+	expect(t, s.putConnAs(admin, "b1", b1), http.StatusOK, "")
 	expect(t, s.do("GET", "/managed/smf/b1/v1", "", s.cookie("viewer", false), wsHeaders("https://gw.example")...),
 		http.StatusBadGateway, "upstream_unavailable")
 }
@@ -367,12 +365,10 @@ func TestSMF_UsesTheConnectionsScheme(t *testing.T) {
 	for scheme, want := range map[string]string{"": "https://host1:8008/", clientPlain: "http://host1:8008/"} {
 		up := &urlRecorder{}
 		e := newManagedEnvWith(t, nil, up)
-		if err := e.api.store.upsertConnection(connRec{
+		putConn(t, e.api.store, connRec{
 			Broker: "b1", Hostname: "host1",
 			Client: clientRec{Scheme: scheme, Port: "8008", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}},
-		}); err != nil {
-			t.Fatal(err)
-		}
+		})
 		expect(t, e.do("GET", "/managed/smf/b1/v1", "", e.cookie("viewer", false), wsHeaders("https://gw.example")...),
 			http.StatusBadGateway, "upstream_unavailable")
 		if got := up.last(t); got != want {
@@ -442,32 +438,32 @@ func TestSMF_ClosesOnRevocation(t *testing.T) {
 			}
 		}},
 		{"password reset by an admin", "viewer", func(t *testing.T, s *smfEnv, _, admin *http.Cookie) {
-			expect(t, s.do("PUT", "/managed/users/viewer", fmt.Sprintf(viewerUser, `,"password":"viewer-new-pw-2"`), admin), http.StatusNoContent, "")
+			expect(t, s.putUserAs(admin, "viewer", fmt.Sprintf(viewerUser, `,"password":"viewer-new-pw-2"`)), http.StatusOK, "")
 		}},
 		{"user deleted", "viewer", func(t *testing.T, s *smfEnv, _, admin *http.Cookie) {
-			expect(t, s.do("DELETE", "/managed/users/viewer", "", admin), http.StatusNoContent, "")
+			expect(t, s.delUserAs(admin, "viewer"), http.StatusNoContent, "")
 		}},
 		{"demoted", "ops", func(t *testing.T, s *smfEnv, _, admin *http.Cookie) {
-			expect(t, s.do("PUT", "/managed/users/ops", fmt.Sprintf(opsUser, false, ""), admin), http.StatusNoContent, "")
+			expect(t, s.putUserAs(admin, "ops", fmt.Sprintf(opsUser, false, "")), http.StatusOK, "")
 		}},
 		{"entitlement removed", "viewer", func(t *testing.T, s *smfEnv, own, admin *http.Cookie) {
 			body := strings.Replace(fmt.Sprintf(viewerUser, ""), `[{"brokers":"b1","msgVpns":"v1","queues":"*"}]`, `[]`, 1)
-			expect(t, s.do("PUT", "/managed/users/viewer", body, admin), http.StatusNoContent, "")
+			expect(t, s.putUserAs(admin, "viewer", body), http.StatusOK, "")
 			// The session survives: the store re-check closed the socket.
 			expect(t, s.do("GET", "/managed/me", "", own), http.StatusOK, "")
 		}},
 		{"VPN removed", "viewer", func(t *testing.T, s *smfEnv, _, admin *http.Cookie) {
-			expect(t, s.do("PUT", "/managed/connections/b1", s.b1Body(`{"name":"v2","user":"u2","pass":""}`), admin), http.StatusNoContent, "")
+			expect(t, s.putConnAs(admin, "b1", s.b1Body(`{"name":"v2","user":"u2","pass":""}`)), http.StatusOK, "")
 		}},
 		{"broker deleted", "viewer", func(t *testing.T, s *smfEnv, _, admin *http.Cookie) {
-			expect(t, s.do("DELETE", "/managed/connections/b1", "", admin), http.StatusNoContent, "")
+			expect(t, s.delConnAs(admin, "b1"), http.StatusNoContent, "")
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newSMFEnv(t, fakeAnswer{})
 			admin := s.cookie("admin", false)
 			if tc.user == "ops" {
-				expect(t, s.do("PUT", "/managed/users/ops", fmt.Sprintf(opsUser, true, `,"password":"ops-password-1"`), admin), http.StatusNoContent, "")
+				expect(t, s.putUserAs(admin, "ops", fmt.Sprintf(opsUser, true, `,"password":"ops-password-1"`)), http.StatusOK, "")
 			}
 			own := s.cookie(tc.user, false)
 			ws := s.mustOpen(t, "/managed/smf/b1/v1", own)
@@ -489,7 +485,7 @@ func TestSMF_OutlivesItsSession(t *testing.T) {
 	expect(t, s.do("GET", "/managed/me", "", own), http.StatusUnauthorized, "unauthenticated")
 	admin := s.cookie("admin", false)
 	b2 := `{"hostname":"host2","semp":{"port":"1943","user":"mon","pass":""},"client":{"port":"1443","msgVpns":[{"name":"v9","user":"u9","pass":""}]}}`
-	expect(t, s.do("PUT", "/managed/connections/b2", b2, admin), http.StatusNoContent, "")
+	expect(t, s.putConnAs(admin, "b2", b2), http.StatusOK, "")
 	ws.echo(t, "still open")
 }
 

@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { X509Certificate } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import tls from 'node:tls';
 import type { AddressInfo } from 'node:net';
 import {
-    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, auditMissing, createCookieJar, detailsFileText, findTokens, hostAliasOverride,
+    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, aliasAddress, auditMissing, basisMoved, createCookieJar, detailsFileText, dnsServers, findTokens,
     hostAliasProblem, hostRootBundle,
-    issueCert, jsonFindings, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails,
-    sealedHeaderProblem, sessionCookieProblems, sweepSecrets,
+    issueCert, jsonFindings, listedRev, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, refusalProblem,
+    resolutionOverride, resolveDetails, resolverLookup, sealedHeaderProblem, sessionCookieProblems, sweepSecrets, wroteFile,
 } from '../../scripts/e2e-lib.mjs';
 import { REPO_ROOT } from '../helpers/sources';
 import { WIDENING, securityOpt, serviceBlock } from '../helpers/compose';
@@ -136,14 +136,14 @@ describe('e2e-lib -- broker details', () => {
         expect(values).toEqual({
             host: 'broker.example.com', caFile: 'certs/ca.pem', sempPort: '943', sempUser: 'monitor', sempPassword: 'semp-secret-1',
             smfPort: '443', vpn: 'prod-vpn', clientUser: 'app', clientPassword: 'client-secret-1', queue: 'orders/other',
-            brokerIp: '', insecure: '0', browser: '1',
+            brokerAddr: '', dns: '', insecure: '0', browser: '1',
         });
     });
 
     it('lists what neither gives, in prompt order, offering the defaults and no secret', () => {
         const file = parseDetailsFile('E2E_BROKER_HOST=broker.example.com\nE2E_SEMP_PASSWORD=\n', FILE);
         const { values, missing } = resolveDetails({}, file, FILE);
-        expect(values).toEqual({ host: 'broker.example.com', brokerIp: '', insecure: '0', browser: '1' });
+        expect(values).toEqual({ host: 'broker.example.com', brokerAddr: '', dns: '', insecure: '0', browser: '1' });
         expect(missing.map((f) => [f.env, f.offer, !!f.secret])).toEqual([
             ['E2E_BROKER_CA', '', false], ['E2E_SEMP_PORT', '1943', false], ['E2E_SEMP_USER', 'admin', false],
             ['E2E_SEMP_PASSWORD', '', true], ['E2E_SMF_PORT', '1443', false], ['E2E_VPN', 'default', false],
@@ -195,22 +195,83 @@ describe('e2e-lib -- broker details', () => {
         for (const ok of ['1', '943', '65535']) expect(check('E2E_SEMP_PORT', ok)).toBe('');
         for (const bad of ['0', '65536', '+943', '9 43', '']) expect(check('E2E_SMF_PORT', bad)).not.toBe('');
         expect(check('E2E_SEMP_PASSWORD', '')).toBe('is empty');
-        for (const ok of ['10.14.128.129', 'fd00::5']) expect(check('E2E_BROKER_IP', ok)).toBe('');
-        for (const bad of ['solxps.handy', '10.0.0.300', 'fe80::1%eth0']) expect(check('E2E_BROKER_IP', bad)).toBe(`is not an IP address: ${bad}`);
+        for (const ok of ['10.14.128.129', 'fd00::5', 'broker.lab.example.net']) expect(check('E2E_BROKER_ADDR', ok)).toBe('');
+        for (const bad of ['https://broker.example.net', 'broker.example.net:943', 'fe80::1%eth0']) {
+            expect(check('E2E_BROKER_ADDR', bad)).toBe(`is not a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port: ${bad}`);
+        }
+        for (const ok of ['10.14.128.2', '10.14.128.2, fd00::53']) expect(check('E2E_DNS', ok)).toBe('');
+        for (const bad of ['dns.example.net', '10.14.128.2,', '10.14.128.2:53', '10.14.128.2 10.14.128.3']) {
+            expect(check('E2E_DNS', bad)).toBe(`is not a list of IP addresses separated by commas: ${bad}`);
+        }
     });
 
     // The certificate names solxps.handy, which nothing resolves: the alias
     // maps that name to the broker's address inside both gateway containers.
-    it('aliases a host name to E2E_BROKER_IP, never an address', () => {
-        const file = parseDetailsFile('E2E_BROKER_HOST=solxps.handy\nE2E_BROKER_IP=10.14.128.129\n', FILE);
-        expect(resolveDetails({}, file, FILE).values).toMatchObject({ host: 'solxps.handy', brokerIp: '10.14.128.129' });
+    it('aliases a host name to E2E_BROKER_ADDR, never an address', () => {
+        const file = parseDetailsFile('E2E_BROKER_HOST=solxps.handy\nE2E_BROKER_ADDR=10.14.128.129\n', FILE);
+        expect(resolveDetails({}, file, FILE).values).toMatchObject({ host: 'solxps.handy', brokerAddr: '10.14.128.129' });
         expect(hostAliasProblem('solxps.handy', '10.14.128.129')).toBe('');
+        expect(hostAliasProblem('solxps.handy', 'broker.lab.example.net')).toBe('');
         expect(hostAliasProblem('10.14.128.129', '')).toBe('');
         expect(hostAliasProblem('10.14.128.129', '10.14.128.130')).toBe(
-            "E2E_BROKER_IP needs E2E_BROKER_HOST to be a name in the broker's certificate, not an address: 10.14.128.129");
-        expect(JSON.parse(hostAliasOverride('solxps.handy', 'fd00::5'))).toEqual({ services: {
+            "E2E_BROKER_ADDR needs E2E_BROKER_HOST to be a name in the broker's certificate, not an address: 10.14.128.129");
+        expect(JSON.parse(resolutionOverride('solxps.handy', 'fd00::5'))).toEqual({ services: {
             gateway: { extra_hosts: ['solxps.handy:fd00::5'] }, direct: { extra_hosts: ['solxps.handy:fd00::5'] },
         } });
+    });
+
+    // E2E_DNS: the gateway containers resolve the broker's name themselves, with
+    // or without an alias beside it.
+    it('gives both gateway containers the E2E_DNS servers, in the order written', () => {
+        expect(dnsServers('')).toEqual([]);
+        const servers = dnsServers('10.14.128.2, fd00::53');
+        expect(servers).toEqual(['10.14.128.2', 'fd00::53']);
+        expect(JSON.parse(resolutionOverride('solxps.handy', '', servers))).toEqual({ services: { gateway: { dns: servers }, direct: { dns: servers } } });
+        const both = { extra_hosts: ['solxps.handy:10.14.128.129'], dns: ['10.14.128.2'] };
+        expect(JSON.parse(resolutionOverride('solxps.handy', '10.14.128.129', ['10.14.128.2']))).toEqual({ services: { gateway: both, direct: both } });
+    });
+
+    it('asks the E2E_DNS servers for an E2E_BROKER_ADDR name: its A record, else its AAAA record, else the refusal names them', async () => {
+        const none = () => Object.assign(new Error('queryA ENODATA'), { code: 'ENODATA' });
+        const resolver = {
+            resolve4: vi.fn(async (name: string) => { if (name !== 'broker.lab.example.net') throw none(); return ['10.14.128.129', '10.14.128.130']; }),
+            resolve6: vi.fn(async (name: string) => { if (name !== 'v6.lab.example.net') throw Object.assign(none(), { code: 'ENOTFOUND' }); return ['fd00::5']; }),
+        };
+        const lookup = resolverLookup(resolver);
+        expect(await aliasAddress('broker.lab.example.net', lookup, 'E2E_DNS 10.14.128.2')).toBe('10.14.128.129');
+        expect(resolver.resolve6).not.toHaveBeenCalled();
+        expect(await aliasAddress('v6.lab.example.net', lookup, 'E2E_DNS 10.14.128.2')).toBe('fd00::5');
+        await expect(aliasAddress('nowhere.invalid', lookup, 'E2E_DNS 10.14.128.2')).rejects.toThrow(
+            'E2E_BROKER_ADDR nowhere.invalid does not resolve (ENOTFOUND, asked E2E_DNS 10.14.128.2): give an IP address, or a name that resolver knows');
+    });
+
+    // A compose extra_hosts entry takes an address, so a DNS name given as
+    // E2E_BROKER_ADDR is resolved by the harness, on the machine that runs it.
+    it('maps the alias to E2E_BROKER_ADDR as given when it is an address, and to what a DNS name resolves to', async () => {
+        const lookup = vi.fn(async (name: string) => ({ address: name === 'v6.lab.example.net' ? 'fd00::5' : '10.14.128.129' }));
+        expect(await aliasAddress('10.14.128.130', lookup)).toBe('10.14.128.130');
+        expect(await aliasAddress('fd00::7', lookup)).toBe('fd00::7');
+        expect(lookup).not.toHaveBeenCalled();
+        expect(await aliasAddress('broker.lab.example.net', lookup)).toBe('10.14.128.129');
+        expect(await aliasAddress('v6.lab.example.net', lookup)).toBe('fd00::5');
+        expect(lookup.mock.calls).toEqual([['broker.lab.example.net'], ['v6.lab.example.net']]);
+    });
+
+    it('refuses an E2E_BROKER_ADDR name that does not resolve, or resolves to an address with a zone', async () => {
+        const unknown = async () => { throw Object.assign(new Error('getaddrinfo ENOTFOUND nowhere.invalid'), { code: 'ENOTFOUND' }); };
+        await expect(aliasAddress('nowhere.invalid', unknown)).rejects.toThrow(
+            "E2E_BROKER_ADDR nowhere.invalid does not resolve (ENOTFOUND, asked this machine's resolver): give an IP address, or a name that resolver knows");
+        const uncoded = async () => { throw new Error('lookup stopped'); };
+        await expect(aliasAddress('nowhere.invalid', uncoded)).rejects.toThrow("does not resolve (lookup stopped, asked this machine's resolver)");
+        await expect(aliasAddress('linklocal.example.net', async () => ({ address: 'fe80::1%eth0' }))).rejects.toThrow(
+            'E2E_BROKER_ADDR linklocal.example.net resolved to fe80::1%eth0, which the gateway containers cannot use: give an IP address instead');
+    });
+
+    it('refuses the old name E2E_BROKER_IP, in the file and in the environment, naming the new one', () => {
+        expect(() => parseDetailsFile('E2E_BROKER_HOST=solxps.handy\nE2E_BROKER_IP=10.14.128.129\n', FILE))
+            .toThrow(`${FILE} line 2: E2E_BROKER_IP is now E2E_BROKER_ADDR; rename the key`);
+        expect(resolveDetails({ E2E_BROKER_IP: '10.14.128.129' }, undefined, FILE).errors)
+            .toEqual(['E2E_BROKER_IP (environment) is now E2E_BROKER_ADDR; set that instead']);
     });
 
     it('refuses a file line it cannot use, by line number and without its value', () => {
@@ -241,7 +302,7 @@ describe('e2e stack -- broker verification', () => {
         expect(read('scripts/e2e.mjs')).toContain("E2E_GATEWAY_SKIP_VERIFY: insecure() ? 'true' : ''");
     });
 
-    it('has both gateway services the host alias override extends', () => {
+    it('has both gateway services the resolution override extends', () => {
         const text = read('docker/docker-compose.e2e.yaml');
         for (const name of ['gateway', 'direct']) expect(text).toMatch(new RegExp(`^services:\\n(?:.*\\n)*?  ${name}:$`, 'm'));
     });
@@ -435,15 +496,16 @@ describe('e2e-lib -- audit log', () => {
     // Keys in the gateway's order, whatever order the literal was written in.
     const entry = (e: Record<string, unknown>) => {
         const full = JSON.parse(line(e)) as Record<string, unknown>;
-        const order = ['time', 'actor', 'client', 'action', 'target', 'outcome', 'code', 'changed', 'msg'];
+        const order = ['time', 'actor', 'client', 'action', 'target', 'outcome', 'code', 'changed', 'wrote', 'msg'];
         return JSON.stringify(Object.fromEntries(order.filter((k) => k in full).map((k) => [k, full[k]])));
     };
 
     it('parses well-formed lines and ignores blank ones', () => {
-        const text = `${entry({ action: 'signin' })}\n\n${entry({ action: 'settings.update', changed: ['connModes'], target: 't' })}\n`;
+        const text = `${entry({ action: 'signin' })}\n\n${entry({ action: 'settings.update', changed: ['connModes'], target: 't' })}\n`
+            + `${entry({ action: 'user.update', target: 'u', changed: ['grants'], wrote: [{ file: 'users.yaml', seq: 3 }] })}\n`;
         const { entries, problems } = parseAuditLog(text);
         expect(problems).toEqual([]);
-        expect(entries.map((e) => e.action)).toEqual(['signin', 'settings.update']);
+        expect(entries.map((e) => e.action)).toEqual(['signin', 'settings.update', 'user.update']);
     });
 
     it('reports a line that is not JSON, not an object, or has unknown, missing or misordered fields', () => {
@@ -470,13 +532,15 @@ describe('e2e-lib -- audit log', () => {
     });
 
     const want = { user: 'e2e-user', settingsKeys: ['connModes', 'modules.userDefault'] };
+    const importWrote = [{ file: 'users.yaml', seq: 7 }, { file: 'connections.yaml', seq: 4 }, { file: 'config.yaml' }];
     const complete = [
         { action: 'signin', outcome: 'refused', code: 'bad_credentials', actor: '', target: 'e2e-user' },
         { action: 'signin', outcome: 'ok', actor: 'e2e-user' },
-        { action: 'settings.update', outcome: 'ok', changed: ['modules.userDefault'] },
-        { action: 'settings.update', outcome: 'ok', changed: ['connModes'] },
+        { action: 'user.create', outcome: 'ok', target: 'e2e-user', wrote: [{ file: 'users.yaml', seq: 2 }] },
+        { action: 'settings.update', outcome: 'ok', changed: ['modules.userDefault'], wrote: [{ file: 'config.yaml' }] },
+        { action: 'settings.update', outcome: 'ok', changed: ['connModes'], wrote: [{ file: 'config.yaml' }] },
         { action: 'backup.export', outcome: 'ok' },
-        { action: 'backup.import', outcome: 'ok' },
+        { action: 'backup.import', outcome: 'ok', wrote: importWrote },
     ];
 
     it('finds nothing missing in a log that holds every decided entry', () => {
@@ -488,6 +552,8 @@ describe('e2e-lib -- audit log', () => {
             'a refused signin for e2e-user with code bad_credentials', 'an ok signin for e2e-user',
             'an ok settings.update naming connModes', 'an ok settings.update naming modules.userDefault',
             'an ok backup.export', 'an ok backup.import',
+            'an ok user.create for e2e-user that wrote users.yaml with a seq', 'an ok settings.update that wrote config.yaml',
+            'an ok backup.import that wrote users.yaml, connections.yaml and config.yaml',
         ]);
     });
 
@@ -500,6 +566,68 @@ describe('e2e-lib -- audit log', () => {
             { action: 'settings.update', outcome: 'ok' },
             { action: 'backup.export', outcome: 'refused' },
         ];
-        expect(auditMissing(wrong, want)).toHaveLength(6);
+        expect(auditMissing(wrong, want)).toHaveLength(9);
+    });
+
+    it('names a change that committed without saying which file it wrote', () => {
+        const unsaid = complete.map((e) => ({ ...e, wrote: undefined }));
+        expect(auditMissing(unsaid, want)).toEqual([
+            'an ok user.create for e2e-user that wrote users.yaml with a seq', 'an ok settings.update that wrote config.yaml',
+            'an ok backup.import that wrote users.yaml, connections.yaml and config.yaml',
+        ]);
+    });
+
+    it('reads wrote as the gateway writes it: a seq on a store file, none on config.yaml', () => {
+        expect(wroteFile({ wrote: [{ file: 'users.yaml', seq: 1 }] }, 'users.yaml')).toBe(true);
+        expect(wroteFile({ wrote: [{ file: 'config.yaml' }] }, 'config.yaml')).toBe(true);
+        expect(wroteFile({}, 'users.yaml')).toBe(false);
+        expect(wroteFile({ wrote: [{ file: 'users.yaml' }] }, 'users.yaml')).toBe(false);
+        expect(wroteFile({ wrote: [{ file: 'users.yaml', seq: 0 }] }, 'users.yaml')).toBe(false);
+        expect(wroteFile({ wrote: [{ file: 'users.yaml', seq: 2.5 }] }, 'users.yaml')).toBe(false);
+        expect(wroteFile({ wrote: [{ file: 'config.yaml', seq: 3 }] }, 'config.yaml')).toBe(false);
+        expect(wroteFile({ wrote: [{ file: 'connections.yaml', seq: 3 }] }, 'users.yaml')).toBe(false);
+        expect(wroteFile({ wrote: 'users.yaml' }, 'users.yaml')).toBe(false);
+        expect(wroteFile({ wrote: [null] }, 'users.yaml')).toBe(false);
+    });
+});
+
+describe('e2e-lib -- versions', () => {
+    const users = JSON.stringify({ users: [{ username: 'admin', rev: 1 }, { username: 'e2e-user', rev: 4 }, { username: 'odd', rev: 0 }, { username: 'bad', rev: '2' }] });
+
+    it('reads the rev a list shows for one record', () => {
+        expect(listedRev(users, 'users', 'username', 'e2e-user')).toBe(4);
+        expect(listedRev(JSON.stringify({ connections: [{ broker: 'b1', rev: 9 }] }), 'connections', 'broker', 'b1')).toBe(9);
+    });
+
+    it('has no rev for an absent record, a rev that is not a whole number from 1, or an answer that is not a list', () => {
+        expect(listedRev(users, 'users', 'username', 'nobody')).toBeNull();
+        expect(listedRev(users, 'users', 'username', 'odd')).toBeNull();
+        expect(listedRev(users, 'users', 'username', 'bad')).toBeNull();
+        expect(listedRev(users, 'connections', 'broker', 'b1')).toBeNull();
+        expect(listedRev('{"error":"forbidden"}', 'users', 'username', 'admin')).toBeNull();
+        expect(listedRev('not json', 'users', 'username', 'admin')).toBeNull();
+    });
+
+    it('accepts a refusal that has the wanted status, code and current rev', () => {
+        const stale = { status: 409, body: '{"error":"stale","rev":5}' };
+        expect(refusalProblem(stale, { status: 409, error: 'stale', rev: 5 })).toBe('');
+        expect(refusalProblem(stale, { status: 409, error: 'stale' })).toBe('');
+        expect(refusalProblem({ status: 404, body: '{"error":"not_found"}' }, { status: 404, error: 'not_found' })).toBe('');
+    });
+
+    it('says what is wrong with an answer that is not the refusal wanted', () => {
+        const stale = { status: 409, body: '{"error":"stale","rev":5}' };
+        expect(refusalProblem(stale, { status: 409, error: 'stale', rev: 6 })).toBe('want stale carrying rev 6, got 409 {"error":"stale","rev":5}');
+        expect(refusalProblem(stale, { status: 404, error: 'not_found' })).toBe('want 404 not_found, got 409 {"error":"stale","rev":5}');
+        expect(refusalProblem({ status: 200, body: '{"rev":2}' }, { status: 409, error: 'stale' })).toBe('want 409 stale, got 200 {"rev":2}');
+        expect(refusalProblem({ status: 409, body: 'not json' }, { status: 409, error: 'stale' })).toBe('want 409 stale, got 409 not json');
+    });
+
+    it('names the sections whose version moved between two bases', () => {
+        const seen = { users: 1, connections: 1, settings: 'abc' };
+        expect(basisMoved(seen, { users: 2, connections: 1, settings: 'abc' })).toEqual(['users']);
+        expect(basisMoved(seen, { users: 2, connections: 3, settings: 'xyz' })).toEqual(['users', 'connections', 'settings']);
+        expect(basisMoved(seen, { ...seen })).toEqual([]);
+        expect(basisMoved(seen, undefined as unknown as Record<string, unknown>)).toEqual(['users', 'connections', 'settings']);
     });
 });

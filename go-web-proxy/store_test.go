@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -26,8 +27,12 @@ const (
 	viewerPW = "viewer-password-1"
 )
 
-const usersYAMLTemplate = `msg-utility-users:
+// The fixture files stand at seq 2: the first record at rev 1, the second at
+// rev 2 (so a rev and the seq differ, as in a store that has seen a change).
+const usersYAMLTemplate = `seq: 2
+msg-utility-users:
   - username: admin
+    rev: 1
     password: %s
     admin: true
     operate:
@@ -35,6 +40,7 @@ const usersYAMLTemplate = `msg-utility-users:
         msgVpns: '*'
         queues: '*'
   - username: viewer
+    rev: 2
     password: %s
     admin: false
     read-only:
@@ -44,8 +50,10 @@ const usersYAMLTemplate = `msg-utility-users:
     modules: [queue-browser]
 `
 
-const connsYAML = `msg-utility-connections:
+const connsYAML = `seq: 2
+msg-utility-connections:
   - broker: b1
+    rev: 1
     hostname: host1
     semp:
       port: 1943
@@ -61,6 +69,7 @@ const connsYAML = `msg-utility-connections:
           username: u2
           password: cli-b1v2-pw
   - broker: b2
+    rev: 2
     hostname: host2
     semp:
       port: 1943
@@ -199,6 +208,89 @@ func signsIn(t *testing.T, s *store, user, pw string) bool {
 	return ok
 }
 
+// seedUsersDoc and seedConnsDoc wrap records in a document as the gateway
+// stamps a seed: seq 1 and every record at rev 1. For a fixture that marshals
+// its own store files (the contract test).
+func seedUsersDoc(users []userRec) usersDoc {
+	users = slices.Clone(users)
+	for i := range users {
+		users[i].Rev = 1
+	}
+	return usersDoc{Seq: 1, Users: users}
+}
+
+func seedConnsDoc(conns []connRec) connsDoc {
+	conns = slices.Clone(conns)
+	for i := range conns {
+		conns[i].Rev = 1
+	}
+	return connsDoc{Seq: 1, Connections: conns}
+}
+
+// currentUser and currentConn are the stored record (a copy), fatal when it
+// is absent.
+func currentUser(t *testing.T, s *store, name string) userRec {
+	t.Helper()
+	i := slices.IndexFunc(s.listUsers(), func(u userRec) bool { return u.Username == name })
+	if i < 0 {
+		t.Fatalf("no user %q", name)
+	}
+	return s.listUsers()[i]
+}
+
+func currentConn(t *testing.T, s *store, broker string) connRec {
+	t.Helper()
+	i := slices.IndexFunc(s.listConnections(), func(c connRec) bool { return c.Broker == broker })
+	if i < 0 {
+		t.Fatalf("no connection %q", broker)
+	}
+	return s.listConnections()[i]
+}
+
+// putUser is the unconditional edit a fixture makes: it saves u at the rev the
+// store holds now (0 for a new name), with no caller, and fails the test on
+// any refusal. For the refusals themselves, call saveUser.
+func putUser(t *testing.T, s *store, u userRec, password string) savedUser {
+	t.Helper()
+	rev := 0
+	if i := slices.IndexFunc(s.listUsers(), func(r userRec) bool { return r.Username == u.Username }); i >= 0 {
+		rev = s.listUsers()[i].Rev
+	}
+	out, err := s.saveUser(context.Background(), "", u, password, rev)
+	if err != nil {
+		t.Fatalf("putUser %q: %v", u.Username, err)
+	}
+	return out
+}
+
+// putConn is putUser for a connection.
+func putConn(t *testing.T, s *store, c connRec) savedConn {
+	t.Helper()
+	rev := 0
+	if i := slices.IndexFunc(s.listConnections(), func(r connRec) bool { return r.Broker == c.Broker }); i >= 0 {
+		rev = s.listConnections()[i].Rev
+	}
+	out, err := s.saveConnection(context.Background(), "", c, rev)
+	if err != nil {
+		t.Fatalf("putConn %q: %v", c.Broker, err)
+	}
+	return out
+}
+
+// readDocs decrypts both store files into their documents.
+func (f storeFixture) readDocs(t *testing.T) (usersDoc, connsDoc) {
+	t.Helper()
+	var u usersDoc
+	var c connsDoc
+	if err := f.sealer(t).readDoc(roleUsers, f.usersPath, &u); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.sealer(t).readDoc(roleConns, f.connsPath, &c); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	return u, c
+}
+
 // ----- bootstrap ------------------------------------------------------------------
 
 // bootstrapFixture is an empty temp dir: no users file yet.
@@ -231,6 +323,9 @@ func TestLoadStore_BootstrapGeneratedPasswordIsLoggedOnceAndMustChange(t *testin
 	}
 	if admin, _ := s.isAdmin("admin"); !admin {
 		t.Error("bootstrap user must be admin")
+	}
+	if doc, _ := f.readDocs(t); doc.Seq != 1 || len(doc.Users) != 1 || doc.Users[0].Rev != 1 || s.usersSeq != 1 {
+		t.Errorf("the bootstrap writes seq 1 and rev 1: file %+v, memory seq %d", doc.Seq, s.usersSeq)
 	}
 	data := f.readUsers(t)
 	if strings.Contains(data, pw) || !strings.Contains(data, "mustChangePassword: true") {
@@ -486,12 +581,8 @@ func TestLoadStore_EmptyOrMissingConnectionsFileYieldsNoBrokers(t *testing.T) {
 func TestStore_FilesOnDiskAreEncrypted(t *testing.T) {
 	f := newStoreFixture(t)
 	s := f.load(t)
-	if _, err := s.upsertUser(context.Background(), userRec{Username: "bob", Operate: []permRow{}, ReadOnly: []permRow{}}, "bob-password-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.upsertConnection(connRec{Broker: "b3", Hostname: "host3", Semp: sempRec{Port: "1943", Username: "mon3", Password: "semp-secret-3"}}); err != nil {
-		t.Fatal(err)
-	}
+	putUser(t, s, userRec{Username: "bob", Operate: []permRow{}, ReadOnly: []permRow{}}, "bob-password-1")
+	putConn(t, s, connRec{Broker: "b3", Hostname: "host3", Semp: sempRec{Port: "1943", Username: "mon3", Password: "semp-secret-3"}})
 	for _, path := range []string{f.usersPath, f.connsPath} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -707,19 +798,28 @@ func TestStore_IsAdmin(t *testing.T) {
 
 // ----- user CRUD ------------------------------------------------------------------------
 
-func TestStore_UpsertUser_CreateHashesAndPersists(t *testing.T) {
+func TestStore_SaveUser_CreateStampsRevAndPersists(t *testing.T) {
 	f := newStoreFixture(t)
 	s := f.load(t)
-	drop, err := s.upsertUser(context.Background(), userRec{
+	onChange := 0
+	s.onChange = func() { onChange++ }
+	got, err := s.saveUser(context.Background(), "admin", userRec{
 		Username: "bob", Admin: true,
 		Operate: []permRow{{Brokers: "*", MsgVpns: "*", Queues: "*"}},
 		Modules: &[]string{},
-	}, "bob-password-1")
-	if err != nil || drop {
-		t.Fatalf("create: drop=%v err=%v", drop, err)
+	}, "bob-password-1", 0)
+	if err != nil || got.dropSessions || got.rev != 3 || got.seq != 3 {
+		t.Fatalf("create: %+v err=%v (the file stood at seq 2: rev and seq are both 3, no session to end)", got, err)
+	}
+	if onChange != 1 {
+		t.Errorf("onChange ran %d times, want once", onChange)
 	}
 	if strings.Contains(f.readUsers(t), "bob-password-1") {
 		t.Error("the plaintext password must never reach the file")
+	}
+	doc, _ := f.readDocs(t)
+	if doc.Seq != 3 || doc.Users[0].Rev != 1 || doc.Users[1].Rev != 2 || doc.Users[2].Rev != 3 {
+		t.Errorf("the file holds seq 3 and revs 1, 2, 3 (the others untouched), got seq %d and %+v", doc.Seq, doc.Users)
 	}
 	s2 := f.load(t)
 	if !signsIn(t, s2, "bob", "bob-password-1") {
@@ -734,68 +834,202 @@ func TestStore_UpsertUser_CreateHashesAndPersists(t *testing.T) {
 	}
 }
 
-func TestStore_UpsertUser_EditWithoutPasswordKeepsHashAndFlag(t *testing.T) {
+// The rev of a record becomes the new seq only when its console view changed;
+// seq moves on every commit. A save that changes nothing, or only the
+// password, keeps the rev.
+func TestStore_SaveUser_RevMovesOnlyWhenTheConsoleViewChanges(t *testing.T) {
+	s := newStoreWithFixtures(t)
+	steps := []struct {
+		name     string
+		edit     func(u *userRec)
+		password string
+		revMoves bool
+		drops    bool
+	}{
+		{"password only", func(*userRec) {}, "viewer-new-pw-1", false, true},
+		{"nothing changed", func(*userRec) {}, "", false, false},
+		{"a grant row added", func(u *userRec) { u.ReadOnly = append(u.ReadOnly, permRow{Brokers: "b2", MsgVpns: "v9", Queues: "*"}) }, "", true, false},
+		{"modules emptied", func(u *userRec) { u.Modules = &[]string{} }, "", true, false},
+		{"modules back to the default", func(u *userRec) { u.Modules = nil }, "", true, false},
+		{"promoted to admin", func(u *userRec) { u.Admin = true }, "", true, true},
+		{"grants as an empty list", func(u *userRec) { u.Operate = []permRow{} }, "", false, false},
+	}
+	for _, st := range steps {
+		before := currentUser(t, s, "viewer")
+		_, seq := s.usersNow()
+		u := before
+		st.edit(&u)
+		got, err := s.saveUser(context.Background(), "admin", u, st.password, before.Rev)
+		if err != nil {
+			t.Fatalf("%s: %v", st.name, err)
+		}
+		wantRev := before.Rev
+		if st.revMoves {
+			wantRev = seq + 1
+		}
+		if got.seq != seq+1 || got.rev != wantRev || got.dropSessions != st.drops {
+			t.Errorf("%s: got %+v, want seq %d rev %d drop %v", st.name, got, seq+1, wantRev, st.drops)
+		}
+		if after := currentUser(t, s, "viewer"); after.Rev != wantRev {
+			t.Errorf("%s: stored rev %d, want %d", st.name, after.Rev, wantRev)
+		}
+	}
+}
+
+// A forced-change flag that an admin's new password clears is a change the
+// console shows, so the rev moves; a blank password keeps the flag.
+func TestStore_SaveUser_AdminResetClearsTheChangeFlagAndMovesRev(t *testing.T) {
 	s := newStoreWithFixtures(t)
 	s.users[1].MustChangePassword = true
-	drop, err := s.upsertUser(context.Background(), userRec{Username: "viewer"}, "")
-	if err != nil || drop {
-		t.Fatalf("edit: drop=%v err=%v (no password, same admin flag: sessions stay)", drop, err)
+	keep := putUser(t, s, currentUser(t, s, "viewer"), "")
+	if keep.rev != 2 || !currentUser(t, s, "viewer").MustChangePassword {
+		t.Fatalf("a blank password keeps the flag and the rev: %+v", keep)
 	}
-	mustChange, ok, _ := s.checkPassword(context.Background(), "viewer", viewerPW)
-	if !ok || !mustChange {
-		t.Errorf("blank password must keep the hash and the change flag: ok=%v mustChange=%v", ok, mustChange)
+	asked := currentUser(t, s, "viewer")
+	asked.MustChangePassword = false // the console's form never sends the flag
+	reset := putUser(t, s, asked, "reset-by-admin-1")
+	if reset.rev != reset.seq || currentUser(t, s, "viewer").MustChangePassword {
+		t.Errorf("a new password clears the flag, which moves the rev to the new seq: %+v", reset)
 	}
 }
 
-func TestStore_UpsertUser_NewPasswordOrAdminFlagDropsSessions(t *testing.T) {
+// An admin's save with a blank password resolves "keep" against the record as
+// it is inside the lock: the hash a user set meanwhile survives.
+func TestStore_SaveUser_BlankPasswordKeepsTheHashTheUserSetMeanwhile(t *testing.T) {
 	s := newStoreWithFixtures(t)
-	s.users[1].MustChangePassword = true
-	drop, err := s.upsertUser(context.Background(), userRec{Username: "viewer"}, "viewer-new-pw-1")
-	if err != nil || !drop {
-		t.Fatalf("password change: drop=%v err=%v", drop, err)
+	opened := currentUser(t, s, "viewer") // the admin opens the form
+	check, err := s.verifyPassword(context.Background(), "viewer", viewerPW)
+	if err != nil || !check.ok {
+		t.Fatalf("verify: %+v %v", check, err)
 	}
-	if signsIn(t, s, "viewer", viewerPW) || !signsIn(t, s, "viewer", "viewer-new-pw-1") {
-		t.Error("the old password must stop working and the new one must work")
+	if err := s.setPassword(context.Background(), "viewer", "viewer-new-pw-1", check.hash, func() {}); err != nil {
+		t.Fatal(err)
 	}
-	if mustChange, _, _ := s.checkPassword(context.Background(), "viewer", "viewer-new-pw-1"); mustChange {
-		t.Error("an admin-set password replaces the record, change flag included")
+	got, err := s.saveUser(context.Background(), "admin", opened, "", opened.Rev)
+	if err != nil {
+		t.Fatalf("the user's own password change keeps the rev, so the admin's save stands: %v", err)
 	}
-
-	drop, err = s.upsertUser(context.Background(), userRec{Username: "viewer", Admin: true}, "")
-	if err != nil || !drop {
-		t.Fatalf("promotion: drop=%v err=%v", drop, err)
-	}
-}
-
-func TestStore_UpsertUser_Refusals(t *testing.T) {
-	s := newStoreWithFixtures(t)
-	if _, err := s.upsertUser(context.Background(), userRec{Username: "admin", Admin: false}, ""); !errors.Is(err, errLastAdmin) {
-		t.Errorf("demoting the last admin: want errLastAdmin, got %v", err)
-	}
-	if admin, _ := s.isAdmin("admin"); !admin {
-		t.Error("a refused demotion must leave the admin in place")
-	}
-	before := len(s.listUsers())
-	if _, err := s.upsertUser(context.Background(), userRec{Username: "ghost", Admin: true}, ""); !errors.Is(err, errBlankNewUserPassword) {
-		t.Errorf("blank-password create: want errBlankNewUserPassword, got %v", err)
-	}
-	if len(s.listUsers()) != before {
-		t.Error("a rejected create must not persist")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	s.hasher = &hasher{iter: 1, slots: make(chan struct{}, 1)}
-	s.hasher.slots <- struct{}{}
-	if _, err := s.upsertUser(ctx, userRec{Username: "carol"}, "carol-password"); !errors.Is(err, context.Canceled) {
-		t.Errorf("hash failure: want context.Canceled, got %v", err)
-	}
-	if len(s.listUsers()) != before {
-		t.Error("a failed hash must not persist")
+	if got.rev != opened.Rev || !signsIn(t, s, "viewer", "viewer-new-pw-1") || signsIn(t, s, "viewer", viewerPW) {
+		t.Errorf("the admin's blank password must keep the hash the user set: %+v", got)
 	}
 }
 
-// blockWrites points path under a regular file so the atomic write's MkdirAll
-// fails, exercising persist-then-commit.
+// Every refusal answers with the typed error, in the pinned order, and leaves
+// seq, the file and the sockets as they were.
+func TestStore_SaveUser_Refusals(t *testing.T) {
+	ctx := context.Background()
+	var stale *staleError
+	cases := []struct {
+		name   string
+		caller string
+		user   userRec
+		pw     string
+		rev    int
+		check  func(t *testing.T, err error)
+	}{
+		{"a create of an existing name", "admin", userRec{Username: "viewer"}, "viewer-other-pw-1", 0, func(t *testing.T, err error) {
+			if !errors.Is(err, errExists) {
+				t.Errorf("want errExists, got %v", err)
+			}
+		}},
+		{"exists wins over a blank password", "admin", userRec{Username: "viewer"}, "", 0, func(t *testing.T, err error) {
+			if !errors.Is(err, errExists) {
+				t.Errorf("want errExists, got %v", err)
+			}
+		}},
+		{"an edit of a user that is gone", "admin", userRec{Username: "ghost"}, "", 1, func(t *testing.T, err error) {
+			if !errors.Is(err, errNotFound) {
+				t.Errorf("want errNotFound, got %v", err)
+			}
+		}},
+		{"an old rev", "admin", userRec{Username: "viewer"}, "", 1, func(t *testing.T, err error) {
+			if !errors.As(err, &stale) || stale.rev != 2 {
+				t.Errorf("want a stale error naming rev 2, got %v", err)
+			}
+		}},
+		{"stale wins over the last-admin rule", "admin", userRec{Username: "admin", Admin: false}, "", 9, func(t *testing.T, err error) {
+			if !errors.As(err, &stale) || stale.rev != 1 {
+				t.Errorf("want a stale error naming rev 1, got %v", err)
+			}
+		}},
+		{"a new user with no password", "admin", userRec{Username: "ghost"}, "", 0, func(t *testing.T, err error) {
+			if !errors.Is(err, errBlankNewUserPassword) {
+				t.Errorf("want errBlankNewUserPassword, got %v", err)
+			}
+		}},
+		{"demoting the last admin", "admin", userRec{Username: "admin", Admin: false}, "", 1, func(t *testing.T, err error) {
+			if !errors.Is(err, errLastAdmin) {
+				t.Errorf("want errLastAdmin, got %v", err)
+			}
+		}},
+		{"a negative rev", "admin", userRec{Username: "viewer"}, "", -1, func(t *testing.T, err error) {
+			if !errors.Is(err, errRevRequired) {
+				t.Errorf("want errRevRequired, got %v", err)
+			}
+		}},
+		{"a caller who lost the admin flag", "viewer", userRec{Username: "viewer"}, "", 2, func(t *testing.T, err error) {
+			if !errors.Is(err, errCallerNotAdmin) {
+				t.Errorf("want errCallerNotAdmin, got %v", err)
+			}
+		}},
+		{"a caller who was deleted", "ghost", userRec{Username: "viewer"}, "", 2, func(t *testing.T, err error) {
+			if !errors.Is(err, errCallerGone) {
+				t.Errorf("want errCallerGone, got %v", err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newStoreFixture(t)
+			s := f.load(t)
+			onChange := 0
+			s.onChange = func() { onChange++ }
+			before, _ := os.ReadFile(f.usersPath)
+			got, err := s.saveUser(ctx, tc.caller, tc.user, tc.pw, tc.rev)
+			tc.check(t, err)
+			if got != (savedUser{}) {
+				t.Errorf("a refusal returns no result, got %+v", got)
+			}
+			if seq, _ := s.seqs(); seq != 2 || onChange != 0 {
+				t.Errorf("a refusal moves nothing: seq %d, onChange %d", seq, onChange)
+			}
+			if now, _ := os.ReadFile(f.usersPath); !bytes.Equal(now, before) {
+				t.Error("a refusal must not rewrite the file")
+			}
+			if len(s.listUsers()) != 2 || !signsIn(t, s, "viewer", viewerPW) {
+				t.Error("a refusal must leave the users as they were")
+			}
+		})
+	}
+	t.Run("a hash that cannot run", func(t *testing.T) {
+		s := newStoreWithFixtures(t)
+		cctx, cancel := context.WithCancel(ctx)
+		cancel()
+		s.hasher = &hasher{iter: 1, slots: make(chan struct{}, 1)}
+		s.hasher.slots <- struct{}{}
+		if _, err := s.saveUser(cctx, "admin", userRec{Username: "carol"}, "carol-password", 0); !errors.Is(err, context.Canceled) {
+			t.Errorf("want context.Canceled, got %v", err)
+		}
+		if seq, _ := s.seqs(); seq != 2 || len(s.listUsers()) != 2 {
+			t.Error("a failed hash must not persist")
+		}
+	})
+	t.Run("a client that left", func(t *testing.T) {
+		s := newStoreWithFixtures(t)
+		cctx, cancel := context.WithCancel(ctx)
+		cancel()
+		var gone *clientGoneError
+		if _, err := s.saveUser(cctx, "admin", currentUser(t, s, "viewer"), "", 2); !errors.As(err, &gone) {
+			t.Errorf("want *clientGoneError, got %v", err)
+		}
+		if seq, _ := s.seqs(); seq != 2 {
+			t.Error("nothing may change for a client that is gone")
+		}
+	})
+}
+
+// blockWrites points path under a regular file so the commit cannot put the
+// file there: the write fails, exercising publish-after-commit.
 func blockWrites(t *testing.T, path *string) {
 	t.Helper()
 	blocker := filepath.Join(t.TempDir(), "blocker")
@@ -803,38 +1037,52 @@ func blockWrites(t *testing.T, path *string) {
 	*path = filepath.Join(blocker, "file.yaml")
 }
 
+// A write that fails leaves memory and seq as they were, for every kind of
+// user change, and says store_write_failed.
 func TestStore_PersistErrorLeavesMemoryUnchanged(t *testing.T) {
 	s := newStoreWithFixtures(t)
+	onChange := 0
+	s.onChange = func() { onChange++ }
 	blockWrites(t, &s.usersPath)
-	before := len(s.listUsers())
-	if _, err := s.upsertUser(context.Background(), userRec{Username: "bob"}, "bob-password-1"); err == nil {
-		t.Fatal("expected a persist error")
+	var failed *writeFailedError
+	ctx := context.Background()
+	if _, err := s.saveUser(ctx, "admin", userRec{Username: "bob"}, "bob-password-1", 0); !errors.As(err, &failed) {
+		t.Errorf("save: want *writeFailedError, got %v", err)
 	}
-	if err := s.setPassword(context.Background(), "viewer", "viewer-new-pw-1", storedHash(s, "viewer"), func() {}); err == nil {
-		t.Fatal("expected a persist error")
+	if err := s.setPassword(ctx, "viewer", "viewer-new-pw-1", storedHash(s, "viewer"), func() { t.Error("committed must not run") }); !errors.As(err, &failed) {
+		t.Errorf("own password: want *writeFailedError, got %v", err)
 	}
-	if len(s.listUsers()) != before || !signsIn(t, s, "viewer", viewerPW) {
-		t.Error("a failed write must leave the in-memory users unchanged")
+	if _, err := s.deleteUser(ctx, "admin", "viewer", 2); !errors.As(err, &failed) {
+		t.Errorf("delete: want *writeFailedError, got %v", err)
+	}
+	if seq, _ := s.seqs(); seq != 2 || len(s.listUsers()) != 2 || !signsIn(t, s, "viewer", viewerPW) || onChange != 0 {
+		t.Errorf("a failed write must leave the in-memory users, seq and sockets alone (seq %d, onChange %d)", seq, onChange)
 	}
 }
 
-// onChange runs after each committed edit that can change entitlement, outside
-// the store's lock (it reads the store here, which would deadlock inside),
-// and not after a refused or failed one.
+// onChange runs after each committed edit that can change entitlement, under
+// the writer lock but outside the store's (it reads the store here, which would
+// deadlock inside), once the new state is published, and not after a refused
+// or failed one.
 func TestStore_OnChangeFiresAfterACommittedEdit(t *testing.T) {
 	s := newStoreWithFixtures(t)
 	n := 0
 	s.onChange = func() {
 		n++
 		_ = s.listConnections()
+		if n == 1 && len(s.listUsers()) != 3 {
+			t.Errorf("onChange must see the committed state, saw %d users", len(s.listUsers()))
+		}
 	}
 	ctx := context.Background()
-	b3 := connRec{Broker: "b3", Hostname: "host3"}
 	for i, edit := range []func() error{
-		func() error { _, err := s.upsertUser(ctx, userRec{Username: "bob"}, "bob-password-1"); return err },
-		func() error { _, err := s.deleteUser("bob"); return err },
-		func() error { return s.upsertConnection(b3) },
-		func() error { _, err := s.deleteConnection("b3"); return err },
+		func() error { _, err := s.saveUser(ctx, "", userRec{Username: "bob"}, "bob-password-1", 0); return err },
+		func() error { _, err := s.deleteUser(ctx, "", "bob", currentUser(t, s, "bob").Rev); return err },
+		func() error {
+			_, err := s.saveConnection(ctx, "", connRec{Broker: "b3", Hostname: "host3"}, 0)
+			return err
+		},
+		func() error { _, err := s.deleteConnection(ctx, "", "b3", currentConn(t, s, "b3").Rev); return err },
 	} {
 		if err := edit(); err != nil {
 			t.Fatal(err)
@@ -843,11 +1091,11 @@ func TestStore_OnChangeFiresAfterACommittedEdit(t *testing.T) {
 			t.Fatalf("edit %d: onChange ran %d times", i, n)
 		}
 	}
-	if _, err := s.deleteUser("admin"); !errors.Is(err, errLastAdmin) {
+	if _, err := s.deleteUser(ctx, "", "admin", 1); !errors.Is(err, errLastAdmin) {
 		t.Fatalf("want errLastAdmin, got %v", err)
 	}
 	blockWrites(t, &s.connsPath)
-	if err := s.upsertConnection(b3); err == nil {
+	if _, err := s.saveConnection(ctx, "", connRec{Broker: "b3", Hostname: "host3"}, 0); err == nil {
 		t.Fatal("expected a persist error")
 	}
 	if n != 4 {
@@ -894,6 +1142,34 @@ func TestStore_SetPassword(t *testing.T) {
 	}
 }
 
+// A user's own change moves seq always, and their rev only when it clears the
+// forced-change flag (the one visible effect).
+func TestStore_SetPassword_RevMovesOnlyWhenTheFlagFlips(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	s.users[1].MustChangePassword = true
+	ctx := context.Background()
+	if err := s.setPassword(ctx, "viewer", "viewer-new-pw-1", storedHash(s, "viewer"), func() {}); err != nil {
+		t.Fatal(err)
+	}
+	if u := currentUser(t, s, "viewer"); u.Rev != 3 || u.MustChangePassword {
+		t.Errorf("clearing the flag moves the rev to the new seq 3, got rev %d flag %v", u.Rev, u.MustChangePassword)
+	}
+	if err := s.setPassword(ctx, "viewer", "viewer-new-pw-2", storedHash(s, "viewer"), func() {}); err != nil {
+		t.Fatal(err)
+	}
+	if u := currentUser(t, s, "viewer"); u.Rev != 3 {
+		t.Errorf("a password change alone keeps the rev, got %d", u.Rev)
+	}
+	if seq, _ := s.seqs(); seq != 4 {
+		t.Errorf("seq moves on every commit: want 4, got %d", seq)
+	}
+	doc, _ := f.readDocs(t)
+	if doc.Seq != 4 || doc.Users[1].Rev != 3 || doc.Users[0].Rev != 1 {
+		t.Errorf("the file agrees: %+v", doc)
+	}
+}
+
 // A user's own change is checked against the hash their current password
 // matched: an administrator's reset that landed in between wins, and nothing
 // is written.
@@ -901,15 +1177,14 @@ func TestStore_SetPasswordRefusesAChangedAccount(t *testing.T) {
 	f := newStoreFixture(t)
 	s := f.load(t)
 	checked := storedHash(s, "viewer")
-	if _, err := s.upsertUser(context.Background(), userRec{Username: "viewer", ReadOnly: []permRow{}}, "reset-by-admin-1"); err != nil {
-		t.Fatal(err)
-	}
+	putUser(t, s, currentUser(t, s, "viewer"), "reset-by-admin-1")
+	seq, _ := s.seqs()
 	ran := false
 	if err := s.setPassword(context.Background(), "viewer", "viewer-new-pw-1", checked, func() { ran = true }); !errors.Is(err, errAccountChanged) {
 		t.Fatalf("want errAccountChanged, got %v", err)
 	}
-	if ran || !signsIn(t, f.load(t), "viewer", "reset-by-admin-1") {
-		t.Error("the administrator's reset must stand, on disk and without a session")
+	if now, _ := s.seqs(); ran || now != seq || !signsIn(t, f.load(t), "viewer", "reset-by-admin-1") {
+		t.Error("the administrator's reset must stand, on disk and without a session, and seq must not move")
 	}
 }
 
@@ -922,12 +1197,10 @@ func TestStore_IfUnchanged(t *testing.T) {
 	}{
 		{"the record stands", func(*testing.T, *store) {}, true},
 		{"an administrator reset the password", func(t *testing.T, s *store) {
-			if _, err := s.upsertUser(context.Background(), userRec{Username: "viewer", ReadOnly: []permRow{}}, "reset-by-admin-1"); err != nil {
-				t.Fatal(err)
-			}
+			putUser(t, s, currentUser(t, s, "viewer"), "reset-by-admin-1")
 		}, false},
 		{"the user was deleted", func(t *testing.T, s *store) {
-			if _, err := s.deleteUser("viewer"); err != nil {
+			if _, err := s.deleteUser(context.Background(), "", "viewer", 2); err != nil {
 				t.Fatal(err)
 			}
 		}, false},
@@ -948,42 +1221,58 @@ func TestStore_IfUnchanged(t *testing.T) {
 	}
 }
 
-func TestStore_DeleteUser(t *testing.T) {
-	s := newStoreWithFixtures(t)
-	found, err := s.deleteUser("viewer")
-	if err != nil || !found {
-		t.Fatalf("delete viewer: found=%v err=%v", found, err)
+// A delete moves seq, so no record holds the new value, and a record created
+// again under the same name gets a rev nobody held before.
+func TestStore_DeleteUser_MovesSeqAndNoRevIsReused(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	seq, err := s.deleteUser(context.Background(), "admin", "viewer", 2)
+	if err != nil || seq != 3 {
+		t.Fatalf("delete viewer: seq=%d err=%v", seq, err)
 	}
 	if signsIn(t, s, "viewer", viewerPW) {
 		t.Error("deleted user must not sign in")
 	}
-	found, err = s.deleteUser("ghost")
-	if err != nil || found {
-		t.Errorf("deleting unknown user: want found=false err=nil, got found=%v err=%v", found, err)
+	doc, _ := f.readDocs(t)
+	if doc.Seq != 3 || len(doc.Users) != 1 || doc.Users[0].Rev != 1 {
+		t.Errorf("the file holds seq 3 and only the admin at rev 1, got %+v", doc)
+	}
+	back := putUser(t, s, userRec{Username: "viewer"}, "viewer-password-2")
+	if back.rev != 4 || back.rev == 2 || back.rev == 3 {
+		t.Errorf("a re-created user must get a fresh rev (4), got %d", back.rev)
 	}
 }
 
-func TestStore_DeleteUser_LastAdmin(t *testing.T) {
-	s := newStoreWithFixtures(t) // admin is the only admin
-	if _, err := s.deleteUser("admin"); !errors.Is(err, errLastAdmin) {
-		t.Fatalf("deleting the last admin must return errLastAdmin, got %v", err)
-	}
-	if _, err := s.upsertUser(context.Background(), userRec{Username: "admin2", Admin: true}, "admin2-password"); err != nil {
-		t.Fatal(err)
-	}
-	if found, err := s.deleteUser("admin"); err != nil || !found {
-		t.Fatalf("deleting a non-last admin must succeed, got found=%v err=%v", found, err)
-	}
-}
-
-func TestStore_DeleteUser_PersistError(t *testing.T) {
+func TestStore_DeleteUser_Refusals(t *testing.T) {
+	ctx := context.Background()
 	s := newStoreWithFixtures(t)
-	blockWrites(t, &s.usersPath)
-	if _, err := s.deleteUser("viewer"); err == nil {
-		t.Fatal("expected a persist error")
+	var stale *staleError
+	if _, err := s.deleteUser(ctx, "admin", "viewer", 1); !errors.As(err, &stale) || stale.rev != 2 {
+		t.Errorf("an old rev: want a stale error naming rev 2, got %v", err)
 	}
-	if !signsIn(t, s, "viewer", viewerPW) {
-		t.Error("a failed delete must leave the user in place")
+	if _, err := s.deleteUser(ctx, "admin", "ghost", 4); !errors.Is(err, errNotFound) {
+		t.Errorf("an unknown user: want errNotFound, got %v", err)
+	}
+	for _, rev := range []int{0, -1} {
+		if _, err := s.deleteUser(ctx, "admin", "viewer", rev); !errors.Is(err, errRevRequired) {
+			t.Errorf("rev %d: want errRevRequired, got %v", rev, err)
+		}
+	}
+	if _, err := s.deleteUser(ctx, "viewer", "viewer", 2); !errors.Is(err, errCallerNotAdmin) {
+		t.Errorf("a caller who is not an admin: want errCallerNotAdmin, got %v", err)
+	}
+	if _, err := s.deleteUser(ctx, "ghost", "viewer", 2); !errors.Is(err, errCallerGone) {
+		t.Errorf("a caller who is gone: want errCallerGone, got %v", err)
+	}
+	if _, err := s.deleteUser(ctx, "admin", "admin", 1); !errors.Is(err, errLastAdmin) {
+		t.Errorf("the only admin: want errLastAdmin, got %v", err)
+	}
+	if seq, _ := s.seqs(); seq != 2 || len(s.listUsers()) != 2 {
+		t.Errorf("a refusal moves nothing: seq %d, %d users", seq, len(s.listUsers()))
+	}
+	putUser(t, s, userRec{Username: "admin2", Admin: true}, "admin2-password")
+	if _, err := s.deleteUser(ctx, "admin", "admin", 1); err != nil {
+		t.Fatalf("deleting a non-last admin must succeed, got %v", err)
 	}
 }
 
@@ -1004,84 +1293,167 @@ func TestStore_ListUsers_ReturnsDeepCopy(t *testing.T) {
 
 // ----- connection CRUD -----------------------------------------------------------------
 
-func TestStore_UpsertConnection_Create(t *testing.T) {
-	s := newStoreWithFixtures(t)
-	err := s.upsertConnection(connRec{
+func TestStore_SaveConnection_CreateStampsRev(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	got, err := s.saveConnection(context.Background(), "admin", connRec{
 		Broker: "b3", Hostname: "host3",
 		Semp:   sempRec{Port: "1943", Username: "mon", Password: "V1:semp-b3"},
 		Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v1", Username: "u", Password: "V1:c"}}},
-	})
-	if err != nil {
-		t.Fatalf("upsertConnection: %v", err)
+	}, 0)
+	if err != nil || got.rev != 3 || got.seq != 3 {
+		t.Fatalf("create: %+v err=%v (the file stood at seq 2)", got, err)
 	}
 	if len(s.listConnections()) != 3 {
 		t.Errorf("want 3 connections after create, got %d", len(s.listConnections()))
 	}
+	_, doc := f.readDocs(t)
+	if doc.Seq != 3 || doc.Connections[0].Rev != 1 || doc.Connections[1].Rev != 2 || doc.Connections[2].Rev != 3 {
+		t.Errorf("the file holds seq 3 and revs 1, 2, 3, got seq %d %+v", doc.Seq, doc.Connections)
+	}
 }
 
-func TestStore_UpsertConnection_MergeSecretsOnEdit(t *testing.T) {
+// A missing connections file is allowed; the first save creates it at seq 1.
+func TestStore_SaveConnection_CreatesTheFileWhenMissing(t *testing.T) {
+	f := newStoreFixture(t)
+	if err := os.Remove(f.connsPath); err != nil {
+		t.Fatal(err)
+	}
+	s := f.load(t)
+	if _, seq := s.seqs(); seq != 0 {
+		t.Fatalf("no file, no seq, got %d", seq)
+	}
+	got := putConn(t, s, connRec{Broker: "b1", Hostname: "host1"})
+	if got.rev != 1 || got.seq != 1 {
+		t.Errorf("the first save stamps seq 1 and rev 1, got %+v", got)
+	}
+	if again := f.load(t); len(again.listConnections()) != 1 {
+		t.Error("the created file must load again")
+	}
+}
+
+func TestStore_SaveConnection_MergeSecretsOnEdit(t *testing.T) {
 	s := newStoreWithFixtures(t)
 	edit := connRec{
 		Broker: "b1", Hostname: "host1-new",
 		Semp: sempRec{Port: "1943", Username: "mon", Password: ""}, // blank -> keep semp-b1-pw
 		Client: clientRec{Port: "1443", MsgVpns: []vpnRec{
 			{Name: "v1", Username: "u1", Password: ""},           // blank + match -> keep cli-b1v1-pw
-			{Name: "v2", Username: "u2", Password: "V1:changed"}, // non-blank → replace
-			{Name: "vX", Username: "ux", Password: ""},           // blank + no match → stays ""
+			{Name: "v2", Username: "u2", Password: "V1:changed"}, // non-blank -> replace
+			{Name: "vX", Username: "ux", Password: ""},           // blank + no match -> stays ""
 		}},
 	}
-	if err := s.upsertConnection(edit); err != nil {
-		t.Fatalf("upsertConnection: %v", err)
+	got := putConn(t, s, edit)
+	if got.rev != 3 || got.seq != 3 {
+		t.Errorf("a hostname change moves the rev to the new seq, got %+v", got)
 	}
-	var b1 connRec
-	for _, c := range s.listConnections() {
-		if c.Broker == "b1" {
-			b1 = c
-		}
-	}
+	b1 := currentConn(t, s, "b1")
 	if b1.Hostname != "host1-new" {
 		t.Errorf("non-secret fields must update, hostname=%q", b1.Hostname)
 	}
 	if b1.Semp.Password != "semp-b1-pw" {
 		t.Errorf("blank semp password must be kept, got %q", b1.Semp.Password)
 	}
-	got := map[string]string{}
+	pw := map[string]string{}
 	for _, v := range b1.Client.MsgVpns {
-		got[v.Name] = v.Password
+		pw[v.Name] = v.Password
 	}
-	if got["v1"] != "cli-b1v1-pw" || got["v2"] != "V1:changed" || got["vX"] != "" {
-		t.Errorf("VPN secrets: want keep/replace/blank, got %v", got)
+	if pw["v1"] != "cli-b1v1-pw" || pw["v2"] != "V1:changed" || pw["vX"] != "" {
+		t.Errorf("VPN secrets: want keep/replace/blank, got %v", pw)
 	}
 }
 
-func TestStore_UpsertConnection_EditReplacesSemp(t *testing.T) {
+// Passwords are not in the console view: changing only them moves seq and
+// keeps the rev. The blank-keeps rule is resolved against the record now.
+func TestStore_SaveConnection_PasswordOnlyKeepsRev(t *testing.T) {
 	s := newStoreWithFixtures(t)
-	edit := connRec{
-		Broker: "b2", Hostname: "host2",
-		Semp:   sempRec{Port: "1943", Username: "mon", Password: "V1:semp-b2-new"},
-		Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v9", Username: "u9", Password: "V1:c-new"}}},
+	edit := currentConn(t, s, "b2")
+	edit.Semp.Password = "V1:semp-b2-new"
+	edit.Client.MsgVpns[0].Password = "V1:c-new"
+	got := putConn(t, s, edit)
+	if got.rev != 2 || got.seq != 3 {
+		t.Errorf("passwords only: want rev 2 and seq 3, got %+v", got)
 	}
-	if err := s.upsertConnection(edit); err != nil {
-		t.Fatalf("upsertConnection: %v", err)
+	if c := currentConn(t, s, "b2"); c.Semp.Password != "V1:semp-b2-new" || c.Client.MsgVpns[0].Password != "V1:c-new" {
+		t.Errorf("a non-blank password must replace, got %+v", c)
 	}
-	for _, c := range s.listConnections() {
-		if c.Broker == "b2" && c.Semp.Password != "V1:semp-b2-new" {
-			t.Errorf("non-blank semp password must replace, got %q", c.Semp.Password)
-		}
+	same := currentConn(t, s, "b2")
+	same.Semp.Scheme = sempTLS // TLS spelled out is the blank scheme: nothing the console shows
+	if got := putConn(t, s, same); got.rev != 2 || got.seq != 4 {
+		t.Errorf("the TLS scheme spelled out changes nothing visible: %+v", got)
+	}
+	plain := currentConn(t, s, "b2")
+	plain.Client.Scheme = clientPlain
+	if got := putConn(t, s, plain); got.rev != got.seq {
+		t.Errorf("a scheme the console shows moves the rev: %+v", got)
+	}
+}
+
+func TestStore_SaveConnection_Refusals(t *testing.T) {
+	ctx := context.Background()
+	var stale *staleError
+	cases := []struct {
+		name   string
+		caller string
+		rec    connRec
+		rev    int
+		check  func(err error) bool
+	}{
+		{"a create of an existing broker", "admin", connRec{Broker: "b1"}, 0, func(err error) bool { return errors.Is(err, errExists) }},
+		{"an edit of a broker that is gone", "admin", connRec{Broker: "b9"}, 1, func(err error) bool { return errors.Is(err, errNotFound) }},
+		{"an old rev", "admin", connRec{Broker: "b2"}, 1, func(err error) bool { return errors.As(err, &stale) && stale.rev == 2 }},
+		{"a negative rev", "admin", connRec{Broker: "b2"}, -3, func(err error) bool { return errors.Is(err, errRevRequired) }},
+		{"a caller who is not an admin", "viewer", connRec{Broker: "b2"}, 2, func(err error) bool { return errors.Is(err, errCallerNotAdmin) }},
+		{"a caller who is gone", "ghost", connRec{Broker: "b2"}, 2, func(err error) bool { return errors.Is(err, errCallerGone) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newStoreFixture(t)
+			s := f.load(t)
+			before, _ := os.ReadFile(f.connsPath)
+			if _, err := s.saveConnection(ctx, tc.caller, tc.rec, tc.rev); !tc.check(err) {
+				t.Errorf("got %v", err)
+			}
+			if _, seq := s.seqs(); seq != 2 || len(s.listConnections()) != 2 {
+				t.Errorf("a refusal moves nothing: seq %d", seq)
+			}
+			if now, _ := os.ReadFile(f.connsPath); !bytes.Equal(now, before) {
+				t.Error("a refusal must not rewrite the file")
+			}
+		})
 	}
 }
 
 func TestStore_DeleteConnection(t *testing.T) {
-	s := newStoreWithFixtures(t)
-	found, err := s.deleteConnection("b2")
-	if err != nil || !found {
-		t.Fatalf("delete b2: found=%v err=%v", found, err)
+	ctx := context.Background()
+	f := newStoreFixture(t)
+	s := f.load(t)
+	var stale *staleError
+	if _, err := s.deleteConnection(ctx, "admin", "b2", 1); !errors.As(err, &stale) || stale.rev != 2 {
+		t.Errorf("an old rev: want a stale error naming rev 2, got %v", err)
 	}
-	if len(s.listConnections()) != 1 {
-		t.Errorf("want 1 connection after delete, got %d", len(s.listConnections()))
+	if _, err := s.deleteConnection(ctx, "admin", "nope", 1); !errors.Is(err, errNotFound) {
+		t.Errorf("an unknown broker: want errNotFound, got %v", err)
 	}
-	if found, _ = s.deleteConnection("nope"); found {
-		t.Error("deleting an unknown broker must return found=false")
+	if _, err := s.deleteConnection(ctx, "admin", "b2", 0); !errors.Is(err, errRevRequired) {
+		t.Errorf("rev 0: want errRevRequired, got %v", err)
+	}
+	if _, err := s.deleteConnection(ctx, "viewer", "b2", 2); !errors.Is(err, errCallerNotAdmin) {
+		t.Errorf("a caller who is not an admin: want errCallerNotAdmin, got %v", err)
+	}
+	if _, seq := s.seqs(); seq != 2 || len(s.listConnections()) != 2 {
+		t.Fatalf("a refusal moves nothing: seq %d", seq)
+	}
+	seq, err := s.deleteConnection(ctx, "admin", "b2", 2)
+	if err != nil || seq != 3 {
+		t.Fatalf("delete b2: seq=%d err=%v", seq, err)
+	}
+	_, doc := f.readDocs(t)
+	if doc.Seq != 3 || len(doc.Connections) != 1 || doc.Connections[0].Rev != 1 {
+		t.Errorf("the file holds seq 3 and only b1 at rev 1, got %+v", doc)
+	}
+	if back := putConn(t, s, connRec{Broker: "b2", Hostname: "host2"}); back.rev != 4 {
+		t.Errorf("a re-created broker must get a fresh rev (4), got %d", back.rev)
 	}
 }
 
@@ -1099,6 +1471,559 @@ func TestStore_ListConnections_ReturnsDeepCopy(t *testing.T) {
 	}
 }
 
+// sameUserView and sameConnView say what the admin console can tell apart;
+// they must agree with what userToOutput and connToOutput show.
+func TestStore_SameViewAgreesWithTheOutput(t *testing.T) {
+	s := newStoreWithFixtures(t)
+	u := currentUser(t, s, "viewer")
+	userEdits := map[string]func(u *userRec){
+		"username":      func(u *userRec) { u.Username = "other" },
+		"password hash": func(u *userRec) { u.Password = "another-hash" },
+		"admin":         func(u *userRec) { u.Admin = true },
+		"must change":   func(u *userRec) { u.MustChangePassword = true },
+		"operate":       func(u *userRec) { u.Operate = []permRow{{Brokers: "b1"}} },
+		"read-only":     func(u *userRec) { u.ReadOnly = nil },
+		"modules":       func(u *userRec) { u.Modules = &[]string{} },
+		"modules gone":  func(u *userRec) { u.Modules = nil },
+		"empty operate": func(u *userRec) { u.Operate = []permRow{} },
+	}
+	for name, edit := range userEdits {
+		v := currentUser(t, s, "viewer")
+		edit(&v)
+		if got, want := sameUserView(u, v), reflect.DeepEqual(userToOutput(u), userToOutput(v)); got != want {
+			t.Errorf("user edit %q: sameUserView = %v, the output says %v", name, got, want)
+		}
+	}
+	c := currentConn(t, s, "b1")
+	connEdits := map[string]func(c *connRec){
+		"broker":        func(c *connRec) { c.Broker = "other" },
+		"hostname":      func(c *connRec) { c.Hostname = "other" },
+		"semp scheme":   func(c *connRec) { c.Semp.Scheme = sempPlain },
+		"semp tls":      func(c *connRec) { c.Semp.Scheme = sempTLS },
+		"semp port":     func(c *connRec) { c.Semp.Port = "1" },
+		"semp user":     func(c *connRec) { c.Semp.Username = "other" },
+		"semp password": func(c *connRec) { c.Semp.Password = "other" },
+		"client scheme": func(c *connRec) { c.Client.Scheme = clientPlain },
+		"client tls":    func(c *connRec) { c.Client.Scheme = clientTLS },
+		"client port":   func(c *connRec) { c.Client.Port = "1" },
+		"vpn name":      func(c *connRec) { c.Client.MsgVpns[0].Name = "other" },
+		"vpn user":      func(c *connRec) { c.Client.MsgVpns[0].Username = "other" },
+		"vpn password":  func(c *connRec) { c.Client.MsgVpns[0].Password = "other" },
+		"vpn removed":   func(c *connRec) { c.Client.MsgVpns = c.Client.MsgVpns[1:] },
+		"vpn order":     func(c *connRec) { slices.Reverse(c.Client.MsgVpns) },
+		"no vpns":       func(c *connRec) { c.Client.MsgVpns = nil },
+	}
+	for name, edit := range connEdits {
+		v := currentConn(t, s, "b1")
+		edit(&v)
+		if got, want := sameConnView(c, v), reflect.DeepEqual(connToOutput(c), connToOutput(v)); got != want {
+			t.Errorf("connection edit %q: sameConnView = %v, the output says %v", name, got, want)
+		}
+	}
+}
+
+// ----- load check on seq and rev ---------------------------------------------------------
+
+func TestLoadStore_RevChecks(t *testing.T) {
+	h := testHasher(t)
+	hash := mustHash(t, h, adminPW)
+	users := func(seq string, rev string) string {
+		return fmt.Sprintf("seq: %s\nmsg-utility-users:\n  - username: admin\n    rev: %s\n    password: %s\n    admin: true\n", seq, rev, hash)
+	}
+	conns := func(seq string, rev string) string {
+		return fmt.Sprintf("seq: %s\nmsg-utility-connections:\n  - broker: b1\n    rev: %s\n    hostname: h\n", seq, rev)
+	}
+	cases := []struct {
+		name, doc, want string
+		users           bool
+	}{
+		{"user rev 0", users("3", "0"), `user "admin" has rev 0 and the file's seq is 3`, true},
+		{"user rev absent", strings.Replace(users("3", "1"), "    rev: 1\n", "", 1), `user "admin" has rev 0`, true},
+		{"user rev above seq", users("3", "4"), `user "admin" has rev 4 and the file's seq is 3`, true},
+		{"user rev negative", users("3", "-1"), `has rev -1`, true},
+		{"users seq negative", users("-1", "1"), "seq is -1", true},
+		{"users seq absent", strings.Replace(users("3", "1"), "seq: 3\n", "", 1), `the file's seq is 0`, true},
+		{"connection rev 0", conns("3", "0"), `broker "b1" has rev 0 and the file's seq is 3`, false},
+		{"connection rev above seq", conns("3", "9"), `broker "b1" has rev 9 and the file's seq is 3`, false},
+		{"connections seq negative", conns("-2", "1"), "seq is -2", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newStoreFixture(t)
+			path := f.connsPath
+			if tc.users {
+				f.writeUsers(t, tc.doc)
+				path = f.usersPath
+			} else {
+				f.writeConns(t, tc.doc)
+			}
+			_, err := loadStore(f.opts(noEnv), quietLogger())
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "restore the file") {
+				t.Fatalf("want a refusal naming %s and %q, got %v", path, tc.want, err)
+			}
+		})
+	}
+	// A rev equal to seq, and a file with no records at seq 0, are fine.
+	f := newStoreFixture(t)
+	f.writeUsers(t, users("1", "1"))
+	f.writeConns(t, "seq: 0\nmsg-utility-connections: []\n")
+	s := f.load(t)
+	if us, cs := s.seqs(); us != 1 || cs != 0 {
+		t.Errorf("seqs after load: %d %d", us, cs)
+	}
+}
+
+// ----- the writer's refusals ---------------------------------------------------------------
+
+// A sealed file replaced on disk behind the gateway's back refuses every later
+// write of it until restart, even if the old bytes are put back, and wins over
+// the rev check. The other file is not affected.
+func TestStore_ReplacedFileRefusesEveryWriteUntilRestart(t *testing.T) {
+	ctx := context.Background()
+	f := newStoreFixture(t)
+	s := f.load(t)
+	original, _ := os.ReadFile(f.usersPath)
+	f.writeUsers(t, fmt.Sprintf(usersYAMLTemplate, mustHash(t, f.h, "someone-else-1"), mustHash(t, f.h, "someone-else-2")))
+	var disk *changedOnDiskError
+	attempts := func() []error {
+		_, e1 := s.saveUser(ctx, "admin", userRec{Username: "bob"}, "bob-password-1", 0)
+		_, e2 := s.saveUser(ctx, "admin", userRec{Username: "viewer"}, "", 1) // stale too: the disk check comes first
+		_, e3 := s.deleteUser(ctx, "admin", "viewer", 2)
+		e4 := s.setPassword(ctx, "viewer", "viewer-new-pw-1", storedHash(s, "viewer"), func() {})
+		return []error{e1, e2, e3, e4}
+	}
+	for round := 0; round < 2; round++ {
+		for i, err := range attempts() {
+			if !errors.As(err, &disk) || disk.file != "users.yaml" {
+				t.Errorf("round %d attempt %d: want *changedOnDiskError for users.yaml, got %v", round, i, err)
+			}
+		}
+		if err := os.WriteFile(f.usersPath, original, 0o600); err != nil { // the cause does not go away by undoing it
+			t.Fatal(err)
+		}
+	}
+	if seq, _ := s.seqs(); seq != 2 || len(s.listUsers()) != 2 {
+		t.Error("a refused write must leave memory alone")
+	}
+	if got := putConn(t, s, connRec{Broker: "b3", Hostname: "host3"}); got.rev != 3 {
+		t.Errorf("the connections file is not the one that changed: %+v", got)
+	}
+	// A restart loads what is on disk and writes again.
+	again := f.load(t)
+	if got := putUser(t, again, userRec{Username: "bob"}, "bob-password-1"); got.seq != 3 {
+		t.Errorf("after a restart the write must go through: %+v", got)
+	}
+}
+
+// The same holds for connections.yaml: a save, a delete and an import of the
+// connections are refused once that file was replaced, and users.yaml is not
+// affected.
+func TestStore_ReplacedConnectionsFileRefusesItsWrites(t *testing.T) {
+	ctx := context.Background()
+	f := newStoreFixture(t)
+	s := f.load(t)
+	conns := s.listConnections()
+	if err := os.WriteFile(f.connsPath, []byte("not the file the gateway wrote"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, e1 := s.saveConnection(ctx, "admin", connRec{Broker: "b9", Hostname: "h9"}, 0)
+	_, e2 := s.deleteConnection(ctx, "admin", conns[0].Broker, conns[0].Rev)
+	_, e3 := runImport(s, nil, &sectionImport[connRec]{recs: conns})
+	var disk *changedOnDiskError
+	for i, err := range []error{e1, e2, e3} {
+		if !errors.As(err, &disk) || disk.file != filepath.Base(f.connsPath) {
+			t.Errorf("attempt %d: want *changedOnDiskError for the connections file, got %v", i, err)
+		}
+	}
+	if _, err := s.saveUser(ctx, "admin", userRec{Username: "bob"}, "bob-password-1", 0); err != nil {
+		t.Errorf("users.yaml is not affected: %v", err)
+	}
+}
+
+// ----- import ------------------------------------------------------------------------------
+
+// runImport runs stageImport as the backup's import does, in one transaction.
+func runImport(s *store, users *sectionImport[userRec], conns *sectionImport[connRec]) (importStaged, error) {
+	var res importStaged
+	err := s.wr.Do(context.Background(), func(tx *txn) error {
+		var err error
+		res, err = s.stageImport(tx, users, conns)
+		return err
+	})
+	return res, err
+}
+
+func TestStore_StageImport_ReplaceStampsEveryRecordAndIgnoresTheBackupsRevs(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	onChange := 0
+	s.onChange = func() { onChange++ }
+	admin := currentUser(t, s, "admin")
+	admin.Rev = 99
+	carol := userRec{Username: "carol", Rev: 7, Password: storedHash(s, "viewer"), Operate: []permRow{}, ReadOnly: []permRow{}}
+	res, err := runImport(s,
+		&sectionImport[userRec]{recs: []userRec{admin, carol}},
+		&sectionImport[connRec]{recs: []connRec{{Broker: "b9", Rev: 50, Hostname: "host9"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.usersSeq != 3 || res.connsSeq != 3 || !reflect.DeepEqual(res.drop, []string{"viewer"}) {
+		t.Errorf("want both files at seq 3 and the removed viewer signed out, got %+v", res)
+	}
+	if onChange != 1 {
+		t.Errorf("onChange ran %d times, want once", onChange)
+	}
+	for _, u := range s.listUsers() {
+		if u.Rev != 3 {
+			t.Errorf("user %q: rev %d, want 3 (the backup's revs are ignored)", u.Username, u.Rev)
+		}
+	}
+	for _, c := range s.listConnections() {
+		if c.Rev != 3 {
+			t.Errorf("connection %q: rev %d, want 3", c.Broker, c.Rev)
+		}
+	}
+	ud, cd := f.readDocs(t)
+	if ud.Seq != 3 || cd.Seq != 3 || len(ud.Users) != 2 || len(cd.Connections) != 1 || cd.Connections[0].Broker != "b9" {
+		t.Errorf("both files must hold the import: %+v %+v", ud, cd)
+	}
+	if again := f.load(t); !signsIn(t, again, "carol", viewerPW) {
+		t.Error("the imported hash must load and work")
+	}
+}
+
+func TestStore_StageImport_MergeKeepsTheRestAndSkipLeavesAFileAlone(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	usersBefore, _ := os.ReadFile(f.usersPath)
+	b1 := currentConn(t, s, "b1")
+	b1.Hostname = "host1-from-backup"
+	res, err := runImport(s, nil, &sectionImport[connRec]{recs: []connRec{b1, {Broker: "b3", Hostname: "host3"}}, merge: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.usersSeq != 0 || res.connsSeq != 3 || len(res.drop) != 0 {
+		t.Errorf("only connections are written: %+v", res)
+	}
+	names := []string{}
+	for _, c := range s.listConnections() {
+		names = append(names, c.Broker)
+		if c.Rev != 3 {
+			t.Errorf("%s: every record of an imported section takes the new seq, got rev %d", c.Broker, c.Rev)
+		}
+	}
+	if !reflect.DeepEqual(names, []string{"b1", "b2", "b3"}) || currentConn(t, s, "b1").Hostname != "host1-from-backup" {
+		t.Errorf("merge keeps b2, replaces b1, appends b3: %v", names)
+	}
+	if now, _ := os.ReadFile(f.usersPath); !bytes.Equal(now, usersBefore) {
+		t.Error("a skipped section's file must not be rewritten")
+	}
+	if us, _ := s.seqs(); us != 2 {
+		t.Errorf("users seq must not move, got %d", us)
+	}
+	// Merging users: a restored hash replaces the same name's, the others stay.
+	viewer := currentUser(t, s, "viewer")
+	viewer.Password = storedHash(s, "admin")
+	res, err = runImport(s, &sectionImport[userRec]{recs: []userRec{viewer}, merge: true}, nil)
+	if err != nil || res.usersSeq != 3 || !reflect.DeepEqual(res.drop, []string{"viewer"}) {
+		t.Fatalf("merge users: %+v %v", res, err)
+	}
+	if u := currentUser(t, s, "admin"); u.Rev != 3 {
+		t.Errorf("the admin was not in the backup but its rev follows the file: %d", u.Rev)
+	}
+}
+
+// An import that breaks the load rules is refused before anything is queued:
+// files, memory and seq stay as they were.
+func TestStore_StageImport_RefusalsChangeNothing(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	usersFile, _ := os.ReadFile(f.usersPath)
+	connsFile, _ := os.ReadFile(f.connsPath)
+	users, conns := s.listUsers(), s.listConnections()
+	viewerOnly := []userRec{currentUser(t, s, "viewer")}
+
+	var invalid *importInvalidError
+	if _, err := runImport(s, &sectionImport[userRec]{recs: viewerOnly}, nil); !errors.Is(err, errLastAdmin) {
+		t.Errorf("no admin left: want errLastAdmin, got %v", err)
+	}
+	if _, err := runImport(s, &sectionImport[userRec]{recs: append(slices.Clone(users), users[0])}, nil); !errors.As(err, &invalid) || invalid.section != "users" ||
+		!strings.Contains(err.Error(), "The backup's users cannot be imported") || !strings.Contains(err.Error(), "appears more than once") {
+		t.Errorf("a duplicate user: want an importInvalidError for users, got %v", err)
+	}
+	if _, err := runImport(s, nil, &sectionImport[connRec]{recs: append(slices.Clone(conns), conns[0])}); !errors.As(err, &invalid) || invalid.section != "connections" {
+		t.Errorf("a duplicate connection: want an importInvalidError for connections, got %v", err)
+	}
+	// The users section is fine, the connections one is not: neither is written.
+	if _, err := runImport(s, &sectionImport[userRec]{recs: users}, &sectionImport[connRec]{recs: []connRec{{Broker: "b 1"}}}); !errors.As(err, &invalid) {
+		t.Errorf("a bad second section: want a refusal, got %v", err)
+	}
+	if us, cs := s.seqs(); us != 2 || cs != 2 || len(s.listUsers()) != 2 || len(s.listConnections()) != 2 {
+		t.Errorf("a refused import moves nothing: seqs %d %d", us, cs)
+	}
+	if now, _ := os.ReadFile(f.usersPath); !bytes.Equal(now, usersFile) {
+		t.Error("a refused import rewrote the users file")
+	}
+	if now, _ := os.ReadFile(f.connsPath); !bytes.Equal(now, connsFile) {
+		t.Error("a refused import rewrote the connections file")
+	}
+	// A file replaced behind the gateway's back refuses the import too.
+	f.writeUsers(t, fmt.Sprintf(usersYAMLTemplate, mustHash(t, f.h, "x-password-1"), mustHash(t, f.h, "x-password-2")))
+	var disk *changedOnDiskError
+	if _, err := runImport(s, &sectionImport[userRec]{recs: users}, nil); !errors.As(err, &disk) {
+		t.Errorf("a replaced users file: want *changedOnDiskError, got %v", err)
+	}
+}
+
+// An import writes the users and the connections together: when the second
+// file cannot be replaced, the first is put back and memory keeps both lists.
+func TestStore_StageImport_IsAllOrNothing(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	usersFile, _ := os.ReadFile(f.usersPath)
+	connsFile, _ := os.ReadFile(f.connsPath)
+	s.wr.hooks.rename = renameFailing(2)
+	users := []userRec{currentUser(t, s, "admin")}
+	_, err := runImport(s, &sectionImport[userRec]{recs: users}, &sectionImport[connRec]{recs: []connRec{{Broker: "b9", Hostname: "host9"}}})
+	var failed *writeFailedError
+	if !errors.As(err, &failed) {
+		t.Fatalf("want a write that failed and changed nothing, got %v", err)
+	}
+	if now, _ := os.ReadFile(f.usersPath); !bytes.Equal(now, usersFile) {
+		t.Error("the users file must be put back")
+	}
+	if now, _ := os.ReadFile(f.connsPath); !bytes.Equal(now, connsFile) {
+		t.Error("the connections file must be put back")
+	}
+	if us, cs := s.seqs(); us != 2 || cs != 2 || len(s.users) != 2 || len(s.conns) != 2 {
+		t.Errorf("memory must keep both lists: seqs %d %d, %d users, %d connections", us, cs, len(s.users), len(s.conns))
+	}
+
+	// With both files writable the two lists change together.
+	s.wr.hooks.rename = nil
+	res, err := runImport(s, &sectionImport[userRec]{recs: users}, &sectionImport[connRec]{recs: []connRec{{Broker: "b9", Hostname: "host9"}}})
+	if err != nil || !reflect.DeepEqual(res.drop, []string{"viewer"}) {
+		t.Fatalf("want the viewer signed out, got %+v %v", res, err)
+	}
+	if l := f.load(t); len(l.users) != 1 || len(l.conns) != 1 || l.conns[0].Broker != "b9" {
+		t.Errorf("both files must hold the import: %d users, %+v", len(l.users), l.conns)
+	}
+}
+
+// ----- races (run with -race) ---------------------------------------------------------------
+
+// together starts every fn at once and waits for all of them.
+func together(fns ...func()) {
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, fn := range fns {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			fn()
+		}()
+	}
+	close(start)
+	wg.Wait()
+}
+
+// Two saves of one record from the same rev: exactly one lands, the other is
+// stale, and the file and memory agree.
+func TestStore_Race_TwoSavesOfOneRecord(t *testing.T) {
+	for round := 0; round < 5; round++ {
+		f := newStoreFixture(t)
+		s := f.load(t)
+		errs := make([]error, 2)
+		together(
+			func() {
+				u := currentUser(t, s, "viewer")
+				u.ReadOnly = []permRow{{Brokers: "b1", MsgVpns: "v1", Queues: "a"}}
+				_, errs[0] = s.saveUser(context.Background(), "admin", u, "", 2)
+			},
+			func() {
+				u := currentUser(t, s, "viewer")
+				u.ReadOnly = []permRow{{Brokers: "b1", MsgVpns: "v1", Queues: "b"}}
+				_, errs[1] = s.saveUser(context.Background(), "admin", u, "", 2)
+			},
+		)
+		var stale *staleError
+		wins := 0
+		for _, err := range errs {
+			switch {
+			case err == nil:
+				wins++
+			case errors.As(err, &stale) && stale.rev == 3:
+			default:
+				t.Fatalf("round %d: want nil or stale at rev 3, got %v", round, err)
+			}
+		}
+		doc, _ := f.readDocs(t)
+		if wins != 1 || doc.Seq != 3 || currentUser(t, s, "viewer").Rev != 3 || doc.Users[1].Rev != 3 {
+			t.Fatalf("round %d: one winner, one commit: wins=%d file seq %d", round, wins, doc.Seq)
+		}
+	}
+}
+
+// Saves of different records in one file both land: neither overwrites the
+// other, because each plans on the state the other published.
+func TestStore_Race_SavesOfDifferentRecordsBothLand(t *testing.T) {
+	f := newStoreFixture(t)
+	s := f.load(t)
+	var e1, e2, e3 error
+	together(
+		func() {
+			u := currentUser(t, s, "viewer")
+			u.Admin = true
+			_, e1 = s.saveUser(context.Background(), "admin", u, "", 2)
+		},
+		func() {
+			_, e2 = s.saveUser(context.Background(), "admin", userRec{Username: "bob"}, "bob-password-1", 0)
+		},
+		func() {
+			_, e3 = s.saveUser(context.Background(), "admin", userRec{Username: "carol"}, "carol-password-1", 0)
+		},
+	)
+	if e1 != nil || e2 != nil || e3 != nil {
+		t.Fatalf("all three must land: %v %v %v", e1, e2, e3)
+	}
+	again := f.load(t)
+	if us, _ := again.seqs(); us != 5 || len(again.users) != 4 {
+		t.Errorf("want seq 5 and four users after a restart, got seq %d, %d users", us, len(again.users))
+	}
+	if admin, _ := again.isAdmin("viewer"); !admin {
+		t.Error("the promotion must survive the creates")
+	}
+}
+
+// Two creates of one name: one wins, the other is told it exists.
+func TestStore_Race_TwoCreatesOfOneName(t *testing.T) {
+	s := newStoreWithFixtures(t)
+	errs := make([]error, 2)
+	together(
+		func() {
+			_, errs[0] = s.saveUser(context.Background(), "admin", userRec{Username: "bob"}, "bob-password-1", 0)
+		},
+		func() {
+			_, errs[1] = s.saveUser(context.Background(), "admin", userRec{Username: "bob"}, "bob-password-2", 0)
+		},
+	)
+	exists := 0
+	for _, err := range errs {
+		if errors.Is(err, errExists) {
+			exists++
+		} else if err != nil {
+			t.Fatalf("unexpected %v", err)
+		}
+	}
+	if exists != 1 || len(s.listUsers()) != 3 {
+		t.Errorf("one create wins and one exists: exists=%d users=%d", exists, len(s.listUsers()))
+	}
+}
+
+// A delete racing a save of the same record: one of them wins and the other is
+// refused for what the winner did.
+func TestStore_Race_DeleteRacingASave(t *testing.T) {
+	for round := 0; round < 5; round++ {
+		s := newStoreWithFixtures(t)
+		var saveErr, delErr error
+		together(
+			func() {
+				u := currentUser(t, s, "viewer")
+				u.Admin = true
+				_, saveErr = s.saveUser(context.Background(), "admin", u, "", 2)
+			},
+			func() { _, delErr = s.deleteUser(context.Background(), "admin", "viewer", 2) },
+		)
+		var stale *staleError
+		switch {
+		case saveErr == nil && errors.As(delErr, &stale):
+		case delErr == nil && errors.Is(saveErr, errNotFound):
+		default:
+			t.Fatalf("round %d: want one winner, got save=%v delete=%v", round, saveErr, delErr)
+		}
+	}
+}
+
+// An import racing a user save, in whichever order they run: the import's list
+// is the final state, and a save that ran second finds its user gone.
+func TestStore_Race_ImportRacingASave(t *testing.T) {
+	for round := 0; round < 8; round++ {
+		s := newStoreWithFixtures(t)
+		admin := currentUser(t, s, "admin")
+		var impErr, saveErr error
+		together(
+			func() {
+				_, impErr = runImport(s, &sectionImport[userRec]{recs: []userRec{admin}}, nil)
+			},
+			func() {
+				u := currentUser(t, s, "viewer")
+				u.Admin = true
+				_, saveErr = s.saveUser(context.Background(), "admin", u, "", 2)
+			},
+		)
+		var stale *staleError
+		if impErr != nil || (saveErr != nil && !errors.As(saveErr, &stale) && !errors.Is(saveErr, errNotFound)) {
+			t.Fatalf("round %d: import=%v save=%v", round, impErr, saveErr)
+		}
+		if us, _ := s.seqs(); len(s.listUsers()) != 1 || us < 3 || us > 4 {
+			t.Fatalf("round %d: the import's list must be the final state, got %d users at seq %d", round, len(s.listUsers()), us)
+		}
+	}
+}
+
+// Readers during writes see a committed state, never half of one: an import
+// moves users.yaml and connections.yaml together, so a reader that sees one
+// file's seq ahead of the other's saw half of it.
+func TestStore_Race_ReadersNeverSeeHalfAnImport(t *testing.T) {
+	s := newStoreWithFixtures(t)
+	admin := currentUser(t, s, "admin")
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				users, conns, us, cs := s.snapshotAll()
+				if us != cs {
+					t.Errorf("half an import: users seq %d, connections seq %d", us, cs)
+					return
+				}
+				for _, u := range users {
+					if u.Rev < 1 || u.Rev > us {
+						t.Errorf("user %q rev %d outside 1..%d", u.Username, u.Rev, us)
+						return
+					}
+				}
+				for _, c := range conns {
+					if c.Rev < 1 || c.Rev > cs {
+						t.Errorf("connection %q rev %d outside 1..%d", c.Broker, c.Rev, cs)
+						return
+					}
+				}
+				s.profile("admin", defaultConfig().modules)
+				s.sempTarget("admin", "b1")
+			}
+		}()
+	}
+	for i := 0; i < 20; i++ {
+		if _, err := runImport(s, &sectionImport[userRec]{recs: []userRec{admin}}, &sectionImport[connRec]{recs: []connRec{{Broker: fmt.Sprintf("b%d", i), Hostname: "h"}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(done)
+	wg.Wait()
+	if us, cs := s.seqs(); us != 22 || cs != 22 {
+		t.Errorf("after 20 imports both files stand at seq 22, got %d and %d", us, cs)
+	}
+}
+
 func TestStore_CRUD_RaceSafe(t *testing.T) {
 	s := newStoreWithFixtures(t)
 	var wg sync.WaitGroup
@@ -1110,71 +2035,15 @@ func TestStore_CRUD_RaceSafe(t *testing.T) {
 			s.listUsers()
 			s.isAdmin("admin")
 			_, _, _ = s.checkPassword(context.Background(), "admin", adminPW)
-			_, _ = s.upsertUser(context.Background(), userRec{Username: fmt.Sprintf("u%d", n)}, "racer-password")
+			if _, err := s.saveUser(context.Background(), "admin", userRec{Username: fmt.Sprintf("u%d", n)}, "racer-password", 0); err != nil {
+				t.Error(err)
+			}
 			s.listConnections()
 		}(i)
 	}
 	wg.Wait()
-}
-
-// An import replaces whole lists. The store still refuses a list that breaks
-// its rules, and keeps what it had, in memory and on disk.
-func TestStore_ReplaceRefusesAnInvalidList(t *testing.T) {
-	f := newStoreFixture(t)
-	s := f.load(t)
-	usersBefore, connsBefore := len(s.users), len(s.conns)
-	usersFile, _ := os.ReadFile(f.usersPath)
-	connsFile, _ := os.ReadFile(f.connsPath)
-
-	if _, err := s.replaceStores(&fileTx{}, append(append([]userRec{}, s.users...), s.users[0]), nil); err == nil || !strings.Contains(err.Error(), "appears more than once") {
-		t.Errorf("replaceStores with a duplicate user: want a refusal, got %v", err)
-	}
-	if _, err := s.replaceStores(&fileTx{}, nil, append(append([]connRec{}, s.conns...), s.conns[0])); err == nil || !strings.Contains(err.Error(), "appears more than once") {
-		t.Errorf("replaceStores with a duplicate connection: want a refusal, got %v", err)
-	}
-	if len(s.users) != usersBefore || len(s.conns) != connsBefore {
-		t.Error("a refused replace changed the store in memory")
-	}
-	if now, _ := os.ReadFile(f.usersPath); !bytes.Equal(now, usersFile) {
-		t.Error("a refused replace rewrote the users file")
-	}
-	if now, _ := os.ReadFile(f.connsPath); !bytes.Equal(now, connsFile) {
-		t.Error("a refused replace rewrote the connections file")
-	}
-}
-
-// An import writes the users and the connections together: when the second
-// file cannot be replaced, the first is put back and memory keeps both lists.
-func TestStore_ReplaceStoresIsAllOrNothing(t *testing.T) {
-	f := newStoreFixture(t)
-	s := f.load(t)
-	usersFile, _ := os.ReadFile(f.usersPath)
-	// The connections file's place is a directory with something in it: the
-	// rename onto it fails after the users file was renamed.
-	s.connsPath = filepath.Join(t.TempDir(), "conns.yaml")
-	if err := os.MkdirAll(filepath.Join(s.connsPath, "child"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	users := append([]userRec{}, s.users[0])
-	drop, err := s.replaceStores(&fileTx{}, users, []connRec{{Broker: "b9", Hostname: "host9"}})
-	if err == nil || !strings.Contains(err.Error(), "nothing was changed") || drop != nil {
-		t.Fatalf("want a failure that changed nothing, got %v %v", drop, err)
-	}
-	if now, _ := os.ReadFile(f.usersPath); !bytes.Equal(now, usersFile) {
-		t.Error("the users file must be put back")
-	}
-	if len(s.users) != 2 || len(s.conns) != 2 {
-		t.Errorf("memory must keep both lists: %d users, %d connections", len(s.users), len(s.conns))
-	}
-
-	// With both files writable the two lists change together.
-	s.connsPath = f.connsPath
-	drop, err = s.replaceStores(&fileTx{}, users, []connRec{{Broker: "b9", Hostname: "host9"}})
-	if err != nil || !reflect.DeepEqual(drop, []string{"viewer"}) {
-		t.Fatalf("want the viewer signed out, got %v %v", drop, err)
-	}
-	if l := f.load(t); len(l.users) != 1 || len(l.conns) != 1 || l.conns[0].Broker != "b9" {
-		t.Errorf("both files must hold the import: %d users, %+v", len(l.users), l.conns)
+	if us, _ := s.seqs(); us != 12 || len(s.listUsers()) != 12 {
+		t.Errorf("ten creates, ten commits: seq %d, %d users", us, len(s.listUsers()))
 	}
 }
 
@@ -1200,9 +2069,7 @@ func TestStore_ConnectionSchemes(t *testing.T) {
 			if err := validateConn(rec); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.upsertConnection(rec); err != nil {
-				t.Fatal(err)
-			}
+			putConn(t, s, rec)
 			if st, ok := s.sempTarget("viewer", "b1"); !ok || st.scheme != c.sempScheme {
 				t.Errorf("SEMP target: %+v %v, want scheme %s", st, ok, c.sempScheme)
 			}

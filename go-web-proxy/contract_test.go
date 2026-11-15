@@ -153,11 +153,11 @@ func newContractEnv(t *testing.T, st contractStores) (*managedEnv, *scriptedUpst
 	for i := range users {
 		users[i].Password = mustHash(t, f.h, users[i].Password)
 	}
-	u, err := yaml.Marshal(usersDoc{Users: users})
+	u, err := yaml.Marshal(seedUsersDoc(users))
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := yaml.Marshal(connsDoc{Connections: st.Connections})
+	c, err := yaml.Marshal(seedConnsDoc(st.Connections))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,9 @@ func newContractEnv(t *testing.T, st contractStores) (*managedEnv, *scriptedUpst
 }
 
 // contractNormalize replaces what differs between runs: a backup's next run
-// follows the clock, and an export is sealed with a fresh salt and nonce.
+// follows the clock, an export is sealed with a fresh salt and nonce, and a
+// settings rev (the real gateway's keyed checksum, the fake's counter) is any
+// non-empty string.
 func contractNormalize(v any) any {
 	if m, ok := v.(map[string]any); ok {
 		if _, ok := m["nextRun"].(string); ok {
@@ -180,7 +182,72 @@ func contractNormalize(v any) any {
 			}
 		}
 	}
+	contractNormalizeRevs(v)
 	return v
+}
+
+// contractNormalizeRevs turns every string "rev" and the settings entry of a
+// "basis" into "<rev>", at any depth. An empty one is left as it is, so it
+// fails to match the golden's "<rev>": the contract is "a non-empty string".
+// A numeric rev (a user, a connection, the schedule) is compared as it is.
+func contractNormalizeRevs(v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, e := range x {
+			if s, ok := e.(string); ok && s != "" && k == "rev" {
+				x[k] = "<rev>"
+				continue
+			}
+			if b, ok := e.(map[string]any); ok && k == "basis" {
+				if s, ok := b["settings"].(string); ok && s != "" {
+					b["settings"] = "<rev>"
+				}
+			}
+			contractNormalizeRevs(e)
+		}
+	case []any:
+		for _, e := range x {
+			contractNormalizeRevs(e)
+		}
+	}
+}
+
+// A request body names the settings rev with a token, because the real
+// gateway's rev is a checksum no file can hold: contractRevToken is the rev
+// as it stands when the step runs, contractRevStartToken the rev the case
+// began with (the one an admin read before another admin saved).
+const (
+	contractRevToken      = `"<settings-rev>"`
+	contractRevStartToken = `"<settings-rev-at-start>"`
+)
+
+// contractSettingsRev is the settings rev now, read as the page reads it.
+func (e *managedEnv) contractSettingsRev(t *testing.T, client string) string {
+	t.Helper()
+	rec := e.contractDo(contractStep{Method: http.MethodGet, Path: "/managed/settings"}, client, e.cookie("admin", false))
+	var got struct {
+		Rev string `json:"rev"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.Rev == "" {
+		t.Fatalf("GET /managed/settings for its rev: %d %s", rec.Code, rec.Body.String())
+	}
+	return got.Rev
+}
+
+// contractResolveBody is body with the rev tokens replaced: start is the rev
+// at the case's start, current reads the rev now (only when a token needs it).
+func contractResolveBody(body json.RawMessage, current func() string, start string) json.RawMessage {
+	quote := func(s string) []byte {
+		q, _ := json.Marshal(s)
+		return q
+	}
+	if bytes.Contains(body, []byte(contractRevStartToken)) {
+		body = bytes.ReplaceAll(body, []byte(contractRevStartToken), quote(start))
+	}
+	if bytes.Contains(body, []byte(contractRevToken)) {
+		body = bytes.ReplaceAll(body, []byte(contractRevToken), quote(current()))
+	}
+	return body
 }
 
 func decodeAny(t *testing.T, data []byte) any {
@@ -253,10 +320,19 @@ func TestContract_Cases(t *testing.T) {
 					cookies[k] = e.cookie(s.As, s.MustChange)
 				}
 			}
+			start := ""
+			for _, s := range cs.Steps {
+				if bytes.Contains(s.Body, []byte(contractRevStartToken)) {
+					start = e.contractSettingsRev(t, env.Client)
+					break
+				}
+			}
 			for si := range cs.Steps {
 				s := &cs.Steps[si]
 				up.next, up.url = s.Upstream, ""
-				rec := e.contractDo(*s, env.Client, cookies[contractSession{s.As, s.MustChange}])
+				sent := *s
+				sent.Body = contractResolveBody(s.Body, func() string { return e.contractSettingsRev(t, env.Client) }, start)
+				rec := e.contractDo(sent, env.Client, cookies[contractSession{s.As, s.MustChange}])
 				got := contractNormalize(decodeAny(t, rec.Body.Bytes()))
 				if *updateContract {
 					s.Status = rec.Code

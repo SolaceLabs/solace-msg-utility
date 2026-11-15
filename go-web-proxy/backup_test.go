@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -283,6 +285,31 @@ func TestBackup_WithHostPathsCoversTheHostOnlyKeys(t *testing.T) {
 
 // ----- import planning ------------------------------------------------------------------
 
+// The rev is the store's stamp, not part of what a backup says: a backup of
+// the gateway as it stands previews as no change whatever the revs are.
+func TestBackup_DiffIgnoresRev(t *testing.T) {
+	u := userRec{Username: "ops", Password: "h", Rev: 3, Operate: []permRow{}, ReadOnly: []permRow{}}
+	moved := u
+	moved.Rev = 9
+	c := connRec{Broker: "b1", Hostname: "host1", Rev: 2}
+	cMoved := c
+	cMoved.Rev = 7
+	none := nameDiff{Added: []string{}, Changed: []string{}, Removed: []string{}}
+	if got := diffByName([]userRec{u}, []userRec{moved}, userName); !reflect.DeepEqual(got, none) {
+		t.Errorf("users differing in rev only: %+v", got)
+	}
+	if got := diffByName([]connRec{c}, []connRec{cMoved}, connName); !reflect.DeepEqual(got, none) {
+		t.Errorf("connections differing in rev only: %+v", got)
+	}
+	moved.Admin = true
+	if got := diffByName([]userRec{u}, []userRec{moved}, userName); len(got.Changed) != 1 {
+		t.Errorf("a real change still shows: %+v", got)
+	}
+	if !sameRecord("a", "a") || sameRecord("a", "b") {
+		t.Error("anything else compares as it is")
+	}
+}
+
 func TestBackup_DiffMergeAndSessionEnders(t *testing.T) {
 	u := func(name, pw string, admin bool) userRec {
 		return userRec{Username: name, Password: pw, Admin: admin, Operate: []permRow{}, ReadOnly: []permRow{}}
@@ -482,7 +509,7 @@ func backupFixtureFrom(t *testing.T, f storeFixture) backupFixture {
 	cfg := defaultConfig()
 	cfg.usersFile, cfg.connectionsFile = f.usersPath, f.connsPath
 	cfgPath := filepath.Join(filepath.Dir(f.usersPath), "config.yaml")
-	sum, err := seedConfigFile(cfgPath, cfg)
+	data, err := seedConfigFile(cfgPath, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +520,7 @@ func backupFixtureFrom(t *testing.T, f storeFixture) backupFixture {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	b, err := newBackupService(dir, opts.schedulePath, st, newSettingsFile(configSource{path: cfgPath, sum: sum}, cfg, newLive(cfg), logger), f.h, clock.now, logger)
+	b, err := newBackupService(dir, opts.schedulePath, st, newSettingsFile(configSource{path: cfgPath, data: data}, cfg, newLive(cfg), st.wr, logger), f.h, clock.now, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,11 +529,23 @@ func backupFixtureFrom(t *testing.T, f storeFixture) backupFixture {
 
 var daily2 = backupSchedule{Kind: scheduleDaily, Hour: 2}
 
+// schedule saves daily2 at the rev the service holds now (0 creates).
 func (x backupFixture) schedule(t *testing.T, keep int) {
 	t.Helper()
-	if err := x.b.setSchedule(context.Background(), daily2, keep, testPassphrase); err != nil {
+	_, rev := x.b.scheduleWithRev()
+	if _, err := x.b.setSchedule(context.Background(), "", daily2, keep, testPassphrase, rev); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// scheduleOnDisk is backup.yaml decrypted.
+func (x backupFixture) scheduleOnDisk(t *testing.T) scheduleFile {
+	t.Helper()
+	var f scheduleFile
+	if err := x.f.sealer(t).readDoc(roleSchedule, x.b.schedulePath, &f); err != nil {
+		t.Fatal(err)
+	}
+	return f
 }
 
 func (x backupFixture) files(t *testing.T) []string {
@@ -524,13 +563,14 @@ func (x backupFixture) files(t *testing.T) []string {
 
 func TestBackupService_ScheduleIsSealedAndSurvivesARestart(t *testing.T) {
 	x := newBackupFixture(t)
+	ctx := context.Background()
 	if x.b.schedule() != nil {
 		t.Fatal("no schedule on a fresh volume")
 	}
-	if err := x.b.setSchedule(context.Background(), daily2, 7, ""); err == nil || !strings.Contains(err.Error(), "needs a passphrase") {
+	if _, err := x.b.setSchedule(ctx, "", daily2, 7, "", 0); err == nil || !strings.Contains(err.Error(), "needs a passphrase") {
 		t.Fatalf("a new schedule needs a passphrase, got %v", err)
 	}
-	if err := x.b.setSchedule(context.Background(), daily2, 7, "short"); err != errPassRule {
+	if _, err := x.b.setSchedule(ctx, "", daily2, 7, "short", 0); err != errPassRule {
 		t.Fatalf("want the rule, got %v", err)
 	}
 	x.schedule(t, 7)
@@ -545,19 +585,19 @@ func TestBackupService_ScheduleIsSealedAndSurvivesARestart(t *testing.T) {
 
 	// An edit without a passphrase keeps the key.
 	weekly := backupSchedule{Kind: scheduleWeekly, Weekday: 1, Hour: 3}
-	if err := x.b.setSchedule(context.Background(), weekly, 3, ""); err != nil {
-		t.Fatal(err)
+	if rev, err := x.b.setSchedule(ctx, "", weekly, 3, "", 1); err != nil || rev != 2 {
+		t.Fatalf("edit: rev %d, %v", rev, err)
 	}
 	if got := x.b.schedule(); got.Key != key || got.Keep != 3 || got.Schedule != weekly {
 		t.Fatalf("edit: %+v", got)
 	}
-	// A restart reads it back.
+	// A restart reads it back, with its rev.
 	y := backupFixtureFrom(t, x.f)
-	if got := y.b.schedule(); got == nil || got.Key != key || got.Schedule != weekly {
-		t.Fatalf("after a restart: %+v", got)
+	if got, rev := y.b.scheduleWithRev(); got == nil || got.Key != key || got.Schedule != weekly || rev != 2 {
+		t.Fatalf("after a restart: %+v rev %d", got, rev)
 	}
 	// A new passphrase makes a new key.
-	if err := x.b.setSchedule(context.Background(), weekly, 3, "another passphrase"); err != nil {
+	if _, err := x.b.setSchedule(ctx, "", weekly, 3, "another passphrase", 2); err != nil {
 		t.Fatal(err)
 	}
 	if x.b.schedule().Key == key {
@@ -565,18 +605,229 @@ func TestBackupService_ScheduleIsSealedAndSurvivesARestart(t *testing.T) {
 	}
 }
 
-func TestBackupService_RemoveSchedule(t *testing.T) {
+// The schedule's rev is backup.yaml's seq: it moves on every save and every
+// delete, a delete keeps the file with the counter and no schedule, and a
+// schedule created afterwards gets a rev nobody holds.
+func TestBackupService_RevIsTheSeqAndADeleteKeepsTheCounter(t *testing.T) {
 	x := newBackupFixture(t)
-	if found, err := x.b.removeSchedule(); found || err != nil {
-		t.Fatalf("none: %v %v", found, err)
+	ctx := context.Background()
+	if sd, rev := x.b.scheduleWithRev(); sd != nil || rev != 0 {
+		t.Fatalf("no schedule is rev 0: %v %d", sd, rev)
 	}
+	if _, err := os.Stat(x.b.schedulePath); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("nothing is written before the first save")
+	}
+	if rev, err := x.b.setSchedule(ctx, "", daily2, 7, testPassphrase, 0); err != nil || rev != 1 {
+		t.Fatalf("create: rev %d, %v", rev, err)
+	}
+	if f := x.scheduleOnDisk(t); f.Seq != 1 || f.Schedule == nil || *f.Schedule != daily2 || f.Keep != 7 {
+		t.Fatalf("the file holds the seq and the schedule: %+v", f)
+	}
+	if seq, err := x.b.removeSchedule(ctx, "", 1); err != nil || seq != 2 {
+		t.Fatalf("remove: seq %d, %v", seq, err)
+	}
+	if sd, rev := x.b.scheduleWithRev(); sd != nil || rev != 0 || x.b.schedule() != nil {
+		t.Fatalf("after a delete the schedule is gone and the rev is 0: %v %d", sd, rev)
+	}
+	f := x.scheduleOnDisk(t)
+	if f.Seq != 2 || f.Schedule != nil || f.Key != "" || f.Keep != 0 {
+		t.Fatalf("the file stays with the counter and no schedule: %+v", f)
+	}
+	// A restart agrees: no schedule, and the counter goes on.
+	y := backupFixtureFrom(t, x.f)
+	if sd, rev := y.b.scheduleWithRev(); sd != nil || rev != 0 {
+		t.Fatalf("after a restart: %v %d", sd, rev)
+	}
+	if rev, err := y.b.setSchedule(ctx, "", daily2, 7, testPassphrase, 0); err != nil || rev != 3 {
+		t.Fatalf("a re-created schedule gets a new rev, never a reused one: rev %d, %v", rev, err)
+	}
+}
+
+// Every refusal of a schedule save or delete, with nothing written and the
+// service as it was.
+func TestBackupService_ScheduleRefusals(t *testing.T) {
+	x := newBackupFixture(t)
+	ctx := context.Background()
+	expectNone := func(step string, err, want error) {
+		t.Helper()
+		if !errors.Is(err, want) {
+			t.Fatalf("%s: want %v, got %v", step, want, err)
+		}
+	}
+	_, err := x.b.setSchedule(ctx, "", daily2, 7, testPassphrase, -1)
+	expectNone("a negative rev", err, errRevRequired)
+	_, err = x.b.setSchedule(ctx, "", daily2, 7, testPassphrase, 3)
+	expectNone("rev above 0 and no schedule", err, errNotFound)
+	_, err = x.b.removeSchedule(ctx, "", 0)
+	expectNone("delete without a rev", err, errRevRequired)
+	_, err = x.b.removeSchedule(ctx, "", 1)
+	expectNone("delete with no schedule", err, errNotFound)
+	if _, statErr := os.Stat(x.b.schedulePath); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatal("a refusal writes nothing")
+	}
+
 	x.schedule(t, 7)
-	if found, err := x.b.removeSchedule(); !found || err != nil {
-		t.Fatalf("remove: %v %v", found, err)
+	before, _ := os.ReadFile(x.b.schedulePath)
+	_, err = x.b.setSchedule(ctx, "", daily2, 7, testPassphrase, 0)
+	expectNone("rev 0 and a schedule", err, errExists)
+	var stale *staleError
+	_, err = x.b.setSchedule(ctx, "", daily2, 7, testPassphrase, 5)
+	if !errors.As(err, &stale) || stale.rev != 1 {
+		t.Fatalf("a moved rev is stale and names the current one: %v", err)
 	}
-	if _, err := os.Stat(x.b.schedulePath); !errors.Is(err, fs.ErrNotExist) || x.b.schedule() != nil {
-		t.Fatal("the schedule must be gone, on disk and in memory")
+	_, err = x.b.removeSchedule(ctx, "", 5)
+	if !errors.As(err, &stale) || stale.rev != 1 {
+		t.Fatalf("delete with a moved rev: %v", err)
 	}
+	_, err = x.b.setSchedule(ctx, "nobody", daily2, 7, testPassphrase, 1)
+	expectNone("a caller who is gone", err, errCallerGone)
+	_, err = x.b.removeSchedule(ctx, "viewer", 1)
+	expectNone("a caller who is no administrator", err, errCallerNotAdmin)
+	if after, _ := os.ReadFile(x.b.schedulePath); !bytes.Equal(after, before) {
+		t.Fatal("a refusal writes nothing")
+	}
+	if _, rev := x.b.scheduleWithRev(); rev != 1 {
+		t.Fatalf("a refusal moves nothing: rev %d", rev)
+	}
+
+	// A backup.yaml replaced outside the gateway is refused, and stays refused.
+	writeFile(t, x.b.schedulePath, "replaced by hand")
+	var disk *changedOnDiskError
+	_, err = x.b.setSchedule(ctx, "", daily2, 7, testPassphrase, 1)
+	if !errors.As(err, &disk) || disk.file != scheduleFileName {
+		t.Fatalf("want store_changed_on_disk naming backup.yaml, got %v", err)
+	}
+	if _, err = x.b.removeSchedule(ctx, "", 1); !errors.As(err, &disk) {
+		t.Fatalf("delete over a hand edit: %v", err)
+	}
+	if sd, _ := x.b.scheduleWithRev(); sd == nil {
+		t.Fatal("memory keeps the schedule it holds")
+	}
+}
+
+// A failed write leaves backup.yaml and the schedule in memory as they were.
+func TestBackupService_FailedWriteChangesNothing(t *testing.T) {
+	x := newBackupFixture(t)
+	ctx := context.Background()
+	x.b.store.wr.exit = func(code int) { t.Errorf("exit(%d): the rollback must succeed", code) }
+	x.schedule(t, 7)
+	before, _ := os.ReadFile(x.b.schedulePath)
+
+	x.b.store.wr.hooks.rename = renameFailing(1)
+	var failed *writeFailedError
+	if _, err := x.b.setSchedule(ctx, "", daily2, 3, "", 1); !errors.As(err, &failed) {
+		t.Fatalf("save: want a write that failed and changed nothing, got %v", err)
+	}
+	x.b.store.wr.hooks.rename = renameFailing(1)
+	if _, err := x.b.removeSchedule(ctx, "", 1); !errors.As(err, &failed) {
+		t.Fatalf("delete: want a write that failed and changed nothing, got %v", err)
+	}
+	x.b.store.wr.hooks.rename = nil
+	if after, _ := os.ReadFile(x.b.schedulePath); !bytes.Equal(after, before) {
+		t.Fatal("backup.yaml must be put back")
+	}
+	if sd, rev := x.b.scheduleWithRev(); sd == nil || sd.Keep != 7 || rev != 1 {
+		t.Fatalf("memory must keep the schedule and its rev: %+v %d", sd, rev)
+	}
+	// The same save works once the disk does.
+	if rev, err := x.b.setSchedule(ctx, "", daily2, 3, "", 1); err != nil || rev != 2 {
+		t.Fatalf("retry: rev %d, %v", rev, err)
+	}
+}
+
+// Two saves at once leave the file and the memory equal: the schedule one of
+// them wrote, the seq it stamped.
+func TestBackupService_ConcurrentSavesLeaveDiskAndMemoryEqual(t *testing.T) {
+	for _, edit := range []bool{false, true} {
+		x := newBackupFixture(t)
+		ctx := context.Background()
+		rev := 0
+		if edit {
+			x.schedule(t, 7)
+			rev = 1
+		}
+		var wg sync.WaitGroup
+		results := make([]error, 2)
+		kept := []int{3, 4}
+		for i := range results {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, results[i] = x.b.setSchedule(ctx, "", daily2, kept[i], testPassphrase, rev)
+			}()
+		}
+		wg.Wait()
+		wins, loser := 0, error(nil)
+		for _, err := range results {
+			if err == nil {
+				wins++
+			} else {
+				loser = err
+			}
+		}
+		var stale *staleError
+		if wins != 1 || (!errors.Is(loser, errExists) && !errors.As(loser, &stale)) {
+			t.Fatalf("edit=%v: exactly one save wins and the other is refused, got %v", edit, results)
+		}
+		sd, seq := x.b.scheduleWithRev()
+		f := x.scheduleOnDisk(t)
+		if sd == nil || f.Seq != seq || f.Schedule == nil || *f.Schedule != sd.Schedule || f.Keep != sd.Keep || f.Key != sd.Key {
+			t.Fatalf("edit=%v: disk %+v and memory %+v rev %d must agree", edit, f, sd, seq)
+		}
+	}
+}
+
+// A backup reads the users and the connections as one committed state: an
+// import that replaces both is seen whole or not at all.
+func TestBackupService_SnapshotNeverSeesHalfAnImport(t *testing.T) {
+	x := newBackupFixture(t)
+	st := x.b.store
+	admin := currentUser(t, st, "admin")
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				doc := x.b.snapshot()
+				// Each import below names its users u<i> and its broker b<i>.
+				var u, b string
+				for _, r := range doc.Users {
+					if strings.HasPrefix(r.Username, "u") {
+						u = strings.TrimPrefix(r.Username, "u")
+					}
+				}
+				for _, c := range doc.Connections {
+					if strings.HasPrefix(c.Broker, "b") && len(c.Broker) > 2 {
+						b = strings.TrimPrefix(c.Broker, "b")
+					}
+				}
+				if u != b {
+					t.Errorf("half an import: users %q, connections %q", u, b)
+					return
+				}
+			}
+		}()
+	}
+	for i := range 40 {
+		n := strconv.Itoa(i + 10)
+		users := &sectionImport[userRec]{recs: []userRec{admin, {Username: "u" + n, Password: admin.Password, Operate: []permRow{}, ReadOnly: []permRow{}}}}
+		conns := &sectionImport[connRec]{recs: []connRec{{Broker: "b" + n, Hostname: "host" + n}}}
+		if err := st.wr.Do(context.Background(), func(tx *txn) error {
+			_, err := st.stageImport(tx, users, conns)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(stop)
+	wg.Wait()
 }
 
 func TestBackupService_LoadRefusesADamagedSchedule(t *testing.T) {
@@ -585,11 +836,38 @@ func TestBackupService_LoadRefusesADamagedSchedule(t *testing.T) {
 	if _, err := newBackupService(x.dir, x.b.schedulePath, x.b.store, x.b.settings, x.f.h, x.clock.now, quietLogger()); err == nil || !strings.Contains(err.Error(), x.b.schedulePath) {
 		t.Fatalf("want an error naming the file, got %v", err)
 	}
-	if err := x.b.store.seal.writeDoc(roleSchedule, x.b.schedulePath, scheduleDoc{Schedule: daily2, Keep: 0}); err != nil {
+	sched := daily2
+	good := fileOfSchedule(1, &scheduleDoc{Schedule: sched, Keep: 7, Iter: 1,
+		Salt: base64.StdEncoding.EncodeToString(make([]byte, 16)), Key: base64.StdEncoding.EncodeToString(make([]byte, 32))})
+	for name, f := range map[string]func(*scheduleFile){
+		"keep 0":                 func(f *scheduleFile) { f.Keep = 0 },
+		"a seq of 0":             func(f *scheduleFile) { f.Seq = 0 },
+		"a negative seq":         func(f *scheduleFile) { f.Seq = -1 },
+		"a key and no schedule":  func(f *scheduleFile) { f.Schedule = nil },
+		"a keep and no schedule": func(f *scheduleFile) { f.Schedule, f.Key, f.Salt, f.Iter = nil, "", "", 0 },
+	} {
+		doc := good
+		f(&doc)
+		if err := x.b.store.seal.writeDoc(roleSchedule, x.b.schedulePath, doc); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newBackupService(x.dir, x.b.schedulePath, x.b.store, x.b.settings, x.f.h, x.clock.now, quietLogger()); err == nil || !strings.Contains(err.Error(), "delete it") {
+			t.Errorf("%s: want the problem and what to do, got %v", name, err)
+		}
+	}
+	// A counter with no schedule is what a delete leaves, and loads.
+	if err := x.b.store.seal.writeDoc(roleSchedule, x.b.schedulePath, scheduleFile{Seq: 4}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newBackupService(x.dir, x.b.schedulePath, x.b.store, x.b.settings, x.f.h, x.clock.now, quietLogger()); err == nil || !strings.Contains(err.Error(), "delete it") {
-		t.Fatalf("want the problem and what to do, got %v", err)
+	b, err := newBackupService(x.dir, x.b.schedulePath, x.b.store, x.b.settings, x.f.h, x.clock.now, quietLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.setSchedule(context.Background(), "", daily2, 7, testPassphrase, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, rev := b.scheduleWithRev(); rev != 5 {
+		t.Fatalf("the counter goes on from the file: rev %d", rev)
 	}
 }
 
@@ -865,7 +1143,7 @@ func TestBackupService_LoopRunsOnScheduleAndStops(t *testing.T) {
 	}
 
 	// 09:00 to the next 10:30 is 90 minutes, waited in hour-long steps.
-	if err := x.b.setSchedule(context.Background(), backupSchedule{Kind: scheduleDaily, Hour: 10, Minute: 30}, 7, testPassphrase); err != nil {
+	if _, err := x.b.setSchedule(context.Background(), "", backupSchedule{Kind: scheduleDaily, Hour: 10, Minute: 30}, 7, testPassphrase, 0); err != nil {
 		t.Fatal(err)
 	}
 	<-x.b.reset // the loop below starts with the schedule; no change to wake it for
@@ -893,7 +1171,7 @@ func TestBackupService_LoopRunsOnScheduleAndStops(t *testing.T) {
 		t.Fatalf("want one run, got %v", got)
 	}
 	// A schedule change recomputes the next run.
-	if err := x.b.setSchedule(context.Background(), backupSchedule{Kind: scheduleHourly, Minute: 45}, 7, ""); err != nil {
+	if _, err := x.b.setSchedule(context.Background(), "", backupSchedule{Kind: scheduleHourly, Minute: 45}, 7, "", 1); err != nil {
 		t.Fatal(err)
 	}
 	if d := fa.next(t); d != 14*time.Minute {

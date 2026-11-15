@@ -44,7 +44,8 @@ import (
 //
 // A schedule keeps the passphrase-derived key (never the passphrase) sealed
 // with the store key in scheduleFileName beside the users file, so a scheduled
-// run needs no one to type anything.
+// run needs no one to type anything. The file also holds a seq, the counter
+// that is the schedule's rev (scheduleFile).
 const (
 	backupRoot       = "/backup" // fixed, like appRoot: mount a directory here
 	scheduleFileName = "backup.yaml"
@@ -231,6 +232,9 @@ func openBackup(ctx context.Context, h *hasher, data []byte, passphrase string) 
 	if err := yd.Decode(&doc); err != nil || doc.Version != backupVersion {
 		return backupDoc{}, errDamaged
 	}
+	// A backup written before audit.onFailure existed holds none. It reads as
+	// the default, so it previews as no change and imports as continue.
+	doc.Settings.Audit.OnFailure = onFailureOrDefault(doc.Settings.Audit.OnFailure)
 	return doc, nil
 }
 
@@ -275,9 +279,24 @@ func diffByName[T any](cur, next []T, name func(T) string) nameDiff {
 // sameRecord compares two store records as the store file holds them, so a
 // list the file has empty and one it never set are the same.
 func sameRecord(a, b any) bool {
-	x, errA := yaml.Marshal(a)
-	y, errB := yaml.Marshal(b)
+	x, errA := yaml.Marshal(withoutRev(a))
+	y, errB := yaml.Marshal(withoutRev(b))
 	return errA == nil && errB == nil && bytes.Equal(x, y)
+}
+
+// withoutRev clears the rev of a user or connection: it is the version the
+// store stamped, not part of what a backup says about the record, so two
+// records that differ only in rev are the same record.
+func withoutRev(v any) any {
+	switch r := v.(type) {
+	case userRec:
+		r.Rev = 0
+		return r
+	case connRec:
+		r.Rev = 0
+		return r
+	}
+	return v
 }
 
 // mergeByName is Merge: the file's records replace those with the same name,
@@ -469,6 +488,52 @@ func (sd scheduleDoc) problem() string {
 	return ""
 }
 
+// scheduleFile is backup.yaml as stored: the counter that is the schedule's
+// rev, and the schedule when there is one. Every save and every delete moves
+// the seq by one. A delete keeps the file with the seq and no schedule, so a
+// schedule created afterwards gets a rev nobody holds; no schedule is rev 0.
+type scheduleFile struct {
+	Seq      int             `yaml:"seq"`
+	Schedule *backupSchedule `yaml:"schedule,omitempty"`
+	Keep     int             `yaml:"keep,omitempty"`
+	Iter     int             `yaml:"iter,omitempty"`
+	Salt     string          `yaml:"salt,omitempty"` // base64
+	Key      string          `yaml:"key,omitempty"`  // base64: the passphrase-derived key
+}
+
+// fileOfSchedule is the file that holds sd (nil: no schedule) at seq.
+func fileOfSchedule(seq int, sd *scheduleDoc) scheduleFile {
+	f := scheduleFile{Seq: seq}
+	if sd != nil {
+		sched := sd.Schedule
+		f.Schedule, f.Keep, f.Iter, f.Salt, f.Key = &sched, sd.Keep, sd.Iter, sd.Salt, sd.Key
+	}
+	return f
+}
+
+// doc is the schedule the file holds, nil when it holds none.
+func (f scheduleFile) doc() *scheduleDoc {
+	if f.Schedule == nil {
+		return nil
+	}
+	return &scheduleDoc{Schedule: *f.Schedule, Keep: f.Keep, Iter: f.Iter, Salt: f.Salt, Key: f.Key}
+}
+
+// problem says what is wrong with the file, or "" when it is sound.
+func (f scheduleFile) problem() string {
+	switch {
+	case f.Seq < 0:
+		return "its seq is negative"
+	case f.Schedule == nil && (f.Keep != 0 || f.Iter != 0 || f.Salt != "" || f.Key != ""):
+		return "it holds a key but no schedule"
+	case f.Schedule == nil:
+		return ""
+	case f.Seq < 1:
+		return "its seq must be at least 1 while there is a schedule"
+	}
+	return f.doc().problem()
+}
+
 // ----- service -------------------------------------------------------------------------
 
 // backupRun is the outcome of the last scheduled or manual run, kept in
@@ -490,8 +555,9 @@ type backupService struct {
 	now          func() time.Time
 	logger       *slog.Logger
 
-	mu    sync.Mutex // guards sched and last
+	mu    sync.Mutex // guards sched, seq and last
 	sched *scheduleDoc
+	seq   int // backup.yaml's seq: the schedule's rev while there is a schedule
 	last  *backupRun
 	runMu sync.Mutex    // one run at a time
 	reset chan struct{} // a schedule change wakes the loop
@@ -501,17 +567,22 @@ type backupService struct {
 // gateway cannot read stops the start, as a store does.
 func newBackupService(dir, schedulePath string, st *store, sf *settingsFile, h *hasher, now func() time.Time, logger *slog.Logger) (*backupService, error) {
 	b := &backupService{dir: dir, schedulePath: schedulePath, store: st, settings: sf, hasher: h, now: now, logger: logger, reset: make(chan struct{}, 1)}
-	var doc scheduleDoc
-	switch err := st.seal.readDoc(roleSchedule, schedulePath, &doc); {
+	var f scheduleFile
+	switch err := st.seal.readDoc(roleSchedule, schedulePath, &f); {
 	case errors.Is(err, fs.ErrNotExist):
-		return b, nil
+		// no schedule yet: seq 0
 	case err != nil:
 		return nil, fmt.Errorf("read backup schedule %q: %w", schedulePath, err)
+	default:
+		if p := f.problem(); p != "" {
+			return nil, fmt.Errorf("backup schedule %q: %s; delete it and set the schedule again", schedulePath, p)
+		}
+		b.sched, b.seq = f.doc(), f.Seq
 	}
-	if p := doc.problem(); p != "" {
-		return nil, fmt.Errorf("backup schedule %q: %s; delete it and set the schedule again", schedulePath, p)
+	// The disk check of every later write starts from what is there now.
+	if err := st.sums.rememberDisk(schedulePath); err != nil {
+		return nil, err
 	}
-	b.sched = &doc
 	return b, nil
 }
 
@@ -519,6 +590,17 @@ func (b *backupService) schedule() *scheduleDoc {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.sched
+}
+
+// scheduleWithRev is the schedule and its rev read together: backup.yaml's
+// seq, or 0 when there is no schedule.
+func (b *backupService) scheduleWithRev() (*scheduleDoc, int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.sched == nil {
+		return nil, 0
+	}
+	return b.sched, b.seq
 }
 
 func (b *backupService) lastRun() *backupRun {
@@ -534,61 +616,128 @@ func (b *backupService) poke() {
 	}
 }
 
-// setSchedule saves a schedule. A passphrase derives a new key; "" keeps the
-// current schedule's key, and is refused when there is none.
-func (b *backupService) setSchedule(ctx context.Context, s backupSchedule, keep int, passphrase string) error {
+// setSchedule saves a schedule as one writer transaction and returns its new
+// rev. rev is the one the administrator read: 0 creates (409 exists when there
+// is a schedule), above 0 edits (404 not_found when there is none, 409 stale
+// when it moved). A passphrase derives a new key, before the lock; "" keeps the
+// current schedule's key, and is refused when there is none. caller is the
+// requesting administrator, re-checked inside the lock ("" skips it). The file
+// and the memory change together or not at all.
+func (b *backupService) setSchedule(ctx context.Context, caller string, s backupSchedule, keep int, passphrase string, rev int) (int, error) {
+	if rev < 0 {
+		return 0, errRevRequired
+	}
 	var k backupKey
-	var err error
 	if passphrase != "" {
+		var err error
 		if k, err = newBackupKey(ctx, b.hasher, passphrase); err != nil {
+			return 0, err
+		}
+	}
+	newRev := 0
+	err := b.store.wr.Do(ctx, func(tx *txn) error {
+		if err := b.store.checkCaller(caller); err != nil {
 			return err
 		}
-	} else if cur := b.schedule(); cur != nil {
-		k, _ = cur.backupKey() // validated when it was loaded or saved
-	} else {
-		return &backupProblem{"passphrase", "A new schedule needs a passphrase."}
+		if err := tx.check(b.schedulePath); err != nil {
+			return err
+		}
+		cur, seq := b.scheduleWithRev()
+		switch {
+		case rev == 0 && cur != nil:
+			return errExists
+		case rev > 0 && cur == nil:
+			return errNotFound
+		case rev > 0 && rev != seq:
+			return newStale(seq)
+		}
+		if passphrase == "" {
+			if cur == nil {
+				return &backupProblem{"passphrase", "A new schedule needs a passphrase."}
+			}
+			k, _ = cur.backupKey() // validated when it was loaded or saved
+		}
+		// A new seq even after a delete: b.seq is kept when there is no schedule.
+		b.mu.Lock()
+		next := b.seq + 1
+		b.mu.Unlock()
+		doc := scheduleDoc{
+			Schedule: s, Keep: keep, Iter: k.iter,
+			Salt: base64.StdEncoding.EncodeToString(k.salt),
+			Key:  base64.StdEncoding.EncodeToString(k.key),
+		}
+		b.store.seal.stageDoc(tx, roleSchedule, b.schedulePath, fileOfSchedule(next, &doc))
+		tx.onPublish(func() {
+			b.mu.Lock()
+			b.sched, b.seq = &doc, next
+			b.mu.Unlock()
+		})
+		tx.afterCommit(b.poke)
+		newRev = next
+		return nil
+	})
+	if err != nil {
+		return 0, err
 	}
-	doc := scheduleDoc{
-		Schedule: s, Keep: keep, Iter: k.iter,
-		Salt: base64.StdEncoding.EncodeToString(k.salt),
-		Key:  base64.StdEncoding.EncodeToString(k.key),
-	}
-	if err := b.store.seal.writeDoc(roleSchedule, b.schedulePath, doc); err != nil {
-		return err
-	}
-	b.mu.Lock()
-	b.sched = &doc
-	b.mu.Unlock()
-	b.poke()
-	return nil
+	return newRev, nil
 }
 
-// removeSchedule deletes the schedule; found is false when there was none.
-// The backups already written stay.
-func (b *backupService) removeSchedule() (found bool, err error) {
-	if b.schedule() == nil {
-		return false, nil
+// removeSchedule deletes the schedule as one writer transaction and returns the
+// new seq of backup.yaml, which stays with the counter and no schedule (rev 0
+// from then on). rev must be the schedule's rev (at least 1): 404 not_found
+// when there is no schedule, 409 stale when it moved. The backups already
+// written stay.
+func (b *backupService) removeSchedule(ctx context.Context, caller string, rev int) (int, error) {
+	if rev < 1 {
+		return 0, errRevRequired
 	}
-	if err := os.Remove(b.schedulePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return false, err
+	newSeq := 0
+	err := b.store.wr.Do(ctx, func(tx *txn) error {
+		if err := b.store.checkCaller(caller); err != nil {
+			return err
+		}
+		if err := tx.check(b.schedulePath); err != nil {
+			return err
+		}
+		cur, seq := b.scheduleWithRev()
+		switch {
+		case cur == nil:
+			return errNotFound
+		case rev != seq:
+			return newStale(seq)
+		}
+		next := seq + 1
+		b.store.seal.stageDoc(tx, roleSchedule, b.schedulePath, fileOfSchedule(next, nil))
+		tx.onPublish(func() {
+			b.mu.Lock()
+			b.sched, b.seq = nil, next
+			b.mu.Unlock()
+		})
+		tx.afterCommit(b.poke)
+		newSeq = next
+		return nil
+	})
+	if err != nil {
+		return 0, err
 	}
-	b.mu.Lock()
-	b.sched = nil
-	b.mu.Unlock()
-	b.poke()
-	return true, nil
+	return newSeq, nil
 }
 
 // snapshot is the configuration a backup holds.
+// It reads the users, the connections and the settings as one committed state
+// (the read side of the writer's publish lock), so an import in flight is seen
+// whole or not at all.
 func (b *backupService) snapshot() backupDoc {
-	return backupDoc{
-		Version:     backupVersion,
-		Created:     b.now().UTC().Format(time.RFC3339),
-		Gateway:     version,
-		Users:       b.store.listUsers(),
-		Connections: b.store.listConnections(),
-		Settings:    withHostPaths(b.settings.current(), fileConfig{}),
+	doc := backupDoc{
+		Version: backupVersion,
+		Created: b.now().UTC().Format(time.RFC3339),
+		Gateway: version,
 	}
+	b.store.wr.snapshot(func() {
+		doc.Users, doc.Connections = b.store.listUsers(), b.store.listConnections()
+		doc.Settings = withHostPaths(b.settings.current(), fileConfig{})
+	})
+	return doc
 }
 
 // run writes one backup with the schedule's key and prunes to its keep

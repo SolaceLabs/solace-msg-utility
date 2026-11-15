@@ -18,10 +18,16 @@
 // setting, and each puts back what it changed, since the checks after them
 // expect the gateway as configureGateway left it.
 //
-// E2E_BROKER_IP maps E2E_BROKER_HOST to that address inside both gateway
+// E2E_BROKER_ADDR maps E2E_BROKER_HOST to that address inside both gateway
 // containers (a host alias, through a compose override under scripts/logs/e2e/),
 // so the host can be the name in the broker's certificate even where no DNS
-// resolves it.
+// resolves it. It is an IP address or a DNS name; a name is resolved once, on
+// this machine, because the alias itself takes an address.
+//
+// E2E_DNS names DNS servers (addresses, separated by commas). Both gateway
+// containers resolve through them, so E2E_BROKER_HOST may be a name only they
+// know, and the harness asks them, not this machine's resolver, for an
+// E2E_BROKER_ADDR name.
 //
 // The gateways verify the broker's certificate unless E2E_INSECURE=1, which
 // starts both e2e gateways with SMU_SSL_SKIP_CERT_VERIFY=true for a broker
@@ -29,7 +35,7 @@
 // so at the start and in its summary: checks 3, 4, 6, 11 and 12 and D2-D4 pass
 // without proving the broker's TLS is trusted.
 //
-// Every check prints PASS or FAIL with its id: 1-19, B1-B9 in the browser and
+// Every check prints PASS or FAIL with its id: 1-23, B1-B9 in the browser and
 // D1-D4 in Gateway mode. Any FAIL, or a setup step that cannot complete, exits
 // 1. The gateway's passwords and its TLS material are generated
 // per run, written only under scripts/logs/e2e/ (git-ignored, deleted at the
@@ -57,6 +63,7 @@
 // the container.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import dns from 'node:dns';
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -67,9 +74,9 @@ import readline from 'node:readline';
 import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import {
-    MIN_MASKED, SESSION_COOKIE, auditMissing, createCookieJar, detailsFileText, findTokens, hostRootBundle, issueCert, jsonFindings,
-    hostAliasOverride, hostAliasProblem, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, resolveDetails, sealedHeaderProblem,
-    sessionCookieProblems, sweepSecrets,
+    MIN_MASKED, SESSION_COOKIE, aliasAddress, auditMissing, basisMoved, createCookieJar, detailsFileText, dnsServers, findTokens, hostRootBundle, issueCert,
+    jsonFindings, hostAliasProblem, listedRev, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates,
+    refusalProblem, resolutionOverride, resolveDetails, resolverLookup, sealedHeaderProblem, sessionCookieProblems, sweepSecrets,
 } from './e2e-lib.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -77,7 +84,7 @@ const COMPOSE = path.join(REPO, 'docker', 'docker-compose.e2e.yaml');
 const DETAILS_NAME = 'docker/e2e-broker.env';
 const DETAILS_FILE = path.join(REPO, DETAILS_NAME);
 const WORK = path.join(REPO, 'scripts', 'logs', 'e2e');
-const ALIAS = path.join(WORK, 'host-alias.yaml');
+const OVERRIDE = path.join(WORK, 'resolution.yaml'); // the host alias and the DNS servers, when the run has either
 const SOLCLIENT = path.join(REPO, 'node_modules', 'solclientjs', 'lib-browser', 'solclient.js');
 const LOGS = path.join(REPO, 'scripts', 'logs');
 const LOG = process.env.E2E_LOG ?? '';
@@ -97,6 +104,7 @@ const DIRECT_APP = 'https://direct:9443';
 const BROKER = 'b1';            // the connection the user is entitled to
 const OTHER = 'b2';             // the same broker under a name the user is not entitled to
 const USER = 'e2e-user';
+const SCRATCH = 'e2e-scratch';  // a user the version checks (20-23) create and remove
 // The settings endpoint's refusal of connModes direct (go-web-proxy/settings.go).
 const DIRECT_REFUSAL = 'connModes "direct" would turn Provisioned mode off at the next restart, and this console with it. '
     + 'To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart.';
@@ -107,6 +115,8 @@ const secrets = {
     bootstrapPassword: token(),
     adminPassword: token(),
     userPassword: token(),
+    scratchPassword: token(),
+    scratchNewPassword: token(),
 };
 // The broker's details (see BROKER_FIELDS in e2e-lib.mjs), and its two
 // passwords apart: those are masked at any length.
@@ -231,11 +241,24 @@ async function collectDetails() {
     return checkedAlias(values);
 }
 
-/** The details, once the host alias (if any) is known to name a host; checked after the prompts, which may supply the host. */
-function checkedAlias(values) {
-    const problem = hostAliasProblem(values.host, values.brokerIp);
+/**
+ * The details, once the host alias (if any) is known to name a host; checked
+ * after the prompts, which may supply the host. `brokerIp` is the address the
+ * alias maps to: E2E_BROKER_ADDR, resolved here when it is a DNS name.
+ */
+async function checkedAlias(values) {
+    const problem = hostAliasProblem(values.host, values.brokerAddr);
     expect(!problem, `broker details refused:\n  ${problem}`);
+    values.brokerIp = values.brokerAddr ? await aliasAddress(values.brokerAddr, ...aliasLookup(dnsServers(values.dns))) : '';
     return values;
+}
+
+/** Who resolves an E2E_BROKER_ADDR name, and what to call it: the E2E_DNS servers when given, else this machine's resolver. */
+function aliasLookup(servers) {
+    if (!servers.length) return [dns.promises.lookup];
+    const resolver = new dns.promises.Resolver();
+    resolver.setServers(servers);
+    return [resolverLookup(resolver), `E2E_DNS ${servers.join(', ')}`];
 }
 
 /** The certificates in the broker CA file; a leading ~ is the home directory and a relative path is from the repo. */
@@ -255,9 +278,11 @@ function readBrokerCA(file) {
 }
 
 function describeBroker(certs) {
-    const alias = broker.brokerIp ? ` (${broker.brokerIp} in both gateway containers)` : '';
+    const resolved = broker.brokerAddr === broker.brokerIp ? '' : `${broker.brokerAddr} -> `;
+    const alias = broker.brokerIp ? ` (${resolved}${broker.brokerIp} in both gateway containers)` : '';
     say(`broker: ${broker.host}${alias}, SEMP port ${broker.sempPort} as ${broker.sempUser}, wss port ${broker.smfPort}, `
         + `VPN ${broker.vpn}, client username ${broker.clientUser}, queue ${broker.queue}`);
+    if (broker.dns) say(`DNS: both gateway containers resolve through ${dnsServers(broker.dns).join(', ')} (E2E_DNS)`);
     for (const c of certs) say(`trusting ${c.subject.replace(/\n/g, ', ')} (valid until ${c.validTo}) from ${broker.caFile}`);
     if (insecure()) say("warning: E2E_INSECURE=1: neither gateway verifies the broker's certificate (SMU_SSL_SKIP_CERT_VERIFY=true)");
     say(browserOn()
@@ -278,8 +303,8 @@ const browserOn = () => broker.browser !== '0';
 function compose(args, { quiet = false } = {}) {
     // Always set, so a value inherited from the shell never reaches the gateway.
     const env = { ...process.env, E2E_GATEWAY_SKIP_VERIFY: insecure() ? 'true' : '' };
-    // The host alias override exists only from writeMaterial to teardown.
-    const files = ['-f', COMPOSE, ...(fs.existsSync(ALIAS) ? ['-f', ALIAS] : [])];
+    // The resolution override exists only from writeMaterial to teardown.
+    const files = ['-f', COMPOSE, ...(fs.existsSync(OVERRIDE) ? ['-f', OVERRIDE] : [])];
     const r = spawnSync('docker', ['compose', ...files, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
     if (r.error) throw new Error(`docker compose ${args[0]}: ${r.error.message}`);
     const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
@@ -314,7 +339,8 @@ function writeMaterial(brokerCerts, roots) {
     put('gateway.crt', gateway.certPem);
     put('gateway.key', gateway.keyPem);
     put('admin-password', `${secrets.bootstrapPassword}\n`);
-    if (broker.brokerIp) put(path.basename(ALIAS), hostAliasOverride(broker.host, broker.brokerIp));
+    const servers = dnsServers(broker.dns);
+    if (broker.brokerIp || servers.length) put(path.basename(OVERRIDE), resolutionOverride(broker.host, broker.brokerIp, servers));
     // The repo's package.json says "type": "module", so the SDK's UMD bundle
     // is loaded from a .cjs copy.
     fs.copyFileSync(SOLCLIENT, path.join(WORK, 'solclient.cjs'));
@@ -365,6 +391,54 @@ function errorCode(res) {
 }
 
 const signIn = (jar, username, password) => request('POST', '/login', { jar, form: { username, password } });
+
+// The admin console's whole-record saves carry the rev the record was read at
+// (go-web-proxy: 400 rev_required without it). These read it just before the
+// save, as the page does after a load.
+async function readRev(jar, list, key, name) {
+    const res = await request('GET', `/managed/${list}`, { jar });
+    expect(res.status === 200, `GET /managed/${list}: want 200, got ${res.status} ${res.body.slice(0, 200)}`);
+    return listedRev(res.body, list, key, name);
+}
+
+/** PUT of a user at the rev the list shows now, 0 (a create) when the user is not listed. */
+async function saveUser(jar, name, record) {
+    const rev = (await readRev(jar, 'users', 'username', name)) ?? 0;
+    return request('PUT', `/managed/users/${enc(name)}`, { jar, json: { ...record, rev } });
+}
+
+/** PUT of settings keys at the rev GET /managed/settings shows now. */
+async function saveSettings(jar, keys) {
+    const res = await request('GET', '/managed/settings', { jar });
+    const rev = res.status === 200 ? JSON.parse(res.body).rev : '';
+    expect(typeof rev === 'string' && rev !== '', `GET /managed/settings: want 200 with a rev, got ${res.status} ${res.body.slice(0, 200)}`);
+    return request('PUT', '/managed/settings', { jar, json: { ...keys, rev } });
+}
+
+/** A second administrator session: its own jar, signed in as the admin. */
+async function adminSession() {
+    const jar = createCookieJar();
+    const res = await signIn(jar, 'admin', secrets.adminPassword);
+    expect(res.status === 303 && res.headers.location === '/', `a second admin sign-in: want 303 to /, got ${res.status} ${res.headers.location ?? ''}`);
+    return jar;
+}
+
+/** Creates the scratch user (a create is rev 0); returns its rev. */
+async function createScratch(jar, password = secrets.scratchPassword) {
+    const res = await request('PUT', `/managed/users/${SCRATCH}`, { jar, json: { password, ...userRecord(false), rev: 0 } });
+    expect(res.status === 200, `creating ${SCRATCH}: want 200, got ${res.status} ${res.body}`);
+    const { rev } = JSON.parse(res.body);
+    expect(Number.isInteger(rev) && rev >= 1, `creating ${SCRATCH}: want a rev from 1, got ${res.body}`);
+    return rev;
+}
+
+/** Removes the scratch user when it is there, at the rev the list shows now. */
+async function removeScratch(jar) {
+    const rev = await readRev(jar, 'users', 'username', SCRATCH);
+    if (rev === null) return;
+    const res = await request('DELETE', `/managed/users/${SCRATCH}?rev=${rev}`, { jar });
+    expect(res.status === 204, `removing ${SCRATCH}: want 204, got ${res.status} ${res.body}`);
+}
 
 /** False once the compose service has no running container. A failed `ps` counts as running. */
 function running(service) {
@@ -555,14 +629,14 @@ async function configureGateway() {
         client: { port: broker.smfPort, msgVpns: [{ name: broker.vpn, user: broker.clientUser, pass: brokerSecrets.clientPassword }] },
     };
     for (const name of [BROKER, OTHER]) {
-        const r = await request('PUT', `/managed/connections/${name}`, { jar: admin, json: connection });
-        expect(r.status === 204, `PUT /managed/connections/${name}: want 204, got ${r.status} ${r.body}`);
+        const r = await request('PUT', `/managed/connections/${name}`, { jar: admin, json: { ...connection, rev: 0 } });
+        expect(r.status === 200, `PUT /managed/connections/${name}: want 200, got ${r.status} ${r.body}`);
     }
     const u = await request('PUT', `/managed/users/${USER}`, {
         jar: admin,
-        json: { password: secrets.userPassword, ...userRecord(true) },
+        json: { password: secrets.userPassword, ...userRecord(true), rev: 0 },
     });
-    expect(u.status === 204, `PUT /managed/users/${USER}: want 204, got ${u.status} ${u.body}`);
+    expect(u.status === 200, `PUT /managed/users/${USER}: want 200, got ${u.status} ${u.body}`);
     return admin;
 }
 
@@ -724,8 +798,8 @@ async function runChecks(admin) {
             try {
                 // No password and the same admin flag: the sessions stay, and
                 // only the sockets that lost their grant close.
-                const revoked = await request('PUT', `/managed/users/${USER}`, { jar: admin, json: userRecord(false) });
-                expect(revoked.status === 204, `revoking: want 204, got ${revoked.status} ${revoked.body}`);
+                const revoked = await saveUser(admin, USER, userRecord(false));
+                expect(revoked.status === 200, `revoking: want 200, got ${revoked.status} ${revoked.body}`);
                 await closed;
                 await withTimeout(rs.down, 10_000, 'the gateway closed the socket but the SDK did not report the session down within 10s');
                 const me = await request('GET', '/managed/me', { jar: user });
@@ -736,16 +810,16 @@ async function runChecks(admin) {
                 expect(relay.status === 404 && dialed.status === 404,
                     `${BROKER} after the revocation: relay ${relay.status}, dial ${dialed.status}; want 404 for both`);
             } finally {
-                restored = await request('PUT', `/managed/users/${USER}`, { jar: admin, json: userRecord(true) });
+                restored = await saveUser(admin, USER, userRecord(true));
             }
-            expect(restored.status === 204, `restoring the grant: want 204, got ${restored.status} ${restored.body}`);
+            expect(restored.status === 200, `restoring the grant: want 200, got ${restored.status} ${restored.body}`);
             const back = await request('GET', '/managed/me', { jar: user });
             expect(back.status === 200 && JSON.parse(back.body).brokers?.map((b) => b.broker).join() === BROKER,
                 `/managed/me after the restore: ${back.status} ${back.body.slice(0, 300)}`);
         });
 
         await check(12, 'settings apply to the next request: userDefault none empties the modules, connModes direct is refused, and both opens the Direct relay and the app', async () => {
-            const put = (json) => request('PUT', '/managed/settings', { jar: admin, json });
+            const put = (json) => saveSettings(admin, json);
             const fresh = (r) => r.status === 200 && JSON.parse(r.body).restartRequired?.length === 0;
             const modules = async () => JSON.parse((await request('GET', '/managed/me', { jar: user })).body).modules;
             let restored = null;
@@ -833,8 +907,10 @@ async function runChecks(admin) {
             const p = JSON.parse(pv.body);
             const changes = [p.users, p.connections].flatMap((d) => [...d.added, ...d.changed, ...d.removed]).concat(p.settings);
             expect(pv.status === 200 && changes.length === 0, `preview of an unchanged gateway: ${pv.status} ${pv.body.slice(0, 300)}`);
-            const put = await api('PUT', '/managed/backup/schedule', { kind: 'daily', minute: 0, hour: 3, weekday: 0, day: 0, keep: 2, passphrase: pass });
-            expect(put.status === 204, `schedule: ${put.status} ${put.body}`);
+            // A new schedule is rev 0; the answer carries its rev, which the delete below sends.
+            const put = await api('PUT', '/managed/backup/schedule', { kind: 'daily', minute: 0, hour: 3, weekday: 0, day: 0, keep: 2, passphrase: pass, rev: 0 });
+            expect(put.status === 200 && Number.isInteger(JSON.parse(put.body).rev), `schedule: want 200 with a rev, got ${put.status} ${put.body}`);
+            const scheduleRev = JSON.parse(put.body).rev;
             const run = await api('POST', '/managed/backup/run');
             expect(run.status === 200, `run: ${run.status} ${run.body}`);
             const { file } = JSON.parse(run.body);
@@ -847,11 +923,117 @@ async function runChecks(admin) {
             expect(onDisk.length === 0, `${file} holds ${onDisk.join(', ')} in clear`);
             const dl = await api('GET', `/managed/backup/files/${file}`);
             expect(dl.status === 200 && JSON.parse(dl.body).content === fs.readFileSync(dest, 'utf8'), `download of ${file}: ${dl.status} ${dl.body.slice(0, 200)}`);
-            const imp = await api('POST', '/managed/backup/import', { backup: file, passphrase: pass, users: 'merge', connections: 'merge', settings: 'replace' });
+            // The import carries the basis of a preview of the file it imports.
+            const pvFile = await api('POST', '/managed/backup/preview', { backup: file, passphrase: pass });
+            expect(pvFile.status === 200 && JSON.parse(pvFile.body).basis, `preview of ${file}: ${pvFile.status} ${pvFile.body.slice(0, 300)}`);
+            const imp = await api('POST', '/managed/backup/import', {
+                backup: file, passphrase: pass, users: 'merge', connections: 'merge', settings: 'replace', basis: JSON.parse(pvFile.body).basis,
+            });
             expect(imp.status === 200 && imp.body.includes('"signedOut":false'), `import: ${imp.status} ${imp.body}`);
             expect((await api('GET', '/managed/me')).status === 200, 'the admin was signed out by an import that changed nothing');
-            expect((await api('DELETE', '/managed/backup/schedule')).status === 204, 'removing the schedule');
+            expect((await api('DELETE', `/managed/backup/schedule?rev=${scheduleRev}`)).status === 204, 'removing the schedule');
             return file;
+        });
+
+        // Several administrators: every whole-record save and the import carry the
+        // version they were read at, so a second session cannot overwrite the
+        // first without knowing. After 18 (which ends with the import) and before
+        // 19, whose audit trail then holds these writes too. Each check makes and
+        // removes its own scratch user.
+        await check(20, 'two admin sessions open one user: the first save wins, the second is refused as stale with the current rev, and saves after a reload', async () => {
+            const second = await adminSession();
+            const url = `/managed/users/${SCRATCH}`;
+            try {
+                const made = await createScratch(admin);
+                const revA = await readRev(admin, 'users', 'username', SCRATCH);
+                const revB = await readRev(second, 'users', 'username', SCRATCH);
+                expect(revA === made && revB === made, `both sessions read rev ${made}: got ${revA} and ${revB}`);
+                const first = await request('PUT', url, { jar: admin, json: { ...userRecord(true), rev: revA } });
+                expect(first.status === 200, `the first save: want 200, got ${first.status} ${first.body}`);
+                const won = JSON.parse(first.body).rev;
+                expect(Number.isInteger(won) && won > revA, `the first save's rev ${won} must be above ${revA}`);
+                const late = await request('PUT', url, { jar: second, json: { ...userRecord(false), rev: revB } });
+                const refused = refusalProblem(late, { status: 409, error: 'stale', rev: won });
+                expect(refused === '', `the second save: ${refused}`);
+                const reloaded = await readRev(second, 'users', 'username', SCRATCH);
+                expect(reloaded === won, `after a reload the second session reads rev ${reloaded}, want ${won}`);
+                const again = await request('PUT', url, { jar: second, json: { ...userRecord(false), rev: reloaded } });
+                expect(again.status === 200, `the second save after a reload: want 200, got ${again.status} ${again.body}`);
+                return `rev ${made} -> ${won} -> ${JSON.parse(again.body).rev}`;
+            } finally {
+                await removeScratch(admin);
+            }
+        });
+
+        await check(21, "one admin session deletes a user: the other session's save is refused as not_found, and so is its delete", async () => {
+            const second = await adminSession();
+            const url = `/managed/users/${SCRATCH}`;
+            try {
+                const made = await createScratch(admin);
+                expect(await readRev(second, 'users', 'username', SCRATCH) === made, `the second session reads rev ${made}`);
+                const del = await request('DELETE', `${url}?rev=${made}`, { jar: admin });
+                expect(del.status === 204, `the delete: want 204, got ${del.status} ${del.body}`);
+                const save = await request('PUT', url, { jar: second, json: { ...userRecord(true), rev: made } });
+                const savedRefusal = refusalProblem(save, { status: 404, error: 'not_found' });
+                expect(savedRefusal === '', `the save of a deleted user: ${savedRefusal}`);
+                const again = await request('DELETE', `${url}?rev=${made}`, { jar: second });
+                const deletedRefusal = refusalProblem(again, { status: 404, error: 'not_found' });
+                expect(deletedRefusal === '', `the delete of a deleted user: ${deletedRefusal}`);
+            } finally {
+                await removeScratch(admin);
+            }
+        });
+
+        await check(22, 'an import is refused as stale after another session changed the users since the preview, and applies after a new preview', async () => {
+            const second = await adminSession();
+            const pass = 'e2e import passphrase';
+            const api = (method, pathname, json) => request(method, pathname, { jar: admin, json });
+            const sections = { users: 'merge', connections: 'skip', settings: 'skip' };
+            try {
+                const ex = await api('POST', '/managed/backup/export', { passphrase: pass });
+                expect(ex.status === 200, `export: ${ex.status} ${ex.body.slice(0, 200)}`);
+                const { content } = JSON.parse(ex.body);
+                const preview = async () => {
+                    const pv = await api('POST', '/managed/backup/preview', { file: content, passphrase: pass });
+                    expect(pv.status === 200 && JSON.parse(pv.body).basis, `preview: ${pv.status} ${pv.body.slice(0, 300)}`);
+                    return JSON.parse(pv.body).basis;
+                };
+                const seen = await preview();
+                await createScratch(second);
+                const late = await api('POST', '/managed/backup/import', { file: content, passphrase: pass, ...sections, basis: seen });
+                const refused = refusalProblem(late, { status: 409, error: 'stale' });
+                expect(refused === '', `the import after the other session's change: ${refused}`);
+                const moved = basisMoved(seen, JSON.parse(late.body).basis);
+                expect(moved.join() === 'users', `the stale answer should name the users as moved, and only them: ${moved.join() || 'nothing'}`);
+                const again = await api('POST', '/managed/backup/import', { file: content, passphrase: pass, ...sections, basis: await preview() });
+                expect(again.status === 200 && again.body.includes('"signedOut":false'), `the import after a new preview: ${again.status} ${again.body}`);
+            } finally {
+                await removeScratch(admin);
+            }
+        });
+
+        await check(23, "a user changes their own password while an admin holds that user's rev: the admin's save still succeeds and keeps the new password", async () => {
+            const person = createCookieJar();
+            try {
+                const made = await createScratch(admin);
+                expect(await readRev(admin, 'users', 'username', SCRATCH) === made, `the admin reads rev ${made}`);
+                const s = await signIn(person, SCRATCH, secrets.scratchPassword);
+                expect(s.status === 303 && s.headers.location === '/', `the scratch user's sign-in: want 303 to /, got ${s.status} ${s.headers.location ?? ''}`);
+                const changed = await request('POST', '/login/password', {
+                    jar: person, form: { current: secrets.scratchPassword, new: secrets.scratchNewPassword, confirm: secrets.scratchNewPassword },
+                });
+                expect(changed.status === 303, `the own password change: want 303, got ${changed.status}`);
+                // No password in the save (keep what the user set) and the same record: the rev did not move.
+                const save = await request('PUT', `/managed/users/${SCRATCH}`, { jar: admin, json: { ...userRecord(false), rev: made } });
+                expect(save.status === 200, `the admin's save at rev ${made}: want 200, got ${save.status} ${save.body}`);
+                expect(JSON.parse(save.body).rev === made, `a password change alone must keep the rev ${made}, got ${save.body}`);
+                const back = await signIn(createCookieJar(), SCRATCH, secrets.scratchNewPassword);
+                expect(back.status === 303, `the new password after the admin's save: want 303, got ${back.status}`);
+                const old = await signIn(createCookieJar(), SCRATCH, secrets.scratchPassword);
+                expect(old.status === 401, `the old password after the admin's save: want 401, got ${old.status}`);
+            } finally {
+                await removeScratch(admin);
+            }
         });
 
         // After 18 and before the restart of 15: the audit trail is plain JSON by
@@ -1154,7 +1336,7 @@ async function runBrowserChecks(admin) {
                     .map((i) => i.dataset.moduleId).join() === w, want, { timeout: 10_000 }).catch(() => {});
                 return nav();
             };
-            const put = (userDefault) => request('PUT', '/managed/settings', { jar: admin, json: { modules: { userDefault } } });
+            const put = (userDefault) => saveSettings(admin, { modules: { userDefault } });
             let none = null;
             let all = null;
             let shrunk = '';
@@ -1188,7 +1370,7 @@ async function runBrowserChecks(admin) {
             // address in an uppercased label would otherwise slip past.
             const text = (await page.locator('body').innerText()).toLowerCase();
             const named = [BROKER, OTHER, USER, vpn];
-            const found = findTokens(text, [broker.host, broker.brokerIp]
+            const found = findTokens(text, [...new Set([broker.host, broker.brokerAddr, broker.brokerIp])]
                 .filter((v) => v && v.length >= 4 && !named.includes(v)).map((v) => v.toLowerCase()));
             expect(found.length === 0, `the page shows ${found.join(', ')}`);
             return new URL(socket.url()).origin;

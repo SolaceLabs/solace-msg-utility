@@ -46,7 +46,8 @@ const conns = createConnMgmtService();
 const settings = createSettingsService();
 const backup = createBackupService();
 const PASS = 'a long passphrase';
-const DAILY = { kind: 'daily' as const, minute: 0, hour: 2, weekday: 0, day: 0, keep: 7, passphrase: PASS };
+/** rev 0: a new schedule. */
+const DAILY = { kind: 'daily' as const, minute: 0, hour: 2, weekday: 0, day: 0, keep: 7, passphrase: PASS, rev: 0 };
 /** A backup of the fake gateway as it stands, as the page exports one. */
 const exported = async () => {
     const res = await backup.exportFile(PASS);
@@ -59,10 +60,12 @@ const norm = (key: string) => key.replace(/\$?\{[^}]*\}/g, '{}');
 
 /**
  * The route keys one source file calls: `managedRequest('METHOD', path)` with
- * a literal or a path helper (`const x = (id: string) => `/managed/...`)`, the
+ * a literal or a path helper (`const x = (id: string) => `/managed/...`)`,
+ * called bare or at the start of a template (`${x(id)}?rev=${rev}`), the
  * relay base the SEMP client appends to (GET) and the SMF socket prefix a
- * dial's answer is held to (GET, broker and VPN segments). Comments are cut
- * first so prose naming a route is not a call.
+ * dial's answer is held to (GET, broker and VPN segments). A query string is
+ * not part of the route and is cut. Comments are cut first so prose naming a
+ * route is not a call.
  */
 function routeKeys(source: string): string[] {
     const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
@@ -72,9 +75,11 @@ function routeKeys(source: string): string[] {
     let matched = 0;
     for (const m of code.matchAll(call)) {
         matched++;
-        const path = m[3] ?? helpers.get(m[4]);
-        if (path === undefined) throw new Error(`managedRequest path helper ${m[4]} is not a one-line \`/managed/...\` template: teach routeKeys to read it`);
-        keys.push(norm(`${m[1]} ${path}`));
+        const inTemplate = /^\$\{(\w+)\(\w+\)\}(.*)$/.exec(m[3] ?? '');
+        const helper = inTemplate?.[1] ?? m[4];
+        const base = inTemplate || m[3] === undefined ? helpers.get(helper) : m[3];
+        if (base === undefined) throw new Error(`managedRequest path helper ${helper} is not a one-line \`/managed/...\` template: teach routeKeys to read it`);
+        keys.push(norm(`${m[1]} ${(base + (inTemplate?.[2] ?? '')).replace(/\?.*$/, '')}`));
     }
     const calls = (code.match(/managedRequest(?:<[^(]*>)?\(/g) ?? []).length - (code.match(/function managedRequest\b/g) ?? []).length;
     if (calls !== matched) throw new Error(`${calls} managedRequest calls but ${matched} read: a call whose path is a variable or not a plain literal or one-line helper is not scanned; teach routeKeys to read it`);
@@ -112,12 +117,24 @@ const ROWS: { key: string; route: string; call: () => Promise<Outcome> }[] = [
     { key: 'GET /managed/users', route: 'GET /managed/users', call: () => users.listUsers() },
     {
         key: 'PUT /managed/users/{name}',
-        route: 'PUT /managed/users/{name}',
-        call: () => users.saveUser({
-            username: 'viewer', password: '', admin: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: '*', queues: '*' }], modules: null,
-        }),
+        route: 'PUT /managed/users/{name}, with the rev the list gave',
+        call: async () => {
+            const list = await users.listUsers();
+            if (!list.ok) return list;
+            return users.saveUser({
+                username: 'viewer', password: '', admin: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: '*', queues: '*' }], modules: null,
+                rev: list.data.users.find(u => u.username === 'viewer')!.rev,
+            });
+        },
     },
-    { key: 'DELETE /managed/users/{name}', route: 'DELETE /managed/users/{name}', call: () => users.deleteUser('viewer') },
+    {
+        key: 'DELETE /managed/users/{name}',
+        route: 'DELETE /managed/users/{name}, with the rev the list gave',
+        call: async () => {
+            const list = await users.listUsers();
+            return list.ok ? users.deleteUser('viewer', list.data.users.find(u => u.username === 'viewer')!.rev) : list;
+        },
+    },
     { key: 'GET /managed/connections', route: 'GET /managed/connections', call: () => conns.listConnections() },
     {
         key: 'PUT /managed/connections/{broker}',
@@ -127,15 +144,22 @@ const ROWS: { key: string; route: string; call: () => Promise<Outcome> }[] = [
             return list.ok ? conns.saveConnection(list.data.find(c => c.broker === 'b2')!) : list;
         },
     },
-    { key: 'DELETE /managed/connections/{broker}', route: 'DELETE /managed/connections/{broker}', call: () => conns.deleteConnection('b3') },
+    {
+        key: 'DELETE /managed/connections/{broker}',
+        route: 'DELETE /managed/connections/{broker}, with the rev the list gave',
+        call: async () => {
+            const list = await conns.listConnections();
+            return list.ok ? conns.deleteConnection('b3', list.data.find(c => c.broker === 'b3')!.rev) : list;
+        },
+    },
     { key: 'GET /managed/settings', route: 'GET /managed/settings', call: () => settings.load() },
     { key: 'GET /managed/client', route: 'GET /managed/client, how the gateway sees this browser', call: () => settings.client() },
     {
         key: 'PUT /managed/settings',
-        route: 'PUT /managed/settings, the file as GET gave it',
+        route: 'PUT /managed/settings, the file as GET gave it, with its rev',
         call: async () => {
             const view = await settings.load();
-            return view.ok ? settings.save(view.data.settings) : view;
+            return view.ok ? settings.save(view.data.settings, view.data.rev) : view;
         },
     },
     { key: 'GET /managed/backup', route: 'GET /managed/backup', call: () => backup.status() },
@@ -144,8 +168,8 @@ const ROWS: { key: string; route: string; call: () => Promise<Outcome> }[] = [
         key: 'DELETE /managed/backup/schedule',
         route: 'DELETE /managed/backup/schedule',
         call: async () => {
-            await backup.saveSchedule(DAILY);
-            return backup.removeSchedule();
+            const saved = await backup.saveSchedule(DAILY);
+            return saved.ok ? backup.removeSchedule(saved.data.rev) : saved;
         },
     },
     {
@@ -169,8 +193,14 @@ const ROWS: { key: string; route: string; call: () => Promise<Outcome> }[] = [
     { key: 'POST /managed/backup/preview', route: 'POST /managed/backup/preview', call: async () => backup.preview(await exported(), PASS) },
     {
         key: 'POST /managed/backup/import',
-        route: 'POST /managed/backup/import, every section',
-        call: async () => backup.importFile(await exported(), PASS, { users: 'merge', connections: 'merge', settings: 'replace' }),
+        route: 'POST /managed/backup/import, every section, with the basis the preview gave',
+        call: async () => {
+            const source = await exported();
+            const preview = await backup.preview(source, PASS);
+            return preview.ok
+                ? backup.importFile(source, PASS, { users: 'merge', connections: 'merge', settings: 'replace' }, preview.data.basis)
+                : preview;
+        },
     },
     { key: 'POST /managed/logout', route: 'POST /managed/logout', call: () => managed.logout() },
 ];

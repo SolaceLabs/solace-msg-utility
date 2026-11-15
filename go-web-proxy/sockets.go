@@ -59,7 +59,13 @@ func (sr *socketRegistry) closeUser(user string) {
 	sr.closeWhere("user changed", func(s openSocket) bool { return s.user == user })
 }
 
-// recheck closes every socket whose user may no longer reach its VPN.
+// recheck closes every socket whose user may no longer reach its VPN. It is
+// the store's after-commit hook and is level-triggered: it looks at the state
+// as it is now, not at what the commit changed, so running it twice, or after
+// a commit that changed nothing for a socket, is harmless. A socket is added
+// to the registry before smf.go checks its access, so one that was judged on
+// the snapshot from before a commit is already listed when the commit's hook
+// runs, and the hook closes it.
 func (sr *socketRegistry) recheck() {
 	sr.closeWhere("access changed", func(s openSocket) bool { return !sr.allowed(s.user, s.broker, s.vpn) })
 }

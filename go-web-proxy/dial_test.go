@@ -35,12 +35,10 @@ func TestDial_IssuesTheVPNCredential(t *testing.T) {
 // smfPath escapes the names, and the SMF gate reads them back.
 func TestDial_PathRoundTripsThroughTheGate(t *testing.T) {
 	e := newManagedEnv(t, nil)
-	if err := e.api.store.upsertConnection(connRec{
+	putConn(t, e.api.store, connRec{
 		Broker: "b3", Hostname: "host3",
 		Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "a b/c", Username: "u", Password: "p"}}},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 	rec := e.do("POST", "/managed/dial", dialBody("b3", "a b/c"), e.cookie("admin", false))
 	expect(t, rec, http.StatusOK, "")
 	var got dialResponse

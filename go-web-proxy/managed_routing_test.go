@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -57,6 +58,11 @@ func TestNewManagedRouting_Enabled(t *testing.T) {
 			t.Errorf("the %s must hold the auditor", name)
 		}
 	}
+	// One writer serves the stores, the settings and the schedule, and the
+	// audit trail is its gate (audit.onFailure refuse).
+	if h.store.wr == nil || h.settings.wr != h.store.wr || h.store.wr.gate == nil {
+		t.Errorf("the settings must share the store's writer, and the auditor must be its gate: %+v", h.store.wr)
+	}
 	routes.audit.record(auditAdmin, auditEntry{Actor: "admin", Action: auditUserCreate, Outcome: auditOK, Msg: "admin created user bob"})
 	if got := fileLines(t, cfg.auditFile); len(got) != 1 || auditOut.String() != got[0]+"\n" {
 		t.Errorf("audit log %q, stdout copy %q", got, auditOut.String())
@@ -101,6 +107,42 @@ func TestBuildManagedRoutes_StoreErrorIsReturned(t *testing.T) {
 	cfg.connModes, cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = connBoth, f.usersPath, f.connsPath, f.keyPath
 	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, nil, quietLogger()); err == nil || !strings.Contains(err.Error(), f.usersPath) {
 		t.Fatalf("want the store error naming the file, got %v", err)
+	}
+}
+
+// What every store file holds is remembered before anything is served, the
+// schedule's file included, absent as it is on a fresh volume: one that
+// appears behind the gateway's back is a change on disk, refused by the next
+// write.
+func TestBuildManagedRoutes_RemembersEveryStoreFile(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	sums := e.api.store.sums
+	schedule := filepath.Join(filepath.Dir(e.f.usersPath), scheduleFileName)
+	for _, p := range []string{e.f.usersPath, e.f.connsPath, e.cfgPath, schedule} {
+		if err := sums.check(p); err != nil {
+			t.Errorf("%s was remembered as it is: %v", p, err)
+		}
+	}
+	if err := os.WriteFile(schedule, []byte("planted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var disk *changedOnDiskError
+	if err := sums.check(schedule); !errors.As(err, &disk) || disk.file != scheduleFileName {
+		t.Errorf("a schedule file that appeared must be a change on disk, got %v", err)
+	}
+}
+
+// A schedule path that cannot even be read stops the start, naming the path.
+func TestBuildManagedRoutes_UnreadableScheduleIsReturned(t *testing.T) {
+	f := newStoreFixture(t)
+	schedule := filepath.Join(filepath.Dir(f.usersPath), scheduleFileName)
+	if err := os.Mkdir(schedule, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := defaultConfig()
+	cfg.connModes, cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = connBoth, f.usersPath, f.connsPath, f.keyPath
+	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, nil, quietLogger()); err == nil || !strings.Contains(err.Error(), schedule) {
+		t.Fatalf("want an error naming the schedule path, got %v", err)
 	}
 }
 

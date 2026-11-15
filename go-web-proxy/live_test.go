@@ -32,7 +32,7 @@ func TestLive_ApplySwapsEveryLiveKey(t *testing.T) {
 	cfg.session = sessionLimits{idle: time.Minute, absolute: 2 * time.Minute}
 	cfg.login.maxFailures = 9
 	cfg.modules = moduleSettings{offered: []string{"queue-copy"}, userDefault: modulesDefaultNone}
-	cfg.audit = auditSettings{stdout: true, access: true}
+	cfg.audit = auditSettings{stdout: true, access: true, onFailure: auditOnFailureRefuse}
 	lv.apply(cfg)
 	got := lv.get()
 	if got.connModes != connBoth || got.defaultConn != connProvisioned || lv.level.Level() != slog.LevelDebug {

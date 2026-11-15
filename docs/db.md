@@ -14,6 +14,7 @@ This is a brief for a planning session. It asks one question: should Provisioned
 - [Options to compare](#options-to-compare)
 - [Code to read](#code-to-read)
 - [What the plan must contain](#what-the-plan-must-contain)
+- [Outcome so far](#outcome-so-far)
 - [Ground rules for the session](#ground-rules-for-the-session)
 
 ---
@@ -46,7 +47,7 @@ Standalone and Gateway mode have no store. This question concerns Provisioned mo
 
 **Passwords.** Hashed with PBKDF2-SHA256 (`password.go`).
 
-**Reads and writes.** `loadStore` (`store.go`) reads both files into memory at startup. A mutex guards them. Every edit rewrites the whole file through `writeFileAtomic` (`fileutil.go`: a temp file, then a rename), then fires `onChange`, which closes any SMF socket that lost its entitlement (`sockets.go`).
+**Reads and writes.** `loadStore` (`store.go`) reads both files into memory at startup. Reads are served from memory. Every change goes through one writer (`writer.go`, `writer.Do`): one lock for all store files, a journaled commit of temp files and backup copies (`fileutil.go`), then the memory swap, then `onChange`, which closes any SMF socket that lost its entitlement (`sockets.go`). Each file carries a `seq` and each user and connection a `rev`, so a save made from a stale read is refused. See the outcome below.
 
 **Sessions.** Only in memory (`session.go`). A restart signs everyone out.
 
@@ -77,7 +78,7 @@ Earlier in the conversation that produced this brief, the answer given was "keep
 - **Container posture.** Non-root UID 65532, a read-only root filesystem, and `/data` and `/tls` as the only writable paths.
 - **Dependencies.** Pinned exactly, scanned by `./scripts/dev.sh scan` (govulncheck and trivy). Go tools run as `go tool` directives.
 - **Shared contract.** `go-web-proxy/testdata/contract/` holds the request and response cases that both the Go tests and the TypeScript fake gateway (`src/mock-broker/gateway/`) must match. The HTTP API must not change shape because of the storage choice.
-- **Tests.** Web coverage stays at 100%. The Go coverage floor is 93.7%.
+- **Tests.** Web coverage stays at 100%. The Go coverage floor is the last recorded total in `scripts/logs/cov.log`.
 - **The e2e run** reads the store files from the container to check they are sealed at rest, restarts the gateway, and checks that a missing key refuses to start (`scripts/e2e.mjs`). These checks change with the format.
 - **Not shipped yet.** Provisioned mode is on `feature/rbac` only. It is not on `main` and not in any pushed tag. Changing the format before the first release that ships it needs no data migration. After that release, it does.
 - **Operator docs.** `docs/provisioned-mode.md` explains backing up the store key and the start-up refusals. Any change rewrites those sections.
@@ -121,7 +122,7 @@ For each option, assess:
 
 ## Code to read
 
-- **Store:** `go-web-proxy/store.go`, `storecrypt.go`, `keyfile.go`, `fileutil.go`, `password.go`
+- **Store:** `go-web-proxy/store.go`, `writer.go`, `storecrypt.go`, `keyfile.go`, `fileutil.go`, `password.go`
 - **Callers:** `managed.go` (the users and connections API), `sockets.go`, `session.go`, `managed_routing.go`, `relay.go`, `dial.go`, `smf.go`
 - **Settings:** `configfile.go`, `settings.go`, `live.go`
 - **Tests:** `store_test.go`, `storecrypt_test.go`, `keyfile_test.go`, `contract_test.go`, `testdata/contract/`
@@ -149,6 +150,21 @@ If the decision is to keep the files:
 
 - the conditions that would reopen the question;
 - any small improvements worth doing now, each as its own item.
+
+---
+
+## Outcome so far
+
+The planning session has not happened. What did change is the store's write path, which answered several of the requirements above without a database. This is a record of that, not the decision: the question stays open until the user's answers are in.
+
+- **Several administrators editing.** Answered. A record has a version, a save carries the version it read, and a stale save is refused (`409 stale`), a create over an existing name is `409 exists` and a save of a deleted record is `404`. The unit is the whole record. See [architecture.md -> The single writer](architecture.md#the-single-writer).
+- **All-or-nothing across files.** Answered. An import writes users, connections and settings as one journaled transaction, and a crash at any step is rolled back or kept whole at the next start (`recoverDataDir`).
+- **Durability.** The writer syncs each temp file and the directory after the renames and after the commit point, and reads each file back before the swap. A power loss leaves old or new, never half.
+- **Detecting an outside edit.** Answered for a single gateway: a keyed checksum of each file, kept in memory, is compared with the disk before every write (`store_changed_on_disk`, `config_changed_on_disk`), and the refusal holds until a restart.
+- **Encryption at rest.** Unchanged: whole sealed files, key apart, checksum key derived from the store key and never stored.
+- **Static binary, image size, dependencies.** Unchanged: the change adds no dependency and needs no CGO.
+- **Backups and the contract.** The backup format is unchanged (versions inside it are ignored on import, and an import stamps fresh ones). The HTTP API gained a version on reads and writes; the contract cases and the fake gateway were updated together.
+- **Still open, and parked with the multi-instance plan.** More than one replica: memory is a cache of the last read, and a freshness check on every read, running the socket check when a snapshot is published (so followers run it too), and splitting `config.yaml` into host-local and shared keys are not done. Already in place for it: every write enters through one function, planning has no side effects, and `seq` tells a follower it is behind. The case for or against a database is therefore the replica question alone, plus whatever the user's answers add.
 
 ---
 

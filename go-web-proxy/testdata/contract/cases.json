@@ -164,15 +164,15 @@
           "response": {
             "users": [
               {
-                "username": "admin", "admin": true, "mustChangePassword": false,
+                "username": "admin", "rev": 1, "admin": true, "mustChangePassword": false,
                 "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }], "readOnly": [], "modules": null
               },
               {
-                "username": "viewer", "admin": false, "mustChangePassword": false,
+                "username": "viewer", "rev": 1, "admin": false, "mustChangePassword": false,
                 "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"]
               },
               {
-                "username": "operator", "admin": false, "mustChangePassword": false,
+                "username": "operator", "rev": 1, "admin": false, "mustChangePassword": false,
                 "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
                 "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }], "modules": null
               }
@@ -187,27 +187,27 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
-          "body": { "password": "", "admin": false, "operate": [], "readOnly": [], "modules": null },
+          "body": { "rev": 0, "password": "", "admin": false, "operate": [], "readOnly": [], "modules": null },
           "status": 422, "response": { "error": "invalid", "field": "password", "reason": "A new user needs a password." }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/bad%20name",
-          "body": { "password": "a-long-password-1", "admin": false, "operate": [], "readOnly": [] },
+          "body": { "rev": 0, "password": "a-long-password-1", "admin": false, "operate": [], "readOnly": [] },
           "status": 422, "response": { "error": "invalid", "field": "username", "reason": "Username must be 1 to 64 characters from A-Z a-z 0-9 . _ @ -, not only dots." }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
-          "body": { "password": "short", "admin": false, "operate": [], "readOnly": [] },
+          "body": { "rev": 0, "password": "short", "admin": false, "operate": [], "readOnly": [] },
           "status": 422, "response": { "error": "invalid", "field": "password", "reason": "Password must be 12 to 128 characters." }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
-          "body": { "password": "a-long-password-1", "admin": false, "operate": [], "readOnly": [], "modules": ["bogus"] },
+          "body": { "rev": 0, "password": "a-long-password-1", "admin": false, "operate": [], "readOnly": [], "modules": ["bogus"] },
           "status": 422, "response": { "error": "invalid", "field": "modules", "reason": "key \"modules[0]\" has invalid value \"bogus\": must be one of queue-browser, queue-copy, queue-subscription-explorer" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
-          "body": { "password": "a-long-password-1", "admin": false, "operate": [], "readOnly": [], "modules": ["queue-copy", "queue-copy"] },
+          "body": { "rev": 0, "password": "a-long-password-1", "admin": false, "operate": [], "readOnly": [], "modules": ["queue-copy", "queue-copy"] },
           "status": 422, "response": { "error": "invalid", "field": "modules", "reason": "key \"modules[1]\" has invalid value \"queue-copy\": listed twice" }
         },
         {
@@ -222,11 +222,11 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/admin",
-          "body": { "password": "", "admin": false, "operate": [], "readOnly": [] },
+          "body": { "rev": 1, "password": "", "admin": false, "operate": [], "readOnly": [] },
           "status": 409, "response": { "error": "last_admin" }
         },
-        { "as": "admin", "method": "DELETE", "path": "/managed/users/admin", "status": 409, "response": { "error": "last_admin" } },
-        { "as": "admin", "method": "DELETE", "path": "/managed/users/ghost", "status": 404, "response": { "error": "not_found" } }
+        { "as": "admin", "method": "DELETE", "path": "/managed/users/admin?rev=1", "status": 409, "response": { "error": "last_admin" } },
+        { "as": "admin", "method": "DELETE", "path": "/managed/users/ghost?rev=1", "status": 404, "response": { "error": "not_found" } }
       ]
     },
     {
@@ -234,28 +234,28 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
-          "body": { "password": "newbie-password-1", "admin": false, "operate": [], "readOnly": [{ "brokers": "b2", "msgVpns": "v9", "queues": "q.*" }], "modules": [] },
-          "status": 204, "response": null
+          "body": { "rev": 0, "password": "newbie-password-1", "admin": false, "operate": [], "readOnly": [{ "brokers": "b2", "msgVpns": "v9", "queues": "q.*" }], "modules": [] },
+          "status": 200, "response": { "rev": 2 }
         },
         {
           "as": "admin", "method": "GET", "path": "/managed/users", "status": 200,
           "response": {
             "users": [
               {
-                "username": "admin", "admin": true, "mustChangePassword": false,
+                "username": "admin", "rev": 1, "admin": true, "mustChangePassword": false,
                 "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }], "readOnly": [], "modules": null
               },
               {
-                "username": "viewer", "admin": false, "mustChangePassword": false,
+                "username": "viewer", "rev": 1, "admin": false, "mustChangePassword": false,
                 "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"]
               },
               {
-                "username": "operator", "admin": false, "mustChangePassword": false,
+                "username": "operator", "rev": 1, "admin": false, "mustChangePassword": false,
                 "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
                 "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }], "modules": null
               },
               {
-                "username": "newbie", "admin": false, "mustChangePassword": false,
+                "username": "newbie", "rev": 2, "admin": false, "mustChangePassword": false,
                 "operate": [], "readOnly": [{ "brokers": "b2", "msgVpns": "v9", "queues": "q.*" }], "modules": []
               }
             ],
@@ -269,8 +269,8 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
-          "body": { "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v2", "queues": "*" }], "modules": ["queue-browser"] },
-          "status": 204, "response": null
+          "body": { "rev": 1, "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v2", "queues": "*" }], "modules": ["queue-browser"] },
+          "status": 200, "response": { "rev": 2 }
         },
         {
           "as": "viewer", "method": "GET", "path": "/managed/me", "status": 200,
@@ -289,8 +289,8 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
-          "body": { "password": "viewer-password-2", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"] },
-          "status": 204, "response": null
+          "body": { "rev": 1, "password": "viewer-password-2", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"] },
+          "status": 200, "response": { "rev": 1 }
         },
         { "as": "viewer", "method": "GET", "path": "/managed/me", "status": 401, "response": { "error": "unauthenticated" } }
       ]
@@ -300,8 +300,8 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
-          "body": { "password": "", "admin": true, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"] },
-          "status": 204, "response": null
+          "body": { "rev": 1, "password": "", "admin": true, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"] },
+          "status": 200, "response": { "rev": 2 }
         },
         { "as": "viewer", "method": "GET", "path": "/managed/me", "status": 401, "response": { "error": "unauthenticated" } }
       ]
@@ -309,7 +309,7 @@
     {
       "name": "users: a deleted user's session is refused",
       "steps": [
-        { "as": "admin", "method": "DELETE", "path": "/managed/users/viewer", "status": 204, "response": null },
+        { "as": "admin", "method": "DELETE", "path": "/managed/users/viewer?rev=1", "status": 204, "response": null },
         { "as": "viewer", "method": "GET", "path": "/managed/me", "status": 401, "response": { "error": "unauthenticated" } }
       ]
     },
@@ -321,17 +321,17 @@
           "response": {
             "connections": [
               {
-                "broker": "b1", "hostname": "host1",
+                "broker": "b1", "rev": 1, "hostname": "host1",
                 "semp": { "scheme": "https", "port": "1943", "user": "mon", "pass": "" },
                 "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }
               },
               {
-                "broker": "b2", "hostname": "host2",
+                "broker": "b2", "rev": 1, "hostname": "host2",
                 "semp": { "scheme": "http", "port": "1943", "user": "mon", "pass": "" },
                 "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v9", "user": "u9", "pass": "" }] }
               },
               {
-                "broker": "b3", "hostname": "host3",
+                "broker": "b3", "rev": 1, "hostname": "host3",
                 "semp": { "scheme": "https", "port": "", "user": "", "pass": "" },
                 "client": { "scheme": "ws", "port": "1443", "msgVpns": [{ "name": "v3", "user": "u3", "pass": "" }] }
               }
@@ -345,50 +345,50 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
-          "body": { "hostname": "bad host", "semp": { "port": "1943", "user": "mon", "pass": "p" }, "client": { "port": "1443", "msgVpns": [] } },
+          "body": { "rev": 0, "hostname": "bad host", "semp": { "port": "1943", "user": "mon", "pass": "p" }, "client": { "port": "1443", "msgVpns": [] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": hostname \"bad host\" must be a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
-          "body": { "hostname": "host4", "semp": { "port": "+80", "user": "mon", "pass": "p" }, "client": { "port": "1443", "msgVpns": [] } },
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "+80", "user": "mon", "pass": "p" }, "client": { "port": "1443", "msgVpns": [] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": semp.port \"+80\" is not a port (1 to 65535)" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
-          "body": { "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [{ "name": "v1", "user": "u", "pass": "p" }] } },
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [{ "name": "v1", "user": "u", "pass": "p" }] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": client.port is required when message VPNs are listed" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
-          "body": { "hostname": "host4", "semp": { "port": "", "user": "mon", "pass": "" }, "client": { "port": "", "msgVpns": [] } },
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "", "user": "mon", "pass": "" }, "client": { "port": "", "msgVpns": [] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": semp.port is required when a SEMP username is set" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
-          "body": { "hostname": "host4", "semp": { "port": "1943", "user": "a:b", "pass": "p" }, "client": { "port": "", "msgVpns": [] } },
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "1943", "user": "a:b", "pass": "p" }, "client": { "port": "", "msgVpns": [] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": the SEMP username and password must not contain control characters, and the username no ':'" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
-          "body": { "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u", "pass": "p" }, { "name": "v1", "user": "u", "pass": "p" }] } },
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u", "pass": "p" }, { "name": "v1", "user": "u", "pass": "p" }] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": message VPN \"v1\" appears more than once" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/bad%20broker",
-          "body": { "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [] } },
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"bad broker\" must be 1 to 64 characters from A-Z a-z 0-9 . _ -, not only dots" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
-          "body": { "hostname": "host4", "semp": { "scheme": "ftp", "port": "21", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [] } },
+          "body": { "rev": 0, "hostname": "host4", "semp": { "scheme": "ftp", "port": "21", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": semp.scheme \"ftp\" must be \"https\" or \"http\"" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
-          "body": { "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "scheme": "https", "port": "1443", "msgVpns": [] } },
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "scheme": "https", "port": "1443", "msgVpns": [] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": client.scheme \"https\" must be \"wss\" or \"ws\"" }
         },
-        { "as": "admin", "method": "DELETE", "path": "/managed/connections/ghost", "status": 404, "response": { "error": "not_found" } }
+        { "as": "admin", "method": "DELETE", "path": "/managed/connections/ghost?rev=1", "status": 404, "response": { "error": "not_found" } }
       ]
     },
     {
@@ -396,8 +396,8 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b1",
-          "body": { "hostname": "host1", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] } },
-          "status": 204, "response": null
+          "body": { "rev": 1, "hostname": "host1", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] } },
+          "status": 200, "response": { "rev": 1 }
         },
         {
           "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 200,
@@ -410,8 +410,8 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b1",
-          "body": { "hostname": "host1", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v2", "user": "u2", "pass": "" }] } },
-          "status": 204, "response": null
+          "body": { "rev": 1, "hostname": "host1", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v2", "user": "u2", "pass": "" }] } },
+          "status": 200, "response": { "rev": 2 }
         },
         {
           "as": "viewer", "method": "GET", "path": "/managed/me", "status": 200,
@@ -429,7 +429,7 @@
     {
       "name": "connections: a deleted broker leaves the profile",
       "steps": [
-        { "as": "admin", "method": "DELETE", "path": "/managed/connections/b2", "status": 204, "response": null },
+        { "as": "admin", "method": "DELETE", "path": "/managed/connections/b2?rev=1", "status": 204, "response": null },
         {
           "as": "operator", "method": "GET", "path": "/managed/me", "status": 200,
           "response": {
@@ -456,8 +456,9 @@
               "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
               "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
               "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
-              "audit": { "stdout": false, "access": false }
+              "audit": { "stdout": false, "access": false, "onFailure": "continue" }
             },
+            "rev": "<rev>",
             "restartOnly": ["hosted", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify"],
             "hostOnly": ["tls.certFile", "tls.keyFile", "tls.trustDir"],
             "pendingRestart": [],
@@ -471,31 +472,31 @@
       "name": "settings: each refusal names its field and reason",
       "steps": [
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "tls": { "certFile": "/elsewhere/tls.crt" } },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "tls": { "certFile": "/elsewhere/tls.crt" } },
           "status": 422, "response": { "error": "invalid", "field": "tls.certFile", "reason": "tls.certFile is a path, so it changes only in config.yaml on the gateway host, followed by a restart." }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "session": { "absoluteMinutes": 0 } },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "session": { "absoluteMinutes": 0 } },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"session.absoluteMinutes\" has invalid value \"0\": must be 1 to 1440" }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "connModes": "bogus" },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "connModes": "bogus" },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "connModes=\"bogus\" (config.yaml; seeded by SMU_CONN_MODES) must be one of \"direct\", \"provisioned\", \"both\"" }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "connModes": "direct" },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "connModes": "direct" },
           "status": 422, "response": { "error": "invalid", "field": "connModes", "reason": "connModes \"direct\" would turn Provisioned mode off at the next restart, and this console with it. To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart." }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "modules": { "userDefault": "some" } },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "modules": { "userDefault": "some" } },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"modules.userDefault\" has invalid value \"some\": must be \"all\" or \"none\"" }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "access": { "allow": ["10.0.0.0/8"] } },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "access": { "allow": ["10.0.0.0/8"] } },
           "status": 409, "response": { "error": "would_lock_out", "field": "access.allow", "reason": "This allow list would deny your own address (192.0.2.10). Add it, or a range that contains it." }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "nope": true },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "nope": true },
           "status": 400, "response": { "error": "bad_request" }
         }
       ]
@@ -504,31 +505,31 @@
       "name": "settings: each value is checked as config.yaml's loader checks it",
       "steps": [
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "logLevel": "loud" },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "logLevel": "loud" },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"logLevel\" has invalid value \"loud\": must be one of debug, info, warn, error" }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "session": { "idleMinutes": 31 } },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "session": { "idleMinutes": 31 } },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"session.idleMinutes\" has invalid value \"31\": must be 1 to 30 (session.absoluteMinutes is 30)" }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "login": { "maxFailures": 0 } },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "maxFailures": 0 } },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"login.maxFailures\" has invalid value \"0\": must be 1 to 1000" }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "login": { "backoffSeconds": 1000 } },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "backoffSeconds": 1000 } },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"login.backoffSeconds\" has invalid value \"1000\": must be 1 to 900 (login.maxBackoffSeconds is 900)" }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "modules": { "offered": ["bogus"] } },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "modules": { "offered": ["bogus"] } },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"modules.offered[0]\" has invalid value \"bogus\": must be one of queue-browser, queue-copy, queue-subscription-explorer" }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "modules": { "offered": ["queue-copy", "queue-copy"] } },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "modules": { "offered": ["queue-copy", "queue-copy"] } },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"modules.offered[1]\" has invalid value \"queue-copy\": listed twice" }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "defaultConn": "neither" },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "defaultConn": "neither" },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "defaultConn=\"neither\" (config.yaml; seeded by SMU_DEFAULT_CONN) must be one of \"direct\", \"provisioned\"" }
         }
       ]
@@ -537,16 +538,16 @@
       "name": "settings: an access list is read as netip.ParsePrefix reads it, and saved masked",
       "steps": [
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "access": { "trustedProxies": ["10.0.0.0/08"] } },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "access": { "trustedProxies": ["10.0.0.0/08"] } },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"access.trustedProxies[0]\" has invalid value \"10.0.0.0/08\": want CIDR such as 10.0.0.0/8 or 192.0.2.7/32 (netip.ParsePrefix(\"10.0.0.0/08\"): bad bits after slash: \"08\")" }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "access": { "trustedProxies": ["2001:db8::/129"] } },
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "access": { "trustedProxies": ["2001:db8::/129"] } },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"access.trustedProxies[0]\" has invalid value \"2001:db8::/129\": want CIDR such as 10.0.0.0/8 or 192.0.2.7/32 (netip.ParsePrefix(\"2001:db8::/129\"): prefix length out of range)" }
         },
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "access": { "allow": ["192.0.2.0/24", "2001:0DB8::1/32", "2001:db8:abcd:12ff::1/52", "fe80::1:0:0:1/128"] } },
-          "status": 200, "response": { "restartRequired": [] }
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "access": { "allow": ["192.0.2.0/24", "2001:0DB8::1/32", "2001:db8:abcd:12ff::1/52", "fe80::1:0:0:1/128"] } },
+          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
         },
         {
           "as": "admin", "method": "GET", "path": "/managed/settings", "status": 200,
@@ -559,8 +560,9 @@
               "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
               "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000 },
               "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
-              "audit": { "stdout": false, "access": false }
+              "audit": { "stdout": false, "access": false, "onFailure": "continue" }
             },
+            "rev": "<rev>",
             "restartOnly": ["hosted", "tls.certFile", "tls.keyFile", "tls.trustDir", "tls.insecureSkipVerify"],
             "hostOnly": ["tls.certFile", "tls.keyFile", "tls.trustDir"],
             "pendingRestart": [],
@@ -574,8 +576,8 @@
       "name": "settings: a live key applies to the next profile",
       "steps": [
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "modules": { "userDefault": "none" } },
-          "status": 200, "response": { "restartRequired": [] }
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "modules": { "userDefault": "none" } },
+          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
         },
         {
           "as": "operator", "method": "GET", "path": "/managed/me", "status": 200,
@@ -596,8 +598,8 @@
       "name": "settings: a saved restart-only key is reported as pending",
       "steps": [
         {
-          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "tls": { "insecureSkipVerify": true } },
-          "status": 200, "response": { "restartRequired": ["tls.insecureSkipVerify"] }
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "tls": { "insecureSkipVerify": true } },
+          "status": 200, "response": { "restartRequired": ["tls.insecureSkipVerify"], "rev": "<rev>" }
         }
       ]
     },
@@ -635,6 +637,7 @@
           "method": "PUT",
           "path": "/managed/backup/schedule",
           "body": {
+            "rev": 0,
             "kind": "yearly",
             "minute": 0,
             "hour": 2,
@@ -655,6 +658,7 @@
           "method": "PUT",
           "path": "/managed/backup/schedule",
           "body": {
+            "rev": 0,
             "kind": "hourly",
             "minute": 0,
             "hour": 2,
@@ -675,6 +679,7 @@
           "method": "PUT",
           "path": "/managed/backup/schedule",
           "body": {
+            "rev": 0,
             "kind": "monthly",
             "minute": 0,
             "hour": 2,
@@ -695,6 +700,7 @@
           "method": "PUT",
           "path": "/managed/backup/schedule",
           "body": {
+            "rev": 0,
             "kind": "daily",
             "minute": 0,
             "hour": 2,
@@ -715,6 +721,7 @@
           "method": "PUT",
           "path": "/managed/backup/schedule",
           "body": {
+            "rev": 0,
             "kind": "daily",
             "minute": 0,
             "hour": 2,
@@ -735,6 +742,7 @@
           "method": "PUT",
           "path": "/managed/backup/schedule",
           "body": {
+            "rev": 0,
             "kind": "daily",
             "minute": 0,
             "hour": 2,
@@ -753,7 +761,7 @@
         {
           "as": "admin",
           "method": "DELETE",
-          "path": "/managed/backup/schedule",
+          "path": "/managed/backup/schedule?rev=1",
           "status": 404,
           "response": {
             "error": "not_found"
@@ -791,6 +799,7 @@
           "method": "PUT",
           "path": "/managed/backup/schedule",
           "body": {
+            "rev": 0,
             "kind": "daily",
             "minute": 0,
             "hour": 2,
@@ -799,8 +808,10 @@
             "keep": 7,
             "passphrase": "contract-vector-passphrase"
           },
-          "status": 204,
-          "response": null
+          "status": 200,
+          "response": {
+            "rev": 1
+          }
         },
         {
           "as": "admin",
@@ -814,7 +825,8 @@
               "hour": 2,
               "weekday": 0,
               "day": 0,
-              "keep": 7
+              "keep": 7,
+              "rev": 1
             },
             "nextRun": "<time>",
             "lastRun": null,
@@ -827,6 +839,7 @@
           "method": "PUT",
           "path": "/managed/backup/schedule",
           "body": {
+            "rev": 1,
             "kind": "daily",
             "minute": 0,
             "hour": 2,
@@ -835,8 +848,10 @@
             "keep": 3,
             "passphrase": ""
           },
-          "status": 204,
-          "response": null
+          "status": 200,
+          "response": {
+            "rev": 2
+          }
         },
         {
           "as": "admin",
@@ -850,7 +865,8 @@
               "hour": 2,
               "weekday": 0,
               "day": 0,
-              "keep": 3
+              "keep": 3,
+              "rev": 2
             },
             "nextRun": "<time>",
             "lastRun": null,
@@ -861,7 +877,7 @@
         {
           "as": "admin",
           "method": "DELETE",
-          "path": "/managed/backup/schedule",
+          "path": "/managed/backup/schedule?rev=2",
           "status": 204,
           "response": null
         },
@@ -957,6 +973,11 @@
             "signsOutCaller": {
               "replace": true,
               "merge": true
+            },
+            "basis": {
+              "users": 1,
+              "connections": 1,
+              "settings": "<rev>"
             }
           }
         }
@@ -1094,6 +1115,7 @@
           "method": "POST",
           "path": "/managed/backup/import",
           "body": {
+            "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" },
             "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
             "passphrase": "contract-vector-passphrase",
             "users": "all",
@@ -1112,6 +1134,7 @@
           "method": "POST",
           "path": "/managed/backup/import",
           "body": {
+            "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" },
             "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
             "passphrase": "contract-vector-passphrase",
             "users": "skip",
@@ -1130,6 +1153,7 @@
           "method": "POST",
           "path": "/managed/backup/import",
           "body": {
+            "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" },
             "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
             "passphrase": "contract-vector-passphrase",
             "users": "skip",
@@ -1148,6 +1172,7 @@
           "method": "POST",
           "path": "/managed/backup/import",
           "body": {
+            "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" },
             "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
             "passphrase": "contract-vector-passphrase",
             "users": "skip",
@@ -1166,6 +1191,7 @@
           "method": "POST",
           "path": "/managed/backup/import",
           "body": {
+            "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" },
             "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"U01VUwEEsLGys7S1tre4ubq7N7xDtWg7uzrT3jWY4Aw3chiV1bxhSGaSOgVagTEQxYee2N5pyT1yk1kcTPac4T7Aqmm0uUpAm1mK1bsQnDpsQaNoPl+tMfk42qH76BrMJ5/IrFaqmC8APxXH+5hDNLg+CEHzuVqktjKKw8ysfx6ZjGrxulaNdG27xOnTSL6etTd0m2ucF2RViQkw2VvVZP209uCccCWYN0ul8SFjLGjtLMQq5VgX3rU0r4rNtivL3ikECe5FXbyW1NMCxiYDlxKtffj85Jpz7sT1ihNcqLa0C4YDs3S2uwXCkEAguaAWOcCMp00C04MJAGEG10NdTTXQYCUTalplVKbOlvUyPxLrMZIMew18tWNz+bZPDeRAyfImngIcAvQJykBNEG4jiRB39+hp4Tbda8UriwZW7em+gD2Xwb0K/uF9CZ4sd0Um9aGOs9/YO6lwOc5++4mnFunBCt1VzBuFFBezVmEBQi6yYkSIDOy5mjIQ+q9iDNfMmwTrZ3sW1JOIK1j89oT9tHdF7jxH1w+swXcpe/IsTvZZ21B0lEagugwwEhQF3cWP69p0BBSdNNhq9+nXfErh56DTFmDgDNgXOF1gLg11wFgy3vEuzA/ZO3+yItVsfGtjF3Nj0UrR0rdLSR4pKTt3xxl7Nwo9c97fVtgkCVVBb6e/FNSJ4chQuWsSoWs6Z4FIRSQt5m0wq4qvpnVbECyTZXr9AWECPgfhSc9z6Ctzz+TF8xLJxvkgN6gCeM6V0II/30XOzfSpndJiNJupyzPJALdreTRrSIfW+Vwi2eDV+Mngw9g/ZnHMmLfaF3qEQOt8fVIlWcgnwoQHT7K59PD4gWdetKZVJA2xg16v0ok4KDEQPphE2Zlozl3CTcrIWAm30t82lwbr8of/2l9hIID3MhZdhq9ED9ss1dYfXN0P93X+uG7u07W+S4pbI+O5aFbjMhJXZJrZyc951/jRe7urHlL+719RmiJ6KxmiP/W6vw6AZ+ndlC+WssXOX+Rz7pLOlY4d2A40ZGn4XD8DeDDozsOui2YOVs3kGCNrczQXlhSpZMn7upwTjiiHcjlKyRcIL8vLaXCeixh+r3R1ASdKiu/qC2G/NGY+NWnRFN051v4B/AfLVYTpeNEfltGBv1tGt/C7h56LZCA7EEIDIiLJ7Pcrij88XLbp3earVS0tFTj8FCYOtgrMU3WIJXQw1R2DFqsAVXCmK+4rO5ON3CTFIA+K+oMgJZCm0QIXrMjcY1wjvZuv3OcZKIJqm5IcbrM13ebDq/flvBKHGseMODoMRpPh/BX7Wy5GlyVRjzNcxEm9DNRe1xUQ2hmUmjBtN7Fw4JqAHGUJAmm806VXsAE5BWzuBGRLMZJBquBXGlljPwNCXcY6skTDOtR5vF+XStZW0pLrj3bWY3g+QcKCxDZxoQUtXJAO4PDt3LrbgKu4PRFOAiITgVVUHRJx9e0PAj23GguSqWEaL1uhVHHUZTrKkVXkkZ2O2k8OdEEKkho/vY5nSPdN+Wr0OX8eO2HbFA3SWqtjD/b7kI3hoCawji3zxG1Nr2OImaw9bibSqYlQUpW2KQ5FWSeFA+wO/zRSLOFUlqtjbKPDQWfTrieuoxznjbNFXo3H59mhiWCKVV5+m28HrPB08GuU/mIxbBsw4Tvv0HzryyVf7sirtymfvX1SeIGwdUupQqWOhRP5C37woN1kFAk+IT+s6YFOSSFRYaz75fE/OKNsdhxDsKxBYtAEqwIjMDlVU+ZS8mHV7BVvAxMa5cL4JhdrRbidPV5brnqZ+iYAmUyF04zpcmhJelp5fPWHt3rJL5khUUBvuobVo/qzDWf2bHHipBvY3RzUHA20k11U5iq52XMNVRvH+1vaHA4vWGE6l/B/4zUB7JQVBqcc5bQJupQS65b/BrFzKKcvuAo7iO2XbXfwMoetKVehn6juS8Eny+vkmNdgoXqUPCUuDCjy8iIPFT0WqoMr+sbpEVt0MGE80SSLNuEJrcvLHyuI3zkjHCby5ObpddeE/KoH73gLxqXR3T+fCvC782ai/H1M524vTv5NGLALTNC9HY+owWfaLxbmReM4Yng1Gz8h9575+XsslX1ycM4o0Ay4t2CwclRUVcS1yrd5mmg/i/PMbpP0Fzkb4BiIrf2VZom3aedrvK51iJ8nINdL8KZhlOF7CkZdFZ7NorVZ31bu9aBYtB26NXuKEx4ukmUoe4/06QF37CTfj2TqsJ3XRDn44GoFxIEJ5ln1oaEzfVRSBxxl8L2xasAwBqI4ACzocISKeA8Ybd9XHBQ7g94UM66ik9T0ZBT7VxuX9EssoRZMXPxzWDNuCD50UTXcRXmJ5eV6gIDyfcgKwe9xQGKIxudlfaDBaifNMR8Q835foFQns38ztn5HQzDvp1auK1N89VTZirWEyRwCYlod9RlUCY2CWsmqShsHQQT2l9qxJv5ZLHRo0FtzBWzjdPESunmKwkvHk8lTu9RXJkw5x2n7H3JQRtKf/5pY1edmwkDgY9kP++EXoQl8vq1HUERrS4bSwGjxiw==\"\n}\n",
             "passphrase": "not the passphrase",
             "users": "merge",
@@ -1189,6 +1215,7 @@
           "method": "POST",
           "path": "/managed/backup/import",
           "body": {
+            "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" },
             "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
             "passphrase": "contract-vector-passphrase",
             "users": "skip",
@@ -1210,6 +1237,7 @@
             "connections": [
               {
                 "broker": "b1",
+                "rev": 2,
                 "hostname": "host1",
                 "semp": {
                   "scheme": "https",
@@ -1236,6 +1264,7 @@
               },
               {
                 "broker": "b2",
+                "rev": 2,
                 "hostname": "host2-dr",
                 "semp": {
                   "scheme": "https",
@@ -1257,6 +1286,7 @@
               },
               {
                 "broker": "b4",
+                "rev": 2,
                 "hostname": "host4",
                 "semp": {
                   "scheme": "https",
@@ -1320,9 +1350,11 @@
               },
               "audit": {
                 "stdout": false,
-                "access": false
+                "access": false,
+                "onFailure": "continue"
               }
             },
+            "rev": "<rev>",
             "restartOnly": [
               "hosted",
               "tls.certFile",
@@ -1385,6 +1417,7 @@
           "method": "POST",
           "path": "/managed/backup/import",
           "body": {
+            "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" },
             "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
             "passphrase": "contract-vector-passphrase",
             "users": "merge",
@@ -1508,45 +1541,436 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
-          "body": { "hostname": "host4", "semp": { "scheme": "http", "port": "8080", "user": "mon", "pass": "p" }, "client": { "scheme": "ws", "port": "8008", "msgVpns": [{ "name": "v4", "user": "u4", "pass": "p4" }] } },
-          "status": 204, "response": null
+          "body": { "rev": 0, "hostname": "host4", "semp": { "scheme": "http", "port": "8080", "user": "mon", "pass": "p" }, "client": { "scheme": "ws", "port": "8008", "msgVpns": [{ "name": "v4", "user": "u4", "pass": "p4" }] } },
+          "status": 200, "response": { "rev": 2 }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b5",
-          "body": { "hostname": "host5", "semp": { "scheme": "https", "port": "1943", "user": "", "pass": "" }, "client": { "port": "1443", "msgVpns": [] } },
-          "status": 204, "response": null
+          "body": { "rev": 0, "hostname": "host5", "semp": { "scheme": "https", "port": "1943", "user": "", "pass": "" }, "client": { "port": "1443", "msgVpns": [] } },
+          "status": 200, "response": { "rev": 3 }
         },
         {
           "as": "admin", "method": "GET", "path": "/managed/connections", "status": 200,
           "response": {
             "connections": [
               {
-                "broker": "b1", "hostname": "host1",
+                "broker": "b1", "rev": 1, "hostname": "host1",
                 "semp": { "scheme": "https", "port": "1943", "user": "mon", "pass": "" },
                 "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }
               },
               {
-                "broker": "b2", "hostname": "host2",
+                "broker": "b2", "rev": 1, "hostname": "host2",
                 "semp": { "scheme": "http", "port": "1943", "user": "mon", "pass": "" },
                 "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v9", "user": "u9", "pass": "" }] }
               },
               {
-                "broker": "b3", "hostname": "host3",
+                "broker": "b3", "rev": 1, "hostname": "host3",
                 "semp": { "scheme": "https", "port": "", "user": "", "pass": "" },
                 "client": { "scheme": "ws", "port": "1443", "msgVpns": [{ "name": "v3", "user": "u3", "pass": "" }] }
               },
               {
-                "broker": "b4", "hostname": "host4",
+                "broker": "b4", "rev": 2, "hostname": "host4",
                 "semp": { "scheme": "http", "port": "8080", "user": "mon", "pass": "" },
                 "client": { "scheme": "ws", "port": "8008", "msgVpns": [{ "name": "v4", "user": "u4", "pass": "" }] }
               },
               {
-                "broker": "b5", "hostname": "host5",
+                "broker": "b5", "rev": 3, "hostname": "host5",
                 "semp": { "scheme": "https", "port": "1943", "user": "", "pass": "" },
                 "client": { "scheme": "wss", "port": "1443", "msgVpns": [] }
               }
             ]
           }
+        }
+      ]
+    },
+    {
+      "name": "users: a save made after another admin saved is stale, and a reloaded rev saves",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/operator",
+          "body": { "password": "", "admin": false, "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }], "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "q.*" }], "rev": 1 },
+          "status": 200, "response": { "rev": 2 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/operator",
+          "body": { "password": "", "admin": false, "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }], "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "r.*" }], "rev": 1 },
+          "status": 409, "response": { "error": "stale", "rev": 2 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/operator",
+          "body": { "password": "", "admin": false, "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }], "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "r.*" }], "rev": 2 },
+          "status": 200, "response": { "rev": 3 }
+        }
+      ]
+    },
+    {
+      "name": "users: a new user takes rev 0, and a taken name is refused as exists",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "viewer-password-9", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"], "rev": 0 },
+          "status": 409, "response": { "error": "exists" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
+          "body": { "password": "newbie-password-1", "admin": false, "operate": [], "readOnly": [], "modules": ["queue-browser"], "rev": 0 },
+          "status": 200, "response": { "rev": 2 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
+          "body": { "password": "newbie-password-1", "admin": false, "operate": [], "readOnly": [], "modules": ["queue-browser"], "rev": 0 },
+          "status": 409, "response": { "error": "exists" }
+        }
+      ]
+    },
+    {
+      "name": "users: a user another admin deleted is not_found on save and on delete",
+      "steps": [
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/users/viewer?rev=1",
+          "status": 204, "response": null
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"], "rev": 1 },
+          "status": 404, "response": { "error": "not_found" }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/users/viewer?rev=1",
+          "status": 404, "response": { "error": "not_found" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/ghost",
+          "body": { "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"], "rev": 3 },
+          "status": 404, "response": { "error": "not_found" }
+        }
+      ]
+    },
+    {
+      "name": "users: a save without a whole-number rev is rev_required",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"] },
+          "status": 400, "response": { "error": "rev_required" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"], "rev": "1" },
+          "status": 400, "response": { "error": "rev_required" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"], "rev": -1 },
+          "status": 400, "response": { "error": "rev_required" }
+        }
+      ]
+    },
+    {
+      "name": "users: a delete needs the rev, and a stale one names the current rev",
+      "steps": [
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/users/viewer",
+          "status": 400, "response": { "error": "rev_required" }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/users/viewer?rev=0",
+          "status": 400, "response": { "error": "rev_required" }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/users/viewer?rev=abc",
+          "status": 400, "response": { "error": "rev_required" }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/users/viewer?rev=5",
+          "status": 409, "response": { "error": "stale", "rev": 1 }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/users/viewer?rev=1",
+          "status": 204, "response": null
+        }
+      ]
+    },
+    {
+      "name": "users: a password change keeps the rev, so the rev an admin read still saves",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "viewer-password-2", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"], "rev": 1 },
+          "status": 200, "response": { "rev": 1 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v2", "queues": "*" }], "modules": ["queue-browser"], "rev": 1 },
+          "status": 200, "response": { "rev": 3 }
+        }
+      ]
+    },
+    {
+      "name": "users: a delete after another save is stale, then the new rev deletes",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/operator",
+          "body": { "password": "", "admin": false, "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }], "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "q.*" }], "rev": 1 },
+          "status": 200, "response": { "rev": 2 }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/users/operator?rev=1",
+          "status": 409, "response": { "error": "stale", "rev": 2 }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/users/operator?rev=2",
+          "status": 204, "response": null
+        }
+      ]
+    },
+    {
+      "name": "users: a deleted name created again gets a new rev, never a reused one",
+      "steps": [
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/users/viewer?rev=1",
+          "status": 204, "response": null
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "viewer-password-9", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"], "rev": 0 },
+          "status": 200, "response": { "rev": 3 }
+        }
+      ]
+    },
+    {
+      "name": "connections: a save made after another admin saved is stale, and a reloaded rev saves",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b1",
+          "body": { "hostname": "host1-new", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }, "rev": 1 },
+          "status": 200, "response": { "rev": 2 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b1",
+          "body": { "hostname": "host1-other", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }, "rev": 1 },
+          "status": 409, "response": { "error": "stale", "rev": 2 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b1",
+          "body": { "hostname": "host1-other", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }, "rev": 2 },
+          "status": 200, "response": { "rev": 3 }
+        }
+      ]
+    },
+    {
+      "name": "connections: a taken broker name is refused as exists, a new one takes rev 0",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b1",
+          "body": { "hostname": "host1", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }, "rev": 0 },
+          "status": 409, "response": { "error": "exists" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [] }, "rev": 0 },
+          "status": 200, "response": { "rev": 2 }
+        }
+      ]
+    },
+    {
+      "name": "connections: a broker another admin deleted is not_found on save and on delete",
+      "steps": [
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/connections/b2?rev=1",
+          "status": 204, "response": null
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b2",
+          "body": { "hostname": "host2", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }, "rev": 1 },
+          "status": 404, "response": { "error": "not_found" }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/connections/b2?rev=1",
+          "status": 404, "response": { "error": "not_found" }
+        }
+      ]
+    },
+    {
+      "name": "connections: a save or delete without the rev is rev_required",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b1",
+          "body": { "hostname": "host1", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] } },
+          "status": 400, "response": { "error": "rev_required" }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/connections/b1",
+          "status": 400, "response": { "error": "rev_required" }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/connections/b1?rev=0",
+          "status": 400, "response": { "error": "rev_required" }
+        }
+      ]
+    },
+    {
+      "name": "connections: a stale delete names the current rev, then the right rev deletes",
+      "steps": [
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/connections/b1?rev=7",
+          "status": 409, "response": { "error": "stale", "rev": 1 }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/connections/b1?rev=1",
+          "status": 204, "response": null
+        }
+      ]
+    },
+    {
+      "name": "settings: a save answers the new rev, and the rev read before it is then stale",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings",
+          "body": { "logLevel": "info", "rev": "<settings-rev>" },
+          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings",
+          "body": { "logLevel": "error", "rev": "<settings-rev-at-start>" },
+          "status": 409, "response": { "error": "stale", "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings",
+          "body": { "logLevel": "loud", "rev": "<settings-rev-at-start>" },
+          "status": 409, "response": { "error": "stale", "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings",
+          "body": { "logLevel": "error", "rev": "<settings-rev>" },
+          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+        }
+      ]
+    },
+    {
+      "name": "settings: a rev that is not the current one is stale, ahead of every value check",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings",
+          "body": { "logLevel": "info", "rev": "not-the-current-rev" },
+          "status": 409, "response": { "error": "stale", "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings",
+          "body": { "logLevel": "loud", "rev": "not-the-current-rev" },
+          "status": 409, "response": { "error": "stale", "rev": "<rev>" }
+        }
+      ]
+    },
+    {
+      "name": "settings: a save without a rev, or with an empty one, is rev_required",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings",
+          "body": { "logLevel": "info" },
+          "status": 400, "response": { "error": "rev_required" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings",
+          "body": { "logLevel": "info", "rev": "" },
+          "status": 400, "response": { "error": "rev_required" }
+        }
+      ]
+    },
+    {
+      "name": "backup: a schedule is created at rev 0, refused when stale or taken, and re-created after a delete at a new rev",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/backup/schedule",
+          "body": { "kind": "daily", "minute": 0, "hour": 2, "weekday": 0, "day": 0, "keep": 7, "passphrase": "contract-vector-passphrase", "rev": 0 },
+          "status": 200, "response": { "rev": 1 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/backup/schedule",
+          "body": { "kind": "daily", "minute": 0, "hour": 2, "weekday": 0, "day": 0, "keep": 7, "passphrase": "contract-vector-passphrase", "rev": 0 },
+          "status": 409, "response": { "error": "exists" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/backup/schedule",
+          "body": { "kind": "daily", "minute": 0, "hour": 2, "weekday": 0, "day": 0, "keep": 7, "passphrase": "contract-vector-passphrase", "rev": 5 },
+          "status": 409, "response": { "error": "stale", "rev": 1 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/backup/schedule",
+          "body": { "kind": "daily", "minute": 0, "hour": 2, "weekday": 0, "day": 0, "keep": 7, "passphrase": "contract-vector-passphrase" },
+          "status": 400, "response": { "error": "rev_required" }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/backup/schedule?rev=5",
+          "status": 409, "response": { "error": "stale", "rev": 1 }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/backup/schedule",
+          "status": 400, "response": { "error": "rev_required" }
+        },
+        {
+          "as": "admin", "method": "DELETE", "path": "/managed/backup/schedule?rev=1",
+          "status": 204, "response": null
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/backup/schedule",
+          "body": { "kind": "daily", "minute": 0, "hour": 2, "weekday": 0, "day": 0, "keep": 7, "passphrase": "contract-vector-passphrase", "rev": 1 },
+          "status": 404, "response": { "error": "not_found" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/backup/schedule",
+          "body": { "kind": "daily", "minute": 0, "hour": 2, "weekday": 0, "day": 0, "keep": 7, "passphrase": "contract-vector-passphrase", "rev": 0 },
+          "status": 200, "response": { "rev": 3 }
+        }
+      ]
+    },
+    {
+      "name": "backup: an import is stale when a section it imports moved, and a skipped section is not compared",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v2", "queues": "*" }], "modules": ["queue-browser"], "rev": 1 },
+          "status": 200, "response": { "rev": 2 }
+        },
+        {
+          "as": "admin", "method": "POST", "path": "/managed/backup/import",
+          "body": { "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"U01VUwEEsLGys7S1tre4ubq7N7xDtWg7uzrT3jWY4Aw3chiV1bxhSGaSOgVagTEQxYee2N5pyT1yk1kcTPac4T7Aqmm0uUpAm1mK1bsQnDpsQaNoPl+tMfk42qH76BrMJ5/IrFaqmC8APxXH+5hDNLg+CEHzuVqktjKKw8ysfx6ZjGrxulaNdG27xOnTSL6etTd0m2ucF2RViQkw2VvVZP209uCccCWYN0ul8SFjLGjtLMQq5VgX3rU0r4rNtivL3ikECe5FXbyW1NMCxiYDlxKtffj85Jpz7sT1ihNcqLa0C4YDs3S2uwXCkEAguaAWOcCMp00C04MJAGEG10NdTTXQYCUTalplVKbOlvUyPxLrMZIMew18tWNz+bZPDeRAyfImngIcAvQJykBNEG4jiRB39+hp4Tbda8UriwZW7em+gD2Xwb0K/uF9CZ4sd0Um9aGOs9/YO6lwOc5++4mnFunBCt1VzBuFFBezVmEBQi6yYkSIDOy5mjIQ+q9iDNfMmwTrZ3sW1JOIK1j89oT9tHdF7jxH1w+swXcpe/IsTvZZ21B0lEagugwwEhQF3cWP69p0BBSdNNhq9+nXfErh56DTFmDgDNgXOF1gLg11wFgy3vEuzA/ZO3+yItVsfGtjF3Nj0UrR0rdLSR4pKTt3xxl7Nwo9c97fVtgkCVVBb6e/FNSJ4chQuWsSoWs6Z4FIRSQt5m0wq4qvpnVbECyTZXr9AWECPgfhSc9z6Ctzz+TF8xLJxvkgN6gCeM6V0II/30XOzfSpndJiNJupyzPJALdreTRrSIfW+Vwi2eDV+Mngw9g/ZnHMmLfaF3qEQOt8fVIlWcgnwoQHT7K59PD4gWdetKZVJA2xg16v0ok4KDEQPphE2Zlozl3CTcrIWAm30t82lwbr8of/2l9hIID3MhZdhq9ED9ss1dYfXN0P93X+uG7u07W+S4pbI+O5aFbjMhJXZJrZyc951/jRe7urHlL+719RmiJ6KxmiP/W6vw6AZ+ndlC+WssXOX+Rz7pLOlY4d2A40ZGn4XD8DeDDozsOui2YOVs3kGCNrczQXlhSpZMn7upwTjiiHcjlKyRcIL8vLaXCeixh+r3R1ASdKiu/qC2G/NGY+NWnRFN051v4B/AfLVYTpeNEfltGBv1tGt/C7h56LZCA7EEIDIiLJ7Pcrij88XLbp3earVS0tFTj8FCYOtgrMU3WIJXQw1R2DFqsAVXCmK+4rO5ON3CTFIA+K+oMgJZCm0QIXrMjcY1wjvZuv3OcZKIJqm5IcbrM13ebDq/flvBKHGseMODoMRpPh/BX7Wy5GlyVRjzNcxEm9DNRe1xUQ2hmUmjBtN7Fw4JqAHGUJAmm806VXsAE5BWzuBGRLMZJBquBXGlljPwNCXcY6skTDOtR5vF+XStZW0pLrj3bWY3g+QcKCxDZxoQUtXJAO4PDt3LrbgKu4PRFOAiITgVVUHRJx9e0PAj23GguSqWEaL1uhVHHUZTrKkVXkkZ2O2k8OdEEKkho/vY5nSPdN+Wr0OX8eO2HbFA3SWqtjD/b7kI3hoCawji3zxG1Nr2OImaw9bibSqYlQUpW2KQ5FWSeFA+wO/zRSLOFUlqtjbKPDQWfTrieuoxznjbNFXo3H59mhiWCKVV5+m28HrPB08GuU/mIxbBsw4Tvv0HzryyVf7sirtymfvX1SeIGwdUupQqWOhRP5C37woN1kFAk+IT+s6YFOSSFRYaz75fE/OKNsdhxDsKxBYtAEqwIjMDlVU+ZS8mHV7BVvAxMa5cL4JhdrRbidPV5brnqZ+iYAmUyF04zpcmhJelp5fPWHt3rJL5khUUBvuobVo/qzDWf2bHHipBvY3RzUHA20k11U5iq52XMNVRvH+1vaHA4vWGE6l/B/4zUB7JQVBqcc5bQJupQS65b/BrFzKKcvuAo7iO2XbXfwMoetKVehn6juS8Eny+vkmNdgoXqUPCUuDCjy8iIPFT0WqoMr+sbpEVt0MGE80SSLNuEJrcvLHyuI3zkjHCby5ObpddeE/KoH73gLxqXR3T+fCvC782ai/H1M524vTv5NGLALTNC9HY+owWfaLxbmReM4Yng1Gz8h9575+XsslX1ycM4o0Ay4t2CwclRUVcS1yrd5mmg/i/PMbpP0Fzkb4BiIrf2VZom3aedrvK51iJ8nINdL8KZhlOF7CkZdFZ7NorVZ31bu9aBYtB26NXuKEx4ukmUoe4/06QF37CTfj2TqsJ3XRDn44GoFxIEJ5ln1oaEzfVRSBxxl8L2xasAwBqI4ACzocISKeA8Ybd9XHBQ7g94UM66ik9T0ZBT7VxuX9EssoRZMXPxzWDNuCD50UTXcRXmJ5eV6gIDyfcgKwe9xQGKIxudlfaDBaifNMR8Q835foFQns38ztn5HQzDvp1auK1N89VTZirWEyRwCYlod9RlUCY2CWsmqShsHQQT2l9qxJv5ZLHRo0FtzBWzjdPESunmKwkvHk8lTu9RXJkw5x2n7H3JQRtKf/5pY1edmwkDgY9kP++EXoQl8vq1HUERrS4bSwGjxiw==\"\n}\n", "passphrase": "contract-vector-passphrase", "users": "merge", "connections": "skip", "settings": "skip", "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" } },
+          "status": 409, "response": { "error": "stale", "basis": { "users": 2, "connections": 1, "settings": "<rev>" } }
+        },
+        {
+          "as": "admin", "method": "POST", "path": "/managed/backup/import",
+          "body": { "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n", "passphrase": "contract-vector-passphrase", "users": "skip", "connections": "replace", "settings": "skip", "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" } },
+          "status": 200, "response": { "restartRequired": [], "signedOut": false }
+        }
+      ]
+    },
+    {
+      "name": "backup: an import is stale when the settings moved since the preview",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings",
+          "body": { "logLevel": "info", "rev": "<settings-rev>" },
+          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "POST", "path": "/managed/backup/import",
+          "body": { "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n", "passphrase": "contract-vector-passphrase", "users": "skip", "connections": "skip", "settings": "replace", "basis": { "users": 1, "connections": 1, "settings": "<settings-rev-at-start>" } },
+          "status": 409, "response": { "error": "stale", "basis": { "users": 1, "connections": 1, "settings": "<rev>" } }
+        },
+        {
+          "as": "admin", "method": "POST", "path": "/managed/backup/import",
+          "body": { "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n", "passphrase": "contract-vector-passphrase", "users": "skip", "connections": "skip", "settings": "replace", "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" } },
+          "status": 200, "response": { "restartRequired": [], "signedOut": false }
+        }
+      ]
+    },
+    {
+      "name": "backup: an import without the preview's basis is rev_required",
+      "steps": [
+        {
+          "as": "admin", "method": "POST", "path": "/managed/backup/import",
+          "body": { "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n", "passphrase": "contract-vector-passphrase", "users": "merge", "connections": "skip", "settings": "skip" },
+          "status": 400, "response": { "error": "rev_required" }
         }
       ]
     },

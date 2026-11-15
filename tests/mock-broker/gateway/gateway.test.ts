@@ -26,8 +26,11 @@ afterEach(() => {
     window.fetch = realFetch;
 });
 
-const call = (method: string, path: string, body?: unknown) =>
-    gw.handle({ method, path, query: '', body: body === undefined ? '' : JSON.stringify(body), session: gw.openSession('admin', false) });
+const call = (method: string, path: string, body?: unknown, query = '') =>
+    gw.handle({ method, path, query, body: body === undefined ? '' : JSON.stringify(body), session: gw.openSession('admin', false) });
+
+/** A settings save that carries the rev the file has now. */
+const putSettings = (patch: object) => call('PUT', '/managed/settings', { ...patch, rev: gw.settings.rev() });
 
 describe('mock-broker/gateway -- the page\'s fetch route', () => {
     it('answers the app\'s own service, with the page\'s cookie', async () => {
@@ -62,7 +65,7 @@ describe('mock-broker/gateway -- the page\'s fetch route', () => {
         expect(await (await fetch('/hosted')).json()).toEqual({ hosted: true, connModes: 'both', defaultConn: 'direct' });
 
         gw.setCookie(gw.openSession('admin', false));
-        await fetch('/managed/settings', { method: 'PUT', body: JSON.stringify({ connModes: 'provisioned', defaultConn: 'provisioned' }) });
+        await fetch('/managed/settings', { method: 'PUT', body: JSON.stringify({ connModes: 'provisioned', defaultConn: 'provisioned', rev: gw.settings.rev() }) });
         expect(await (await fetch('/hosted')).json()).toEqual({ hosted: true, connModes: 'provisioned', defaultConn: 'provisioned' });
     });
 
@@ -115,7 +118,7 @@ describe('mock-broker/gateway -- admin routes', () => {
 
     it('matches a field name without regard to case, as encoding/json does', async () => {
         expect(await call('POST', '/managed/dial', { Broker: 'zz', VPN: 'v1' })).toEqual({ status: 404, json: { error: 'not_found' } });
-        expect((await call('PUT', '/managed/settings', { LogLevel: 'debug', \u017fession: { IdleMinutes: 20 } })).status).toBe(200);
+        expect((await call('PUT', '/managed/settings', { LogLevel: 'debug', \u017fession: { IdleMinutes: 20 }, REV: gw.settings.rev() })).status).toBe(200);
         expect([gw.settings.current().logLevel, gw.settings.current().session.idleMinutes]).toEqual(['debug', 20]);
         expect((await call('POST', '/managed/dial', { Brokers: 'b1' })).status).toBe(400);
     });
@@ -127,13 +130,13 @@ describe('mock-broker/gateway -- admin routes', () => {
 
 describe('mock-broker/gateway -- settings', () => {
     it('saves an allow list that admits the client, masked as the gateway prints it', async () => {
-        expect(await call('PUT', '/managed/settings', { access: { allow: [' 192.0.2.77/24 '] } })).toEqual({ status: 200, json: { restartRequired: [] } });
+        expect(await putSettings({ access: { allow: [' 192.0.2.77/24 '] } })).toEqual({ status: 200, json: { restartRequired: [], rev: '2' } });
         expect(gw.settings.current().access.allow).toEqual(['192.0.2.0/24']);
     });
 
     it('reads a prefix as netip.ParsePrefix does: IPv6 masked and printed short, no leading zero in the bits', async () => {
         const list = ['192.0.2.0/24', '2001:0DB8:0:0:8:800:200C:417A/64', '2001:db8::1/32', 'fe80::1:0:0:1/128', '::/0'];
-        expect((await call('PUT', '/managed/settings', { access: { allow: list } })).status).toBe(200);
+        expect((await putSettings({ access: { allow: list } })).status).toBe(200);
         expect(gw.settings.current().access.allow).toEqual(['192.0.2.0/24', '2001:db8::/64', '2001:db8::/32', 'fe80::1:0:0:1/128', '::/0']);
         for (const [v, why] of [
             ['10.0.0.0/08', 'bad bits after slash: "08"'],
@@ -144,44 +147,57 @@ describe('mock-broker/gateway -- settings', () => {
             ['1:2:3:4:5:6:7::8/64', 'ParseAddr("1:2:3:4:5:6:7::8"): unable to parse IP'],
             ['1.2.3.4::/64', 'ParseAddr("1.2.3.4::"): unable to parse IP'],
         ]) {
-            const res: any = (await call('PUT', '/managed/settings', { access: { trustedProxies: [v] } })).json;
+            const res: any = (await putSettings({ access: { trustedProxies: [v] } })).json;
             expect(res.reason).toBe(`key "access.trustedProxies[0]" has invalid value "${v}": want CIDR such as 10.0.0.0/8 or 192.0.2.7/32 (netip.ParsePrefix("${v}"): ${why})`);
         }
     });
 
     it('refuses a value that is not a CIDR, and an IPv4-mapped one', async () => {
-        const bad: any = (await call('PUT', '/managed/settings', { access: { allow: ['192.0.2.7'] } })).json;
+        const bad: any = (await putSettings({ access: { allow: ['192.0.2.7'] } })).json;
         expect(bad.reason).toMatch(/^key "access\.allow\[0\]" has invalid value "192\.0\.2\.7": want CIDR such as 10\.0\.0\.0\/8 or 192\.0\.2\.7\/32 \(/);
-        const mapped: any = (await call('PUT', '/managed/settings', { access: { trustedProxies: ['::ffff:10.0.0.1/120'] } })).json;
+        const mapped: any = (await putSettings({ access: { trustedProxies: ['::ffff:10.0.0.1/120'] } })).json;
         expect(mapped.reason).toBe('key "access.trustedProxies[0]" has invalid value "::ffff:10.0.0.1/120": use the IPv4 form');
     });
 
     it('treats null as no change, except that a null list empties it', async () => {
-        await call('PUT', '/managed/settings', { access: { allow: ['192.0.2.0/24'] } });
-        expect((await call('PUT', '/managed/settings', { logLevel: null, access: { allow: null } })).status).toBe(200);
+        await putSettings({ access: { allow: ['192.0.2.0/24'] } });
+        expect((await putSettings({ logLevel: null, access: { allow: null } })).status).toBe(200);
         expect(gw.settings.current().logLevel).toBe('warn');
         expect(gw.settings.current().access.allow).toEqual([]);
     });
 
     it('carries the audit section: off by default, saved live, never pending a restart', async () => {
-        expect(gw.settings.current().audit).toEqual({ stdout: false, access: false });
-        expect((await call('PUT', '/managed/settings', { audit: { access: true } })).json).toEqual({ restartRequired: [] });
-        expect(gw.settings.current().audit).toEqual({ stdout: false, access: true });
+        expect(gw.settings.current().audit).toEqual({ stdout: false, access: false, onFailure: 'continue' });
+        expect((await putSettings({ audit: { access: true } })).json).toEqual({ restartRequired: [], rev: '2' });
+        expect(gw.settings.current().audit).toEqual({ stdout: false, access: true, onFailure: 'continue' });
         const view: any = (await call('GET', '/managed/settings')).json;
         expect([view.restartOnly, view.hostOnly].flat().filter((k: string) => k.startsWith('audit'))).toEqual([]);
-        expect((await call('PUT', '/managed/settings', { audit: { stdout: 'yes' } })).status).toBe(400);
-        expect((await call('PUT', '/managed/settings', { audit: { verbose: true } })).status).toBe(400);
+        expect((await putSettings({ audit: { stdout: 'yes' } })).status).toBe(400);
+        expect((await putSettings({ audit: { verbose: true } })).status).toBe(400);
+    });
+
+    it('takes audit.onFailure continue or refuse and nothing else, and a seed without it starts on continue', async () => {
+        expect((await putSettings({ audit: { onFailure: 'refuse' } })).status).toBe(200);
+        expect(gw.settings.current().audit.onFailure).toBe('refuse');
+        const bad: any = await putSettings({ audit: { onFailure: 'ignore' } });
+        expect([bad.status, bad.json.error, bad.json.field]).toEqual([422, 'invalid', 'settings']);
+        expect(bad.json.reason).toBe('key "audit.onFailure" has invalid value "ignore": must be "continue" or "refuse"');
+        expect(gw.settings.current().audit.onFailure).toBe('refuse');
+
+        const old = contractSeed();
+        delete (old.settings.audit as Partial<typeof old.settings.audit>).onFailure;
+        expect(createGateway({ seed: old }).settings.current().audit.onFailure).toBe('continue');
     });
 
     it('normalises the modes, the log level and the module order', async () => {
-        await call('PUT', '/managed/settings', { connModes: 'PROVISIONED', logLevel: 'DEBUG', modules: { offered: ['queue-copy', 'queue-browser'] } });
+        await putSettings({ connModes: 'PROVISIONED', logLevel: 'DEBUG', modules: { offered: ['queue-copy', 'queue-browser'] } });
         const s = gw.settings.current();
         expect([s.connModes, s.logLevel, s.modules.offered]).toEqual(['provisioned', 'debug', ['queue-browser', 'queue-copy']]);
     });
 
     it('refuses connModes direct, which would end Provisioned mode and the console with it', async () => {
         const before = gw.settings.current().connModes;
-        const res: any = await call('PUT', '/managed/settings', { connModes: 'direct' });
+        const res: any = await putSettings({ connModes: 'direct' });
         expect(res.status).toBe(422);
         expect(res.json.field).toBe('connModes');
         expect(res.json.reason).toMatch(/set connModes: direct in config\.yaml on the gateway host and restart\.$/);
@@ -191,12 +207,12 @@ describe('mock-broker/gateway -- settings', () => {
     it('reports a hand edit and refuses to save over it', async () => {
         gw.faults.changedOnDisk = true;
         expect(((await call('GET', '/managed/settings')).json as any).changedOnDisk).toBe(true);
-        expect(await call('PUT', '/managed/settings', { logLevel: 'info' })).toEqual({ status: 409, json: { error: 'config_changed_on_disk' } });
+        expect(await putSettings({ logLevel: 'info' })).toEqual({ status: 409, json: { error: 'config_changed_on_disk' } });
     });
 
     it('answers 500 config_unreadable, with what to do, when the file cannot be read', async () => {
         gw.faults.unreadable = true;
-        for (const res of [await call('GET', '/managed/settings'), await call('PUT', '/managed/settings', {})]) {
+        for (const res of [await call('GET', '/managed/settings'), await putSettings({})]) {
             expect(res.status).toBe(500);
             expect((res.json as any).error).toBe('config_unreadable');
             expect((res.json as any).reason).toMatch(/Fix the file on the gateway host, then reload this page\.$/);

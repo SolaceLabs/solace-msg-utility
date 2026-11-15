@@ -111,6 +111,13 @@
     <div class="form-group" data-key="audit.access">
         <label class="flex-row items-center gap-2 m-0"><input type="checkbox" id="gw-set-audit-access"> Also audit broker access: dials, SMF sockets and SEMP relay requests</label>
     </div>
+    <div class="form-group" data-key="audit.onFailure">
+        <label for="gw-set-audit-onFailure">If the audit log cannot be written</label>
+        <select id="gw-set-audit-onFailure" class="form-control">
+            <option value="continue">Carry on, and log the lost record</option>
+            <option value="refuse">Refuse changes until it can be written</option>
+        </select>
+    </div>
 
     <h3 class="gw-set-section">Files and TLS</h3>
     <div class="form-group" data-key="tls.certFile">

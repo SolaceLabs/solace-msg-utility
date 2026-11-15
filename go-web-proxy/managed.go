@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -132,11 +133,13 @@ func (h *managedHandler) adminOnly(fn http.HandlerFunc) http.HandlerFunc {
 // auditCall is what an audited admin handler tells its wrapper beyond the
 // response: the action when it knows better than the route did (a save that
 // turned out to create), the target that is not in the path (an import's
-// backup file) and the names of the parts it changed.
+// backup file), the names of the parts it changed and the store files the
+// commit wrote (with their seq), which an ok entry carries as "wrote".
 type auditCall struct {
 	action  string
 	target  string
 	changed []string
+	wrote   []auditWrote
 }
 
 // auditWriter notes the status and error code of a response, so the wrapper
@@ -190,7 +193,9 @@ func fixedAction(action string) auditPre {
 	return func(r *http.Request) (string, string) { return action, pathTarget(r) }
 }
 
-// userAction is PUT /managed/users/{name}: a create unless the user exists.
+// userAction is PUT /managed/users/{name} before the handler has read the
+// body: a create unless the user exists. A save that gets as far as its body
+// names the action by its rev instead (0 creates).
 func (h *managedHandler) userAction(r *http.Request) (string, string) {
 	name := r.PathValue("name")
 	_, exists := h.store.isAdmin(name)
@@ -204,8 +209,7 @@ func userSaveAction(existed bool) string {
 	return auditUserCreate
 }
 
-// connectionAction is PUT /managed/connections/{broker}: a create unless the
-// connection exists.
+// connectionAction is userAction for PUT /managed/connections/{broker}.
 func (h *managedHandler) connectionAction(r *http.Request) (string, string) {
 	broker := r.PathValue("broker")
 	return connectionSaveAction(h.store.hasConnection(broker)), broker
@@ -236,11 +240,14 @@ func (h *managedHandler) audited(pre auditPre, fn func(http.ResponseWriter, *htt
 // like a sign-in's username (userKey): it can be a path segment or a file
 // name the requester chose.
 func (h *managedHandler) recordAdmin(r *http.Request, call *auditCall, aw *auditWriter) {
+	if aw.status == statusClientGone {
+		return // the client left before the change began: nothing happened, nobody reads an answer
+	}
 	e := auditFor(r, call.action)
 	e.Target = userKey(call.target)
 	ph := auditPhrases[call.action]
 	if aw.status < http.StatusBadRequest {
-		e.Outcome, e.Changed = auditOK, call.changed
+		e.Outcome, e.Changed, e.Wrote = auditOK, call.changed, call.wrote
 		e.Msg = e.Actor + " " + strings.Replace(ph.done, "{t}", e.Target, 1)
 		if len(e.Changed) > 0 {
 			e.Msg += ": " + strings.Join(e.Changed, ", ")
@@ -258,6 +265,8 @@ type apiError struct {
 	Error  string `json:"error"`
 	Field  string `json:"field,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	Rev    any    `json:"rev,omitempty"`
+	Basis  any    `json:"basis,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -373,10 +382,42 @@ type userJSON struct {
 	Modules            *[]string  `json:"modules"`
 }
 
+// userListJSON is a user in the list answer: the view plus the rev a save or a
+// delete of it must send back. The rev is not in userJSON because the view is
+// what sameUserView compares, and a rev is not part of it.
+type userListJSON struct {
+	userJSON
+	Rev int `json:"rev"`
+}
+
+// bodyRev is the "rev" of a whole-record save. A body without one, or with
+// anything but a whole number from 0 up (null, a string, a fraction, a
+// negative), leaves ok false and is refused as rev_required; 0 creates.
+type bodyRev struct {
+	n  int
+	ok bool
+}
+
+func (b *bodyRev) UnmarshalJSON(data []byte) error {
+	n, err := strconv.ParseUint(string(data), 10, 31)
+	b.n, b.ok = int(n), err == nil
+	return nil
+}
+
+// queryRev is the ?rev=N of a delete: a whole number from 1 up (a record that
+// exists has a rev of at least 1), else ok is false and the delete is refused
+// as rev_required.
+func queryRev(r *http.Request) (rev int, ok bool) {
+	n, err := strconv.ParseUint(r.URL.Query().Get("rev"), 10, 31)
+	return int(n), err == nil && n > 0
+}
+
 // userSaveJSON is the PUT /managed/users/{name} body. The username comes from
 // the path. Password is plaintext over TLS, hashed here; "" keeps it on edit.
-// Modules null or absent means the deployment default.
+// Modules null or absent means the deployment default. Rev is the rev the
+// admin read the user at, 0 for a new user.
 type userSaveJSON struct {
+	Rev      bodyRev    `json:"rev"`
 	Password string     `json:"password"`
 	Admin    bool       `json:"admin"`
 	Operate  []permJSON `json:"operate"`
@@ -421,9 +462,18 @@ type connJSON struct {
 	Client   clientJSON `json:"client"`
 }
 
+// connListJSON is a connection in the list answer: the view plus its rev (see
+// userListJSON).
+type connListJSON struct {
+	connJSON
+	Rev int `json:"rev"`
+}
+
 // connSaveJSON is the PUT /managed/connections/{broker} body; the broker name
-// comes from the path.
+// comes from the path. Rev is the rev the admin read the connection at, 0 for
+// a new one.
 type connSaveJSON struct {
+	Rev      bodyRev    `json:"rev"`
 	Hostname string     `json:"hostname"`
 	Semp     sempJSON   `json:"semp"`
 	Client   clientJSON `json:"client"`
@@ -485,9 +535,9 @@ func connToOutput(c connRec) connJSON {
 // ----- admin endpoints -------------------------------------------------------------
 
 func (h *managedHandler) listUsers(w http.ResponseWriter, _ *http.Request) {
-	out := []userJSON{}
+	out := []userListJSON{}
 	for _, u := range h.store.listUsers() {
-		out = append(out, userToOutput(u))
+		out = append(out, userListJSON{userJSON: userToOutput(u), Rev: u.Rev})
 	}
 	ms := h.live.get().modules
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -496,9 +546,42 @@ func (h *managedHandler) listUsers(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// saveUser creates or edits a user. A new password, a changed admin flag or a
-// deletion ends the target's sessions, the requester's own included: an admin
-// who changes their own password signs in again.
+// storeFailed answers the error of a user or connection transaction: the
+// shared store errors as writeStoreError says, the in-lock caller re-check as
+// a 401 or 403, the two user rules (a new user needs a password, the last
+// admin stays) and anything else as a 500 server_error. A store write that
+// failed is logged with its cause; the body never carries it.
+func (h *managedHandler) storeFailed(w http.ResponseWriter, r *http.Request, op string, err error) {
+	if _, ok := writeStoreError(w, err); ok {
+		var failed *writeFailedError
+		if errors.As(err, &failed) {
+			h.log(r).Error("admin request failed", "op", op, "target", pathTarget(r), "err", err)
+		}
+		return
+	}
+	switch {
+	case errors.Is(err, errCallerGone):
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+	case errors.Is(err, errCallerNotAdmin):
+		writeError(w, http.StatusForbidden, "forbidden")
+	case errors.Is(err, errBlankNewUserPassword):
+		writeInvalid(w, "password", "A new user needs a password.")
+	case errors.Is(err, errLastAdmin):
+		writeError(w, http.StatusConflict, "last_admin")
+	default:
+		h.serverError(w, r, op, err)
+	}
+}
+
+// saveUser creates (rev 0) or edits (rev above 0) a user and answers 200 with
+// the user's rev. A new password, a changed admin flag or a deletion ends the
+// target's sessions, the requester's own included: an admin who changes their
+// own password signs in again.
+//
+// What needs no store state comes first (422 invalid, 400 rev_required), and
+// the password is policy-checked and hashed before the writer lock. Inside it
+// the store refuses in the order of the contract: audit gate, caller, disk,
+// existence, rev, then the cross-record rules.
 func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request, call *auditCall) {
 	name := r.PathValue("name")
 	var body userSaveJSON
@@ -521,31 +604,33 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request, call *
 			return
 		}
 	}
+	if !body.Rev.ok {
+		_, _ = writeStoreError(w, errRevRequired)
+		return
+	}
+	rev := body.Rev.n
+	call.action = userSaveAction(rev > 0)
 	rec := userRec{Username: name, Admin: body.Admin, Operate: permsToRows(body.Operate), ReadOnly: permsToRows(body.ReadOnly), Modules: body.Modules}
-	old, existed := userNamed(h.store.listUsers(), name)
-	call.action = userSaveAction(existed)
-	if existed {
+	if old, found := userNamed(h.store.listUsers(), name); rev > 0 && found {
+		// Read outside the lock, for the audit entry's list of parts only. An
+		// accepted save means the user's rev has not moved since the admin
+		// read it, and a password-only commit is the one change that keeps
+		// the rev (and is not in the list).
 		call.changed = userChanges(old, rec, body.Password != "")
 	}
-	drop, err := h.store.upsertUser(r.Context(), rec, body.Password)
-	switch {
-	case errors.Is(err, errBlankNewUserPassword):
-		writeInvalid(w, "password", "A new user needs a password.")
-		return
-	case errors.Is(err, errLastAdmin):
-		writeError(w, http.StatusConflict, "last_admin")
-		return
-	case err != nil:
-		h.serverError(w, r, "saveUser", err)
+	got, err := h.store.saveUser(r.Context(), sessionOf(r).user, rec, body.Password, rev)
+	if err != nil {
+		h.storeFailed(w, r, "saveUser", err)
 		return
 	}
-	if drop {
+	if got.dropSessions {
 		h.sessions.dropUser(name)
 	}
-	h.log(r).Info("user saved", "target", name, "created", !existed, "admin", body.Admin,
+	call.wrote = []auditWrote{{File: filepath.Base(h.store.usersPath), Seq: int64(got.seq)}}
+	h.log(r).Info("user saved", "target", name, "created", rev == 0, "admin", body.Admin,
 		"password_set", body.Password != "", "operate_rows", len(body.Operate), "read_only_rows", len(body.ReadOnly),
-		"modules", modulesAttr(body.Modules), "sessions_ended", drop)
-	w.WriteHeader(http.StatusNoContent)
+		"modules", modulesAttr(body.Modules), "sessions_ended", got.dropSessions, "rev", got.rev)
+	writeJSON(w, http.StatusOK, map[string]int{"rev": got.rev})
 }
 
 // userNamed is the user called name in users.
@@ -594,31 +679,36 @@ func modulesAttr(m *[]string) any {
 	return *m
 }
 
-func (h *managedHandler) deleteUser(w http.ResponseWriter, r *http.Request, _ *auditCall) {
+// deleteUser removes a user: ?rev=N, the rev the admin read the user at, is
+// required (400 rev_required without it, or with 0). Success is 204.
+func (h *managedHandler) deleteUser(w http.ResponseWriter, r *http.Request, call *auditCall) {
 	name := r.PathValue("name")
-	found, err := h.store.deleteUser(name)
-	switch {
-	case errors.Is(err, errLastAdmin):
-		writeError(w, http.StatusConflict, "last_admin")
-	case err != nil:
-		h.serverError(w, r, "deleteUser", err)
-	case !found:
-		writeError(w, http.StatusNotFound, "not_found")
-	default:
-		h.sessions.dropUser(name)
-		h.log(r).Info("user deleted", "target", name)
-		w.WriteHeader(http.StatusNoContent)
+	rev, ok := queryRev(r)
+	if !ok {
+		_, _ = writeStoreError(w, errRevRequired)
+		return
 	}
+	seq, err := h.store.deleteUser(r.Context(), sessionOf(r).user, name, rev)
+	if err != nil {
+		h.storeFailed(w, r, "deleteUser", err)
+		return
+	}
+	h.sessions.dropUser(name)
+	call.wrote = []auditWrote{{File: filepath.Base(h.store.usersPath), Seq: int64(seq)}}
+	h.log(r).Info("user deleted", "target", name)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *managedHandler) listConnections(w http.ResponseWriter, _ *http.Request) {
-	out := []connJSON{}
+	out := []connListJSON{}
 	for _, c := range h.store.listConnections() {
-		out = append(out, connToOutput(c))
+		out = append(out, connListJSON{connJSON: connToOutput(c), Rev: c.Rev})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"connections": out})
 }
 
+// saveConnection creates (rev 0) or edits (rev above 0) a connection and
+// answers 200 with its rev. The order of refusals is saveUser's.
 func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request, call *auditCall) {
 	var body connSaveJSON
 	if !decodeJSON(w, r, &body) {
@@ -629,14 +719,18 @@ func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request, 
 		writeInvalid(w, "connection", err.Error())
 		return
 	}
-	old, found := connectionNamed(h.store.listConnections(), rec.Broker)
-	created := !found
-	call.action = connectionSaveAction(found)
-	if found {
+	if !body.Rev.ok {
+		_, _ = writeStoreError(w, errRevRequired)
+		return
+	}
+	rev := body.Rev.n
+	call.action = connectionSaveAction(rev > 0)
+	if old, found := connectionNamed(h.store.listConnections(), rec.Broker); rev > 0 && found {
 		call.changed = connChanges(old, rec)
 	}
-	if err := h.store.upsertConnection(rec); err != nil {
-		h.serverError(w, r, "saveConnection", err)
+	got, err := h.store.saveConnection(r.Context(), sessionOf(r).user, rec, rev)
+	if err != nil {
+		h.storeFailed(w, r, "saveConnection", err)
 		return
 	}
 	vpns, newPasswords := make([]string, 0, len(body.Client.MsgVpns)), 0
@@ -646,11 +740,12 @@ func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request, 
 			newPasswords++
 		}
 	}
-	h.log(r).Info("connection saved", "target", rec.Broker, "created", created, "hostname", rec.Hostname,
+	call.wrote = []auditWrote{{File: filepath.Base(h.store.connsPath), Seq: int64(got.seq)}}
+	h.log(r).Info("connection saved", "target", rec.Broker, "created", rev == 0, "hostname", rec.Hostname,
 		"semp_scheme", orTLS(rec.Semp.Scheme, sempTLS), "semp_port", string(rec.Semp.Port), "semp_password_set", body.Semp.Pass != "",
 		"client_scheme", orTLS(rec.Client.Scheme, clientTLS), "client_port", string(rec.Client.Port),
-		"vpns", vpns, "vpn_passwords_set", newPasswords)
-	w.WriteHeader(http.StatusNoContent)
+		"vpns", vpns, "vpn_passwords_set", newPasswords, "rev", got.rev)
+	writeJSON(w, http.StatusOK, map[string]int{"rev": got.rev})
 }
 
 // connectionNamed is the connection to broker in conns.
@@ -694,17 +789,22 @@ func connChanges(old, next connRec) []string {
 	return out
 }
 
-func (h *managedHandler) deleteConnection(w http.ResponseWriter, r *http.Request, _ *auditCall) {
-	found, err := h.store.deleteConnection(r.PathValue("broker"))
-	switch {
-	case err != nil:
-		h.serverError(w, r, "deleteConnection", err)
-	case !found:
-		writeError(w, http.StatusNotFound, "not_found")
-	default:
-		h.log(r).Info("connection deleted", "target", r.PathValue("broker"))
-		w.WriteHeader(http.StatusNoContent)
+// deleteConnection is deleteUser for a connection.
+func (h *managedHandler) deleteConnection(w http.ResponseWriter, r *http.Request, call *auditCall) {
+	broker := r.PathValue("broker")
+	rev, ok := queryRev(r)
+	if !ok {
+		_, _ = writeStoreError(w, errRevRequired)
+		return
 	}
+	seq, err := h.store.deleteConnection(r.Context(), sessionOf(r).user, broker, rev)
+	if err != nil {
+		h.storeFailed(w, r, "deleteConnection", err)
+		return
+	}
+	call.wrote = []auditWrote{{File: filepath.Base(h.store.connsPath), Seq: int64(seq)}}
+	h.log(r).Info("connection deleted", "target", broker)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // clientSeenJSON is GET /managed/client.

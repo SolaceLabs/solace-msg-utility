@@ -12,6 +12,12 @@
  * the fields are cleared after it succeeds. Preview and import send the file
  * (or a saved backup's name) each time. Imports only from `src/core/*` and
  * its own service.
+ *
+ * Versions: the schedule's `rev` (0 when there is none) goes back with a save
+ * or a delete, and the preview's `basis` goes back untouched with the import.
+ * When the data moved on meanwhile the gateway answers `stale`: for the
+ * schedule a dialog with a Reload button (`src/core/admin-conflict.ts`), for an
+ * import a message asking for a new preview, with the old one cleared.
  */
 import { required, setError } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
@@ -22,6 +28,7 @@ import { logger } from '../../core/logger';
 import { showToast } from '../../core/toast';
 import { formatBytes } from '../../core/utils';
 import { reportManagedFailure, SIGNED_OUT_TOAST_MS } from '../../core/services/managed-api';
+import { handleConflict, STALE_IMPORT_MESSAGE } from '../../core/admin-conflict';
 import {
     createBackupService, type BackupSchedule, type BackupStatus, type ImportPreview, type ImportSource,
     type NameDiff, type ScheduleKind, type SectionChoice,
@@ -123,6 +130,10 @@ export const BackupModule = {
         let source: ImportSource | null = null;
         /** The last preview's sign-out flags, for the warning under the users choice. */
         let signsOut: ImportPreview['signsOutCaller'] = { replace: false, merge: false };
+        /** The last preview's basis, sent back untouched with the import. */
+        let basis: unknown = null;
+        /** The rev of the schedule as last loaded: 0 when there is none. */
+        let scheduleRev = 0;
 
         const fail = (el: HTMLElement) => (msg: string) => setError(el, msg);
 
@@ -137,6 +148,7 @@ export const BackupModule = {
 
         function renderStatus(st: BackupStatus): void {
             const s = st.schedule;
+            scheduleRev = s ? s.rev : 0;
             const lines: string[] = [];
             if (s) {
                 lines.push(`${describeSchedule(s)}; keeps the last ${s.keep}.`);
@@ -304,6 +316,7 @@ export const BackupModule = {
             fillDiff(els.diffSettings, p.settings.length ? [`Change: ${p.settings.join(', ')}`] : ['No change.']);
             for (const sel of [els.choiceUsers, els.choiceConns, els.choiceSettings]) sel.value = 'skip';
             signsOut = p.signsOutCaller;
+            basis = p.basis;
             showSignOutWarning();
             els.preview.classList.remove('hidden');
         }
@@ -318,9 +331,16 @@ export const BackupModule = {
             const chosen = Object.entries(choices).filter(([, v]) => v !== 'skip').map(([k, v]) => `${k} (${v})`);
             if (chosen.length && !(await confirmDialog(`Import ${chosen.join(', ')} from this backup? The gateway applies it at once.`, { confirmLabel: 'Import' }))) return;
             els.btnImport.disabled = true;
-            const res = await service.importFile(source as ImportSource, els.importPass.value, choices);
+            const res = await service.importFile(source as ImportSource, els.importPass.value, choices, basis);
             els.btnImport.disabled = false;
             if (!res.ok) {
+                if (res.code === 'stale') {
+                    // The data moved on since the preview: it no longer says what the import would do.
+                    els.preview.classList.add('hidden');
+                    basis = null;
+                    setError(els.importError, STALE_IMPORT_MESSAGE);
+                    return;
+                }
                 reportManagedFailure(res, eventBus, fail(els.importError));
                 return;
             }
@@ -368,12 +388,19 @@ export const BackupModule = {
                 return;
             }
             els.btnSaveSchedule.disabled = true;
-            const res = await service.saveSchedule(body);
+            const res = await service.saveSchedule({ ...body, rev: scheduleRev });
             els.btnSaveSchedule.disabled = false;
             if (!res.ok) {
+                if (res.code === 'exists') {
+                    setError(els.scheduleError, 'Someone else saved a schedule since you opened this page. It is shown now; change it if you still want to.');
+                    await load();
+                    return;
+                }
+                if (await handleConflict(res, 'This schedule', load)) return;
                 reportManagedFailure(res, eventBus, fail(els.scheduleError));
                 return;
             }
+            scheduleRev = res.data.rev;
             els.schedPass.value = '';
             els.schedConfirm.value = '';
             showToast('Schedule saved', 'ok');
@@ -383,8 +410,9 @@ export const BackupModule = {
         async function removeSchedule(): Promise<void> {
             setError(els.scheduleError, null);
             if (!(await confirmDialog('Remove the backup schedule? The saved backups stay.', { confirmLabel: 'Remove' }))) return;
-            const res = await service.removeSchedule();
+            const res = await service.removeSchedule(scheduleRev);
             if (!res.ok) {
+                if (await handleConflict(res, 'This schedule', load)) return;
                 reportManagedFailure(res, eventBus, fail(els.scheduleError));
                 return;
             }

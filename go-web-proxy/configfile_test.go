@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto/sha256"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +69,7 @@ modules:
 audit:
   stdout: true
   access: true
+  onFailure: refuse
 `
 
 func TestDecodeConfigFile_Valid(t *testing.T) {
@@ -83,7 +85,7 @@ func TestDecodeConfigFile_Valid(t *testing.T) {
 		Session:  fileSession{IdleMinutes: 5, AbsoluteMinutes: 60},
 		Login:    fileLogin{MaxFailures: 3, BackoffSeconds: 10, MaxBackoffSeconds: 600, UnauthenticatedPerMinute: 20},
 		Modules:  fileModules{Offered: []string{"queue-copy"}, UserDefault: "none"},
-		Audit:    fileAudit{Stdout: true, Access: true},
+		Audit:    fileAudit{Stdout: true, Access: true, OnFailure: "refuse"},
 	}
 	if !reflect.DeepEqual(fc, want) {
 		t.Errorf("decoded:\n%+v\nwant:\n%+v", fc, want)
@@ -241,27 +243,68 @@ func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 	}
 }
 
-// audit.stdout and audit.access reach the runtime config and back, and both
-// default to off.
+// audit.stdout, audit.access and audit.onFailure reach the runtime config and
+// back; the two flags default to off and onFailure to continue, also for a
+// config or backup that never had the key.
 func TestToConfig_Audit(t *testing.T) {
 	cfg, err := defaultFileConfig().toConfig(secretPaths{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.audit != (auditSettings{}) || cfg.auditFile != defaultAuditFile {
-		t.Errorf("defaults: want both options off and the fixed log path, got %+v %q", cfg.audit, cfg.auditFile)
+	if cfg.audit != (auditSettings{onFailure: auditOnFailureContinue}) || cfg.auditFile != defaultAuditFile {
+		t.Errorf("defaults: want both options off, continue and the fixed log path, got %+v %q", cfg.audit, cfg.auditFile)
 	}
 	fc := defaultFileConfig()
-	fc.Audit = fileAudit{Stdout: true, Access: true}
+	fc.Audit = fileAudit{Stdout: true, Access: true, OnFailure: "refuse"}
 	cfg, err = fc.toConfig(secretPaths{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.audit != (auditSettings{stdout: true, access: true}) {
+	if cfg.audit != (auditSettings{stdout: true, access: true, onFailure: "refuse"}) {
 		t.Errorf("audit: got %+v", cfg.audit)
 	}
 	if back := fileConfigFromConfig(cfg).Audit; back != fc.Audit {
 		t.Errorf("round trip: got %+v", back)
+	}
+	fc.Audit.OnFailure = ""
+	cfg, err = fc.toConfig(secretPaths{})
+	if err != nil || cfg.audit.onFailure != auditOnFailureContinue {
+		t.Errorf("an absent onFailure is continue: %+v, %v", cfg.audit, err)
+	}
+}
+
+// audit.onFailure takes exactly continue or refuse; the error names the key,
+// the value and the choices.
+func TestToConfig_AuditOnFailureIsValidated(t *testing.T) {
+	for _, bad := range []string{"Refuse", "stop", " continue", "true"} {
+		fc := defaultFileConfig()
+		fc.Audit.OnFailure = bad
+		_, err := fc.toConfig(secretPaths{})
+		if err == nil {
+			t.Errorf("%q must be refused", bad)
+			continue
+		}
+		for _, want := range []string{`"audit.onFailure"`, strconv.Quote(bad), `"continue"`, `"refuse"`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%q: error %q lacks %s", bad, err, want)
+			}
+		}
+	}
+}
+
+// A file written before the key existed loads with continue, and the next
+// write adds the key.
+func TestDecodeConfigFile_OnFailureDefaultsAndIsWritten(t *testing.T) {
+	fc, err := decodeConfigFile([]byte("version: 1\naudit:\n  stdout: true\n"), "x.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fc.Audit.OnFailure != auditOnFailureContinue || !fc.Audit.Stdout {
+		t.Fatalf("audit: %+v", fc.Audit)
+	}
+	out, err := encodeConfigFile(fc)
+	if err != nil || !strings.Contains(string(out), "onFailure: continue\n") {
+		t.Errorf("the file must carry the key once written: %v\n%s", err, out)
 	}
 }
 
@@ -398,8 +441,8 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	if strings.Contains(string(raw), defaultStoreKeyFile) {
 		t.Error("a secret path leaked into config.yaml")
 	}
-	if load.sum != sha256.Sum256(raw) {
-		t.Error("the seeded load must carry the hash of the bytes it wrote")
+	if !bytes.Equal(load.data, raw) {
+		t.Error("the seeded load must carry the bytes it wrote")
 	}
 	if !strings.Contains(string(raw), "connModes: both") || !strings.Contains(string(raw), "logLevel: info") {
 		t.Errorf("file content: %s", raw)
@@ -409,8 +452,8 @@ func TestResolveConfig_SeedsFromEnvThenFileWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.sum != load.sum {
-		t.Error("reading the file back must carry the same hash")
+	if !bytes.Equal(again.data, load.data) {
+		t.Error("reading the file back must carry the same bytes")
 	}
 	if again.seeded || len(again.overrides) != 0 {
 		t.Errorf("second start: want file read with no overrides, got seeded=%v overrides=%v", again.seeded, again.overrides)
@@ -879,5 +922,66 @@ func TestResolveConfig_IgnoresTheRemovedStoreKeys(t *testing.T) {
 	}
 	if strings.Contains(string(data), "usersFile") || strings.Contains(string(data), "connectionsFile") {
 		t.Errorf("the next write must drop the keys:\n%s", data)
+	}
+}
+
+// The first-start seed is a journaled commit like every other write of the
+// file: the file lands whole with the operator-readable mode, the journal and
+// its leftovers are gone, and the bytes returned are the bytes on disk.
+func TestSeedConfigFile_GoesThroughTheJournal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data, err := seedConfigFile(path, defaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if onDisk := readOr(t, path); onDisk != string(data) || !strings.HasPrefix(onDisk, "# config.yaml -- AUTHORITATIVE") {
+		t.Errorf("the seed on disk differs from what was returned:\n%s", onDisk)
+	}
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o644 {
+			t.Errorf("mode: want 0644, got %v (%v)", info, err)
+		}
+	}
+	for _, left := range []string{txnFileName, "config.yaml.bak"} {
+		if got := readOr(t, filepath.Join(dir, left)); got != "<absent>" {
+			t.Errorf("%s left behind after the commit: %q", left, got)
+		}
+	}
+	assertNoTempFiles(t, dir)
+}
+
+// A seed whose bytes would not parse back strictly is never committed: the
+// round-trip check refuses it and the target stays absent.
+func TestConfigVerifier_RefusesWhatAStartWouldRefuse(t *testing.T) {
+	good, err := encodeConfigFile(defaultFileConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify := configVerifier("config.yaml")
+	if err := verify(good); err != nil {
+		t.Fatalf("a file the gateway wrote must verify: %v", err)
+	}
+	for name, bad := range map[string][]byte{
+		"empty":         nil,
+		"unknown key":   []byte("version: 1\nsurprise: true\n"),
+		"wrong version": []byte("version: 2\n"),
+		"not yaml":      []byte("version: [1\n"),
+	} {
+		if err := verify(bad); err == nil {
+			t.Errorf("%s must fail the round trip", name)
+		}
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	wr := newWriter(dir, nil, quietLogger())
+	err = wr.Do(t.Context(), func(tx *txn) error {
+		tx.stage(path, []byte("version: 1\nsurprise: true\n"), 0o644, configVerifier(path))
+		return nil
+	})
+	var failed *writeFailedError
+	if !errors.As(err, &failed) || readOr(t, path) != "<absent>" {
+		t.Errorf("want the commit refused with nothing written, got %v", err)
 	}
 }

@@ -13,6 +13,7 @@ vi.mock('../../../src/modules/gateway-settings/service', () => ({
 
 import { GatewaySettingsModule } from '../../../src/modules/gateway-settings/module';
 import { completeContext } from '../../helpers/appContext';
+import { answerConfirm } from '../../helpers/confirmDialog';
 
 const ADMIN: ManagedSession = {
     admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
@@ -25,13 +26,13 @@ const SETTINGS = {
     session: { idleMinutes: 10, absoluteMinutes: 30 },
     login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60 },
     modules: { offered: ['queue-browser'], userDefault: 'all' },
-    audit: { stdout: false, access: false },
+    audit: { stdout: false, access: false, onFailure: 'continue' },
 };
 const RESTART_ONLY = ['hosted', 'tls.certFile', 'tls.keyFile', 'tls.trustDir', 'tls.insecureSkipVerify'];
 const HOST_ONLY = ['tls.certFile', 'tls.keyFile', 'tls.trustDir'];
 const view = (over: Record<string, unknown> = {}) => ({
     ok: true,
-    data: { settings: SETTINGS, restartOnly: RESTART_ONLY, hostOnly: HOST_ONLY, pendingRestart: [], changedOnDisk: false, catalog: ['queue-browser', 'queue-copy'], ...over },
+    data: { rev: 'rev-1', settings: SETTINGS, restartOnly: RESTART_ONLY, hostOnly: HOST_ONLY, pendingRestart: [], changedOnDisk: false, catalog: ['queue-browser', 'queue-copy'], ...over },
 });
 
 function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
@@ -226,7 +227,7 @@ describe('gateway-settings — load', () => {
 describe('gateway-settings -- audit trail', () => {
     it('shows the two audit checkboxes from the loaded settings, live and editable', async () => {
         const { container } = await setup(ADMIN, view({
-            settings: { ...SETTINGS, audit: { stdout: true, access: false } },
+            settings: { ...SETTINGS, audit: { stdout: true, access: false, onFailure: 'continue' } },
         }));
         const stdout = el<HTMLInputElement>(container, '#gw-set-audit-stdout');
         const access = el<HTMLInputElement>(container, '#gw-set-audit-access');
@@ -236,19 +237,34 @@ describe('gateway-settings -- audit trail', () => {
         expect(container.textContent).toContain('/data/audit.log');
     });
 
-    it('sends an unchanged audit section back as loaded', async () => {
-        const { container } = await setup();
-        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [] } });
+    it('shows the audit.onFailure choice from the loaded settings, and sends the changed one', async () => {
+        const { container } = await setup(ADMIN, view({
+            settings: { ...SETTINGS, audit: { ...SETTINGS.audit, onFailure: 'refuse' } },
+        }));
+        const select = el<HTMLSelectElement>(container, '#gw-set-audit-onFailure');
+        expect(select.value).toBe('refuse');
+        expect(select.disabled).toBe(false);
+        expect([...select.options].map(o => o.value)).toEqual(['continue', 'refuse']);
+        select.value = 'continue';
+        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
-        expect(svcMock.save.mock.calls[0][0].audit).toEqual({ stdout: false, access: false });
+        expect(svcMock.save.mock.calls[0][0].audit.onFailure).toBe('continue');
+    });
+
+    it('sends an unchanged audit section back as loaded', async () => {
+        const { container } = await setup();
+        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        clickSave(container);
+        await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
+        expect(svcMock.save.mock.calls[0][0].audit).toEqual({ stdout: false, access: false, onFailure: 'continue' });
     });
 });
 
 describe('gateway-settings — save', () => {
     it("sends the whole file with the form's values, then reloads", async () => {
         const { container } = await setup();
-        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: ['tls.insecureSkipVerify'] } });
+        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: ['tls.insecureSkipVerify'], rev: 'rev-2' } });
         el<HTMLInputElement>(container, '#gw-set-session-idleMinutes').value = '5';
         el<HTMLTextAreaElement>(container, '#gw-set-access-allow').value = ' 10.0.0.0/8 \n\n192.0.2.7/32\n';
         el<HTMLSelectElement>(container, '#gw-set-logLevel').value = 'debug';
@@ -267,8 +283,8 @@ describe('gateway-settings — save', () => {
             access: { allow: ['10.0.0.0/8', '192.0.2.7/32'], trustedProxies: [] },
             session: { idleMinutes: 5, absoluteMinutes: 30 },
             modules: { offered: ['queue-browser', 'queue-copy'], userDefault: 'all' },
-            audit: { stdout: true, access: true },
-        });
+            audit: { stdout: true, access: true, onFailure: 'continue' },
+        }, 'rev-1');
         expect(toastMock.showToast).toHaveBeenCalledWith('Settings saved', 'ok');
         expect(svcMock.load).toHaveBeenCalledTimes(2);
         // The form came back from the gateway, not from what was typed.
@@ -307,5 +323,47 @@ describe('gateway-settings — save', () => {
         await vi.waitFor(() => expect(hidden(container, '#gw-set-disk')).toBe(false));
         expect(el<HTMLButtonElement>(container, '#btn-gw-set-save').disabled).toBe(true);
         expect(errorText(container)).toMatch(/^config\.yaml was edited on the gateway host/);
+    });
+});
+
+describe('gateway-settings -- versions', () => {
+    it('a save sends the rev the settings were loaded at, and the reload brings the next one', async () => {
+        const { container } = await setup();
+        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        svcMock.load.mockResolvedValue(view({ rev: 'rev-2' }));
+        clickSave(container);
+        await vi.waitFor(() => expect(svcMock.load).toHaveBeenCalledTimes(2));
+        await vi.waitFor(() => expect(el<HTMLButtonElement>(container, '#btn-gw-set-save').disabled).toBe(false));
+        clickSave(container);
+        await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalledTimes(2));
+        expect(svcMock.save.mock.calls.map(c => c[1])).toEqual(['rev-1', 'rev-2']);
+    });
+
+    it('stale save: the dialog says so; Reload reloads the form with the other admin\'s values and rev', async () => {
+        const { container } = await setup();
+        svcMock.save.mockResolvedValue({ ok: false, status: 409, code: 'stale', rev: 'rev-9' });
+        svcMock.load.mockResolvedValue(view({ rev: 'rev-9', settings: { ...SETTINGS, session: { idleMinutes: 20, absoluteMinutes: 30 } } }));
+        el<HTMLInputElement>(container, '#gw-set-session-idleMinutes').value = '5';
+        clickSave(container);
+        expect(await answerConfirm(true)).toBe('This settings page was changed by someone else since you opened it.');
+        await vi.waitFor(() => expect(value(container, 'session-idleMinutes')).toBe('20'));
+        expect(toastMock.showToast).not.toHaveBeenCalledWith('Settings saved', 'ok');
+
+        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-10' } });
+        clickSave(container);
+        await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalledTimes(2));
+        expect(svcMock.save.mock.calls[1][1]).toBe('rev-9');
+    });
+
+    it("stale save: Cancel keeps the admin's edits and does not reload", async () => {
+        const { container } = await setup();
+        svcMock.save.mockResolvedValue({ ok: false, status: 409, code: 'stale', rev: 'rev-9' });
+        el<HTMLInputElement>(container, '#gw-set-session-idleMinutes').value = '5';
+        clickSave(container);
+        await answerConfirm(false);
+        await vi.waitFor(() => expect(el<HTMLButtonElement>(container, '#btn-gw-set-save').disabled).toBe(false));
+        expect(value(container, 'session-idleMinutes')).toBe('5');
+        expect(svcMock.load).toHaveBeenCalledTimes(1);
+        expect(errorText(container)).toBe('');
     });
 });

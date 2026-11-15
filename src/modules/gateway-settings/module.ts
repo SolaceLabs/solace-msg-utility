@@ -14,12 +14,18 @@
  * gateway's reason) and a save over a hand edit of the file it has not loaded
  * (`changedOnDisk`, which also disables Save). Imports only from
  * `src/core/*` and its own service.
+ *
+ * The file's `rev` (opaque text) comes with every load and goes back at the top
+ * level of the save body; the answer carries the new one. When someone else
+ * saved first the gateway answers `stale`: a dialog with a Reload button that
+ * reloads the form (`src/core/admin-conflict.ts`).
  */
 import { required, setError as setErrorOn } from '../../core/dom';
 import { createGate } from '../../core/components/module-gate';
 import { showToast } from '../../core/toast';
 import { moduleLabel } from '../../core/utils';
 import { logger } from '../../core/logger';
+import { askReload } from '../../core/admin-conflict';
 import { reportManagedFailure } from '../../core/services/managed-api';
 import { createSettingsService, type ClientSeen, type GatewaySettings, type SettingsView } from './service';
 import type { AppContext } from '../../core/types';
@@ -46,6 +52,7 @@ const FIELDS: ReadonlyArray<{ key: string; kind: Kind }> = [
     { key: 'logLevel', kind: 'text' },
     { key: 'audit.stdout', kind: 'bool' },
     { key: 'audit.access', kind: 'bool' },
+    { key: 'audit.onFailure', kind: 'text' },
     { key: 'tls.certFile', kind: 'text' },
     { key: 'tls.keyFile', kind: 'text' },
     { key: 'tls.trustDir', kind: 'text' },
@@ -95,6 +102,8 @@ export const GatewaySettingsModule = {
         // The settings as last loaded; a save sends a copy with the form's
         // values. null until the first load succeeds.
         let loaded: GatewaySettings | null = null;
+        // The rev the settings were loaded at, sent back by a save.
+        let loadedRev = '';
 
         function setError(msg: string | null): void {
             setErrorOn(els.error, msg);
@@ -107,6 +116,7 @@ export const GatewaySettingsModule = {
 
         function render(view: SettingsView): void {
             loaded = view.settings;
+            loadedRev = view.rev;
             const tree = view.settings as unknown as Tree;
             for (const f of FIELDS) {
                 const input = inputs.get(f.key) as Input;
@@ -197,13 +207,18 @@ export const GatewaySettingsModule = {
             }
             els.btnSave.disabled = true;
             setError(null);
-            const res = await service.save(next);
+            const res = await service.save(next, loadedRev);
             els.btnSave.disabled = false;
             if (!res.ok) {
+                if (res.code === 'stale') {
+                    if (await askReload('This settings page')) await load();
+                    return;
+                }
                 if (res.code === 'config_changed_on_disk') showChangedOnDisk(true);
                 reportManagedFailure(res, eventBus, setError);
                 return;
             }
+            loadedRev = res.data.rev;
             showToast('Settings saved', 'ok');
             await load(); // the gateway's normalised values and the restart banner
         }

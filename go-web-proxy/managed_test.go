@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -63,13 +68,13 @@ func newManagedEnvFrom(t *testing.T, f storeFixture, mutate func(*config), upstr
 	clock := newFakeClock()
 	log := &strings.Builder{}
 	cfgPath := filepath.Join(filepath.Dir(f.usersPath), "config.yaml")
-	sum, err := seedConfigFile(cfgPath, cfg)
+	data, err := seedConfigFile(cfgPath, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	lv := newLive(cfg)
 	logger := newCapturingLogger(log)
-	routes, err := buildManagedRoutes(cfg, lv, configSource{path: cfgPath, sum: sum}, f.h, noEnv, clock.now, upstream, logger)
+	routes, err := buildManagedRoutes(cfg, lv, configSource{path: cfgPath, data: data}, f.h, noEnv, clock.now, upstream, logger)
 	if err != nil {
 		t.Fatalf("buildManagedRoutes: %v", err)
 	}
@@ -105,6 +110,47 @@ func (e *managedEnv) do(method, path, body string, c *http.Cookie, headers ...st
 	rec := httptest.NewRecorder()
 	e.root.ServeHTTP(rec, req)
 	return rec
+}
+
+// withRev puts "rev" first in the JSON object body, as the console sends a
+// save.
+func withRev(body string, rev int) string {
+	if body == "" || body == "{}" {
+		return fmt.Sprintf(`{"rev":%d}`, rev)
+	}
+	return fmt.Sprintf(`{"rev":%d,`, rev) + body[1:]
+}
+
+// userRev and connRev are the rev the store holds for the record now: what
+// the console read when it listed it, and 0 for a name that is not there.
+func (e *managedEnv) userRev(name string) int {
+	u, _ := userNamed(e.api.store.listUsers(), name)
+	return u.Rev
+}
+
+func (e *managedEnv) connRev(broker string) int {
+	c, _ := connectionNamed(e.api.store.listConnections(), broker)
+	return c.Rev
+}
+
+// putUserAs and putConnAs save as the console would after listing the record:
+// at the rev the store holds now (0, a create, for a new name). delUserAs and
+// delConnAs delete at the current rev. The tests of a refusal for the rev send
+// their own.
+func (e *managedEnv) putUserAs(c *http.Cookie, name, body string) *httptest.ResponseRecorder {
+	return e.do("PUT", "/managed/users/"+name, withRev(body, e.userRev(name)), c)
+}
+
+func (e *managedEnv) putConnAs(c *http.Cookie, broker, body string) *httptest.ResponseRecorder {
+	return e.do("PUT", "/managed/connections/"+broker, withRev(body, e.connRev(broker)), c)
+}
+
+func (e *managedEnv) delUserAs(c *http.Cookie, name string) *httptest.ResponseRecorder {
+	return e.do("DELETE", fmt.Sprintf("/managed/users/%s?rev=%d", name, e.userRev(name)), "", c)
+}
+
+func (e *managedEnv) delConnAs(c *http.Cookie, broker string) *httptest.ResponseRecorder {
+	return e.do("DELETE", fmt.Sprintf("/managed/connections/%s?rev=%d", broker, e.connRev(broker)), "", c)
 }
 
 func errorCode(t *testing.T, rec *httptest.ResponseRecorder) apiError {
@@ -261,10 +307,10 @@ func TestManagedAPI_MustChangeAllowsOnlyLogout(t *testing.T) {
 func TestManagedAPI_CrossOriginStateChangeRefused(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	c := e.cookie("admin", false)
-	expect(t, e.do("DELETE", "/managed/users/viewer", "", c, "Sec-Fetch-Site", "cross-site"), http.StatusForbidden, "cross_origin")
+	expect(t, e.do("DELETE", "/managed/users/viewer?rev=2", "", c, "Sec-Fetch-Site", "cross-site"), http.StatusForbidden, "cross_origin")
 	expect(t, e.do("POST", "/managed/logout", "", c, "Origin", "https://evil.example"), http.StatusForbidden, "cross_origin")
 	expect(t, e.do("GET", "/managed/me", "", c, "Sec-Fetch-Site", "cross-site"), http.StatusOK, "")
-	expect(t, e.do("DELETE", "/managed/users/viewer", "", c, "Sec-Fetch-Site", "same-origin"), http.StatusNoContent, "")
+	expect(t, e.do("DELETE", "/managed/users/viewer?rev=2", "", c, "Sec-Fetch-Site", "same-origin"), http.StatusNoContent, "")
 }
 
 func TestManagedAPI_UnknownPathOrMethodIs404(t *testing.T) {
@@ -339,11 +385,15 @@ func TestManagedAPI_ListUsersNeverSendsHashes(t *testing.T) {
 		t.Errorf("the hash must never leave the gateway: %s", body)
 	}
 	var out struct {
-		Users   []userJSON
+		Users   []userListJSON
 		Modules modulesJSON
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.Users) != 2 {
 		t.Fatalf("users: %v %s", err, body)
+	}
+	// Each row carries the rev a save or delete of it must send back.
+	if out.Users[0].Rev != 1 || out.Users[1].Rev != 2 || !strings.Contains(body, `"username":"admin"`) {
+		t.Errorf("revs: want admin 1 and viewer 2, got %d and %d in %s", out.Users[0].Rev, out.Users[1].Rev, body)
 	}
 	if out.Users[1].Username != "viewer" || len(out.Users[1].ReadOnly) != 1 || out.Users[1].ReadOnly[0].Brokers != "b1" {
 		t.Errorf("viewer row: %+v", out.Users[1])
@@ -366,7 +416,11 @@ func TestManagedAPI_SaveUser_CreateAndValidate(t *testing.T) {
 		return e.do("PUT", "/managed/users/"+name, body, c)
 	}
 
-	expect(t, put("bob", `{"password":"bob-password-1","admin":false,"operate":[],"readOnly":[{"brokers":"b1","msgVpns":"*","queues":"*"}]}`), http.StatusNoContent, "")
+	created := put("bob", `{"rev":0,"password":"bob-password-1","admin":false,"operate":[],"readOnly":[{"brokers":"b1","msgVpns":"*","queues":"*"}]}`)
+	expect(t, created, http.StatusOK, "")
+	if got := decodeTo[map[string]int](t, created.Body.Bytes()); got["rev"] != 3 || e.userRev("bob") != 3 {
+		t.Errorf("a create answers the rev it stamped (the users file's new seq, 3): %v", got)
+	}
 	if !signsIn(t, e.api.store, "bob", "bob-password-1") {
 		t.Error("the created user must sign in")
 	}
@@ -378,13 +432,13 @@ func TestManagedAPI_SaveUser_CreateAndValidate(t *testing.T) {
 		{"bad username", "a%20b", `{"password":"long-enough-pw"}`, 422, "invalid", "username"},
 		{"dots only", "...", `{"password":"long-enough-pw"}`, 422, "invalid", "username"},
 		{"short password", "carol", `{"password":"short"}`, 422, "invalid", "password"},
-		{"new without password", "carol", `{}`, 422, "invalid", "password"},
+		{"new without password", "carol", `{"rev":0}`, 422, "invalid", "password"},
 		{"unknown field", "carol", `{"password":"long-enough-pw","role":"x"}`, 400, "bad_request", ""},
 		{"trailing data", "carol", `{"password":"long-enough-pw"} {}`, 400, "bad_request", ""},
 		{"malformed", "carol", `{`, 400, "bad_request", ""},
 		{"too large", "carol", `{"password":"` + strings.Repeat("x", maxBodyBytes) + `"}`, 413, "too_large", ""},
 		{"too large after the value", "carol", `{"password":"long-enough-pw"}` + strings.Repeat(" ", maxBodyBytes), 413, "too_large", ""},
-		{"last admin", "admin", `{"admin":false}`, 409, "last_admin", ""},
+		{"last admin", "admin", `{"rev":1,"admin":false}`, 409, "last_admin", ""},
 		{"unknown module", "carol", `{"password":"long-enough-pw","modules":["queue-discovery"]}`, 422, "invalid", "modules"},
 	}
 	for _, tc := range cases {
@@ -413,15 +467,15 @@ func TestManagedAPI_SaveUser_Modules(t *testing.T) {
 		_ = json.Unmarshal(rec.Body.Bytes(), &p)
 		return p.Modules
 	}
-	expect(t, e.do("PUT", "/managed/users/viewer", `{"modules":["queue-copy"]}`, admin), http.StatusNoContent, "")
+	expect(t, e.putUserAs(admin, "viewer", `{"modules":["queue-copy"]}`), http.StatusOK, "")
 	if got := modules(); !reflect.DeepEqual(got, []string{"queue-copy"}) {
 		t.Errorf("own list: got %v", got)
 	}
-	expect(t, e.do("PUT", "/managed/users/viewer", `{"modules":null}`, admin), http.StatusNoContent, "")
+	expect(t, e.putUserAs(admin, "viewer", `{"modules":null}`), http.StatusOK, "")
 	if got := modules(); !reflect.DeepEqual(got, moduleCatalog()) {
 		t.Errorf("null: want the deployment default (every module), got %v", got)
 	}
-	expect(t, e.do("PUT", "/managed/users/viewer", `{"modules":[]}`, admin), http.StatusNoContent, "")
+	expect(t, e.putUserAs(admin, "viewer", `{"modules":[]}`), http.StatusOK, "")
 	if got := modules(); len(got) != 0 {
 		t.Errorf("empty list: want none, got %v", got)
 	}
@@ -433,18 +487,18 @@ func TestManagedAPI_SaveUser_SessionsEndOnPasswordOrRoleChange(t *testing.T) {
 	viewer := e.cookie("viewer", false)
 
 	// An edit that changes neither keeps the user signed in.
-	expect(t, e.do("PUT", "/managed/users/viewer", `{"readOnly":[]}`, admin), http.StatusNoContent, "")
+	expect(t, e.putUserAs(admin, "viewer", `{"readOnly":[]}`), http.StatusOK, "")
 	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusOK, "")
 
-	expect(t, e.do("PUT", "/managed/users/viewer", `{"password":"viewer-new-pw-1"}`, admin), http.StatusNoContent, "")
+	expect(t, e.putUserAs(admin, "viewer", `{"password":"viewer-new-pw-1"}`), http.StatusOK, "")
 	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusUnauthorized, "unauthenticated")
 
 	viewer = e.cookie("viewer", false)
-	expect(t, e.do("PUT", "/managed/users/viewer", `{"admin":true}`, admin), http.StatusNoContent, "")
+	expect(t, e.putUserAs(admin, "viewer", `{"admin":true}`), http.StatusOK, "")
 	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusUnauthorized, "unauthenticated")
 
 	// The admin's own password change ends the admin's own session too.
-	expect(t, e.do("PUT", "/managed/users/admin", `{"admin":true,"password":"admin-new-pw-1"}`, admin), http.StatusNoContent, "")
+	expect(t, e.putUserAs(admin, "admin", `{"admin":true,"password":"admin-new-pw-1"}`), http.StatusOK, "")
 	expect(t, e.do("GET", "/managed/me", "", admin), http.StatusUnauthorized, "unauthenticated")
 }
 
@@ -452,8 +506,8 @@ func TestManagedAPI_SaveAndDeleteUser_PersistErrorIs500(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	c := e.cookie("admin", false)
 	blockWrites(t, &e.api.store.usersPath)
-	expect(t, e.do("PUT", "/managed/users/bob", `{"password":"bob-password-1"}`, c), http.StatusInternalServerError, "server_error")
-	expect(t, e.do("DELETE", "/managed/users/viewer", "", c), http.StatusInternalServerError, "server_error")
+	expect(t, e.do("PUT", "/managed/users/bob", `{"rev":0,"password":"bob-password-1"}`, c), http.StatusInternalServerError, "store_write_failed")
+	expect(t, e.do("DELETE", "/managed/users/viewer?rev=2", "", c), http.StatusInternalServerError, "store_write_failed")
 	for _, want := range []string{"admin request failed", "op=saveUser", "target=bob", "user=admin", "op=deleteUser", "target=viewer"} {
 		if !strings.Contains(e.log.String(), want) {
 			t.Errorf("the failure must name %q in the log: %s", want, e.log.String())
@@ -465,9 +519,9 @@ func TestManagedAPI_DeleteUser(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	admin := e.cookie("admin", false)
 	viewer := e.cookie("viewer", false)
-	expect(t, e.do("DELETE", "/managed/users/admin", "", admin), http.StatusConflict, "last_admin")
-	expect(t, e.do("DELETE", "/managed/users/ghost", "", admin), http.StatusNotFound, "not_found")
-	expect(t, e.do("DELETE", "/managed/users/viewer", "", admin), http.StatusNoContent, "")
+	expect(t, e.do("DELETE", "/managed/users/admin?rev=1", "", admin), http.StatusConflict, "last_admin")
+	expect(t, e.do("DELETE", "/managed/users/ghost?rev=1", "", admin), http.StatusNotFound, "not_found")
+	expect(t, e.delUserAs(admin, "viewer"), http.StatusNoContent, "")
 	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusUnauthorized, "unauthenticated")
 }
 
@@ -476,10 +530,18 @@ func TestManagedAPI_DeleteUser(t *testing.T) {
 func TestManagedAPI_ListConnectionsNeverSendsSecrets(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	c := e.cookie("admin", false)
-	expect(t, e.do("PUT", "/managed/connections/b3", `{"hostname":"h3","semp":{"port":"","user":"","pass":""},"client":{"port":"","msgVpns":[]}}`, c), http.StatusNoContent, "")
+	expect(t, e.putConnAs(c, "b3", `{"hostname":"h3","semp":{"port":"","user":"","pass":""},"client":{"port":"","msgVpns":[]}}`), http.StatusOK, "")
 	rec := e.do("GET", "/managed/connections", "", c)
 	expect(t, rec, http.StatusOK, "")
 	body := rec.Body.String()
+	var list struct{ Connections []connListJSON }
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil || len(list.Connections) != 3 {
+		t.Fatalf("connections: %v %s", err, body)
+	}
+	// Each row carries the rev a save or delete of it must send back.
+	if got := []int{list.Connections[0].Rev, list.Connections[1].Rev, list.Connections[2].Rev}; !reflect.DeepEqual(got, []int{1, 2, 3}) {
+		t.Errorf("revs: want 1, 2 and the new b3's 3, got %v in %s", got, body)
+	}
 	if strings.Contains(body, "-pw") || strings.Contains(strings.ReplaceAll(body, `"pass":""`, ""), `"pass"`) {
 		t.Errorf("stored passwords must never be listed: %s", body)
 	}
@@ -492,7 +554,11 @@ func TestManagedAPI_SaveConnection(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	c := e.cookie("admin", false)
 	ok := `{"hostname":"h","semp":{"port":"1943","user":"mon","pass":"V1:x"},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u","pass":"V1:y"}]}}`
-	expect(t, e.do("PUT", "/managed/connections/b3", ok, c), http.StatusNoContent, "")
+	created := e.do("PUT", "/managed/connections/b3", withRev(ok, 0), c)
+	expect(t, created, http.StatusOK, "")
+	if got := decodeTo[map[string]int](t, created.Body.Bytes()); got["rev"] != 3 || e.connRev("b3") != 3 {
+		t.Errorf("a create answers the rev it stamped (the connections file's new seq, 3): %v", got)
+	}
 	if n := len(e.api.store.listConnections()); n != 3 {
 		t.Errorf("want 3 connections, got %d", n)
 	}
@@ -505,16 +571,16 @@ func TestManagedAPI_SaveConnection(t *testing.T) {
 	expect(t, e.do("PUT", "/managed/connections/...", ok, c), http.StatusUnprocessableEntity, "invalid")
 	expect(t, e.do("PUT", "/managed/connections/b3", `{"vpn":1}`, c), http.StatusBadRequest, "bad_request")
 	blockWrites(t, &e.api.store.connsPath)
-	expect(t, e.do("PUT", "/managed/connections/b4", ok, c), http.StatusInternalServerError, "server_error")
+	expect(t, e.do("PUT", "/managed/connections/b4", withRev(ok, 0), c), http.StatusInternalServerError, "store_write_failed")
 }
 
 func TestManagedAPI_DeleteConnection(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	c := e.cookie("admin", false)
-	expect(t, e.do("DELETE", "/managed/connections/nope", "", c), http.StatusNotFound, "not_found")
-	expect(t, e.do("DELETE", "/managed/connections/b2", "", c), http.StatusNoContent, "")
+	expect(t, e.do("DELETE", "/managed/connections/nope?rev=1", "", c), http.StatusNotFound, "not_found")
+	expect(t, e.delConnAs(c, "b2"), http.StatusNoContent, "")
 	blockWrites(t, &e.api.store.connsPath)
-	expect(t, e.do("DELETE", "/managed/connections/b1", "", c), http.StatusInternalServerError, "server_error")
+	expect(t, e.do("DELETE", "/managed/connections/b1?rev=1", "", c), http.StatusInternalServerError, "store_write_failed")
 }
 
 func TestWriteJSON_EncodeFailureKeepsStatus(t *testing.T) {
@@ -530,11 +596,11 @@ func TestWriteJSON_EncodeFailureKeepsStatus(t *testing.T) {
 func TestManagedAPI_ChangesAreLoggedWithActorAndTarget(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	c := e.cookie("admin", false)
-	expect(t, e.do("PUT", "/managed/users/carol", `{"password":"carol-password-1","modules":["queue-browser"]}`, c), http.StatusNoContent, "")
-	expect(t, e.do("PUT", "/managed/users/viewer", `{"readOnly":[]}`, c), http.StatusNoContent, "")
-	expect(t, e.do("DELETE", "/managed/users/carol", "", c), http.StatusNoContent, "")
-	expect(t, e.do("PUT", "/managed/connections/b3", `{"hostname":"h3","semp":{"port":"1943","user":"mon","pass":"semp-new-pw"},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u","pass":"vpn-new-pw"},{"name":"v2","user":"u","pass":""}]}}`, c), http.StatusNoContent, "")
-	expect(t, e.do("DELETE", "/managed/connections/b3", "", c), http.StatusNoContent, "")
+	expect(t, e.putUserAs(c, "carol", `{"password":"carol-password-1","modules":["queue-browser"]}`), http.StatusOK, "")
+	expect(t, e.putUserAs(c, "viewer", `{"readOnly":[]}`), http.StatusOK, "")
+	expect(t, e.delUserAs(c, "carol"), http.StatusNoContent, "")
+	expect(t, e.putConnAs(c, "b3", `{"hostname":"h3","semp":{"port":"1943","user":"mon","pass":"semp-new-pw"},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u","pass":"vpn-new-pw"},{"name":"v2","user":"u","pass":""}]}}`), http.StatusOK, "")
+	expect(t, e.delConnAs(c, "b3"), http.StatusNoContent, "")
 	log := e.log.String()
 	lines := []struct {
 		msg, target string
@@ -586,8 +652,8 @@ func TestManagedAPI_ConnectionSchemes(t *testing.T) {
 	c := e.cookie("admin", false)
 	plain := `{"hostname":"h3","semp":{"scheme":"http","port":"8080","user":"","pass":""},"client":{"scheme":"ws","port":"8008","msgVpns":[]}}`
 	tls := `{"hostname":"h4","semp":{"scheme":"https","port":"1943","user":"","pass":""},"client":{"scheme":"wss","port":"1443","msgVpns":[]}}`
-	expect(t, e.do("PUT", "/managed/connections/b3", plain, c), http.StatusNoContent, "")
-	expect(t, e.do("PUT", "/managed/connections/b4", tls, c), http.StatusNoContent, "")
+	expect(t, e.putConnAs(c, "b3", plain), http.StatusOK, "")
+	expect(t, e.putConnAs(c, "b4", tls), http.StatusOK, "")
 	rec := e.do("GET", "/managed/connections", "", c)
 	expect(t, rec, http.StatusOK, "")
 	var list struct{ Connections []connJSON }
@@ -650,7 +716,7 @@ func TestManagedAPI_UserChangesAreAudited(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	au := e.withAudit(t, auditSettings{})
 	c := e.cookie("admin", false)
-	put := func(name, body string) { e.do("PUT", "/managed/users/"+name, body, c) }
+	put := func(name, body string) { e.putUserAs(c, name, body) }
 
 	put("bob", `{"password":"bob-password-1","readOnly":[{"brokers":"b1","msgVpns":"*","queues":"*"}]}`)
 	put("bob", `{"password":"bob-password-2","admin":true,"readOnly":[],"modules":["queue-browser"]}`)
@@ -658,34 +724,40 @@ func TestManagedAPI_UserChangesAreAudited(t *testing.T) {
 	put("admin", `{"admin":true,"operate":[{"brokers":"*","msgVpns":"*","queues":"*"}]}`)
 	put("carol", `{"password":"short"}`)
 	// bob goes first: while bob is an admin, the demotion would succeed and sign admin out.
-	e.do("DELETE", "/managed/users/bob", "", c)
+	e.delUserAs(c, "bob")
 	put("admin", `{"admin":false}`)
-	e.do("DELETE", "/managed/users/ghost", "", c)
+	e.do("DELETE", "/managed/users/ghost?rev=1", "", c)
 	e.do("PUT", "/managed/users/x", `{}`, e.cookie("viewer", false))
 
 	au.expect(t,
-		auditEntry{Actor: "admin", Action: "user.create", Target: "bob", Outcome: "ok", Msg: "admin created user bob"},
-		auditEntry{Actor: "admin", Action: "user.update", Target: "bob", Outcome: "ok", Changed: []string{"password", "admin", "grants", "modules"},
+		auditEntry{Actor: "admin", Action: "user.create", Target: "bob", Outcome: "ok", Wrote: usersWrote(3), Msg: "admin created user bob"},
+		auditEntry{Actor: "admin", Action: "user.update", Target: "bob", Outcome: "ok", Changed: []string{"password", "admin", "grants", "modules"}, Wrote: usersWrote(4),
 			Msg: "admin updated user bob: password, admin, grants, modules"},
-		auditEntry{Actor: "admin", Action: "user.update", Target: "viewer", Outcome: "ok", Msg: "admin updated user viewer"},
-		auditEntry{Actor: "admin", Action: "user.update", Target: "admin", Outcome: "ok", Msg: "admin updated user admin"},
+		auditEntry{Actor: "admin", Action: "user.update", Target: "viewer", Outcome: "ok", Wrote: usersWrote(5), Msg: "admin updated user viewer"},
+		auditEntry{Actor: "admin", Action: "user.update", Target: "admin", Outcome: "ok", Wrote: usersWrote(6), Msg: "admin updated user admin"},
 		auditEntry{Actor: "admin", Action: "user.create", Target: "carol", Outcome: "refused", Code: "invalid", Msg: "admin could not create user carol: invalid"},
-		auditEntry{Actor: "admin", Action: "user.delete", Target: "bob", Outcome: "ok", Msg: "admin deleted user bob"},
+		auditEntry{Actor: "admin", Action: "user.delete", Target: "bob", Outcome: "ok", Wrote: usersWrote(7), Msg: "admin deleted user bob"},
 		auditEntry{Actor: "admin", Action: "user.update", Target: "admin", Outcome: "refused", Code: "last_admin", Msg: "admin could not update user admin: last_admin"},
 		auditEntry{Actor: "admin", Action: "user.delete", Target: "ghost", Outcome: "refused", Code: "not_found", Msg: "admin could not delete user ghost: not_found"},
 		auditEntry{Actor: "viewer", Action: "user.create", Target: "x", Outcome: "refused", Code: "forbidden", Msg: "viewer could not create user x: forbidden"},
 	)
 }
 
-// A save that fails to write is a refusal with the server_error code.
+// A save that fails to write is a refusal with the store_write_failed code,
+// and carries no "wrote": nothing was written.
 func TestManagedAPI_FailedSaveIsAuditedAsRefused(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	au := e.withAudit(t, auditSettings{})
 	blockWrites(t, &e.api.store.usersPath)
-	expect(t, e.do("PUT", "/managed/users/bob", `{"password":"bob-password-1"}`, e.cookie("admin", false)), http.StatusInternalServerError, "server_error")
-	au.expect(t, auditEntry{Actor: "admin", Action: "user.create", Target: "bob", Outcome: "refused", Code: "server_error",
-		Msg: "admin could not create user bob: server_error"})
+	expect(t, e.do("PUT", "/managed/users/bob", `{"rev":0,"password":"bob-password-1"}`, e.cookie("admin", false)), http.StatusInternalServerError, "store_write_failed")
+	au.expect(t, auditEntry{Actor: "admin", Action: "user.create", Target: "bob", Outcome: "refused", Code: "store_write_failed",
+		Msg: "admin could not create user bob: store_write_failed"})
 }
+
+// usersWrote and connsWrote are the "wrote" of an ok entry for a commit that
+// moved the file to seq.
+func usersWrote(seq int64) []auditWrote { return []auditWrote{{File: "users.yaml", Seq: seq}} }
+func connsWrote(seq int64) []auditWrote { return []auditWrote{{File: "conns.yaml", Seq: seq}} }
 
 // A connection update names hostname, semp, client and each VPN added,
 // changed or removed; a password counts as a change to its part, with no value.
@@ -693,24 +765,24 @@ func TestManagedAPI_ConnectionChangesAreAudited(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	au := e.withAudit(t, auditSettings{})
 	c := e.cookie("admin", false)
-	put := func(broker, body string) { e.do("PUT", "/managed/connections/"+broker, body, c) }
+	put := func(broker, body string) { e.putConnAs(c, broker, body) }
 
 	put("b3", `{"hostname":"h3","semp":{"port":"1943","user":"mon","pass":"semp-new-pw"},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u","pass":"vpn-new-pw"}]}}`)
 	put("b3", `{"hostname":"h3b","semp":{"scheme":"http","port":"1943","user":"mon","pass":""},"client":{"scheme":"ws","port":"1443","msgVpns":[{"name":"v1","user":"u","pass":""},{"name":"v2","user":"u2","pass":"vpn2-pw"}]}}`)
 	put("b3", `{"hostname":"h3b","semp":{"scheme":"http","port":"1943","user":"mon","pass":"semp2-pw"},"client":{"scheme":"ws","port":"1443","msgVpns":[{"name":"v1","user":"u-new","pass":""}]}}`)
 	put("b3", `{"semp":{"port":"x"}}`)
-	e.do("DELETE", "/managed/connections/b3", "", c)
-	e.do("DELETE", "/managed/connections/nope", "", c)
+	e.delConnAs(c, "b3")
+	e.do("DELETE", "/managed/connections/nope?rev=1", "", c)
 	e.do("PUT", "/managed/connections/b9", `{}`, e.cookie("viewer", false))
 
 	au.expect(t,
-		auditEntry{Actor: "admin", Action: "connection.create", Target: "b3", Outcome: "ok", Msg: "admin created connection b3"},
-		auditEntry{Actor: "admin", Action: "connection.update", Target: "b3", Outcome: "ok", Changed: []string{"hostname", "semp", "client", "vpn v2"},
+		auditEntry{Actor: "admin", Action: "connection.create", Target: "b3", Outcome: "ok", Wrote: connsWrote(3), Msg: "admin created connection b3"},
+		auditEntry{Actor: "admin", Action: "connection.update", Target: "b3", Outcome: "ok", Changed: []string{"hostname", "semp", "client", "vpn v2"}, Wrote: connsWrote(4),
 			Msg: "admin updated connection b3: hostname, semp, client, vpn v2"},
-		auditEntry{Actor: "admin", Action: "connection.update", Target: "b3", Outcome: "ok", Changed: []string{"semp", "vpn v1", "vpn v2"},
+		auditEntry{Actor: "admin", Action: "connection.update", Target: "b3", Outcome: "ok", Changed: []string{"semp", "vpn v1", "vpn v2"}, Wrote: connsWrote(5),
 			Msg: "admin updated connection b3: semp, vpn v1, vpn v2"},
 		auditEntry{Actor: "admin", Action: "connection.update", Target: "b3", Outcome: "refused", Code: "invalid", Msg: "admin could not update connection b3: invalid"},
-		auditEntry{Actor: "admin", Action: "connection.delete", Target: "b3", Outcome: "ok", Msg: "admin deleted connection b3"},
+		auditEntry{Actor: "admin", Action: "connection.delete", Target: "b3", Outcome: "ok", Wrote: connsWrote(6), Msg: "admin deleted connection b3"},
 		auditEntry{Actor: "admin", Action: "connection.delete", Target: "nope", Outcome: "refused", Code: "not_found", Msg: "admin could not delete connection nope: not_found"},
 		auditEntry{Actor: "viewer", Action: "connection.create", Target: "b9", Outcome: "refused", Code: "forbidden", Msg: "viewer could not create connection b9: forbidden"},
 	)
@@ -737,8 +809,8 @@ func TestManagedAPI_AuditNeverHoldsASecret(t *testing.T) {
 	rec := e.form("/login", signInForm("admin", adminPW, "/"), nil)
 	expectRedirect(t, rec, "/")
 	c := issuedCookie(t, rec)
-	expect(t, e.do("PUT", "/managed/users/sweep", `{"password":"sweep-user-pw-1"}`, c), http.StatusNoContent, "")
-	expect(t, e.do("PUT", "/managed/connections/b3", `{"hostname":"h3","semp":{"port":"1943","user":"mon","pass":"sweep-semp-pw"},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u","pass":"sweep-vpn-pw"}]}}`, c), http.StatusNoContent, "")
+	expect(t, e.putUserAs(c, "sweep", `{"password":"sweep-user-pw-1"}`), http.StatusOK, "")
+	expect(t, e.putConnAs(c, "b3", `{"hostname":"h3","semp":{"port":"1943","user":"mon","pass":"sweep-semp-pw"},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u","pass":"sweep-vpn-pw"}]}}`), http.StatusOK, "")
 	expect(t, e.do("POST", "/managed/dial", dialBody("b1", "v1"), c), http.StatusOK, "")
 	exp := e.do("POST", "/managed/backup/export", `{"passphrase":"sweep passphrase one"}`, c)
 	expect(t, exp, http.StatusOK, "")
@@ -758,5 +830,639 @@ func TestManagedAPI_AuditNeverHoldsASecret(t *testing.T) {
 		if strings.Contains(string(data), secret) {
 			t.Errorf("the audit file holds %q:\n%s", secret, data)
 		}
+	}
+}
+
+// ----- versions: every refusal of 11.1 on users and connections ------------------------
+
+// revCase is one request of a refusal table: what it sends, the status and
+// error code it must get, and the current rev a stale answer must carry.
+type revCase struct {
+	name, method, path, body string
+	status                   int
+	code                     string
+	rev                      int // the rev in the body of a stale answer
+}
+
+// runRevCases sends every case as the admin, checks the answer, and then that
+// the audit trail holds one refused entry per case under the same code and the
+// store did not move.
+func runRevCases(t *testing.T, e *managedEnv, au *auditLog, cases []revCase) {
+	t.Helper()
+	c := e.cookie("admin", false)
+	usersSeq, connsSeq := e.api.store.seqs()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := e.do(tc.method, tc.path, tc.body, c)
+			expect(t, rec, tc.status, tc.code)
+			if tc.rev != 0 {
+				if got := errorCode(t, rec).Rev; got != float64(tc.rev) {
+					t.Errorf("a stale answer carries the current rev %d, got %v", tc.rev, got)
+				}
+			}
+		})
+	}
+	if u, cn := e.api.store.seqs(); u != usersSeq || cn != connsSeq {
+		t.Errorf("a refusal must not move a seq: users %d->%d, connections %d->%d", usersSeq, u, connsSeq, cn)
+	}
+	got := au.entries(t)
+	if len(got) != len(cases) {
+		t.Fatalf("want one audit entry per case, got %d for %d: %+v", len(got), len(cases), got)
+	}
+	for i, tc := range cases {
+		if got[i].Outcome != auditRefused || got[i].Code != tc.code || got[i].Wrote != nil {
+			t.Errorf("%s: audit entry %+v, want refused with code %q and nothing written", tc.name, got[i], tc.code)
+		}
+	}
+}
+
+func TestManagedAPI_UserVersionCodes(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	const view = `"readOnly":[]`
+	u := "/managed/users/"
+	runRevCases(t, e, au, []revCase{
+		{"no rev", "PUT", u + "viewer", `{` + view + `}`, 400, "rev_required", 0},
+		{"rev as text", "PUT", u + "viewer", `{"rev":"2",` + view + `}`, 400, "rev_required", 0},
+		{"rev with a fraction", "PUT", u + "viewer", `{"rev":2.5,` + view + `}`, 400, "rev_required", 0},
+		{"negative rev", "PUT", u + "viewer", `{"rev":-1,` + view + `}`, 400, "rev_required", 0},
+		{"null rev", "PUT", u + "viewer", `{"rev":null,` + view + `}`, 400, "rev_required", 0},
+		{"invalid input comes before the rev", "PUT", u + "a%20b", `{}`, 422, "invalid", 0},
+		{"create of a name that exists", "PUT", u + "viewer", `{"rev":0,` + view + `}`, 409, "exists", 0},
+		{"update of a user that is gone", "PUT", u + "ghost", `{"rev":4,"password":"ghost-password-1"}`, 404, "not_found", 0},
+		{"stale update", "PUT", u + "viewer", `{"rev":1,` + view + `}`, 409, "stale", 2},
+		{"stale beats last admin", "PUT", u + "admin", `{"rev":2,"admin":false}`, 409, "stale", 1},
+		{"delete without a rev", "DELETE", u + "viewer", "", 400, "rev_required", 0},
+		{"delete rev empty", "DELETE", u + "viewer?rev=", "", 400, "rev_required", 0},
+		{"delete rev as text", "DELETE", u + "viewer?rev=two", "", 400, "rev_required", 0},
+		{"delete rev zero", "DELETE", u + "viewer?rev=0", "", 400, "rev_required", 0},
+		{"delete negative rev", "DELETE", u + "viewer?rev=-2", "", 400, "rev_required", 0},
+		{"delete rev with a fraction", "DELETE", u + "viewer?rev=2.5", "", 400, "rev_required", 0},
+		{"delete of a user that is gone", "DELETE", u + "ghost?rev=4", "", 404, "not_found", 0},
+		{"stale delete", "DELETE", u + "viewer?rev=1", "", 409, "stale", 2},
+	})
+}
+
+func TestManagedAPI_ConnectionVersionCodes(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	const rec = `"hostname":"host1","semp":{"port":"1943","user":"mon","pass":""},"client":{"port":"1443","msgVpns":[]}`
+	p := "/managed/connections/"
+	runRevCases(t, e, au, []revCase{
+		{"no rev", "PUT", p + "b1", `{` + rec + `}`, 400, "rev_required", 0},
+		{"rev as text", "PUT", p + "b1", `{"rev":"1",` + rec + `}`, 400, "rev_required", 0},
+		{"rev with a fraction", "PUT", p + "b1", `{"rev":1.5,` + rec + `}`, 400, "rev_required", 0},
+		{"negative rev", "PUT", p + "b1", `{"rev":-1,` + rec + `}`, 400, "rev_required", 0},
+		{"null rev", "PUT", p + "b1", `{"rev":null,` + rec + `}`, 400, "rev_required", 0},
+		{"invalid input comes before the rev", "PUT", p + "b1", `{"semp":{"port":"x"}}`, 422, "invalid", 0},
+		{"create of a name that exists", "PUT", p + "b1", `{"rev":0,` + rec + `}`, 409, "exists", 0},
+		{"update of a connection that is gone", "PUT", p + "b9", `{"rev":4,` + rec + `}`, 404, "not_found", 0},
+		{"stale update", "PUT", p + "b2", `{"rev":1,` + rec + `}`, 409, "stale", 2},
+		{"delete without a rev", "DELETE", p + "b1", "", 400, "rev_required", 0},
+		{"delete rev empty", "DELETE", p + "b1?rev=", "", 400, "rev_required", 0},
+		{"delete rev as text", "DELETE", p + "b1?rev=one", "", 400, "rev_required", 0},
+		{"delete rev zero", "DELETE", p + "b1?rev=0", "", 400, "rev_required", 0},
+		{"delete negative rev", "DELETE", p + "b1?rev=-1", "", 400, "rev_required", 0},
+		{"delete of a connection that is gone", "DELETE", p + "b9?rev=4", "", 404, "not_found", 0},
+		{"stale delete", "DELETE", p + "b2?rev=1", "", 409, "stale", 2},
+	})
+}
+
+// A delete that won leaves nothing to save or delete: the loser is told the
+// record was deleted, not that it is stale.
+func TestManagedAPI_DeletedMeanwhileIsNotFound(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	expect(t, e.do("DELETE", "/managed/users/viewer?rev=2", "", c), http.StatusNoContent, "")
+	expect(t, e.do("PUT", "/managed/users/viewer", `{"rev":2,"readOnly":[]}`, c), http.StatusNotFound, "not_found")
+	expect(t, e.do("DELETE", "/managed/users/viewer?rev=2", "", c), http.StatusNotFound, "not_found")
+	expect(t, e.do("DELETE", "/managed/connections/b2?rev=2", "", c), http.StatusNoContent, "")
+	expect(t, e.do("PUT", "/managed/connections/b2", `{"rev":2,"hostname":"host2","semp":{},"client":{}}`, c), http.StatusNotFound, "not_found")
+	// A re-created name never reuses a rev: the old one is stale.
+	expect(t, e.do("PUT", "/managed/users/viewer", `{"rev":0,"password":"viewer-new-pw-1"}`, c), http.StatusOK, "")
+	expect(t, e.do("PUT", "/managed/users/viewer", `{"rev":2,"readOnly":[]}`, c), http.StatusConflict, "stale")
+}
+
+// The answer to a save carries the rev the record holds afterwards: the new
+// seq of the file when what the console shows changed, the same rev when only
+// a password did (the hash is never shown). The list says the same.
+func TestManagedAPI_ResponseRevFollowsWhatTheConsoleShows(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	rev := func(rec *httptest.ResponseRecorder) int {
+		t.Helper()
+		expect(t, rec, http.StatusOK, "")
+		return decodeTo[map[string]int](t, rec.Body.Bytes())["rev"]
+	}
+	same := `"readOnly":[{"brokers":"b1","msgVpns":"v1","queues":"*"}],"modules":["queue-browser"]`
+	if got := rev(e.putUserAs(c, "viewer", `{"password":"viewer-new-pw-1",`+same+`}`)); got != 2 {
+		t.Errorf("a password alone keeps the rev (2), got %d", got)
+	}
+	if u, _ := e.api.store.seqs(); u != 3 {
+		t.Errorf("the file's seq moves on every commit, want 3, got %d", u)
+	}
+	if got := rev(e.putUserAs(c, "viewer", `{"readOnly":[],"modules":["queue-browser"]}`)); got != 4 {
+		t.Errorf("a change to the grants takes the file's new seq (4), got %d", got)
+	}
+	if e.userRev("viewer") != 4 || e.userRev("admin") != 1 {
+		t.Errorf("revs after the saves: viewer %d, admin %d", e.userRev("viewer"), e.userRev("admin"))
+	}
+
+	if got := rev(e.putConnAs(c, "b1", `{"hostname":"host1","semp":{"port":"1943","user":"mon","pass":"semp-new-pw"},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u1","pass":""},{"name":"v2","user":"u2","pass":""}]}}`)); got != 1 {
+		t.Errorf("a SEMP password alone keeps the rev (1), got %d", got)
+	}
+	if got := rev(e.putConnAs(c, "b1", `{"hostname":"host1b","semp":{"port":"1943","user":"mon","pass":""},"client":{"port":"1443","msgVpns":[{"name":"v1","user":"u1","pass":""},{"name":"v2","user":"u2","pass":""}]}}`)); got != 4 {
+		t.Errorf("a changed hostname takes the file's new seq (4), got %d", got)
+	}
+	list := decodeTo[struct{ Connections []connListJSON }](t, e.do("GET", "/managed/connections", "", c).Body.Bytes())
+	if list.Connections[0].Rev != 4 || list.Connections[1].Rev != 2 {
+		t.Errorf("the list carries the revs: %+v", list.Connections)
+	}
+}
+
+// A hand edit of a sealed file is refused on every later save and delete of
+// that file, even with the bytes put back (the cause does not go away until a
+// restart), before the existence and the rev are looked at. The other file is
+// not affected.
+func TestManagedAPI_StoreChangedOnDiskIsRefusedUntilRestart(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	c := e.cookie("admin", false)
+	orig := mustRead(t, e.f.usersPath)
+	if err := os.WriteFile(e.f.usersPath, []byte("not the file the gateway wrote"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, e.do("PUT", "/managed/users/viewer", `{"rev":1,"readOnly":[]}`, c), http.StatusConflict, "store_changed_on_disk")
+	expect(t, e.do("DELETE", "/managed/users/ghost?rev=9", "", c), http.StatusConflict, "store_changed_on_disk")
+	if err := os.WriteFile(e.f.usersPath, orig, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, e.putUserAs(c, "viewer", `{"readOnly":[]}`), http.StatusConflict, "store_changed_on_disk")
+	expect(t, e.putConnAs(c, "b3", `{"hostname":"h3","semp":{},"client":{}}`), http.StatusOK, "")
+	expect(t, e.do("GET", "/managed/users", "", c), http.StatusOK, "") // reads come from memory
+	for _, en := range au.entries(t)[:3] {
+		if en.Outcome != auditRefused || en.Code != "store_changed_on_disk" {
+			t.Errorf("a refused entry with the disk code, got %+v", en)
+		}
+	}
+}
+
+// audit.onFailure refuse: the change that meets the failure stands, then every
+// user and connection change is 503 audit_unavailable with nothing written
+// while sign-ins and reads go on; the refusal's own line, once the log is
+// writable, clears the state.
+func TestManagedAPI_AuditUnavailableRefusesChanges(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	e.setAudit(auditSettings{onFailure: auditOnFailureRefuse})
+	a, _ := e.withLoudAudit(t)
+	c := e.cookie("admin", false)
+	_ = a.f.Close() // the audit log is no longer writable
+
+	expect(t, e.putUserAs(c, "bob", `{"password":"bob-password-1"}`), http.StatusOK, "") // meets the failure: stands
+	if _, exists := e.api.store.isAdmin("bob"); !exists {
+		t.Fatal("the change that met the failure must stand")
+	}
+	seq, _ := e.api.store.seqs()
+	expect(t, e.putUserAs(c, "carol", `{"password":"carol-password-1"}`), http.StatusServiceUnavailable, "audit_unavailable")
+	expect(t, e.delUserAs(c, "viewer"), http.StatusServiceUnavailable, "audit_unavailable")
+	expect(t, e.putConnAs(c, "b3", `{"hostname":"h3","semp":{},"client":{}}`), http.StatusServiceUnavailable, "audit_unavailable")
+	expect(t, e.delConnAs(c, "b2"), http.StatusServiceUnavailable, "audit_unavailable")
+	if now, _ := e.api.store.seqs(); now != seq || e.api.store.hasConnection("b3") || !e.api.store.hasConnection("b2") {
+		t.Error("a refused change must write nothing")
+	}
+	expect(t, e.do("GET", "/managed/users", "", c), http.StatusOK, "")
+	if !signsIn(t, e.api.store, "viewer", viewerPW) {
+		t.Error("sign-ins are never refused")
+	}
+
+	a.mu.Lock()
+	a.f = nil // the next write reopens the file: space is back
+	a.mu.Unlock()
+	expect(t, e.putUserAs(c, "carol", `{"password":"carol-password-1"}`), http.StatusServiceUnavailable, "audit_unavailable") // its refusal line is written and clears the state
+	expect(t, e.putUserAs(c, "carol", `{"password":"carol-password-1"}`), http.StatusOK, "")
+}
+
+// ----- the caller is checked again inside the lock -------------------------------------
+
+// holdWriter takes the writer's lock for the test and returns the func that
+// gives it back, so a request can be parked at the lock.
+func holdWriter(t *testing.T, w *writer) (release func()) {
+	t.Helper()
+	started, stop, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		done <- w.Do(context.Background(), func(*txn) error {
+			close(started)
+			<-stop
+			return nil
+		})
+	}()
+	<-started
+	return func() {
+		close(stop)
+		if err := <-done; err != nil {
+			t.Errorf("the held transaction: %v", err)
+		}
+	}
+}
+
+// waitForWaiters returns once n goroutines are waiting for the writer's lock
+// beside the one that holds it: each is a goroutine inside writer.Do, found
+// from the goroutine dump, because nothing else says a request has got that
+// far.
+func waitForWaiters(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		buf := make([]byte, 1<<20)
+		if strings.Count(string(buf[:runtime.Stack(buf, true)]), ".(*writer).Do(") >= n+1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d request(s) never reached the writer's lock", n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// changeUsersBehindTheWriter stands in for a commit that lands while the lock
+// is held: it swaps memory for the users edit makes of the current list.
+func changeUsersBehindTheWriter(s *store, edit func([]userRec) []userRec) {
+	cur, seq := s.usersNow()
+	s.publish(&usersDoc{Seq: seq + 1, Users: edit(cur)}, nil)
+}
+
+// An administrator who is demoted, or removed, while the request waits for the
+// lock is refused as the admin gate would have refused it, on every route that
+// changes a user or a connection, and nothing is written.
+func TestManagedAPI_CallerIsCheckedAgainInsideTheLock(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, path, body string
+		audited                  string // the action of the refused entry
+	}{
+		{"user save", "PUT", "/managed/users/bob", `{"rev":0,"password":"bob-password-1"}`, "user.create"},
+		{"user delete", "DELETE", "/managed/users/viewer?rev=2", "", "user.delete"},
+		{"connection save", "PUT", "/managed/connections/b3", `{"rev":0,"hostname":"h3","semp":{},"client":{}}`, "connection.create"},
+		{"connection delete", "DELETE", "/managed/connections/b2?rev=2", "", "connection.delete"},
+	} {
+		for _, gone := range []bool{false, true} {
+			name := tc.name + " by an admin demoted meanwhile"
+			status, code := http.StatusForbidden, "forbidden"
+			if gone {
+				name, status, code = tc.name+" by an admin removed meanwhile", http.StatusUnauthorized, "unauthenticated"
+			}
+			t.Run(name, func(t *testing.T) {
+				e := newManagedEnv(t, nil)
+				au := e.withAudit(t, auditSettings{})
+				putUser(t, e.api.store, userRec{Username: "boss", Admin: true}, "boss-password-1")
+				caller := e.cookie("boss", false)
+				seq, _ := e.api.store.seqs()
+				release := holdWriter(t, e.api.store.wr)
+				done := make(chan *httptest.ResponseRecorder)
+				go func() { done <- e.do(tc.method, tc.path, tc.body, caller) }()
+				waitForWaiters(t, 1)
+				changeUsersBehindTheWriter(e.api.store, func(users []userRec) []userRec {
+					i := slices.IndexFunc(users, func(u userRec) bool { return u.Username == "boss" })
+					if gone {
+						return slices.Delete(slices.Clone(users), i, i+1)
+					}
+					next := slices.Clone(users)
+					next[i].Admin = false
+					return next
+				})
+				release()
+				expect(t, <-done, status, code)
+				if _, now := e.api.store.usersNow(); now != seq+1 || e.api.store.hasConnection("b3") || !e.api.store.hasConnection("b2") {
+					t.Error("a refused change must write nothing")
+				}
+				if _, exists := e.api.store.isAdmin("bob"); exists {
+					t.Error("the refused save must not create the user")
+				}
+				entries := au.entries(t)
+				if len(entries) != 1 || entries[0].Actor != "boss" || entries[0].Action != tc.audited || entries[0].Outcome != auditRefused || entries[0].Code != code {
+					t.Errorf("want one refused entry for boss under %s with code %s, got %+v", tc.audited, code, entries)
+				}
+			})
+		}
+	}
+}
+
+// The settings save and the import take the lock through their own handlers
+// and re-check the caller there too: an administrator demoted while the
+// request waited is refused, and nothing is written.
+func TestManagedAPI_SettingsAndImportCheckTheCallerAgainInsideTheLock(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, path string
+		body               func(t *testing.T, e *managedEnv) string
+		audited            string // the action of the refused entry
+	}{
+		{"settings save", "PUT", "/managed/settings", func(t *testing.T, e *managedEnv) string {
+			return withSettingsRev(t, `{"logLevel":"debug"}`, e.settings(t).Rev)
+		}, auditSettingsUpdate},
+		{"import", "POST", "/managed/backup/import", func(t *testing.T, e *managedEnv) string {
+			return jsonBody(t, map[string]any{
+				"file": e.exported(t, nil), "passphrase": testPassphrase, "basis": e.api.currentBasis(),
+				"users": importMerge, "connections": importMerge, "settings": importReplace,
+			})
+		}, auditBackupImport},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newManagedEnv(t, nil)
+			au := e.withAudit(t, auditSettings{})
+			putUser(t, e.api.store, userRec{Username: "boss", Admin: true}, "boss-password-1")
+			caller := e.cookie("boss", false)
+			body := tc.body(t, e)
+			rev := e.settings(t).Rev
+			users, conns := e.api.store.seqs()
+			release := holdWriter(t, e.api.store.wr)
+			done := make(chan *httptest.ResponseRecorder)
+			go func() { done <- e.do(tc.method, tc.path, body, caller) }()
+			waitForWaiters(t, 1)
+			changeUsersBehindTheWriter(e.api.store, func(list []userRec) []userRec {
+				next := slices.Clone(list)
+				next[slices.IndexFunc(next, func(u userRec) bool { return u.Username == "boss" })].Admin = false
+				return next
+			})
+			release()
+			expect(t, <-done, http.StatusForbidden, "forbidden")
+			if nowUsers, nowConns := e.api.store.seqs(); nowUsers != users+1 || nowConns != conns || e.settings(t).Rev != rev {
+				t.Error("a refused change must write nothing")
+			}
+			entries := au.entries(t)
+			if len(entries) != 1 || entries[0].Actor != "boss" || entries[0].Action != tc.audited || entries[0].Outcome != auditRefused || entries[0].Code != "forbidden" {
+				t.Errorf("want one refused entry for boss under %s with code forbidden, got %+v", tc.audited, entries)
+			}
+		})
+	}
+}
+
+// A password that cannot be hashed, here because the client leaves while every
+// hashing slot is busy, is a 500 server_error: nothing is written, and the
+// cause goes to the log, not into the answer.
+func TestManagedAPI_APasswordThatCannotBeHashedIsAServerError(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	h := e.api.store.hasher
+	for range cap(h.slots) {
+		h.slots <- struct{}{}
+	}
+	req := httptest.NewRequest("PUT", "https://gw.example/managed/users/bob", strings.NewReader(`{"rev":0,"password":"bob-password-1"}`))
+	req.AddCookie(e.cookie("admin", false))
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	rec := httptest.NewRecorder()
+	e.root.ServeHTTP(rec, req.WithContext(ctx))
+	expect(t, rec, http.StatusInternalServerError, "server_error")
+	if _, exists := e.api.store.isAdmin("bob"); exists || strings.Contains(rec.Body.String(), "canceled") {
+		t.Errorf("nothing may be written and the cause stays out of the answer: %s", rec.Body.String())
+	}
+	if line := logLine(e.log.String(), `msg="admin request failed"`); !strings.Contains(line, "op=saveUser") || !strings.Contains(line, "context canceled") {
+		t.Errorf("the failure must be logged with its operation and cause: %s", e.log.String())
+	}
+}
+
+// An error the settings transaction does not know is a 500 server_error too:
+// the cause is logged and stays out of the answer.
+func TestManagedAPI_AnUnknownSettingsFailureIsAServerError(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	rec := httptest.NewRecorder()
+	e.api.settingsFailed(rec, httptest.NewRequest("PUT", "https://gw.example/managed/settings", nil), fmt.Errorf("the disk is on fire"))
+	expect(t, rec, http.StatusInternalServerError, "server_error")
+	if strings.Contains(rec.Body.String(), "fire") || !strings.Contains(e.log.String(), "the disk is on fire") {
+		t.Errorf("the cause belongs in the log, not in the answer: %s", rec.Body.String())
+	}
+}
+
+// A client that leaves while its request waits for the lock changes nothing
+// and writes no audit line: nobody reads the answer (499).
+func TestManagedAPI_ClientGoneWhileWaitingChangesNothing(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	au := e.withAudit(t, auditSettings{})
+	seq, _ := e.api.store.seqs()
+	release := holdWriter(t, e.api.store.wr)
+	req := httptest.NewRequest("PUT", "https://gw.example/managed/users/bob", strings.NewReader(`{"rev":0,"password":"bob-password-1"}`))
+	req.AddCookie(e.cookie("admin", false))
+	ctx, cancel := context.WithCancel(req.Context())
+	done := make(chan *httptest.ResponseRecorder)
+	go func() {
+		rec := httptest.NewRecorder()
+		e.root.ServeHTTP(rec, req.WithContext(ctx))
+		done <- rec
+	}()
+	waitForWaiters(t, 1)
+	cancel()
+	rec := <-done
+	release()
+	if rec.Code != statusClientGone {
+		t.Errorf("want 499, got %d %s", rec.Code, rec.Body.String())
+	}
+	if now, _ := e.api.store.seqs(); now != seq {
+		t.Error("nothing may change for a client that is gone")
+	}
+	if got := au.entries(t); len(got) != 0 {
+		t.Errorf("nothing happened, so nothing is audited: %+v", got)
+	}
+}
+
+// ----- races -------------------------------------------------------------------------------
+
+// raced runs every request at once, each as soon as the others are ready, and
+// returns their answers in the order given.
+func raced(t *testing.T, reqs ...func() *httptest.ResponseRecorder) []*httptest.ResponseRecorder {
+	t.Helper()
+	out := make([]*httptest.ResponseRecorder, len(reqs))
+	var ready, wg sync.WaitGroup
+	start := make(chan struct{})
+	ready.Add(len(reqs))
+	wg.Add(len(reqs))
+	for i, rq := range reqs {
+		go func() {
+			defer wg.Done()
+			ready.Done()
+			<-start
+			out[i] = rq()
+		}()
+	}
+	ready.Wait()
+	close(start)
+	wg.Wait()
+	return out
+}
+
+func statusesOf(recs []*httptest.ResponseRecorder) []int {
+	out := make([]int, len(recs))
+	for i, r := range recs {
+		out[i] = r.Code
+	}
+	slices.Sort(out)
+	return out
+}
+
+// Two saves of one record at one rev: exactly one wins, the other is stale.
+func TestManagedAPI_TwoSavesOfOneRecordOneWins(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	recs := raced(t,
+		func() *httptest.ResponseRecorder {
+			return e.do("PUT", "/managed/users/viewer", `{"rev":2,"readOnly":[]}`, c)
+		},
+		func() *httptest.ResponseRecorder {
+			return e.do("PUT", "/managed/users/viewer", `{"rev":2,"modules":[]}`, c)
+		},
+	)
+	if got := statusesOf(recs); !reflect.DeepEqual(got, []int{200, 409}) {
+		t.Fatalf("want one 200 and one 409, got %v", got)
+	}
+	for _, r := range recs {
+		if r.Code == http.StatusConflict {
+			expect(t, r, http.StatusConflict, "stale")
+		}
+	}
+	if u, _ := e.api.store.seqs(); u != 3 {
+		t.Errorf("one commit: want seq 3, got %d", u)
+	}
+}
+
+// Two creates of one name: one wins, the other is told it exists.
+func TestManagedAPI_TwoCreatesOfOneNameOneWins(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	recs := raced(t,
+		func() *httptest.ResponseRecorder {
+			return e.do("PUT", "/managed/users/bob", `{"rev":0,"password":"bob-password-1"}`, c)
+		},
+		func() *httptest.ResponseRecorder {
+			return e.do("PUT", "/managed/users/bob", `{"rev":0,"password":"bob-password-2"}`, c)
+		},
+	)
+	if got := statusesOf(recs); !reflect.DeepEqual(got, []int{200, 409}) {
+		t.Fatalf("want one 200 and one 409, got %v", got)
+	}
+	for _, r := range recs {
+		if r.Code == http.StatusConflict {
+			expect(t, r, http.StatusConflict, "exists")
+		}
+	}
+}
+
+// Saves of different records of one file all land: each is stale only against
+// its own record.
+func TestManagedAPI_SavesOfDifferentRecordsBothLand(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	recs := raced(t,
+		func() *httptest.ResponseRecorder {
+			return e.do("PUT", "/managed/connections/b1", `{"rev":1,"hostname":"host1b","semp":{"port":"1943","user":"mon"},"client":{"port":"1443"}}`, c)
+		},
+		func() *httptest.ResponseRecorder {
+			return e.do("PUT", "/managed/connections/b2", `{"rev":2,"hostname":"host2b","semp":{"port":"1943","user":"mon"},"client":{"port":"1443"}}`, c)
+		},
+	)
+	if got := statusesOf(recs); !reflect.DeepEqual(got, []int{200, 200}) {
+		t.Fatalf("want two 200, got %v", got)
+	}
+	if currentConn(t, e.api.store, "b1").Hostname != "host1b" || currentConn(t, e.api.store, "b2").Hostname != "host2b" {
+		t.Error("both saves must stand")
+	}
+}
+
+// A delete and a save of one record at one rev: whichever commits first wins,
+// and the other finds the record gone (404) or changed (409 stale).
+func TestManagedAPI_DeleteRacingASave(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	recs := raced(t,
+		func() *httptest.ResponseRecorder { return e.do("DELETE", "/managed/users/viewer?rev=2", "", c) },
+		func() *httptest.ResponseRecorder {
+			return e.do("PUT", "/managed/users/viewer", `{"rev":2,"readOnly":[]}`, c)
+		},
+	)
+	del, save := recs[0], recs[1]
+	switch {
+	case del.Code == http.StatusNoContent:
+		expect(t, save, http.StatusNotFound, "not_found")
+	case save.Code == http.StatusOK:
+		expect(t, del, http.StatusConflict, "stale")
+	default:
+		t.Fatalf("one of the two must win, got delete %d and save %d", del.Code, save.Code)
+	}
+}
+
+// Two administrators demoting each other at once: whichever commits first
+// wins, and the other is no longer an administrator when it gets the lock (403),
+// or no longer has a session at all when its request starts after the first
+// commit ended it (401), so someone is always left.
+func TestManagedAPI_TwoAdminsDemotingEachOther(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	putUser(t, e.api.store, userRec{Username: "boss", Admin: true}, "boss-password-1")
+	admin, boss := e.cookie("admin", false), e.cookie("boss", false)
+	recs := raced(t,
+		func() *httptest.ResponseRecorder {
+			return e.do("PUT", "/managed/users/boss", withRev(`{"admin":false}`, e.userRev("boss")), admin)
+		},
+		func() *httptest.ResponseRecorder {
+			return e.do("PUT", "/managed/users/admin", withRev(`{"admin":false}`, e.userRev("admin")), boss)
+		},
+	)
+	got := statusesOf(recs)
+	if got[0] != http.StatusOK || (got[1] != http.StatusForbidden && got[1] != http.StatusUnauthorized) {
+		t.Fatalf("want one 200 and one 401 or 403, got %v", got)
+	}
+	if n := countAdmins(e.api.store.listUsers()); n != 1 {
+		t.Errorf("exactly one administrator must be left, got %d", n)
+	}
+}
+
+// Two administrators each demoting themselves at once: the second still is an
+// administrator when it gets the lock, and the last-admin rule stops it.
+func TestManagedAPI_TwoAdminsDemotingThemselves(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	putUser(t, e.api.store, userRec{Username: "boss", Admin: true}, "boss-password-1")
+	admin, boss := e.cookie("admin", false), e.cookie("boss", false)
+	recs := raced(t,
+		func() *httptest.ResponseRecorder {
+			return e.do("PUT", "/managed/users/admin", withRev(`{"admin":false}`, e.userRev("admin")), admin)
+		},
+		func() *httptest.ResponseRecorder {
+			return e.do("PUT", "/managed/users/boss", withRev(`{"admin":false}`, e.userRev("boss")), boss)
+		},
+	)
+	if got := statusesOf(recs); !reflect.DeepEqual(got, []int{200, 409}) {
+		t.Fatalf("want one 200 and one 409, got %v", got)
+	}
+	for _, r := range recs {
+		if r.Code == http.StatusConflict {
+			expect(t, r, http.StatusConflict, "last_admin")
+		}
+	}
+	if n := countAdmins(e.api.store.listUsers()); n != 1 {
+		t.Errorf("exactly one administrator must be left, got %d", n)
+	}
+}
+
+// A user changing their own password while an administrator saves the same
+// user: both land, whichever goes first. The password does not move the rev,
+// and the save with no password keeps the hash the user set.
+func TestManagedAPI_OwnPasswordRacingAnAdminSave(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	admin, viewer := e.cookie("admin", false), e.cookie("viewer", false)
+	var page *httptest.ResponseRecorder
+	var save *httptest.ResponseRecorder
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		page = e.form("/login/password", passwordForm(viewerPW, "viewer-new-pw-1", "viewer-new-pw-1"), viewer)
+	}()
+	go func() {
+		defer wg.Done()
+		save = e.do("PUT", "/managed/users/viewer", `{"rev":2,"readOnly":[],"modules":["queue-browser"]}`, admin)
+	}()
+	wg.Wait()
+	expectRedirect(t, page, "/")
+	expect(t, save, http.StatusOK, "")
+	if !signsIn(t, e.api.store, "viewer", "viewer-new-pw-1") || signsIn(t, e.api.store, "viewer", viewerPW) {
+		t.Error("the admin's save must keep the password the user set")
+	}
+	if got, _ := userNamed(e.api.store.listUsers(), "viewer"); len(got.ReadOnly) != 0 {
+		t.Errorf("the admin's save must stand: %+v", got)
 	}
 }

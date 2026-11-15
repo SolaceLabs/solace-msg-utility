@@ -47,11 +47,14 @@ func newManagedRouting(cfg config, lv *live, src configSource, upstream http.Rou
 }
 
 // setAuditor hands the audit trail to every piece that records to it. Each
-// piece keeps its own *auditor field, nil until here.
+// piece keeps its own *auditor field, nil until here. The writer's gate is the
+// trail too: with audit.onFailure refuse, a lost record refuses every further
+// change until a line can be written again (writer.go).
 func (mr *managedRoutes) setAuditor(a *auditor) {
 	mr.audit = a
 	h := mr.api.(*managedHandler)
 	h.audit = a
+	h.store.wr.gate = a.gate
 	h.throttle.audit = a // the sign-in pages share it
 	h.relay.(*sempRelay).audit = a
 	h.smf.(*smfGate).audit = a
@@ -70,7 +73,17 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	if err != nil {
 		return nil, err
 	}
-	sf := newSettingsFile(src, cfg, lv, logger.With("component", "settings"))
+	// The one writer of the data directory was made with the store, once the
+	// store key was known (loadStore): the settings file and the backup
+	// schedule share it, so one lock covers every file the gateway writes.
+	// loadStore remembered what users.yaml and connections.yaml hold and
+	// newSettingsFile remembers config.yaml; backup.yaml is the last one. All
+	// of it is read before anything is served, so each later write can tell a
+	// hand edit from its own.
+	if err := st.sums.rememberDisk(schedulePath); err != nil {
+		return nil, err
+	}
+	sf := newSettingsFile(src, cfg, lv, st.wr, logger.With("component", "settings"))
 	backups, err := newBackupService(cfg.backupDir, schedulePath, st, sf, h, now, logger.With("component", "backup"))
 	if err != nil {
 		return nil, err
@@ -78,7 +91,10 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	ss := newSessions(lv.sessionLimits, now)
 	th := newThrottle(lv.loginLimits, now, logger.With("component", "throttle"))
 	// Revocation: open SMF sockets close when their session is ended, their
-	// user changes, or a store edit takes their VPN away (sockets.go).
+	// user changes, or a store edit takes their VPN away (sockets.go). The
+	// store runs recheck after every commit that can change an entitlement, and
+	// a socket is listed before its access is checked (smf.go), so a socket
+	// that read the old snapshot is always in the list when the hook runs.
 	sockets := newSocketRegistry(func(user, broker, vpn string) bool {
 		_, ok := st.smfTarget(user, broker, vpn)
 		return ok

@@ -16,8 +16,8 @@ export type { UserList } from '../../modules/user-management/service';
 export type { ManagedConnRecord } from '../../modules/connection-management/service';
 export type { GatewaySettings, SettingsView } from '../../modules/gateway-settings/service';
 
-/** A user as `GET /managed/users` lists one (the gateway adds the flag). */
-export type ListedUser = ManagedUser & { mustChangePassword: boolean };
+/** A user as `GET /managed/users` lists one (the gateway adds the flag and the record's rev). */
+export type ListedUser = ManagedUser & { mustChangePassword: boolean; rev: number };
 
 /** A users-file record (store.go `userRec`), the password in plain text: it is fake. */
 export interface UserRec {
@@ -47,6 +47,7 @@ export interface ConnRec {
 
 /** A connection as `GET /managed/connections` lists it: no password, both schemes named. */
 export interface ListedConn {
+    rev: number;
     broker: string;
     hostname: string;
     semp: { scheme: string; port: string; user: string; pass: string };

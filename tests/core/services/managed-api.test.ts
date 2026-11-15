@@ -57,6 +57,19 @@ describe('core/services/managed-api — managedRequest', () => {
         });
     });
 
+    it('carries the current rev of a stale save (a number, or text for the settings)', async () => {
+        respond(409, { error: 'stale', rev: 7 });
+        expect(await managedRequest('PUT', '/managed/users/bob', {})).toEqual({ ok: false, status: 409, code: 'stale', rev: 7 });
+        respond(409, { error: 'stale', rev: 'abc_-9' });
+        expect(await managedRequest('PUT', '/managed/settings', {})).toEqual({ ok: false, status: 409, code: 'stale', rev: 'abc_-9' });
+    });
+
+    it('carries the current basis of a stale import untouched', async () => {
+        const basis = { users: 4, connections: 2, settings: 'xyz' };
+        respond(409, { error: 'stale', basis });
+        expect(await managedRequest('POST', '/managed/backup/import', {})).toEqual({ ok: false, status: 409, code: 'stale', basis });
+    });
+
     it('falls back to http_<status> when the error body is not the gateway JSON', async () => {
         respond(502, undefined, true);
         expect(await managedRequest('GET', '/managed/me')).toEqual(expect.objectContaining({ ok: false, status: 502, code: 'http_502' }));
@@ -116,6 +129,12 @@ describe('core/services/managed-api — managedErrorMessage', () => {
         ['rate_limited', 'Too many requests. Wait a minute and try again.'],
         ['would_lock_out', 'This change would lock this browser out of the gateway.'],
         ['config_changed_on_disk', 'config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.'],
+        ['stale', 'This was changed by someone else since you opened it. Reload to see the current version.'],
+        ['exists', 'That name already exists. Use Edit to change it.'],
+        ['rev_required', 'The page did not send the version it was working from, so the gateway refused the change. Reload the page and try again.'],
+        ['store_changed_on_disk', 'A data file (users, connections or backup settings) was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.'],
+        ['store_write_failed', 'The gateway could not write its data files, so nothing was changed. Its log has the cause.'],
+        ['audit_unavailable', 'The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.'],
         ['config_unreadable', 'The gateway cannot read its config.yaml. Its log has the cause.'],
         ['server_error', 'The gateway could not complete the request. Its log has the cause.'],
         ['read_only', 'The gateway relays SEMP reads only; this request would change the broker.'],

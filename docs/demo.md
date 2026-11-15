@@ -155,13 +155,24 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
   A snapshot of an older version, or one that cannot be read at all, is ignored without a message.
 - **Changes apply at once,** to the signed-in user too. Change your own password or Administrator flag, or delete
   your account, and you are signed out. Revoke a user's access and that user's broker connection closes.
+- **Versions and stale saves are simulated.** Each user, connection, the settings and the schedule carry a version,
+  and a save made from an out-of-date read is refused as in the product, with the same codes: *changed by someone else*
+  with Reload, *deleted by someone else*, a name that already exists, and an import refused after a change since the
+  preview. Nothing else edits the demo's data while a form is open, so a stale save appears only when a test or
+  a second session in the same page changes the record first.
+  The rules (a password-only change keeps a record's version, an import restamps every record it imports) follow the
+  gateway's.
+- **Not simulated, beyond the list below:** a write that fails (full disk), a store file changed on the host
+  (`store_changed_on_disk`), an audit log that cannot be written (`audit_unavailable`, with `audit.onFailure` set to
+  `refuse`), and the journal and its recovery after a crash: the demo has no disk. The **Demo controls** can still make
+  `config.yaml` read as edited on the host or unreadable.
 - **Not simulated:**
   - the cross-site request check;
   - the request size limit;
   - the sign-in limit for clients without a session (the per-account lockout after five wrong passwords is
     simulated);
   - the limit on concurrent requests.
-- **The audit options are saved, no audit trail is written.** Gateway Settings shows the two Audit trail checkboxes (`audit.stdout`, `audit.access`, both off at first) and saves them, but the demo keeps no audit log and has no Audit page, as the real gateway has none in the console.
+- **The audit options are saved, no audit trail is written.** Gateway Settings shows the two Audit trail checkboxes (`audit.stdout`, `audit.access`, both off at first) and the `audit.onFailure` choice (`continue` at first) and saves them, but the demo keeps no audit log and has no Audit page, as the real gateway has none in the console.
 - **The client access list** is saved and checked against the demo's own address, `192.0.2.10`, so a list that would
   lock you out is refused. A saved list is never enforced.
 

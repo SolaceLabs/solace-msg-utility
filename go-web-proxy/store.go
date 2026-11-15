@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -44,6 +45,9 @@ type permRow struct {
 
 type userRec struct {
 	Username string `yaml:"username"`
+	// Rev is the record's version: the file's seq as of the last change the
+	// admin console can see (saveUser). 1 to the file's seq, checked at load.
+	Rev      int    `yaml:"rev"`
 	Password string `yaml:"password"` // pbkdf2-sha256 hash (password.go)
 	// MustChangePassword limits the user's session to the password page until
 	// they set a new one. Set for the bootstrap admin.
@@ -57,7 +61,10 @@ type userRec struct {
 	Modules *[]string `yaml:"modules,omitempty"`
 }
 
+// usersDoc is users.yaml. Seq moves on every commit of the file and is stored,
+// never derived from the highest rev: after a delete no record holds it.
 type usersDoc struct {
+	Seq   int       `yaml:"seq"`
 	Users []userRec `yaml:"msg-utility-users"`
 }
 
@@ -116,12 +123,15 @@ func schemeOK(s, tls, plain string) bool {
 
 type connRec struct {
 	Broker   string    `yaml:"broker"`
+	Rev      int       `yaml:"rev"` // as userRec.Rev, against connections.yaml's seq
 	Hostname string    `yaml:"hostname"`
 	Semp     sempRec   `yaml:"semp"`
 	Client   clientRec `yaml:"client"`
 }
 
+// connsDoc is connections.yaml, with a seq as usersDoc has.
 type connsDoc struct {
+	Seq         int       `yaml:"seq"`
 	Connections []connRec `yaml:"msg-utility-connections"`
 }
 
@@ -153,33 +163,36 @@ type profileResponse struct {
 
 // ----- store ------------------------------------------------------------------
 
-// store holds the parsed users and connections, guarded by an
-// RWMutex (reads under RLock, CRUD writes under Lock). The file paths are
+// store holds the parsed users and connections, guarded by an RWMutex: reads
+// under RLock, and the memory swap of a commit under Lock. Memory changes only
+// there (publish), inside the writer's publish lock. The file paths are
 // retained so admin-CRUD mutations can persist back to the same files. Both
-// files are encrypted with the store key (storecrypt.go), so the gateway is
-// the only writer and nobody edits them by hand.
+// files are encrypted with the store key (storecrypt.go), and every change to
+// them goes through the writer (wr), so the gateway is the only writer and
+// nobody edits them by hand.
 type store struct {
 	mu        sync.RWMutex
 	users     []userRec
 	conns     []connRec
+	usersSeq  int    // seq of users.yaml, moves on every commit of it
+	connsSeq  int    // seq of connections.yaml; 0 until the file exists
 	usersPath string // retained for CRUD persistence
 	connsPath string // retained for CRUD persistence
 	seal      *sealer
 	hasher    *hasher
 
-	// onChange runs after every call to upsertUser, deleteUser,
-	// upsertConnection or deleteConnection that returns no error, outside mu
-	// (the SMF sockets re-check their access, sockets.go). Set once before
-	// serving.
-	onChange func()
-}
+	// wr is the one writer of the data directory, made by loadStore with the
+	// checksums of the store key (sums). The settings and the backup schedule
+	// share it, so one lock covers every store file; the caller sets its gate
+	// and exit hook before serving.
+	wr   *writer
+	sums *checksums
 
-// afterWrite is deferred first by each mutator that can change entitlement,
-// so it runs after the mutator's own deferred unlock.
-func (s *store) afterWrite(err *error) {
-	if *err == nil && s.onChange != nil {
-		s.onChange()
-	}
+	// onChange runs after every committed change that can alter an entitlement
+	// (a user or connection save or delete, an import): the SMF sockets
+	// re-check their access (sockets.go). It runs under the writer lock and
+	// outside mu, and must not call the writer. Set once before serving.
+	onChange func()
 }
 
 type storeOptions struct {
@@ -202,14 +215,21 @@ func loadStore(opts storeOptions, logger *slog.Logger) (*store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store key file %q: %w", opts.keyPath, err)
 	}
-	s := &store{usersPath: opts.usersPath, connsPath: opts.connsPath, seal: sl, hasher: opts.hasher}
+	sums, err := newChecksums(key)
+	if err != nil {
+		return nil, fmt.Errorf("store key file %q: %w", opts.keyPath, err)
+	}
+	s := &store{
+		usersPath: opts.usersPath, connsPath: opts.connsPath, seal: sl, hasher: opts.hasher,
+		sums: sums, wr: newWriter(filepath.Dir(opts.usersPath), sums, logger),
+	}
 
 	if _, err := os.Stat(opts.usersPath); errors.Is(err, os.ErrNotExist) {
 		doc, err := bootstrapUsers(opts, sl, logger)
 		if err != nil {
 			return nil, fmt.Errorf("bootstrap users file %q: %w", opts.usersPath, err)
 		}
-		s.users = doc.Users
+		s.users, s.usersSeq = doc.Users, doc.Seq
 	} else {
 		for _, name := range []string{envAdminPassword, envAdminPasswordFile} {
 			if opts.getenv(name) != "" {
@@ -223,7 +243,10 @@ func loadStore(opts storeOptions, logger *slog.Logger) (*store, error) {
 		if err := validateUsers(doc.Users); err != nil {
 			return nil, fmt.Errorf("users file %q: %w", opts.usersPath, err)
 		}
-		s.users = doc.Users
+		if err := validateUserRevs(doc.Users, doc.Seq); err != nil {
+			return nil, fmt.Errorf("users file %q: %w", opts.usersPath, err)
+		}
+		s.users, s.usersSeq = doc.Users, doc.Seq
 	}
 
 	if _, err := os.Stat(opts.connsPath); errors.Is(err, os.ErrNotExist) {
@@ -236,7 +259,18 @@ func loadStore(opts storeOptions, logger *slog.Logger) (*store, error) {
 		if err := validateConns(doc.Connections); err != nil {
 			return nil, fmt.Errorf("connections file %q: %w", opts.connsPath, err)
 		}
-		s.conns = doc.Connections
+		if err := validateConnRevs(doc.Connections, doc.Seq); err != nil {
+			return nil, fmt.Errorf("connections file %q: %w", opts.connsPath, err)
+		}
+		s.conns, s.connsSeq = doc.Connections, doc.Seq
+	}
+	// What is on disk now is what the writer compares with before every write
+	// (the changed-on-disk refusal). A connections file that does not exist is
+	// remembered as absent.
+	for _, p := range []string{opts.usersPath, opts.connsPath} {
+		if err := sums.rememberDisk(p); err != nil {
+			return nil, err
+		}
 	}
 	return s, nil
 }
@@ -302,6 +336,37 @@ func validateConns(conns []connRec) error {
 			return fmt.Errorf("broker %q appears more than once", c.Broker)
 		}
 		seen[c.Broker] = true
+	}
+	return nil
+}
+
+// revRule is the load check on a record's rev, for the errors below.
+const revRule = "a rev must be from 1 to the file's seq, and the gateway never writes it otherwise; restore the file from a backup"
+
+// validateUserRevs holds the users of a file with the given seq to the load
+// check: every rev is at least 1 and at most seq. Run after validateUsers, so
+// a file that is wrong in another way says so first.
+func validateUserRevs(users []userRec, seq int) error {
+	if seq < 0 {
+		return fmt.Errorf("seq is %d, which the gateway never writes; restore the file from a backup", seq)
+	}
+	for _, u := range users {
+		if u.Rev < 1 || u.Rev > seq {
+			return fmt.Errorf("user %q has rev %d and the file's seq is %d: %s", u.Username, u.Rev, seq, revRule)
+		}
+	}
+	return nil
+}
+
+// validateConnRevs is validateUserRevs for the connections file.
+func validateConnRevs(conns []connRec, seq int) error {
+	if seq < 0 {
+		return fmt.Errorf("seq is %d, which the gateway never writes; restore the file from a backup", seq)
+	}
+	for _, c := range conns {
+		if c.Rev < 1 || c.Rev > seq {
+			return fmt.Errorf("broker %q has rev %d and the file's seq is %d: %s", c.Broker, c.Rev, seq, revRule)
+		}
 	}
 	return nil
 }
@@ -550,6 +615,17 @@ func toRespPerms(rows []permRow) []respPerm {
 }
 
 // ----- admin CRUD --------------------------------------------------------------
+//
+// Every change to users.yaml or connections.yaml goes through the writer
+// (writer.go): one transaction at a time, the order of checks pinned by the
+// design (caller, disk, existence, rev, cross-record rules), planned on
+// copies, staged with the round-trip check, and published by swapping memory
+// only after the commit point. The slow, input-only work (hashing a password)
+// happens before the lock.
+//
+// Each file carries a seq that moves on every commit; a record's rev becomes
+// the new seq only when the record changed as the admin console shows it
+// (sameUserView, sameConnView). A password-only change moves seq and keeps rev.
 
 // errBlankNewUserPassword rejects creating a brand-new user with no password.
 // (A blank password on EDIT legitimately keeps the existing hash.)
@@ -566,6 +642,27 @@ var errUserNotFound = errors.New("user not found")
 // administrator reset it while the check ran.
 var errAccountChanged = errors.New("the account changed while its password was checked")
 
+// The caller re-check inside the lock: the user who asked for the change was
+// deleted (401 unauthenticated) or lost the admin flag (403 forbidden) while
+// the request waited.
+var (
+	errCallerGone     = errors.New("the requesting user no longer exists")
+	errCallerNotAdmin = errors.New("the requesting user is no longer an administrator")
+)
+
+// importInvalidError is an import section that breaks the load rules: 422
+// invalid, with the section name for the message.
+type importInvalidError struct {
+	section string // "users" or "connections"
+	err     error
+}
+
+func (e *importInvalidError) Error() string {
+	return "The backup's " + e.section + " cannot be imported: " + e.err.Error()
+}
+
+func (e *importInvalidError) Unwrap() error { return e.err }
+
 func countAdmins(users []userRec) int {
 	n := 0
 	for _, u := range users {
@@ -576,9 +673,120 @@ func countAdmins(users []userRec) int {
 	return n
 }
 
+// savedUser is what a committed user save tells the handler: the record's rev
+// after the save (the answer's body), the new seq of users.yaml (the audit
+// line's "wrote"), and whether the change must end the user's sessions (a new
+// password or a changed admin flag).
+type savedUser struct {
+	rev, seq     int
+	dropSessions bool
+}
+
+// savedConn is the same for a connection: no sessions are involved.
+type savedConn struct {
+	rev, seq int
+}
+
+// seqs are the seq of users.yaml and connections.yaml as of now: the users
+// and connections parts of an import's basis.
+func (s *store) seqs() (users, conns int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.usersSeq, s.connsSeq
+}
+
+// usersNow is the current user list (the slice is a copy; the records share
+// their inner slices, which nothing mutates in place) and the file's seq.
+func (s *store) usersNow() ([]userRec, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.Clone(s.users), s.usersSeq
+}
+
+// connsNow is usersNow for the connections.
+func (s *store) connsNow() ([]connRec, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.Clone(s.conns), s.connsSeq
+}
+
+// publish swaps memory for the committed documents, nil leaving a list alone,
+// in one critical section: a reader sees the old state or the new, never one
+// list of an import from each. It runs from tx.onPublish.
+func (s *store) publish(u *usersDoc, c *connsDoc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if u != nil {
+		s.users, s.usersSeq = u.Users, u.Seq
+	}
+	if c != nil {
+		s.conns, s.connsSeq = c.Connections, c.Seq
+	}
+}
+
+// changed is the after-commit hook of every change that can alter an
+// entitlement: the SMF sockets re-check their access. It runs under the writer
+// lock and outside the store's own.
+func (s *store) changed() {
+	if s.onChange != nil {
+		s.onChange()
+	}
+}
+
+// checkCaller re-checks, against the current users, that the requesting user
+// still exists and is an admin. An empty caller skips it (a change the gateway
+// makes for itself, and tests).
+func (s *store) checkCaller(caller string) error {
+	if caller == "" {
+		return nil
+	}
+	admin, exists := s.isAdmin(caller)
+	switch {
+	case !exists:
+		return errCallerGone
+	case !admin:
+		return errCallerNotAdmin
+	}
+	return nil
+}
+
+// checkRev is the existence and rev rules of a whole-record save or delete:
+// rev 0 is a create and refuses an existing name, rev above 0 needs the
+// record and its current rev. cur is the record's current rev, valid when
+// found.
+func checkRev(found bool, cur, rev int) error {
+	switch {
+	case rev == 0 && found:
+		return errExists
+	case rev > 0 && !found:
+		return errNotFound
+	case rev > 0 && cur != rev:
+		return newStale(cur)
+	}
+	return nil
+}
+
+// sameUserView reports whether two users look the same in the admin console:
+// what userToOutput shows. The password hash is never shown, and neither is
+// the rev. Absent grant lists equal empty ones; an absent module list differs
+// from an empty one.
+func sameUserView(a, b userRec) bool {
+	return a.Username == b.Username && a.Admin == b.Admin && a.MustChangePassword == b.MustChangePassword &&
+		slices.Equal(a.Operate, b.Operate) && slices.Equal(a.ReadOnly, b.ReadOnly) && sameModules(a.Modules, b.Modules)
+}
+
+// sameConnView is sameUserView for a connection: what connToOutput shows,
+// which leaves every password out. A blank scheme is TLS either way.
+func sameConnView(a, b connRec) bool {
+	return a.Broker == b.Broker && a.Hostname == b.Hostname &&
+		orTLS(a.Semp.Scheme, sempTLS) == orTLS(b.Semp.Scheme, sempTLS) && a.Semp.Port == b.Semp.Port && a.Semp.Username == b.Semp.Username &&
+		orTLS(a.Client.Scheme, clientTLS) == orTLS(b.Client.Scheme, clientTLS) && a.Client.Port == b.Client.Port &&
+		slices.EqualFunc(a.Client.MsgVpns, b.Client.MsgVpns, func(x, y vpnRec) bool { return x.Name == y.Name && x.Username == y.Username })
+}
+
 // listUsers returns a deep copy of the stored users — the nested permRow and
 // module slices are cloned so a caller can't mutate the live store through the
-// result.
+// result. Each record carries its rev.
 // Callers must strip secrets before sending them to a client (see userToOutput).
 func (s *store) listUsers() []userRec {
 	s.mu.RLock()
@@ -595,121 +803,167 @@ func (s *store) listUsers() []userRec {
 	return out
 }
 
-// upsertUser replaces the user with the same username, or appends a new one,
-// then persists. password is plaintext: blank on an EXISTING user keeps the
-// stored hash (edit without changing the password), blank on a NEW user is
-// rejected (errBlankNewUserPassword). The hash is computed before the lock.
-// Demoting the last admin is refused (errLastAdmin). dropSessions reports a
-// change that must end the user's sessions: a new password or a changed admin
-// flag. Persist-then-commit: the in-memory slice is swapped only after the file
-// write succeeds, so a failed write leaves the store unchanged.
-func (s *store) upsertUser(ctx context.Context, u userRec, password string) (dropSessions bool, err error) {
-	defer s.afterWrite(&err)
+// saveUser creates (rev 0) or edits (rev above 0) the user u.Username.
+// caller is the requesting admin, re-checked inside the lock ("" skips it).
+// password is plaintext: blank on an EXISTING user keeps the stored hash and
+// change flag as they are NOW (inside the lock, so a password the user set
+// meanwhile survives), blank on a NEW user is errBlankNewUserPassword. The
+// hash is computed before the lock. Order of refusals once inside: caller
+// (errCallerGone, errCallerNotAdmin), disk (*changedOnDiskError), existence
+// (errExists, errNotFound), rev (a stale error naming the current rev), then
+// errBlankNewUserPassword and errLastAdmin (demoting the only admin). A write
+// that fails comes back as *writeFailedError, with memory and files as they
+// were. A refusal leaves seq alone.
+func (s *store) saveUser(ctx context.Context, caller string, u userRec, password string, rev int) (savedUser, error) {
+	if rev < 0 {
+		return savedUser{}, errRevRequired
+	}
 	if password != "" {
-		if u.Password, err = s.hasher.hash(ctx, password); err != nil {
-			return false, err
+		hash, err := s.hasher.hash(ctx, password)
+		if err != nil {
+			return savedUser{}, err
 		}
+		u.Password = hash
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	next := append([]userRec(nil), s.users...)
-	found := false
-	for i := range next {
-		if next[i].Username != u.Username {
-			continue
+	var out savedUser
+	err := s.wr.Do(ctx, func(tx *txn) error {
+		if err := s.checkCaller(caller); err != nil {
+			return err
 		}
-		old := next[i]
-		if old.Admin && !u.Admin && countAdmins(next) <= 1 {
-			return false, errLastAdmin
+		if err := tx.check(s.usersPath); err != nil {
+			return err
 		}
-		if password == "" {
-			u.Password = old.Password // keep existing
-			u.MustChangePassword = old.MustChangePassword
+		cur, seq := s.usersNow()
+		i := slices.IndexFunc(cur, func(r userRec) bool { return r.Username == u.Username })
+		old := userRec{}
+		if i >= 0 {
+			old = cur[i]
 		}
-		dropSessions = password != "" || old.Admin != u.Admin
-		next[i] = u
-		found = true
-		break
+		if err := checkRev(i >= 0, old.Rev, rev); err != nil {
+			return err
+		}
+		next, rec, newSeq := slices.Clone(cur), u, seq+1
+		drop := false
+		if i >= 0 {
+			if old.Admin && !u.Admin && countAdmins(cur) <= 1 {
+				return errLastAdmin
+			}
+			if password == "" {
+				rec.Password, rec.MustChangePassword = old.Password, old.MustChangePassword
+			}
+			drop = password != "" || old.Admin != u.Admin
+			rec.Rev = old.Rev
+			if !sameUserView(old, rec) {
+				rec.Rev = newSeq
+			}
+			next[i] = rec
+		} else {
+			if password == "" {
+				return errBlankNewUserPassword
+			}
+			rec.Rev = newSeq
+			next = append(next, rec)
+		}
+		doc := usersDoc{Seq: newSeq, Users: next}
+		s.seal.stageDoc(tx, roleUsers, s.usersPath, doc)
+		tx.onPublish(func() { s.publish(&doc, nil) })
+		tx.afterCommit(s.changed)
+		out = savedUser{rev: rec.Rev, seq: newSeq, dropSessions: drop}
+		return nil
+	})
+	if err != nil {
+		return savedUser{}, err
 	}
-	if !found {
-		if password == "" {
-			return false, errBlankNewUserPassword
-		}
-		next = append(next, u)
-	}
-	if err := s.seal.writeDoc(roleUsers, s.usersPath, usersDoc{Users: next}); err != nil {
-		return false, err
-	}
-	s.users = next
-	return dropSessions, nil
+	return out, nil
 }
 
-// setPassword is a user changing their own password: it stores the new hash
-// and clears MustChangePassword, but only while the record still holds
-// expect, the hash the current password was checked against; otherwise
-// errAccountChanged, and nothing is written (an administrator's reset during
-// the check wins). committed runs under the store lock once the new hash is
-// stored, so the session it creates cannot slip past a revocation. The caller
-// ends the user's other sessions.
+// setPassword is a user changing their own password, the one field-scoped
+// write: it sends no rev, and inside the lock it sets only the password hash
+// and clears MustChangePassword on the record as it is now. It is refused with
+// errAccountChanged when the record no longer holds expect, the hash the
+// current password was checked against (an administrator's reset during the
+// check wins), and with errUserNotFound when the user is gone. seq moves; the
+// user's rev moves only when the change flag was set. committed runs under the
+// writer lock once the new hash is published, so the session it creates cannot
+// slip past a revocation. The new password is hashed before the lock. The
+// caller ends the user's other sessions.
 func (s *store) setPassword(ctx context.Context, username, password, expect string, committed func()) error {
 	hash, err := s.hasher.hash(ctx, password)
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	next := append([]userRec(nil), s.users...)
-	for i := range next {
-		if next[i].Username != username {
-			continue
-		}
-		if next[i].Password != expect {
-			return errAccountChanged
-		}
-		next[i].Password = hash
-		next[i].MustChangePassword = false
-		if err := s.seal.writeDoc(roleUsers, s.usersPath, usersDoc{Users: next}); err != nil {
+	return s.wr.Do(ctx, func(tx *txn) error {
+		if err := tx.check(s.usersPath); err != nil {
 			return err
 		}
-		s.users = next
-		committed()
+		cur, seq := s.usersNow()
+		i := slices.IndexFunc(cur, func(r userRec) bool { return r.Username == username })
+		switch {
+		case i < 0:
+			return errUserNotFound
+		case cur[i].Password != expect:
+			return errAccountChanged
+		}
+		next, newSeq := slices.Clone(cur), seq+1
+		rec := cur[i]
+		rec.Password = hash
+		if rec.MustChangePassword {
+			rec.MustChangePassword, rec.Rev = false, newSeq
+		}
+		next[i] = rec
+		doc := usersDoc{Seq: newSeq, Users: next}
+		s.seal.stageDoc(tx, roleUsers, s.usersPath, doc)
+		tx.onPublish(func() { s.publish(&doc, nil) })
+		tx.afterCommit(committed)
 		return nil
-	}
-	return errUserNotFound
+	})
 }
 
-// deleteUser removes the named user and persists. Returns found=false (and no
-// error, no write) when there is no such user, or errLastAdmin when the target
-// is the only remaining admin.
-func (s *store) deleteUser(username string) (found bool, err error) {
-	defer s.afterWrite(&err)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	idx := -1
-	for i := range s.users {
-		if s.users[i].Username == username {
-			idx = i
-			break
+// deleteUser removes the named user, which must stand at rev (above 0). The
+// refusals are saveUser's, with errNotFound for a user that is gone and
+// errLastAdmin for the only admin; a rev of 0 or less is errRevRequired.
+// seq of users.yaml moves and no record holds the new value. The handler ends
+// the user's sessions.
+func (s *store) deleteUser(ctx context.Context, caller, username string, rev int) (seq int, err error) {
+	if rev <= 0 {
+		return 0, errRevRequired
+	}
+	err = s.wr.Do(ctx, func(tx *txn) error {
+		if err := s.checkCaller(caller); err != nil {
+			return err
 		}
+		if err := tx.check(s.usersPath); err != nil {
+			return err
+		}
+		cur, prev := s.usersNow()
+		i := slices.IndexFunc(cur, func(r userRec) bool { return r.Username == username })
+		curRev := 0
+		if i >= 0 {
+			curRev = cur[i].Rev
+		}
+		if err := checkRev(i >= 0, curRev, rev); err != nil {
+			return err
+		}
+		if cur[i].Admin && countAdmins(cur) <= 1 {
+			return errLastAdmin
+		}
+		doc := usersDoc{Seq: prev + 1, Users: slices.Delete(slices.Clone(cur), i, i+1)}
+		s.seal.stageDoc(tx, roleUsers, s.usersPath, doc)
+		tx.onPublish(func() { s.publish(&doc, nil) })
+		tx.afterCommit(s.changed)
+		seq = doc.Seq
+		return nil
+	})
+	if err != nil {
+		return 0, err
 	}
-	if idx == -1 {
-		return false, nil
-	}
-	if s.users[idx].Admin && countAdmins(s.users) <= 1 {
-		return false, errLastAdmin
-	}
-	next := append(append([]userRec(nil), s.users[:idx]...), s.users[idx+1:]...)
-	if err := s.seal.writeDoc(roleUsers, s.usersPath, usersDoc{Users: next}); err != nil {
-		return false, err
-	}
-	s.users = next
-	return true, nil
+	return seq, nil
 }
 
 // listConnections returns a deep copy of the stored connections — the nested
 // VPN slices are cloned so a caller can't mutate the live store through the
-// result. Callers strip the passwords before sending them to a client
-// (see connToOutput).
+// result. Each record carries its rev. Callers strip the passwords before
+// sending them to a client (see connToOutput).
 func (s *store) listConnections() []connRec {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -720,6 +974,19 @@ func (s *store) listConnections() []connRec {
 	return out
 }
 
+// snapshotAll is users and connections, each with its seq, as one committed
+// state: it holds the writer's publish lock for read, so an import is seen
+// whole or not at all. For a backup that also reads settings, call
+// listUsers, listConnections and seqs inside writer.snapshot instead (the
+// publish lock is not re-entrant).
+func (s *store) snapshotAll() (users []userRec, conns []connRec, usersSeq, connsSeq int) {
+	s.wr.snapshot(func() {
+		users, conns = s.listUsers(), s.listConnections()
+		usersSeq, connsSeq = s.seqs()
+	})
+	return users, conns, usersSeq, connsSeq
+}
+
 // hasConnection reports whether broker is stored.
 func (s *store) hasConnection(broker string) bool {
 	s.mu.RLock()
@@ -727,32 +994,55 @@ func (s *store) hasConnection(broker string) bool {
 	return slices.ContainsFunc(s.conns, func(c connRec) bool { return c.Broker == broker })
 }
 
-// upsertConnection replaces the connection with the same broker, or appends a
-// new one, then persists. Blank password fields on an EXISTING broker
-// keep the stored secrets (edit-without-changing-password) — see
-// mergeConnSecrets. Persist-then-commit, same as upsertUser.
-func (s *store) upsertConnection(c connRec) (err error) {
-	defer s.afterWrite(&err)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	next := append([]connRec(nil), s.conns...)
-	found := false
-	for i := range next {
-		if next[i].Broker == c.Broker {
-			mergeConnSecrets(&c, next[i])
-			next[i] = c
-			found = true
-			break
+// saveConnection creates (rev 0) or edits (rev above 0) the connection
+// c.Broker, with saveUser's order of refusals (no last-admin rule). Blank
+// password fields on an EXISTING broker keep the stored secrets as they are
+// now (mergeConnSecrets). A change to a password alone moves seq and keeps
+// the rev. The caller validates the record (validateConn) before the call.
+func (s *store) saveConnection(ctx context.Context, caller string, c connRec, rev int) (savedConn, error) {
+	if rev < 0 {
+		return savedConn{}, errRevRequired
+	}
+	var out savedConn
+	err := s.wr.Do(ctx, func(tx *txn) error {
+		if err := s.checkCaller(caller); err != nil {
+			return err
 		}
+		if err := tx.check(s.connsPath); err != nil {
+			return err
+		}
+		cur, seq := s.connsNow()
+		i := slices.IndexFunc(cur, func(r connRec) bool { return r.Broker == c.Broker })
+		old := connRec{}
+		if i >= 0 {
+			old = cur[i]
+		}
+		if err := checkRev(i >= 0, old.Rev, rev); err != nil {
+			return err
+		}
+		next, rec, newSeq := slices.Clone(cur), c, seq+1
+		if i >= 0 {
+			mergeConnSecrets(&rec, old)
+			rec.Rev = old.Rev
+			if !sameConnView(old, rec) {
+				rec.Rev = newSeq
+			}
+			next[i] = rec
+		} else {
+			rec.Rev = newSeq
+			next = append(next, rec)
+		}
+		doc := connsDoc{Seq: newSeq, Connections: next}
+		s.seal.stageDoc(tx, roleConns, s.connsPath, doc)
+		tx.onPublish(func() { s.publish(nil, &doc) })
+		tx.afterCommit(s.changed)
+		out = savedConn{rev: rec.Rev, seq: newSeq}
+		return nil
+	})
+	if err != nil {
+		return savedConn{}, err
 	}
-	if !found {
-		next = append(next, c)
-	}
-	if err := s.seal.writeDoc(roleConns, s.connsPath, connsDoc{Connections: next}); err != nil {
-		return err
-	}
-	s.conns = next
-	return nil
+	return out, nil
 }
 
 // mergeConnSecrets fills blank password fields in `c` from the existing
@@ -776,71 +1066,124 @@ func mergeConnSecrets(c *connRec, old connRec) {
 	}
 }
 
-// deleteConnection removes the named broker and persists. Returns found=false
-// (no error, no write) when there is no such broker.
-func (s *store) deleteConnection(broker string) (found bool, err error) {
-	defer s.afterWrite(&err)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	idx := -1
-	for i := range s.conns {
-		if s.conns[i].Broker == broker {
-			idx = i
-			break
+// deleteConnection removes the named broker, which must stand at rev (above
+// 0); the refusals are deleteUser's without the last-admin rule. seq of
+// connections.yaml moves and no record holds the new value.
+func (s *store) deleteConnection(ctx context.Context, caller, broker string, rev int) (seq int, err error) {
+	if rev <= 0 {
+		return 0, errRevRequired
+	}
+	err = s.wr.Do(ctx, func(tx *txn) error {
+		if err := s.checkCaller(caller); err != nil {
+			return err
 		}
+		if err := tx.check(s.connsPath); err != nil {
+			return err
+		}
+		cur, prev := s.connsNow()
+		i := slices.IndexFunc(cur, func(r connRec) bool { return r.Broker == broker })
+		curRev := 0
+		if i >= 0 {
+			curRev = cur[i].Rev
+		}
+		if err := checkRev(i >= 0, curRev, rev); err != nil {
+			return err
+		}
+		doc := connsDoc{Seq: prev + 1, Connections: slices.Delete(slices.Clone(cur), i, i+1)}
+		s.seal.stageDoc(tx, roleConns, s.connsPath, doc)
+		tx.onPublish(func() { s.publish(nil, &doc) })
+		tx.afterCommit(s.changed)
+		seq = doc.Seq
+		return nil
+	})
+	if err != nil {
+		return 0, err
 	}
-	if idx == -1 {
-		return false, nil
-	}
-	next := append(append([]connRec(nil), s.conns[:idx]...), s.conns[idx+1:]...)
-	if err := s.seal.writeDoc(roleConns, s.connsPath, connsDoc{Connections: next}); err != nil {
-		return false, err
-	}
-	s.conns = next
-	return true, nil
+	return seq, nil
 }
 
-// replaceStores swaps the user list, the connection list, or both (an
-// import; nil leaves a list alone), together with whatever the caller staged
-// in tx before (config.yaml): each store file is staged into tx, tx commits
-// them all or none (fileTx), and only then does memory change, so a failure
-// anywhere leaves the files and memory as they were. drop is the users whose
-// sessions must end (sessionEnders). Each list must pass the load rules.
-func (s *store) replaceStores(tx *fileTx, users []userRec, conns []connRec) (drop []string, err error) {
-	defer s.afterWrite(&err)
+// sectionImport is one section of an import: the backup's records, and
+// whether they merge (the backup's records replace those of the same name and
+// the rest stay) or replace the whole list. A nil *sectionImport skips the
+// section.
+type sectionImport[T any] struct {
+	recs  []T
+	merge bool
+}
+
+// importStaged is what stageImport tells the handler: the new seq of each file
+// it staged (0 for a skipped section) and the users whose sessions must end
+// (sessionEnders).
+type importStaged struct {
+	usersSeq, connsSeq int
+	drop               []string
+}
+
+// stageImport plans an import of users and/or connections inside a
+// transaction the caller opened with writer.Do, together with whatever else
+// the caller stages there (the settings). It checks the files it will write
+// against the disk, plans the merge or replace on the CURRENT lists, holds the
+// result to the load rules (no administrator left is errLastAdmin, any other
+// breach an *importInvalidError naming the section), stamps EVERY record of
+// each imported section with that file's new seq (a seq or rev in the backup
+// is ignored), stages the sealed files with the round-trip check, and queues
+// the memory swap (both lists in one critical section) and the socket
+// re-check. A refusal returns before anything is queued; the caller returns it
+// from the op. Read the basis it compares with from seqs() in the same op.
+func (s *store) stageImport(tx *txn, users *sectionImport[userRec], conns *sectionImport[connRec]) (importStaged, error) {
+	var res importStaged
+	var udoc *usersDoc
+	var cdoc *connsDoc
 	if users != nil {
-		if err := validateUsers(users); err != nil {
-			return nil, err
+		if err := tx.check(s.usersPath); err != nil {
+			return importStaged{}, err
 		}
+		cur, seq := s.usersNow()
+		list := slices.Clone(users.recs)
+		if users.merge {
+			list = mergeByName(cur, users.recs, userName)
+		}
+		if countAdmins(list) == 0 {
+			return importStaged{}, errLastAdmin
+		}
+		if err := validateUsers(list); err != nil {
+			return importStaged{}, &importInvalidError{section: "users", err: err}
+		}
+		for i := range list {
+			list[i].Rev = seq + 1
+		}
+		udoc = &usersDoc{Seq: seq + 1, Users: list}
+		res.usersSeq, res.drop = seq+1, sessionEnders(cur, list)
 	}
 	if conns != nil {
-		if err := validateConns(conns); err != nil {
-			return nil, err
+		if err := tx.check(s.connsPath); err != nil {
+			return importStaged{}, err
 		}
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if users != nil {
-		if err := s.seal.stageDoc(tx, roleUsers, s.usersPath, usersDoc{Users: users}); err != nil {
-			return nil, err
+		cur, seq := s.connsNow()
+		list := slices.Clone(conns.recs)
+		if conns.merge {
+			list = mergeByName(cur, conns.recs, connName)
 		}
-	}
-	if conns != nil {
-		if err := s.seal.stageDoc(tx, roleConns, s.connsPath, connsDoc{Connections: conns}); err != nil {
-			return nil, err
+		if err := validateConns(list); err != nil {
+			return importStaged{}, &importInvalidError{section: "connections", err: err}
 		}
+		for i := range list {
+			list[i].Rev = seq + 1
+		}
+		cdoc = &connsDoc{Seq: seq + 1, Connections: list}
+		res.connsSeq = seq + 1
 	}
-	if err := tx.commit(); err != nil {
-		return nil, err
+	if udoc != nil {
+		s.seal.stageDoc(tx, roleUsers, s.usersPath, *udoc)
 	}
-	if users != nil {
-		drop = sessionEnders(s.users, users)
-		s.users = users
+	if cdoc != nil {
+		s.seal.stageDoc(tx, roleConns, s.connsPath, *cdoc)
 	}
-	if conns != nil {
-		s.conns = conns
+	if udoc != nil || cdoc != nil {
+		tx.onPublish(func() { s.publish(udoc, cdoc) })
+		tx.afterCommit(s.changed)
 	}
-	return drop, nil
+	return res, nil
 }
 
 // ----- bootstrap ----------------------------------------------------------------
@@ -894,8 +1237,9 @@ func bootstrapUsers(opts storeOptions, sl *sealer, logger *slog.Logger) (usersDo
 	if err != nil {
 		return usersDoc{}, err
 	}
-	doc := usersDoc{Users: []userRec{{
+	doc := usersDoc{Seq: 1, Users: []userRec{{
 		Username:           bootstrapAdminName,
+		Rev:                1,
 		Password:           hash,
 		MustChangePassword: true,
 		Admin:              true,

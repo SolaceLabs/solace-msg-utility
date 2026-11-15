@@ -22,7 +22,7 @@ import { answerConfirm, confirmOpen } from '../../helpers/confirmDialog';
 const ADMIN: ManagedSession = { admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [] };
 const NONE: BackupStatus = { schedule: null, nextRun: null, lastRun: null, dirProblem: '', files: [] };
 const WEEKLY: BackupStatus = {
-    schedule: { kind: 'weekly', minute: 15, hour: 2, weekday: 1, day: 0, keep: 14 },
+    schedule: { kind: 'weekly', minute: 15, hour: 2, weekday: 1, day: 0, keep: 14, rev: 4 },
     nextRun: '2026-11-16T02:15:00Z',
     lastRun: { at: '2026-11-09T02:15:00Z', file: 'smu-backup-20261109T021500Z.json', error: '' },
     dirProblem: '',
@@ -37,6 +37,7 @@ const PREVIEW: ImportPreview = {
     connections: { added: [], changed: [], removed: [] },
     settings: ['logLevel'],
     signsOutCaller: { replace: true, merge: false },
+    basis: { users: 3, connections: 2, settings: 'cfg-1' },
 };
 const ok = <T>(data?: T) => ({ ok: true, data });
 const refused = (code: string, reason?: string, field?: string) => ({ ok: false, status: 422, code, reason, field });
@@ -203,7 +204,7 @@ describe('backup -- gate and status', () => {
     it('shows a failed last run with its reason, and the directory problem', async () => {
         const { c } = await setup({
             ...NONE,
-            schedule: { kind: 'monthly', minute: 0, hour: 3, weekday: 0, day: 31, keep: 3 },
+            schedule: { kind: 'monthly', minute: 0, hour: 3, weekday: 0, day: 31, keep: 3, rev: 1 },
             nextRun: '2026-11-30T03:00:00Z',
             lastRun: { at: '2026-11-09T03:00:00Z', file: '', error: '/backup is not writable' },
             dirProblem: '/backup does not exist. Mount a directory there.',
@@ -372,7 +373,7 @@ describe('backup -- import', () => {
         await click(c, '#btn-backup-import');
         await answer(true);
         expect(svc.importFile).toHaveBeenCalledWith({ file: '{"format":"smu-backup"}' }, 'the passphrase!',
-            { users: 'skip', connections: 'replace', settings: 'replace' });
+            { users: 'skip', connections: 'replace', settings: 'replace' }, PREVIEW.basis);
         expect(toastMock.showToast).toHaveBeenCalledWith('Imported. Restart the gateway to apply: tls.insecureSkipVerify.', 'ok');
         expect(hidden(c, '#backup-preview')).toBe(true);
         expect(el<HTMLInputElement>(c, '#backup-import-pass').value).toBe('');
@@ -423,7 +424,7 @@ describe('backup -- schedule', () => {
 
     it('sends each kind with the fields it uses and zeros for the rest', async () => {
         const { c } = await setup();
-        svc.saveSchedule.mockResolvedValue(ok());
+        svc.saveSchedule.mockResolvedValue(ok({ rev: 2 }));
         const save = async (kind: string, fill: () => void) => {
             choose(c, '#backup-kind', kind);
             fill();
@@ -434,13 +435,13 @@ describe('backup -- schedule', () => {
             return svc.saveSchedule.mock.calls.at(-1)![0];
         };
         expect(await save('hourly', () => type(c, '#backup-minute', '45')))
-            .toEqual({ kind: 'hourly', minute: 45, hour: 0, weekday: 0, day: 0, keep: 7, passphrase: 'a long passphrase' });
+            .toEqual({ kind: 'hourly', minute: 45, hour: 0, weekday: 0, day: 0, keep: 7, passphrase: 'a long passphrase', rev: 0 });
         expect(await save('daily', () => type(c, '#backup-time', '23:05')))
-            .toEqual({ kind: 'daily', minute: 5, hour: 23, weekday: 0, day: 0, keep: 7, passphrase: 'a long passphrase' });
+            .toEqual({ kind: 'daily', minute: 5, hour: 23, weekday: 0, day: 0, keep: 7, passphrase: 'a long passphrase', rev: 0 });
         expect(await save('weekly', () => { el<HTMLSelectElement>(c, '#backup-weekday').value = '6'; }))
-            .toEqual({ kind: 'weekly', minute: 5, hour: 23, weekday: 6, day: 0, keep: 7, passphrase: 'a long passphrase' });
+            .toEqual({ kind: 'weekly', minute: 5, hour: 23, weekday: 6, day: 0, keep: 7, passphrase: 'a long passphrase', rev: 0 });
         expect(await save('monthly', () => type(c, '#backup-day', '31')))
-            .toEqual({ kind: 'monthly', minute: 5, hour: 23, weekday: 0, day: 31, keep: 7, passphrase: 'a long passphrase' });
+            .toEqual({ kind: 'monthly', minute: 5, hour: 23, weekday: 0, day: 31, keep: 7, passphrase: 'a long passphrase', rev: 0 });
         expect(toastMock.showToast).toHaveBeenCalledWith('Schedule saved', 'ok');
         expect(el<HTMLInputElement>(c, '#backup-sched-pass').value).toBe('');
     });
@@ -475,13 +476,14 @@ describe('backup -- schedule', () => {
         await click(c, '#btn-backup-remove-schedule');
         expect(await answer(false)).toBe('Remove the backup schedule? The saved backups stay.');
         expect(svc.removeSchedule).not.toHaveBeenCalled();
-        svc.removeSchedule.mockResolvedValue({ ok: false, status: 404, code: 'not_found' });
+        svc.removeSchedule.mockResolvedValue({ ok: false, status: 500, code: 'store_write_failed' });
         await click(c, '#btn-backup-remove-schedule');
         await answer(true);
-        expect(text(c, '#backup-schedule-error')).toBe('Not found. It may already have been removed.');
+        expect(text(c, '#backup-schedule-error')).toBe('The gateway could not write its data files, so nothing was changed. Its log has the cause.');
         svc.removeSchedule.mockResolvedValue(ok());
         await click(c, '#btn-backup-remove-schedule');
         await answer(true);
+        expect(svc.removeSchedule).toHaveBeenLastCalledWith(4);
         expect(toastMock.showToast).toHaveBeenCalledWith('Schedule removed', 'ok');
     });
 
@@ -494,5 +496,140 @@ describe('backup -- schedule', () => {
         await click(c, '#btn-backup-run');
         expect(text(c, '#backup-schedule-error')).toBe('cannot write /backup/x');
         expect(svc.status).toHaveBeenCalledTimes(3);
+    });
+});
+
+// The schedule's rev goes back with a save or a delete and the preview's basis
+// with the import; when the data moved on meanwhile the admin is told.
+describe('backup -- versions', () => {
+    const stale = (extra: object = {}) => ({ ok: false, status: 409, code: 'stale', ...extra });
+    const savePass = (c: HTMLElement) => {
+        type(c, '#backup-sched-pass', 'a long passphrase');
+        type(c, '#backup-sched-confirm', 'a long passphrase');
+    };
+
+    it('creates a schedule with rev 0, then updates it with the rev the answer gave', async () => {
+        const { c } = await setup();
+        svc.saveSchedule.mockResolvedValue(ok({ rev: 5 }));
+        svc.status.mockResolvedValue(ok({ ...WEEKLY, schedule: { ...WEEKLY.schedule!, rev: 5 } }));
+        savePass(c);
+        await click(c, '#btn-backup-save-schedule');
+        expect(svc.saveSchedule.mock.calls[0][0].rev).toBe(0);
+        await click(c, '#btn-backup-save-schedule');
+        expect(svc.saveSchedule.mock.calls[1][0].rev).toBe(5);
+    });
+
+    it('a refused save keeps the loaded rev for the retry', async () => {
+        const { c } = await setup(WEEKLY);
+        svc.saveSchedule.mockResolvedValueOnce(refused('invalid', 'keep must be 1 to 365.', 'keep')).mockResolvedValue(ok({ rev: 6 }));
+        await click(c, '#btn-backup-save-schedule');
+        await click(c, '#btn-backup-save-schedule');
+        expect(svc.saveSchedule.mock.calls.map(call => call[0].rev)).toEqual([4, 4]);
+    });
+
+    it('stale schedule save: the dialog says so; Reload reloads the status and its rev', async () => {
+        const { c } = await setup(WEEKLY);
+        svc.saveSchedule.mockResolvedValue(stale({ rev: 9 }));
+        svc.status.mockResolvedValue(ok({ ...WEEKLY, schedule: { ...WEEKLY.schedule!, keep: 30, rev: 9 } }));
+        await click(c, '#btn-backup-save-schedule');
+        expect(await answer(true)).toBe('This schedule was changed by someone else since you opened it.');
+        expect(svc.status).toHaveBeenCalledTimes(2);
+        expect(el<HTMLInputElement>(c, '#backup-keep').value).toBe('30');
+        svc.saveSchedule.mockResolvedValue(ok({ rev: 10 }));
+        await click(c, '#btn-backup-save-schedule');
+        expect(svc.saveSchedule.mock.calls[1][0].rev).toBe(9);
+    });
+
+    it('stale schedule save: Cancel leaves the form as typed and reloads nothing', async () => {
+        const { c } = await setup(WEEKLY);
+        svc.saveSchedule.mockResolvedValue(stale({ rev: 9 }));
+        type(c, '#backup-keep', '3');
+        await click(c, '#btn-backup-save-schedule');
+        await answer(false);
+        expect(svc.status).toHaveBeenCalledTimes(1);
+        expect(el<HTMLInputElement>(c, '#backup-keep').value).toBe('3');
+        expect(el<HTMLButtonElement>(c, '#btn-backup-save-schedule').disabled).toBe(false);
+    });
+
+    it('save over a schedule deleted meanwhile: says so and shows the reloaded status', async () => {
+        const { c } = await setup(WEEKLY);
+        svc.saveSchedule.mockResolvedValue({ ok: false, status: 404, code: 'not_found' });
+        svc.status.mockResolvedValue(ok(NONE));
+        await click(c, '#btn-backup-save-schedule');
+        expect(toastMock.showToast).toHaveBeenCalledWith('This schedule was deleted by someone else.', 'error');
+        expect(text(c, '#backup-schedule-status')).toMatch(/^No schedule/);
+        expect(el<HTMLButtonElement>(c, '#btn-backup-remove-schedule').disabled).toBe(true);
+    });
+
+    it('a new schedule that someone else created first: says so and shows theirs, with its rev', async () => {
+        const { c } = await setup();
+        svc.saveSchedule.mockResolvedValue({ ok: false, status: 409, code: 'exists' });
+        svc.status.mockResolvedValue(ok(WEEKLY));
+        savePass(c);
+        await click(c, '#btn-backup-save-schedule');
+        expect(text(c, '#backup-schedule-error')).toBe('Someone else saved a schedule since you opened this page. It is shown now; change it if you still want to.');
+        expect(text(c, '#backup-schedule-status')).toContain('Weekly on Monday');
+        svc.saveSchedule.mockResolvedValue(ok({ rev: 5 }));
+        await click(c, '#btn-backup-save-schedule');
+        expect(svc.saveSchedule.mock.calls[1][0].rev).toBe(4);
+    });
+
+    it('stale schedule delete: the dialog offers Reload; a delete of a gone schedule says so', async () => {
+        const { c } = await setup(WEEKLY);
+        svc.removeSchedule.mockResolvedValue(stale({ rev: 8 }));
+        await click(c, '#btn-backup-remove-schedule');
+        await answer(true);
+        expect(await answer(true)).toBe('This schedule was changed by someone else since you opened it.');
+        expect(svc.removeSchedule).toHaveBeenCalledWith(4);
+        expect(svc.status).toHaveBeenCalledTimes(2);
+
+        svc.removeSchedule.mockResolvedValue({ ok: false, status: 404, code: 'not_found' });
+        svc.status.mockResolvedValue(ok(NONE));
+        await click(c, '#btn-backup-remove-schedule');
+        await answer(true);
+        expect(toastMock.showToast).toHaveBeenCalledWith('This schedule was deleted by someone else.', 'error');
+        expect(svc.status).toHaveBeenCalledTimes(3);
+    });
+
+    describe('import basis', () => {
+        async function previewed() {
+            const s = await setup();
+            await pick(s.c, new File(['{"format":"smu-backup"}'], 'mine.json'));
+            type(s.c, '#backup-import-pass', 'the passphrase!');
+            svc.preview.mockResolvedValue(ok(PREVIEW));
+            await click(s.c, '#btn-backup-preview');
+            return s;
+        }
+
+        it('sends the preview basis back untouched with the import', async () => {
+            const { c } = await previewed();
+            choose(c, '#backup-choice-users', 'merge');
+            svc.importFile.mockResolvedValue(ok({ restartRequired: [], signedOut: false }));
+            await click(c, '#btn-backup-import');
+            await answer(true);
+            expect(svc.importFile.mock.calls[0][3]).toBe(PREVIEW.basis);
+        });
+
+        it('stale import: asks for a new preview, clears the old one, keeps the file and passphrase', async () => {
+            const { c } = await previewed();
+            choose(c, '#backup-choice-users', 'replace');
+            svc.importFile.mockResolvedValue(stale({ basis: { users: 4, connections: 2, settings: 'cfg-2' } }));
+            await click(c, '#btn-backup-import');
+            await answer(true);
+            expect(text(c, '#backup-import-error')).toBe("The gateway's data changed since the preview. Run the preview again.");
+            expect(hidden(c, '#backup-preview')).toBe(true);
+            expect(hidden(c, '#backup-import-source')).toBe(false);
+            expect(el<HTMLInputElement>(c, '#backup-import-pass').value).toBe('the passphrase!');
+            expect(toastMock.showToast).not.toHaveBeenCalled();
+
+            const fresh = { ...PREVIEW, basis: { users: 4, connections: 2, settings: 'cfg-2' } };
+            svc.preview.mockResolvedValue(ok(fresh));
+            await click(c, '#btn-backup-preview');
+            choose(c, '#backup-choice-users', 'replace');
+            svc.importFile.mockResolvedValue(ok({ restartRequired: [], signedOut: false }));
+            await click(c, '#btn-backup-import');
+            await answer(true);
+            expect(svc.importFile.mock.calls[1][3]).toBe(fresh.basis);
+        });
     });
 });

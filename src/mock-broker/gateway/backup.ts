@@ -11,6 +11,12 @@
  * passwords in plain text, so a demo backup carries them that way: it imports
  * into the demo, and a real gateway refuses its users.
  *
+ * The schedule is the one record of backup.yaml, versioned by that file's
+ * `seq`: it moves on every save and delete, the schedule's rev is the seq it
+ * was saved at (0 when there is none), and a delete keeps the counter. An
+ * import carries the `basis` its preview returned (the seq of each list and
+ * the settings rev) and is refused as stale when a section it imports moved.
+ *
  * Not simulated: the backup directory is in memory, so a run has no
  * `.partial` file to rename, and the schedule runs only through Back up now
  * (the demo keeps no timer).
@@ -19,7 +25,8 @@
  */
 import { BadRequest, boolean, integer, list, nullableList, object, parseBody, string } from './strict';
 import { connectionProblem, moduleIdsProblem, passwordOk, PASSWORD_MAX, PASSWORD_MIN, quote, validUsername } from './validate';
-import { settingsFromBackup } from './settings';
+import { refusalBody, settingsFromBackup } from './settings';
+import { bodyRev, exists, notFound, queryRev, revRequired, stale } from './versions';
 import type { GatewaySessions, Session } from './sessions';
 import type { GatewaySettingsFile } from './settings';
 import type { GatewayStore } from './store';
@@ -154,7 +161,11 @@ const glob = (x: unknown): QGlob => {
 /** flexStr: a port written as a number or a string. */
 const port = (v: unknown): string => (typeof v === 'number' && Number.isInteger(v) ? String(v) : string(v));
 
-/** The sealed text, read as strictly as the gateway reads it; throws BadRequest. */
+/**
+ * The sealed text, read as strictly as the gateway reads it; throws BadRequest.
+ * A `rev` on a user or a connection is read and dropped: the real gateway's
+ * exports carry it, and an import stamps fresh versions whatever the file says.
+ */
 function docOf(raw: unknown): BackupDoc {
     const o = object(raw, ['version', 'created', 'gateway', 'msg-utility-users', 'msg-utility-connections', 'settings']);
     if (integer(o.version, 0) !== 1) throw new BadRequest('version');
@@ -162,7 +173,7 @@ function docOf(raw: unknown): BackupDoc {
         created: string(o.created),
         gateway: string(o.gateway),
         users: list(o['msg-utility-users'], x => {
-            const u = object(x, ['username', 'password', 'mustChangePassword', 'admin', 'operate', 'read-only', 'modules']);
+            const u = object(x, ['username', 'password', 'mustChangePassword', 'admin', 'operate', 'read-only', 'modules', 'rev']);
             return {
                 username: string(u.username), password: string(u.password), admin: boolean(u.admin),
                 mustChangePassword: boolean(u.mustChangePassword),
@@ -170,7 +181,7 @@ function docOf(raw: unknown): BackupDoc {
             };
         }),
         connections: list(o['msg-utility-connections'], x => {
-            const c = object(x, ['broker', 'hostname', 'semp', 'client']);
+            const c = object(x, ['broker', 'hostname', 'semp', 'client', 'rev']);
             const semp = object(c.semp, ['scheme', 'port', 'username', 'password']);
             const client = object(c.client, ['scheme', 'port', 'msgVpns']);
             const sempScheme = string(semp.scheme);
@@ -376,11 +387,16 @@ const createdOf = (name: string) => {
 
 interface ScheduleState { schedule: BackupSchedule; keep: number; key: BackupKey }
 
-/** What a reload carries: the directory and the outcome of the last run (the key cannot be exported). */
+/** What a reload carries: the directory, the outcome of the last run and the file's seq (the key cannot be exported). */
 export interface BackupsState {
     files: [string, string][];
     lastRun: { at: string; file: string; error: string } | null;
+    /** Absent in a snapshot from a build before the schedule had a version. */
+    seq?: number;
 }
+
+/** What an import must carry back from its preview: the versions the preview saw. */
+export interface Basis { users: number; connections: number; settings: string }
 
 // ----- the service and its routes ----------------------------------------------------------
 
@@ -399,6 +415,9 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
     const files = new Map<string, string>();
     let sched: ScheduleState | null = null;
     let lastRun: BackupsState['lastRun'] = null;
+    /** backup.yaml's seq: moves on every schedule save and delete, never back. */
+    let seq = 0;
+    const basis = (): Basis => ({ ...store.seqs(), settings: settings.rev() });
 
     const snapshot = (): BackupDoc => {
         const d = store.dump();
@@ -429,7 +448,7 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
     };
 
     const status: Route[2] = () => ok({
-        schedule: sched ? { ...sched.schedule, keep: sched.keep } : null,
+        schedule: sched ? { ...sched.schedule, keep: sched.keep, rev: seq } : null,
         nextRun: sched ? rfc3339(nextRun(now(), sched.schedule)) : null,
         lastRun,
         dirProblem: '',
@@ -443,7 +462,7 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
     };
 
     const saveSchedule: Route[2] = async req => {
-        const b = object(parseBody(req.body), ['kind', 'minute', 'hour', 'weekday', 'day', 'keep', 'passphrase']);
+        const b = object(parseBody(req.body), ['kind', 'minute', 'hour', 'weekday', 'day', 'keep', 'passphrase', 'rev']);
         const schedule: BackupSchedule = {
             kind: string(b.kind), minute: integer(b.minute, 0), hour: integer(b.hour, 0), weekday: integer(b.weekday, 0), day: integer(b.day, 0),
         };
@@ -452,19 +471,33 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
         const problem = scheduleProblem(schedule);
         if (problem) return invalid('schedule', problem);
         if (keep < 1 || keep > KEEP_MAX) return invalid('keep', `Keep 1 to ${KEEP_MAX} backups.`);
-        if (passphrase === '' && !sched) return invalid('passphrase', 'A new schedule needs a passphrase.');
-        try {
-            const key = passphrase !== '' ? await newBackupKey(passphrase, iter) : sched!.key;
-            sched = { schedule, keep, key };
-        } catch (e) {
-            return respond(e);
+        // The key is derived before the record is looked at, as the gateway derives it before its lock.
+        let key: BackupKey | null = null;
+        if (passphrase !== '') {
+            try {
+                key = await newBackupKey(passphrase, iter);
+            } catch (e) {
+                return respond(e);
+            }
         }
-        return noContent;
+        const rev = bodyRev(b.rev);
+        if (rev === null) return revRequired;
+        if (rev === 0 && sched) return exists;
+        if (rev > 0 && !sched) return notFound;
+        if (rev > 0 && rev !== seq) return stale(seq);
+        if (!key && !sched) return invalid('passphrase', 'A new schedule needs a passphrase.');
+        sched = { schedule, keep, key: key ?? sched!.key };
+        seq += 1;
+        return ok({ rev: seq });
     };
 
-    const deleteSchedule: Route[2] = () => {
-        if (!sched) return error(404, 'not_found');
+    const deleteSchedule: Route[2] = req => {
+        const rev = queryRev(req.query);
+        if (rev === null) return revRequired;
+        if (!sched) return notFound;
+        if (rev !== seq) return stale(seq);
         sched = null;
+        seq += 1;
         return noContent;
     };
 
@@ -506,6 +539,7 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
         }
         const { users, conns } = store.dump();
         return ok({
+            basis: basis(),
             created: doc.created,
             gateway: doc.gateway,
             users: diffByName(users, doc.users, userName, canonUser),
@@ -519,7 +553,7 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
     };
 
     const importFile: Route[2] = async (req, s) => {
-        const b = object(parseBody(req.body), ['file', 'backup', 'passphrase', 'users', 'connections', 'settings']);
+        const b = object(parseBody(req.body), ['file', 'backup', 'passphrase', 'users', 'connections', 'settings', 'basis']);
         const choice = { users: string(b.users), connections: string(b.connections), settings: string(b.settings) };
         for (const f of ['users', 'connections'] as const) {
             if (!['replace', 'merge', 'skip'].includes(choice[f])) return invalid(f, 'Choose replace, merge or skip.');
@@ -533,6 +567,18 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
             doc = await openSource(string(b.file), string(b.backup), string(b.passphrase));
         } catch (e) {
             return respond(e);
+        }
+        if (b.basis === undefined || b.basis === null) return revRequired;
+        const sent = object(b.basis, ['users', 'connections', 'settings']);
+        const seen: Basis = { users: integer(sent.users, 0), connections: integer(sent.connections, 0), settings: string(sent.settings) };
+        // The config file's disk check comes first, then the basis of each section the import touches.
+        const disk = choice.settings === 'skip' ? null : settings.diskRefusal();
+        if (disk) return { status: disk.status, json: refusalBody(disk) };
+        const now = basis();
+        if ((choice.users !== 'skip' && seen.users !== now.users)
+            || (choice.connections !== 'skip' && seen.connections !== now.connections)
+            || (choice.settings !== 'skip' && seen.settings !== now.settings)) {
+            return { status: 409, json: { error: 'stale', basis: now } };
         }
         const cur = store.dump();
         const users = choice.users === 'replace' ? doc.users : choice.users === 'merge' ? mergeByName(cur.users, doc.users, userName) : null;
@@ -551,10 +597,8 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
         // first: its refusals then leave everything as it was, as the gateway's do.
         let restartRequired: string[] = [];
         if (choice.settings === 'replace') {
-            const r = settings.save(withHostPaths(doc.settings, settings.current()));
-            if (!r.ok) {
-                return { status: r.status, json: { error: r.error, ...(r.field ? { field: r.field } : {}), ...(r.reason ? { reason: r.reason } : {}) } };
-            }
+            const r = settings.save(withHostPaths(doc.settings, settings.current()), now.settings);
+            if (!r.ok) return { status: r.status, json: refusalBody(r) };
             restartRequired = r.restartRequired;
         }
         let signedOut = false;
@@ -582,12 +626,13 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
     return {
         routes,
         dump(): BackupsState {
-            return { files: [...files.entries()], lastRun };
+            return { files: [...files.entries()], lastRun, seq };
         },
         load(st: BackupsState): void {
             files.clear();
             for (const [k, v] of st.files) files.set(k, v);
             lastRun = st.lastRun;
+            seq = st.seq ?? 0;
         },
     };
 }
