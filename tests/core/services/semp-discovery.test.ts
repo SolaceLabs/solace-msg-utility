@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
 import { createSempDiscovery, PAGE_DELAY_MS } from '../../../src/core/services/semp-discovery';
 import type { SempContext } from '../../../src/core/connections/types';

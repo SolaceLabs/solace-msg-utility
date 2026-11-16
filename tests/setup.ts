@@ -1,7 +1,14 @@
 /**
  * Global test setup — mocks for browser APIs and external libraries.
+ *
+ * It runs for every test file, including those that run in Node rather than
+ * jsdom (a `// @vitest-environment node` line at the top of the file): the
+ * mocks that need a page (window, document, localStorage) are installed only
+ * where there is one.
  */
 import { vi, beforeEach, afterEach } from 'vitest';
+
+const hasDom = typeof window !== 'undefined';
 
 // ---- Global mocks ----
 
@@ -26,7 +33,7 @@ const localStorageMock = {
     get length() { return Object.keys(store).length; },
     key: vi.fn(localStorageDefaults.key)
 };
-Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true });
+if (hasDom) Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true });
 
 // Mock navigator.clipboard
 Object.defineProperty(navigator, 'clipboard', {
@@ -251,12 +258,14 @@ function createMessageMock(): any {
 export { createSolaceMock, createSessionMock, createBrowserMock, createMessageMock };
 
 // Install solace mock by default
-(window as any).solace = createSolaceMock();
-// The shell's vendor loader sets this in the browser; `connect()` refuses to
-// open a session without it (src/core/services/solace-client.ts). Default it
-// true so suites exercise the normal path — the refusal branch is driven by the
-// one test that sets it false explicitly.
-(window as any).solaceLibLoaded = true;
+if (hasDom) {
+    (window as any).solace = createSolaceMock();
+    // The shell's vendor loader sets this in the browser; `connect()` refuses to
+    // open a session without it (src/core/services/solace-client.ts). Default it
+    // true so suites exercise the normal path — the refusal branch is driven by the
+    // one test that sets it false explicitly.
+    (window as any).solaceLibLoaded = true;
+}
 
 // Reset mocks between tests
 beforeEach(() => {
@@ -286,10 +295,11 @@ beforeEach(() => {
     fetchMock.mockReset();
     (globalThis as any).fetch = fetchMock;
 
+    if (!hasDom) return;
     // Fresh Solace SDK mock every test — stale `_handlers` entries from a prior
     // test's `mockSession._handlers[UP_NOTICE] = …` assignments cannot fire in
     // the next test. Test files that instantiate their own mock in their own
-    // `beforeEach` simply overwrite this default, so this is backwards-compatible.
+    // `beforeEach` overwrite this default.
     (window as any).solace = createSolaceMock();
     // Re-assert alongside it: `restoreAllMocks` doesn't touch plain property
     // assignments, so a test that flips this false would otherwise leak.

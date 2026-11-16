@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { createConnMgmtService, type ManagedConnRecord } from '../../../src/modules/connection-management/service';
 

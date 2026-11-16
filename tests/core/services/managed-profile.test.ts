@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
 import { createManagedProfile, isSessionEnded, type ManagedDialer } from '../../../src/core/services/managed-profile';
 import type { ManagedProfile } from '../../../src/core/services/managed-service';

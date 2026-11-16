@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { getOriginalIdHint, destNameProblem } from '../../../src/modules/queue-copy/service';
 import { createMessageMock } from '../../setup';

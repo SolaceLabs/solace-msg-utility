@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { sempErrorText, sempFailureText } from '../../../src/core/services/semp-errors';
 import { managedErrorMessage } from '../../../src/core/services/managed-api';

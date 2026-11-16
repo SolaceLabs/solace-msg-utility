@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
     managedRequest, managedErrorMessage, reportManagedFailure, SIGNED_OUT_TOAST_MS, type ManagedError,

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { X509Certificate } from 'node:crypto';
 import fs from 'node:fs';

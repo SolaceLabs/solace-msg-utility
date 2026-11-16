@@ -59,9 +59,9 @@ npm install && npm test
 | --- | --- |
 | `build` | `npm run build` (every variant), `npm run check:bundles` (no Direct bundle carries Provisioned UI; the Provisioned demo has no way out to a network), plus the gateway binary, version-stamped, into `dist/` (a compile check: it ships only inside the image) |
 | `vet` | `npm run typecheck` (`src/`, its `.js` modules included: `checkJs`), `npm run typecheck:tests` (`tests/` and the vite/vitest configs, through `tsconfig.test.json`), `npm run lint` (ESLint, see [Linting](#linting)), `go vet ./...`, and `gofmt -l` on `go-web-proxy/` (any file it lists fails the task) |
-| `test` | `npm run test:app` (the web suite without `tests/mock-broker/`), `go test -race ./...` (`CGO_ENABLED=1`; without gcc on PATH it runs without `-race` and `test.log` says so). When `cov` is in the same invocation (`full`, `all cov`), the web suite runs once, in `cov`, and `test.log` says so |
+| `test` | `npm run test:app` (the web suite without `tests/mock-broker/`), `go test -race ./...` (`CGO_ENABLED=1`; without gcc on PATH it runs without `-race` and `test.log` says so). When `cov` is in the same invocation (`full`, `all cov`), both suites run once, in `cov`, and `test.log` says so |
 | `mock` | `npm run test:mock:coverage`: `tests/mock-broker/`, the suites behind `demo.html` and the Provisioned demo, the gateway contract included, with the coverage of `src/mock-broker/` printed (reported, no threshold). Skipped, like `test`'s web suite, when `cov` is in the same invocation |
-| `cov` | `npm run test:coverage` plus a Go coverage profile; prints both totals |
+| `cov` | `npm run test:coverage`, then the Go suite with `-race` (the same run as `test`'s, with `CGO_ENABLED=1` and the same fallback) writing a coverage profile; prints both totals |
 | `scan` | `npm run audit:gate` (`npm audit`, fatal on fixable HIGH/CRITICAL advisories, warns on unfixable ones), `go tool govulncheck ./...`, then a Trivy scan of the freshly-built image with the pinned Trivy container (never a `trivy` on PATH; see [git.md](git.md#keeping-the-workflow-pins-current)) |
 | `image` | Builds the container image via `docker/docker-compose.yaml` |
 | `up` / `down` | Brings the compose stack up or down |
@@ -71,6 +71,8 @@ npm install && npm test
 | `full` | `all` + `cov image scan graphify` — the pre-tag sweep |
 
 Every task name is checked before any task runs, so a typo fails at once. Each task writes `scripts/logs/<task>.log` with a timestamped footer, and a run of more than one task ends with a console-only `timing:` line giving each task's seconds. CI runs `all cov scan`, so the 100% thresholds in `vitest.config.ts` gate every release. `logs/cov.log` holds the previous coverage totals, which are the local floor for what has no threshold (the Go total) -- CI is a fresh checkout with no prior log, so that comparison is yours.
+
+While fixing a failure, rerun only the task that failed (for example `./scripts/dev.sh cov` after a web test fix, or `./scripts/dev.sh vet`), and run `full` once at the end: the tasks before it have already passed.
 
 The image half of `image` and `scan` warn-skips when Docker is absent or running Windows containers, since a Linux image cannot be built there. The `ubuntu-24.04` CI leg still enforces it.
 

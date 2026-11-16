@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { coerceConnConfig, resolveConnTabs, DEFAULT_CONN_CONFIG } from '../../../src/core/connections/conn-modes';
 

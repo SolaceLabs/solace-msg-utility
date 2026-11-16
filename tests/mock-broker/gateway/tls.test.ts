@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 import { createGateway } from '../../../src/mock-broker/gateway';

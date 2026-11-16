@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
 import { deadlineSignal, isTimeoutError, raceDeadline, REQUEST_TIMEOUT_MS } from '../../src/core/timing';
 

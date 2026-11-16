@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
 import { sempQueueSource, queueSourceFrom } from '../../../src/core/services/queue-source';
 import type { FetchPage } from '../../../src/core/services/semp-discovery';

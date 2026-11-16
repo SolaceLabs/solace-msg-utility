@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { createSettingsService, type GatewaySettings } from '../../../src/modules/gateway-settings/service';
 

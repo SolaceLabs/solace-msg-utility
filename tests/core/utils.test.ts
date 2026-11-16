@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { formatBytes, generateUuid, matchString, matchContains, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText, moduleLabel, errMessage, basicAuthHeader, sempAccountError } from '../../src/core/utils';
 

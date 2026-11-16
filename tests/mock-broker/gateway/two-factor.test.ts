@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createGateway } from '../../../src/mock-broker/gateway';
 import { mockCode, stepOf, STEP_MS, hashRecovery, SECRET_RULE, HASH_RULE } from '../../../src/mock-broker/gateway/authenticator';

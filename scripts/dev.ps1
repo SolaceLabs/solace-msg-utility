@@ -240,26 +240,33 @@ function Task-vet {
 
 function Task-test {
   $c = Install-Deps 'test'; if ($c -ne 0) { return $c }
-  # The web suite without tests/mock-broker/, which `mock` runs. `cov` runs the
-  # whole suite with coverage on, so when it is queued in this invocation the
-  # suite runs once, there; a failure in it still fails the run.
+  # The web suite without tests/mock-broker/, which `mock` runs, then the Go
+  # suite. `cov` runs both with coverage on, so when it is queued in this
+  # invocation each suite runs once, there; a failure in it still fails the run.
   if ($CovQueued) {
     Write-Note 'test' 'web suite: skipped here, cov runs it in this invocation'
-  } else {
-    $c = Invoke-Logged 'test' 'npm' @('run','test:app'); if ($c -ne 0) { return $c }
+    Write-Note 'test' 'go test: skipped here, cov runs it with -race in this invocation'
+    return 0
   }
-  # The race detector needs cgo, so a C compiler: gcc is on both CI runners.
-  # Without one the Go suite still runs, without -race, and the log says so.
+  $c = Invoke-Logged 'test' 'npm' @('run','test:app'); if ($c -ne 0) { return $c }
+  return (Invoke-GoTest 'test')
+}
+
+# Invoke-GoTest runs the Go suite for a task with any extra flags. The race
+# detector needs cgo, so a C compiler: gcc is on both CI runners. Without one
+# the suite still runs, without -race, and the task's log says so.
+function Invoke-GoTest([string]$Task, [string[]]$Extra = @()) {
+  $flags = @($Extra | Where-Object { $_ }) + @('./...')
   if (Get-Command gcc -ErrorAction SilentlyContinue) {
     $env:CGO_ENABLED = '1'
     try {
-      return (Invoke-Logged 'test' 'go' @('-C',$GoDir,'test','-race','-count=1','./...'))
+      return (Invoke-Logged $Task 'go' (@('-C',$GoDir,'test','-race','-count=1') + $flags))
     } finally {
       Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
     }
   }
-  Write-Note 'test' 'go test: -race skipped, no gcc on PATH'
-  return (Invoke-Logged 'test' 'go' @('-C',$GoDir,'test','-count=1','./...'))
+  Write-Note $Task 'go test: -race skipped, no gcc on PATH'
+  return (Invoke-Logged $Task 'go' (@('-C',$GoDir,'test','-count=1') + $flags))
 }
 
 # The demo broker and the Provisioned demo's fake gateway (tests/mock-broker/):
@@ -289,10 +296,10 @@ function Task-cov {
   # the run here rather than needing a floor comparison.
   $c = Invoke-Logged 'cov' 'npm' @('run','test:coverage'); if ($c -ne 0) { return $c }
 
-  # After vitest, not before: it empties coverage/ on every run.
+  # After vitest, not before: it empties coverage/ on every run. The one Go run
+  # of the invocation: the same -race suite test runs, with the profile on.
   New-Item -ItemType Directory -Force -Path (Join-Path $CovDir 'go') | Out-Null
-  $c = Invoke-Logged 'cov' 'go' @(
-    '-C',$GoDir,'test',"-coverprofile=$covProfile",'./...')
+  $c = Invoke-GoTest 'cov' @("-coverprofile=$covProfile")
   if ($c -ne 0) { return $c }
   $c = Invoke-Logged 'cov' 'go' @(
     '-C',$GoDir,'tool','cover',"-html=$covProfile",'-o',(Join-Path $CovDir 'go/coverage.html'))

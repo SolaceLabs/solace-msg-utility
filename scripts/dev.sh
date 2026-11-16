@@ -173,21 +173,28 @@ task_vet() {
 
 task_test() {
   ensure_deps test || return $?
-  # The web suite without tests/mock-broker/, which `mock` runs. `cov` runs the
-  # whole suite with coverage on, so when it is queued in this invocation the
-  # suite runs once, there; a failure in it still fails the run.
+  # The web suite without tests/mock-broker/, which `mock` runs, then the Go
+  # suite. `cov` runs both with coverage on, so when it is queued in this
+  # invocation each suite runs once, there; a failure in it still fails the run.
   if [ -n "${COV_QUEUED:-}" ]; then
     note test "web suite: skipped here, cov runs it in this invocation"
-  else
-    run test npm run test:app || return $?
+    note test "go test: skipped here, cov runs it with -race in this invocation"
+    return 0
   fi
-  # The race detector needs cgo, so a C compiler: gcc is on both CI runners.
-  # Without one the Go suite still runs, without -race, and the log says so.
+  run test npm run test:app || return $?
+  go_test test || return $?
+}
+
+# go_test runs the Go suite for task $1 with any extra flags. The race detector
+# needs cgo, so a C compiler: gcc is on both CI runners. Without one the suite
+# still runs, without -race, and the task's log says so.
+go_test() {
+  local task="$1"; shift
   if command -v gcc >/dev/null 2>&1; then
-    run test env CGO_ENABLED=1 go -C "$GO_DIR" test -race -count=1 ./... || return $?
+    run "$task" env CGO_ENABLED=1 go -C "$GO_DIR" test -race -count=1 "$@" ./...
   else
-    note test "go test: -race skipped, no gcc on PATH"
-    run test go -C "$GO_DIR" test -count=1 ./... || return $?
+    note "$task" "go test: -race skipped, no gcc on PATH"
+    run "$task" go -C "$GO_DIR" test -count=1 "$@" ./...
   fi
 }
 
@@ -216,10 +223,10 @@ task_cov() {
   # the run here rather than needing a floor comparison.
   run cov npm run test:coverage || return $?
 
-  # After vitest, not before: it empties coverage/ on every run.
+  # After vitest, not before: it empties coverage/ on every run. The one Go run
+  # of the invocation: the same -race suite test runs, with the profile on.
   mkdir -p "$COV_DIR/go"
-  run cov go -C "$GO_DIR" test \
-    -coverprofile="$COV_DIR/go/coverage.out" ./... || return $?
+  go_test cov -coverprofile="$COV_DIR/go/coverage.out" || return $?
   run cov go -C "$GO_DIR" tool cover \
     -html="$COV_DIR/go/coverage.out" -o "$COV_DIR/go/coverage.html" || return $?
   run cov go -C "$GO_DIR" tool cover -func="$COV_DIR/go/coverage.out" || return $?

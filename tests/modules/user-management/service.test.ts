@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { createUserMgmtService, type UserPayload } from '../../../src/modules/user-management/service';
 

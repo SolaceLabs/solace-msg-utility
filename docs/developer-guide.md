@@ -471,6 +471,8 @@ Provides global mocks installed before every test:
 - `window.solace` — full Solace SDK mock (`createSolaceMock()`)
 - `beforeEach` clears all mocks and DOM between tests
 
+Test files run in jsdom by default. A file that needs no page (no `document`, `window`, `localStorage`, DOM events, `DOMParser` or `loadModuleDOM`, directly or through the code it calls) starts with `// @vitest-environment node` and runs in Node, which starts much faster. `tests/setup.ts` still runs there; it installs `localStorage`, `window.solace` and the DOM reset only where a page exists. Use it for a new DOM-free file; a file that turns out to need a page fails loudly, so take the line out.
+
 ### Writing Tests for a New Module
 
 Load the real per-module `index.html` via [`loadModuleDOM`](../tests/helpers/loadModuleDOM.ts) so the test DOM can never drift from the production template. The `moduleId` argument is a plain `string` (the directory name under `src/modules/`) — a typo throws at read time, loud enough for tests. Pass an entry to load a variant entry's composed template, exactly as the build injects it: `loadModuleDOM('connections', 'managed')`. The previous compile-time enumeration was retired along with `src/module-ids.ts` when variant manifests became the single source of truth.

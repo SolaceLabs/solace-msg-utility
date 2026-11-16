@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { createTickets, TICKET_TTL_MS, type Ticket } from '../../../src/mock-broker/gateway/tickets';
 

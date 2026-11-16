@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { createGateway } from '../../../src/mock-broker/gateway';
 import { DEMO_ACCOUNTS, DEMO_TOPOLOGY, demoSeed } from '../../../src/mock-broker/gateway/seed';

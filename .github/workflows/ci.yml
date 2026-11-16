@@ -71,8 +71,8 @@ jobs:
       # A task that does not fit the stack warns and skips, so this line is
       # the same whether the project is compiled, interpreted, or mixed.
       # `cov` is here so the coverage thresholds gate every release, not only
-      # a local sweep; with cov queued, `test` and `mock` leave the web suites
-      # to it, so they still run once.
+      # a local sweep; with cov queued, `test` and `mock` leave the web and Go
+      # suites to it, so each still runs once.
       - name: Gates (POSIX)
         if: runner.os != 'Windows'
         run: ./scripts/dev.sh all cov scan
