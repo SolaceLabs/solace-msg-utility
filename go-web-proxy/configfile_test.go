@@ -616,7 +616,10 @@ func TestSeedConfigFile_WriteFailureIsActionable(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error when the directory cannot be created")
 	}
-	for _, want := range []string{path, "cannot write config file", "UID 65532", "/data"} {
+	if !namesPath(err.Error(), path) {
+		t.Errorf("error %q does not name %q", err, path)
+	}
+	for _, want := range []string{"cannot write config file", "UID 65532", "/data"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}
@@ -652,7 +655,10 @@ func TestResolveConfig_InvalidFileValueNamesFileAndKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error")
 	}
-	for _, want := range []string{path, `"access.allow[1]"`, `"10.0.0.1"`, "want CIDR such as"} {
+	if !namesPath(err.Error(), path) {
+		t.Errorf("error %q does not name %q", err, path)
+	}
+	for _, want := range []string{`"access.allow[1]"`, `"10.0.0.1"`, "want CIDR such as"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}

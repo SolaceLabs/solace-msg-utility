@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -322,8 +323,8 @@ func TestBackupAPI_ScheduleWriteFailureIsAStoreWriteFailure(t *testing.T) {
 }
 
 func TestBackupAPI_RemoveFailureIsAStoreWriteFailure(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores directory permissions")
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs Unix permissions and a non-root user")
 	}
 	e := newManagedEnv(t, nil)
 	e.noExit(t)
@@ -849,8 +850,8 @@ func TestBackupAPI_ImportWriteFailures(t *testing.T) {
 			if c.name == "settings" {
 				// The settings check reads the file first: break only the write.
 				dir := filepath.Dir(*p)
-				if os.Geteuid() == 0 {
-					t.Skip("root ignores directory permissions")
+				if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+					t.Skip("needs Unix permissions and a non-root user")
 				}
 				if err := os.Chmod(dir, 0o500); err != nil {
 					t.Fatal(err)

@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -33,6 +34,13 @@ import (
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError + 1}))
+}
+
+// namesPath reports whether msg names path, as written or as %q quotes it.
+// The gateway's errors quote paths with %q, which doubles every backslash, so
+// on Windows a message reads C:\\Users\\... where the path is C:\Users\....
+func namesPath(msg, path string) bool {
+	return strings.Contains(msg, path) || strings.Contains(msg, strconv.Quote(path))
 }
 
 func TestFileExists(t *testing.T) {
@@ -1071,6 +1079,9 @@ func TestTLSManager_TrustFilesListsWhatThePoolReads(t *testing.T) {
 // A trust directory that cannot be listed (here a file in its place) gives an
 // empty list and a warning, not an error page.
 func TestTLSManager_TrustFilesOfAnUnlistableDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows reports a file listed as a directory as a missing path")
+	}
 	f := newTLSFix(t)
 	f.m.trustDir = f.certFile // a regular file
 	if got := f.m.trustFiles(); len(got) != 0 || !strings.Contains(f.log.String(), "trust directory cannot be listed") {
@@ -1495,6 +1506,9 @@ func TestTLSManager_AddTrustFailuresChangeNothing(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			if c.cause == "not a directory" && runtime.GOOS == "windows" {
+				t.Skip("Windows reports a directory under a file as a missing path, not as one that is not a directory")
+			}
 			f := newTLSFix(t)
 			c.setup(f)
 			before := f.m.trust.get().pool

@@ -830,7 +830,7 @@ func TestBackupService_SnapshotNeverSeesHalfAnImport(t *testing.T) {
 func TestBackupService_LoadRefusesADamagedSchedule(t *testing.T) {
 	x := newBackupFixture(t)
 	writeFile(t, x.b.schedulePath, "not sealed")
-	if _, err := newBackupService(x.dir, x.b.schedulePath, x.b.store, x.b.settings, x.f.h, x.clock.now, quietLogger()); err == nil || !strings.Contains(err.Error(), x.b.schedulePath) {
+	if _, err := newBackupService(x.dir, x.b.schedulePath, x.b.store, x.b.settings, x.f.h, x.clock.now, quietLogger()); err == nil || !namesPath(err.Error(), x.b.schedulePath) {
 		t.Fatalf("want an error naming the file, got %v", err)
 	}
 	sched := daily2
@@ -876,7 +876,7 @@ func TestBackupService_MissingKeyBesideAScheduleRefusesToStart(t *testing.T) {
 	writeFile(t, schedulePath, "sealed with a lost key")
 	opts := f.opts(noEnv)
 	opts.schedulePath = schedulePath
-	if _, err := loadStore(opts, quietLogger()); err == nil || !strings.Contains(err.Error(), schedulePath) {
+	if _, err := loadStore(opts, quietLogger()); err == nil || !namesPath(err.Error(), schedulePath) {
 		t.Fatalf("want a refusal naming the schedule, got %v", err)
 	}
 }

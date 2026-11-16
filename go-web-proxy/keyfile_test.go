@@ -50,7 +50,7 @@ func TestLoadStoreKey_RefusesAMissingKeyBesideAStore(t *testing.T) {
 		path, stores := keyDir(t)
 		writeFile(t, stores[i], "anything")
 		_, err := loadStoreKey(path, stores, quietLogger())
-		if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), stores[i]) ||
+		if err == nil || !namesPath(err.Error(), path) || !namesPath(err.Error(), stores[i]) ||
 			!strings.Contains(err.Error(), "restore the key file, or delete the store files") {
 			t.Fatalf("want a refusal naming both files and the fix, got %v", err)
 		}
@@ -75,7 +75,7 @@ func TestLoadStoreKey_RefusesAMalformedKey(t *testing.T) {
 			path, stores := keyDir(t)
 			writeFile(t, path, tc.content)
 			_, err := loadStoreKey(path, stores, quietLogger())
-			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), keyGenerateHint) {
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !namesPath(err.Error(), path) || !strings.Contains(err.Error(), keyGenerateHint) {
 				t.Fatalf("want %q naming the file and how to make a key, got %v", tc.want, err)
 			}
 			if tc.content != "" && strings.Contains(err.Error(), tc.content) {

@@ -105,7 +105,7 @@ func TestBuildManagedRoutes_StoreErrorIsReturned(t *testing.T) {
 	f.writeUsers(t, "msg-utility-users: [")
 	cfg := defaultConfig()
 	cfg.connModes, cfg.usersFile, cfg.connectionsFile, cfg.storeKeyFile = connBoth, f.usersPath, f.connsPath, f.keyPath
-	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, nil, nil, quietLogger()); err == nil || !strings.Contains(err.Error(), f.usersPath) {
+	if _, err := buildManagedRoutes(cfg, newLive(cfg), configSource{}, f.h, noEnv, time.Now, nil, nil, quietLogger()); err == nil || !namesPath(err.Error(), f.usersPath) {
 		t.Fatalf("want the store error naming the file, got %v", err)
 	}
 }

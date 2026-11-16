@@ -434,7 +434,7 @@ func TestLoadStore_BootstrapRefusesBadSources(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := bootstrapFixture(t)
 			_, err := loadStore(f.opts(envOf(tc.env)), quietLogger())
-			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), f.usersPath) {
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !namesPath(err.Error(), f.usersPath) {
 				t.Fatalf("want an error naming the users file and %q, got %v", tc.want, err)
 			}
 			if strings.Contains(err.Error(), "long-enough-pw") {
@@ -517,7 +517,7 @@ func TestLoadStore_RejectsInvalidUsersFile(t *testing.T) {
 			f := newStoreFixture(t)
 			f.writeUsers(t, tc.doc)
 			_, err := loadStore(f.opts(noEnv), quietLogger())
-			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), f.usersPath) {
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !namesPath(err.Error(), f.usersPath) {
 				t.Fatalf("want an error naming the file and %q, got %v", tc.want, err)
 			}
 		})
@@ -553,7 +553,7 @@ func TestLoadStore_RejectsInvalidConnectionsFile(t *testing.T) {
 			f := newStoreFixture(t)
 			f.writeConns(t, tc.doc)
 			_, err := loadStore(f.opts(noEnv), quietLogger())
-			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), f.connsPath) {
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !namesPath(err.Error(), f.connsPath) {
 				t.Fatalf("want an error naming the file and %q, got %v", tc.want, err)
 			}
 		})
@@ -641,7 +641,7 @@ func TestLoadStore_RefusesStoresItCannotOpen(t *testing.T) {
 			f := newStoreFixture(t)
 			tc.prepare(t, f)
 			_, err := loadStore(f.opts(noEnv), quietLogger())
-			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), tc.path(f)) {
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !namesPath(err.Error(), tc.path(f)) {
 				t.Fatalf("want an error naming %s and %q, got %v", tc.path(f), tc.want, err)
 			}
 		})
@@ -1558,7 +1558,7 @@ func TestLoadStore_RevChecks(t *testing.T) {
 				f.writeConns(t, tc.doc)
 			}
 			_, err := loadStore(f.opts(noEnv), quietLogger())
-			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "restore the file") {
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !namesPath(err.Error(), path) || !strings.Contains(err.Error(), "restore the file") {
 				t.Fatalf("want a refusal naming %s and %q, got %v", path, tc.want, err)
 			}
 		})
