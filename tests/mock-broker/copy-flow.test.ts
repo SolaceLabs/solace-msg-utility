@@ -83,6 +83,10 @@ async function run(session: any, opts: { vpn: string; from: string; to: string; 
 }
 
 describe('queue-copy engine against the demo broker', () => {
+    // 400 messages, each delivered and acknowledged on its own timer. Windows
+    // runs a short timer at its clock tick (about 15 ms), not at 1 ms, so this
+    // run takes seconds there where it takes under one on Linux: hence the
+    // longer timeout.
     it('copies every message in order and leaves the source as it was, pausing and resuming the source browser', async () => {
         const source = [...spooled('vpn-dev', 'Q/BULK')];
         const before = payloads('vpn-dev', 'Q/BULK');
@@ -101,7 +105,7 @@ describe('queue-copy engine against the demo broker', () => {
         expect(onProgress).toHaveBeenCalledTimes(source.length);
         expect(payloads('vpn-dev', 'Q/BULK')).toEqual(before);
         expect(payloads('vpn-dev', 'dev-scratch').slice(destBefore)).toEqual(before);
-    });
+    }, 30_000);
 
     it('moves every message: the destination gains them in order and the source is left empty', async () => {
         const before = payloads('vpn-prod', 'Q/ORDER/PROCESS');

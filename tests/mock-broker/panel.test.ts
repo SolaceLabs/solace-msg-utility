@@ -73,7 +73,10 @@ describe('mock-broker/panel -- guidance', () => {
     });
 
     it('treats every load as the first when the storage refuses, so the guidance still shows', () => {
-        const refused = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
+        // The prototype of the sessionStorage in use, not the global Storage:
+        // from Node 25 the runtime has Web Storage of its own, and which one a
+        // test sees depends on the Node version.
+        const refused = vi.spyOn(Object.getPrototypeOf(sessionStorage), 'getItem').mockImplementation(() => { throw new Error('denied'); });
         try {
             expect([firstVisit('k'), firstVisit('k')]).toEqual([true, true]);
         } finally {
