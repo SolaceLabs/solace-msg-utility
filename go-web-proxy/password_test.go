@@ -81,17 +81,54 @@ func TestParsePasswordHash_Rejects(t *testing.T) {
 }
 
 func TestCheckPasswordPolicy(t *testing.T) {
-	cases := map[string]bool{
+	cases := []struct {
+		pw  string
+		min int
+		ok  bool
+	}{
+		{strings.Repeat("a", 11), passwordMinLen, false},
+		{strings.Repeat("a", 12), passwordMinLen, true},
+		{strings.Repeat("e", 128), passwordMinLen, true},
+		{strings.Repeat("a", 129), passwordMinLen, false},
+		// Counted in characters, not bytes: 12 two-byte runes pass.
+		{strings.Repeat("é", 12), passwordMinLen, true},
+		// A raised minimum (login.passwordMinLength) moves the lower bound only.
+		{strings.Repeat("a", 15), 16, false},
+		{strings.Repeat("a", 16), 16, true},
+		{strings.Repeat("a", 128), 16, true},
+		{strings.Repeat("a", 129), 128, false},
+		{strings.Repeat("a", 128), 128, true},
+	}
+	for _, c := range cases {
+		if err := checkPasswordPolicy(c.pw, c.min); (err == nil) != c.ok {
+			t.Errorf("len %d, min %d: want ok=%v, got %v", len([]rune(c.pw)), c.min, c.ok, err)
+		}
+	}
+}
+
+// The refusal names the bounds in force, so a page can tell the user the live
+// minimum.
+func TestPasswordRuleError_NamesTheMinimum(t *testing.T) {
+	err := checkPasswordPolicy("short", 20)
+	if err == nil || err.Error() != "password must be 20 to 128 characters" {
+		t.Fatalf("got %v", err)
+	}
+	if got := passwordRuleError(12).Error(); got != "password must be 12 to 128 characters" {
+		t.Errorf("got %q", got)
+	}
+}
+
+// A backup passphrase keeps the fixed rule whatever login.passwordMinLength is:
+// a backup made under one setting must open under another.
+func TestCheckPassphrase_FixedRule(t *testing.T) {
+	for pw, ok := range map[string]bool{
 		strings.Repeat("a", 11):  false,
 		strings.Repeat("a", 12):  true,
-		strings.Repeat("e", 128): true,
+		strings.Repeat("a", 128): true,
 		strings.Repeat("a", 129): false,
-		// Counted in characters, not bytes: 12 two-byte runes pass.
-		strings.Repeat("é", 12): true,
-	}
-	for pw, ok := range cases {
-		if err := checkPasswordPolicy(pw); (err == nil) != ok {
-			t.Errorf("len %d: want ok=%v, got %v", len([]rune(pw)), ok, err)
+	} {
+		if err := checkPassphrase(pw); (err == nil) != ok {
+			t.Errorf("len %d: want ok=%v, got %v", len(pw), ok, err)
 		}
 	}
 }

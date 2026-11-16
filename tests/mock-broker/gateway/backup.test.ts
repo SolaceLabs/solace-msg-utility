@@ -133,7 +133,7 @@ describe('mock-broker/gateway/backup -- the file format', () => {
         })), PASS);
         expect(d.connections[0]).toEqual({ broker: 'b9', hostname: 'h', semp: { port: '1943', username: '', password: '' }, client: { port: '1443', msgVpns: [{ name: 'v', username: '', password: '' }] } });
         expect(d.users[0]).toEqual({ ...user('u', 'p'), readOnly: [{ brokers: 'b', msgVpns: 'v', queues: 'q' }] });
-        expect([d.created, d.gateway, d.settings.connModes, d.settings.hosted]).toEqual(['', '', 'both', false]);
+        expect([d.created, d.gateway, d.settings.connModes, d.settings.hosted]).toEqual(['', '', 'both', true]);   // hosted: the default's
         expect(d.settings).not.toHaveProperty('connectionsFile');
     });
 
@@ -145,11 +145,22 @@ describe('mock-broker/gateway/backup -- the file format', () => {
         expect(toBase64(new Uint8Array(70_000)).length).toBe(93_336);
     });
 
-    it('decodes settings onto a zero file: missing ones are zero, mistyped ones refused', () => {
-        expect(settingsFromBackup(undefined).connModes).toBe('');
+    it('decodes settings onto the default file: a missing key reads as its default, mistyped ones are refused', () => {
+        expect(settingsFromBackup(undefined).connModes).toBe('direct');
         expect(settingsFromBackup({ tls: null }).tls).toEqual({ insecureSkipVerify: false });
-        expect(settingsFromBackup(null).session).toEqual({ idleMinutes: 0, absoluteMinutes: 0 });
+        expect(settingsFromBackup(null).session).toEqual({ idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 });
+        expect(settingsFromBackup({ session: { idleMinutes: 5 } }).session).toEqual({ idleMinutes: 5, absoluteMinutes: 30, connectsPerMinute: 20 });
+        expect(settingsFromBackup(null).modules).toEqual({ offered: ['queue-browser', 'queue-copy', 'queue-subscription-explorer'], userDefault: 'all' });
         expect(() => settingsFromBackup({ hosted: 'yes' })).toThrow();
+    });
+
+    it('reads a backup without the sign-in limits and the connect limit as their defaults, and keeps the keys it holds', () => {
+        const { login, session, ...rest } = settings();
+        const { perClient, clientMaxFailures, resetMinutes, passwordMinLength, twoFactorMinutes, ...kept } = login;
+        expect([perClient, clientMaxFailures, resetMinutes, passwordMinLength, twoFactorMinutes]).toEqual([true, 10, 15, 12, 10]);
+        const from = settingsFromBackup({ ...rest, login: { ...kept, maxFailures: 3 }, session: { idleMinutes: session.idleMinutes, absoluteMinutes: session.absoluteMinutes } });
+        expect(from.login).toEqual({ ...login, maxFailures: 3 });
+        expect(from.session).toEqual(session);
     });
 
     it('reads a backup from before the paths left the file, and drops the three TLS paths whatever their case', () => {
@@ -320,6 +331,16 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         expect(d.settings.logLevel).toBe('warn');
     });
 
+    it('keeps the passphrase rule at 12 to 128 whatever login.passwordMinLength says', async () => {
+        const gw = gateway();
+        expect(gw.settings.save({ login: { passwordMinLength: 40 } }, gw.settings.rev()).ok).toBe(true);
+        const twelve = 'twelve-chars';
+        const ex = await call(gw, 'POST', '/managed/backup/export', { passphrase: twelve });
+        expect(ex.status).toBe(200);
+        expect((await openBackup(ex.json.content, twelve)).settings.login.passwordMinLength).toBe(40);
+        expect((await call(gw, 'POST', '/managed/backup/export', { passphrase: 'eleven-char' })).json.reason).toBe(RULE[1]);
+    });
+
     describe('import', () => {
         async function file(gw: Gw, edit: (d: BackupDoc) => void = () => {}): Promise<string> {
             const d = await openBackup((await call(gw, 'POST', '/managed/backup/export', { passphrase: PASS })).json.content, PASS);
@@ -374,14 +395,14 @@ describe('mock-broker/gateway/backup -- the routes', () => {
                 d.connections = d.connections.slice(0, 1);
                 d.settings.logLevel = 'info';
             });
-            expect((await imp(gw, f, 'merge', 'replace', 'replace')).json).toEqual({ restartRequired: [], signedOut: false });
+            expect((await imp(gw, f, 'merge', 'replace', 'replace')).json).toEqual({ signedOut: false });
             expect(gw.sessions.get(viewer)).toBeNull();
             expect(gw.sessions.get(operator)).not.toBeNull(); // merge keeps the operator
             expect(gw.store.listConnections().map(c => c.broker)).toEqual(['b1']);
             expect(gw.settings.current().logLevel).toBe('info');
             expect(gw.signIn('viewer', 'viewer password two').ok).toBe(true);
 
-            expect((await imp(gw, f, 'replace', 'merge', 'skip')).json).toEqual({ restartRequired: [], signedOut: false });
+            expect((await imp(gw, f, 'replace', 'merge', 'skip')).json).toEqual({ signedOut: false });
             expect(gw.sessions.get(operator)).toBeNull();
             expect(gw.store.listUsers().map(u => u.username)).toEqual(['admin', 'viewer']);
 
@@ -389,10 +410,10 @@ describe('mock-broker/gateway/backup -- the routes', () => {
             expect((await imp(gw, own, 'merge', 'skip', 'skip')).json.signedOut).toBe(true);
         });
 
-        it('applies tls.insecureSkipVerify at once: nothing is pending a restart', async () => {
+        it('applies tls.insecureSkipVerify at once', async () => {
             const gw = gateway();
             const f = await file(gw, d => { d.settings.tls.insecureSkipVerify = true; });
-            expect((await imp(gw, f, 'skip', 'skip', 'replace')).json.restartRequired).toEqual([]);
+            expect((await imp(gw, f, 'skip', 'skip', 'replace')).json).toEqual({ signedOut: false });
             expect(gw.settings.current().tls.insecureSkipVerify).toBe(true);
         });
     });
@@ -497,7 +518,7 @@ describe('mock-broker/gateway/backup -- two-factor', () => {
             const operator = gw.openSession('operator', false);
 
             const res = await call(gw, '/managed/backup/import', { file, passphrase: PASS, users: 'replace', connections: 'skip', settings: 'skip', basis: basisOf(gw) });
-            expect(res.json).toEqual({ restartRequired: [], signedOut: false });
+            expect(res.json).toEqual({ signedOut: false });
             expect(gw.store.totpOf('viewer')).toEqual(totp);
             expect(gw.sessions.get(session)).toBeNull();
             expect(gw.sessions.get(operator)).not.toBeNull();

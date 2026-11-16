@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func (e *managedEnv) form(path string, v url.Values, c *http.Cookie, headers ...string) *httptest.ResponseRecorder {
@@ -232,6 +233,38 @@ func TestPasswordChange_Rejections(t *testing.T) {
 	au.expect(t, refused("bad_credentials"), refused("invalid"), refused("invalid"), refused("invalid"))
 }
 
+// login.passwordMinLength is read live by the password page: the form states it
+// and carries it as minlength, a shorter password is refused 422 naming it, and
+// a password of that length is taken.
+func TestPasswordPage_EnforcesAndShowsTheLiveMinimum(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	// The audit trail first: withAudit applies e.cfg's live settings, which
+	// would put the minimum back to its default.
+	au := e.withAudit(t, auditSettings{})
+	c := e.cookie("viewer", false)
+	expectPage(t, e.do("GET", "/login/password", "", c), http.StatusOK, `minlength="12"`)
+	next := e.cfg
+	next.login.passwordMinLength = 20
+	e.live.apply(next)
+	page := e.do("GET", "/login/password", "", c)
+	expectPage(t, page, http.StatusOK, `minlength="20"`)
+	if !strings.Contains(page.Body.String(), "20 to 128 characters.") || strings.Contains(page.Body.String(), `minlength="12"`) {
+		t.Errorf("the page must state the live minimum:\n%s", page.Body.String())
+	}
+	short := "viewer-new-pw-1" // 15 characters: fine by default, short of 20
+	expectPage(t, e.form("/login/password", passwordForm(viewerPW, short, short), c), http.StatusUnprocessableEntity, "The new password must be 20 to 128 characters.")
+	if !signsIn(t, e.api.store, "viewer", viewerPW) {
+		t.Error("a refused change leaves the password")
+	}
+	au.expect(t, auditEntry{Actor: "viewer", Action: "password.change", Target: "viewer", Outcome: "refused", Code: "invalid",
+		Msg: "viewer could not change their password: invalid"})
+	long := strings.Repeat("v", 20)
+	expectRedirect(t, e.form("/login/password", passwordForm(viewerPW, long, long), c), "/")
+	if !signsIn(t, e.api.store, "viewer", long) {
+		t.Error("a password of the minimum length must be taken")
+	}
+}
+
 func TestPasswordChange_SuccessEndsOtherSessionsAndClearsFlag(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	au := e.withAudit(t, auditSettings{})
@@ -372,6 +405,33 @@ func TestPasswordChange_ClientGoneIsNotAudited(t *testing.T) {
 	if !signsIn(t, e.api.store, "viewer", viewerPW) {
 		t.Error("the password must be unchanged")
 	}
+}
+
+// A browser that already holds a session still draws every sign-in attempt from
+// its client's budget: the 61st POST /login in a minute (the default
+// login.unauthenticatedPerMinute) is refused, while pages that need a session
+// and carry one stay unmetered.
+func TestLogin_SignInWithASessionDrawsFromTheBudget(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.login.unauthPerMinute = defaultConfig().login.unauthPerMinute })
+	if e.cfg.login.unauthPerMinute != 60 {
+		t.Fatalf("the default budget is 60 a minute, got %d", e.cfg.login.unauthPerMinute)
+	}
+	c := e.cookie("viewer", false)
+	for i := range 60 {
+		rec := e.form("/login", signInForm("viewer", viewerPW, "/"), c)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("attempt %d: want a sign-in, got %d %s", i+1, rec.Code, rec.Body.String())
+		}
+		c = issuedCookie(t, rec)
+	}
+	rec := e.form("/login", signInForm("viewer", viewerPW, "/"), c)
+	expectPage(t, rec, http.StatusTooManyRequests, "Too many requests from this address")
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("429 must carry Retry-After")
+	}
+	expect(t, e.do("GET", "/managed/me", "", c), http.StatusOK, "") // the session was not touched
+	expectRedirect(t, e.do("GET", "/login?next=/solAdmin", "", c), "/solAdmin")
+	expectPage(t, e.do("GET", "/login/password", "", c), http.StatusOK, `action="/login/password"`)
 }
 
 // ----- gates ------------------------------------------------------------------------------
@@ -630,6 +690,9 @@ func TestLogin_IsAudited(t *testing.T) {
 	e.clock.advance(testLoginLimits.backoff)
 	expectRedirect(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil), "/")
 	e.form("/login", signInForm("ghost", "wrong-password", "/"), nil)
+	// The sign-in did not clear the client's count, so the ghost's failure is
+	// its fourth and blocks it again, for a doubled back-off; wait it out.
+	e.clock.advance(2 * testLoginLimits.backoff)
 	e.api.store.users[0].MustChangePassword = true
 	e.form("/login", signInForm("admin", adminPW, "/"), nil)
 
@@ -1005,6 +1068,118 @@ func TestLoginCode_RecoveryCodeWorksOnce(t *testing.T) {
 	e.expectNoSecrets(t, au, codes[0], codes[1], typed, other, storeTOTPSecret)
 }
 
+// A code typed as an authenticator shows it ("123 456", or with a hyphen) is a
+// TOTP code once the separators are out: it signs in, and it is still judged as
+// a TOTP code, so a replay of it is refused however it is typed.
+func TestLoginCode_SeparatorsInATOTPCodeAreIgnored(t *testing.T) {
+	e, _ := optionalEnv(t)
+	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	signIn := func() *http.Cookie {
+		return ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	}
+	for _, sep := range []string{" ", "-"} {
+		e.clock.advance(totpPeriod)
+		code := e.nowCode(t, storeTOTPSecret)
+		typed := code[:3] + sep + code[3:]
+		rec := e.form("/login/code", codeForm(typed, "/"), signIn())
+		expectRedirect(t, rec, "/")
+		issuedCookie(t, rec)
+		if recoveryLeft(e, "viewer") != recoveryCount {
+			t.Errorf("%q: a TOTP code uses no recovery code, %d left", typed, recoveryLeft(e, "viewer"))
+		}
+		replay := e.form("/login/code", codeForm(code, "/"), signIn())
+		expectPage(t, replay, http.StatusUnauthorized, "The code is not correct.")
+		noSession(t, replay)
+	}
+	// Six digits with other characters around them is not a TOTP code.
+	e.clock.advance(totpPeriod)
+	code := e.nowCode(t, storeTOTPSecret)
+	rec := e.form("/login/code", codeForm(code+"x", "/"), signIn())
+	expectPage(t, rec, http.StatusUnauthorized, "The code is not correct.")
+	noSession(t, rec)
+}
+
+// audit.onFailure refuse with an audit log that cannot be written: a recovery
+// code (a store write) is answered 503 on the code page, audited as
+// audit_unavailable once the log can be written, and not used up; a code from
+// the authenticator and a sign-in without two-factor write nothing and go on.
+func TestLoginCode_RecoveryCodeIsRefusedWhileTheAuditLogCannotBeWritten(t *testing.T) {
+	newEnv := func(t *testing.T) (*managedEnv, *auditor, []string) {
+		e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorOptional })
+		e.setAudit(auditSettings{onFailure: auditOnFailureRefuse})
+		a, _ := e.withLoudAudit(t)
+		codes := e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+		_ = a.f.Close()
+		e.api.audit.record(auditAdmin, auditEntry{Actor: "admin", Action: auditUserCreate, Outcome: auditOK, Msg: "admin created user x"}) // the lost record
+		return e, a, codes
+	}
+	t.Run("recovery code", func(t *testing.T) {
+		e, a, codes := newEnv(t)
+		typed := formatRecoveryCode(codes[0])
+		tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil)) // the password step writes nothing
+		rec := e.form("/login/code", codeForm(typed, "/"), tc)
+		expectPage(t, rec, http.StatusServiceUnavailable, recoveryAuditText)
+		noSession(t, rec)
+		if recoveryLeft(e, "viewer") != recoveryCount {
+			t.Fatalf("a refused recovery code is not used up: %d left", recoveryLeft(e, "viewer"))
+		}
+
+		a.mu.Lock()
+		a.f = nil // the next write reopens the file: space is back
+		a.mu.Unlock()
+		expectPage(t, e.form("/login/code", codeForm(typed, "/"), tc), http.StatusServiceUnavailable, recoveryAuditText) // its refusal line is written and clears the state
+		lines := fileLines(t, a.path)
+		if len(lines) != 1 || !strings.Contains(lines[0], `"action":"signin"`) || !strings.Contains(lines[0], `"outcome":"refused"`) || !strings.Contains(lines[0], `"code":"audit_unavailable"`) {
+			t.Errorf("want one refused sign-in entry with code audit_unavailable: %q", lines)
+		}
+		rec = e.form("/login/code", codeForm(typed, "/"), tc)
+		expectRedirect(t, rec, "/")
+		issuedCookie(t, rec)
+		if recoveryLeft(e, "viewer") != recoveryCount-1 {
+			t.Errorf("the code works once the log is writable and is then used up: %d left", recoveryLeft(e, "viewer"))
+		}
+	})
+	t.Run("authenticator code and no two-factor", func(t *testing.T) {
+		e, _, _ := newEnv(t)
+		tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+		rec := e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc)
+		expectRedirect(t, rec, "/")
+		issuedCookie(t, rec)
+		expectRedirect(t, e.form("/login", signInForm("admin", adminPW, "/solAdmin"), nil), "/solAdmin")
+	})
+}
+
+// login.twoFactorMinutes is the sign-in ticket's lifetime, read live: a ticket
+// ends at the time in force, and lowering the setting ends one already issued.
+func TestLoginCode_TicketLivesAsLongAsTwoFactorMinutes(t *testing.T) {
+	e, _ := optionalEnv(t)
+	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	setTicket := func(d time.Duration) {
+		next := e.cfg
+		next.session.ticket = d
+		e.live.apply(next)
+	}
+	signIn := func() *http.Cookie {
+		return ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	}
+	setTicket(2 * time.Minute)
+	tc := signIn()
+	e.clock.advance(2*time.Minute - time.Second)
+	expectPage(t, e.do("GET", "/login/code", "", tc), http.StatusOK, `action="/login/code"`)
+	e.clock.advance(time.Second)
+	expectRedirect(t, e.do("GET", "/login/code", "", tc), "/login")
+
+	setTicket(10 * time.Minute)
+	tc = signIn()
+	e.clock.advance(5 * time.Minute)
+	expectPage(t, e.do("GET", "/login/code", "", tc), http.StatusOK, `action="/login/code"`)
+	setTicket(4 * time.Minute)
+	expectRedirect(t, e.do("GET", "/login/code", "", tc), "/login")
+	rec := e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc)
+	expectRedirect(t, rec, "/login")
+	noSession(t, rec)
+}
+
 func TestLoginCode_NeedsALiveCodeTicket(t *testing.T) {
 	e, _ := optionalEnv(t)
 	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
@@ -1012,7 +1187,7 @@ func TestLoginCode_NeedsALiveCodeTicket(t *testing.T) {
 	expectRedirect(t, e.form("/login/code", codeForm("123456", "/solAdmin"), nil), "/login?next=%2FsolAdmin")
 
 	tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
-	e.clock.advance(ticketTTL)
+	e.clock.advance(defaultTicketTTL)
 	expectRedirect(t, e.do("GET", "/login/code", "", tc), "/login")
 	rec := e.form("/login/code", codeForm(e.nowCode(t, storeTOTPSecret), "/"), tc)
 	expectRedirect(t, rec, "/login")

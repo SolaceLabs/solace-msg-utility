@@ -2,9 +2,23 @@
  * collide in the shared (inlined) cascade. Shipped only in the admin app and
  * the Provisioned demo (main-admin.css). */
 
+/* Each card is a section of the page; both share the one column. */
 .backup-card {
     max-width: 720px;
     margin: 2rem auto;
+}
+
+.backup-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.backup-title {
+    margin: 0;
+    font-size: 1rem;
 }
 
 .backup-intro,

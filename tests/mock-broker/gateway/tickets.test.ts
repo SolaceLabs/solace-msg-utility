@@ -4,7 +4,8 @@ import { createTickets, TICKET_TTL_MS, type Ticket } from '../../../src/mock-bro
 
 /**
  * Sign-in tickets (src/mock-broker/gateway/tickets.ts): ten minutes from
- * creation, swept on create, ended with the user's sessions.
+ * creation unless the lifetime they are given (login.twoFactorMinutes) says
+ * otherwise, swept on create, ended with the user's sessions.
  */
 const mk = (user: string, stage: Ticket['stage'] = 'code', secret = '') => ({ user, stage, password: 'p', mustChange: false, secret });
 
@@ -50,6 +51,22 @@ describe('mock-broker/gateway/tickets', () => {
         expect(tickets.get(old)).toBeNull();
         const fresh = tickets.create(mk('viewer'));
         expect(tickets.dump().map(([id]) => id)).toEqual([fresh]);
+    });
+
+    it('reads its lifetime live: a shorter one also ends a ticket already issued', () => {
+        let t = 0;
+        let ttl = TICKET_TTL_MS;
+        const tickets = createTickets(() => t, () => ttl);
+        const id = tickets.create(mk('admin'));
+        t = 5 * 60 * 1000;
+        expect(tickets.get(id)).not.toBeNull();
+        ttl = 60 * 1000;
+        expect(tickets.get(id)).toBeNull();
+        const short = tickets.create(mk('viewer'));
+        t += 60 * 1000;
+        expect(tickets.get(short)).not.toBeNull();
+        t += 1;
+        expect(tickets.get(short)).toBeNull();
     });
 
     it('drops every ticket of a user and no one else\'s', () => {

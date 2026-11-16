@@ -26,6 +26,9 @@ type socketRegistry struct {
 	// it takes only the store's lock and never calls back in here.
 	allowed func(user, broker, vpn string) bool
 	logger  *slog.Logger
+	// perUser and total are the open-socket ceilings (maxSocketsPerUser,
+	// maxSocketsTotal); fields so tests can lower them.
+	perUser, total int
 }
 
 type openSocket struct {
@@ -33,13 +36,39 @@ type openSocket struct {
 	cancel                     context.CancelFunc // ends the socket's context: smf.go closes both sides
 }
 
+// The ceilings on open sockets. The connect rate (session.connectsPerMinute)
+// bounds how fast sockets open, not how many stay open, and each one holds two
+// goroutines and two file descriptors until the SMF keep-alive ends it. A
+// browser tab holds one socket per connection (two with a Queue Copy
+// destination), so the per-user ceiling leaves room for many tabs.
+const (
+	maxSocketsPerUser = 20
+	maxSocketsTotal   = 1000
+)
+
 func newSocketRegistry(allowed func(user, broker, vpn string) bool, logger *slog.Logger) *socketRegistry {
-	return &socketRegistry{open: map[uint64]openSocket{}, allowed: allowed, logger: logger}
+	return &socketRegistry{
+		open: map[uint64]openSocket{}, allowed: allowed, logger: logger,
+		perUser: maxSocketsPerUser, total: maxSocketsTotal,
+	}
 }
 
 // add registers a socket; the returned func removes it once the socket ends.
-func (sr *socketRegistry) add(s openSocket) (remove func()) {
+// ok is false, and nothing is registered, when the user already holds
+// perUser open sockets or the gateway holds total.
+func (sr *socketRegistry) add(s openSocket) (remove func(), ok bool) {
 	sr.mu.Lock()
+	held := 0
+	for _, o := range sr.open {
+		if o.user == s.user {
+			held++
+		}
+	}
+	if total := len(sr.open); held >= sr.perUser || total >= sr.total {
+		sr.mu.Unlock()
+		sr.logger.Warn("smf socket refused: too many open sockets", "user", s.user, "user_open", held, "total_open", total)
+		return nil, false
+	}
 	id := sr.next
 	sr.next++
 	sr.open[id] = s
@@ -48,7 +77,7 @@ func (sr *socketRegistry) add(s openSocket) (remove func()) {
 		sr.mu.Lock()
 		delete(sr.open, id)
 		sr.mu.Unlock()
-	}
+	}, true
 }
 
 func (sr *socketRegistry) closeSession(id string) {

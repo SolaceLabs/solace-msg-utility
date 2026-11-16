@@ -624,3 +624,51 @@ func TestClip(t *testing.T) {
 		t.Errorf("a text of the limit is kept: %q", got)
 	}
 }
+
+// audit.onFailure refuse with an audit log that cannot be written: a certificate
+// replacement, a trusted-CA add and a trusted-CA delete are each 503
+// audit_unavailable with the pair, the served certificate and the trust
+// directory as they were, while reads, the check and Restart gateway go on (a
+// restart changes no stored file, and may be what makes the log writable). Once
+// the log can be written the refusal's own entry clears the state and the
+// change goes through.
+func TestTLSAPI_AuditUnavailableRefusesCertificateAndTrustChanges(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	e.setAudit(auditSettings{onFailure: auditOnFailureRefuse})
+	a, _ := e.withLoudAudit(t)
+	next := newTestCert(t, testCertSpec{cn: "next"})
+	ca := newTestCert(t, testCertSpec{cn: "ca", ca: true})
+	old := newTestCert(t, testCertSpec{cn: "old", ca: true})
+	e.putTrustDir(t, map[string]string{"old.crt": old.certPEM})
+	restarts := 0
+	e.api.restart = func() { restarts++ }
+	pair := tlsJSON(t, tlsPairJSON{Certificate: next.certPEM, Key: next.keyPEM})
+	add := tlsJSON(t, tlsTrustAddJSON{Name: "ca.crt", Certificate: ca.certPEM})
+	// The audit log cannot be written from here on; the record it loses starts the refusals.
+	_ = a.f.Close()
+	e.api.audit.record(auditAdmin, auditEntry{Actor: "admin", Action: auditUserCreate, Outcome: auditOK, Msg: "admin created user x"})
+
+	expect(t, e.do("PUT", tlsCertPath, pair, e.admin()), http.StatusServiceUnavailable, "audit_unavailable")
+	expect(t, e.do("POST", tlsTrustPath, add, e.admin()), http.StatusServiceUnavailable, "audit_unavailable")
+	expect(t, e.do("DELETE", tlsTrustPath+"/old.crt", "", e.admin()), http.StatusServiceUnavailable, "audit_unavailable")
+	e.wantTLSUntouched(t, "old.crt")
+
+	expect(t, e.do("GET", tlsPath, "", e.admin()), http.StatusOK, "")
+	expect(t, e.do("POST", tlsCheckPath, pair, e.admin()), http.StatusOK, "")
+	expect(t, e.do("POST", "/managed/restart", "", e.admin()), http.StatusAccepted, "")
+	if restarts != 1 {
+		t.Errorf("Restart gateway is not refused: want 1 restart, got %d", restarts)
+	}
+
+	a.mu.Lock()
+	a.f = nil // the next write reopens the file: space is back
+	a.mu.Unlock()
+	expect(t, e.do("PUT", tlsCertPath, pair, e.admin()), http.StatusServiceUnavailable, "audit_unavailable") // its refusal line is written and clears the state
+	expect(t, e.do("PUT", tlsCertPath, pair, e.admin()), http.StatusOK, "")
+	e.tls.wantFiles(t, next)
+	lines := fileLines(t, a.path)
+	if len(lines) != 2 || !strings.Contains(lines[0], `"action":"tls.certificate.replace"`) || !strings.Contains(lines[0], `"outcome":"refused"`) ||
+		!strings.Contains(lines[0], `"code":"audit_unavailable"`) || !strings.Contains(lines[1], `"outcome":"ok"`) {
+		t.Errorf("want the refusal audited as audit_unavailable, then the change: %q", lines)
+	}
+}

@@ -10,6 +10,7 @@ import type { AppContext, AppState, ManagedSession } from '../../../src/core/typ
 import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import type { CopyJob, VerifyResult } from '../../../src/modules/queue-copy/state';
 import { completeContext } from '../../helpers/appContext';
+import { createSolacePublisher } from '../../../src/core/services/solace-publisher';
 
 // Derive the structured sempCredentials fields from a baseUrl shorthand so
 // fixture lines stay readable: `sempCreds('https://broker:1943/SEMP/v2')`.
@@ -789,7 +790,6 @@ describe('queue-copy/ui-modal', () => {
             const session = createSessionMock();
             const browser = createBrowserMock();
             (session.createQueueBrowser as any).mockReturnValue(browser);
-            const { createSolacePublisher } = await import('../../../src/core/services/solace-publisher');
             state.primaryPublisher = createSolacePublisher(session);
 
             openCopyModal(ctx, els, state, () => session);
@@ -822,7 +822,6 @@ describe('queue-copy/ui-modal', () => {
             const session = createSessionMock();
             const browser = createBrowserMock();
             (session.createQueueBrowser as any).mockReturnValue(browser);
-            const { createSolacePublisher } = await import('../../../src/core/services/solace-publisher');
             state.primaryPublisher = createSolacePublisher(session);
 
             openCopyModal(ctx, els, state, () => session);
@@ -877,7 +876,6 @@ describe('queue-copy/ui-modal', () => {
             const session = createSessionMock();
             const browser = createBrowserMock();
             (session.createQueueBrowser as any).mockReturnValue(browser);
-            const { createSolacePublisher } = await import('../../../src/core/services/solace-publisher');
             state.primaryPublisher = createSolacePublisher(session);
 
             openCopyModal(ctx, els, state, () => session);
@@ -909,7 +907,6 @@ describe('queue-copy/ui-modal', () => {
             const session = createSessionMock();
             const browser = createBrowserMock();
             (session.createQueueBrowser as any).mockReturnValue(browser);
-            const { createSolacePublisher } = await import('../../../src/core/services/solace-publisher');
             state.primaryPublisher = createSolacePublisher(session);
 
             openCopyModal(ctx, els, state, () => session);
@@ -965,7 +962,6 @@ describe('queue-copy/ui-modal', () => {
             const session = createSessionMock();
             const browser = createBrowserMock();
             (session.createQueueBrowser as any).mockReturnValue(browser);
-            const { createSolacePublisher } = await import('../../../src/core/services/solace-publisher');
             state.primaryPublisher = createSolacePublisher(session);
 
             openCopyModal(ctx, els, state, () => session);
@@ -1042,7 +1038,6 @@ describe('queue-copy/ui-modal', () => {
             state.destForm.sameVpn = false;
             state.destForm.host = 'b2';
             state.destForm.solace.vpn = 'v1';
-            const { createSolacePublisher } = await import('../../../src/core/services/solace-publisher');
             const destSession = createSessionMock();
             state.destSession = destSession;
             state.destSessionTarget = destTargetKey(state.destForm);
@@ -1093,7 +1088,6 @@ describe('queue-copy/ui-modal', () => {
             state.dest = { type: 'queue', name: 'd' };
             const session = createSessionMock();
             (session.createQueueBrowser as any).mockReturnValue(createBrowserMock());
-            const { createSolacePublisher } = await import('../../../src/core/services/solace-publisher');
             state.primaryPublisher = createSolacePublisher(session);
 
             openCopyModal(makeCtx(), els, state, () => session);
@@ -1389,7 +1383,6 @@ describe('queue-copy/ui-modal — entitlement gates', () => {
             try {
                 const state = provisionedState('topic', 'some/topic');
                 const session = createSessionMock();
-                const { createSolacePublisher } = await import('../../../src/core/services/solace-publisher');
                 state.primaryPublisher = createSolacePublisher(session);
                 const ctx = makeCtx({ selectedVpn: 'vpn1', managed: managed() });
                 openCopyModal(ctx, els, state, () => session);

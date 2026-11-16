@@ -25,13 +25,24 @@ export interface TwoFactorState { mode: TwoFactorMode; enrolled: boolean }
 export type ManagedProfile = ServiceProfile & { twoFactor: TwoFactorState };
 
 /**
- * The settings file with `login.twoFactor` (the fake validates it, so it is the narrow type), and
+ * The settings file with `login.twoFactor` (the fake validates it, so it is the narrow type), the
+ * sign-in and connect limits the fake reads (`LoginLimitKeys`, `session.connectsPerMinute`), and
  * `tls` holding only `insecureSkipVerify`: the three TLS paths are environment variables, not keys.
  */
-export type GatewaySettings = Omit<ServiceSettings, 'login' | 'tls'> & {
-    login: ServiceSettings['login'] & { twoFactor: TwoFactorMode };
+export type GatewaySettings = Omit<ServiceSettings, 'login' | 'session' | 'tls'> & {
+    login: ServiceSettings['login'] & LoginLimitKeys & { twoFactor: TwoFactorMode };
+    session: ServiceSettings['session'] & { connectsPerMinute: number };
     tls: Pick<ServiceSettings['tls'], 'insecureSkipVerify'>;
 };
+
+/** The `login` keys that bound the sign-in throttle, the password rule and the two-factor step. */
+interface LoginLimitKeys {
+    perClient: boolean;
+    clientMaxFailures: number;
+    resetMinutes: number;
+    passwordMinLength: number;
+    twoFactorMinutes: number;
+}
 
 /** A user as `GET /managed/users` lists one (the gateway adds the flag, the two-factor state and the record's rev). */
 export type ListedUser = ManagedUser & { mustChangePassword: boolean; twoFactor: boolean; rev: number };

@@ -96,8 +96,11 @@ export function demoSeed(): GatewaySeed {
             tls: { insecureSkipVerify: false },
             logLevel: 'warn',
             access: { allow: [], trustedProxies: [] },
-            session: { idleMinutes: 10, absoluteMinutes: 30 },
-            login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60, twoFactor: 'optional' },
+            session: { idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 },
+            login: {
+                maxFailures: 5, perClient: true, clientMaxFailures: 10, resetMinutes: 15, backoffSeconds: 30, maxBackoffSeconds: 900,
+                unauthenticatedPerMinute: 60, passwordMinLength: 12, twoFactorMinutes: 10, twoFactor: 'optional',
+            },
             modules: { offered: ['queue-browser', 'queue-copy', 'queue-subscription-explorer'], userDefault: 'all' },
             audit: { stdout: false, access: false, onFailure: 'continue' },
         },

@@ -242,7 +242,7 @@ describe('mock-broker/gateway/versions -- settings', () => {
         expect(first).not.toBe('');
         const res = await save(gw, { logLevel: 'info', rev: first });
         expect(res.status).toBe(200);
-        expect(res.json).toEqual({ restartRequired: [], rev: res.json.rev });
+        expect(res.json).toEqual({ rev: res.json.rev });
         expect(res.json.rev).not.toBe(first);
         expect((await view(gw)).rev).toBe(res.json.rev);
         const again = await save(gw, { rev: res.json.rev });   // nothing changed, still a save

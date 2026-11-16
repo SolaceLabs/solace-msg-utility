@@ -349,8 +349,7 @@ export const BackupModule = {
                 eventBus.emit('rbac:sign-out-requested');
                 return;
             }
-            const restart = res.data.restartRequired;
-            showToast(restart.length ? `Imported. Restart the gateway to apply: ${restart.join(', ')}.` : 'Imported', 'ok');
+            showToast('Imported', 'ok');
             els.importFile.value = '';
             els.importPass.value = '';
             setSource(null, '');

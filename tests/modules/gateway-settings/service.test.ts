@@ -7,8 +7,11 @@ const SETTINGS: GatewaySettings = {
     tls: { insecureSkipVerify: false },
     logLevel: 'warn',
     access: { allow: [], trustedProxies: [] },
-    session: { idleMinutes: 10, absoluteMinutes: 30 },
-    login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60, twoFactor: 'optional' },
+    session: { idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 },
+    login: {
+        maxFailures: 5, perClient: true, clientMaxFailures: 10, resetMinutes: 15, backoffSeconds: 30, maxBackoffSeconds: 900,
+        unauthenticatedPerMinute: 60, passwordMinLength: 12, twoFactor: 'optional', twoFactorMinutes: 10,
+    },
     modules: { offered: ['queue-browser'], userDefault: 'all' },
     audit: { stdout: false, access: false, onFailure: 'continue' },
 };
@@ -17,7 +20,7 @@ const fetchMock = () => globalThis.fetch as any;
 
 describe('gateway-settings/service', () => {
     it('load GETs /managed/settings', async () => {
-        const view = { rev: 'abc', settings: SETTINGS, restartOnly: ['hosted'], pendingRestart: [], changedOnDisk: false, catalog: ['queue-browser'] };
+        const view = { rev: 'abc', settings: SETTINGS, changedOnDisk: false, catalog: ['queue-browser'] };
         fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => view });
 
         expect(await createSettingsService().load()).toEqual({ ok: true, data: view });
@@ -32,10 +35,10 @@ describe('gateway-settings/service', () => {
         expect(fetchMock()).toHaveBeenCalledWith('/managed/client', { method: 'GET', credentials: 'same-origin' });
     });
 
-    it('save PUTs the whole file with the rev at top level, and returns the restart keys and the new rev', async () => {
-        fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => ({ restartRequired: ['hosted'], rev: 'next' }) });
+    it('save PUTs the whole file with the rev at top level, and returns the new rev', async () => {
+        fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => ({ rev: 'next' }) });
 
-        expect(await createSettingsService().save(SETTINGS, 'abc')).toEqual({ ok: true, data: { restartRequired: ['hosted'], rev: 'next' } });
+        expect(await createSettingsService().save(SETTINGS, 'abc')).toEqual({ ok: true, data: { rev: 'next' } });
         expect(fetchMock()).toHaveBeenCalledWith('/managed/settings', expect.objectContaining({
             method: 'PUT', body: JSON.stringify({ ...SETTINGS, rev: 'abc' }),
         }));

@@ -443,7 +443,7 @@
       ]
     },
     {
-      "name": "settings: the file, its restart-only key, and the catalog",
+      "name": "settings: the file and the catalog",
       "steps": [
         {
           "as": "admin", "method": "GET", "path": "/managed/settings", "status": 200,
@@ -453,14 +453,12 @@
               "tls": { "insecureSkipVerify": false },
               "logLevel": "warn",
               "access": { "allow": [], "trustedProxies": [] },
-              "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
-              "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000, "twoFactor": "optional" },
+              "session": { "idleMinutes": 10, "absoluteMinutes": 30, "connectsPerMinute": 20 },
+              "login": { "maxFailures": 5, "perClient": true, "clientMaxFailures": 10, "resetMinutes": 15, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000, "passwordMinLength": 12, "twoFactorMinutes": 10, "twoFactor": "optional" },
               "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
               "audit": { "stdout": false, "access": false, "onFailure": "continue" }
             },
             "rev": "<rev>",
-            "restartOnly": ["hosted"],
-            "pendingRestart": [],
             "changedOnDisk": false,
             "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
           }
@@ -530,6 +528,30 @@
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "defaultConn": "neither" },
           "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "defaultConn=\"neither\" (config.yaml; seeded by SMU_DEFAULT_CONN) must be one of \"direct\", \"provisioned\"" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "session": { "connectsPerMinute": 0 } },
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"session.connectsPerMinute\" has invalid value \"0\": must be 1 to 1000" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "clientMaxFailures": 1001 } },
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"login.clientMaxFailures\" has invalid value \"1001\": must be 1 to 1000" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "resetMinutes": 0 } },
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"login.resetMinutes\" has invalid value \"0\": must be 1 to 1440" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "passwordMinLength": 11 } },
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"login.passwordMinLength\" has invalid value \"11\": must be 12 to 128" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "passwordMinLength": 129 } },
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"login.passwordMinLength\" has invalid value \"129\": must be 12 to 128" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactorMinutes": 61 } },
+          "status": 422, "response": { "error": "invalid", "field": "settings", "reason": "key \"login.twoFactorMinutes\" has invalid value \"61\": must be 1 to 60" }
         }
       ]
     },
@@ -546,7 +568,7 @@
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "access": { "allow": ["192.0.2.0/24", "2001:0DB8::1/32", "2001:db8:abcd:12ff::1/52", "fe80::1:0:0:1/128"] } },
-          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+          "status": 200, "response": { "rev": "<rev>" }
         },
         {
           "as": "admin", "method": "GET", "path": "/managed/settings", "status": 200,
@@ -556,14 +578,12 @@
               "tls": { "insecureSkipVerify": false },
               "logLevel": "warn",
               "access": { "allow": ["192.0.2.0/24", "2001:db8::/32", "2001:db8:abcd:1000::/52", "fe80::1:0:0:1/128"], "trustedProxies": [] },
-              "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
-              "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000, "twoFactor": "optional" },
+              "session": { "idleMinutes": 10, "absoluteMinutes": 30, "connectsPerMinute": 20 },
+              "login": { "maxFailures": 5, "perClient": true, "clientMaxFailures": 10, "resetMinutes": 15, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000, "passwordMinLength": 12, "twoFactorMinutes": 10, "twoFactor": "optional" },
               "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
               "audit": { "stdout": false, "access": false, "onFailure": "continue" }
             },
             "rev": "<rev>",
-            "restartOnly": ["hosted"],
-            "pendingRestart": [],
             "changedOnDisk": false,
             "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
           }
@@ -575,7 +595,7 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "modules": { "userDefault": "none" } },
-          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+          "status": 200, "response": { "rev": "<rev>" }
         },
         {
           "as": "operator", "method": "GET", "path": "/managed/me", "status": 200,
@@ -593,11 +613,62 @@
       ]
     },
     {
-      "name": "settings: skipping broker certificate checks applies at once and is never pending",
+      "name": "settings: the sign-in limits and the password minimum are saved and shown",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings",
+          "body": {
+            "rev": "<settings-rev>",
+            "session": { "connectsPerMinute": 50 },
+            "login": { "perClient": false, "clientMaxFailures": 3, "resetMinutes": 5, "passwordMinLength": 16, "twoFactorMinutes": 2 }
+          },
+          "status": 200, "response": { "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/settings", "status": 200,
+          "response": {
+            "settings": {
+              "hosted": true, "connModes": "both", "defaultConn": "direct",
+              "tls": { "insecureSkipVerify": false },
+              "logLevel": "warn",
+              "access": { "allow": [], "trustedProxies": [] },
+              "session": { "idleMinutes": 10, "absoluteMinutes": 30, "connectsPerMinute": 50 },
+              "login": { "maxFailures": 5, "perClient": false, "clientMaxFailures": 3, "resetMinutes": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000, "passwordMinLength": 16, "twoFactorMinutes": 2, "twoFactor": "optional" },
+              "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
+              "audit": { "stdout": false, "access": false, "onFailure": "continue" }
+            },
+            "rev": "<rev>",
+            "changedOnDisk": false,
+            "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "settings: login.passwordMinLength is the rule for a user's password, at once",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "passwordMinLength": 16 } },
+          "status": 200, "response": { "rev": "<rev>" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
+          "body": { "rev": 0, "password": "fifteen-chars-1", "admin": false, "operate": [], "readOnly": [] },
+          "status": 422, "response": { "error": "invalid", "field": "password", "reason": "Password must be 16 to 128 characters." }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
+          "body": { "rev": 0, "password": "sixteen-chars-16", "admin": false, "operate": [], "readOnly": [] },
+          "status": 200, "response": { "rev": 2 }
+        }
+      ]
+    },
+    {
+      "name": "settings: skipping broker certificate checks applies at once",
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "tls": { "insecureSkipVerify": true } },
-          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+          "status": 200, "response": { "rev": "<rev>" }
         },
         {
           "as": "admin", "method": "GET", "path": "/managed/settings", "status": 200,
@@ -607,14 +678,12 @@
               "tls": { "insecureSkipVerify": true },
               "logLevel": "warn",
               "access": { "allow": [], "trustedProxies": [] },
-              "session": { "idleMinutes": 10, "absoluteMinutes": 30 },
-              "login": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000, "twoFactor": "optional" },
+              "session": { "idleMinutes": 10, "absoluteMinutes": 30, "connectsPerMinute": 20 },
+              "login": { "maxFailures": 5, "perClient": true, "clientMaxFailures": 10, "resetMinutes": 15, "backoffSeconds": 30, "maxBackoffSeconds": 900, "unauthenticatedPerMinute": 1000, "passwordMinLength": 12, "twoFactorMinutes": 10, "twoFactor": "optional" },
               "modules": { "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" },
               "audit": { "stdout": false, "access": false, "onFailure": "continue" }
             },
             "rev": "<rev>",
-            "restartOnly": ["hosted"],
-            "pendingRestart": [],
             "changedOnDisk": false,
             "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"]
           }
@@ -1242,7 +1311,6 @@
           },
           "status": 200,
           "response": {
-            "restartRequired": [],
             "signedOut": false
           }
         },
@@ -1347,13 +1415,19 @@
               },
               "session": {
                 "idleMinutes": 5,
-                "absoluteMinutes": 30
+                "absoluteMinutes": 30,
+                "connectsPerMinute": 20
               },
               "login": {
                 "maxFailures": 5,
+                "perClient": true,
+                "clientMaxFailures": 10,
+                "resetMinutes": 15,
                 "backoffSeconds": 30,
                 "maxBackoffSeconds": 900,
                 "unauthenticatedPerMinute": 1000,
+                "passwordMinLength": 12,
+                "twoFactorMinutes": 10,
                 "twoFactor": "optional"
               },
               "modules": {
@@ -1371,10 +1445,6 @@
               }
             },
             "rev": "<rev>",
-            "restartOnly": [
-              "hosted"
-            ],
-            "pendingRestart": [],
             "changedOnDisk": false,
             "catalog": [
               "queue-browser",
@@ -1437,7 +1507,6 @@
           },
           "status": 200,
           "response": {
-            "restartRequired": [],
             "signedOut": true
           }
         },
@@ -1839,7 +1908,7 @@
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings",
           "body": { "logLevel": "info", "rev": "<settings-rev>" },
-          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+          "status": 200, "response": { "rev": "<rev>" }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings",
@@ -1854,7 +1923,7 @@
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings",
           "body": { "logLevel": "error", "rev": "<settings-rev>" },
-          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+          "status": 200, "response": { "rev": "<rev>" }
         }
       ]
     },
@@ -1951,7 +2020,7 @@
         {
           "as": "admin", "method": "POST", "path": "/managed/backup/import",
           "body": { "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n", "passphrase": "contract-vector-passphrase", "users": "skip", "connections": "replace", "settings": "skip", "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" } },
-          "status": 200, "response": { "restartRequired": [], "signedOut": false }
+          "status": 200, "response": { "signedOut": false }
         }
       ]
     },
@@ -1961,7 +2030,7 @@
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings",
           "body": { "logLevel": "info", "rev": "<settings-rev>" },
-          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+          "status": 200, "response": { "rev": "<rev>" }
         },
         {
           "as": "admin", "method": "POST", "path": "/managed/backup/import",
@@ -1971,7 +2040,7 @@
         {
           "as": "admin", "method": "POST", "path": "/managed/backup/import",
           "body": { "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n", "passphrase": "contract-vector-passphrase", "users": "skip", "connections": "skip", "settings": "replace", "basis": { "users": 1, "connections": 1, "settings": "<settings-rev>" } },
-          "status": 200, "response": { "restartRequired": [], "signedOut": false }
+          "status": 200, "response": { "signedOut": false }
         }
       ]
     },
@@ -2029,7 +2098,7 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactor": "admins" } },
-          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+          "status": 200, "response": { "rev": "<rev>" }
         },
         {
           "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,
@@ -2047,7 +2116,7 @@
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactor": "mandatory" } },
-          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+          "status": 200, "response": { "rev": "<rev>" }
         },
         {
           "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,
@@ -2065,7 +2134,7 @@
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactor": "optional" } },
-          "status": 200, "response": { "restartRequired": [], "rev": "<rev>" }
+          "status": 200, "response": { "rev": "<rev>" }
         },
         {
           "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,

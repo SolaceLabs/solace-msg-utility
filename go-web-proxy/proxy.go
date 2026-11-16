@@ -246,7 +246,6 @@ func newUpstreamTransport(trust *trustHolder) *http.Transport {
 		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dialUpstreamTLS(ctx, dialer, trust, network, addr)
 		},
-		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
@@ -272,9 +271,14 @@ func dialUpstreamTLS(ctx context.Context, d *net.Dialer, trust *trustHolder, net
 	if err != nil {
 		return nil, err
 	}
+	// HTTP/1.1 only. A WebSocket upgrade (the SMF gate, the Direct relay's ws
+	// and wss paths) needs it, and net/http forces it for an upgrade only on
+	// its own TLS path, which this dialer replaces. HTTP/2 would gain nothing
+	// for SEMP, and a TLS proxy in front of a broker that picked it would fail
+	// every upgrade.
 	conn := tls.Client(raw, &tls.Config{
 		ServerName:         host,
-		NextProtos:         []string{"h2", "http/1.1"},
+		NextProtos:         []string{"http/1.1"},
 		InsecureSkipVerify: true,
 		VerifyConnection:   func(cs tls.ConnectionState) error { return trust.verify(cs, host) },
 	})

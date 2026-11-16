@@ -27,13 +27,29 @@ const (
 	passwordMaxLen    = 128
 )
 
-var errPasswordPolicy = fmt.Errorf("password must be %d to %d characters", passwordMinLen, passwordMaxLen)
+// checkPasswordPolicy is the one rule a new password must pass: min (the
+// login.passwordMinLength setting, never below passwordMinLen) to
+// passwordMaxLen characters. The upper bound also caps the work a single hash
+// costs. A raised minimum applies when a password is next set; passwords
+// already stored keep working.
+func checkPasswordPolicy(pw string, min int) error {
+	if n := utf8.RuneCountInString(pw); n < min || n > passwordMaxLen {
+		return passwordRuleError(min)
+	}
+	return nil
+}
 
-// checkPasswordPolicy is the one rule a new password must pass. The upper bound
-// also caps the work a single hash costs.
-func checkPasswordPolicy(pw string) error {
+// passwordRuleError is the policy's refusal, naming the bounds in force.
+func passwordRuleError(min int) error {
+	return fmt.Errorf("password must be %d to %d characters", min, passwordMaxLen)
+}
+
+// checkPassphrase is the rule for a backup passphrase: passwordMinLen to
+// passwordMaxLen characters. It does not follow login.passwordMinLength, so a
+// backup made under one setting always opens under another.
+func checkPassphrase(pw string) error {
 	if n := utf8.RuneCountInString(pw); n < passwordMinLen || n > passwordMaxLen {
-		return errPasswordPolicy
+		return passwordRuleError(passwordMinLen)
 	}
 	return nil
 }

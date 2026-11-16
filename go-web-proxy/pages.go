@@ -96,7 +96,7 @@ func (p *authPages) render(w http.ResponseWriter, status int, d pageData) {
 	h.Set("Content-Security-Policy", pageCSP)
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Content-Type-Options", "nosniff")
-	d.MinLen, d.MaxLen = passwordMinLen, passwordMaxLen
+	d.MinLen, d.MaxLen = p.live.loginLimits().minPassword(), passwordMaxLen
 	w.WriteHeader(status)
 	if err := p.tmpl.Execute(w, d); err != nil {
 		p.logger.Error("sign-in page render failed", "err", err)
@@ -172,7 +172,11 @@ func (p *authPages) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	as, signedIn := p.sessions.fromRequest(r)
 	if signedIn {
 		setRequestUser(r, as.user)
-	} else if !p.allowAnon(w, r) {
+	}
+	// Requests without a session draw from the client's budget, and so does
+	// every sign-in attempt: a session must not buy a browser unmetered
+	// guesses at other accounts.
+	if (!signedIn || r.URL.Path == "/login" && post) && !p.allowAnon(w, r) {
 		return
 	}
 	switch {
@@ -338,11 +342,11 @@ func (p *authPages) onwardURL(next string, mustChange bool) string {
 }
 
 // sessionOpened is everything that follows a session's creation at sign-in:
-// the throttle forgets the user's failures, the cookie is set, the audit entry
+// the throttle forgets the account's failures, the cookie is set, the audit entry
 // (an ok signin, only now that the session exists) and the log line are
 // written, and the client watch may warn.
 func (p *authPages) sessionOpened(w http.ResponseWriter, r *http.Request, log *slog.Logger, user, id, msg string, mustChange bool, client netip.Addr, resolved bool) {
-	p.throttle.loginSucceeded(user, client, resolved)
+	p.throttle.loginSucceeded(user)
 	setSessionCookie(w, id)
 	setRequestUser(r, user)
 	e := auditFor(r, auditSignin)
@@ -385,6 +389,7 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 		return
 	}
 	cur, nw, confirm := r.PostFormValue("current"), r.PostFormValue("new"), r.PostFormValue("confirm")
+	least := p.live.loginLimits().minPassword()
 	page := pageData{Mode: "password", Title: "Change password", Next: next, Required: as.mustChange}
 	fail := func(status int, msg string) {
 		page.Error = msg
@@ -424,9 +429,9 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 		p.passwordRefused(r, "invalid")
 		fail(http.StatusUnprocessableEntity, "The new passwords do not match.")
 		return
-	case checkPasswordPolicy(nw) != nil:
+	case checkPasswordPolicy(nw, least) != nil:
 		p.passwordRefused(r, "invalid")
-		fail(http.StatusUnprocessableEntity, "The new password must be "+strconv.Itoa(passwordMinLen)+" to "+strconv.Itoa(passwordMaxLen)+" characters.")
+		fail(http.StatusUnprocessableEntity, "The new password must be "+strconv.Itoa(least)+" to "+strconv.Itoa(passwordMaxLen)+" characters.")
 		return
 	case nw == cur:
 		p.passwordRefused(r, "invalid")
@@ -480,7 +485,7 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 		fail(http.StatusInternalServerError, "The password could not be saved.")
 		return
 	}
-	p.throttle.loginSucceeded(as.user, client, resolved)
+	p.throttle.loginSucceeded(as.user)
 	p.sessions.dropOthers(as.user, id)
 	setSessionCookie(w, id)
 	log.Info("password changed")
@@ -490,6 +495,15 @@ func (p *authPages) submitPassword(w http.ResponseWriter, r *http.Request, as ac
 // ----- two-factor steps ----------------------------------------------------------------
 
 const twoFactorTitle = "Two-factor sign-in"
+
+// codeSeparators are taken out of a typed code before it is judged a TOTP
+// code: authenticator apps show "123 456".
+var codeSeparators = strings.NewReplacer(" ", "", "-", "")
+
+// recoveryAuditText is the code page's answer when audit.onFailure is refuse
+// and the audit log cannot be written: using a recovery code changes the
+// users file, so it waits until a change can be recorded.
+const recoveryAuditText = "The gateway cannot record changes right now, so it cannot accept a recovery code. Sign in with the code from your authenticator app, or try again later."
 
 // startTicket begins a half-finished sign-in in this browser: the ticket the
 // browser held before (if any) ends, the new one is created and its cookie
@@ -541,13 +555,15 @@ func (p *authPages) takeTurn(w http.ResponseWriter, r *http.Request, user string
 }
 
 // spendCode checks the one code field of a user who has two-factor with the
-// given secret: exactly six digits is a TOTP code (a replayed one is refused),
-// anything else is tried as a recovery code, which is used up. left is the
-// recovery codes remaining and means something only when byRecovery. err is a
-// store failure.
+// given secret: six digits, once spaces and hyphens are taken out ("123 456"
+// as authenticator apps show it), is a TOTP code (a replayed one is refused);
+// anything else is tried as a recovery code, which is used up. A recovery code
+// has 16 characters, so taking the separators out never makes one look like a
+// TOTP code. left is the recovery codes remaining and means something only
+// when byRecovery. err is a store failure.
 func (p *authPages) spendCode(ctx context.Context, user, secret, code string) (valid, byRecovery bool, left int, err error) {
-	if totpShaped(code) {
-		return p.totp.check(user, secret, code, p.sessions.now()), false, 0, nil
+	if digits := codeSeparators.Replace(code); totpShaped(digits) {
+		return p.totp.check(user, secret, digits, p.sessions.now()), false, 0, nil
 	}
 	valid, left, err = p.store.useRecoveryCode(ctx, user, hashRecoveryCode(code))
 	return valid, true, left, err
@@ -648,6 +664,16 @@ func (p *authPages) submitCode(w http.ResponseWriter, r *http.Request, prior act
 		return
 	}
 	valid, byRecovery, left, err := p.spendCode(r.Context(), user, secret, code)
+	if errors.Is(err, errAuditUnavailable) {
+		// audit.onFailure refuse: a recovery code is a store write, so it is
+		// refused while the audit log cannot be written. The code is not used
+		// up; a code from the authenticator writes nothing and still works.
+		p.signinRefused(r, user, "audit_unavailable")
+		log.Error("sign-in refused: a recovery code cannot be used while the audit log cannot be written", "err", err)
+		page.Error = recoveryAuditText
+		p.render(w, http.StatusServiceUnavailable, page)
+		return
+	}
 	if err != nil {
 		unavailable(err)
 		return
@@ -878,7 +904,7 @@ func (p *authPages) submitConfirm(w http.ResponseWriter, r *http.Request, next s
 		}
 		p.sessionOpened(w, r, log, user, id, signedInMsg(user), at.mustChange, client, resolved)
 	} else {
-		p.throttle.loginSucceeded(user, client, resolved)
+		p.throttle.loginSucceeded(user)
 	}
 	log.Info("two-factor sign-in set up", "again", wasEnrolled)
 	formatted := make([]string, len(codes))

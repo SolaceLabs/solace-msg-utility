@@ -11,8 +11,9 @@ import (
 // settingsFile lets an administrator edit config.yaml from the admin app
 // (GET and PUT /managed/settings). A save is validated exactly as at startup,
 // written through the writer's journaled commit with the usual header, and its
-// live keys (live.go) apply at once; restart-only keys are saved and reported
-// back.
+// live keys (live.go) apply at once. The one restart-only key, hosted, has no
+// field on the page and cannot change in Provisioned mode (validateConnModes),
+// so nothing a save writes waits for a restart.
 //
 // The settings rev is the writer's keyed checksum of config.yaml as last read
 // or written (checksums.rev): opaque, derived from the store key, never stored.
@@ -73,12 +74,10 @@ func (h *managedHandler) configUnreadable(w http.ResponseWriter, err error) {
 
 // settingsJSON is the GET /managed/settings body.
 type settingsJSON struct {
-	Settings       fileConfig `json:"settings"`
-	Rev            string     `json:"rev"`            // opaque; a save sends it back
-	RestartOnly    []string   `json:"restartOnly"`    // keys that apply at restart
-	PendingRestart []string   `json:"pendingRestart"` // saved, not yet running
-	ChangedOnDisk  bool       `json:"changedOnDisk"`  // hand-edited since loaded
-	Catalog        []string   `json:"catalog"`        // modules.offered choices
+	Settings      fileConfig `json:"settings"`
+	Rev           string     `json:"rev"`           // opaque; a save sends it back
+	ChangedOnDisk bool       `json:"changedOnDisk"` // hand-edited since loaded
+	Catalog       []string   `json:"catalog"`       // modules.offered choices
 }
 
 // getSettings answers the saved file and its rev as one committed state: it
@@ -96,12 +95,10 @@ func (h *managedHandler) getSettings(w http.ResponseWriter, _ *http.Request) {
 			return
 		}
 		body = settingsJSON{
-			Settings:       sf.saved,
-			Rev:            sf.rev(),
-			RestartOnly:    restartOnlyKeyNames(),
-			PendingRestart: pendingRestart(sf.boot, sf.saved),
-			ChangedOnDisk:  changed,
-			Catalog:        moduleCatalog(),
+			Settings:      sf.saved,
+			Rev:           sf.rev(),
+			ChangedOnDisk: changed,
+			Catalog:       moduleCatalog(),
 		}
 	})
 	if err != nil {
@@ -131,8 +128,8 @@ type settingsBody struct {
 // then inside the writer: 503 audit_unavailable (the gate), the caller no
 // longer an administrator (401, 403), 409 config_changed_on_disk (a hand edit
 // the gateway has not loaded; it wins over stale), 409 stale (carrying the
-// current rev), then checkSettings' refusals. Success is 200 with the keys
-// still to restart and the new rev.
+// current rev), then checkSettings' refusals. Success is 200 with the new
+// rev.
 func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request, call *auditCall) {
 	sf := h.settings
 	// The base of the decode is the saved file read now, outside the writer.
@@ -171,8 +168,8 @@ func (h *managedHandler) saveSettings(w http.ResponseWriter, r *http.Request, ca
 		h.settingsFailed(w, r, err)
 		return
 	}
-	h.log(r).Info("gateway settings saved", "file", sf.path, "changed", staged.changed, "restart_required", staged.restart)
-	writeJSON(w, http.StatusOK, map[string]any{"restartRequired": staged.restart, "rev": newRev})
+	h.log(r).Info("gateway settings saved", "file", sf.path, "changed", staged.changed)
+	writeJSON(w, http.StatusOK, map[string]any{"rev": newRev})
 }
 
 // wroteSettings is what a commit to config.yaml wrote, for committed: the file
@@ -252,11 +249,10 @@ func (h *managedHandler) checkSettings(r *http.Request, body fileConfig) (config
 }
 
 // stagedSettings is what staging a settings document tells its caller:
-// restart is the restart-only keys now pending, as a save answers them;
-// changed the settings keys, dotted, on which the new file differs from the
+// changed is the settings keys, dotted, on which the new file differs from the
 // saved one (settingsChanges), for the audit entry.
 type stagedSettings struct {
-	restart, changed []string
+	changed []string
 }
 
 // stageSettings is the import's way into config.yaml: inside a transaction the
@@ -287,7 +283,7 @@ func (sf *settingsFile) stage(tx *txn, cfg config) (stagedSettings, error) {
 	changed := settingsChanges(sf.current(), saved)
 	tx.stage(sf.path, data, 0o644, configVerifier(sf.path))
 	tx.onPublish(func() { sf.apply(saved, cfg) })
-	return stagedSettings{restart: pendingRestart(sf.boot, saved), changed: changed}, nil
+	return stagedSettings{changed: changed}, nil
 }
 
 // apply takes a committed change in: the saved file and the live keys at once.

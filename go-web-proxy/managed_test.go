@@ -1815,3 +1815,49 @@ func TestManagedAPI_SaveUserCannotCarryTwoFactor(t *testing.T) {
 		t.Error("an edit of the user keeps their two-factor")
 	}
 }
+
+// login.passwordMinLength is read at each save: creating a user and resetting a
+// user's password are both refused below the live minimum, the message names
+// it, and nothing is written. A password stored before a raise keeps working.
+func TestManagedAPI_SaveUser_PasswordMinimumFollowsTheLiveSetting(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.login.passwordMinLength = 16 })
+	admin := e.cookie("admin", false)
+	setMin := func(n int) {
+		next := e.cfg
+		next.login.passwordMinLength = n
+		e.live.apply(next)
+	}
+	refused := func(rec *httptest.ResponseRecorder, least int) {
+		t.Helper()
+		expect(t, rec, http.StatusUnprocessableEntity, "invalid")
+		got := errorCode(t, rec)
+		if want := fmt.Sprintf("Password must be %d to 128 characters.", least); got.Field != "password" || got.Reason != want {
+			t.Errorf("want field password with %q, got %+v", want, got)
+		}
+	}
+	const fifteen, sixteen, twelve = "fifteen-chars-p", "sixteen-chars-pw", "twelve-chars"
+
+	refused(e.putUserAs(admin, "carol", `{"password":"`+fifteen+`"}`), 16)
+	if _, exists := e.api.store.isAdmin("carol"); exists {
+		t.Error("a refused create must not create the user")
+	}
+	expect(t, e.putUserAs(admin, "carol", `{"password":"`+sixteen+`"}`), http.StatusOK, "")
+
+	refused(e.putUserAs(admin, "viewer", `{"password":"`+fifteen+`"}`), 16)
+	if !signsIn(t, e.api.store, "viewer", viewerPW) {
+		t.Error("a refused reset must leave the password")
+	}
+	expect(t, e.putUserAs(admin, "viewer", `{"password":"`+sixteen+`"}`), http.StatusOK, "")
+
+	setMin(20) // applies at the next save, no restart
+	refused(e.putUserAs(admin, "dave", `{"password":"`+sixteen+`"}`), 20)
+	if !signsIn(t, e.api.store, "viewer", sixteen) {
+		t.Error("a password stored under the old minimum keeps working")
+	}
+
+	setMin(passwordMinLen)
+	expect(t, e.putUserAs(admin, "dave", `{"password":"`+twelve+`"}`), http.StatusOK, "")
+	// A save that sends no password changes none, whatever the minimum.
+	setMin(30)
+	expect(t, e.putUserAs(admin, "dave", `{"admin":false}`), http.StatusOK, "")
+}

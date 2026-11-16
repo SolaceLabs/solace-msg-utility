@@ -158,6 +158,31 @@ describe('mock-broker/gateway two-factor -- the code step', () => {
         expect(gw.submitCode(codeNow(secret)).ok).toBe(true);
     });
 
+    it('takes spaces and hyphens out of a six-digit code, as authenticator apps show it', () => {
+        const { secret } = enrolled('viewer');
+        gw.signIn('viewer', PW.viewer);
+        const first = codeNow(secret);
+        expect(gw.submitCode(`${first.slice(0, 3)} ${first.slice(3)}`).ok).toBe(true);
+
+        signOut();
+        clock += STEP_MS;
+        gw.signIn('viewer', PW.viewer);
+        const next = codeNow(secret);
+        expect(gw.submitCode(`${next.slice(0, 3)}-${next.slice(3)}`).ok).toBe(true);
+    });
+
+    it('holds a spaced code to the replay rule as it does a plain one, and counts a wrong one as a failure', () => {
+        const { secret } = enrolled('viewer');
+        gw.signIn('viewer', PW.viewer);
+        const code = codeNow(secret);
+        expect(gw.submitCode(code).ok).toBe(true);
+        signOut();
+        gw.signIn('viewer', PW.viewer);
+        expect(gw.submitCode(`${code.slice(0, 3)} ${code.slice(3)}`)).toEqual({ ok: false, error: 'The code is not correct.' });
+        const bad = badCode(secret);
+        expect(gw.submitCode(`${bad.slice(0, 2)} ${bad.slice(2, 4)}-${bad.slice(4)}`)).toEqual({ ok: false, error: 'The code is not correct.' });
+    });
+
     it('blocks the right code while the throttle holds, with the wait named', () => {
         const { secret } = enrolled('viewer');
         gw.signIn('viewer', PW.viewer);
@@ -196,6 +221,28 @@ describe('mock-broker/gateway two-factor -- the code step', () => {
         expect(gw.codePending()).toBe(false);
         expect(gw.submitCode(codeNow(secret))).toEqual({ ok: false, error: '', signedOut: true });
         expect(gw.session()).toBeNull();
+    });
+
+    it('follows login.twoFactorMinutes, read live: a shorter value also ends a ticket already issued', () => {
+        const { secret } = enrolled('viewer');
+        expect(gw.settings.save({ login: { twoFactorMinutes: 1 } }, gw.settings.rev()).ok).toBe(true);
+        gw.signIn('viewer', PW.viewer);
+        clock += 60_000;
+        expect(gw.codePending()).toBe(true);
+        clock += 1;
+        expect(gw.codePending()).toBe(false);
+        expect(gw.submitCode(codeNow(secret))).toEqual({ ok: false, error: '', signedOut: true });
+
+        expect(gw.settings.save({ login: { twoFactorMinutes: 30 } }, gw.settings.rev()).ok).toBe(true);
+        gw.signIn('viewer', PW.viewer);
+        clock += 20 * 60_000;
+        expect(gw.submitCode(codeNow(secret)).ok).toBe(true);
+
+        signOut();
+        gw.signIn('viewer', PW.viewer);
+        clock += 5 * 60_000;
+        expect(gw.settings.save({ login: { twoFactorMinutes: 2 } }, gw.settings.rev()).ok).toBe(true);
+        expect(gw.codePending()).toBe(false);
     });
 
     it.each([
@@ -587,7 +634,6 @@ describe('mock-broker/gateway two-factor -- the setting', () => {
             expect((await call('PUT', { login: { twoFactor: mode }, rev })).status).toBe(200);
             const view: any = (await call('GET')).json;
             expect(view.settings.login.twoFactor).toBe(mode);
-            expect(view.pendingRestart).toEqual([]);
             expect(gw.settings.current().login).toMatchObject({ twoFactor: mode, maxFailures: 5 });
         }
     });

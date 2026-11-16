@@ -221,7 +221,7 @@ func TestSessions_RevocationHooksFireOnlyOnPurpose(t *testing.T) {
 
 func newTestTickets() (*signinTickets, *fakeClock) {
 	clock := newFakeClock()
-	return newSigninTickets(clock.now), clock
+	return newSigninTickets(fixed(defaultTicketTTL), clock.now), clock
 }
 
 func TestTickets_CreateAndLookupKeepEveryField(t *testing.T) {
@@ -266,29 +266,81 @@ func TestTickets_CreateReplacesNothing(t *testing.T) {
 	tk.drop("unknown") // not an error
 }
 
-// A ticket lives ticketTTL from create; using it does not extend it.
+// A ticket lives its lifetime (ten minutes unless login.twoFactorMinutes says
+// otherwise) from create; using it does not extend it.
 func TestTickets_ExpireTenMinutesAfterCreate(t *testing.T) {
 	tk, clock := newTestTickets()
 	id := tk.create(ticket{user: "alice", stage: stageCode})
-	clock.advance(ticketTTL - time.Second)
+	clock.advance(defaultTicketTTL - time.Second)
 	if _, ok := tk.lookup(id); !ok {
 		t.Fatal("a ticket must be live just before its time is up")
 	}
 	clock.advance(time.Second)
 	if _, ok := tk.lookup(id); ok {
-		t.Fatal("a ticket must end ticketTTL after it was made, however often it was used")
+		t.Fatal("a ticket must end defaultTicketTTL after it was made, however often it was used")
 	}
 	if len(tk.byID) != 0 {
 		t.Error("an expired ticket must be removed when seen")
 	}
 }
 
+// A session store whose limits carry login.twoFactorMinutes gives its tickets
+// that lifetime, and a limits value without one gives the ten-minute default.
+func TestSessions_TicketLifetimeFollowsTwoFactorMinutes(t *testing.T) {
+	clock := newFakeClock()
+	lim := testSessionLimits
+	s := newSessions(func() sessionLimits { return lim }, clock.now)
+	id := s.tickets.create(ticket{user: "alice", stage: stageCode})
+	clock.advance(defaultTicketTTL - time.Second)
+	if _, ok := s.tickets.lookup(id); !ok {
+		t.Fatal("no setting: the ticket lives ten minutes")
+	}
+	clock.advance(time.Second)
+	if _, ok := s.tickets.lookup(id); ok {
+		t.Fatal("no setting: the ticket ends after ten minutes")
+	}
+	lim.ticket = 3 * time.Minute
+	id = s.tickets.create(ticket{user: "alice", stage: stageCode})
+	clock.advance(3*time.Minute - time.Second)
+	if _, ok := s.tickets.lookup(id); !ok {
+		t.Fatal("a 3-minute lifetime: live just before it is up")
+	}
+	clock.advance(time.Second)
+	if _, ok := s.tickets.lookup(id); ok {
+		t.Fatal("a 3-minute lifetime: the ticket must end at it")
+	}
+}
+
+// The lifetime is read at each lookup and sweep: lowering login.twoFactorMinutes
+// also ends tickets already issued, raising it keeps them longer.
+func TestTickets_LifetimeIsReadLive(t *testing.T) {
+	clock := newFakeClock()
+	ttl := 10 * time.Minute
+	tk := newSigninTickets(func() time.Duration { return ttl }, clock.now)
+	old := tk.create(ticket{user: "alice", stage: stageCode})
+	kept := tk.create(ticket{user: "bob", stage: stageCode})
+	clock.advance(4 * time.Minute)
+	ttl = 3 * time.Minute
+	if _, ok := tk.lookup(old); ok {
+		t.Error("a ticket 4 minutes old must end once the lifetime is 3 minutes")
+	}
+	ttl = 5 * time.Minute
+	if _, ok := tk.lookup(kept); !ok {
+		t.Error("raising the lifetime to 5 minutes keeps a ticket that is 4 minutes old")
+	}
+	ttl = time.Minute
+	tk.create(ticket{user: "carol", stage: stageCode}) // the sweep applies the lifetime in force
+	if _, held := tk.byID[kept]; held {
+		t.Error("the sweep must drop a ticket older than the lifetime now in force")
+	}
+}
+
 func TestTickets_SweepOnCreateRemovesTheExpired(t *testing.T) {
 	tk, clock := newTestTickets()
 	old := tk.create(ticket{user: "alice", stage: stageCode})
-	clock.advance(ticketTTL / 2)
+	clock.advance(defaultTicketTTL / 2)
 	fresh := tk.create(ticket{user: "bob", stage: stageCode})
-	clock.advance(ticketTTL/2 + time.Second) // alice's is past its time, bob's is not
+	clock.advance(defaultTicketTTL/2 + time.Second) // alice's is past its time, bob's is not
 	tk.create(ticket{user: "carol", stage: stageCode})
 	if _, held := tk.byID[old]; held {
 		t.Error("the sweep must remove an expired ticket nobody asked for")
@@ -389,7 +441,7 @@ func TestTickets_FromRequest(t *testing.T) {
 	if _, ok := tk.fromRequest(req(&http.Cookie{Name: signinCookie, Value: "forged"})); ok {
 		t.Error("an unknown id is no ticket")
 	}
-	clock.advance(ticketTTL)
+	clock.advance(defaultTicketTTL)
 	if _, ok := tk.fromRequest(req(&http.Cookie{Name: signinCookie, Value: id})); ok {
 		t.Error("an expired ticket is no ticket")
 	}

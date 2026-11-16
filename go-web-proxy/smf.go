@@ -81,7 +81,13 @@ func (g *smfGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	remove := g.sockets.add(openSocket{session: as.id, user: as.user, broker: p.broker, vpn: p.vpn, cancel: cancel})
+	remove, ok := g.sockets.add(openSocket{session: as.id, user: as.user, broker: p.broker, vpn: p.vpn, cancel: cancel})
+	if !ok {
+		// A ceiling, not a window: the wait is a hint to try again once a
+		// socket has closed.
+		writeRateLimited(w, connectWindow)
+		return
+	}
 	defer remove()
 	// Registered first, checked second: a revocation that lands after the
 	// session gate either finds this socket in the registry or is seen here.

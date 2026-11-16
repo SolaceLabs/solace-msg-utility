@@ -13,8 +13,12 @@ export interface GatewaySettings {
     tls: { insecureSkipVerify: boolean };
     logLevel: string;
     access: { allow: string[]; trustedProxies: string[] };
-    session: { idleMinutes: number; absoluteMinutes: number };
-    login: { maxFailures: number; backoffSeconds: number; maxBackoffSeconds: number; unauthenticatedPerMinute: number; twoFactor: string };
+    session: { idleMinutes: number; absoluteMinutes: number; connectsPerMinute: number };
+    login: {
+        maxFailures: number; perClient: boolean; clientMaxFailures: number; resetMinutes: number;
+        backoffSeconds: number; maxBackoffSeconds: number; unauthenticatedPerMinute: number;
+        passwordMinLength: number; twoFactor: string; twoFactorMinutes: number;
+    };
     modules: { offered: string[]; userDefault: string };
     /** `onFailure`: "continue" logs a lost audit record and carries on; "refuse" refuses changes while the audit log cannot be written. */
     audit: { stdout: boolean; access: boolean; onFailure: string };
@@ -25,10 +29,6 @@ export interface SettingsView {
     settings: GatewaySettings;
     /** The file's version, opaque text; a save sends it back, and the gateway refuses it once it is out of date (`stale`). */
     rev: string;
-    /** Keys that apply when the gateway restarts; every other key applies at once. */
-    restartOnly: string[];
-    /** Restart-only keys saved with a value the running gateway does not have yet. */
-    pendingRestart: string[];
     /** The file was edited on the host since the gateway loaded it; a save is refused. */
     changedOnDisk: boolean;
     /** The modules `modules.offered` may list. */
@@ -49,8 +49,8 @@ export interface SettingsService {
     load(): Promise<ManagedResult<SettingsView>>;
     /** The caller's address as the gateway resolves it (go-web-proxy/managed.go clientSeen). */
     client(): Promise<ManagedResult<ClientSeen>>;
-    /** PUT the whole file with the `rev` it was loaded at. `restartRequired` lists the saved keys that wait for a restart; `rev` is the file's new version. */
-    save(settings: GatewaySettings, rev: string): Promise<ManagedResult<{ restartRequired: string[]; rev: string }>>;
+    /** PUT the whole file with the `rev` it was loaded at; the answer carries the file's new version. */
+    save(settings: GatewaySettings, rev: string): Promise<ManagedResult<{ rev: string }>>;
     /** POST /managed/restart: the gateway answers 202, then restarts itself in place. */
     restart(): Promise<ManagedResult<{ restarting: boolean }>>;
     /** True when `/hosted` answers: the gateway is up. A refused or dropped connection, or any other answer, is false. */
@@ -61,7 +61,7 @@ export function createSettingsService(): SettingsService {
     return {
         load: () => managedRequest<SettingsView>('GET', '/managed/settings'),
         client: () => managedRequest<ClientSeen>('GET', '/managed/client'),
-        save: (settings, rev) => managedRequest<{ restartRequired: string[]; rev: string }>('PUT', '/managed/settings', { ...settings, rev }),
+        save: (settings, rev) => managedRequest<{ rev: string }>('PUT', '/managed/settings', { ...settings, rev }),
         restart: () => managedRequest<{ restarting: boolean }>('POST', '/managed/restart'),
         async ping() {
             try {

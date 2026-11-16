@@ -58,11 +58,17 @@ access:
 session:
   idleMinutes: 5
   absoluteMinutes: 60
+  connectsPerMinute: 40
 login:
   maxFailures: 3
+  perClient: false
+  clientMaxFailures: 30
+  resetMinutes: 45
   backoffSeconds: 10
   maxBackoffSeconds: 600
   unauthenticatedPerMinute: 20
+  passwordMinLength: 16
+  twoFactorMinutes: 5
   twoFactor: admins
 modules:
   offered: [queue-copy]
@@ -83,8 +89,8 @@ func TestDecodeConfigFile_Valid(t *testing.T) {
 		TLS:      fileTLS{InsecureSkipVerify: true},
 		LogLevel: "debug",
 		Access:   fileAccess{Allow: []string{"10.0.0.0/8", "2001:db8::/32"}, TrustedProxies: []string{"10.0.0.1/32"}},
-		Session:  fileSession{IdleMinutes: 5, AbsoluteMinutes: 60},
-		Login:    fileLogin{MaxFailures: 3, BackoffSeconds: 10, MaxBackoffSeconds: 600, UnauthenticatedPerMinute: 20, TwoFactor: "admins"},
+		Session:  fileSession{IdleMinutes: 5, AbsoluteMinutes: 60, ConnectsPerMinute: 40},
+		Login:    fileLogin{MaxFailures: 3, PerClient: false, ClientMaxFailures: 30, ResetMinutes: 45, BackoffSeconds: 10, MaxBackoffSeconds: 600, UnauthenticatedPerMinute: 20, PasswordMinLength: 16, TwoFactorMinutes: 5, TwoFactor: "admins"},
 		Modules:  fileModules{Offered: []string{"queue-copy"}, UserDefault: "none"},
 		Audit:    fileAudit{Stdout: true, Access: true, OnFailure: "refuse"},
 	}
@@ -183,6 +189,16 @@ func TestToConfig_InvalidValues(t *testing.T) {
 		{"max backoff", func(fc *fileConfig) { fc.Login.MaxBackoffSeconds = 86401 }, "login.maxBackoffSeconds", "86401"},
 		{"backoff over max", func(fc *fileConfig) { fc.Login.BackoffSeconds = 901 }, "login.backoffSeconds", "901"},
 		{"unauthenticated", func(fc *fileConfig) { fc.Login.UnauthenticatedPerMinute = -1 }, "login.unauthenticatedPerMinute", "-1"},
+		{"client max failures below", func(fc *fileConfig) { fc.Login.ClientMaxFailures = 0 }, "login.clientMaxFailures", "0"},
+		{"client max failures above", func(fc *fileConfig) { fc.Login.ClientMaxFailures = 1001 }, "login.clientMaxFailures", "1001"},
+		{"reset minutes below", func(fc *fileConfig) { fc.Login.ResetMinutes = 0 }, "login.resetMinutes", "0"},
+		{"reset minutes above a day", func(fc *fileConfig) { fc.Login.ResetMinutes = 1441 }, "login.resetMinutes", "1441"},
+		{"password minimum below the built-in rule", func(fc *fileConfig) { fc.Login.PasswordMinLength = 11 }, "login.passwordMinLength", "11"},
+		{"password minimum above the maximum", func(fc *fileConfig) { fc.Login.PasswordMinLength = 129 }, "login.passwordMinLength", "129"},
+		{"two-factor minutes below", func(fc *fileConfig) { fc.Login.TwoFactorMinutes = 0 }, "login.twoFactorMinutes", "0"},
+		{"two-factor minutes above an hour", func(fc *fileConfig) { fc.Login.TwoFactorMinutes = 61 }, "login.twoFactorMinutes", "61"},
+		{"connects below", func(fc *fileConfig) { fc.Session.ConnectsPerMinute = 0 }, "session.connectsPerMinute", "0"},
+		{"connects above", func(fc *fileConfig) { fc.Session.ConnectsPerMinute = 1001 }, "session.connectsPerMinute", "1001"},
 		// Queue Discovery reads the broker unfiltered, so it is not in the catalog.
 		{"module outside the catalog", func(fc *fileConfig) { fc.Modules.Offered = []string{"queue-discovery"} }, "modules.offered[0]", "queue-discovery"},
 		{"module twice", func(fc *fileConfig) { fc.Modules.Offered = []string{"queue-copy", "queue-copy"} }, "modules.offered[1]", "queue-copy"},
@@ -233,10 +249,13 @@ func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 	if cfg.logLevel != slog.LevelWarn {
 		t.Errorf("defaults not carried: %+v", cfg)
 	}
-	if cfg.session != (sessionLimits{idle: 10 * time.Minute, absolute: 30 * time.Minute}) {
+	if cfg.session != (sessionLimits{idle: 10 * time.Minute, absolute: 30 * time.Minute, ticket: 10 * time.Minute, connects: 20}) {
 		t.Errorf("session defaults: %+v", cfg.session)
 	}
-	if want := (loginLimits{maxFailures: 5, backoff: 30 * time.Second, maxBackoff: 15 * time.Minute, unauthPerMinute: 60}); cfg.login != want {
+	if want := (loginLimits{
+		maxFailures: 5, backoff: 30 * time.Second, maxBackoff: 15 * time.Minute, unauthPerMinute: 60,
+		clientMaxFailures: 10, reset: 15 * time.Minute, passwordMinLength: 12,
+	}); cfg.login != want {
 		t.Errorf("login defaults: %+v", cfg.login)
 	}
 	if want := (moduleSettings{offered: moduleCatalog(), userDefault: modulesDefaultAll}); !reflect.DeepEqual(cfg.modules, want) {
@@ -1131,5 +1150,97 @@ func TestTLSPathsFromEnv(t *testing.T) {
 	}
 	if rebuilt.certFile != "/r/c" || rebuilt.keyFile != "/r/k" || rebuilt.trustDir != "/r/t" {
 		t.Errorf("a config rebuilt from a document keeps the running paths: %q %q %q", rebuilt.certFile, rebuilt.keyFile, rebuilt.trustDir)
+	}
+}
+
+// The sign-in and session keys added to the file have these defaults, for a
+// file or a config that never had them, and each is the bound the setting
+// documents.
+func TestFileConfig_SignInKeysDefaults(t *testing.T) {
+	d := defaultFileConfig()
+	if l := d.Login; l.MaxFailures != 5 || !l.PerClient || l.ClientMaxFailures != 10 || l.ResetMinutes != 15 ||
+		l.PasswordMinLength != 12 || l.TwoFactorMinutes != 10 {
+		t.Errorf("login defaults: %+v", l)
+	}
+	if d.Session.ConnectsPerMinute != 20 {
+		t.Errorf("session.connectsPerMinute defaults to 20, got %d", d.Session.ConnectsPerMinute)
+	}
+	// A file that leaves them out reads the defaults, also beside keys it sets.
+	fc, err := decodeConfigFile([]byte("version: 1\nlogin:\n  maxFailures: 7\nsession:\n  idleMinutes: 5\n"), "x.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l := fc.Login; l.MaxFailures != 7 || !l.PerClient || l.ClientMaxFailures != 10 || l.ResetMinutes != 15 || l.PasswordMinLength != 12 || l.TwoFactorMinutes != 10 {
+		t.Errorf("login: %+v", l)
+	}
+	if fc.Session.ConnectsPerMinute != 20 || fc.Session.IdleMinutes != 5 {
+		t.Errorf("session: %+v", fc.Session)
+	}
+	// perClient false in a file is kept, not read as absent.
+	fc, err = decodeConfigFile([]byte("version: 1\nlogin:\n  perClient: false\n"), "x.yaml")
+	if err != nil || fc.Login.PerClient {
+		t.Errorf("perClient: false must survive the decode: %+v, %v", fc.Login, err)
+	}
+}
+
+// The new keys reach the runtime config and back, and the file written from it
+// carries every one and decodes to the same values.
+func TestToConfig_SignInKeysRoundTrip(t *testing.T) {
+	fc := defaultFileConfig()
+	fc.Login.PerClient, fc.Login.ClientMaxFailures, fc.Login.ResetMinutes = false, 30, 45
+	fc.Login.PasswordMinLength, fc.Login.TwoFactorMinutes = 16, 5
+	fc.Session.ConnectsPerMinute = 40
+	cfg, err := fc.toConfig(secretPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.login.perClientOff || cfg.login.clientMaxFailures != 30 || cfg.login.reset != 45*time.Minute || cfg.login.passwordMinLength != 16 {
+		t.Errorf("login: %+v", cfg.login)
+	}
+	if cfg.session.ticket != 5*time.Minute || cfg.session.connects != 40 {
+		t.Errorf("session: %+v", cfg.session)
+	}
+	if back := fileConfigFromConfig(cfg); !reflect.DeepEqual(back.Login, fc.Login) || back.Session != fc.Session {
+		t.Errorf("config round trip:\n%+v %+v\nwant:\n%+v %+v", back.Login, back.Session, fc.Login, fc.Session)
+	}
+	out, err := encodeConfigFile(fc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{
+		"  perClient: false\n", "  clientMaxFailures: 30\n", "  resetMinutes: 45\n", "  passwordMinLength: 16\n",
+		"  twoFactorMinutes: 5\n", "  connectsPerMinute: 40\n",
+	} {
+		if !strings.Contains(string(out), line) {
+			t.Errorf("the written file lacks %q:\n%s", line, out)
+		}
+	}
+	got, err := decodeConfigFile(out, "x.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.Access, fc.Access = fileAccess{}, fileAccess{} // an empty list reads back as none; the access lists have their own tests
+	if !reflect.DeepEqual(got, fc) {
+		t.Errorf("file round trip:\n%+v\nwant:\n%+v", got, fc)
+	}
+}
+
+// A config built without the new fields (the zero values) is written with the
+// defaults the accessors give: the client limit follows the account limit, the
+// reset follows the longest back-off, and the rest are the built-in values.
+func TestFileConfigFromConfig_NewFieldsUnsetGiveTheDefaults(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.login.perClientOff, cfg.login.clientMaxFailures, cfg.login.reset, cfg.login.passwordMinLength = false, 0, 0, 0
+	cfg.session.ticket, cfg.session.connects = 0, 0
+	got := fileConfigFromConfig(cfg)
+	if l := got.Login; !l.PerClient || l.ClientMaxFailures != cfg.login.maxFailures || l.ResetMinutes != 15 || l.PasswordMinLength != passwordMinLen || l.TwoFactorMinutes != 10 {
+		t.Errorf("login: %+v", l)
+	}
+	if got.Session.ConnectsPerMinute != defaultConnectsPerMinute {
+		t.Errorf("session.connectsPerMinute: %d", got.Session.ConnectsPerMinute)
+	}
+	// The accessors are what the throttle, the password rule and the sessions read.
+	if (loginLimits{}).minPassword() != passwordMinLen || (sessionLimits{}).ticketTTL() != defaultTicketTTL || (sessionLimits{}).connectsPerMinute() != defaultConnectsPerMinute {
+		t.Error("zero limits must read as the built-in defaults")
 	}
 }

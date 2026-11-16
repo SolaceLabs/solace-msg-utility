@@ -16,12 +16,18 @@ import (
 const throttleMaxTracked = 10_000
 
 // throttle slows password guessing and probing. Sign-in failures are counted
-// per username and per client; after maxFailures each further failure blocks
-// that key for backoff, doubling up to maxBackoff, and a blocked attempt is
-// refused before any password is checked. Separately, every request without a
-// session draws from a per-client token bucket of unauthPerMinute. Sign-ins
-// for one account are checked one at a time (loginTurn), so parallel guesses
-// cannot all pass the check before the first failure is counted.
+// per username and, unless login.perClient is off, per client; once a key
+// reaches its limit (login.maxFailures for an account,
+// login.clientMaxFailures for a client) each further failure blocks it for
+// backoff, doubling up to maxBackoff, and a blocked attempt is refused before
+// any password is checked. A count is forgotten after login.resetMinutes
+// without a failure. A successful sign-in clears the account's count only: the
+// client's is left to age out, so signing in to one's own account cannot wipe
+// the guesses made against others from the same address. Separately, every
+// request without a session, and every sign-in attempt, draws from a
+// per-client token bucket of unauthPerMinute. Sign-ins for one account are
+// checked one at a time (loginTurn), so parallel guesses cannot all pass the
+// check before the first failure is counted.
 //
 // Clients are keyed by address, IPv6 by its /64: one host usually owns a whole
 // /64, so rotating within it buys nothing.
@@ -96,9 +102,9 @@ func userKey(user string) string {
 }
 
 // stale reports whether a failure record no longer matters: not blocked, and
-// quiet for longer than the longest back-off.
+// quiet for longer than login.resetMinutes.
 func (t *throttle) stale(f *failures, now time.Time) bool {
-	return !now.Before(f.blockedUntil) && now.Sub(f.last) > t.lim.maxBackoff
+	return !now.Before(f.blockedUntil) && now.Sub(f.last) > t.lim.resetAfter()
 }
 
 // loginTurn waits until no other sign-in for user is being checked, then
@@ -163,7 +169,11 @@ func (t *throttle) loginWait(user string, client netip.Addr, ok bool) time.Durat
 	defer t.mu.Unlock()
 	t.lim = t.limits()
 	now := t.now()
-	return max(failureWait(t, t.users, userKey(user), now, "users"), failureWait(t, t.clients, clientKey(client, ok), now, "clients"))
+	wait := failureWait(t, t.users, userKey(user), now, "users")
+	if t.lim.perClientOff {
+		return wait
+	}
+	return max(wait, failureWait(t, t.clients, clientKey(client, ok), now, "clients"))
 }
 
 func failureWait[K comparable](t *throttle, m map[K]*failures, k K, now time.Time, table string) time.Duration {
@@ -202,26 +212,30 @@ func hasRoom[K comparable](t *throttle, m map[K]*failures, now time.Time) bool {
 	return len(m) < t.maxTracked
 }
 
-// loginFailed records a failed sign-in against both keys.
+// loginFailed records a failed sign-in against the account and, unless
+// login.perClient is off, against the client.
 func (t *throttle) loginFailed(user string, client netip.Addr, ok bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.lim = t.limits()
 	now := t.now()
-	ck := clientKey(client, ok)
-	if recordFailure(t, t.users, userKey(user), now, "user", userKey(user)) {
-		t.auditLockout(client, ok, "user", userKey(user))
+	if recordFailure(t, t.users, userKey(user), now, t.lim.maxFailures, "user", userKey(user)) {
+		t.auditLockout(client, ok, "user", userKey(user), t.lim.maxFailures)
 	}
-	if recordFailure(t, t.clients, ck, now, "client", ck.String()) {
-		t.auditLockout(client, ok, "client", ck.String())
+	if t.lim.perClientOff {
+		return
+	}
+	ck := clientKey(client, ok)
+	if recordFailure(t, t.clients, ck, now, t.lim.clientThreshold(), "client", ck.String()) {
+		t.auditLockout(client, ok, "client", ck.String(), t.lim.clientThreshold())
 	}
 }
 
 // auditLockout records that a key has started being refused: the lockout
 // entry names the key (a username, or the client's prefix) and the failures
 // that did it. The attempt that tripped it is unauthenticated, so the actor
-// is empty. t.mu must be held (t.lim is read).
-func (t *throttle) auditLockout(client netip.Addr, ok bool, kind, label string) {
+// is empty. limit is the count that tripped it. t.mu must be held.
+func (t *throttle) auditLockout(client netip.Addr, ok bool, kind, label string, limit int) {
 	addr := "unknown"
 	if ok {
 		addr = client.String()
@@ -230,15 +244,15 @@ func (t *throttle) auditLockout(client netip.Addr, ok bool, kind, label string) 
 	}
 	t.audit.record(auditAuth, auditEntry{
 		Client: addr, Action: auditLockout, Target: label, Outcome: auditRefused, Code: "throttled",
-		Msg: fmt.Sprintf("sign-in throttled for %s %s after %d failed attempts", kind, label, t.lim.maxFailures),
+		Msg: fmt.Sprintf("sign-in throttled for %s %s after %d failed attempts", kind, label, limit),
 	})
 }
 
-// recordFailure bumps one key's count and blocks it once it reaches
-// maxFailures. The first block logs a warn: that line is the "burst of failed
-// sign-ins" signal for the operator. It reports whether this failure started
-// the block (the audit trail's lockout).
-func recordFailure[K comparable](t *throttle, m map[K]*failures, k K, now time.Time, kind, label string) (started bool) {
+// recordFailure bumps one key's count and blocks it once it reaches limit.
+// The first block logs a warn: that line is the "burst of failed sign-ins"
+// signal for the operator. It reports whether this failure started the block
+// (the audit trail's lockout).
+func recordFailure[K comparable](t *throttle, m map[K]*failures, k K, now time.Time, limit int, kind, label string) (started bool) {
 	f := m[k]
 	if f != nil && t.stale(f, now) {
 		f.count = 0
@@ -253,28 +267,30 @@ func recordFailure[K comparable](t *throttle, m map[K]*failures, k K, now time.T
 	}
 	f.count++
 	f.last = now
-	if f.count < t.lim.maxFailures {
+	if f.count < limit {
 		return false
 	}
 	backoff := t.lim.backoff
-	for i := t.lim.maxFailures; i < f.count && backoff < t.lim.maxBackoff; i++ {
+	for i := limit; i < f.count && backoff < t.lim.maxBackoff; i++ {
 		backoff *= 2
 	}
 	backoff = min(backoff, t.lim.maxBackoff)
 	f.blockedUntil = now.Add(backoff)
-	started = f.count == t.lim.maxFailures
+	started = f.count == limit
 	if started {
 		t.logger.Warn("sign-in throttled after repeated failures", kind, label, "failures", f.count, "retry_after_s", int(backoff.Seconds()))
 	}
 	return started
 }
 
-// loginSucceeded clears both keys' failure counts.
-func (t *throttle) loginSucceeded(user string, client netip.Addr, ok bool) {
+// loginSucceeded clears the account's failure count. The client's count is
+// left to age out (login.resetMinutes): a sign-in to one's own account must
+// not wipe the count of guesses made against other accounts from the same
+// address.
+func (t *throttle) loginSucceeded(user string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.users, userKey(user))
-	delete(t.clients, clientKey(client, ok))
 }
 
 // allowUnauthenticated takes one token from the client's bucket. When it is

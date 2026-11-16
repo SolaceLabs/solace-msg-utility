@@ -1,17 +1,19 @@
 <!-- The admin gate is created at install by createGate() (see module.ts). -->
-<div id="backup-view" class="card backup-card hidden">
-    <div class="flex-row justify-between items-center mb-4">
-        <h2 class="m-0">Backup &amp; Restore</h2>
-        <button id="btn-backup-reload" type="button" class="btn btn-secondary" title="Reload the schedule and the saved backups">Reload</button>
+<!-- Two cards under one hidden wrapper: Configuration (export and import by hand) and
+     Schedule (the gateway's own scheduled backups and the files they leave). The page's
+     title is the module's name in the sidebar. -->
+<div id="backup-view" class="hidden">
+<div class="card backup-card">
+    <div class="backup-head">
+        <h3 class="backup-title">Configuration</h3>
     </div>
     <p class="text-secondary backup-intro">
         A backup holds the users (their password hashes, never the passwords), the connections with their
         credentials, and the gateway settings except the file paths, encrypted with a passphrase. Keep the
         passphrase safe: without it a backup cannot be opened.
     </p>
-    <div id="backup-error" class="text-error hidden" role="alert"></div>
 
-    <h3 class="backup-section">Export</h3>
+    <h4 class="backup-section">Export</h4>
     <div class="form-group">
         <label for="backup-export-pass">Passphrase (12 to 128 characters)</label>
         <input id="backup-export-pass" type="password" class="form-control" autocomplete="new-password">
@@ -23,7 +25,7 @@
     <div id="backup-export-error" class="text-error hidden" role="alert"></div>
     <button id="btn-backup-export" type="button" class="btn btn-primary">Export</button>
 
-    <h3 class="backup-section">Import</h3>
+    <h4 class="backup-section">Import</h4>
     <div class="form-group">
         <label for="backup-import-file">Backup file</label>
         <input id="backup-import-file" type="file" class="form-control" accept=".json,application/json">
@@ -69,12 +71,18 @@
         </div>
         <button id="btn-backup-import" type="button" class="btn btn-primary">Import</button>
     </div>
+</div>
 
-    <h3 class="backup-section">Scheduled backup</h3>
+<div class="card backup-card">
+    <div class="backup-head">
+        <h3 class="backup-title">Schedule</h3>
+        <button id="btn-backup-reload" type="button" class="btn btn-secondary" title="Reload the schedule and the saved backups">Reload</button>
+    </div>
     <p class="backup-hint">
         The gateway writes each backup into its backup directory, which you mount from the host to keep the
         files outside the container. Times are UTC.
     </p>
+    <div id="backup-error" class="text-error hidden" role="alert"></div>
     <div id="backup-dir-problem" class="backup-banner hidden"></div>
     <p id="backup-schedule-status" class="backup-status"></p>
     <div class="form-group">
@@ -132,7 +140,7 @@
         <button id="btn-backup-remove-schedule" type="button" class="btn btn-danger">Remove schedule</button>
     </div>
 
-    <h3 class="backup-section">Saved backups</h3>
+    <h4 class="backup-section">Saved backups</h4>
     <div class="data-table-frame">
         <table class="data-table">
             <thead>
@@ -141,4 +149,5 @@
             <tbody id="backup-rows"></tbody>
         </table>
     </div>
+</div>
 </div>

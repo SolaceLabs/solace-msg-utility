@@ -455,7 +455,7 @@ It appears as a tab in the **Connections** module: **Direct** (type your own cre
 ### Signing in and connecting
 
 1. **Sign in.** On a deployment that offers only Provisioned, opening the app takes you straight to the sign-in page. Otherwise open **Connections**, choose the **Provisioned** tab and click **Sign in**. Enter the username and password your administrator gave you; you return to the app with the **Provisioned** tab open.
-2. **First sign-in of a new deployment.** The bootstrap `admin` account is asked to choose a new password (12 to 128 characters) before anything else.
+2. **First sign-in of a new deployment.** The bootstrap `admin` account is asked to choose a new password (at least the gateway's **Minimum password length**, 12 by default, and at most 128 characters) before anything else.
 3. Pick a **Broker** and **Message VPN** from the dropdowns. They list only what you are entitled to, by name. You never see or type the broker's address or credentials.
 4. Click **Connect**. From here the **Queue Browser** and **Queue Copy** work as usual, scoped to your entitlements.
 5. **Refresh** re-fetches your entitlements and brokers without signing out (useful right after an administrator grants you access).
@@ -474,7 +474,7 @@ Your administrator may ask for a second proof after your password: a six-digit c
 
 **Recovery codes.** The next page, **Recovery codes**, lists ten codes such as `ABCD-EFGH-JKLM-NPQR` and says "Two-factor sign-in is on. Keep these recovery codes somewhere safe: each works once if you lose your authenticator. They are shown only now." Write them down or save them somewhere other than your phone, then press **Continue** (to the password page first if you must choose a new password). They are not shown again.
 
-**Signing in afterwards.** After the password you see **Two-factor sign-in**: "Enter the 6-digit code from your authenticator app, or one of your recovery codes." Type the current code, or a recovery code (case and hyphens do not matter; each recovery code works once), and press **Continue**. A wrong or already-used code answers "The code is not correct." and counts like a wrong password: after a few, the page says "Too many attempts. Try again in N seconds." A code works once, so if you sign in twice in a row, wait for the app's next code. **Start again** goes back to the password. A half-finished sign-in is dropped after 10 minutes.
+**Signing in afterwards.** After the password you see **Two-factor sign-in**: "Enter the 6-digit code from your authenticator app, or one of your recovery codes." Type the current code (spaces or hyphens between the digits are fine), or a recovery code (case and hyphens do not matter; each recovery code works once), and press **Continue**. A wrong or already-used code answers "The code is not correct." and counts like a wrong password: after a few, the page says "Too many attempts. Try again in N seconds." A code works once, so if you sign in twice in a row, wait for the app's next code. **Start again** goes back to the password. A half-finished sign-in is dropped after the gateway's **Time to finish two-factor after the password** (10 minutes by default).
 
 **Setting it up again** (a new phone, or you chose to turn it on yourself while it is optional). While signed in, press the lock icon, or **Two-factor sign-in** on the Administration page of `/solAdmin`. The page asks for your **Password** and, if two-factor is already on, **Current code or a recovery code**; a wrong answer to either says "The password or the code is not correct." Then you scan a new picture and confirm a code as above. The new key and ten new recovery codes replace the old ones, and your other sessions are signed out; this browser stays signed in.
 
@@ -538,7 +538,7 @@ List, add, edit and delete users. Each row's pencil icon edits the user and the 
 | Field | Rules |
 | --- | --- |
 | Username | Letters, digits and `. _ @ -`, up to 64 characters, not only dots |
-| Password | 12 to 128 characters. Leave it blank when editing to keep the current one |
+| Password | At least the gateway's **Minimum password length** (12 by default), at most 128 characters. Leave it blank when editing to keep the current one |
 | **Administrator** | Gives access to `/solAdmin`, and no broker access by itself: an administrator needs entitlement rows like anyone else |
 | **Operate** / **Read-only** rows | One row is a *brokers / msgVpns / queues* glob, for example `* / vpn-prod / orders.*`, under the column names **Brokers**, **Message VPNs** and **Queues** |
 
@@ -588,21 +588,21 @@ List, add, edit and delete broker connections, with the same pencil and bin icon
 
 ### Gateway Settings
 
-The gateway's own settings, one card each: Connections, Access, Sessions, Sign-in throttle, Two-factor sign-in, Modules, Logging, Audit trail and Broker trust. Then **Save**, then a **Gateway** card with **Restart gateway** (see [Restart gateway](#restart-gateway)). What the settings do, with their defaults and recommended values, is in [provisioned-mode.md](provisioned-mode.md#configure); the log level and the broker certificate check are in [deployment.md](deployment.md#settings).
+The gateway's own settings, one card each: Connections, Access, Sessions, Sign-in throttle, Passwords and two-factor sign-in, Modules, Logging, Audit trail and Broker trust. Then **Save**, then a **Gateway** card with **Restart gateway** (see [Restart gateway](#restart-gateway)). What the settings do, with their defaults and recommended values, is in [provisioned-mode.md](provisioned-mode.md#configure); the log level and the broker certificate check are in [deployment.md](deployment.md#settings).
 
 | Card | What you set |
 | --- | --- |
 | Connections | Which connection tabs the app offers: Provisioned only, or Direct and Provisioned. Leaving Provisioned mode is not done on this page; see [provisioned-mode.md](provisioned-mode.md#connection-modes) |
 | Access | The client access list (**Allowed clients**) and the **Trusted reverse proxies**. It opens with one line, "Your address as the gateway sees it", naming your address and whether it is the TCP peer or came from X-Forwarded-For through a trusted proxy. If it shows a proxy's address, see [Client addresses behind Docker and proxies](deployment.md#client-addresses-behind-docker-and-proxies) |
-| Sessions | Idle and absolute session limits |
-| Sign-in throttle | How many wrong passwords lock sign-in, and for how long |
-| Two-factor sign-in (code from an authenticator app) | *Optional* (the default), *Administrators must use it* or *Everyone must use it*; applies at the next sign-in |
+| Sessions | Idle and absolute session limits, and **Broker connects per user per minute**: how many credential requests and messaging sockets one user may open in a minute (a user may also hold at most 20 open sockets, and the gateway 1000) |
+| Sign-in throttle | **Failed sign-ins per account before a back-off**, the checkbox **Count failures per client address**, **Failed sign-ins per client before a back-off** and **Forget failures after (minutes)**, then the back-off waits and **Requests and sign-in attempts per minute per client**. A successful sign-in clears the account's count, never the client's. Turn the per-client count off only where every user reaches the gateway from one address |
+| Passwords and two-factor sign-in | **Minimum password length** (12 to 128; a raised minimum applies at the next password change, and passwords already set keep working), **Time to finish two-factor after the password (minutes)**, and the two-factor mode (code from an authenticator app): *Optional* (the default), *Administrators must use it* or *Everyone must use it*; applies at the next sign-in |
 | Modules | **Modules signed-in users may be given** is a row of toggle tiles, one per module, each with its name and a line saying what it does (Queue Browser: "Browse, inspect and delete queued messages."; Queue Copy: "Copy or move messages between queues."; Queue Subscriptions: "See which topics each queue subscribes to."). A pressed tile is offered; a click or the Space or Enter key toggles it. **A user without a list of their own gets** is *Every offered module* or *No modules* |
 | Logging | The log level |
-| Audit trail | Two checkboxes, **Copy audit lines to the gateway log (stdout)** and **Also audit broker access: dials, SMF sockets and SEMP relay requests**, and a choice, **If the audit log cannot be written**: *Carry on, and log the lost record* (the default) or *Refuse changes until it can be written* (sign-ins and reads are not refused). The trail itself is always written to `/data/audit.log` on the gateway; the options only add to it, and all apply at once. See [Audit trail](provisioned-mode.md#audit-trail) |
+| Audit trail | Two checkboxes, **Copy audit lines to the gateway log (stdout)** and **Also audit broker access: dials, SMF sockets and SEMP relay requests**, and a choice, **If the audit log cannot be written**: *Carry on, and log the lost record* (the default) or *Refuse changes until it can be written* (reads, Restart gateway and a normal sign-in are not refused; certificate changes are, like the rest). The trail itself is always written to `/data/audit.log` on the gateway; the options only add to it, and all apply at once. See [Audit trail](provisioned-mode.md#audit-trail) |
 | Broker trust | One checkbox, **Skip broker certificate checks (insecure)**, which applies on Save with no restart. The gateway's certificate and the trusted broker CAs are on the [Certificates](#certificates) page; their file paths come only from the gateway's environment, so no setting shows them |
 
-**Saving.** **Save** applies most changes at once. A setting tagged **restart** (only whether the gateway serves the app, `hosted`) is saved but takes effect when the gateway restarts. A banner, "Saved, applies when the gateway restarts: <keys>.", lists the saved ones still waiting, with a **Go to Restart gateway** button that moves to the Restart gateway button.
+**Saving.** **Save** applies every change at once.
 
 **Refused saves:**
 
@@ -636,20 +636,25 @@ The key is sent once and never kept; its field and file choice are emptied after
 
 ### Backup & Restore
 
-Copies of the users, connections and settings, each encrypted with a passphrase (12 to 128 characters) that you need again to restore it.
+Copies of the users, connections and settings, each encrypted with a passphrase (12 to 128 characters) that you need again to restore it. The page has two cards.
+
+**Configuration** moves the configuration in and out of the gateway:
 
 - **Export** downloads one.
-- **Saved backups** lists the backups in the gateway's backup directory. Each one's download icon saves it as written (it opens with the schedule's passphrase); its restore icon starts an import.
 - **Import** takes a file, or a saved backup's restore icon, and its passphrase. **Preview** lists what each section would add, change and remove, and you choose per section: **Skip**, **Merge** (add and update, keep the rest) or **Replace** (settings: Skip or Replace). Every choice starts at Skip, and **Import** asks before it applies anything.
 - If the users, connections or settings you are importing changed after the preview (anyone's save, a password change included), the import is refused with *The gateway's data changed since the preview. Run the preview again.* and the preview is cleared. Press **Preview** again, check the new result and choose again; the file and passphrase stay filled in.
 - A warning shows when the users choice would change your own account; the import then signs you out.
+
+**Schedule** looks after the backups the gateway writes by itself:
+
 - **Scheduled backup** sets how often the gateway writes a backup into its backup directory (hourly, daily, weekly or monthly, in UTC), how many to keep, and the passphrase (leave it blank when editing to keep the current one). **Back up now** writes one at once; **Remove schedule** stops them after a confirmation (saved backups stay). The page shows the next and last backup, and a banner when the gateway cannot write to the directory.
+- **Saved backups** lists the backups in the gateway's backup directory. Each one's download icon saves it as written (it opens with the schedule's passphrase); its restore icon fills in the import in the Configuration card.
 
 How backups are stored and restored on the host is in [Back up and restore](provisioned-mode.md#back-up-and-restore).
 
 ### Restart gateway
 
-The last card of Gateway Settings, **Gateway**, holds the **Restart gateway** button. The gateway starts its own program again in place, which signs everyone out, closes open broker connections and applies any setting that was waiting for a restart.
+The last card of Gateway Settings, **Gateway**, holds the **Restart gateway** button. The gateway starts its own program again in place, which signs everyone out and closes open broker connections.
 
 1. Press it. The page asks "Restart the gateway? Everyone is signed out and open broker connections close. It is back in a few seconds."
 2. After you confirm, the page says "Restarting the gateway. This page goes to the sign-in when the gateway answers again." and takes you to the sign-in once the gateway answers.

@@ -2,15 +2,14 @@
 
 <!-- List view -->
 <div id="user-mgmt-list-view" class="card user-mgmt-card hidden">
-    <div class="flex-row justify-between items-center mb-4">
-        <h2 class="m-0">Users</h2>
-        <div class="flex-row items-center gap-4">
-            <input type="search" id="user-mgmt-search" class="form-control user-mgmt-search"
-                placeholder="Search users (* = any)" aria-label="Search users" autocomplete="off">
-            <button id="btn-user-mgmt-refresh" class="btn btn-secondary" title="Reload the user list">Refresh</button>
-            <button id="btn-user-mgmt-add" class="btn btn-primary">Add user</button>
-        </div>
+    <!-- The page's name is the sidebar's; the card opens with its actions, then
+         the search on a row of its own across the card, as on Connections. -->
+    <div class="flex-row justify-end items-center gap-4 mb-4">
+        <button id="btn-user-mgmt-refresh" class="btn btn-secondary" title="Reload the user list">Refresh</button>
+        <button id="btn-user-mgmt-add" class="btn btn-primary">Add user</button>
     </div>
+    <input type="search" id="user-mgmt-search" class="form-control user-mgmt-search"
+        placeholder="Search users (* = any)" aria-label="Search users" autocomplete="off">
     <div class="data-table-frame">
         <table class="data-table">
             <thead>

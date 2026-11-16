@@ -9,7 +9,8 @@
 }
 
 .user-mgmt-search {
-    width: 14rem;
+    width: 100%;
+    margin-bottom: 1rem;
 }
 
 .user-mgmt-hint {

@@ -55,22 +55,131 @@ func TestThrottle_BackoffGrowsDoublesAndCaps(t *testing.T) {
 	}
 }
 
-func TestThrottle_SuccessResetsAndQuietPeriodForgives(t *testing.T) {
-	clock := newFakeClock()
-	th := newThrottle(fixed(testLoginLimits), clock.now, quietLogger())
+// A success clears the account's count, so an account's failures never carry
+// over a sign-in that worked. The client's count is not cleared.
+func TestThrottle_SuccessClearsTheAccountNotTheClient(t *testing.T) {
+	lim := testLoginLimits
+	lim.clientMaxFailures = 4
+	th := newThrottle(fixed(lim), newFakeClock().now, quietLogger())
 	client := addr(t, "192.0.2.7")
 	th.loginFailed("alice", client, true)
 	th.loginFailed("alice", client, true)
-	th.loginSucceeded("alice", client, true)
-	th.loginFailed("alice", client, true)
-	th.loginFailed("alice", client, true)
-	if th.loginWait("alice", client, true) != 0 {
-		t.Fatal("a success must reset the count")
+	th.loginSucceeded("alice")
+	if _, kept := th.users["alice"]; kept {
+		t.Fatal("a success must clear the account's count")
 	}
-	clock.advance(testLoginLimits.maxBackoff + time.Second)
+	if got := th.clients[clientKey(client, true)]; got == nil || got.count != 2 {
+		t.Fatalf("a success must leave the client's count alone, got %+v", got)
+	}
 	th.loginFailed("alice", client, true)
-	if th.loginWait("alice", client, true) != 0 {
-		t.Fatal("after a quiet maxBackoff the old failures must be forgotten")
+	th.loginFailed("alice", client, true)
+	if th.loginWait("alice", addr(t, "198.51.100.1"), true) != 0 {
+		t.Error("two failures after the success are below maxFailures for the account")
+	}
+	if th.loginWait("bob", client, true) == 0 {
+		t.Error("the client's four failures, success or not, must block it for every account")
+	}
+}
+
+// A count is forgotten once login.resetMinutes pass without a failure, and
+// not before: the reset follows its own setting, not the back-off ceiling.
+func TestThrottle_ResetMinutesForgivesAfterTheQuietTime(t *testing.T) {
+	lim := testLoginLimits
+	lim.reset = 5 * time.Minute // longer than maxBackoff (2 minutes)
+	lim.clientMaxFailures = 100
+	client := addr(t, "192.0.2.7")
+	for _, tc := range []struct {
+		name  string
+		quiet time.Duration
+		block bool
+	}{
+		{"quiet for less than the reset keeps the count", lim.reset - time.Second, true},
+		{"quiet for longer than the reset starts again", lim.reset + time.Second, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clock := newFakeClock()
+			th := newThrottle(fixed(lim), clock.now, quietLogger())
+			th.loginFailed("alice", client, true)
+			th.loginFailed("alice", client, true)
+			clock.advance(tc.quiet)
+			th.loginFailed("alice", client, true)
+			if blocked := th.loginWait("alice", client, true) != 0; blocked != tc.block {
+				t.Errorf("blocked %v, want %v", blocked, tc.block)
+			}
+		})
+	}
+}
+
+// The client limit is its own number: an account is blocked at maxFailures, the
+// client only at clientMaxFailures, and another client is never affected.
+func TestThrottle_ClientLimitIsSeparateFromTheAccountLimit(t *testing.T) {
+	lim := testLoginLimits
+	lim.clientMaxFailures = 5
+	th := newThrottle(fixed(lim), newFakeClock().now, quietLogger())
+	client, other := addr(t, "192.0.2.7"), addr(t, "198.51.100.1")
+	for range lim.maxFailures {
+		th.loginFailed("alice", client, true)
+	}
+	if th.loginWait("alice", other, true) == 0 {
+		t.Error("the account is blocked at maxFailures, from any client")
+	}
+	if th.loginWait("bob", client, true) != 0 {
+		t.Error("three failures are below clientMaxFailures: the client may still try other accounts")
+	}
+	th.loginFailed("u1", client, true)
+	th.loginFailed("u2", client, true)
+	if th.loginWait("bob", client, true) == 0 {
+		t.Error("the client is blocked at clientMaxFailures")
+	}
+	if th.loginWait("bob", other, true) != 0 {
+		t.Error("another client is not blocked")
+	}
+}
+
+// login.perClient off counts per account only: no client is ever blocked or
+// even tracked, and an account still blocks from every address.
+func TestThrottle_PerClientOffCountsPerAccountOnly(t *testing.T) {
+	lim := testLoginLimits
+	lim.perClientOff = true
+	th := newThrottle(fixed(lim), newFakeClock().now, quietLogger())
+	client := addr(t, "192.0.2.7")
+	for i := range 3 * lim.maxFailures {
+		th.loginFailed("u"+strings.Repeat("x", i), client, true)
+	}
+	if th.loginWait("fresh", client, true) != 0 {
+		t.Error("a client that sprays accounts must not be blocked when perClient is off")
+	}
+	if len(th.clients) != 0 {
+		t.Errorf("no client count is kept, got %d", len(th.clients))
+	}
+	for range lim.maxFailures {
+		th.loginFailed("alice", client, true)
+	}
+	if th.loginWait("alice", addr(t, "198.51.100.1"), true) == 0 {
+		t.Error("the account is still blocked, from any address")
+	}
+	if th.loginWait("bob", client, true) != 0 {
+		t.Error("another account from the same address stays open")
+	}
+}
+
+// The setting is read at each failure, so turning perClient off applies at once.
+func TestThrottle_PerClientIsReadLive(t *testing.T) {
+	lim := testLoginLimits
+	th := newThrottle(func() loginLimits { return lim }, newFakeClock().now, quietLogger())
+	client := addr(t, "192.0.2.7")
+	th.loginFailed("u1", client, true)
+	lim.perClientOff = true
+	th.loginFailed("u2", client, true)
+	th.loginFailed("u3", client, true)
+	if th.loginWait("u4", client, true) != 0 {
+		t.Error("with perClient off the client's count is neither grown nor consulted")
+	}
+	lim.perClientOff = false
+	th.loginFailed("u5", client, true)
+	th.loginFailed("u6", client, true)
+	if th.loginWait("u7", client, true) == 0 {
+		t.Error("with perClient back on the count resumes from the one failure it held")
 	}
 }
 
@@ -318,6 +427,8 @@ type throttleVectors struct {
 	Comment string `json:"_comment"`
 	Limits  struct {
 		MaxFailures       int `json:"maxFailures"`
+		ClientMaxFailures int `json:"clientMaxFailures"`
+		ResetMinutes      int `json:"resetMinutes"`
 		BackoffSeconds    int `json:"backoffSeconds"`
 		MaxBackoffSeconds int `json:"maxBackoffSeconds"`
 	} `json:"limits"`
@@ -342,9 +453,10 @@ func TestThrottle_SharedVectors(t *testing.T) {
 		t.Fatalf("throttle.json: %v (%d cases)", err, len(v.Cases))
 	}
 	lim := loginLimits{
-		maxFailures: v.Limits.MaxFailures, unauthPerMinute: 60,
+		maxFailures: v.Limits.MaxFailures, clientMaxFailures: v.Limits.ClientMaxFailures, unauthPerMinute: 60,
 		backoff:    time.Duration(v.Limits.BackoffSeconds) * time.Second,
 		maxBackoff: time.Duration(v.Limits.MaxBackoffSeconds) * time.Second,
+		reset:      time.Duration(v.Limits.ResetMinutes) * time.Minute,
 	}
 	client := addr(t, "192.0.2.10")
 	for _, c := range v.Cases {
@@ -358,7 +470,7 @@ func TestThrottle_SharedVectors(t *testing.T) {
 						th.loginFailed(s.Fail, client, true)
 					}
 				case s.Succeed != "":
-					th.loginSucceeded(s.Succeed, client, true)
+					th.loginSucceeded(s.Succeed)
 				case s.Advance > 0:
 					clock.advance(time.Duration(s.Advance) * time.Second)
 				case s.Wait != "":
@@ -387,7 +499,7 @@ func TestThrottle_LockoutIsAudited(t *testing.T) {
 	al.expect(t)
 	th.loginFailed("alice", client, true)
 	th.loginFailed("alice", client, true) // already blocked: no second entry
-	th.loginSucceeded("alice", client, true)
+	th.loginSucceeded("alice")
 	for range testLoginLimits.maxFailures {
 		th.loginFailed("bob", netip.Addr{}, false)
 	}
@@ -399,4 +511,24 @@ func TestThrottle_LockoutIsAudited(t *testing.T) {
 		lock("192.0.2.7", "alice", "user"), lock("192.0.2.7", "192.0.2.7/32", "client"),
 		lock("unknown", "bob", "user"), lock("unknown", "unknown", "client"),
 	)
+}
+
+// The lockout entry names the limit that tripped: login.maxFailures for an
+// account, login.clientMaxFailures for a client.
+func TestThrottle_LockoutAuditNamesTheLimitThatTripped(t *testing.T) {
+	lim := testLoginLimits
+	lim.maxFailures, lim.clientMaxFailures = 2, 4
+	th := newThrottle(fixed(lim), newFakeClock().now, quietLogger())
+	a, al := newTestAuditor(t, liveWith(nil))
+	th.audit = a
+	client := addr(t, "192.0.2.7")
+	th.loginFailed("alice", client, true)
+	th.loginFailed("alice", client, true)
+	th.loginFailed("u2", client, true)
+	th.loginFailed("u3", client, true)
+	lock := func(target, kind, limit string) auditEntry {
+		return auditEntry{Client: "192.0.2.7", Action: "lockout", Target: target, Outcome: "refused", Code: "throttled",
+			Msg: "sign-in throttled for " + kind + " " + target + " after " + limit + " failed attempts"}
+	}
+	al.expect(t, lock("alice", "user", "2"), lock("192.0.2.7/32", "client", "4"))
 }

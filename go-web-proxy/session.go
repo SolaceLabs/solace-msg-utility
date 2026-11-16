@@ -43,7 +43,8 @@ type sessions struct {
 }
 
 func newSessions(limits func() sessionLimits, now func() time.Time) *sessions {
-	return &sessions{byID: map[string]*session{}, limits: limits, now: now, tickets: newSigninTickets(now)}
+	ttl := func() time.Duration { return limits().ticketTTL() }
+	return &sessions{byID: map[string]*session{}, limits: limits, now: now, tickets: newSigninTickets(ttl, now)}
 }
 
 func expired(ss *session, now time.Time, lim sessionLimits) bool {
@@ -183,8 +184,9 @@ func sessionOf(r *http.Request) activeSession {
 // session cookie (proxy.go).
 const signinCookie = "__Host-smu-signin"
 
-// ticketTTL is how long a half-finished sign-in waits for its next step.
-const ticketTTL = 10 * time.Minute
+// defaultTicketTTL is how long a half-finished sign-in waits for its next
+// step unless login.twoFactorMinutes says otherwise.
+const defaultTicketTTL = 10 * time.Minute
 
 // ticket is a sign-in that has passed the password and still owes a step. It
 // is never a session: no session exists until every step has passed, so
@@ -204,19 +206,24 @@ type ticket struct {
 type signinTickets struct {
 	mu   sync.Mutex
 	byID map[string]*ticket
+	ttl  func() time.Duration // login.twoFactorMinutes, read live
 	now  func() time.Time
 }
 
-func newSigninTickets(now func() time.Time) *signinTickets {
-	return &signinTickets{byID: map[string]*ticket{}, now: now}
+func newSigninTickets(ttl func() time.Duration, now func() time.Time) *signinTickets {
+	return &signinTickets{byID: map[string]*ticket{}, ttl: ttl, now: now}
 }
 
-func ticketExpired(tk *ticket, now time.Time) bool { return now.Sub(tk.created) >= ticketTTL }
+// expired reports whether tk is older than the ticket lifetime in force now,
+// so a shorter login.twoFactorMinutes also ends tickets already issued.
+func (t *signinTickets) expired(tk *ticket, now time.Time) bool {
+	return now.Sub(tk.created) >= t.ttl()
+}
 
 // create stores tk (its created time is set here) and returns its id. It
 // replaces nothing: a caller that holds the browser's earlier ticket drops it.
 // Expired tickets are swept here, so the table never outgrows the sign-ins
-// begun in the last ticketTTL.
+// begun in the last ticket lifetime.
 func (t *signinTickets) create(tk ticket) string {
 	b := make([]byte, 32)
 	rand.Read(b) // never fails: since Go 1.24 it crashes the process instead
@@ -225,7 +232,7 @@ func (t *signinTickets) create(tk ticket) string {
 	defer t.mu.Unlock()
 	now := t.now()
 	for k, old := range t.byID {
-		if ticketExpired(old, now) {
+		if t.expired(old, now) {
 			delete(t.byID, k)
 		}
 	}
@@ -235,7 +242,7 @@ func (t *signinTickets) create(tk ticket) string {
 }
 
 // lookup returns a copy of a live ticket. An expired one is dropped and
-// reported as absent. A lookup does not extend it: ticketTTL runs from create.
+// reported as absent. A lookup does not extend it: the lifetime runs from create.
 func (t *signinTickets) lookup(id string) (ticket, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -243,7 +250,7 @@ func (t *signinTickets) lookup(id string) (ticket, bool) {
 	if !ok {
 		return ticket{}, false
 	}
-	if ticketExpired(tk, t.now()) {
+	if t.expired(tk, t.now()) {
 		delete(t.byID, id)
 		return ticket{}, false
 	}

@@ -468,7 +468,7 @@ func recoverDir(dir string, bakNames []string, logger *slog.Logger) error {
 	}
 	rec, err := parseTxn(raw)
 	if err != nil {
-		return fmt.Errorf("the transaction journal %s is damaged (%w): the .bak files beside the store files hold their contents from before the interrupted change; restore them by hand, then delete the journal", txnPath, err)
+		return fmt.Errorf("the transaction journal %s is damaged (%w), so the gateway cannot tell which change was interrupted: restore %s from your volume backup (for the data directory, importing a backup into a fresh volume also works)", txnPath, err, dir)
 	}
 	names := make([]string, len(rec.Files))
 	for i, t := range rec.Files {

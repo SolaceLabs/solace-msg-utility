@@ -5,10 +5,12 @@
  * (connModes and defaultConn reach the next `/hosted`, modules the next
  * `/me`; audit.stdout, audit.access and audit.onFailure the next audit event,
  * which the demo does not write and cannot fail to write: the keys are saved
- * and shown only; login.twoFactor at the next sign-in; tls.insecureSkipVerify
- * at once, as the gateway's trust holder takes it); restart-only keys (now
- * `hosted` alone) are saved and reported as pending until a restart
- * (`applyRestart`). The TLS paths are environment variables, not keys: a
+ * and shown only; the login keys at the next sign-in or password change, and
+ * login.twoFactorMinutes at the next ticket check; tls.insecureSkipVerify at
+ * once, as the gateway's trust holder takes it; session.connectsPerMinute is
+ * saved and shown only, as the demo has no connect window). Nothing a save
+ * writes waits for a restart. A seed, snapshot or backup without a key reads
+ * it as its default. The TLS paths are environment variables, not keys: a
  * seed, snapshot or backup that still holds them is read and they are
  * dropped, and a save that names one is a bad request, as for any unknown key.
  *
@@ -27,11 +29,11 @@
  */
 import { BadRequest, fieldOf, string } from './strict';
 import { isTwoFactorMode } from './authenticator';
-import { CATALOG, moduleIdsProblem, quote } from './validate';
+import { CATALOG, moduleIdsProblem, PASSWORD_MAX, PASSWORD_MIN, quote } from './validate';
 import type { GatewaySettings, SettingsView } from './types';
 
 /** `GET /managed/settings`: the view and the file's rev. */
-export type SettingsViewRev = Omit<SettingsView, 'hostOnly'> & { rev: string };
+export type SettingsViewRev = SettingsView & { rev: string };
 
 type Kind = 'bool' | 'string' | 'int' | 'strings';
 type Schema = { [key: string]: Kind | Schema };
@@ -42,16 +44,14 @@ const SCHEMA: Schema = {
     tls: { insecureSkipVerify: 'bool' },
     logLevel: 'string',
     access: { allow: 'strings', trustedProxies: 'strings' },
-    session: { idleMinutes: 'int', absoluteMinutes: 'int' },
-    login: { maxFailures: 'int', backoffSeconds: 'int', maxBackoffSeconds: 'int', unauthenticatedPerMinute: 'int', twoFactor: 'string' },
+    session: { idleMinutes: 'int', absoluteMinutes: 'int', connectsPerMinute: 'int' },
+    login: {
+        maxFailures: 'int', perClient: 'bool', clientMaxFailures: 'int', resetMinutes: 'int', backoffSeconds: 'int',
+        maxBackoffSeconds: 'int', unauthenticatedPerMinute: 'int', passwordMinLength: 'int', twoFactorMinutes: 'int', twoFactor: 'string',
+    },
     modules: { offered: 'strings', userDefault: 'string' },
     audit: { stdout: 'bool', access: 'bool', onFailure: 'string' },
 };
-
-/** restartOnlyKeys (live.go), in order. */
-const RESTART_ONLY: { key: string; value: (s: GatewaySettings) => unknown }[] = [
-    { key: 'hosted', value: s => s.hosted },
-];
 
 /** The tls keys earlier releases kept in config.yaml; the paths are environment variables now, so a file that holds one is read and the key dropped. */
 const REMOVED_TLS_KEYS = ['certFile', 'keyFile', 'trustDir'];
@@ -100,15 +100,18 @@ function merge(target: Record<string, any>, patch: unknown, schema: Schema): voi
     }
 }
 
-/** A fileConfig's zero value: what the gateway decodes a backup's settings onto. */
-const ZERO: GatewaySettings = {
-    hosted: false, connModes: '', defaultConn: '',
+/** defaultFileConfig: the built-in defaults, what the gateway decodes a backup's settings onto (a key the backup lacks reads as its default). */
+const DEFAULTS: GatewaySettings = {
+    hosted: true, connModes: 'direct', defaultConn: 'direct',
     tls: { insecureSkipVerify: false },
-    logLevel: '',
+    logLevel: 'warn',
     access: { allow: [], trustedProxies: [] },
-    session: { idleMinutes: 0, absoluteMinutes: 0 },
-    login: { maxFailures: 0, backoffSeconds: 0, maxBackoffSeconds: 0, unauthenticatedPerMinute: 0, twoFactor: 'optional' },
-    modules: { offered: [], userDefault: '' },
+    session: { idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 },
+    login: {
+        maxFailures: 5, perClient: true, clientMaxFailures: 10, resetMinutes: 15, backoffSeconds: 30, maxBackoffSeconds: 900,
+        unauthenticatedPerMinute: 60, passwordMinLength: 12, twoFactorMinutes: 10, twoFactor: 'optional',
+    },
+    modules: { offered: [...CATALOG], userDefault: 'all' },
     audit: { stdout: false, access: false, onFailure: 'continue' },
 };
 
@@ -119,14 +122,14 @@ const withoutRemovedTls = (v: unknown): unknown =>
         : v;
 
 /**
- * A backup's settings as the gateway's strict decoder reads them: onto a
- * zero file, unknown or mistyped keys refused (BadRequest). The file's own
+ * A backup's settings as the gateway's strict decoder reads them: onto the
+ * default file, unknown or mistyped keys refused (BadRequest). The file's own
  * `version`, the `appDir`, `usersFile` and `connectionsFile` keys and the
  * `tls.certFile`, `tls.keyFile` and `tls.trustDir` keys earlier releases
  * wrote, are not settings: accepted and ignored.
  */
 export function settingsFromBackup(raw: unknown): GatewaySettings {
-    const out = clone(ZERO);
+    const out = clone(DEFAULTS);
     const rest = raw && typeof raw === 'object' && !Array.isArray(raw)
         ? Object.fromEntries(Object.entries(raw)
             .filter(([k]) => !['version', 'appDir', 'usersFile', 'connectionsFile'].includes(k))
@@ -272,13 +275,18 @@ function normalize(f: GatewaySettings): { ok: true; value: GatewaySettings } | {
     if (!trusted.ok) return trusted;
     const { idleMinutes: idle, absoluteMinutes: abs } = f.session;
     const sessionProblem = range('session.absoluteMinutes', abs, 1, 1440)
-        ?? ((p => p && `${p} (session.absoluteMinutes is ${abs})`)(range('session.idleMinutes', idle, 1, abs)));
+        ?? ((p => p && `${p} (session.absoluteMinutes is ${abs})`)(range('session.idleMinutes', idle, 1, abs)))
+        ?? range('session.connectsPerMinute', f.session.connectsPerMinute, 1, 1000);
     if (sessionProblem) return { ok: false, reason: sessionProblem };
     const l = f.login;
     const loginProblem = range('login.maxFailures', l.maxFailures, 1, 1000)
+        ?? range('login.clientMaxFailures', l.clientMaxFailures, 1, 1000)
+        ?? range('login.resetMinutes', l.resetMinutes, 1, 1440)
         ?? range('login.maxBackoffSeconds', l.maxBackoffSeconds, 1, 86400)
         ?? range('login.unauthenticatedPerMinute', l.unauthenticatedPerMinute, 1, 10000)
-        ?? ((p => p && `${p} (login.maxBackoffSeconds is ${l.maxBackoffSeconds})`)(range('login.backoffSeconds', l.backoffSeconds, 1, l.maxBackoffSeconds)));
+        ?? range('login.passwordMinLength', l.passwordMinLength, PASSWORD_MIN, PASSWORD_MAX)
+        ?? ((p => p && `${p} (login.maxBackoffSeconds is ${l.maxBackoffSeconds})`)(range('login.backoffSeconds', l.backoffSeconds, 1, l.maxBackoffSeconds)))
+        ?? range('login.twoFactorMinutes', l.twoFactorMinutes, 1, 60);
     if (loginProblem) return { ok: false, reason: loginProblem };
     const modulesProblem = moduleIdsProblem('modules.offered', f.modules.offered)
         ?? (['all', 'none'].includes(f.modules.userDefault) ? null
@@ -332,26 +340,26 @@ export function refusalBody(r: Refusal): Record<string, string> {
     return { error: r.error, ...(r.field ? { field: r.field } : {}), ...(r.reason ? { reason: r.reason } : {}), ...(r.rev ? { rev: r.rev } : {}) };
 }
 
-export type SaveResult = { ok: true; restartRequired: string[]; rev: string } | Refusal;
+export type SaveResult = { ok: true; rev: string } | Refusal;
 
 const UNREADABLE_REASON = 'The gateway cannot read config.yaml (demo: the control panel made it unreadable). '
     + 'The cause is on the gateway host; once the gateway can read the file again, reload this page.';
 
 /**
  * A file's settings with the keys it may lack (an older seed, backup or snapshot):
- * audit and login.twoFactor, the zero value's; and without the keys it may still
- * hold (the three TLS paths).
+ * the session, login and audit keys, the defaults'; and without the keys it may
+ * still hold (the three TLS paths).
  */
 const fileDefaults = (s: GatewaySettings): GatewaySettings => {
     const c = clone(s);
-    c.audit = { ...ZERO.audit, ...c.audit };
-    c.login = { ...ZERO.login, ...c.login };
+    c.session = { ...DEFAULTS.session, ...c.session };
+    c.audit = { ...DEFAULTS.audit, ...c.audit };
+    c.login = { ...DEFAULTS.login, ...c.login };
     c.tls = { insecureSkipVerify: c.tls.insecureSkipVerify };
     return c;
 };
 
 export function createSettings(boot: GatewaySettings, client: string, faults: () => SettingsFaults) {
-    let running = fileDefaults(boot);
     let saved = fileDefaults(boot);
     let revN = 1;
 
@@ -361,8 +369,6 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
         if (faults().changedOnDisk) return { ok: false, status: 409, error: 'config_changed_on_disk' };
         return null;
     };
-
-    const pending = () => RESTART_ONLY.filter(k => k.value(running) !== k.value(saved)).map(k => k.key);
 
     return {
         /** The live file: what /hosted and /me read. */
@@ -382,8 +388,6 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
             return { ok: true, view: {
                 rev: String(revN),
                 settings: clone(saved),
-                restartOnly: RESTART_ONLY.map(k => k.key),
-                pendingRestart: pending(),
                 changedOnDisk: faults().changedOnDisk,
                 catalog: [...CATALOG],
             } };
@@ -417,12 +421,7 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
             }
             saved = n.value;
             revN += 1;
-            return { ok: true, restartRequired: pending(), rev: String(revN) };
-        },
-
-        /** A restart of the gateway: it runs on the saved file now, so nothing is pending. */
-        applyRestart(): void {
-            running = clone(saved);
+            return { ok: true, rev: String(revN) };
         },
 
         dump(): GatewaySettings {

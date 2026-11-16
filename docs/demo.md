@@ -185,12 +185,14 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
 - **Not simulated (request limits):**
   - the cross-site request check;
   - the request size limit;
-  - the sign-in limit for clients without a session (the per-account lockout after five wrong passwords is
-    simulated);
+  - the request budget for clients without a session, which every sign-in attempt also draws from (the lockouts
+    after wrong passwords, per account and per client, are simulated);
+  - the per-user connect window (`session.connectsPerMinute`) and the cap on open sockets (20 per user, 1000 in
+    all), though the **Demo controls** can make the dial answer `429`;
   - the limit on concurrent requests.
 - **The audit options are saved, no audit trail is written.** Gateway Settings shows the two Audit trail checkboxes (`audit.stdout`, `audit.access`, both off at first) and the `audit.onFailure` choice (`continue` at first) and saves them, but the demo keeps no audit log and has no Audit page, as the real gateway has none in the console.
 - **The Certificates page holds a demo certificate, not a parsed one.** The fake gateway cannot read X.509, so it accepts PEM that is well formed (the armour lines and base64 that decodes) and describes what it was given with fixed demo values: subject and issuer `CN=demo certificate`, no names, valid from the moment it was added to one year later, self-signed, never expired. The fingerprint is the real SHA-256 of the decoded bytes. A key is any single `PRIVATE KEY` block, and the pair is taken to match, so the page's "does not match" and "expired" refusals never appear. It starts with one certificate, both files writable and no trusted CA; an unnamed CA is saved as `demo-certificate.crt` (a second unnamed one is refused as already existing). A replace, add or delete changes what the page shows and nothing else: the demo makes no TLS connection.
-- **Restart gateway ends every session, then the page reloads onto the sign-in.** The fake drops every session, ticket and open socket at once, applies any setting waiting for a restart, and for about 1.5 seconds answers nothing, as a stopped gateway would; then the page returns to the sign-in. The users, connections, settings and the demo certificate stay, as they do over any sign-in reload.
+- **Restart gateway ends every session, then the page reloads onto the sign-in.** The fake drops every session, ticket and open socket at once, and for about 1.5 seconds answers nothing, as a stopped gateway would; then the page returns to the sign-in. The users, connections, settings and the demo certificate stay, as they do over any sign-in reload.
 - **The client access list** is saved and checked against the demo's own address, `192.0.2.10`, so a list that would
   lock you out is refused. A saved list is never enforced.
 

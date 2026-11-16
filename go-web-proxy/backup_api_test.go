@@ -597,8 +597,8 @@ func TestBackupAPI_ImportReplaceAll(t *testing.T) {
 	rec := e.importWith(t, file, "replace", "replace", "replace")
 	expect(t, rec, http.StatusOK, "")
 	got := decodeTo[importResultJSON](t, rec.Body.Bytes())
-	if !reflect.DeepEqual(got, importResultJSON{RestartRequired: []string{}, SignedOut: false}) {
-		t.Fatalf("result: %+v", got)
+	if got != (importResultJSON{SignedOut: false}) || strings.TrimSpace(rec.Body.String()) != `{"signedOut":false}` {
+		t.Fatalf("result: %+v, body %s", got, rec.Body.String())
 	}
 	if conns := e.api.store.listConnections(); len(conns) != 1 || conns[0].Broker != "b1" {
 		t.Fatalf("connections replaced: %+v", conns)
@@ -682,7 +682,7 @@ func TestBackupAPI_ImportMergeAndTheCallersOwnSession(t *testing.T) {
 	})
 	rec := e.importWith(t, file, "merge", "merge", "skip")
 	expect(t, rec, http.StatusOK, "")
-	if got := decodeTo[importResultJSON](t, rec.Body.Bytes()); !got.SignedOut || len(got.RestartRequired) != 0 {
+	if got := decodeTo[importResultJSON](t, rec.Body.Bytes()); !got.SignedOut || strings.TrimSpace(rec.Body.String()) != `{"signedOut":true}` {
 		t.Fatalf("result: %+v", got)
 	}
 	if got := userNames(e.api.store.listUsers()); !reflect.DeepEqual(got, []string{"admin", "viewer", "newbie"}) {

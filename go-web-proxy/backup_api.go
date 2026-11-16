@@ -181,7 +181,7 @@ func (h *managedHandler) saveBackupSchedule(w http.ResponseWriter, r *http.Reque
 		writeInvalid(w, "keep", "Keep 1 to "+strconv.Itoa(backupKeepMax)+" backups.")
 		return
 	}
-	if body.Passphrase != "" && checkPasswordPolicy(body.Passphrase) != nil {
+	if body.Passphrase != "" && checkPassphrase(body.Passphrase) != nil {
 		h.writeBackupProblem(w, r, "saveBackupSchedule", errPassRule)
 		return
 	}
@@ -375,8 +375,7 @@ type importJSON struct {
 }
 
 type importResultJSON struct {
-	RestartRequired []string `json:"restartRequired"`
-	SignedOut       bool     `json:"signedOut"` // the requester's session ended
+	SignedOut bool `json:"signedOut"` // the requester's session ended
 }
 
 // importBackup applies the chosen sections. The file is opened and decrypted
@@ -438,7 +437,6 @@ func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request, ca
 		conns = &sectionImport[connRec]{recs: doc.Connections, merge: body.Connections == importMerge}
 	}
 	var staged importStaged
-	var settings stagedSettings
 	err := h.store.wr.Do(r.Context(), func(tx *txn) error {
 		if err := h.settingsCaller(r); err != nil {
 			return err
@@ -469,8 +467,7 @@ func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request, ca
 			}
 		}
 		if body.Settings != importSkip {
-			var err error
-			if settings, err = h.stageSettings(tx, r, doc.Settings); err != nil {
+			if _, err := h.stageSettings(tx, r, doc.Settings); err != nil {
 				return err
 			}
 		}
@@ -493,16 +490,13 @@ func (h *managedHandler) importBackup(w http.ResponseWriter, r *http.Request, ca
 		h.backupFailed(w, r, "importBackup", err)
 		return
 	}
-	result := importResultJSON{RestartRequired: []string{}}
-	if settings.restart != nil {
-		result.RestartRequired = settings.restart
-	}
+	var result importResultJSON
 	for _, name := range staged.drop {
 		h.sessions.dropUser(name)
 		h.totp.forget(name) // an imported secret is not compared with the old one's steps
 	}
 	result.SignedOut = slices.Contains(staged.drop, sessionOf(r).user)
 	h.log(r).Info("configuration imported", "users", body.Users, "connections", body.Connections,
-		"settings", body.Settings, "from", doc.Created, "restart_required", result.RestartRequired)
+		"settings", body.Settings, "from", doc.Created)
 	writeJSON(w, http.StatusOK, result)
 }

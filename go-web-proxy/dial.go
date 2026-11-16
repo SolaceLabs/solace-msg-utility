@@ -15,8 +15,8 @@ import (
 // reconnect dials again. Stateless: no ticket, so the SDK's own reconnects
 // keep working. Read-only users dial too: SMF is how they browse.
 const (
-	connectsPerWindow = 20          // dials plus SMF upgrades per user
-	connectWindow     = time.Minute // ... in each window
+	defaultConnectsPerMinute = 20          // dials plus SMF upgrades per user, unless session.connectsPerMinute says otherwise
+	connectWindow            = time.Minute // ... in each window
 )
 
 type dialRequest struct {
@@ -93,13 +93,14 @@ func smfPathFor(broker, vpn string) string {
 	return smfPrefix + url.PathEscape(broker) + "/" + url.PathEscape(vpn)
 }
 
-// rateWindow allows max events per user in each fixed window. Dial and the
-// SMF upgrade share one, so a reconnect loop cannot open sockets faster than
-// it could fetch passwords. Keyed by signed-in usernames, so it stays as
-// small as the users file.
+// rateWindow allows limit() events per user in each fixed window. Dial and
+// the SMF upgrade share one, so a reconnect loop cannot open sockets faster
+// than it could fetch passwords. Keyed by signed-in usernames, so it stays as
+// small as the users file. The limit is read at each event, so a changed
+// session.connectsPerMinute applies at once.
 type rateWindow struct {
 	mu     sync.Mutex
-	max    int
+	limit  func() int
 	window time.Duration
 	now    func() time.Time
 	byUser map[string]windowCount
@@ -110,8 +111,8 @@ type windowCount struct {
 	n     int
 }
 
-func newRateWindow(max int, window time.Duration, now func() time.Time) *rateWindow {
-	return &rateWindow{max: max, window: window, now: now, byUser: map[string]windowCount{}}
+func newRateWindow(limit func() int, window time.Duration, now func() time.Time) *rateWindow {
+	return &rateWindow{limit: limit, window: window, now: now, byUser: map[string]windowCount{}}
 }
 
 // allow counts one event for user, or reports how long until the window
@@ -124,7 +125,7 @@ func (rw *rateWindow) allow(user string) (bool, time.Duration) {
 	if now.Sub(c.start) >= rw.window {
 		c = windowCount{start: now}
 	}
-	if c.n >= rw.max {
+	if c.n >= rw.limit() {
 		return false, c.start.Add(rw.window).Sub(now)
 	}
 	c.n++

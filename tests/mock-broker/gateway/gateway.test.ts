@@ -130,7 +130,7 @@ describe('mock-broker/gateway -- admin routes', () => {
 
 describe('mock-broker/gateway -- settings', () => {
     it('saves an allow list that admits the client, masked as the gateway prints it', async () => {
-        expect(await putSettings({ access: { allow: [' 192.0.2.77/24 '] } })).toEqual({ status: 200, json: { restartRequired: [], rev: '2' } });
+        expect(await putSettings({ access: { allow: [' 192.0.2.77/24 '] } })).toEqual({ status: 200, json: { rev: '2' } });
         expect(gw.settings.current().access.allow).toEqual(['192.0.2.0/24']);
     });
 
@@ -166,12 +166,73 @@ describe('mock-broker/gateway -- settings', () => {
         expect(gw.settings.current().access.allow).toEqual([]);
     });
 
-    it('carries the audit section: off by default, saved live, never pending a restart', async () => {
+    it('shows the sign-in limits, the password minimum and the connect limit, saved live', async () => {
+        const view = async () => ((await call('GET', '/managed/settings')).json as any).settings;
+        expect(await view()).toMatchObject({
+            session: { connectsPerMinute: 20 },
+            login: { maxFailures: 5, perClient: true, clientMaxFailures: 10, resetMinutes: 15, passwordMinLength: 12, twoFactorMinutes: 10 },
+        });
+        const patch = {
+            session: { connectsPerMinute: 50 },
+            login: { perClient: false, clientMaxFailures: 3, resetMinutes: 5, passwordMinLength: 16, twoFactorMinutes: 2 },
+        };
+        expect((await putSettings(patch)).json).toEqual({ rev: '2' });
+        expect(await view()).toMatchObject({ session: { idleMinutes: 10, absoluteMinutes: 30, ...patch.session }, login: { maxFailures: 5, ...patch.login } });
+    });
+
+    it.each([
+        [{ session: { connectsPerMinute: 0 } }, 'session.connectsPerMinute', 0, '1 to 1000'],
+        [{ session: { connectsPerMinute: 1001 } }, 'session.connectsPerMinute', 1001, '1 to 1000'],
+        [{ login: { clientMaxFailures: 0 } }, 'login.clientMaxFailures', 0, '1 to 1000'],
+        [{ login: { clientMaxFailures: 1001 } }, 'login.clientMaxFailures', 1001, '1 to 1000'],
+        [{ login: { resetMinutes: 0 } }, 'login.resetMinutes', 0, '1 to 1440'],
+        [{ login: { resetMinutes: 1441 } }, 'login.resetMinutes', 1441, '1 to 1440'],
+        [{ login: { passwordMinLength: 11 } }, 'login.passwordMinLength', 11, '12 to 128'],
+        [{ login: { passwordMinLength: 129 } }, 'login.passwordMinLength', 129, '12 to 128'],
+        [{ login: { twoFactorMinutes: 0 } }, 'login.twoFactorMinutes', 0, '1 to 60'],
+        [{ login: { twoFactorMinutes: 61 } }, 'login.twoFactorMinutes', 61, '1 to 60'],
+    ])('refuses %o with the key and its range, and saves nothing', async (patch, key, value, range) => {
+        expect(await putSettings(patch)).toEqual({
+            status: 422,
+            json: { error: 'invalid', field: 'settings', reason: `key "${key}" has invalid value "${value}": must be ${range}` },
+        });
+        expect(gw.settings.rev()).toBe('1');
+    });
+
+    it('refuses a perClient that is not a boolean and a limit that is not a whole number as a bad request', async () => {
+        expect((await putSettings({ login: { perClient: 'no' } })).status).toBe(400);
+        expect((await putSettings({ login: { resetMinutes: 1.5 } })).status).toBe(400);
+        expect((await putSettings({ session: { connectsPerMinute: '20' } })).status).toBe(400);
+        expect(gw.settings.rev()).toBe('1');
+    });
+
+    it('reads a seed or a snapshot without the newer login and session keys as their defaults', () => {
+        const strip = (s: ReturnType<typeof contractSeed>['settings']) => {
+            const login = s.login as Partial<typeof s.login>;
+            for (const k of ['perClient', 'clientMaxFailures', 'resetMinutes', 'passwordMinLength', 'twoFactorMinutes'] as const) delete login[k];
+            delete (s.session as Partial<typeof s.session>).connectsPerMinute;
+        };
+        const defaults = {
+            session: { idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 },
+            login: { maxFailures: 3, perClient: true, clientMaxFailures: 10, resetMinutes: 15, passwordMinLength: 12, twoFactorMinutes: 10 },
+        };
+        const seed = contractSeed();
+        seed.settings.login.maxFailures = 3;
+        strip(seed.settings);
+        expect(createGateway({ seed }).settings.current()).toMatchObject(defaults);
+
+        const snap = JSON.parse(JSON.stringify(createGateway({ seed: contractSeed() }).snapshot()));
+        snap.settings.login.maxFailures = 3;
+        strip(snap.settings);
+        const restored = createGateway({ seed: contractSeed() });
+        restored.restore(snap);
+        expect(restored.settings.current()).toMatchObject(defaults);
+    });
+
+    it('carries the audit section: off by default and saved live', async () => {
         expect(gw.settings.current().audit).toEqual({ stdout: false, access: false, onFailure: 'continue' });
-        expect((await putSettings({ audit: { access: true } })).json).toEqual({ restartRequired: [], rev: '2' });
+        expect((await putSettings({ audit: { access: true } })).json).toEqual({ rev: '2' });
         expect(gw.settings.current().audit).toEqual({ stdout: false, access: true, onFailure: 'continue' });
-        const view: any = (await call('GET', '/managed/settings')).json;
-        expect(view.restartOnly.filter((k: string) => k.startsWith('audit'))).toEqual([]);
         expect((await putSettings({ audit: { stdout: 'yes' } })).status).toBe(400);
         expect((await putSettings({ audit: { verbose: true } })).status).toBe(400);
     });
@@ -217,6 +278,25 @@ describe('mock-broker/gateway -- settings', () => {
             expect((res.json as any).error).toBe('config_unreadable');
             expect((res.json as any).reason).toMatch(/The cause is on the gateway host; once the gateway can read the file again, reload this page\.$/);
         }
+    });
+});
+
+describe('mock-broker/gateway -- the password minimum', () => {
+    const put = (name: string, password: string) => call('PUT', `/managed/users/${name}`, { rev: 0, password, admin: false, operate: [], readOnly: [] });
+
+    it('is login.passwordMinLength for a new user\'s password, read at the next save', async () => {
+        expect((await putSettings({ login: { passwordMinLength: 16 } })).status).toBe(200);
+        expect(await put('newbie', 'fifteen-chars-1')).toEqual({
+            status: 422, json: { error: 'invalid', field: 'password', reason: 'Password must be 16 to 128 characters.' },
+        });
+        expect((await put('newbie', 'sixteen-chars-16')).status).toBe(200);
+    });
+
+    it('applies to a password reset as to a new user, and lets an unchanged password stay empty', async () => {
+        await putSettings({ login: { passwordMinLength: 20 } });
+        const body = (password: string) => ({ rev: 1, password, admin: false, operate: [], readOnly: [], modules: null });
+        expect(((await call('PUT', '/managed/users/viewer', body('nineteen-chars-0019'))).json as any).reason).toBe('Password must be 20 to 128 characters.');
+        expect((await call('PUT', '/managed/users/viewer', body(''))).status).toBe(200);
     });
 });
 

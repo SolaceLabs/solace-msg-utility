@@ -1,6 +1,6 @@
 {
-  "_comment": "Sign-in throttle vectors both gateways run with one client (go-web-proxy/throttle_test.go TestThrottle_SharedVectors, tests/mock-broker/gateway/throttle.test.ts). Each step does one thing: fail (a failed sign-in for that user, times times, default 1), succeed (a sign-in for that user), advance (seconds on the clock) or wait (the seconds a sign-in for that user must wait, want).",
-  "limits": { "maxFailures": 5, "backoffSeconds": 30, "maxBackoffSeconds": 900 },
+  "_comment": "Sign-in throttle vectors both gateways run with one client (go-web-proxy/throttle_test.go TestThrottle_SharedVectors, tests/mock-broker/gateway/throttle.test.ts). Each step does one thing: fail (a failed sign-in for that user, times times, default 1), succeed (a sign-in for that user: it clears that account's count, never the client's), advance (seconds on the clock) or wait (the seconds a sign-in for that user must wait, want). maxFailures is the per-account limit, clientMaxFailures the per-client one, resetMinutes the quiet time after which a count is forgotten.",
+  "limits": { "maxFailures": 5, "clientMaxFailures": 10, "resetMinutes": 15, "backoffSeconds": 30, "maxBackoffSeconds": 900 },
   "cases": [
     {
       "name": "another user's failures survive a success",
@@ -13,14 +13,32 @@
       ]
     },
     {
-      "name": "the client blocks every name once it reaches the limit",
+      "name": "the client blocks every name once it reaches its limit",
       "steps": [
         { "fail": "a" },
         { "fail": "b" },
         { "fail": "c" },
         { "fail": "d" },
         { "fail": "e" },
+        { "fail": "f" },
+        { "fail": "g" },
+        { "fail": "h" },
+        { "fail": "i" },
+        { "wait": "someone-else", "want": 0 },
+        { "fail": "j" },
         { "wait": "someone-else", "want": 30 }
+      ]
+    },
+    {
+      "name": "a success clears the account's count, not the client's",
+      "steps": [
+        { "fail": "viewer", "times": 4 },
+        { "succeed": "viewer" },
+        { "wait": "viewer", "want": 0 },
+        { "fail": "a", "times": 4 },
+        { "fail": "b", "times": 2 },
+        { "wait": "someone-else", "want": 30 },
+        { "wait": "viewer", "want": 30 }
       ]
     },
     {
@@ -42,12 +60,21 @@
       ]
     },
     {
-      "name": "a count quiet for longer than the longest back-off starts again",
+      "name": "a count quiet for longer than the reset time starts again",
       "steps": [
         { "fail": "viewer", "times": 4 },
         { "advance": 901 },
         { "fail": "viewer" },
         { "wait": "viewer", "want": 0 }
+      ]
+    },
+    {
+      "name": "a count quiet for less than the reset time is kept",
+      "steps": [
+        { "fail": "viewer", "times": 4 },
+        { "advance": 899 },
+        { "fail": "viewer" },
+        { "wait": "viewer", "want": 30 }
       ]
     },
     {

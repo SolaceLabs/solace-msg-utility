@@ -15,8 +15,8 @@
  * the SDK emulator's sessions, admitted by `sockets.gate` (which the managed
  * demo's boot hands to `setSocketGate`) and closed on revocation.
  *
- * A restart (`POST /managed/restart`) ends every session, ticket and socket and
- * applies what waited for it at once; the gateway is then unreachable (`fetch`
+ * A restart (`POST /managed/restart`) ends every session, ticket and socket;
+ * the gateway is then unreachable (`fetch`
  * fails, as against a stopped process) for RESTART_PAUSE_MS, after which the
  * `onRestart` listeners run: the boot's land the page on the sign-in.
  *
@@ -35,7 +35,7 @@ import { createStore, type GatewayStore } from './store';
 import { createTls, type TlsFaults, type TlsState } from './tls';
 import { createTickets, type Ticket } from './tickets';
 import { createThrottle, throttledText, type ThrottleState } from './throttle';
-import { PASSWORD_MAX, PASSWORD_MIN, passwordOk } from './validate';
+import { PASSWORD_MAX, passwordOk } from './validate';
 import type { GatewayRequest, GatewayResponse, GatewaySeed, GatewaySettings, UserTotp } from './types';
 import type { Session } from './sessions';
 
@@ -141,7 +141,7 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
     const restartListeners: (() => void)[] = [];
     /** The last TOTP step accepted per user: a step at or below it is a replay. */
     const lastStep = new Map<string, number>();
-    const tickets = createTickets(() => now().getTime());
+    const tickets = createTickets(() => now().getTime(), () => settings.current().login.twoFactorMinutes * 60_000);
     // A user-wide drop (a password change, a delete, an import, a reset) ends that user's tickets too.
     sessions.onDropUser(user => tickets.dropUser(user));
     const sockets = createSockets(store, sessions, () => cookie);
@@ -149,8 +149,8 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
     const throttle = createThrottle(() => settings.current().login);
 
     /**
-     * The gateway restarts in place: every session, ticket and socket ends, what waited for a
-     * restart applies, and nothing answers until it is back, when the listeners run.
+     * The gateway restarts in place: every session, ticket and socket ends, and nothing
+     * answers until it is back, when the listeners run.
      */
     function restart(): void {
         sessions.dropAll();
@@ -158,7 +158,6 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
         sockets.closeAll();
         cookie = null;
         ticketCookie = null;
-        settings.applyRestart();
         down = true;
         setTimeout(() => {
             down = false;
@@ -172,13 +171,15 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
     };
 
     /**
-     * acceptCode: a code of exactly six digits is a TOTP code (a mock one here), checked against
-     * the user's secret and the replay rule; anything else is tried as a recovery code, which a
-     * match uses up. Nothing is recorded for a code that fails.
+     * acceptCode (spendCode in pages.go): a code of six digits, once spaces and hyphens are taken
+     * out ("123 456" as authenticator apps show it), is a TOTP code (a mock one here), checked
+     * against the user's secret and the replay rule; anything else is tried as a recovery code,
+     * which a match uses up. Nothing is recorded for a code that fails.
      */
     function acceptCode(user: string, totp: UserTotp, code: string): boolean {
-        if (!/^[0-9]{6}$/.test(code)) return store.useRecovery(user, hashRecovery(code)) !== null;
-        const step = acceptedStep(totp.secret, code, now().getTime(), lastStep.get(user));
+        const digits = code.replace(/[ -]/g, '');
+        if (!/^[0-9]{6}$/.test(digits)) return store.useRecovery(user, hashRecovery(code)) !== null;
+        const step = acceptedStep(totp.secret, digits, now().getTime(), lastStep.get(user));
         if (step === null) return false;
         lastStep.set(user, step);
         return true;
@@ -324,7 +325,8 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
             return { ok: false, error: 'The current password is not correct.' };
         }
         if (next !== confirm) return { ok: false, error: 'The new passwords do not match.' };
-        if (!passwordOk(next)) return { ok: false, error: `The new password must be ${PASSWORD_MIN} to ${PASSWORD_MAX} characters.` };
+        const least = settings.current().login.passwordMinLength;
+        if (!passwordOk(next, least)) return { ok: false, error: `The new password must be ${least} to ${PASSWORD_MAX} characters.` };
         if (next === current) return { ok: false, error: 'The new password must differ from the current one.' };
         store.setPassword(s.user, next);
         throttle.succeeded(s.user);

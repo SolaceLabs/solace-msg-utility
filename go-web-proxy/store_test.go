@@ -2614,3 +2614,40 @@ func err2s(err error) string {
 	}
 	return err.Error()
 }
+
+// A bootstrap password from the environment is held to login.passwordMinLength
+// as the gateway started with it: one that meets the built-in 12 but not the
+// raised minimum is set aside like any other outside the policy, with the
+// warning naming the minimum in force; one that meets it is used.
+func TestLoadStore_BootstrapPasswordIsCheckedAgainstTheConfiguredMinimum(t *testing.T) {
+	const twelve, sixteen = "twelve-chars", "sixteen-chars-pw"
+	for _, tc := range []struct {
+		name, value string
+		accepted    bool
+	}{
+		{"12 characters under a minimum of 16", twelve, false},
+		{"16 characters under a minimum of 16", sixteen, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := bootstrapFixture(t)
+			opts := f.opts(envOf(map[string]string{envAdminPassword: tc.value}))
+			opts.passwordMin = 16
+			var buf strings.Builder
+			s, err := loadStore(opts, newCapturingLogger(&buf))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, ok, _ := s.checkPassword(context.Background(), "admin", tc.value)
+			if ok != tc.accepted {
+				t.Errorf("sign-in with the supplied password: got %v, want %v", ok, tc.accepted)
+			}
+			out := buf.String()
+			if !tc.accepted && (!strings.Contains(out, "bootstrap password variable ignored") || !strings.Contains(out, "password must be 16 to 128 characters")) {
+				t.Errorf("the warning must name the minimum in force: %s", out)
+			}
+			if tc.accepted && strings.Contains(out, "ignored") {
+				t.Errorf("a password that meets the minimum is not set aside: %s", out)
+			}
+		})
+	}
+}

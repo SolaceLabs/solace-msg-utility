@@ -68,34 +68,9 @@ func (lv *live) loginLimits() loginLimits     { return lv.get().login }
 func (lv *live) twoFactor() string { return lv.get().twoFactor }
 
 // restartOnlyKeys are the config.yaml keys the gateway reads once at startup.
-// A saved change applies at the next restart; the settings page marks them.
-// tls.insecureSkipVerify is not among them: it is live through the trust
-// holder (trustHolder.setSkip, reached from apply). The TLS paths are not
-// config.yaml keys at all (tlsPaths).
-var restartOnlyKeys = []struct {
-	key   string
-	value func(fileConfig) any
-}{
-	{"hosted", func(f fileConfig) any { return f.Hosted }},
-}
-
-func restartOnlyKeyNames() []string {
-	out := make([]string, 0, len(restartOnlyKeys))
-	for _, k := range restartOnlyKeys {
-		out = append(out, k.key)
-	}
-	return out
-}
-
-// pendingRestart lists the restart-only keys on which file differs from the
-// running gateway.
-func pendingRestart(running config, file fileConfig) []string {
-	run := fileConfigFromConfig(running)
-	out := []string{}
-	for _, k := range restartOnlyKeys {
-		if k.value(run) != k.value(file) {
-			out = append(out, k.key)
-		}
-	}
-	return out
-}
+// hosted is the only one, and it cannot change while Provisioned mode runs:
+// the page has no field for it and validateConnModes refuses hosted false
+// beside Provisioned sign-in. tls.insecureSkipVerify is not among them: it is
+// live through the trust holder (trustHolder.setSkip, reached from apply).
+// The TLS paths are not config.yaml keys at all (tlsPaths).
+var restartOnlyKeys = []string{"hosted"}

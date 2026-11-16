@@ -29,23 +29,8 @@
     font-size: 0.9rem;
 }
 
-.gw-set-goto {
-    margin-left: 0.5rem;
-}
-
-/* The "restart" tag: in the intro, and after the label of every key the
- * gateway reads only at startup. */
-.gw-set-tag,
-.gw-set-restart > label::after {
-    border: 1px solid var(--status-warning);
-    border-radius: 4px;
-    padding: 0 0.4rem;
-    font-size: 0.75rem;
-}
-
-.gw-set-restart > label::after {
-    content: 'restart';
-    margin-left: 0.5rem;
+.gw-set-error {
+    font-size: 0.9rem;
 }
 
 /* Modules on offer: one toggle tile each; a pressed tile is on offer. */

@@ -601,11 +601,9 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
         }
         // The fake's settings save checks and commits in one step, so it goes
         // first: its refusals then leave everything as it was, as the gateway's do.
-        let restartRequired: string[] = [];
         if (choice.settings === 'replace') {
             const r = settings.save(doc.settings, now.settings);
             if (!r.ok) return { status: r.status, json: refusalBody(r) };
-            restartRequired = r.restartRequired;
         }
         let signedOut = false;
         if (users) {
@@ -615,7 +613,7 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
             signedOut = drop.includes(s.user);
         }
         if (conns) store.replaceConnections(conns);
-        return ok({ restartRequired, signedOut });
+        return ok({ signedOut });
     };
 
     const routes: Route[] = [

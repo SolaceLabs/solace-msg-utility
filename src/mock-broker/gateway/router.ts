@@ -25,8 +25,7 @@
  *
  * TLS and restart: `/managed/tls/*` (tls.ts) and `POST /managed/restart`, administrators
  * only like the rest. A restart answers `202 { restarting: true }` and then,
- * through `restart` (index.ts), ends every session and ticket and applies what
- * waited for it.
+ * through `restart` (index.ts), ends every session and ticket.
  *
  * Not simulated: the cross-site write check, the body cap and the
  * unauthenticated throttle, and the refusals of a store that cannot be
@@ -35,7 +34,7 @@
  * Mock-only.
  */
 import { BadRequest, boolean, list, nullableList, object, parseBody, string } from './strict';
-import { canonScheme, CATALOG, connectionProblem, moduleIdsProblem, passwordOk, PASSWORD_MAX, PASSWORD_MIN, USERNAME_RULE, validUsername } from './validate';
+import { canonScheme, CATALOG, connectionProblem, moduleIdsProblem, passwordOk, PASSWORD_MAX, USERNAME_RULE, validUsername } from './validate';
 import { relay, RELAY_PREFIX, type Upstream } from './relay';
 import type { GatewayStore } from './store';
 import type { GatewaySessions, Session } from './sessions';
@@ -61,7 +60,7 @@ export interface RouterDeps {
     backupRoutes: [string, string, Handler][];
     /** The TLS console's routes (tls.ts), admin only too. */
     tlsRoutes: [string, string, Handler][];
-    /** The gateway restarts: sessions and tickets end, what waited for a restart applies. */
+    /** The gateway restarts: sessions, tickets and sockets end. */
     restart: () => void;
     /** The browser's address as the gateway sees it (the seed's `client`). */
     client: string;
@@ -136,8 +135,9 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
         const modules = nullableList(b.modules, string);
         const rec = { username: name, admin: boolean(b.admin), operate: list(b.operate, glob), readOnly: list(b.readOnly, glob), modules };
         if (!validUsername(name)) return invalid('username', `Username ${USERNAME_RULE}.`);
-        if (password !== '' && !passwordOk(password)) {
-            return invalid('password', `Password must be ${PASSWORD_MIN} to ${PASSWORD_MAX} characters.`);
+        const least = settings.current().login.passwordMinLength;
+        if (password !== '' && !passwordOk(password, least)) {
+            return invalid('password', `Password must be ${least} to ${PASSWORD_MAX} characters.`);
         }
         const modulesProblem = modules && moduleIdsProblem('modules', modules);
         if (modulesProblem) return invalid('modules', modulesProblem);
@@ -225,7 +225,7 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
     const saveSettings: Handler = (req) => {
         const { patch, rev } = splitRev(parseBody(req.body));
         const r = settings.save(patch, rev);
-        return r.ok ? ok({ restartRequired: r.restartRequired, rev: r.rev }) : refusal(r);
+        return r.ok ? ok({ rev: r.rev }) : refusal(r);
     };
 
     /** clientSeen: the demo has one browser, seen directly. */

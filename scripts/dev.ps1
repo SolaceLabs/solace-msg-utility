@@ -94,14 +94,28 @@ function Invoke-Logged {
   param([string]$Task, [string]$Exe, [string[]]$CmdArgs)
   $writer = New-Object System.IO.StreamWriter((Get-Log $Task), $true, $Utf8NoBom)
   $writer.AutoFlush = $true
+  # PowerShell decodes a native tool's output with [Console]::OutputEncoding,
+  # the console's code page by default (437, 850, ...), which turns the UTF-8
+  # that node, go and npm write into mojibake (a check mark arrives as three
+  # characters). UTF-8 for the length of the command, then the caller's
+  # encoding again; a host with no console refuses the setter, so it is tried.
+  $prevEncoding = [Console]::OutputEncoding
+  try { [Console]::OutputEncoding = $Utf8NoBom } catch { }
   try {
     & $Exe @CmdArgs 2>&1 | ForEach-Object {
-      $line = ("$_") -replace "\x1b\[[0-9;?]*[a-zA-Z]", ""
+      # A stderr line arrives as an ErrorRecord, and "$_" of an empty one is
+      # its exception's type name ("System.Management.Automation.
+      # RemoteException"). The message is the line as the tool wrote it.
+      $text = if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { "$_" }
+      $line = $text -replace "\x1b\[[0-9;?]*[a-zA-Z]", ""
       $writer.WriteLine($line)
       Write-Host $line
     }
     $code = $LASTEXITCODE
-  } finally { $writer.Dispose() }
+  } finally {
+    $writer.Dispose()
+    try { [Console]::OutputEncoding = $prevEncoding } catch { }
+  }
   return $code
 }
 
@@ -439,7 +453,9 @@ foreach ($task in $queue) {
   Start-TaskLog $task
   $sw = [Diagnostics.Stopwatch]::StartNew()
   $code = 0
-  try { $code = & "Task-$task" } catch { $code = 1 }
+  # A task that throws (a tool missing from PATH, for one) says why on the
+  # console and in its log, as dev.sh's run() does, instead of a bare exit 1.
+  try { $code = & "Task-$task" } catch { Write-Note $task "error: $($_.Exception.Message)"; $code = 1 }
   if ($null -eq $code) { $code = 0 }
   $sw.Stop()
   $secs = [int]$sw.Elapsed.TotalSeconds

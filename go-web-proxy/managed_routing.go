@@ -76,7 +76,7 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	schedulePath := filepath.Join(filepath.Dir(cfg.usersFile), scheduleFileName)
 	st, err := loadStore(storeOptions{
 		usersPath: cfg.usersFile, connsPath: cfg.connectionsFile, keyPath: cfg.storeKeyFile,
-		schedulePath: schedulePath, hasher: h, getenv: getenv,
+		schedulePath: schedulePath, hasher: h, getenv: getenv, passwordMin: cfg.login.minPassword(),
 	}, logger.With("component", "store"))
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ func buildManagedRoutes(cfg config, lv *live, src configSource, h *hasher, geten
 	}, logger.With("component", "smf"))
 	ss.onDrop, ss.onDropUser = sockets.closeSession, sockets.closeUser
 	st.onChange = sockets.recheck
-	connects := newRateWindow(connectsPerWindow, connectWindow, now)
+	connects := newRateWindow(func() int { return lv.sessionLimits().connectsPerMinute() }, connectWindow, now)
 	pages, err := newAuthPages(st, ss, th, lv, logger.With("component", "signin"))
 	if err != nil {
 		return nil, fmt.Errorf("sign-in page template: %w", err)

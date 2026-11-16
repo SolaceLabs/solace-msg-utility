@@ -137,7 +137,7 @@ func (h *hasher) deriveKey(ctx context.Context, passphrase string, iter int, sal
 // newBackupKey derives a key from passphrase with a fresh salt, at the
 // hasher's cost.
 func newBackupKey(ctx context.Context, h *hasher, passphrase string) (backupKey, error) {
-	if checkPasswordPolicy(passphrase) != nil {
+	if checkPassphrase(passphrase) != nil {
 		return backupKey{}, errPassRule
 	}
 	salt := make([]byte, backupSaltBytes)
@@ -211,7 +211,7 @@ func openBackup(ctx context.Context, h *hasher, data []byte, passphrase string) 
 	if err != nil || !bytes.HasPrefix(blob, storeHeader(roleBackup)) {
 		return backupDoc{}, errDamaged
 	}
-	if checkPasswordPolicy(passphrase) != nil {
+	if checkPassphrase(passphrase) != nil {
 		return backupDoc{}, errPassRule
 	}
 	key, err := h.deriveKey(ctx, passphrase, env.KDF.Iter, salt)
@@ -226,16 +226,17 @@ func openBackup(ctx context.Context, h *hasher, data []byte, passphrase string) 
 	if err != nil {
 		return backupDoc{}, errWrongPass
 	}
-	var doc backupDoc
+	// The settings are decoded over the built-in defaults, so a key a backup
+	// does not hold (one added to the gateway after the backup was written)
+	// reads as its default: it previews as no change from a default and
+	// imports as the default.
+	doc := backupDoc{Settings: defaultFileConfig()}
 	yd := yaml.NewDecoder(bytes.NewReader(plain))
 	yd.KnownFields(true)
 	if err := yd.Decode(&doc); err != nil || doc.Version != backupVersion {
 		return backupDoc{}, errDamaged
 	}
-	// A backup written before audit.onFailure existed holds none. It reads as
-	// the default, so it previews as no change and imports as continue.
 	doc.Settings.Audit.OnFailure = onFailureOrDefault(doc.Settings.Audit.OnFailure)
-	// The same for login.twoFactor, which a backup of an older gateway lacks.
 	doc.Settings.Login.TwoFactor = twoFactorOrDefault(doc.Settings.Login.TwoFactor)
 	return doc, nil
 }

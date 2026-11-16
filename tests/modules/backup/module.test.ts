@@ -119,6 +119,19 @@ describe('backup -- helpers', () => {
     });
 });
 
+describe('backup -- layout', () => {
+    it('is two cards, Configuration (export, import) and Schedule (schedule, saved backups), with no page title repeated in the body', async () => {
+        const { c } = await setup();
+        const cards = [...c.querySelectorAll<HTMLElement>('#backup-view > .card')];
+        expect(cards.map(card => card.querySelector('.backup-title')?.textContent)).toEqual(['Configuration', 'Schedule']);
+        const inCard = (sel: string) => cards.findIndex(card => card.querySelector(sel));
+        expect(['#btn-backup-export', '#btn-backup-preview', '#backup-import-file'].map(inCard)).toEqual([0, 0, 0]);
+        expect(['#backup-kind', '#btn-backup-save-schedule', '#backup-rows', '#btn-backup-reload', '#backup-error'].map(inCard)).toEqual([1, 1, 1, 1, 1]);
+        expect(c.querySelector('#backup-view h2')).toBeNull();
+        expect(el(c, '#backup-view').textContent).not.toContain('Backup & Restore');
+    });
+});
+
 describe('backup -- gate and status', () => {
     it('fetches the status once at start with an admin restored, and ignores an rbac:changed that leaves the session as it is', async () => {
         const { c, ctx } = await setup();
@@ -365,28 +378,20 @@ describe('backup -- import', () => {
         expect(text(c, '#backup-import-error')).toBe('Choose at least one section to import.');
     });
 
-    it('imports the chosen sections, reports what waits for a restart, and resets the form', async () => {
+    it('imports the chosen sections and resets the form', async () => {
         const { c } = await previewed();
         choose(c, '#backup-choice-connections', 'replace');
         choose(c, '#backup-choice-settings', 'replace');
-        svc.importFile.mockResolvedValue(ok({ restartRequired: ['tls.insecureSkipVerify'], signedOut: false }));
+        svc.importFile.mockResolvedValue(ok({ signedOut: false }));
         await click(c, '#btn-backup-import');
         await answer(true);
         expect(svc.importFile).toHaveBeenCalledWith({ file: '{"format":"smu-backup"}' }, 'the passphrase!',
             { users: 'skip', connections: 'replace', settings: 'replace' }, PREVIEW.basis);
-        expect(toastMock.showToast).toHaveBeenCalledWith('Imported. Restart the gateway to apply: tls.insecureSkipVerify.', 'ok');
+        expect(toastMock.showToast).toHaveBeenCalledWith('Imported', 'ok');
         expect(hidden(c, '#backup-preview')).toBe(true);
         expect(el<HTMLInputElement>(c, '#backup-import-pass').value).toBe('');
         expect(hidden(c, '#backup-import-source')).toBe(true);
         expect(svc.status).toHaveBeenCalledTimes(2);
-        svc.importFile.mockResolvedValue(ok({ restartRequired: [], signedOut: false }));
-        await pick(c, new File(['{}'], 'again.json'));
-        svc.preview.mockResolvedValue(ok(PREVIEW));
-        await click(c, '#btn-backup-preview');
-        choose(c, '#backup-choice-settings', 'replace');
-        await click(c, '#btn-backup-import');
-        await answer(true);
-        expect(toastMock.showToast).toHaveBeenLastCalledWith('Imported', 'ok');
     });
 
     it('signs out when the import ended this administrator\'s own session', async () => {
@@ -394,7 +399,7 @@ describe('backup -- import', () => {
         const signOut = vi.fn();
         ctx.eventBus.on('rbac:sign-out-requested', signOut);
         choose(c, '#backup-choice-users', 'replace');
-        svc.importFile.mockResolvedValue(ok({ restartRequired: [], signedOut: true }));
+        svc.importFile.mockResolvedValue(ok({ signedOut: true }));
         await click(c, '#btn-backup-import');
         await answer(true);
         expect(signOut).toHaveBeenCalled();
@@ -604,7 +609,7 @@ describe('backup -- versions', () => {
         it('sends the preview basis back untouched with the import', async () => {
             const { c } = await previewed();
             choose(c, '#backup-choice-users', 'merge');
-            svc.importFile.mockResolvedValue(ok({ restartRequired: [], signedOut: false }));
+            svc.importFile.mockResolvedValue(ok({ signedOut: false }));
             await click(c, '#btn-backup-import');
             await answer(true);
             expect(svc.importFile.mock.calls[0][3]).toBe(PREVIEW.basis);
@@ -626,7 +631,7 @@ describe('backup -- versions', () => {
             svc.preview.mockResolvedValue(ok(fresh));
             await click(c, '#btn-backup-preview');
             choose(c, '#backup-choice-users', 'replace');
-            svc.importFile.mockResolvedValue(ok({ restartRequired: [], signedOut: false }));
+            svc.importFile.mockResolvedValue(ok({ signedOut: false }));
             await click(c, '#btn-backup-import');
             await answer(true);
             expect(svc.importFile.mock.calls[1][3]).toBe(fresh.basis);

@@ -67,17 +67,19 @@ func (e *managedEnv) saveSettings(t *testing.T, body string) *httptest.ResponseR
 	return e.saveSettingsRev(t, e.settings(t).Rev, body)
 }
 
-// saveAnswer is the 200 body of a settings save.
+// saveAnswer is the 200 body of a settings save: the new rev and nothing else
+// (decodeSave refuses any other key).
 type saveAnswer struct {
-	RestartRequired []string `json:"restartRequired"`
-	Rev             string   `json:"rev"`
+	Rev string `json:"rev"`
 }
 
 func decodeSave(t *testing.T, rec *httptest.ResponseRecorder) saveAnswer {
 	t.Helper()
 	var a saveAnswer
-	if err := json.Unmarshal(rec.Body.Bytes(), &a); err != nil {
-		t.Fatalf("want a save answer, got %q", rec.Body.String())
+	dec := json.NewDecoder(bytes.NewReader(rec.Body.Bytes()))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&a); err != nil {
+		t.Fatalf("want a save answer holding the rev only, got %q (%v)", rec.Body.String(), err)
 	}
 	return a
 }
@@ -105,13 +107,16 @@ func TestSettings_GetReportsTheFile(t *testing.T) {
 	if body := rec.Body.String(); strings.Contains(body, "certFile") || strings.Contains(body, "keyFile") || strings.Contains(body, "trustDir") || strings.Contains(body, "hostOnly") {
 		t.Errorf("the TLS paths are environment only and no key is host-only: %s", body)
 	}
+	if body := rec.Body.String(); strings.Contains(body, "restartOnly") || strings.Contains(body, "pendingRestart") || strings.Contains(body, "restartRequired") {
+		t.Errorf("no setting waits for a restart, so the page is told of none: %s", body)
+	}
 	s := e.settings(t)
 	want := fileConfigFromConfig(e.cfg)
 	want.Version = 0 // never sent
 	if !reflect.DeepEqual(s.Settings, want) {
 		t.Errorf("settings:\n%+v\nwant:\n%+v", s.Settings, want)
 	}
-	if !reflect.DeepEqual(s.RestartOnly, restartOnlyKeyNames()) || len(s.PendingRestart) != 0 || s.ChangedOnDisk {
+	if s.ChangedOnDisk {
 		t.Errorf("flags: %+v", s)
 	}
 	data, err := os.ReadFile(e.cfgPath)
@@ -138,8 +143,8 @@ func TestSettings_SaveAppliesLiveKeysAtOnce(t *testing.T) {
 	}
 	rec := e.saveSettings(t, `{"connModes":"provisioned","logLevel":"debug","session":{"idleMinutes":1,"absoluteMinutes":30},"modules":{"offered":["queue-copy"],"userDefault":"none"}}`)
 	expect(t, rec, http.StatusOK, "")
-	if got := decodeSave(t, rec); len(got.RestartRequired) != 0 || got.Rev == "" || got.Rev != e.settings(t).Rev {
-		t.Errorf("live keys need no restart, and the answer carries the new rev: %s", rec.Body.String())
+	if got := decodeSave(t, rec); got.Rev == "" || got.Rev != e.settings(t).Rev {
+		t.Errorf("the answer carries the new rev: %s", rec.Body.String())
 	}
 	cur := e.live.get()
 	if cur.connModes != connProvisioned || cur.session.idle != time.Minute || e.live.level.Level() != slog.LevelDebug {
@@ -175,9 +180,7 @@ func TestSettings_AuditKeysApplyLive(t *testing.T) {
 	}
 	rec := e.saveSettings(t, `{"audit":{"stdout":true,"access":true}}`)
 	expect(t, rec, http.StatusOK, "")
-	if got := decodeSave(t, rec); len(got.RestartRequired) != 0 {
-		t.Errorf("audit keys need no restart: %s", rec.Body.String())
-	}
+	decodeSave(t, rec)
 	if cur := e.live.get().audit; cur != (auditSettings{stdout: true, access: true, onFailure: auditOnFailureContinue}) {
 		t.Errorf("not applied: %+v", cur)
 	}
@@ -206,12 +209,7 @@ func TestSettings_SkipVerifyAppliesAtOnce(t *testing.T) {
 
 	rec := e.saveSettings(t, `{"tls":{"insecureSkipVerify":true}}`)
 	expect(t, rec, http.StatusOK, "")
-	if got := decodeSave(t, rec); len(got.RestartRequired) != 0 {
-		t.Errorf("restartRequired: %s", rec.Body.String())
-	}
-	if got := e.settings(t).PendingRestart; len(got) != 0 {
-		t.Errorf("pendingRestart: %v", got)
-	}
+	decodeSave(t, rec)
 	if !e.fileOnDisk(t).TLS.InsecureSkipVerify || !holder.get().skip {
 		t.Errorf("the key is saved and live: disk %v, holder %v", e.fileOnDisk(t).TLS.InsecureSkipVerify, holder.get().skip)
 	}
@@ -576,8 +574,7 @@ func TestSettings_TheCallerIsCheckedAgainWhenTheLockIsHeld(t *testing.T) {
 // ----- stageSettings (the import's way in) ----------------------------------------------
 
 // Staging validates and stages inside somebody else's transaction: nothing is
-// on disk or live until it commits, the restart keys and the changed keys come
-// back, and the settings rev after the commit is the new checksum.
+// on disk or live until it commits, the changed keys come back, and the settings rev after the commit is the new checksum.
 func TestStageSettings_AppliesOnlyWhenTheTransactionCommits(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	sf := e.api.settings
@@ -606,7 +603,7 @@ func TestStageSettings_AppliesOnlyWhenTheTransactionCommits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(staged.restart) != 0 || !reflect.DeepEqual(staged.changed, []string{"audit.onFailure", "logLevel", "tls.insecureSkipVerify"}) {
+	if !reflect.DeepEqual(staged.changed, []string{"audit.onFailure", "logLevel", "tls.insecureSkipVerify"}) {
 		t.Errorf("staged: %+v", staged)
 	}
 	disk := e.fileOnDisk(t)
@@ -715,9 +712,7 @@ func TestSettings_AuditOnFailureIsALiveKey(t *testing.T) {
 	expect(t, e.saveSettings(t, `{"audit":{"stdout":true}}`), http.StatusOK, "")
 	rec := e.saveSettings(t, `{"audit":{"onFailure":"refuse"}}`)
 	expect(t, rec, http.StatusOK, "")
-	if got := decodeSave(t, rec); len(got.RestartRequired) != 0 {
-		t.Errorf("a live key needs no restart: %s", rec.Body.String())
-	}
+	decodeSave(t, rec)
 	if cur := e.live.get().audit; cur != (auditSettings{stdout: true, onFailure: auditOnFailureRefuse}) {
 		t.Errorf("not applied: %+v", cur)
 	}
@@ -749,9 +744,7 @@ func TestSettings_TwoFactorIsALiveKey(t *testing.T) {
 	for _, mode := range []string{twoFactorOptional, twoFactorAdmins, twoFactorMandatory} {
 		rec := e.saveSettings(t, `{"login":{"twoFactor":"`+mode+`"}}`)
 		expect(t, rec, http.StatusOK, "")
-		if got := decodeSave(t, rec); len(got.RestartRequired) != 0 {
-			t.Errorf("%s: a live key needs no restart: %s", mode, rec.Body.String())
-		}
+		decodeSave(t, rec)
 		if e.live.twoFactor() != mode || e.settings(t).Settings.Login.TwoFactor != mode || e.fileOnDisk(t).Login.TwoFactor != mode {
 			t.Errorf("%s: not applied, shown and written", mode)
 		}

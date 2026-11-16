@@ -70,6 +70,20 @@ func writeTLSFailure(w http.ResponseWriter, err error) {
 	}
 }
 
+// tlsChangeAllowed is audit.onFailure refuse for the TLS files: a certificate
+// or trusted-CA change is refused (503 audit_unavailable) while the audit log
+// cannot be written, as every store change is by the writer's gate. The TLS
+// files have their own journal and never pass the writer, so the routes ask
+// the gate themselves. Restart is not asked: it changes no stored file, and
+// restarting may be what makes the audit log writable again.
+func (h *managedHandler) tlsChangeAllowed(w http.ResponseWriter) bool {
+	if err := h.audit.gate(); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "audit_unavailable")
+		return false
+	}
+	return true
+}
+
 // clip cuts s to at most n bytes.
 func clip(s string, n int) string {
 	if len(s) > n {
@@ -99,7 +113,7 @@ func (h *managedHandler) checkTLSCertificate(w http.ResponseWriter, r *http.Requ
 // and the listener serves it, before the answer.
 func (h *managedHandler) replaceTLSCertificate(w http.ResponseWriter, r *http.Request, call *auditCall) {
 	var in tlsPairJSON
-	if !decodeJSON(w, r, &in) {
+	if !decodeJSON(w, r, &in) || !h.tlsChangeAllowed(w) {
 		return
 	}
 	cert, err := h.tls.replaceCertificate(in.Certificate, in.Key)
@@ -120,6 +134,9 @@ func (h *managedHandler) addTLSTrust(w http.ResponseWriter, r *http.Request, cal
 		return
 	}
 	call.target = in.Name
+	if !h.tlsChangeAllowed(w) {
+		return
+	}
 	name, err := h.tls.addTrust(in.Name, in.Certificate)
 	if err != nil {
 		writeTLSFailure(w, err)
@@ -131,6 +148,9 @@ func (h *managedHandler) addTLSTrust(w http.ResponseWriter, r *http.Request, cal
 }
 
 func (h *managedHandler) removeTLSTrust(w http.ResponseWriter, r *http.Request, call *auditCall) {
+	if !h.tlsChangeAllowed(w) {
+		return
+	}
 	if err := h.tls.removeTrust(r.PathValue("name")); err != nil {
 		writeTLSFailure(w, err)
 		return

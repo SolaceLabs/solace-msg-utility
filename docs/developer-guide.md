@@ -598,7 +598,7 @@ Recipes for extending the Go gateway and the admin pages. Each links the design 
 
 ### Adding a gateway config.yaml setting
 
-Classify the new key as live (a field of `liveSettings`, applied by `apply`) or restart-only (`restartOnlyKeys`; the only one is `hosted`). `TestFileConfig_EveryKeyIsClassifiedOnce` in `go-web-proxy/live_test.go` fails until it is exactly one. Add the key to the table in [Writing a config.yaml by hand](#writing-a-configyaml-by-hand-development-only) too.
+Classify the new key as live (a field of `liveSettings`, applied by `apply`) or restart-only (`restartOnlyKeys`, a `[]string` that only the classification test reads; the only one is `hosted`). The settings API reports no restart state, so a new restart-only key needs its own documentation wherever it applies. `TestFileConfig_EveryKeyIsClassifiedOnce` in `go-web-proxy/live_test.go` fails until it is exactly one. Add the key to the table in [Writing a config.yaml by hand](#writing-a-configyaml-by-hand-development-only) too.
 
 A location the console must never be able to change (a file path to a secret or a certificate) is not a setting at all: read it from an `SMU_` variable at every start, as `tlsPathsFromEnv` does for the three TLS paths, and keep it out of `fileConfig`, the settings API, the page and the fake.
 
@@ -622,7 +622,13 @@ The file is plain YAML, parsed strictly (`decodeConfigFile` in [configfile.go](.
 | `logLevel` | `warn` | `LOG_LEVEL` | At once |
 | `access.allow`, `access.trustedProxies` | `[]` | none | At once, in every mode |
 | `session.idleMinutes`, `session.absoluteMinutes` | `10`, `30` | none | At once. Provisioned mode only |
-| `login.maxFailures`, `login.backoffSeconds`, `login.maxBackoffSeconds`, `login.unauthenticatedPerMinute` | `5`, `30`, `900`, `60` | none | At once. Provisioned mode only |
+| `session.connectsPerMinute` | `20` (`1` to `1000`) | none | At once. Provisioned mode only |
+| `login.maxFailures`, `login.backoffSeconds`, `login.maxBackoffSeconds`, `login.unauthenticatedPerMinute` | `5`, `30`, `900`, `60` | none | At once. Provisioned mode only. `maxFailures` is the per-account limit |
+| `login.perClient` | `true` | none | At once. Provisioned mode only. `false` counts failures per account only |
+| `login.clientMaxFailures` | `10` (`1` to `1000`) | none | At once. Provisioned mode only. The per-client limit |
+| `login.resetMinutes` | `15` (`1` to `1440`) | none | At once. Provisioned mode only. A count is forgotten after this long without a failure |
+| `login.passwordMinLength` | `12` (`12` to `128`) | none | At once, for the next password set. Provisioned mode only |
+| `login.twoFactorMinutes` | `10` (`1` to `60`) | none | At once: a shorter value also ends sign-in tickets already issued. Provisioned mode only |
 | `login.twoFactor` | `optional` | none | At the next sign-in. Provisioned mode only |
 | `modules.offered`, `modules.userDefault` | every catalog module, `all` | none | At once. Provisioned mode only |
 | `audit.stdout` | `false` | `SMU_SHOW_AUDIT` | At the next audited event. Provisioned mode only |

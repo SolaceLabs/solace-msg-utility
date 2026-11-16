@@ -933,12 +933,16 @@ async function runChecks(admin) {
 
         await check(12, 'settings apply to the next request: userDefault none empties the modules, connModes direct is refused, and both opens the Direct relay and the app', async () => {
             const put = (json) => saveSettings(admin, json);
-            const fresh = (r) => r.status === 200 && JSON.parse(r.body).restartRequired?.length === 0;
+            const fresh = (r) => {
+                if (r.status !== 200) return false;
+                const body = JSON.parse(r.body);
+                return typeof body.rev === 'string' && body.rev !== '' && Object.keys(body).length === 1;
+            };
             const modules = async () => JSON.parse((await request('GET', '/managed/me', { jar: user })).body).modules;
             let restored = null;
             try {
                 const none = await put({ modules: { userDefault: 'none' } });
-                expect(fresh(none), `PUT modules.userDefault none: want 200 {"restartRequired":[]}, got ${none.status} ${none.body}`);
+                expect(fresh(none), `PUT modules.userDefault none: want 200 {"rev":"..."}, got ${none.status} ${none.body}`);
                 const emptied = await modules();
                 expect(Array.isArray(emptied) && emptied.length === 0, `/managed/me modules: ${JSON.stringify(emptied)}`);
                 const direct = await put({ connModes: 'direct' });
@@ -948,7 +952,7 @@ async function runChecks(admin) {
                 const saved = JSON.parse((await request('GET', '/managed/settings', { jar: admin })).body).settings?.connModes;
                 expect(saved === 'provisioned', `connModes after the refusal: ${saved}`);
                 const both = await put({ connModes: 'both' });
-                expect(fresh(both), `PUT connModes both: want 200 {"restartRequired":[]}, got ${both.status} ${both.body}`);
+                expect(fresh(both), `PUT connModes both: want 200 {"rev":"..."}, got ${both.status} ${both.body}`);
                 const hosted = JSON.parse((await request('GET', '/hosted')).body);
                 expect(hosted.connModes === 'both', `/hosted under both: ${JSON.stringify(hosted)}`);
                 const relayed = await request('GET', directSempPath(), { headers: sempAuth() });

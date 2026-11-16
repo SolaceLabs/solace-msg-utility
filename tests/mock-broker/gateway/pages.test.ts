@@ -162,6 +162,20 @@ describe('mock-broker/gateway/pages -- password', () => {
         expect(gw.signIn('newadmin', 'a-new-password-1').ok).toBe(true);
     });
 
+    it('follows login.passwordMinLength: the note, the fields\' minlength and the rule', () => {
+        expect(gw.settings.save({ login: { passwordMinLength: 16 } }, gw.settings.rev()).ok).toBe(true);
+        gw.signIn('admin', 'demo-admin-0001');
+        pages.open('/login/password');
+        expect(layer()!.querySelector('.mgw-note')!.textContent).toBe('16 to 128 characters.');
+        expect([input('new').minLength, input('confirm').minLength, input('new').maxLength]).toEqual([16, 16, 128]);
+
+        submit({ current: 'demo-admin-0001', new: 'a-new-password1', confirm: 'a-new-password1' });
+        expect(error()).toBe('The new password must be 16 to 128 characters.');
+        expect(landed).toEqual([]);
+        submit({ current: 'demo-admin-0001', new: 'a-new-password-1', confirm: 'a-new-password-1' });
+        expect(landed).toEqual(['app']);
+    });
+
     it('offers Cancel back to the app when the change is not forced', () => {
         gw.signIn('admin', 'demo-admin-0001');
         pages.open('/login/password');

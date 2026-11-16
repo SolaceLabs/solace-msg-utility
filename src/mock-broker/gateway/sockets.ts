@@ -12,7 +12,9 @@
  * expired session leaves its
  * socket open, as in the gateway.
  *
- * Not simulated: the `Origin` check and the per-user upgrade window.
+ * Not simulated: the `Origin` check, the per-user connect window
+ * (`session.connectsPerMinute`) and the cap on open sockets (20 per user, 1000
+ * in all).
  *
  * Mock-only.
  */

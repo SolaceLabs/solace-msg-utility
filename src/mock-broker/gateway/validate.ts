@@ -90,10 +90,10 @@ export function canonScheme(s: string, tls: string): string {
     return s === tls ? '' : s;
 }
 
-/** checkPasswordPolicy, counted in runes. */
-export function passwordOk(pw: string): boolean {
+/** checkPasswordPolicy, counted in runes: `least` is login.passwordMinLength; a backup passphrase keeps PASSWORD_MIN. */
+export function passwordOk(pw: string, least: number = PASSWORD_MIN): boolean {
     const n = [...pw].length;
-    return n >= PASSWORD_MIN && n <= PASSWORD_MAX;
+    return n >= least && n <= PASSWORD_MAX;
 }
 
 /** checkModuleIDs: ids from the catalog, none twice. */

@@ -336,13 +336,13 @@ describe('user-management — create / edit form', () => {
     it("shows the gateway's reason when the save is rejected", async () => {
         const { container } = await setup();
         svcMock.saveUser.mockResolvedValue({
-            ok: false, status: 422, code: 'invalid', field: 'password', reason: 'Password must be 12 to 128 characters.',
+            ok: false, status: 422, code: 'invalid', field: 'password', reason: 'Password must be 16 to 128 characters.',
         });
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
         el<HTMLInputElement>(container, '#user-mgmt-username').value = 'x';
         el<HTMLInputElement>(container, '#user-mgmt-password').value = 'pw';
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
-        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toBe('Password must be 12 to 128 characters.'));
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toBe('Password must be 16 to 128 characters.'));
         expect(el<HTMLButtonElement>(container, '#btn-user-mgmt-save').disabled).toBe(false);
     });
 

@@ -1321,3 +1321,67 @@ func slicesIndexUser(users []userRec, name string) int {
 	}
 	return -1
 }
+
+// A backup that holds none of the sign-in and session keys added to the
+// settings (login.perClient, clientMaxFailures, resetMinutes, passwordMinLength,
+// twoFactorMinutes and session.connectsPerMinute) opens with each at its
+// default, keeps the keys it does hold, and previews as no change from a
+// gateway on the defaults.
+func TestBackup_ABackupWithoutTheSignInKeysReadsThemAsTheDefaults(t *testing.T) {
+	h := testHasher(t)
+	doc := sampleBackup(t, h)
+	doc.Settings.Login.MaxFailures = 7
+	plain, err := yamlAsJSON(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tree map[string]any
+	if err := json.Unmarshal(plain, &tree); err != nil {
+		t.Fatal(err)
+	}
+	settings := tree["settings"].(map[string]any)
+	login, session := settings["login"].(map[string]any), settings["session"].(map[string]any)
+	for _, k := range []string{"perClient", "clientMaxFailures", "resetMinutes", "passwordMinLength", "twoFactorMinutes"} {
+		if _, there := login[k]; !there {
+			t.Fatalf("the sample backup must hold login.%s before it is taken out", k)
+		}
+		delete(login, k)
+	}
+	if _, there := session["connectsPerMinute"]; !there {
+		t.Fatal("the sample backup must hold session.connectsPerMinute before it is taken out")
+	}
+	delete(session, "connectsPerMinute")
+	plain, err = json.Marshal(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := newBackupKey(context.Background(), h, testPassphrase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sl, _ := newSealer(k.key)
+	data := reseal(t, backupEnvelope{Format: backupFormat, Version: backupVersion,
+		KDF:  backupKDF{Name: backupKDFName, Iter: k.iter, Salt: base64.StdEncoding.EncodeToString(k.salt)},
+		Data: base64.StdEncoding.EncodeToString(sl.seal(roleBackup, plain))})
+
+	opened, err := openBackup(context.Background(), h, data, testPassphrase)
+	if err != nil {
+		t.Fatalf("a backup without the newer keys must open: %v", err)
+	}
+	want := defaultFileConfig().Login
+	want.MaxFailures = 7
+	if opened.Settings.Login != want || opened.Settings.Session.ConnectsPerMinute != 20 {
+		t.Errorf("login %+v, connectsPerMinute %d; want %+v and 20", opened.Settings.Login, opened.Settings.Session.ConnectsPerMinute, want)
+	}
+	if !opened.Settings.Login.PerClient {
+		t.Error("login.perClient reads as on, not as the zero value false")
+	}
+	current := defaultFileConfig()
+	current.Login.MaxFailures = 7
+	if got := settingsChanges(current, opened.Settings); len(got) != 0 {
+		t.Errorf("previews as no change from a gateway on the defaults: %v", got)
+	}
+	if _, err := opened.Settings.toConfig(secretPaths{}); err != nil {
+		t.Errorf("the defaults it reads must pass startup validation: %v", err)
+	}
+}

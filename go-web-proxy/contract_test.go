@@ -505,7 +505,7 @@ func TestContract_Validation(t *testing.T) {
 		{"broker", v.Broker, func(s string) bool { return validName(brokerPattern, s) }},
 		{"host", v.Host, validHost},
 		{"port", v.Port, func(s string) bool { return validatePort(s) == nil }},
-		{"password", v.Password, func(s string) bool { return checkPasswordPolicy(s) == nil }},
+		{"password", v.Password, func(s string) bool { return checkPasswordPolicy(s, passwordMinLen) == nil }},
 		{"scheme.semp", v.Scheme.Semp, func(s string) bool { return schemeOK(s, sempTLS, sempPlain) }},
 		{"scheme.client", v.Scheme.Client, func(s string) bool { return schemeOK(s, clientTLS, clientPlain) }},
 	}

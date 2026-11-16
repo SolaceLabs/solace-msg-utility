@@ -1,28 +1,21 @@
 <!-- The admin gate is created at install by createGate() (see module.ts). -->
 
 <!-- Every section is its own card, stacked full width. Each .form-group's
-     data-key is its config.yaml key; the module tags the restart-only ones
-     (gw-set-restart) from the gateway's own list. Short fields share a row
-     (.form-cols); long ones keep the full width. -->
+     data-key is its settings key. Short fields share a row (.form-cols); long
+     ones keep the full width. The page's title is the module's name in the
+     sidebar; the first card holds only what the page is for and Reload. -->
 <div id="gw-set-view" class="hidden">
     <div class="card gw-set-card">
-        <div class="flex-row justify-between items-center mb-4">
-            <h2 class="m-0">Gateway Settings</h2>
+        <div class="flex-row justify-between items-center gap-4">
+            <p class="text-secondary gw-set-intro m-0">
+                The gateway's settings. A saved setting applies at once. The gateway's certificate and the
+                trusted broker CAs are managed under Certificates.
+            </p>
             <button id="btn-gw-set-reload" class="btn btn-secondary" title="Reload the settings from the gateway">Reload</button>
         </div>
-        <p class="text-secondary gw-set-intro">
-            The gateway's config.yaml. Settings apply on the next request; one tagged
-            <span class="gw-set-tag">restart</span> is saved at once and applies when the gateway restarts
-            (Restart gateway, at the foot of this page). The gateway's certificate and the trusted broker CAs
-            are managed under Certificates.
-        </p>
         <div id="gw-set-disk" class="gw-set-banner hidden">
             config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load
             that edit; saving here is blocked until then.
-        </div>
-        <div id="gw-set-pending" class="gw-set-banner hidden">
-            <span id="gw-set-pending-text"></span>
-            <button id="btn-gw-set-goto-restart" type="button" class="btn btn-secondary btn-sm gw-set-goto">Go to Restart gateway</button>
         </div>
     </div>
 
@@ -73,15 +66,30 @@
                 <label for="gw-set-session-absoluteMinutes">Absolute limit (minutes)</label>
                 <input type="number" id="gw-set-session-absoluteMinutes" class="form-control" min="1" step="1">
             </div>
+            <div class="form-group" data-key="session.connectsPerMinute">
+                <label for="gw-set-session-connectsPerMinute">Broker connects per user per minute</label>
+                <input type="number" id="gw-set-session-connectsPerMinute" class="form-control" min="1" max="1000" step="1">
+            </div>
         </div>
     </div>
 
     <div class="card gw-set-card">
         <h3 class="gw-set-section">Sign-in throttle</h3>
+        <div class="form-group" data-key="login.perClient">
+            <label class="flex-row items-center gap-2 m-0"><input type="checkbox" id="gw-set-login-perClient"> Count failures per client address</label>
+        </div>
         <div class="form-cols">
             <div class="form-group" data-key="login.maxFailures">
-                <label for="gw-set-login-maxFailures">Failed sign-ins before a back-off</label>
+                <label for="gw-set-login-maxFailures">Failed sign-ins per account before a back-off</label>
                 <input type="number" id="gw-set-login-maxFailures" class="form-control" min="1" step="1">
+            </div>
+            <div class="form-group" data-key="login.clientMaxFailures">
+                <label for="gw-set-login-clientMaxFailures">Failed sign-ins per client before a back-off</label>
+                <input type="number" id="gw-set-login-clientMaxFailures" class="form-control" min="1" max="1000" step="1">
+            </div>
+            <div class="form-group" data-key="login.resetMinutes">
+                <label for="gw-set-login-resetMinutes">Forget failures after (minutes)</label>
+                <input type="number" id="gw-set-login-resetMinutes" class="form-control" min="1" max="1440" step="1">
             </div>
             <div class="form-group" data-key="login.backoffSeconds">
                 <label for="gw-set-login-backoffSeconds">First back-off (seconds)</label>
@@ -92,15 +100,22 @@
                 <input type="number" id="gw-set-login-maxBackoffSeconds" class="form-control" min="1" step="1">
             </div>
             <div class="form-group" data-key="login.unauthenticatedPerMinute">
-                <label for="gw-set-login-unauthenticatedPerMinute">Requests per minute per client without a session</label>
+                <label for="gw-set-login-unauthenticatedPerMinute">Requests and sign-in attempts per minute per client</label>
                 <input type="number" id="gw-set-login-unauthenticatedPerMinute" class="form-control" min="1" step="1">
             </div>
         </div>
     </div>
 
     <div class="card gw-set-card">
-        <h3 class="gw-set-section">Two-factor sign-in</h3>
+        <h3 class="gw-set-section">Passwords and two-factor sign-in</h3>
+        <p class="text-secondary gw-set-client">
+            A raised minimum length applies at the next password change; passwords already set keep working.
+        </p>
         <div class="form-cols">
+            <div class="form-group" data-key="login.passwordMinLength">
+                <label for="gw-set-login-passwordMinLength">Minimum password length</label>
+                <input type="number" id="gw-set-login-passwordMinLength" class="form-control" min="12" max="128" step="1">
+            </div>
             <div class="form-group" data-key="login.twoFactor">
                 <label for="gw-set-login-twoFactor">Two-factor sign-in (code from an authenticator app)</label>
                 <select id="gw-set-login-twoFactor" class="form-control">
@@ -108,6 +123,10 @@
                     <option value="admins">Administrators must use it</option>
                     <option value="mandatory">Everyone must use it</option>
                 </select>
+            </div>
+            <div class="form-group" data-key="login.twoFactorMinutes">
+                <label for="gw-set-login-twoFactorMinutes">Time to finish two-factor after the password (minutes)</label>
+                <input type="number" id="gw-set-login-twoFactorMinutes" class="form-control" min="1" max="60" step="1">
             </div>
         </div>
     </div>
@@ -169,7 +188,7 @@
     <div class="card gw-set-card">
         <h3 class="gw-set-section">Broker trust</h3>
         <p class="text-secondary gw-set-client">
-            Applies on Save, with no restart. The trusted broker CAs are listed under Certificates.
+            Applies on Save. The trusted broker CAs are listed under Certificates.
         </p>
         <div class="form-group" data-key="tls.insecureSkipVerify">
             <label class="flex-row items-center gap-2 m-0"><input type="checkbox" id="gw-set-tls-insecureSkipVerify"> Skip broker certificate checks (insecure)</label>
@@ -180,19 +199,19 @@
         <div class="flex-row gap-4">
             <button id="btn-gw-set-save" class="btn btn-primary">Save</button>
         </div>
-        <div id="gw-set-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+        <div id="gw-set-error" class="text-error gw-set-error mt-2 hidden"></div>
     </div>
 
     <div id="gw-set-restart-card" class="card gw-set-card">
         <h3 class="gw-set-section">Gateway</h3>
         <p class="text-secondary gw-set-client">
             Restart starts the gateway's program again in place, with the same arguments and environment.
-            Everyone is signed out and open broker connections close; settings waiting for a restart take effect.
+            Everyone is signed out and open broker connections close.
         </p>
         <div class="flex-row gap-4">
             <button id="btn-gw-set-restart" type="button" class="btn btn-danger">Restart gateway</button>
         </div>
         <div id="gw-set-restarting" class="gw-set-banner mt-2 hidden" role="status"></div>
-        <div id="gw-set-restart-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+        <div id="gw-set-restart-error" class="text-error gw-set-error mt-2 hidden"></div>
     </div>
 </div>

@@ -217,6 +217,9 @@ type storeOptions struct {
 	schedulePath string
 	hasher       *hasher
 	getenv       func(string) string // os.Getenv; injected for tests
+	// passwordMin is login.passwordMinLength at start, the rule a bootstrap
+	// password from the environment must meet; 0 means passwordMinLen.
+	passwordMin int
 }
 
 func loadStore(opts storeOptions, logger *slog.Logger) (*store, error) {
@@ -1439,7 +1442,7 @@ func bootstrapUsers(opts storeOptions, sl *sealer, logger *slog.Logger) (usersDo
 		return usersDoc{}, err
 	}
 	if source != "" {
-		if err := checkPasswordPolicy(password); err != nil {
+		if err := checkPasswordPolicy(password, max(opts.passwordMin, passwordMinLen)); err != nil {
 			logger.Warn("bootstrap password variable ignored: it does not meet the password policy, so a generated password is used instead",
 				"env", source, "rule", err.Error())
 			password, source = "", ""

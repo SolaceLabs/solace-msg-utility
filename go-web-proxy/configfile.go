@@ -131,15 +131,21 @@ type fileAccess struct {
 }
 
 type fileSession struct {
-	IdleMinutes     int `yaml:"idleMinutes" json:"idleMinutes"`
-	AbsoluteMinutes int `yaml:"absoluteMinutes" json:"absoluteMinutes"`
+	IdleMinutes       int `yaml:"idleMinutes" json:"idleMinutes"`
+	AbsoluteMinutes   int `yaml:"absoluteMinutes" json:"absoluteMinutes"`
+	ConnectsPerMinute int `yaml:"connectsPerMinute" json:"connectsPerMinute"`
 }
 
 type fileLogin struct {
-	MaxFailures              int `yaml:"maxFailures" json:"maxFailures"`
-	BackoffSeconds           int `yaml:"backoffSeconds" json:"backoffSeconds"`
-	MaxBackoffSeconds        int `yaml:"maxBackoffSeconds" json:"maxBackoffSeconds"`
-	UnauthenticatedPerMinute int `yaml:"unauthenticatedPerMinute" json:"unauthenticatedPerMinute"`
+	MaxFailures              int  `yaml:"maxFailures" json:"maxFailures"` // per account
+	PerClient                bool `yaml:"perClient" json:"perClient"`
+	ClientMaxFailures        int  `yaml:"clientMaxFailures" json:"clientMaxFailures"`
+	ResetMinutes             int  `yaml:"resetMinutes" json:"resetMinutes"`
+	BackoffSeconds           int  `yaml:"backoffSeconds" json:"backoffSeconds"`
+	MaxBackoffSeconds        int  `yaml:"maxBackoffSeconds" json:"maxBackoffSeconds"`
+	UnauthenticatedPerMinute int  `yaml:"unauthenticatedPerMinute" json:"unauthenticatedPerMinute"`
+	PasswordMinLength        int  `yaml:"passwordMinLength" json:"passwordMinLength"`
+	TwoFactorMinutes         int  `yaml:"twoFactorMinutes" json:"twoFactorMinutes"`
 	// TwoFactor is optional (the default, also for a file or backup without
 	// the key), admins or mandatory (totp.go). Live.
 	TwoFactor string `yaml:"twoFactor" json:"twoFactor"`
@@ -170,16 +176,76 @@ func (fc fileConfig) clone() fileConfig {
 
 // sessionLimits bound a Provisioned sign-in session: idle is measured from the
 // last request, absolute from sign-in (session.go).
-type sessionLimits struct{ idle, absolute time.Duration }
+type sessionLimits struct {
+	idle, absolute time.Duration
+	// ticket is login.twoFactorMinutes: how long a sign-in that passed the
+	// password waits for its two-factor step; 0 means defaultTicketTTL.
+	ticket time.Duration
+	// connects is session.connectsPerMinute: credential requests plus SMF
+	// sockets opened per user per minute; 0 means defaultConnectsPerMinute.
+	connects int
+}
+
+// ticketTTL is how long a half-finished sign-in waits for its next step.
+func (l sessionLimits) ticketTTL() time.Duration {
+	if l.ticket > 0 {
+		return l.ticket
+	}
+	return defaultTicketTTL
+}
+
+// connectsPerMinute is how many credential requests and SMF sockets one user
+// may open in a minute.
+func (l sessionLimits) connectsPerMinute() int {
+	if l.connects > 0 {
+		return l.connects
+	}
+	return defaultConnectsPerMinute
+}
 
 // loginLimits drive the sign-in throttle (throttle.go): back-off after
 // maxFailures failed sign-ins, doubling from backoff up to maxBackoff, and a
 // per-client budget for requests that carry no session.
 type loginLimits struct {
-	maxFailures     int
+	maxFailures     int // per account
 	backoff         time.Duration
 	maxBackoff      time.Duration
 	unauthPerMinute int
+	// perClientOff is login.perClient turned off: failures are counted per
+	// account only, for a deployment where every user reaches the gateway
+	// from one address. Inverted so the zero value keeps per-client counting.
+	perClientOff bool
+	// clientMaxFailures is login.clientMaxFailures; 0 means maxFailures.
+	clientMaxFailures int
+	// reset is login.resetMinutes, how long a count is kept without a new
+	// failure; 0 means maxBackoff.
+	reset time.Duration
+	// passwordMinLength is login.passwordMinLength; 0 means passwordMinLen.
+	passwordMinLength int
+}
+
+// clientThreshold is the failures a client may make before its back-off.
+func (l loginLimits) clientThreshold() int {
+	if l.clientMaxFailures > 0 {
+		return l.clientMaxFailures
+	}
+	return l.maxFailures
+}
+
+// resetAfter is how long a failure count is kept without a new failure.
+func (l loginLimits) resetAfter() time.Duration {
+	if l.reset > 0 {
+		return l.reset
+	}
+	return l.maxBackoff
+}
+
+// minPassword is the shortest password a user may set.
+func (l loginLimits) minPassword() int {
+	if l.passwordMinLength > 0 {
+		return l.passwordMinLength
+	}
+	return passwordMinLen
 }
 
 // moduleCatalog is every app module an administrator can give a signed-in user.
@@ -347,14 +413,20 @@ func fileConfigFromConfig(c config) fileConfig {
 			TrustedProxies: prefixStrings(c.access.trustedProxies),
 		},
 		Session: fileSession{
-			IdleMinutes:     int(c.session.idle / time.Minute),
-			AbsoluteMinutes: int(c.session.absolute / time.Minute),
+			IdleMinutes:       int(c.session.idle / time.Minute),
+			AbsoluteMinutes:   int(c.session.absolute / time.Minute),
+			ConnectsPerMinute: c.session.connectsPerMinute(),
 		},
 		Login: fileLogin{
 			MaxFailures:              c.login.maxFailures,
+			PerClient:                !c.login.perClientOff,
+			ClientMaxFailures:        c.login.clientThreshold(),
+			ResetMinutes:             int(c.login.resetAfter() / time.Minute),
 			BackoffSeconds:           int(c.login.backoff / time.Second),
 			MaxBackoffSeconds:        int(c.login.maxBackoff / time.Second),
 			UnauthenticatedPerMinute: c.login.unauthPerMinute,
+			PasswordMinLength:        c.login.minPassword(),
+			TwoFactorMinutes:         int(c.session.ticketTTL() / time.Minute),
 			TwoFactor:                twoFactorOrDefault(c.twoFactor),
 		},
 		Modules: fileModules{
@@ -405,6 +477,12 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	// login.twoFactorMinutes is a sign-in setting, kept beside the session
+	// limits because the sign-in tickets live with the sessions.
+	if err := intInRange("login.twoFactorMinutes", fc.Login.TwoFactorMinutes, 1, 60); err != nil {
+		return config{}, err
+	}
+	session.ticket = time.Duration(fc.Login.TwoFactorMinutes) * time.Minute
 	modules, err := fc.Modules.settings()
 	if err != nil {
 		return config{}, err
@@ -454,22 +532,30 @@ func (sc fileSession) limits() (sessionLimits, error) {
 	if err := intInRange("session.idleMinutes", sc.IdleMinutes, 1, sc.AbsoluteMinutes); err != nil {
 		return sessionLimits{}, fmt.Errorf("%w (session.absoluteMinutes is %d)", err, sc.AbsoluteMinutes)
 	}
+	if err := intInRange("session.connectsPerMinute", sc.ConnectsPerMinute, 1, 1000); err != nil {
+		return sessionLimits{}, err
+	}
 	return sessionLimits{
 		idle:     time.Duration(sc.IdleMinutes) * time.Minute,
 		absolute: time.Duration(sc.AbsoluteMinutes) * time.Minute,
+		connects: sc.ConnectsPerMinute,
 	}, nil
 }
 
 // limits validates the login block; maxBackoffSeconds can never be below
-// backoffSeconds.
+// backoffSeconds. The minimum password length never goes below the built-in
+// one, so the setting can only tighten the rule.
 func (fl fileLogin) limits() (loginLimits, error) {
 	checks := []struct {
 		key       string
 		v, lo, hi int
 	}{
 		{"login.maxFailures", fl.MaxFailures, 1, 1000},
+		{"login.clientMaxFailures", fl.ClientMaxFailures, 1, 1000},
+		{"login.resetMinutes", fl.ResetMinutes, 1, 1440},
 		{"login.maxBackoffSeconds", fl.MaxBackoffSeconds, 1, 86400},
 		{"login.unauthenticatedPerMinute", fl.UnauthenticatedPerMinute, 1, 10000},
+		{"login.passwordMinLength", fl.PasswordMinLength, passwordMinLen, passwordMaxLen},
 	}
 	for _, c := range checks {
 		if err := intInRange(c.key, c.v, c.lo, c.hi); err != nil {
@@ -480,10 +566,14 @@ func (fl fileLogin) limits() (loginLimits, error) {
 		return loginLimits{}, fmt.Errorf("%w (login.maxBackoffSeconds is %d)", err, fl.MaxBackoffSeconds)
 	}
 	return loginLimits{
-		maxFailures:     fl.MaxFailures,
-		backoff:         time.Duration(fl.BackoffSeconds) * time.Second,
-		maxBackoff:      time.Duration(fl.MaxBackoffSeconds) * time.Second,
-		unauthPerMinute: fl.UnauthenticatedPerMinute,
+		maxFailures:       fl.MaxFailures,
+		backoff:           time.Duration(fl.BackoffSeconds) * time.Second,
+		maxBackoff:        time.Duration(fl.MaxBackoffSeconds) * time.Second,
+		unauthPerMinute:   fl.UnauthenticatedPerMinute,
+		perClientOff:      !fl.PerClient,
+		clientMaxFailures: fl.ClientMaxFailures,
+		reset:             time.Duration(fl.ResetMinutes) * time.Minute,
+		passwordMinLength: fl.PasswordMinLength,
 	}, nil
 }
 

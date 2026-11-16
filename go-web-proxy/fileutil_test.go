@@ -617,7 +617,8 @@ func TestRecoverDataDir_RefusesADamagedJournal(t *testing.T) {
 			writeFile(t, filepath.Join(dir, "users.yaml"), "untouched")
 			writeFile(t, filepath.Join(dir, txnFileName), c.body)
 			err := recoverDataDir(dir, quietLogger())
-			if err == nil || !strings.Contains(err.Error(), "is damaged") || !strings.Contains(err.Error(), ".bak files") {
+			if err == nil || !strings.Contains(err.Error(), "is damaged") || !strings.Contains(err.Error(), "restore "+dir+" from your volume backup") ||
+				!strings.Contains(err.Error(), "importing a backup into a fresh volume also works") || strings.Contains(err.Error(), ".bak") {
 				t.Fatalf("want the damaged-journal error with its remedy, got %v", err)
 			}
 			if got := readOr(t, filepath.Join(dir, txnFileName)); got != c.body {

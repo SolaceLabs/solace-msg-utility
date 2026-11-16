@@ -2,7 +2,8 @@
  * Half-finished sign-ins (go-web-proxy/session.go's tickets). A ticket is not
  * a session: while one stands no session exists, so nothing that checks
  * sessions has a new state to learn. It lives in memory beside the sessions,
- * for ten minutes, and grants nothing but its own page.
+ * for `login.twoFactorMinutes` (read live, so a shorter value also ends the
+ * tickets already issued), and grants nothing but its own page.
  *
  * `stage` is the step it waits for: `code` (a password passed, a code is
  * due), `enrol` (a password passed, two-factor must be set up before the
@@ -25,7 +26,7 @@ export interface Ticket {
     created: number;
 }
 
-/** How long a ticket lasts. */
+/** How long a ticket lasts unless the settings say otherwise (login.twoFactorMinutes: 10). */
 export const TICKET_TTL_MS = 10 * 60 * 1000;
 
 function newId(): string {
@@ -34,9 +35,9 @@ function newId(): string {
     return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export function createTickets(now: () => number) {
+export function createTickets(now: () => number, ttl: () => number = () => TICKET_TTL_MS) {
     const byId = new Map<string, Ticket>();
-    const live = (t: Ticket) => now() - t.created <= TICKET_TTL_MS;
+    const live = (t: Ticket) => now() - t.created <= ttl();
 
     return {
         /** A new ticket, after the expired ones are swept. */

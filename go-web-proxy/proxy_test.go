@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -551,6 +553,41 @@ func TestDialUpstreamTLS_FailsBeforeTheHandshakeWhenItCannotConnect(t *testing.T
 	_ = ln.Close()
 	if conn, err := dialUpstreamTLS(context.Background(), dialer, trust, "tcp", addr); err == nil || conn != nil {
 		t.Errorf("a closed port must fail to connect, got %v %v", conn, err)
+	}
+}
+
+// The upstream dialer offers HTTP/1.1 only: against a broker (or a TLS proxy in
+// front of one) that would pick h2 when offered, the connection is HTTP/1.1,
+// which a WebSocket upgrade needs.
+func TestDialUpstreamTLS_NegotiatesHTTP11OnlyEvenWhenTheServerOffersH2(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	// Both protocols, h2 first, as a TLS proxy in front of a broker might offer
+	// them. (EnableHTTP2 would offer h2 alone, and a server with no overlap
+	// lets an http/1.1 client fall back with no protocol named at all.)
+	srv.TLS = &tls.Config{NextProtos: []string{"h2", "http/1.1"}}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+
+	// The server does prefer h2 when a client offers it.
+	probe, err := tls.Dial("tcp", srv.Listener.Addr().String(), &tls.Config{RootCAs: pool, NextProtos: []string{"h2", "http/1.1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	offered := probe.ConnectionState().NegotiatedProtocol
+	_ = probe.Close()
+	if offered != "h2" {
+		t.Fatalf("the test server must negotiate h2 when offered it, got %q", offered)
+	}
+
+	conn, err := dialUpstreamTLS(context.Background(), &net.Dialer{Timeout: 5 * time.Second}, newTrustHolder(pool, false, quietLogger()), "tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if got := conn.(*tls.Conn).ConnectionState().NegotiatedProtocol; got != "http/1.1" {
+		t.Errorf("negotiated protocol: want http/1.1, got %q", got)
 	}
 }
 

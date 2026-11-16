@@ -75,30 +75,6 @@ func TestLive_TwoFactorIsLive(t *testing.T) {
 	}
 }
 
-func TestPendingRestart(t *testing.T) {
-	running := defaultConfig()
-	file := fileConfigFromConfig(running)
-	if got := pendingRestart(running, file); len(got) != 0 {
-		t.Fatalf("same file: want none, got %v", got)
-	}
-	// Live keys never need a restart.
-	file.LogLevel, file.ConnModes, file.Session.IdleMinutes = "debug", connBoth, 1
-	file.Access.Allow = []string{"10.0.0.0/8"}
-	file.Modules.Offered = nil
-	if got := pendingRestart(running, file); len(got) != 0 {
-		t.Fatalf("live keys only: want none, got %v", got)
-	}
-	// tls.insecureSkipVerify is live too (the trust holder), not restart-only.
-	file.TLS.InsecureSkipVerify = true
-	if got := pendingRestart(running, file); len(got) != 0 {
-		t.Fatalf("tls.insecureSkipVerify applies at once: want none, got %v", got)
-	}
-	file.Hosted = false
-	if got := pendingRestart(running, file); !reflect.DeepEqual(got, []string{"hosted"}) {
-		t.Errorf("want [hosted], got %v", got)
-	}
-}
-
 // tls.insecureSkipVerify reaches the trust holder on apply, with the warning
 // when it turns on; apply with no holder bound (a test's live) changes nothing
 // else.
@@ -119,26 +95,6 @@ func TestLive_ApplyCarriesSkipVerifyIntoTheTrustHolder(t *testing.T) {
 	lv.apply(cfg)
 	if holder.get().skip {
 		t.Error("a save with the flag off must reach the holder")
-	}
-}
-
-// Every restart-only key reads its own field: changing exactly that field
-// flags exactly that key.
-func TestRestartOnlyKeys_EachReadsItsField(t *testing.T) {
-	want := []string{"hosted"}
-	if got := restartOnlyKeyNames(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("restart-only keys: want %v, got %v", want, got)
-	}
-	running := defaultConfig()
-	edits := map[string]func(*fileConfig){
-		"hosted": func(f *fileConfig) { f.Hosted = false },
-	}
-	for key, edit := range edits {
-		file := fileConfigFromConfig(running)
-		edit(&file)
-		if got := pendingRestart(running, file); !reflect.DeepEqual(got, []string{key}) {
-			t.Errorf("%s: got %v", key, got)
-		}
 	}
 }
 
@@ -210,7 +166,7 @@ func TestFileConfig_EveryKeyIsClassifiedOnce(t *testing.T) {
 	liveTops := map[string]bool{"connModes": true, "defaultConn": true, "logLevel": true, "access": true, "session": true, "login": true, "modules": true, "audit": true, "tls": true}
 	restartOnly := map[string]bool{}
 	for _, k := range restartOnlyKeys {
-		restartOnly[k.key] = true
+		restartOnly[k] = true
 	}
 	seen := map[string]bool{}
 	for _, key := range leaves {
@@ -228,8 +184,8 @@ func TestFileConfig_EveryKeyIsClassifiedOnce(t *testing.T) {
 		}
 	}
 	for _, k := range restartOnlyKeys {
-		if !seen[k.key] {
-			t.Errorf("restartOnlyKeys names %q, which is not a fileConfig key", k.key)
+		if !seen[k] {
+			t.Errorf("restartOnlyKeys names %q, which is not a fileConfig key", k)
 		}
 	}
 }

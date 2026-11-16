@@ -670,8 +670,9 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request, call *
 		return
 	}
 	if body.Password != "" {
-		if err := checkPasswordPolicy(body.Password); err != nil {
-			writeInvalid(w, "password", "Password must be "+strconv.Itoa(passwordMinLen)+" to "+strconv.Itoa(passwordMaxLen)+" characters.")
+		least := h.live.loginLimits().minPassword()
+		if err := checkPasswordPolicy(body.Password, least); err != nil {
+			writeInvalid(w, "password", "Password must be "+strconv.Itoa(least)+" to "+strconv.Itoa(passwordMaxLen)+" characters.")
 			return
 		}
 	}

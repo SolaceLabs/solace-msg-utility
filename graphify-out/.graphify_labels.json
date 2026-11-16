@@ -26,9 +26,7 @@
   "85": "Solace Client Service",
   "86": "Queue Copy: Verify Flow & Broker Bug Workaround",
   "87": "Queue Browser Internal Architecture",
-  "88": "System Overview",
   "89": "CSS Organization",
-  "90": "Module Isolation",
   "96": "sempContext Test Suite",
   "97": "dev.ps1",
   "98": "Features",
@@ -39,7 +37,6 @@
   "110": "queue-subscription-explorer ui",
   "113": "<!-- @module-templates --> marker",
   "114": "README",
-  "115": "Code Standards",
   "116": "proxy.go (handlers)",
   "117": "tls.go (server cert + trust pool)",
   "126": "queue-subscription-explorer parse",
@@ -58,6 +55,5 @@
   "150": "queue-discovery ui tests",
   "151": "parse.ts",
   "159": "ConnectionsModule Test Suite",
-  "167": "SEMP v1 Pagination (Queue Subscription Explorer)",
   "168": "code:ts (for await (const page of createSempDiscovery(sempCtx).fetchV)"
 }

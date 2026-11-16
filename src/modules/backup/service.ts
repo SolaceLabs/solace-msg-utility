@@ -73,7 +73,6 @@ export interface ImportChoices {
 }
 
 export interface ImportResult {
-    restartRequired: string[];
     signedOut: boolean;
 }
 

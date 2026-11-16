@@ -25,7 +25,7 @@
  */
 import './pages.css';
 import { groupSecret } from './authenticator';
-import { PASSWORD_MAX, PASSWORD_MIN } from './validate';
+import { PASSWORD_MAX } from './validate';
 import type { Gateway } from './index';
 
 /**
@@ -211,11 +211,12 @@ export function createPages({ gateway, navigate }: PagesDeps) {
         form.appendChild(el('h1', {}, 'Change password'));
         if (required) form.appendChild(el('p', { class: 'mgw-note' }, 'You must set a new password before you continue.'));
         if (error) form.appendChild(el('p', { class: 'mgw-error', role: 'alert' }, error));
-        const len = { minlength: String(PASSWORD_MIN), maxlength: String(PASSWORD_MAX) };
+        const least = gateway.settings.current().login.passwordMinLength;
+        const len = { minlength: String(least), maxlength: String(PASSWORD_MAX) };
         const cur = field(form, 'mgw-current', 'Current password', { type: 'password', autocomplete: 'current-password', maxlength: '128' });
         const next = field(form, 'mgw-new', 'New password', { type: 'password', autocomplete: 'new-password', ...len });
         const confirm = field(form, 'mgw-confirm', 'Confirm new password', { type: 'password', autocomplete: 'new-password', ...len });
-        form.appendChild(el('p', { class: 'mgw-note' }, `${PASSWORD_MIN} to ${PASSWORD_MAX} characters.`));
+        form.appendChild(el('p', { class: 'mgw-note' }, `${least} to ${PASSWORD_MAX} characters.`));
         form.appendChild(el('button', { type: 'submit' }, 'Change password'));
         if (!required) {
             const links = el('p', { class: 'mgw-links' });

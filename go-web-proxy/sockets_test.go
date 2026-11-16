@@ -15,7 +15,11 @@ func TestSocketRegistry_ClosesOnlyWhatWasRevoked(t *testing.T) {
 	sr := newSocketRegistry(func(user, broker, vpn string) bool { return allowed[user+"/"+broker+"/"+vpn] }, quietLogger())
 	cancelled := map[string]int{}
 	open := func(name, session, user, broker, vpn string) func() {
-		return sr.add(openSocket{session: session, user: user, broker: broker, vpn: vpn, cancel: func() { cancelled[name]++ }})
+		remove, ok := sr.add(openSocket{session: session, user: user, broker: broker, vpn: vpn, cancel: func() { cancelled[name]++ }})
+		if !ok {
+			t.Fatalf("%s: a socket well under the ceilings was refused", name)
+		}
+		return remove
 	}
 	open("alice-1", "s-a1", "alice", "b1", "v1")
 	open("alice-2", "s-a2", "alice", "b1", "v1")
@@ -86,6 +90,9 @@ func TestSockets_OpenedWhileCommitsRunAreRefusedOrClosed(t *testing.T) {
 		refused bool
 		closed  atomic.Bool
 	}
+	// A closed socket stays listed until its goroutine removes it, which this
+	// test has none to do: lift the ceilings so every attempt is judged on access.
+	sr.perUser, sr.total = 1<<30, 1<<30
 	var mu sync.Mutex
 	var attempts []*attempt
 	stop := make(chan struct{})
@@ -101,7 +108,7 @@ func TestSockets_OpenedWhileCommitsRunAreRefusedOrClosed(t *testing.T) {
 				default:
 				}
 				a := &attempt{}
-				remove := sr.add(openSocket{session: "s", user: "viewer", broker: "b1", vpn: "v1", cancel: func() { a.closed.Store(true) }})
+				remove, _ := sr.add(openSocket{session: "s", user: "viewer", broker: "b1", vpn: "v1", cancel: func() { a.closed.Store(true) }})
 				if _, ok := st.smfTarget("viewer", "b1", "v1"); !ok {
 					remove()
 					a.refused = true
@@ -130,5 +137,54 @@ func TestSockets_OpenedWhileCommitsRunAreRefusedOrClosed(t *testing.T) {
 		if !a.refused && !a.closed.Load() {
 			t.Fatalf("socket %d of %d was neither refused nor closed after the last commit", i, len(attempts))
 		}
+	}
+}
+
+// A user holds at most perUser open sockets and the gateway at most total: a
+// refused socket registers nothing (so nothing of it can be cancelled or
+// counted), and closing one admits the next.
+func TestSocketRegistry_CeilingsRefuseAndRegisterNothing(t *testing.T) {
+	sr := newSocketRegistry(func(string, string, string) bool { return true }, quietLogger())
+	sr.perUser, sr.total = 2, 3
+	var cancelled atomic.Int32
+	add := func(user string) (func(), bool) {
+		return sr.add(openSocket{session: "s-" + user, user: user, broker: "b1", vpn: "v1", cancel: func() { cancelled.Add(1) }})
+	}
+	count := func() int {
+		sr.mu.Lock()
+		defer sr.mu.Unlock()
+		return len(sr.open)
+	}
+	removeA1, ok := add("alice")
+	if _, ok2 := add("alice"); !ok || !ok2 {
+		t.Fatal("two sockets are within the per-user ceiling")
+	}
+	if remove, ok := add("alice"); ok || remove != nil || count() != 2 {
+		t.Fatalf("a third socket for alice: want refused and unregistered, got ok=%v remove nil=%v open=%d", ok, remove == nil, count())
+	}
+	if _, ok := add("bob"); !ok {
+		t.Fatal("another user is not held to alice's count")
+	}
+	if _, ok := add("carol"); ok || count() != 3 {
+		t.Fatalf("the fourth socket in all: want refused by the total ceiling, got ok=%v open=%d", ok, count())
+	}
+	sr.closeUser("carol")
+	if cancelled.Load() != 0 {
+		t.Error("a refused socket was registered: a revocation cancelled it")
+	}
+	removeA1()
+	if _, ok := add("carol"); !ok {
+		t.Error("closing one socket must admit the next")
+	}
+	if _, ok := add("alice"); ok {
+		t.Error("alice is back at the total ceiling, not below it")
+	}
+}
+
+// The ceilings are the documented ones until a test lowers them.
+func TestNewSocketRegistry_StartsAtTheCeilings(t *testing.T) {
+	sr := newSocketRegistry(func(string, string, string) bool { return true }, quietLogger())
+	if sr.perUser != 20 || sr.total != 1000 {
+		t.Errorf("want 20 per user and 1000 in all, got %d and %d", sr.perUser, sr.total)
 	}
 }

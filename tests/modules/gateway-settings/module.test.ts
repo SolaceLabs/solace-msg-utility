@@ -23,15 +23,17 @@ const SETTINGS = {
     tls: { insecureSkipVerify: false },
     logLevel: 'warn',
     access: { allow: ['10.0.0.0/8', '192.0.2.0/24'], trustedProxies: [] },
-    session: { idleMinutes: 10, absoluteMinutes: 30 },
-    login: { maxFailures: 5, backoffSeconds: 30, maxBackoffSeconds: 900, unauthenticatedPerMinute: 60, twoFactor: 'optional' },
+    session: { idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 },
+    login: {
+        maxFailures: 5, perClient: true, clientMaxFailures: 10, resetMinutes: 15, backoffSeconds: 30, maxBackoffSeconds: 900,
+        unauthenticatedPerMinute: 60, passwordMinLength: 12, twoFactor: 'optional', twoFactorMinutes: 10,
+    },
     modules: { offered: ['queue-browser'], userDefault: 'all' },
     audit: { stdout: false, access: false, onFailure: 'continue' },
 };
-const RESTART_ONLY = ['hosted'];
 const view = (over: Record<string, unknown> = {}) => ({
     ok: true,
-    data: { rev: 'rev-1', settings: SETTINGS, restartOnly: RESTART_ONLY, pendingRestart: [], changedOnDisk: false, catalog: ['queue-browser', 'queue-copy'], ...over },
+    data: { rev: 'rev-1', settings: SETTINGS, changedOnDisk: false, catalog: ['queue-browser', 'queue-copy'], ...over },
 });
 
 function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
@@ -89,7 +91,6 @@ describe('gateway-settings — load', () => {
         expect(value(container, 'session-idleMinutes')).toBe('10');
         expect(el<HTMLInputElement>(container, '#gw-set-tls-insecureSkipVerify').checked).toBe(false);
         expect(pressed(container)).toEqual([true, false]);
-        expect(hidden(container, '#gw-set-pending')).toBe(true);
         expect(hidden(container, '#gw-set-disk')).toBe(true);
         expect(el<HTMLButtonElement>(container, '#btn-gw-set-save').disabled).toBe(false);
     });
@@ -122,11 +123,9 @@ describe('gateway-settings — load', () => {
         expect(value(container, 'connModes')).toBe('both');
     });
 
-    it('tags a key the gateway reports as restart-only, and no other; it has no path fields', async () => {
-        const { container } = await setup(ADMIN, view({ restartOnly: ['logLevel'] }));
-        const tagged = [...container.querySelectorAll<HTMLElement>('.gw-set-restart')].map(g => g.dataset.key);
-        expect(tagged).toEqual(['logLevel']);
-        // The TLS paths are environment variables: no field, no tag.
+    it('has no path fields, and offers neither hosted nor connModes "direct"', async () => {
+        const { container } = await setup();
+        // The TLS paths are environment variables: no field.
         expect(container.querySelector('[id^="gw-set-tls-"]:not(#gw-set-tls-insecureSkipVerify)')).toBeNull();
         expect(container.querySelector('.gw-set-host')).toBeNull();
         expect(container.textContent).not.toContain('edit on host');
@@ -137,16 +136,26 @@ describe('gateway-settings — load', () => {
         expect([...container.querySelectorAll<HTMLOptionElement>('#gw-set-connModes option')].map(o => o.value)).toEqual(['provisioned', 'both']);
     });
 
-    it('tags nothing with the gateway\'s own restart-only list, and every field is enabled', async () => {
+    it('every field is enabled', async () => {
         const { container } = await setup();
-        expect(container.querySelector('.gw-set-restart')).toBeNull();
         expect(container.querySelectorAll('#gw-set-view .form-control:disabled')).toHaveLength(0);
     });
 
-    it('lists the keys saved but not yet running', async () => {
-        const { container } = await setup(ADMIN, view({ pendingRestart: ['hosted', 'logLevel'] }));
-        expect(hidden(container, '#gw-set-pending')).toBe(false);
-        expect(el(container, '#gw-set-pending-text').textContent).toBe('Saved, applies when the gateway restarts: hosted, logLevel.');
+    it('shows the throttle, password and connect-rate settings from the gateway', async () => {
+        const { container } = await setup(ADMIN, view({
+            settings: {
+                ...SETTINGS,
+                session: { ...SETTINGS.session, connectsPerMinute: 7 },
+                login: {
+                    ...SETTINGS.login, perClient: false, maxFailures: 4, clientMaxFailures: 40, resetMinutes: 90,
+                    passwordMinLength: 16, twoFactorMinutes: 3,
+                },
+            },
+        }));
+        expect(el<HTMLInputElement>(container, '#gw-set-login-perClient').checked).toBe(false);
+        expect(['login-maxFailures', 'login-clientMaxFailures', 'login-resetMinutes', 'login-passwordMinLength',
+            'login-twoFactorMinutes', 'session-connectsPerMinute'].map(id => value(container, id)))
+            .toEqual(['4', '40', '90', '16', '3', '7']);
     });
 
     it('a hand edit on disk shows the banner and disables Save', async () => {
@@ -238,7 +247,6 @@ describe('gateway-settings -- audit trail', () => {
         const access = el<HTMLInputElement>(container, '#gw-set-audit-access');
         expect([stdout.checked, access.checked]).toEqual([true, false]);
         expect([stdout.disabled, access.disabled]).toEqual([false, false]);
-        expect(el(container, '[data-key="audit.stdout"]').classList.contains('gw-set-restart')).toBe(false);
         expect(container.textContent).toContain('/data/audit.log');
     });
 
@@ -251,7 +259,7 @@ describe('gateway-settings -- audit trail', () => {
         expect(select.disabled).toBe(false);
         expect([...select.options].map(o => o.value)).toEqual(['continue', 'refuse']);
         select.value = 'continue';
-        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
         expect(svcMock.save.mock.calls[0][0].audit.onFailure).toBe('continue');
@@ -269,7 +277,7 @@ describe('gateway-settings -- audit trail', () => {
         ]);
         expect(select.value).toBe('admins');
         select.value = 'mandatory';
-        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
         expect(svcMock.save.mock.calls[0][0].login).toEqual({ ...SETTINGS.login, twoFactor: 'mandatory' });
@@ -277,7 +285,7 @@ describe('gateway-settings -- audit trail', () => {
 
     it('sends an unchanged audit section back as loaded', async () => {
         const { container } = await setup();
-        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
         expect(svcMock.save.mock.calls[0][0].audit).toEqual({ stdout: false, access: false, onFailure: 'continue' });
@@ -287,29 +295,39 @@ describe('gateway-settings -- audit trail', () => {
 describe('gateway-settings — save', () => {
     it("sends the whole file with the form's values, then reloads", async () => {
         const { container } = await setup();
-        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
         el<HTMLInputElement>(container, '#gw-set-session-idleMinutes').value = '5';
         el<HTMLTextAreaElement>(container, '#gw-set-access-allow').value = ' 10.0.0.0/8 \n\n192.0.2.7/32\n';
         el<HTMLSelectElement>(container, '#gw-set-logLevel').value = 'debug';
         el<HTMLInputElement>(container, '#gw-set-tls-insecureSkipVerify').checked = true;
         el<HTMLInputElement>(container, '#gw-set-audit-stdout').checked = true;
         el<HTMLInputElement>(container, '#gw-set-audit-access').checked = true;
+        el<HTMLInputElement>(container, '#gw-set-session-connectsPerMinute').value = '8';
+        el<HTMLInputElement>(container, '#gw-set-login-perClient').checked = false;
+        el<HTMLInputElement>(container, '#gw-set-login-maxFailures').value = '3';
+        el<HTMLInputElement>(container, '#gw-set-login-clientMaxFailures').value = '25';
+        el<HTMLInputElement>(container, '#gw-set-login-resetMinutes').value = '60';
+        el<HTMLInputElement>(container, '#gw-set-login-passwordMinLength').value = '16';
+        el<HTMLInputElement>(container, '#gw-set-login-twoFactorMinutes').value = '5';
         tiles(container)[1].click();
-        svcMock.load.mockResolvedValue(view({ pendingRestart: ['hosted'] }));
         clickSave(container);
 
-        await vi.waitFor(() => expect(hidden(container, '#gw-set-pending')).toBe(false));
+        await vi.waitFor(() => expect(svcMock.load).toHaveBeenCalledTimes(2));
+        await vi.waitFor(() => expect(value(container, 'session-idleMinutes')).toBe('10'));
         expect(svcMock.save).toHaveBeenCalledWith({
             ...SETTINGS,
             logLevel: 'debug',
             tls: { insecureSkipVerify: true },
             access: { allow: ['10.0.0.0/8', '192.0.2.7/32'], trustedProxies: [] },
-            session: { idleMinutes: 5, absoluteMinutes: 30 },
+            session: { idleMinutes: 5, absoluteMinutes: 30, connectsPerMinute: 8 },
+            login: {
+                ...SETTINGS.login, perClient: false, maxFailures: 3, clientMaxFailures: 25, resetMinutes: 60,
+                passwordMinLength: 16, twoFactorMinutes: 5,
+            },
             modules: { offered: ['queue-browser', 'queue-copy'], userDefault: 'all' },
             audit: { stdout: true, access: true, onFailure: 'continue' },
         }, 'rev-1');
         expect(toastMock.showToast).toHaveBeenCalledWith('Settings saved', 'ok');
-        expect(svcMock.load).toHaveBeenCalledTimes(2);
         // The form came back from the gateway, not from what was typed.
         expect(value(container, 'session-idleMinutes')).toBe('10');
         // The copy sent was a copy: the loaded settings are untouched.
@@ -352,7 +370,7 @@ describe('gateway-settings — save', () => {
 describe('gateway-settings -- versions', () => {
     it('a save sends the rev the settings were loaded at, and the reload brings the next one', async () => {
         const { container } = await setup();
-        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
         svcMock.load.mockResolvedValue(view({ rev: 'rev-2' }));
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.load).toHaveBeenCalledTimes(2));
@@ -365,14 +383,14 @@ describe('gateway-settings -- versions', () => {
     it('stale save: the dialog says so; Reload reloads the form with the other admin\'s values and rev', async () => {
         const { container } = await setup();
         svcMock.save.mockResolvedValue({ ok: false, status: 409, code: 'stale', rev: 'rev-9' });
-        svcMock.load.mockResolvedValue(view({ rev: 'rev-9', settings: { ...SETTINGS, session: { idleMinutes: 20, absoluteMinutes: 30 } } }));
+        svcMock.load.mockResolvedValue(view({ rev: 'rev-9', settings: { ...SETTINGS, session: { ...SETTINGS.session, idleMinutes: 20 } } }));
         el<HTMLInputElement>(container, '#gw-set-session-idleMinutes').value = '5';
         clickSave(container);
         expect(await answerConfirm(true)).toBe('This settings page was changed by someone else since you opened it.');
         await vi.waitFor(() => expect(value(container, 'session-idleMinutes')).toBe('20'));
         expect(toastMock.showToast).not.toHaveBeenCalledWith('Settings saved', 'ok');
 
-        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-10' } });
+        svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-10' } });
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalledTimes(2));
         expect(svcMock.save.mock.calls[1][1]).toBe('rev-9');
@@ -400,7 +418,7 @@ describe('gateway-settings -- layout', () => {
         const { container } = await setup();
         const sections = [...container.querySelectorAll('.gw-set-section')].map(h => h.textContent);
         expect(sections).toEqual([
-            'Connections', 'Access', 'Sessions', 'Sign-in throttle', 'Two-factor sign-in',
+            'Connections', 'Access', 'Sessions', 'Sign-in throttle', 'Passwords and two-factor sign-in',
             'Modules', 'Logging', 'Audit trail', 'Broker trust', 'Gateway',
         ]);
         for (const h of container.querySelectorAll('.gw-set-section')) {
@@ -408,15 +426,58 @@ describe('gateway-settings -- layout', () => {
             expect(card.classList.contains('card')).toBe(true);
             expect(card.parentElement?.id).toBe('gw-set-view');
         }
-        // One card per section plus the title card: nothing sits beside another card.
+        // One card per section plus the intro card: nothing sits beside another card.
         expect(container.querySelectorAll('#gw-set-view .card')).toHaveLength(sections.length + 1);
         expect(container.querySelectorAll('.card .card')).toHaveLength(0);
     });
 
+    it('opens with what the page is for and Reload, never its own title again, and names no file', async () => {
+        const { container } = await setup();
+        expect(container.querySelector('#gw-set-view h2')).toBeNull();
+        const intro = el(container, '.gw-set-intro');
+        expect(intro.textContent).toContain("The gateway's settings.");
+        expect(intro.textContent).toContain('Certificates');
+        expect(intro.textContent).not.toContain('config.yaml');
+        expect(intro.closest('.card')?.querySelector('#btn-gw-set-reload')).not.toBeNull();
+    });
+
+    it('carries no restart-only tag, banner or button, and no inline style', async () => {
+        const { container } = await setup();
+        for (const sel of ['.gw-set-restart', '.gw-set-tag', '#gw-set-pending', '#btn-gw-set-goto-restart']) {
+            expect(container.querySelector(sel), sel).toBeNull();
+        }
+        expect(container.textContent).not.toMatch(/applies when the gateway restarts/);
+        expect(container.querySelectorAll('[style]')).toHaveLength(0);
+    });
+
+    it('groups the throttle and password settings by card, with the per-client choice as a checkbox', async () => {
+        const { container } = await setup();
+        const section = (id: string) => el(container, `#gw-set-${id}`).closest('.card')?.querySelector('.gw-set-section')?.textContent;
+        for (const id of ['login-perClient', 'login-maxFailures', 'login-clientMaxFailures', 'login-resetMinutes']) {
+            expect(section(id), id).toBe('Sign-in throttle');
+        }
+        for (const id of ['login-passwordMinLength', 'login-twoFactor', 'login-twoFactorMinutes']) {
+            expect(section(id), id).toBe('Passwords and two-factor sign-in');
+        }
+        expect(section('session-connectsPerMinute')).toBe('Sessions');
+        expect(el<HTMLInputElement>(container, '#gw-set-login-perClient').type).toBe('checkbox');
+        const labels = [...container.querySelectorAll('label')].map(l => l.textContent?.trim());
+        expect(labels).toEqual(expect.arrayContaining([
+            'Count failures per client address',
+            'Failed sign-ins per account before a back-off',
+            'Failed sign-ins per client before a back-off',
+            'Forget failures after (minutes)',
+            'Minimum password length',
+            'Time to finish two-factor after the password (minutes)',
+            'Broker connects per user per minute',
+        ]));
+    });
+
     it('lays short fields (numbers, selects) out in columns and keeps long ones outside them', async () => {
         const { container } = await setup();
-        for (const id of ['connModes', 'defaultConn', 'session-idleMinutes', 'session-absoluteMinutes', 'login-maxFailures',
-            'login-unauthenticatedPerMinute', 'login-twoFactor', 'modules-userDefault', 'logLevel', 'audit-onFailure']) {
+        for (const id of ['connModes', 'defaultConn', 'session-idleMinutes', 'session-absoluteMinutes', 'session-connectsPerMinute',
+            'login-maxFailures', 'login-clientMaxFailures', 'login-resetMinutes', 'login-backoffSeconds', 'login-maxBackoffSeconds',
+            'login-unauthenticatedPerMinute', 'login-passwordMinLength', 'login-twoFactor', 'login-twoFactorMinutes', 'modules-userDefault', 'logLevel', 'audit-onFailure']) {
             expect(el(container, `#gw-set-${id}`).closest('.form-cols'), id).not.toBeNull();
         }
         for (const id of ['access-allow', 'access-trustedProxies']) {
@@ -450,7 +511,7 @@ describe('gateway-settings -- modules on offer', () => {
         subs.click();
         subs.click();
         expect(pressed(container)).toEqual([false, true, false]);
-        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
         expect(svcMock.save.mock.calls[0][0].modules.offered).toEqual(['queue-copy']);
@@ -466,14 +527,13 @@ describe('gateway-settings -- modules on offer', () => {
 });
 
 describe('gateway-settings -- broker trust', () => {
-    it('keeps Skip broker certificate checks in its card, saved with the rest, with no restart tag', async () => {
+    it('keeps Skip broker certificate checks in its card, saved with the rest', async () => {
         const { container } = await setup();
         const box = el<HTMLInputElement>(container, '#gw-set-tls-insecureSkipVerify');
         expect(box.closest('.card')?.querySelector('.gw-set-section')?.textContent).toBe('Broker trust');
         expect(box.checked).toBe(false);
-        expect(el(container, '[data-key="tls.insecureSkipVerify"]').classList.contains('gw-set-restart')).toBe(false);
         box.checked = true;
-        svcMock.save.mockResolvedValue({ ok: true, data: { restartRequired: [], rev: 'rev-2' } });
+        svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
         expect(svcMock.save.mock.calls[0][0].tls).toEqual({ insecureSkipVerify: true });
@@ -606,13 +666,5 @@ describe('gateway-settings -- restart', () => {
         } finally {
             timer.mockRestore();
         }
-    });
-});
-
-describe('gateway-settings -- pending-restart notice', () => {
-    it('points at the Restart gateway button: its button moves focus there', async () => {
-        const { container } = await setup(ADMIN, view({ pendingRestart: ['hosted'] }));
-        el<HTMLButtonElement>(container, '#btn-gw-set-goto-restart').click();
-        expect(document.activeElement).toBe(el(container, '#btn-gw-set-restart'));
     });
 });

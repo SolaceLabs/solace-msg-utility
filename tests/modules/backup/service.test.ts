@@ -64,7 +64,7 @@ describe('backup/service', () => {
             method: 'POST', body: JSON.stringify({ backup: 'smu-backup-20261109T020000Z.json', passphrase: 'pp' }),
         })]);
         fetchMock().mockClear();
-        answer(200, { restartRequired: [], signedOut: false });
+        answer(200, { signedOut: false });
         await createBackupService().importFile({ file: '{}' }, 'pp', { users: 'merge', connections: 'skip', settings: 'replace' }, { users: 3, connections: 2, settings: 'cfg' });
         expect(sent()).toEqual(['/managed/backup/import', expect.objectContaining({
             method: 'POST', body: JSON.stringify({ file: '{}', passphrase: 'pp', users: 'merge', connections: 'skip', settings: 'replace', basis: { users: 3, connections: 2, settings: 'cfg' } }),

@@ -5,10 +5,10 @@ import { resetScenario, scenario } from '../../../src/mock-broker/fixtures';
 import { contractSeed } from './helpers';
 
 /**
- * The fake gateway's restart (POST /managed/restart) and the settings it
- * applies at one: the in-place restart of go-web-proxy, as the demo shows it.
- * Also the settings file without the TLS paths, which are environment
- * variables now, and tls.insecureSkipVerify, which applies at once.
+ * The fake gateway's restart (POST /managed/restart): the in-place restart of
+ * go-web-proxy, as the demo shows it. Also the settings file without the TLS
+ * paths, which are environment variables, with no restart bookkeeping, and
+ * tls.insecureSkipVerify, which applies at once.
  */
 let realFetch: typeof window.fetch;
 let gw: ReturnType<typeof createGateway>;
@@ -64,14 +64,6 @@ describe('mock-broker/gateway -- restart', () => {
         expect(gw.tickets.dump()).toEqual([]);
     });
 
-    it('applies a setting that waited for a restart', async () => {
-        gw.settings.load({ ...gw.settings.dump(), hosted: false }, gw.settings.rev());
-        expect((await view()).pendingRestart).toEqual(['hosted']);
-        await call('POST', '/managed/restart');
-        expect((await view()).pendingRestart).toEqual([]);
-        expect(gw.settings.current().hosted).toBe(false);
-    });
-
     describe('the pause before the gateway is back', () => {
         beforeEach(() => {
             vi.useFakeTimers();
@@ -110,19 +102,16 @@ describe('mock-broker/gateway -- restart', () => {
 describe('mock-broker/gateway -- settings without the TLS paths', () => {
     const LEGACY = { certFile: '/old/tls.crt', keyFile: '/old/tls.key', trustDir: '/old/trust', insecureSkipVerify: true };
 
-    it('shows the one tls key and lists hosted as the only restart-only key, with no host-only list', async () => {
+    it('shows the one tls key, and neither a host-only nor a restart-only list', async () => {
         const v = await view();
         expect(v.settings.tls).toEqual({ insecureSkipVerify: false });
-        expect(v.restartOnly).toEqual(['hosted']);
-        expect(v).not.toHaveProperty('hostOnly');
-        expect(v.pendingRestart).toEqual([]);
+        expect(Object.keys(v).sort()).toEqual(['catalog', 'changedOnDisk', 'rev', 'settings']);
     });
 
-    it('applies tls.insecureSkipVerify on a save, with nothing waiting for a restart', async () => {
+    it('applies tls.insecureSkipVerify on a save, and answers the new rev alone', async () => {
         const res = await putSettings({ tls: { insecureSkipVerify: true } });
-        expect(res).toEqual({ status: 200, json: { restartRequired: [], rev: '2' } });
+        expect(res).toEqual({ status: 200, json: { rev: '2' } });
         expect(gw.settings.current().tls.insecureSkipVerify).toBe(true);
-        expect((await view()).pendingRestart).toEqual([]);
     });
 
     it.each(['certFile', 'keyFile', 'trustDir'])('refuses a save that names tls.%s, as it does any unknown key', async key => {

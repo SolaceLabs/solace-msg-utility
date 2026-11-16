@@ -91,7 +91,9 @@ func TestLogStartup_ShowsAtEveryLevel(t *testing.T) {
 		{"provisioned", func(c *config) {
 			c.connModes = connProvisioned
 			c.access.trustedProxies = prefixes(t, "172.16.0.0/12")
-		}, []string{"mode=provisioned", "app_bundle=provisioned.html", "access.trustedProxies=[172.16.0.0/12]", "usersFile=/data/users.yaml", "store_key_file=", "login.maxFailures=5", "login.twoFactor=optional", "session.idle=10m0s", "modules.userDefault=all"}, nil},
+		}, []string{"mode=provisioned", "app_bundle=provisioned.html", "access.trustedProxies=[172.16.0.0/12]", "usersFile=/data/users.yaml", "store_key_file=", "login.maxFailures=5", "login.twoFactor=optional", "session.idle=10m0s", "modules.userDefault=all",
+			"session.connectsPerMinute=20", "login.perClient=true", "login.clientMaxFailures=10", "login.reset=15m0s",
+			"login.passwordMinLength=12", "login.twoFactorTime=10m0s"}, nil},
 		{"files only", func(c *config) { c.hosted = false }, []string{"mode=files-only"}, nil},
 	}
 	for _, c := range cases {

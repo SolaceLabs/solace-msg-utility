@@ -1,18 +1,27 @@
 /**
  * The sign-in throttle (go-web-proxy/throttle.go), for the demo's single
- * client. Failures count per user and for the client; a sign-in waits for the
- * larger block of the two. After `login.maxFailures` failures a key blocks for
- * `login.backoffSeconds`, doubling with each further failure up to
- * `login.maxBackoffSeconds`. A success clears that user's count and the
- * client's, and no other user's; a count quiet for longer than the longest
- * back-off starts again.
+ * client. Failures count per account and, unless `login.perClient` is off, for
+ * the client; a sign-in waits for the larger block of the two. After
+ * `login.maxFailures` failures an account blocks (the client after
+ * `login.clientMaxFailures`) for `login.backoffSeconds`, doubling with each
+ * further failure up to `login.maxBackoffSeconds`. A success clears that
+ * account's count and nothing else: the client's count ages out. A count with
+ * no new failure for `login.resetMinutes` starts again.
  *
- * Not simulated: the cap on tracked keys (one client cannot fill the table).
+ * Not simulated: the cap on tracked keys (one client cannot fill the table)
+ * and the per-client request budget (`login.unauthenticatedPerMinute`).
  *
  * Mock-only.
  */
 
-export interface LoginLimits { maxFailures: number; backoffSeconds: number; maxBackoffSeconds: number }
+export interface LoginLimits {
+    maxFailures: number;
+    backoffSeconds: number;
+    maxBackoffSeconds: number;
+    perClient: boolean;
+    clientMaxFailures: number;
+    resetMinutes: number;
+}
 
 interface Failures { count: number; blockedUntil: number; last: number }
 
@@ -38,15 +47,16 @@ export function createThrottle(limits: () => LoginLimits, now: () => number = ()
 
     const waitOf = (f: Failures | null | undefined, t: number) => (f ? Math.max(f.blockedUntil - t, 0) : 0);
 
-    /** recordFailure: a stale count starts again; at the limit the key blocks. */
-    function record(prev: Failures | null | undefined, l: LoginLimits, t: number): Failures {
-        const stale = prev && t >= prev.blockedUntil && t - prev.last > l.maxBackoffSeconds * 1000;
+    /** recordFailure: a stale count starts again; at `limit` the key blocks. */
+    function record(prev: Failures | null | undefined, l: LoginLimits, limit: number, t: number): Failures {
+        const resetMs = l.resetMinutes * 60_000;
+        const stale = prev && t >= prev.blockedUntil && t - prev.last > resetMs;
         const f: Failures = prev && !stale ? { ...prev } : { count: 0, blockedUntil: prev?.blockedUntil ?? 0, last: 0 };
         f.count++;
         f.last = t;
-        if (f.count < l.maxFailures) return f;
+        if (f.count < limit) return f;
         let backoff = l.backoffSeconds * 1000;
-        for (let i = l.maxFailures; i < f.count && backoff < l.maxBackoffSeconds * 1000; i++) backoff *= 2;
+        for (let i = limit; i < f.count && backoff < l.maxBackoffSeconds * 1000; i++) backoff *= 2;
         f.blockedUntil = t + Math.min(backoff, l.maxBackoffSeconds * 1000);
         return f;
     }
@@ -55,19 +65,19 @@ export function createThrottle(limits: () => LoginLimits, now: () => number = ()
         /** How long a sign-in for `user` must wait, in ms; 0 when it may go ahead. */
         wait(user: string): number {
             const t = now();
-            return Math.max(waitOf(users.get(userKey(user)), t), waitOf(client, t));
+            const byUser = waitOf(users.get(userKey(user)), t);
+            return limits().perClient ? Math.max(byUser, waitOf(client, t)) : byUser;
         },
         failed(user: string): void {
             const l = limits();
             const t = now();
             const k = userKey(user);
-            users.set(k, record(users.get(k), l, t));
-            client = record(client, l, t);
+            users.set(k, record(users.get(k), l, l.maxFailures, t));
+            if (l.perClient) client = record(client, l, l.clientMaxFailures, t);
         },
-        /** loginSucceeded: this user's count and the client's. */
+        /** loginSucceeded: this account's count; the client's is left to age out. */
         succeeded(user: string): void {
             users.delete(userKey(user));
-            client = null;
         },
         /** The control panel's "clear the lockout": every count. */
         clear(): void {

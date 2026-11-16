@@ -304,7 +304,7 @@ func TestSMF_RefusalsNeverReachTheBroker(t *testing.T) {
 	}
 	// A throttled upgrade is refused before the broker is dialled. Dials
 	// share the window and never reach the broker, so they spend it here.
-	for range connectsPerWindow {
+	for range defaultConnectsPerMinute {
 		expect(t, s.do("POST", "/managed/dial", dialBody("b1", "v1"), viewer), http.StatusOK, "")
 	}
 	expect(t, s.do("GET", "/managed/smf/b1/v1", "", viewer, wsHeaders(origin)...), http.StatusTooManyRequests, "rate_limited")
@@ -523,4 +523,64 @@ func TestSMF_SocketsAreAudited(t *testing.T) {
 		auditEntry{Actor: "viewer", Client: "127.0.0.1", Action: "smf.open", Target: "b1/v1", Outcome: "ok", Msg: "viewer's SMF socket to b1/v1 opened"},
 		auditEntry{Actor: "viewer", Client: "127.0.0.1", Action: "smf.close", Target: "b1/v1", Outcome: "ok", Msg: "viewer's SMF socket to b1/v1 closed"},
 	)
+}
+
+// The SMF upgrade draws from the same per-user window as a dial, and the window's
+// size is session.connectsPerMinute read at each upgrade.
+func TestSMF_ConnectsPerMinuteIsReadLive(t *testing.T) {
+	s := newSMFEnv(t, fakeAnswer{})
+	viewer := s.cookie("viewer", false)
+	s.setConnects(1)
+	expect(t, s.do("POST", "/managed/dial", dialBody("b1", "v1"), viewer), http.StatusOK, "")
+	refused := s.open(t, "/managed/smf/b1/v1", viewer)
+	if refused.resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("one a minute, spent by the dial: want 429, got %d %s", refused.resp.StatusCode, refused.body)
+	}
+	s.setConnects(2)
+	s.mustOpen(t, "/managed/smf/b1/v1", viewer).echo(t, "ping")
+	if again := s.open(t, "/managed/smf/b1/v1", viewer); again.resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("two a minute, both spent: want 429, got %d", again.resp.StatusCode)
+	}
+}
+
+// Over the open-socket ceiling the gate answers 429 rate_limited with a
+// Retry-After before the broker is dialled, logs it, and takes the next socket
+// once one has closed.
+func TestSMF_OverTheSocketCeilingIsRefusedBeforeTheBroker(t *testing.T) {
+	s := newSMFEnv(t, fakeAnswer{})
+	sockets := s.api.smf.(*smfGate).sockets
+	sockets.perUser = 1
+	viewer := s.cookie("viewer", false)
+	first := s.mustOpen(t, "/managed/smf/b1/v1", viewer)
+	first.echo(t, "ping")
+	hits := s.broker.hits()
+	over := s.open(t, "/managed/smf/b1/v1", viewer)
+	if over.resp.StatusCode != http.StatusTooManyRequests || !strings.Contains(over.body, "rate_limited") {
+		t.Fatalf("over the ceiling: want 429 rate_limited, got %d %s", over.resp.StatusCode, over.body)
+	}
+	if over.resp.Header.Get("Retry-After") != "60" {
+		t.Errorf("Retry-After: %q", over.resp.Header.Get("Retry-After"))
+	}
+	if n := s.broker.hits(); n != hits {
+		t.Errorf("a refused socket must never reach the broker (%d calls, had %d)", n, hits)
+	}
+	if !strings.Contains(s.log.String(), "smf socket refused: too many open sockets") || !strings.Contains(s.log.String(), "user=viewer") {
+		t.Errorf("the refusal must be logged with the user:\n%s", s.log.String())
+	}
+	other := s.mustOpen(t, "/managed/smf/b1/v1", s.cookie("admin", false))
+	other.echo(t, "ping") // the ceiling is per user: the admin has none open
+
+	_ = first.conn.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		ws := s.open(t, "/managed/smf/b1/v1", viewer)
+		if ws.resp.StatusCode == http.StatusSwitchingProtocols {
+			ws.echo(t, "ping")
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("closing the first socket never admitted the next: %d %s", ws.resp.StatusCode, ws.body)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

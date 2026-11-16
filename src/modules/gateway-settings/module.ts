@@ -1,17 +1,16 @@
 /**
  * Gateway Settings Module (managed/RBAC variant, admin-only).
  *
- * Edits the gateway's config.yaml over `GET`/`PUT /managed/settings`
+ * Edits the gateway's settings over `GET`/`PUT /managed/settings`
  * (go-web-proxy/settings.go). Ships in the standalone `/solAdmin` app (the
  * `admin` variant); the id maps to `'admin'` in rbac.ts's MODULE_REQUIREMENTS.
  *
  * The gateway validates a save exactly as at startup and applies the keys on
  * the next request (the TLS paths are environment variables, not settings, and
- * the certificate and trusted CAs live in the Certificates module). The keys it
- * reports as `restartOnly` are tagged "restart" here, and a banner lists the
- * ones saved but not yet running, pointing at the Restart gateway button of the
- * "Gateway" card: a confirm dialog, `POST /managed/restart`, then a wait for
- * `/hosted` to answer again and a move to the sign-in. It refuses an
+ * the certificate and trusted CAs live in the Certificates module). The
+ * Restart gateway button of the "Gateway" card asks first, then sends
+ * `POST /managed/restart`, waits for `/hosted` to answer again and moves to
+ * the sign-in. The gateway refuses an
  * access list that would deny this browser (`would_lock_out`, shown with the
  * gateway's reason) and a save over a hand edit of the file it has not loaded
  * (`changedOnDisk`, which also disables Save). Imports only from
@@ -36,7 +35,7 @@ import type { AppContext } from '../../core/types';
 type Kind = 'text' | 'bool' | 'int' | 'lines';
 
 /**
- * Every form field: its config.yaml key and how its input holds the value.
+ * Every form field: its settings key and how its input holds the value.
  * The input's id is `gw-set-` plus the key with the dot as a dash.
  * `modules.offered` is a toggle tile per catalog module, handled on its own.
  */
@@ -47,11 +46,17 @@ const FIELDS: ReadonlyArray<{ key: string; kind: Kind }> = [
     { key: 'access.trustedProxies', kind: 'lines' },
     { key: 'session.idleMinutes', kind: 'int' },
     { key: 'session.absoluteMinutes', kind: 'int' },
+    { key: 'session.connectsPerMinute', kind: 'int' },
+    { key: 'login.perClient', kind: 'bool' },
     { key: 'login.maxFailures', kind: 'int' },
+    { key: 'login.clientMaxFailures', kind: 'int' },
+    { key: 'login.resetMinutes', kind: 'int' },
     { key: 'login.backoffSeconds', kind: 'int' },
     { key: 'login.maxBackoffSeconds', kind: 'int' },
     { key: 'login.unauthenticatedPerMinute', kind: 'int' },
+    { key: 'login.passwordMinLength', kind: 'int' },
     { key: 'login.twoFactor', kind: 'text' },
+    { key: 'login.twoFactorMinutes', kind: 'int' },
     { key: 'modules.userDefault', kind: 'text' },
     { key: 'logLevel', kind: 'text' },
     { key: 'audit.stdout', kind: 'bool' },
@@ -106,9 +111,6 @@ export const GatewaySettingsModule = {
             btnReload: required<HTMLButtonElement>(container, '#btn-gw-set-reload'),
             btnSave: required<HTMLButtonElement>(container, '#btn-gw-set-save'),
             disk: required<HTMLElement>(container, '#gw-set-disk'),
-            pending: required<HTMLElement>(container, '#gw-set-pending'),
-            pendingText: required<HTMLElement>(container, '#gw-set-pending-text'),
-            btnGotoRestart: required<HTMLButtonElement>(container, '#btn-gw-set-goto-restart'),
             btnRestart: required<HTMLButtonElement>(container, '#btn-gw-set-restart'),
             restarting: required<HTMLElement>(container, '#gw-set-restarting'),
             restartError: required<HTMLElement>(container, '#gw-set-restart-error'),
@@ -182,12 +184,6 @@ export const GatewaySettingsModule = {
             }
             els.offered.innerHTML = '';
             for (const id of view.catalog) els.offered.appendChild(moduleTile(id, view.settings.modules.offered.includes(id)));
-            container.querySelectorAll<HTMLElement>('[data-key]').forEach(group => {
-                group.classList.toggle('gw-set-restart', view.restartOnly.includes(group.dataset.key as string));
-            });
-            const pending = view.pendingRestart;
-            els.pendingText.textContent = pending.length ? `Saved, applies when the gateway restarts: ${pending.join(', ')}.` : '';
-            els.pending.classList.toggle('hidden', pending.length === 0);
             showChangedOnDisk(view.changedOnDisk);
         }
 
@@ -264,7 +260,7 @@ export const GatewaySettingsModule = {
             }
             loadedRev = res.data.rev;
             showToast('Settings saved', 'ok');
-            await load(); // the gateway's normalised values and the restart banner
+            await load(); // the gateway's normalised values
         }
 
         function setRestartError(msg: string | null): void {
@@ -322,7 +318,6 @@ export const GatewaySettingsModule = {
         els.btnReload.addEventListener('click', () => void load());
         els.btnSave.addEventListener('click', () => void save());
         els.btnRestart.addEventListener('click', () => void restart());
-        els.btnGotoRestart.addEventListener('click', () => els.btnRestart.focus());
         eventBus.on('rbac:changed', () => {
             if (sessionKey() !== appliedKey) applyGate();
         });

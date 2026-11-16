@@ -94,7 +94,7 @@ func TestDial_ConnectsAreRateLimitedPerUser(t *testing.T) {
 	dial := func(c *http.Cookie) *httptest.ResponseRecorder {
 		return e.do("POST", "/managed/dial", dialBody("b1", "v1"), c)
 	}
-	for range connectsPerWindow {
+	for range defaultConnectsPerMinute {
 		expect(t, dial(viewer), http.StatusOK, "")
 	}
 	rec := dial(viewer)
@@ -106,6 +106,36 @@ func TestDial_ConnectsAreRateLimitedPerUser(t *testing.T) {
 	expect(t, e.do("GET", "/managed/smf/b1/v1", "", viewer, wsHeaders("https://gw.example")...), http.StatusTooManyRequests, "rate_limited")
 	e.clock.advance(connectWindow)
 	expect(t, dial(viewer), http.StatusOK, "")
+}
+
+// setConnects swaps the live session.connectsPerMinute, as a settings save does.
+func (e *managedEnv) setConnects(n int) {
+	next := e.cfg
+	next.session.connects = n
+	e.live.apply(next)
+}
+
+// session.connectsPerMinute is read at each dial: raising it in the middle of a
+// window admits more, lowering it below what the window already holds refuses
+// at once, and a new window starts from the setting in force.
+func TestDial_ConnectsPerMinuteIsReadLive(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	viewer := e.cookie("viewer", false)
+	dial := func() *httptest.ResponseRecorder {
+		return e.do("POST", "/managed/dial", dialBody("b1", "v1"), viewer)
+	}
+	e.setConnects(2)
+	expect(t, dial(), http.StatusOK, "")
+	expect(t, dial(), http.StatusOK, "")
+	expect(t, dial(), http.StatusTooManyRequests, "rate_limited")
+	e.setConnects(3)
+	expect(t, dial(), http.StatusOK, "")
+	expect(t, dial(), http.StatusTooManyRequests, "rate_limited")
+	e.setConnects(1)
+	expect(t, dial(), http.StatusTooManyRequests, "rate_limited")
+	e.clock.advance(connectWindow)
+	expect(t, dial(), http.StatusOK, "")
+	expect(t, dial(), http.StatusTooManyRequests, "rate_limited")
 }
 
 // A secret marshals as itself and nothing else prints it.
