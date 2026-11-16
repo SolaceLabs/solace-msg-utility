@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Solace Sandbox</title>
+    <script src="solclient.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            margin: 0;
+            padding: 1.5rem;
+            background: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+        }
+
+        h1 {
+            margin: 0 0 1rem 0;
+            font-size: 1.25rem;
+            color: #00C895;
+        }
+
+        h2 {
+            margin: 0 0 0.5rem 0;
+            font-size: 0.95rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        section {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        @media (max-width: 800px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        label {
+            display: block;
+            margin: 0.25rem 0 0.15rem 0;
+            font-size: 0.75rem;
+            color: #94a3b8;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 0.35rem 0.5rem;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 4px;
+            color: #e2e8f0;
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
+
+        input:focus,
+        select:focus {
+            outline: none;
+            border-color: #00C895;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+        }
+
+        .row-3 {
+            display: grid;
+            grid-template-columns: 1fr 100px 1fr;
+            gap: 0.5rem;
+        }
+
+        button {
+            padding: 0.4rem 0.9rem;
+            background: #00C895;
+            color: #0f172a;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 0.8rem;
+            margin-top: 0.5rem;
+            margin-right: 0.4rem;
+        }
+
+        button:hover:not(:disabled) {
+            filter: brightness(0.92);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: #334155;
+            color: #e2e8f0;
+        }
+
+        button.danger {
+            background: #ef4444;
+            color: #fff;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            margin-left: 0.5rem;
+        }
+
+        .status-ok {
+            background: #14532d;
+            color: #86efac;
+        }
+
+        .status-err {
+            background: #7f1d1d;
+            color: #fecaca;
+        }
+
+        .status-pending {
+            background: #713f12;
+            color: #fde68a;
+        }
+
+        .status-idle {
+            background: #334155;
+            color: #94a3b8;
+        }
+
+        pre#log {
+            background: #020617;
+            border: 1px solid #334155;
+            border-radius: 4px;
+            padding: 0.75rem;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin: 0;
+        }
+
+        code {
+            background: #0f172a;
+            padding: 0.1rem 0.35rem;
+            border-radius: 3px;
+            color: #00C895;
+            font-size: 0.8rem;
+        }
+
+        ul {
+            margin: 0.25rem 0;
+            padding-left: 1.25rem;
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+
+        li code {
+            font-size: 0.75rem;
+        }
+
+        .hint {
+            color: #64748b;
+            font-size: 0.75rem;
+            margin-top: 0.5rem;
+        }
+
+        /* ---- <dialog> showcase ---- */
+        dialog {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            color: #e2e8f0;
+            padding: 0;
+            min-width: 360px;
+            max-width: 560px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        dialog::backdrop {
+            background: rgba(2, 6, 23, 0.7);
+            backdrop-filter: blur(2px);
+        }
+
+        dialog .dlg-header,
+        dialog .dlg-body,
+        dialog .dlg-footer {
+            padding: 0.75rem 1rem;
+        }
+
+        dialog .dlg-header {
+            border-bottom: 1px solid #334155;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        dialog .dlg-header h3 {
+            margin: 0;
+            font-size: 0.95rem;
+            color: #00C895;
+        }
+
+        dialog .dlg-close {
+            background: transparent;
+            color: #94a3b8;
+            border: none;
+            margin: 0;
+            padding: 0.15rem 0.4rem;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+
+        dialog .dlg-close:hover {
+            color: #e2e8f0;
+        }
+
+        dialog .dlg-footer {
+            border-top: 1px solid #334155;
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.4rem;
+        }
+
+        dialog .dlg-footer button {
+            margin-top: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Solace Sandbox</h1>
+
+    <div class="grid">
+        <!-- Solace Client (Web Messaging) -->
+        <section>
+            <h2>Solace Client (Web Messaging) <span id="sol-status" class="status status-idle">Disconnected</span></h2>
+            <div class="row">
+                <div><label>Host</label><input id="sol-host" value="localhost"></div>
+                <div><label>VPN</label><input id="sol-vpn" value="default"></div>
+            </div>
+            <div class="row-3">
+                <div><label>Protocol</label>
+                    <select id="sol-protocol">
+                        <option value="wss" selected>wss</option>
+                        <option value="ws">ws</option>
+                    </select>
+                </div>
+                <div><label>Port</label><input id="sol-port" value="1443"></div>
+                <div><label>Username</label><input id="sol-user" value="default"></div>
+            </div>
+            <div><label>Password</label><input id="sol-pass" type="password"></div>
+            <button id="sol-connect">Connect</button>
+            <button id="sol-disconnect" class="secondary">Disconnect</button>
+        </section>
+
+        <!-- SEMP -->
+        <section>
+            <h2>SEMP (Management API) <span id="semp-status" class="status status-idle">Idle</span></h2>
+            <div class="row">
+                <div><label>Host</label><input id="semp-host" value="localhost"></div>
+                <div><label>Username</label><input id="semp-user" value="admin"></div>
+            </div>
+            <div class="row-3">
+                <div><label>Protocol</label>
+                    <select id="semp-protocol">
+                        <option value="https" selected>https</option>
+                        <option value="http">http</option>
+                    </select>
+                </div>
+                <div><label>Port</label><input id="semp-port" value="1943"></div>
+                <div><label>Password</label><input id="semp-pass" type="password"></div>
+            </div>
+            <button id="semp-test">Test Auth</button>
+            <button id="semp-list-vpns" class="secondary">List VPNs</button>
+            <div class="hint">SEMP has no persistent session — credentials are captured for
+                <code>sandbox.sempFetch()</code>.
+            </div>
+        </section>
+    </div>
+
+    <!-- Queue Browser -->
+    <section>
+        <h2>Queue Browser</h2>
+        <div class="row-3" style="align-items: end;">
+            <div style="grid-column: 1 / span 2;">
+                <label>Queue Name</label>
+                <input id="qb-queue-name" placeholder="e.g. test-queue-1">
+            </div>
+            <div>
+                <label>Max messages (for collect)</label>
+                <input id="qb-max" type="number" value="50" min="1">
+            </div>
+        </div>
+        <div>
+            <label>Stop browser on Guaranteed Message ID (live match)</label>
+            <input id="qb-stop-id" placeholder="leave blank to disable">
+        </div>
+        <button id="qb-create">Create Browser</button>
+        <button id="qb-collect" class="secondary">Browse &amp; Collect</button>
+        <div style="margin-top: 0.75rem;">
+            <label>Active browsers</label>
+            <ul id="qb-active" style="list-style: none; padding: 0; margin: 0; font-size: 0.8rem;">
+                <li style="color: #64748b; padding: 0.25rem 0;">None yet — create one above.</li>
+            </ul>
+        </div>
+        <div class="hint">
+            <strong>Create Browser</strong> opens a persistent <code>QueueBrowser</code> and logs every message as it
+            arrives. <strong>Browse &amp; Collect</strong> returns a <code>Promise&lt;message[]&gt;</code> — resolves
+            after <em>max</em> messages or 3&nbsp;s of silence. Both are also available from the console as
+            <code>sandbox.createBrowser(name)</code> / <code>sandbox.browseQueue(name, max)</code>.
+        </div>
+    </section>
+
+    <!-- Native <dialog> showcase -->
+    <section>
+        <h2>Native <code>&lt;dialog&gt;</code> Showcase</h2>
+        <p style="font-size: 0.8rem; margin: 0 0 0.5rem 0;">
+            Spike for the L7 modal migration. This dialog uses the native <code>&lt;dialog&gt;</code> element with
+            <code>showModal()</code> instead of a hand-rolled <code>.modal-backdrop</code> div. Verify by hand:
+        </p>
+        <ul>
+            <li><strong>Focus trap</strong> — Tab/Shift-Tab cycles within the dialog only.</li>
+            <li><strong>Escape</strong> closes the dialog (no listener wiring needed).</li>
+            <li><strong>Backdrop click</strong> closes (we wire this — not native).</li>
+            <li><strong>Return value</strong> via <code>dialog.close(value)</code> → <code>dialog.returnValue</code>.
+            </li>
+            <li><strong>ARIA</strong> — implicit <code>role="dialog"</code>, <code>aria-modal</code>.</li>
+            <li><strong>Initial focus</strong> — <code>autofocus</code> on the first input works in modal mode.</li>
+        </ul>
+        <button id="dlg-open">Open Dialog</button>
+        <button id="dlg-open-confirm" class="secondary">Open Confirm</button>
+    </section>
+
+    <dialog id="demo-dialog" aria-labelledby="demo-dialog-title">
+        <form method="dialog">
+            <div class="dlg-header">
+                <h3 id="demo-dialog-title">Forward Message (demo)</h3>
+                <button type="button" class="dlg-close" aria-label="Close" data-close>&times;</button>
+            </div>
+            <div class="dlg-body">
+                <label for="dlg-dest-type">Destination Type</label>
+                <select id="dlg-dest-type">
+                    <option value="Topic">Topic</option>
+                    <option value="Queue">Queue</option>
+                    <option value="Original">Original</option>
+                </select>
+                <label for="dlg-dest-name" style="margin-top: 0.5rem;">Destination Name</label>
+                <input id="dlg-dest-name" autofocus placeholder="e.g. demo/topic">
+            </div>
+            <div class="dlg-footer">
+                <button type="button" class="secondary" data-close value="cancel">Close</button>
+                <button type="submit" value="send">Send</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="confirm-dialog" aria-labelledby="confirm-dialog-title">
+        <form method="dialog">
+            <div class="dlg-header">
+                <h3 id="confirm-dialog-title">Confirm</h3>
+            </div>
+            <div class="dlg-body">
+                <p style="margin: 0; font-size: 0.85rem;">Delete 3 messages from <code>test-queue-1</code>?</p>
+            </div>
+            <div class="dlg-footer">
+                <button type="button" class="secondary" data-close value="cancel">Cancel</button>
+                <button type="submit" class="danger" value="delete">Delete</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Log -->
+    <section>
+        <h2>Log <button onclick="document.getElementById('log').textContent=''" class="secondary"
+                style="float:right; margin:0;">Clear</button></h2>
+        <pre id="log">Ready. Type <code>sandbox.help()</code> in the console to list available commands.
+</pre>
+    </section>
+
+    <!-- API reference -->
+    <section>
+        <h2>Exposed on <code>window.sandbox</code></h2>
+        <ul>
+            <li><code>sandbox.sdk</code> — raw <code>solace</code> global (same as <code>window.solace</code>)</li>
+            <li><code>sandbox.session</code> — live Solace session, once connected</li>
+            <li><code>sandbox.cfg</code> — captured <code>{ client, semp }</code> configs</li>
+            <li><code>sandbox.sempFetch(url, init?)</code> — <code>fetch()</code> with Basic-Auth pre-applied from SEMP
+                form</li>
+            <li><code>sandbox.listVpns()</code> — SEMP GET <code>/SEMP/v2/monitor/msgVpns</code></li>
+            <li><code>sandbox.listQueues(vpnName)</code> — SEMP GET
+                <code>/SEMP/v2/monitor/msgVpns/&lt;vpn&gt;/queues</code>
+            </li>
+            <li><code>sandbox.browsers</code> — <code>Map&lt;queueName, QueueBrowser&gt;</code> of active browsers</li>
+            <li><code>sandbox.messages</code> — per-queue ring buffers:
+                <code>sandbox.messages['test-queue-1']</code> → <code>Array&lt;{ msg, at }&gt;</code>.
+                Each buffer caps at 1000 entries (oldest dropped). Populated by <code>createBrowser()</code> events.
+            </li>
+            <li><code>sandbox.allMessages()</code> — flattened view across every queue, sorted by arrival time.
+                Each entry is <code>{ queue, msg, at }</code></li>
+            <li><code>sandbox.clearMessages(queueName?)</code> — wipe one queue's buffer, or all buffers when called
+                without args</li>
+            <li><code>sandbox.createBrowser(queueName)</code> — open a <code>QueueBrowser</code> on the current session
+            </li>
+            <li><code>sandbox.disconnectBrowser(queueName)</code> — close a browser created via
+                <code>createBrowser</code>
+            </li>
+            <li><code>sandbox.browseQueue(queueName, max=50)</code> — bind + collect up to <code>max</code> messages
+                into an array (returns a Promise)</li>
+            <li><code>sandbox.send(destName, text, destType='topic')</code> — publish a <code>TextMessage</code>
+                (destType: <code>'topic'</code> or <code>'queue'</code>)</li>
+            <li><code>sandbox.subscribe(topicPattern)</code> — session.subscribe on a topic (logs incoming messages)
+            </li>
+            <li><code>sandbox.log(...args)</code> — log to both console and the on-page pane</li>
+            <li><code>sandbox.help()</code> — print this list</li>
+        </ul>
+    </section>
+
+    <script>
+        (function () {
+            'use strict';
+            const $ = (id) => document.getElementById(id);
+
+            function setStatus(prefix, text, kind) {
+                const el = $(`${prefix}-status`);
+                el.textContent = text;
+                el.className = 'status status-' + (kind || 'idle');
+            }
+
+            const logPane = $('log');
+            function log(...args) {
+                console.log(...args);
+                const line = args.map(a => {
+                    if (a instanceof Error) return `${a.name}: ${a.message}`;
+                    if (typeof a === 'object') {
+                        try { return JSON.stringify(a, null, 2); } catch (e) { return String(a); }
+                    }
+                    return String(a);
+                }).join(' ');
+                logPane.textContent += line + '\n';
+                logPane.scrollTop = logPane.scrollHeight;
+            }
+
+            function initSDK() {
+                if (!window.solace) throw new Error('solclient.js did not load. Place it alongside sandbox.html.');
+                if (!window.sandbox._initialized) {
+                    const props = new solace.SolclientFactoryProperties();
+                    props.profile = solace.SolclientFactoryProfiles.version10;
+                    props.logLevel = solace.LogLevel.WARN;
+                    solace.SolclientFactory.init(props);
+                    window.sandbox._initialized = true;
+                    log('[init] SolclientFactory initialized (profile: version10, logLevel: WARN)');
+                }
+            }
+
+            function readClientForm() {
+                return {
+                    host: $('sol-host').value.trim(),
+                    protocol: $('sol-protocol').value,
+                    port: $('sol-port').value.trim(),
+                    vpn: $('sol-vpn').value.trim(),
+                    user: $('sol-user').value.trim(),
+                    pass: $('sol-pass').value
+                };
+            }
+
+            function readSempForm() {
+                return {
+                    host: $('semp-host').value.trim(),
+                    protocol: $('semp-protocol').value,
+                    port: $('semp-port').value.trim(),
+                    user: $('semp-user').value.trim(),
+                    pass: $('semp-pass').value
+                };
+            }
+
+            function connectSolace() {
+                initSDK();
+                const cfg = readClientForm();
+                sandbox.cfg.client = cfg;
+
+                if (sandbox.session) {
+                    try { sandbox.session.disconnect(); } catch (e) { log('[connect] prior session disconnect error:', e); }
+                }
+
+                const sp = new solace.SessionProperties();
+                sp.url = `${cfg.protocol}://${cfg.host}:${cfg.port}`;
+                sp.vpnName = cfg.vpn;
+                sp.userName = cfg.user;
+                sp.password = cfg.pass;
+                sp.clientName = "test-SMU-!@#$%^&_+-=/\\;':,.";
+
+
+                const session = solace.SolclientFactory.createSession(sp);
+
+                session.on(solace.SessionEventCode.UP_NOTICE, () => {
+                    setStatus('sol', 'Connected', 'ok');
+                    log('[solace] UP_NOTICE — session ready');
+                });
+                session.on(solace.SessionEventCode.CONNECT_FAILED_ERROR, (e) => {
+                    setStatus('sol', 'Failed', 'err');
+                    log('[solace] CONNECT_FAILED_ERROR:', e.infoStr || e);
+                });
+                session.on(solace.SessionEventCode.DISCONNECTED, () => {
+                    setStatus('sol', 'Disconnected', 'idle');
+                    log('[solace] DISCONNECTED');
+                });
+                session.on(solace.SessionEventCode.MESSAGE, (msg) => {
+                    log('[solace] MESSAGE:', msg.dump ? msg.dump() : msg);
+                });
+                session.on(solace.SessionEventCode.REJECTED_MESSAGE_ERROR, (e) => {
+                    log('[solace] REJECTED_MESSAGE_ERROR:', e.infoStr || e);
+                });
+                session.on(solace.SessionEventCode.ACKNOWLEDGED_MESSAGE, (e) => {
+                    log('[solace] ACKNOWLEDGED_MESSAGE:', e.correlationKey);
+                });
+
+                sandbox.session = session;
+                setStatus('sol', 'Connecting...', 'pending');
+                log('[solace] connecting to', sp.url, 'as', cfg.user + '@' + cfg.vpn);
+                try {
+                    session.connect();
+                } catch (e) {
+                    setStatus('sol', 'Error', 'err');
+                    log('[solace] connect() threw:', e);
+                }
+            }
+
+            function disconnectSolace() {
+                if (!sandbox.session) { log('[solace] no active session'); return; }
+                try { sandbox.session.disconnect(); } catch (e) { log('[solace] disconnect error:', e); }
+            }
+
+            function renderBrowsersList() {
+                const list = $('qb-active');
+                const names = Array.from(sandbox.browsers.keys());
+                if (names.length === 0) {
+                    list.innerHTML = '<li style="color: #64748b; padding: 0.25rem 0;">None yet — create one above.</li>';
+                    return;
+                }
+                list.innerHTML = '';
+                names.forEach(name => {
+                    const li = document.createElement('li');
+                    li.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 0.25rem 0; border-bottom: 1px solid #334155;';
+                    const label = document.createElement('span');
+                    label.textContent = name;
+                    const btn = document.createElement('button');
+                    btn.className = 'danger';
+                    btn.style.cssText = 'margin: 0; padding: 0.2rem 0.5rem; font-size: 0.7rem;';
+                    btn.textContent = 'Disconnect';
+                    btn.addEventListener('click', () => sandbox.disconnectBrowser(name));
+                    li.appendChild(label);
+                    li.appendChild(btn);
+                    list.appendChild(li);
+                });
+            }
+
+            // --- sandbox API exposed on window ---
+            const PER_QUEUE_CAP = 1000;
+            window.sandbox = {
+                _initialized: false,
+                get sdk() { return window.solace; },
+                session: null,
+                cfg: { client: {}, semp: {} },
+                /**
+                 * Per-queue message buffers. One ring buffer per queue name.
+                 *   sandbox.messages['test-queue-1']  → Array<{ msg, at }>
+                 *   sandbox.messages['test-queue-2']  → Array<{ msg, at }>
+                 * Each buffer is capped at PER_QUEUE_CAP (1000) — oldest entries drop first.
+                 * `disconnectBrowser(name)` leaves the buffer intact so you can still inspect after unbind;
+                 * call `sandbox.clearMessages(name)` to wipe a single queue, or `sandbox.clearMessages()` to wipe all.
+                 */
+                messages: {},
+                lastCollected: null,   // Last array returned by browseQueue() / Browse & Collect.
+                log,
+
+                clearMessages(queueName) {
+                    if (queueName) {
+                        delete sandbox.messages[queueName];
+                        log(`[sandbox] messages[${queueName}] cleared`);
+                    } else {
+                        sandbox.messages = {};
+                        log('[sandbox] all message buffers cleared');
+                    }
+                },
+
+                /** Flattened view across every queue, newest-last. Handy one-liner. */
+                allMessages() {
+                    return Object.entries(sandbox.messages).flatMap(([queue, buf]) =>
+                        buf.map(e => ({ queue, msg: e.msg, at: e.at }))
+                    ).sort((a, b) => a.at - b.at);
+                },
+
+                sempFetch(url, init = {}) {
+                    if (!sandbox.cfg.semp.user) {
+                        // Capture form creds on first call if the user hasn't clicked Test Auth.
+                        sandbox.cfg.semp = readSempForm();
+                    }
+                    const { user, pass } = sandbox.cfg.semp;
+                    const headers = {
+                        ...(init.headers || {}),
+                        'Authorization': 'Basic ' + btoa(`${user}:${pass}`)
+                    };
+                    return fetch(url, { ...init, headers });
+                },
+
+                async listVpns(count = 100) {
+                    const { protocol, host, port } = sandbox.cfg.semp.host ? sandbox.cfg.semp : readSempForm();
+                    const res = await sandbox.sempFetch(`${protocol}://${host}:${port}/SEMP/v2/monitor/msgVpns?count=${count}`);
+                    return res.ok ? (await res.json()).data : Promise.reject(new Error(`${res.status} ${res.statusText}`));
+                },
+
+                async listQueues(vpnName, count = 100) {
+                    const { protocol, host, port } = sandbox.cfg.semp.host ? sandbox.cfg.semp : readSempForm();
+                    const res = await sandbox.sempFetch(`${protocol}://${host}:${port}/SEMP/v2/monitor/msgVpns/${encodeURIComponent(vpnName)}/queues?count=${count}`);
+                    return res.ok ? (await res.json()).data : Promise.reject(new Error(`${res.status} ${res.statusText}`));
+                },
+
+                browsers: new Map(),
+
+                createBrowser(queueName) {
+                    if (!sandbox.session) throw new Error('No active session — click Connect first.');
+                    if (sandbox.browsers.has(queueName)) {
+                        log(`[browser:${queueName}] already active — reusing existing`);
+                        return sandbox.browsers.get(queueName);
+                    }
+                    const bp = new solace.QueueBrowserProperties();
+                    bp.queueDescriptor = { name: queueName, type: solace.QueueType.QUEUE };
+                    bp.acknowledgeMode = solace.MessageConsumerAcknowledgeMode.CLIENT;
+                    const browser = sandbox.session.createQueueBrowser(bp);
+                    browser.on(solace.QueueBrowserEventName.UP, () => log(`[browser:${queueName}] UP`));
+                    browser.on(solace.QueueBrowserEventName.CONNECT_FAILED_ERROR, (e) => {
+                        log(`[browser:${queueName}] CONNECT_FAILED:`, e);
+                        sandbox.browsers.delete(queueName);
+                        renderBrowsersList();
+                    });
+                    browser.on(solace.QueueBrowserEventName.DOWN_ERROR, (e) => {
+                        log(`[browser:${queueName}] DOWN:`, e);
+                        sandbox.browsers.delete(queueName);
+                        renderBrowsersList();
+                    });
+                    browser.on(solace.QueueBrowserEventName.MESSAGE, (msg) => {
+                        // Per-queue ring buffer — drop oldest once we hit the cap so memory is bounded.
+                        if (!sandbox.messages[queueName]) sandbox.messages[queueName] = [];
+                        const buf = sandbox.messages[queueName];
+                        if (buf.length >= PER_QUEUE_CAP) buf.shift();
+                        buf.push({ msg, at: new Date() });
+                        log(`[browser:${queueName}] MESSAGE:`, msg.dump ? msg.dump() : msg);
+                    });
+                    // Separate listener: stop the browser when an incoming message's
+                    // guaranteed id matches the live value of the #qb-stop-id input.
+                    // getGuaranteedMessageId() returns a Long-like object → toString() before compare.
+                    // Read the field on each message so the user can change/clear it on the fly.
+                    browser.on(solace.QueueBrowserEventName.MESSAGE, (msg) => {
+                        const target = $('qb-stop-id').value.trim();
+                        if (!target) return;
+                        const raw = msg.getGuaranteedMessageId && msg.getGuaranteedMessageId();
+                        const id = raw == null ? null : (typeof raw === 'string' ? raw : raw.toString());
+                        if (id !== target) return;
+                        try {
+                            browser.stop();
+                            log(`[browser:${queueName}] stop() — guaranteed id "${id}" matched`);
+                        } catch (e) {
+                            log(`[browser:${queueName}] stop() error:`, e);
+                        }
+                    });
+                    browser.connect();
+                    sandbox.browsers.set(queueName, browser);
+                    renderBrowsersList();
+                    return browser;
+                },
+
+                disconnectBrowser(queueName) {
+                    const browser = sandbox.browsers.get(queueName);
+                    if (!browser) { log(`[browser:${queueName}] no active browser`); return; }
+                    try { browser.disconnect(); } catch (e) { log(`[browser:${queueName}] disconnect error:`, e); }
+                    sandbox.browsers.delete(queueName);
+                    renderBrowsersList();
+                    log(`[browser:${queueName}] disconnected`);
+                },
+
+                browseQueue(queueName, max = 50) {
+                    if (!sandbox.session) return Promise.reject(new Error('No active session — click Connect first.'));
+                    return new Promise((resolve, reject) => {
+                        const messages = [];
+                        const bp = new solace.QueueBrowserProperties();
+                        bp.queueDescriptor = { name: queueName, type: solace.QueueType.QUEUE };
+                        bp.acknowledgeMode = solace.MessageConsumerAcknowledgeMode.CLIENT;
+                        const browser = sandbox.session.createQueueBrowser(bp);
+                        const done = (err) => {
+                            try { browser.disconnect(); } catch (e) { /* already down */ }
+                            err ? reject(err) : resolve(messages);
+                        };
+                        browser.on(solace.QueueBrowserEventName.CONNECT_FAILED_ERROR, (e) => done(new Error(e.infoStr || 'connect failed')));
+                        browser.on(solace.QueueBrowserEventName.DOWN_ERROR, (e) => done(new Error(e.infoStr || 'browser down')));
+                        browser.on(solace.QueueBrowserEventName.MESSAGE, (msg) => {
+                            messages.push(msg);
+                            if (messages.length >= max) done();
+                        });
+                        browser.connect();
+                        // Safety timeout in case the queue is empty — resolve with whatever we've got after 3s of quiet.
+                        setTimeout(() => done(), 3000);
+                    });
+                },
+
+                send(destName, text, destType = 'topic') {
+                    if (!sandbox.session) throw new Error('No active session — click Connect first.');
+                    const msg = solace.SolclientFactory.createMessage();
+                    const dest = destType === 'queue'
+                        ? solace.SolclientFactory.createDurableQueueDestination(destName)
+                        : solace.SolclientFactory.createTopicDestination(destName);
+                    msg.setDestination(dest);
+                    msg.setBinaryAttachment(text);
+                    msg.setDeliveryMode(solace.MessageDeliveryModeType.PERSISTENT);
+                    sandbox.session.send(msg);
+                    log(`[send] sent ${text.length}-byte payload to ${destType}:${destName}`);
+                    return msg;
+                },
+
+                subscribe(topicPattern) {
+                    if (!sandbox.session) throw new Error('No active session — click Connect first.');
+                    const topic = solace.SolclientFactory.createTopicDestination(topicPattern);
+                    sandbox.session.subscribe(topic, true, topicPattern, 10000);
+                    log(`[subscribe] requested subscribe on ${topicPattern}`);
+                },
+
+                help() {
+                    const lines = [
+                        'sandbox.sdk                           — the raw solace global',
+                        'sandbox.session                       — active solace session (null until connected)',
+                        'sandbox.cfg                           — { client, semp } captured configs',
+                        'sandbox.sempFetch(url, init?)         — fetch with Basic auth for SEMP creds',
+                        'sandbox.listVpns(count=100)           — GET msgVpns',
+                        'sandbox.listQueues(vpn, count=100)    — GET msgVpns/<vpn>/queues',
+                        'sandbox.browsers                      — Map<queueName, QueueBrowser> of active browsers',
+                        'sandbox.messages                      — { [queueName]: Array<{msg, at}> }, per-queue ring buffer (cap 1000 each)',
+                        'sandbox.allMessages()                 — flat [{queue, msg, at}] across all queues, sorted by arrival',
+                        'sandbox.clearMessages(name?)          — wipe one queue or (no arg) all buffers',
+                        'sandbox.createBrowser(queueName)      — returns a wired QueueBrowser (non-blocking)',
+                        'sandbox.disconnectBrowser(queueName)  — close a browser created above',
+                        'sandbox.browseQueue(queueName, max=50) → Promise<message[]>  — collect N messages',
+                        'sandbox.send(destName, text, destType="topic"|"queue")',
+                        'sandbox.subscribe(topicPattern)       — session.subscribe',
+                        'sandbox.log(...args)                  — write to console AND the on-page pane'
+                    ];
+                    log(lines.join('\n'));
+                    return undefined;
+                }
+            };
+
+            // --- Button bindings ---
+            $('sol-connect').addEventListener('click', connectSolace);
+            $('sol-disconnect').addEventListener('click', disconnectSolace);
+
+            $('semp-test').addEventListener('click', async () => {
+                sandbox.cfg.semp = readSempForm();
+                const { protocol, host, port } = sandbox.cfg.semp;
+                setStatus('semp', 'Testing...', 'pending');
+                try {
+                    const res = await sandbox.sempFetch(`${protocol}://${host}:${port}/SEMP/v2/monitor/msgVpns?count=1`);
+                    if (res.ok) {
+                        setStatus('semp', `OK (${res.status})`, 'ok');
+                        log('[semp] auth succeeded —', await res.json());
+                    } else {
+                        setStatus('semp', `${res.status}`, 'err');
+                        log('[semp] failed:', res.status, res.statusText);
+                    }
+                } catch (e) {
+                    setStatus('semp', 'Error', 'err');
+                    log('[semp] error:', e);
+                }
+            });
+
+            $('semp-list-vpns').addEventListener('click', async () => {
+                sandbox.cfg.semp = readSempForm();
+                try {
+                    const vpns = await sandbox.listVpns();
+                    log('[semp] VPNs:', vpns.map(v => v.msgVpnName).join(', '));
+                } catch (e) {
+                    log('[semp] listVpns error:', e);
+                }
+            });
+
+            $('qb-create').addEventListener('click', () => {
+                const name = $('qb-queue-name').value.trim();
+                if (!name) { log('[browser] queue name required'); return; }
+                try { sandbox.createBrowser(name); } catch (e) { log('[browser] create error:', e); }
+            });
+
+            $('qb-collect').addEventListener('click', async () => {
+                const name = $('qb-queue-name').value.trim();
+                const max = parseInt($('qb-max').value, 10) || 50;
+                if (!name) { log('[browser] queue name required'); return; }
+                log(`[browser:${name}] collecting up to ${max} message(s)...`);
+                try {
+                    const msgs = await sandbox.browseQueue(name, max);
+                    log(`[browser:${name}] collected ${msgs.length} message(s). Assigned to sandbox.lastCollected.`);
+                    sandbox.lastCollected = msgs;
+                } catch (e) {
+                    log(`[browser:${name}] collect error:`, e);
+                }
+            });
+
+            // --- <dialog> showcase wiring ---
+            // Each <dialog> contains a <form method="dialog">; submitting it (or any
+            // button[type=submit]) closes the dialog and sets dialog.returnValue to
+            // the button's value attribute. data-close buttons explicitly call close()
+            // with their value so they work the same way without form submission.
+            function wireDialog(dlg) {
+                // Close-on-backdrop-click. The trick: when the user clicks the dimmed
+                // area outside the dialog content, the click target IS the dialog
+                // element itself (because the backdrop is a pseudo-element layered
+                // behind the dialog box, and the click bubbles up to <dialog>).
+                // Children of the dialog have target !== dlg so they don't trigger this.
+                dlg.addEventListener('click', (e) => {
+                    if (e.target === dlg) dlg.close('backdrop');
+                });
+                // Buttons opting out of <form method="dialog"> submission semantics
+                // (e.g. our × close button which is type="button") use data-close to
+                // close with an explicit value.
+                dlg.querySelectorAll('[data-close]').forEach(btn => {
+                    btn.addEventListener('click', () => dlg.close(btn.value || 'close'));
+                });
+                // After close, log the returnValue so we can confirm the contract.
+                dlg.addEventListener('close', () => {
+                    log(`[dialog:${dlg.id}] closed — returnValue="${dlg.returnValue}"`);
+                });
+            }
+
+            const demoDialog = $('demo-dialog');
+            const confirmDialog = $('confirm-dialog');
+            wireDialog(demoDialog);
+            wireDialog(confirmDialog);
+
+            $('dlg-open').addEventListener('click', () => {
+                if (typeof demoDialog.showModal !== 'function') {
+                    log('[dialog] showModal() not supported in this browser — falling back to .show()');
+                    demoDialog.show();
+                } else {
+                    demoDialog.showModal();
+                }
+            });
+
+            $('dlg-open-confirm').addEventListener('click', () => {
+                confirmDialog.showModal();
+            });
+
+            // --- Optional: persist form values across reloads (convenience for repeated experiments) ---
+            const STORAGE_KEY = 'solace-sandbox-form';
+            const formIds = ['sol-host', 'sol-protocol', 'sol-port', 'sol-vpn', 'sol-user',
+                'semp-host', 'semp-protocol', 'semp-port', 'semp-user'];
+            try {
+                const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+                formIds.forEach(id => { if (saved[id] != null) $(id).value = saved[id]; });
+            } catch (e) { /* ignore */ }
+            formIds.forEach(id => {
+                $(id).addEventListener('change', () => {
+                    const snapshot = Object.fromEntries(formIds.map(i => [i, $(i).value]));
+                    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot)); } catch (e) { /* ignore */ }
+                });
+            });
+
+            log('[sandbox] ready. solace SDK loaded:', !!window.solace, '— version:', window.solace?.Version?.version || 'unknown');
+        })();
+    </script>
+</body>
+
+</html>

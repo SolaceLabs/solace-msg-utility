@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module Picker Samples</title>
+<style>
+/* Layout: one column of admin-console cards, each sample shown in the two places it would live. */
+:root {
+  --bg: #f8f9fa;
+  --card: #ffffff;
+  --input: #f1f5f9;
+  --border: #e2e8f0;
+  --text: #334155;
+  --text-2: #64748b;
+  --muted: #94a3b8;
+  --accent: #00c895;
+  --accent-ink: #00785a;
+  --accent-tint: #e6faf4;
+  --on-accent: #ffffff;
+  --navy: #03213b;
+  --dim: #f1f5f9;
+  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --r-md: 6px;
+  --r-lg: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0a1826; --card: #102334; --input: #0c1c2b; --border: #213a50; --text: #dbe5ee; --text-2: #9db0c3;
+    --muted: #6f8499; --accent: #00c895; --accent-ink: #5fe3bd; --accent-tint: #0f3a36; --on-accent: #03213b;
+    --navy: #dbe5ee; --dim: #0c1c2b; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0a1826; --card: #102334; --input: #0c1c2b; --border: #213a50; --text: #dbe5ee; --text-2: #9db0c3;
+  --muted: #6f8499; --accent: #00c895; --accent-ink: #5fe3bd; --accent-tint: #0f3a36; --on-accent: #03213b;
+  --navy: #dbe5ee; --dim: #0c1c2b; color-scheme: dark;
+}
+body {
+  background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 48px;
+}
+.page { max-width: 940px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+h1 { font-size: 22px; font-weight: 600; color: var(--navy); margin: 0; text-wrap: balance; }
+h2 { font-size: 16px; font-weight: 600; color: var(--navy); margin: 0; }
+h3 { font-size: 14px; font-weight: 600; color: var(--navy); margin: 0; }
+p { margin: 0; }
+.lede { color: var(--text-2); max-width: 65ch; }
+.variant { display: flex; flex-direction: column; gap: 14px; }
+.variant-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.badge { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent-ink);
+  background: var(--accent-tint); border-radius: 999px; padding: 2px 10px; }
+.where { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 20px;
+  display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.field-label { font-weight: 500; }
+.hint { color: var(--text-2); font-size: 13px; }
+.saved { font-size: 12px; color: var(--text-2); border-top: 1px dashed var(--border); padding-top: 10px; }
+.saved b { color: var(--text); font-weight: 600; }
+
+/* --- toggle tiles --- */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.tile { font: inherit; color: inherit; text-align: left; background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 12px 14px; display: grid; grid-template-columns: 20px 1fr; gap: 4px 10px;
+  cursor: pointer; min-width: 0; transition: border-color 0.12s, background-color 0.12s; }
+.tile:hover:not(:disabled) { border-color: var(--accent); }
+.tile:focus-visible, .pill button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tile .box { width: 18px; height: 18px; border: 1.5px solid var(--muted); border-radius: 4px; margin-top: 1px;
+  display: grid; place-items: center; background: var(--card); }
+.tile .box svg { width: 12px; height: 12px; opacity: 0; }
+.tile .name { font-weight: 600; color: var(--navy); }
+.tile .desc { grid-column: 2; color: var(--text-2); font-size: 13px; }
+.tile[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-tint); }
+.tile[aria-pressed="true"] .box { background: var(--accent); border-color: var(--accent); }
+.tile[aria-pressed="true"] .box svg { opacity: 1; }
+.tile:disabled { cursor: default; }
+.tile.locked { opacity: 0.75; }
+.tile.unoffered { border-style: dashed; background: var(--dim); }
+.tile.unoffered .name, .tile.unoffered .desc { color: var(--muted); }
+.tile.unoffered .box { visibility: hidden; }
+.tag { grid-column: 2; justify-self: start; font-size: 11px; font-weight: 600; color: var(--text-2);
+  border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; }
+
+/* --- pills --- */
+.pills { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 34px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-tint); color: var(--navy);
+  border: 1px solid var(--accent); border-radius: 999px; padding: 3px 4px 3px 12px; font-weight: 500; }
+.pill button { font: inherit; border: 0; background: transparent; color: var(--text-2); width: 22px; height: 22px;
+  border-radius: 50%; cursor: pointer; line-height: 1; }
+.pill button:hover { background: var(--border); color: var(--text); }
+.pill.locked { background: var(--dim); border-color: var(--border); color: var(--text-2); padding-right: 12px; }
+.none { color: var(--muted); font-style: italic; }
+
+/* --- shared form bits --- */
+select, input[type="number"] { font: inherit; color: var(--text); background: var(--input); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 7px 10px; max-width: 100%; }
+.choice { display: flex; flex-direction: column; gap: 6px; }
+.choice label { display: flex; gap: 8px; align-items: baseline; cursor: pointer; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px 16px; }
+.cols label { display: flex; flex-direction: column; gap: 4px; font-weight: 500; min-width: 0; }
+.cols input { width: 100%; box-sizing: border-box; font-variant-numeric: tabular-nums; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="variant">
+    <h1>Module picker samples</h1>
+    <p class="lede">Two ways to choose modules, each shown where it would appear: the modules on offer in Gateway Settings, and one user's modules in the user form. Everything here is clickable. The data is a sample; nothing is saved.</p>
+  </header>
+
+  <section class="variant" aria-labelledby="tiles-title">
+    <div class="variant-head"><h2 id="tiles-title">A. Toggle tiles</h2><span class="badge">Your pick so far</span></div>
+    <p class="lede">Every module is always visible with a line saying what it is. Click a tile to turn it on or off.</p>
+    <div class="two">
+      <div class="card">
+        <span class="where">Gateway Settings</span>
+        <h3>Modules</h3>
+        <span class="field-label">Modules signed-in users may be given</span>
+        <div class="tiles" id="tiles-offer"></div>
+        <label class="row"><span class="field-label">A user without a list of their own gets</span>
+          <select id="tiles-default"><option value="all">Every offered module</option><option value="none">No modules</option></select></label>
+        <p class="saved" id="tiles-offer-saved"></p>
+      </div>
+      <div class="card">
+        <span class="where">User form: operator</span>
+        <h3>Modules</h3>
+        <div class="choice" role="radiogroup" aria-label="Modules for this user">
+          <label><input type="radio" name="tiles-mode" id="tiles-mode-default" value="default" checked><span>Deployment default: <span id="tiles-default-text"></span></span></label>
+          <label><input type="radio" name="tiles-mode" id="tiles-mode-own" value="own"><span>Choose for this user</span></label>
+        </div>
+        <div class="tiles" id="tiles-user"></div>
+        <p class="saved" id="tiles-user-saved"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="variant" aria-labelledby="pills-title">
+    <div class="variant-head"><h2 id="pills-title">B. Pills</h2></div>
+    <p class="lede">Only the chosen modules are shown, as removable pills. The rest are in the Add menu.</p>
+    <div class="two">
+      <div class="card">
+        <span class="where">Gateway Settings</span>
+        <h3>Modules</h3>
+        <span class="field-label">Modules signed-in users may be given</span>
+        <div class="pills" id="pills-offer"></div>
+        <label class="row"><span class="field-label">A user without a list of their own gets</span>
+          <select id="pills-default"><option value="all">Every offered module</option><option value="none">No modules</option></select></label>
+        <p class="saved" id="pills-offer-saved"></p>
+      </div>
+      <div class="card">
+        <span class="where">User form: operator</span>
+        <h3>Modules</h3>
+        <div class="choice" role="radiogroup" aria-label="Modules for this user">
+          <label><input type="radio" name="pills-mode" id="pills-mode-default" value="default" checked><span>Deployment default: <span id="pills-default-text"></span></span></label>
+          <label><input type="radio" name="pills-mode" id="pills-mode-own" value="own"><span>Choose for this user</span></label>
+        </div>
+        <div class="pills" id="pills-user"></div>
+        <p class="saved" id="pills-user-saved"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="variant" aria-labelledby="layout-title">
+    <div class="variant-head"><h2 id="layout-title">Also in this wave: one card per section, short fields in columns</h2></div>
+    <p class="lede">How two of the Gateway Settings sections would look once each has its own card and the short number fields sit side by side.</p>
+    <div class="two">
+      <div class="card">
+        <span class="where">Gateway Settings</span>
+        <h3>Sessions</h3>
+        <div class="cols">
+          <label>Idle timeout (minutes)<input type="number" id="s-idle" value="15" min="1" max="30"></label>
+          <label>Longest session (minutes)<input type="number" id="s-abs" value="480" min="1" max="1440"></label>
+        </div>
+      </div>
+      <div class="card">
+        <span class="where">Gateway Settings</span>
+        <h3>Sign-in throttle</h3>
+        <div class="cols">
+          <label>Failures before a wait<input type="number" id="t-max" value="5" min="1"></label>
+          <label>First wait (seconds)<input type="number" id="t-back" value="30" min="1"></label>
+          <label>Longest wait (seconds)<input type="number" id="t-maxback" value="900" min="1"></label>
+          <label>Anonymous requests a minute<input type="number" id="t-anon" value="60" min="1"></label>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var MODULES = [
+    { id: 'queue-browser', name: 'Queue Browser', desc: 'Browse, inspect and delete queued messages.' },
+    { id: 'queue-copy', name: 'Queue Copy', desc: 'Copy or move messages between queues.' },
+    { id: 'queue-subscription-explorer', name: 'Queue Subscriptions', desc: 'See which topics each queue subscribes to.' }
+  ];
+  var TICK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5l2.6 2.6L10 3.6" fill="none" stroke="var(--on-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  function byId(id) { return document.getElementById(id); }
+  function names(ids) {
+    var out = MODULES.filter(function (m) { return ids.indexOf(m.id) >= 0; }).map(function (m) { return m.name; });
+    return out.length ? out.join(', ') : 'no modules';
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  // One sample: the offer (Gateway Settings) and one user's choice (user form), in a given style.
+  function sample(prefix, style) {
+    var offered = ['queue-browser', 'queue-copy'];
+    var own = ['queue-browser'];
+    var defaultSel = byId(prefix + '-default');
+    var modeDefault = byId(prefix + '-mode-default');
+    var modeOwn = byId(prefix + '-mode-own');
+
+    function toggle(list, id) {
+      var i = list.indexOf(id);
+      if (i >= 0) list.splice(i, 1); else list.push(id);
+    }
+    function defaultIds() { return defaultSel.value === 'all' ? offered.slice() : []; }
+    function userIds() { return modeOwn.checked ? own.filter(function (id) { return offered.indexOf(id) >= 0; }) : defaultIds(); }
+
+    function tile(m, on, opts) {
+      var b = el('button', 'tile' + (opts.locked ? ' locked' : '') + (opts.unoffered ? ' unoffered' : ''));
+      b.type = 'button';
+      b.id = prefix + '-' + opts.scope + '-' + m.id;
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.disabled = !!(opts.locked || opts.unoffered);
+      var box = el('span', 'box'); box.innerHTML = TICK;
+      b.appendChild(box);
+      b.appendChild(el('span', 'name', m.name));
+      b.appendChild(el('span', 'desc', m.desc));
+      if (opts.unoffered) b.appendChild(el('span', 'tag', 'not offered'));
+      if (opts.onClick) b.addEventListener('click', opts.onClick);
+      return b;
+    }
+    function pill(m, onRemove) {
+      var p = el('span', 'pill' + (onRemove ? '' : ' locked'));
+      p.appendChild(el('span', '', m.name));
+      if (onRemove) {
+        var x = el('button', '', 'x');
+        x.type = 'button';
+        x.setAttribute('aria-label', 'Remove ' + m.name);
+        x.addEventListener('click', onRemove);
+        p.appendChild(x);
+      }
+      return p;
+    }
+    function addMenu(scope, choices, onAdd) {
+      var s = el('select');
+      s.id = prefix + '-' + scope + '-add';
+      s.setAttribute('aria-label', 'Add a module');
+      var first = el('option', '', choices.length ? '+ Add module' : 'Nothing left to add');
+      first.value = '';
+      s.appendChild(first);
+      choices.forEach(function (m) { var o = el('option', '', m.name); o.value = m.id; s.appendChild(o); });
+      s.disabled = !choices.length;
+      s.addEventListener('change', function () { if (s.value) onAdd(s.value); });
+      return s;
+    }
+
+    function render() {
+      var offerBox = byId(prefix + '-offer');
+      var userBox = byId(prefix + '-user');
+      offerBox.textContent = '';
+      userBox.textContent = '';
+      var choosing = modeOwn.checked;
+      var shown = userIds();
+
+      if (style === 'tiles') {
+        MODULES.forEach(function (m) {
+          offerBox.appendChild(tile(m, offered.indexOf(m.id) >= 0, { scope: 'offer', onClick: function () { toggle(offered, m.id); render(); } }));
+          var isOffered = offered.indexOf(m.id) >= 0;
+          userBox.appendChild(tile(m, shown.indexOf(m.id) >= 0, {
+            scope: 'user', unoffered: !isOffered, locked: isOffered && !choosing,
+            onClick: function () { toggle(own, m.id); render(); }
+          }));
+        });
+      } else {
+        var chosen = MODULES.filter(function (m) { return offered.indexOf(m.id) >= 0; });
+        if (!chosen.length) offerBox.appendChild(el('span', 'none', 'No modules on offer'));
+        chosen.forEach(function (m) { offerBox.appendChild(pill(m, function () { toggle(offered, m.id); render(); })); });
+        offerBox.appendChild(addMenu('offer', MODULES.filter(function (m) { return offered.indexOf(m.id) < 0; }), function (id) { offered.push(id); render(); }));
+
+        var mine = MODULES.filter(function (m) { return shown.indexOf(m.id) >= 0; });
+        if (!mine.length) userBox.appendChild(el('span', 'none', 'No modules'));
+        mine.forEach(function (m) { userBox.appendChild(pill(m, choosing ? function () { toggle(own, m.id); render(); } : null)); });
+        if (choosing) {
+          userBox.appendChild(addMenu('user', MODULES.filter(function (m) { return offered.indexOf(m.id) >= 0 && shown.indexOf(m.id) < 0; }),
+            function (id) { own.push(id); render(); }));
+        }
+      }
+
+      byId(prefix + '-default-text').textContent = names(defaultIds());
+      byId(prefix + '-offer-saved').innerHTML = 'Would save: offered = <b></b>';
+      byId(prefix + '-offer-saved').querySelector('b').textContent = names(offered);
+      byId(prefix + '-user-saved').innerHTML = 'Would save: <b></b>';
+      byId(prefix + '-user-saved').querySelector('b').textContent = choosing ? names(shown) : 'the deployment default (no list of their own)';
+    }
+
+    defaultSel.addEventListener('change', render);
+    modeDefault.addEventListener('change', render);
+    modeOwn.addEventListener('change', render);
+    render();
+  }
+
+  sample('tiles', 'tiles');
+  sample('pills', 'pills');
+})();
+</script>
+</body>
+</html>

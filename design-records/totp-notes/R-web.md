@@ -1,0 +1,7 @@
+# R-web (T13, web side) -- nothing was run
+
+Fake gateway: TWO_FACTOR_MODES = optional/admins/mandatory (authenticator.ts); settings ZERO and demo seed hold optional (so a backup/seed without the key reads optional); invalid-value reason lists the three values; TwoFactorPage lost kind 'off' and the guard (index.ts); pages.ts lost the "not in use" branch and showMessage (only user); Page doc comment fixed. controls/authenticator.ts empty-state hint reworded (no Gateway Settings step needed any more).
+App: managed-api.ts TwoFactorMode 3 values, twoFactorInUse removed; account.ts link always shown, AccountUser lost twoFactor, managed-panel no longer passes it; admin-login module/markup lost the hidden class, els.twoFactor and the showSession argument; gateway-settings select has 3 options. TwoFactorState/profile twoFactor kept.
+Tests: removed twoFactorInUse tests, off table rows, "not in use" tests; repurposed others; two-factor.test restore test now starts from mandatory so "no key reads optional" is meaningful; 'off' is a bad value (422) in two-factor.test.
+
+Owner check: twoFactorNeed still returns 'none' for any unknown mode string (tested with ''), so 'off' reaching it would read as none; settings validation refuses it before. tests/mock-broker/gateway/{seed,contract,routes,error-codes} and seed.json are other agents' (must say optional). docs/demo.md line 132 still says two-factor is off in the seed (H-docs).
