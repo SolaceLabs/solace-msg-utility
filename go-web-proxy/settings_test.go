@@ -258,7 +258,7 @@ func TestSettings_Refusals(t *testing.T) {
 		{"bad value", `{"session":{"idleMinutes":0}}`, 422, "invalid", "settings", `"session.idleMinutes"`},
 		{"module outside the catalog", `{"modules":{"offered":["queue-discovery"]}}`, 422, "invalid", "settings", "must be one of queue-browser, queue-copy, queue-subscription-explorer"},
 		{"cross check", `{"hosted":false,"connModes":"both"}`, 422, "invalid", "settings", "hosted is false"},
-		{"direct would end Provisioned mode", `{"connModes":"direct"}`, 422, "invalid", "connModes", "set connModes: direct in config.yaml on the gateway host and restart"},
+		{"direct would end Provisioned mode", `{"connModes":"direct"}`, 422, "invalid", "connModes", "remove config.yaml from the gateway's data volume and start the gateway with SMU_CONN_MODES=direct"},
 		{"managed is retired", `{"managed":true}`, 400, "bad_request", "", ""},
 		{"unknown key", `{"bogus":1}`, 400, "bad_request", "", ""},
 		{"version is the gateway's", `{"version":2}`, 400, "bad_request", "", ""},
@@ -362,7 +362,7 @@ func TestSettings_UnreadableFileIsNotAHandEdit(t *testing.T) {
 	}
 	rec := e.do("GET", "/managed/settings", "", e.cookie("admin", false))
 	expect(t, rec, http.StatusInternalServerError, "config_unreadable")
-	if got := errorCode(t, rec).Reason; !strings.HasPrefix(got, "The gateway cannot read config.yaml (") || !strings.Contains(got, "Fix the file on the gateway host") {
+	if got := errorCode(t, rec).Reason; !strings.HasPrefix(got, "The gateway cannot read config.yaml (") || !strings.Contains(got, "once the gateway can read the file again, reload this page") {
 		t.Errorf("reason: %q", got)
 	}
 	expect(t, e.saveSettingsRev(t, rev, `{"logLevel":"info"}`), http.StatusInternalServerError, "store_write_failed")

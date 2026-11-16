@@ -32,6 +32,7 @@ This guide is for developers who build, change or extend the project: the TypeSc
   - [Logging standard](#logging-standard)
 - [Gateway and Admin How-tos](#gateway-and-admin-how-tos)
   - [Adding a gateway config.yaml setting](#adding-a-gateway-configyaml-setting)
+  - [Writing a config.yaml by hand (development only)](#writing-a-configyaml-by-hand-development-only)
   - [Auditing an action](#auditing-an-action)
   - [Writing to the store](#writing-to-the-store)
   - [Adding a sign-in step](#adding-a-sign-in-step)
@@ -597,11 +598,42 @@ Recipes for extending the Go gateway and the admin pages. Each links the design 
 
 ### Adding a gateway config.yaml setting
 
-Classify the new key as live (a field of `liveSettings`, applied by `apply`) or restart-only (`restartOnlyKeys`; the only one is `hosted`). `TestFileConfig_EveryKeyIsClassifiedOnce` in `go-web-proxy/live_test.go` fails until it is exactly one.
+Classify the new key as live (a field of `liveSettings`, applied by `apply`) or restart-only (`restartOnlyKeys`; the only one is `hosted`). `TestFileConfig_EveryKeyIsClassifiedOnce` in `go-web-proxy/live_test.go` fails until it is exactly one. Add the key to the table in [Writing a config.yaml by hand](#writing-a-configyaml-by-hand-development-only) too.
 
 A location the console must never be able to change (a file path to a secret or a certificate) is not a setting at all: read it from an `SMU_` variable at every start, as `tlsPathsFromEnv` does for the three TLS paths, and keep it out of `fileConfig`, the settings API, the page and the fake.
 
 A key that leaves the file stays in `fileConfig` as a removed key (see `fileTLS.RemovedCertFile`), so a `config.yaml` that still holds it loads, and the key is dropped at the next write. A variable that seeds a setting takes the `SMU_` prefix (only `LOG_LEVEL` keeps its bare name); never reuse a name Go or another tool reads itself, such as `SSL_CERT_FILE`.
+
+### Writing a config.yaml by hand (development only)
+
+Nobody who runs or uses the product writes or edits one of the gateway's files. An operator sets the variables at the first start, an administrator uses the console, and settings move between deployments through Backup & Restore. The reader-facing docs (README.md, user-guide.md, demo.md, deployment.md, provisioned-mode.md) therefore never tell a reader to open one, and neither does text the product shows: the header the gateway writes into `config.yaml`, its log and console messages, and the comments in the compose files. Keep it that way when you change them.
+
+A developer sometimes does need a hand-written `config.yaml`: for a Go test, to reproduce a refused start, or for a local run in a state the variables cannot seed. This section is the reference for that. The sealed stores cannot be written by hand at all; their shapes are in [architecture.md -> Stored file schemas](architecture.md#stored-file-schemas).
+
+The file is plain YAML, parsed strictly (`decodeConfigFile` in [configfile.go](../go-web-proxy/configfile.go)): `version: 1` is required, an unknown key or an empty file stops the start, and a missing key takes its built-in default (`defaultFileConfig`), never an environment value. The gateway writes the file with a comment header and a `key <- variable` table generated from `seedVars`; a hand-written file needs neither.
+
+| Key | Default | Seeded by | Applies |
+| --- | --- | --- | --- |
+| `version` | none | none | Required, always `1`; the gateway stamps it on every write |
+| `hosted` | `true` | `SMU_HOSTED` | At restart. Must be `true` unless `connModes` is `direct` |
+| `connModes` | `direct` | `SMU_CONN_MODES` | At once. The settings API and an import refuse `direct` |
+| `defaultConn` | `direct` | `SMU_DEFAULT_CONN` | At once |
+| `tls.insecureSkipVerify` | `false` | `SMU_SSL_SKIP_CERT_VERIFY` | At once |
+| `logLevel` | `warn` | `LOG_LEVEL` | At once |
+| `access.allow`, `access.trustedProxies` | `[]` | none | At once, in every mode |
+| `session.idleMinutes`, `session.absoluteMinutes` | `10`, `30` | none | At once. Provisioned mode only |
+| `login.maxFailures`, `login.backoffSeconds`, `login.maxBackoffSeconds`, `login.unauthenticatedPerMinute` | `5`, `30`, `900`, `60` | none | At once. Provisioned mode only |
+| `login.twoFactor` | `optional` | none | At the next sign-in. Provisioned mode only |
+| `modules.offered`, `modules.userDefault` | every catalog module, `all` | none | At once. Provisioned mode only |
+| `audit.stdout` | `false` | `SMU_SHOW_AUDIT` | At the next audited event. Provisioned mode only |
+| `audit.access`, `audit.onFailure` | `false`, `continue` | none | At the next audited event. Provisioned mode only |
+
+What each setting means to an operator is in [provisioned-mode.md -> Configure](provisioned-mode.md#configure); `toConfig` holds every range and check.
+
+Two things follow from the file being the gateway's:
+
+- **A hand-written file is read at start only.** While the gateway runs, the writer compares the file with what it last read or wrote before every save, so a change made behind it turns every settings save into `409 config_changed_on_disk` until a restart loads the file (see [Writing to the store](#writing-to-the-store)). A Go test passes its own path to `resolveConfig`; for a local container, put the file in the data volume before the gateway starts.
+- **A setting with no variable and no console field has no supported route.** In Gateway mode that is `access.allow` and `access.trustedProxies`: the mode has no console and no variable seeds them, so the operator docs present the access list as a Provisioned-mode setting. The gateway still enforces a list it finds in the file, in every mode (`clientACL` in [access.go](../go-web-proxy/access.go)).
 
 ### Auditing an action
 

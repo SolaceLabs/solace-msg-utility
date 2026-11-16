@@ -335,7 +335,7 @@ export function refusalBody(r: Refusal): Record<string, string> {
 export type SaveResult = { ok: true; restartRequired: string[]; rev: string } | Refusal;
 
 const UNREADABLE_REASON = 'The gateway cannot read config.yaml (demo: the control panel made it unreadable). '
-    + 'Fix the file on the gateway host, then reload this page.';
+    + 'The cause is on the gateway host; once the gateway can read the file again, reload this page.';
 
 /**
  * A file's settings with the keys it may lack (an older seed, backup or snapshot):
@@ -405,7 +405,8 @@ export function createSettings(boot: GatewaySettings, client: string, faults: ()
                 return {
                     ok: false, status: 422, error: 'invalid', field: 'connModes',
                     reason: 'connModes "direct" would turn Provisioned mode off at the next restart, and this console with it. '
-                        + 'To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart.',
+                        + 'To leave Provisioned mode, remove config.yaml from the gateway\'s data volume and start the gateway with SMU_CONN_MODES=direct, '
+                        + 'so that it seeds its settings again.',
                 };
             }
             if (n.value.access.allow.length > 0 && !allowListAdmits(n.value.access.allow, client)) {

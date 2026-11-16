@@ -42,8 +42,8 @@
 # /data/config.yaml; startup fails if it cannot be written) on the first start,
 # when the file does not exist; afterwards the file is authoritative and a
 # differing variable is logged, not applied. The client access list
-# (access.allow, access.trustedProxies) has no variable and lives only in the
-# file. See docs/deployment.md.
+# (access.allow, access.trustedProxies) has no variable: an administrator sets
+# it on Gateway Settings, in Provisioned mode. See docs/deployment.md.
 #   SMU_HOSTED                true (default) | false. false serves the files
 #                             only; Provisioned mode needs true.
 #   SMU_CONN_MODES            direct (default, Gateway mode) | provisioned |

@@ -484,7 +484,7 @@
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "connModes": "direct" },
-          "status": 422, "response": { "error": "invalid", "field": "connModes", "reason": "connModes \"direct\" would turn Provisioned mode off at the next restart, and this console with it. To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart." }
+          "status": 422, "response": { "error": "invalid", "field": "connModes", "reason": "connModes \"direct\" would turn Provisioned mode off at the next restart, and this console with it. To leave Provisioned mode, remove config.yaml from the gateway's data volume and start the gateway with SMU_CONN_MODES=direct, so that it seeds its settings again." }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "modules": { "userDefault": "some" } },

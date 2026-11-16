@@ -353,7 +353,7 @@ func (p *authPages) sessionOpened(w http.ResponseWriter, r *http.Request, log *s
 	p.audit.record(auditAuth, e)
 	log.Info("signed in")
 	if p.watch.seen(client, resolved) {
-		log.Warn("every recent sign-in came from this one private address: a reverse proxy or Docker's userland proxy the gateway does not trust is likely in front of it, so all users share one throttle and one access-list entry; list the proxy in access.trustedProxies (config.yaml), see docs/deployment.md",
+		log.Warn("every recent sign-in came from this one private address: a reverse proxy or Docker's userland proxy the gateway does not trust is likely in front of it, so all users share one throttle and one access-list entry; list the proxy under Trusted reverse proxies on Gateway Settings (access.trustedProxies), see docs/deployment.md",
 			"sign_ins", len(p.watch.recent))
 	}
 }

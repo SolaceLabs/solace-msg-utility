@@ -48,8 +48,9 @@ services:
       - "19443:9443"
     environment:
       # These SEED config.yaml on the first start only. Afterwards the file in
-      # the gateway-data volume is authoritative: edit it and restart; a
-      # changed value here is logged as ignored. See docs/deployment.md.
+      # the gateway-data volume is authoritative and a changed value here is
+      # logged as ignored: `docker compose down -v` removes the volumes, and the
+      # next start seeds the file again. See docs/deployment.md.
       # Log level: debug | info | warn | error. Bump to info/debug while testing.
       LOG_LEVEL: warn
       # Set to "true" ONLY for lab use against brokers with untrusted certs.

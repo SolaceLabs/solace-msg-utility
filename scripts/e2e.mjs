@@ -120,7 +120,8 @@ const SCRATCH = 'e2e-scratch';  // a user the version checks (20-23) create and 
 const TRUST_FILE = 'broker-ca.crt'; // the broker's CA file in the gateway's trust directory (writeMaterial), which check 30 deletes and adds back
 // The settings endpoint's refusal of connModes direct (go-web-proxy/settings.go).
 const DIRECT_REFUSAL = 'connModes "direct" would turn Provisioned mode off at the next restart, and this console with it. '
-    + 'To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart.';
+    + 'To leave Provisioned mode, remove config.yaml from the gateway\'s data volume and start the gateway with SMU_CONN_MODES=direct, '
+    + 'so that it seeds its settings again.';
 
 const token = () => randomBytes(18).toString('base64url');
 // Generated for this run, so always long enough to mask and look for.

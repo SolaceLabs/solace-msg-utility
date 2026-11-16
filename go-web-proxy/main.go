@@ -443,7 +443,7 @@ func serveUntilStopped(p process, restart *bool) error {
 		logger.Warn("env var ignored, config.yaml wins", "env", o.Env, "key", o.Key, "env_value", o.EnvValue, "file_value", o.FileValue)
 	}
 	for _, s := range load.removed {
-		logger.Warn("setting no longer used, ignored: remove it", "setting", s.name, "instead", s.instead)
+		logger.Warn("setting no longer used, ignored", "setting", s.name, "instead", s.instead)
 	}
 	if len(load.tlsPathsIgnored) > 0 {
 		logger.Warn("config.yaml holds TLS paths that differ from the ones in use; they are ignored and dropped at the next save: the paths come from SMU_SSL_CERTFILE, SMU_SSL_CERTKEYFILE and SMU_SSL_TRUSTDIR at every start",

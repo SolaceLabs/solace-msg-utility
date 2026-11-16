@@ -67,7 +67,7 @@ func (sf *settingsFile) changedOnDisk() (bool, error) {
 // configUnreadable answers 500 config_unreadable with what to do.
 func (h *managedHandler) configUnreadable(w http.ResponseWriter, err error) {
 	h.logger.Error("managed: cannot read config file", "path", h.settings.path, "err", err)
-	reason := "The gateway cannot read config.yaml (" + err.Error() + "). Fix the file on the gateway host, then reload this page."
+	reason := "The gateway cannot read config.yaml (" + err.Error() + "). The cause is on the gateway host; once the gateway can read the file again, reload this page."
 	writeJSON(w, http.StatusInternalServerError, apiError{Error: "config_unreadable", Reason: reason})
 }
 
@@ -238,7 +238,7 @@ func (h *managedHandler) checkSettings(r *http.Request, body fileConfig) (config
 	// console with it, leaving no page to undo it from. That change is the
 	// host's to make.
 	if cfg.connModes == connDirect {
-		return config{}, invalidRefusal("connModes", `connModes "direct" would turn Provisioned mode off at the next restart, and this console with it. To leave Provisioned mode, set connModes: direct in config.yaml on the gateway host and restart.`)
+		return config{}, invalidRefusal("connModes", `connModes "direct" would turn Provisioned mode off at the next restart, and this console with it. To leave Provisioned mode, remove config.yaml from the gateway's data volume and start the gateway with SMU_CONN_MODES=direct, so that it seeds its settings again.`)
 	}
 	ip, ok := clientIP(r.RemoteAddr, r.Header.Values("X-Forwarded-For"), cfg.access.trustedProxies)
 	if len(cfg.access.allow) > 0 && !(ok && prefixContains(cfg.access.allow, ip)) {

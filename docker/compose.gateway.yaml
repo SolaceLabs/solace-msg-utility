@@ -28,8 +28,10 @@ services:
     ports:
       - "9443:9443"
     environment:
-      # Seeds config.yaml on the first start only; afterwards edit the file in
-      # the data volume and restart. warn is quiet; info logs every request.
+      # Seeds config.yaml on the first start only. To apply a changed value
+      # later, remove config.yaml from the data volume and start again (a
+      # volume that has only run Gateway mode holds nothing else). warn is
+      # quiet; info logs every request.
       LOG_LEVEL: warn
     volumes:
       # The gateway's certificate (tls.crt, tls.key) and, under trust/, the CAs

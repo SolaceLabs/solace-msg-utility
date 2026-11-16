@@ -116,7 +116,7 @@ docker run -d -p 9443:9443 \
 
 ## Configure
 
-The gateway's settings live in `config.yaml`. An administrator edits most of them on the admin console's **Gateway Settings** page; they apply at once. The rest change in the file, followed by a restart.
+An administrator changes the gateway's settings on the admin console's **Gateway Settings** page; they apply at once. The gateway keeps them in `/data/config.yaml`, a file it writes itself: never write or edit it by hand. To carry settings to another deployment, or to bring them back, use [Back up and restore](#back-up-and-restore). The tables below name each setting by its key, the name the gateway's log and the audit trail give a setting saved on that page; the page's own labels are in [user-guide.md](user-guide.md#gateway-settings).
 
 ### Connection modes
 
@@ -128,7 +128,7 @@ The gateway's settings live in `config.yaml`. An administrator edits most of the
 
 `SMU_DEFAULT_CONN` (`direct` or `provisioned`) picks which tab opens first under `both`.
 
-The Gateway Settings page switches between `provisioned` and `both`. Leaving Provisioned mode (`direct`) also turns off the admin console, so it is done in `config.yaml` on the host, followed by a restart.
+The Gateway Settings page switches between `provisioned` and `both`. It does not offer `direct`, and an import refuses it too: leaving Provisioned mode turns the admin console off with it, so it is a fresh start of the settings. Export a backup if you want to keep the users and connections. Then stop the gateway, remove `/data/config.yaml`, set `SMU_CONN_MODES=direct` and start it: the gateway seeds its settings from the variables again and runs in Gateway mode (see [Starting the settings again](#stored-files-and-recovery)). The stores stay on the volume, unread.
 
 ### Sessions and sign-in
 
@@ -148,14 +148,14 @@ A wrong code at the two-factor step counts as a wrong password and brings the sa
 
 | Key | Default | Recommended |
 | --- | --- | --- |
-| `access.allow` | `[]` (everyone) | Your users' networks, for example `[10.0.0.0/8]`. The page refuses a list that would lock out your own browser. |
+| `access.allow` | `[]` (everyone) | Your users' networks, for example `[10.0.0.0/8]`. The page refuses a list that would lock out your own browser. A client outside the list gets a bare `403`, and the gateway's log names its address (`client denied by access list`, at `warn`). |
 | `access.trustedProxies` | `[]` | The address of your reverse proxy, if there is one, so the gateway sees each user's own address. |
 
 ### What users may open
 
 | Key | Default | Recommended |
 | --- | --- | --- |
-| `modules.offered` | `[queue-browser, queue-copy, queue-subscription-explorer]` | All three, unless no one should copy or move messages (drop `queue-copy`), or queue and topic names in VPNs a user is not granted must stay hidden from them (drop `queue-subscription-explorer`, see the [security checklist](#security-checklist)). A `config.yaml` whose list names only the first two offers only those: add Queue Subscriptions in Gateway Settings to offer it. |
+| `modules.offered` | `[queue-browser, queue-copy, queue-subscription-explorer]` | All three, unless no one should copy or move messages (drop `queue-copy`), or queue and topic names in VPNs a user is not granted must stay hidden from them (drop `queue-subscription-explorer`, see the [security checklist](#security-checklist)). A deployment whose list names only the first two offers only those: add Queue Subscriptions in Gateway Settings to offer it. |
 | `modules.userDefault` | `all` | `all` for a small team; `none` if each user should get modules explicitly on their account. |
 
 ### Audit settings
@@ -190,7 +190,7 @@ Two-factor sign-in asks for a second proof after the password: a six-digit code 
 
 ### Choosing a mode
 
-One setting, `login.twoFactor`, on the Gateway Settings page (the select **Two-factor sign-in (code from an authenticator app)**) or in `config.yaml`. It is read at each sign-in, so a change applies to the next one, with no restart. A session already open is not asked again. There is no environment variable.
+One setting, `login.twoFactor`, on the Gateway Settings page (the select **Two-factor sign-in (code from an authenticator app)**). It is read at each sign-in, so a change applies to the next one, with no restart. A session already open is not asked again. There is no environment variable.
 
 | Value | Who is asked | Use it |
 | --- | --- | --- |
@@ -200,7 +200,7 @@ One setting, `login.twoFactor`, on the Gateway Settings page (the select **Two-f
 
 **Recommended.** Run `optional` while people enrol, then switch to `mandatory`; if you cannot move everyone, at least `admins`, because administrators edit grants, the access list and sign-in itself. Under `admins` and `mandatory` a user without two-factor cannot reach the app until it is set up, so tell people first, and enrol the administrators first. Keep at least two administrators, and tell everyone to keep their recovery codes safe (see [A lost phone](#a-lost-phone)).
 
-Two-factor cannot be turned off for everyone: there is no value for it, and no switch on the host. A `config.yaml` without the key reads as `optional`. Any other value, `off` included, stops the start, naming the key and the value and the three to choose from; Gateway Settings refuses it with `422`.
+Two-factor cannot be turned off for everyone: there is no value for it, and no switch on the host. Settings that do not hold the key (a backup without `login.twoFactor`, for example) read as `optional`. Any other value, `off` included, is refused: Gateway Settings and an import answer `422`, and a gateway whose settings hold one does not start, naming the key, the value and the three to choose from.
 
 ### Setting it up
 
@@ -234,7 +234,7 @@ Each user gets ten at setup, shown once, as `XXXX-XXXX-XXXX-XXXX`. Each works on
   5. Open **Backup & Restore**, choose the backup, preview it, and import the users with **Merge**. (**Replace** would remove `recovery` and sign you out with nobody to reset the locked administrator. If the locked account is itself named `admin`, **Merge** replaces the new `admin` with it, which is why step 4 matters.) The import brings every user back as the backup holds them, the locked administrator's two-factor included: it does not unlock anything by itself.
   6. Sign in as `recovery` (set up two-factor if the mode asks), open **User Management**, press **Reset two-factor** on the locked administrator and confirm. Then sign in as that administrator with the password, set two-factor up again, and delete `recovery`.
 
-  What is lost: every user, password, grant and two-factor change made after the backup was written, and every user created since. A user the backup does not hold must be created again. A backup made before the administrator first set two-factor up brings them back without it, which also ends the lock. With no backup at all the users cannot be brought back: the moved `users.yaml` can only be opened by this gateway, and it still holds the locked administrator, so recreate the users by hand. The audit trail is not touched. So keep the recovery codes where you can find them, and keep two administrators, so a lost phone is a **Reset two-factor** click and never this.
+  What is lost: every user, password, grant and two-factor change made after the backup was written, and every user created since. A user the backup does not hold must be created again. A backup made before the administrator first set two-factor up brings them back without it, which also ends the lock. With no backup at all the users cannot be brought back: the moved `users.yaml` can only be opened by this gateway, and it still holds the locked administrator, so enter the users again in User Management. The audit trail is not touched. So keep the recovery codes where you can find them, and keep two administrators, so a lost phone is a **Reset two-factor** click and never this.
 
 ### The gateway's clock
 
@@ -308,7 +308,7 @@ A file you drop into the trust directory by hand is read at the next start, or a
 
 **Restart gateway**, in the **Gateway** card at the foot of Gateway Settings, makes the gateway start its own program again in place: it asks for confirmation, writes the audit line `gateway.restart`, answers `202`, shuts down as it does for `SIGTERM` (requests in flight are given up to 10 seconds; the stores and the audit log close) and executes itself again with the same arguments and environment. The container keeps running, so its mounts and name stay. Every user and administrator is signed out, open broker connections and sockets close, and any setting that was waiting for a restart (the notice on Gateway Settings lists them and points at the button) is applied. The console says it is restarting, waits for the gateway to answer again and goes to the sign-in; if nothing answers within a minute it says so.
 
-You rarely need it: settings, certificates and trusted CAs apply without one. Use it to apply a restart-only setting or to load a `config.yaml` edited on the host. It restarts with the environment the container already has, so a changed variable (the three TLS paths included) still needs the container recreated. If the gateway cannot start itself again it logs `gateway restart failed` with the cause and exits with status 1, and the platform's restart policy (`restart: unless-stopped` in the compose files) brings it back; on a platform without an in-place start it exits with status 0 instead, so the policy must restart on any exit.
+You rarely need it: settings, certificates and trusted CAs apply without one. Use it when the console says a file was changed on the host (see [Stored files and recovery](#stored-files-and-recovery)), or to apply a setting the page reports as waiting for a restart. It restarts with the environment the container already has, so a changed variable (the three TLS paths included) still needs the container recreated. If the gateway cannot start itself again it logs `gateway restart failed` with the cause and exits with status 1, and the platform's restart policy (`restart: unless-stopped` in the compose files) brings it back; on a platform without an in-place start it exits with status 0 instead, so the policy must restart on any exit.
 
 ### Paths come from the environment
 
@@ -352,9 +352,9 @@ To move a deployment: export (or copy a file from `/backup`), start the new gate
 
 ## Stored files and recovery
 
-The gateway keeps its state in a few files on the `/data` volume: `users.yaml`, `connections.yaml` and `backup.yaml` (sealed with the store key), `config.yaml` (plain), the key itself and the audit log. Treat them as the gateway's: change them through the console, never by hand, and do not copy one in or out while the gateway runs.
+The gateway keeps its state in a few files on the `/data` volume: `users.yaml`, `connections.yaml` and `backup.yaml` (sealed with the store key), `config.yaml` (plain), the key itself and the audit log. They are the gateway's: none of them is meant to be written or edited by hand. Change users, connections and settings in the console, carry them between deployments with [Back up and restore](#back-up-and-restore), and do not copy a file in or out while the gateway runs.
 
-**Versions in the files.** Each sealed file begins with a counter, `seq`, that goes up by one on every change written to that file. Each user and each connection also holds a `rev`, the value of `seq` when that record last changed in a way the console shows; the console sends it back with a save. A password change moves `seq` but not `rev`, because the console never shows a password. Two-factor is shown as On or Off: setting it up the first time and an administrator's reset move `rev`; setting it up again and spending a recovery code move only `seq`. The schedule's version is the `seq` of `backup.yaml`; removing the schedule keeps the file with its counter, so a schedule created later gets a number nobody holds. `config.yaml` has no counter, because people may edit it: its version is a checksum of the file, which the gateway computes in memory and never stores. At start the gateway refuses to run if any `rev` is zero or above its file's `seq` (a file restored from somewhere else), and says which. A backup does not carry versions: an import gives every record in the sections it imports a fresh one.
+**Versions.** The gateway numbers every change it writes to a sealed file (`seq`, which an audit entry shows in `wrote`) and keeps, for each user and each connection, the number of its last change that the console shows (`rev`). These are the versions behind [Two administrators at once](#two-administrators-at-once). At start the gateway refuses to run if any `rev` is zero or above its file's `seq` (a file restored from somewhere else), and says which. A backup does not carry versions: an import gives every record in the sections it imports a fresh one. How the numbers move is in [architecture.md](architecture.md#the-single-writer).
 
 **Every write is one journaled change.** The gateway writes the new content to temporary files, checks that it can read each one back, and swaps them in, with a small journal file called `txn` that says what is in flight. Saving a user changes one file; an import changes three, and they change together or not at all. The data directory may therefore briefly hold `txn`, `<name>.bak` copies of the files being replaced and `.tmp-*` files. Do not keep your own `config.yaml.bak`, `users.yaml.bak`, `connections.yaml.bak` or `backup.yaml.bak` in `/data`: the gateway overwrites or deletes those names.
 
@@ -362,7 +362,9 @@ The gateway keeps its state in a few files on the `/data` volume: `users.yaml`, 
 
 **After a crash or power loss.** The gateway settles any change that was in flight before it reads anything else at start. If the journal shows a change that had not finished, it puts back the previous files, as if the change had never happened, and the administrator whose save was lost gets no answer; saving again with the version they read works. If the change had finished, the new files stand and a retry with the old version is refused as changed by someone else, which is the cue to reload. No action is needed. The gateway logs a warning when it rolls a change back. If `txn` is unreadable (damaged, or it names something it should not), the gateway stops the start and says so rather than guess: restore `/data` from your volume backup, or import a backup into a fresh volume.
 
-**Changed on disk.** Before each write the gateway checks that the file on disk is still the one it last read or wrote. If a store file is replaced behind its back, or `config.yaml` was edited by hand, the save is refused with `store_changed_on_disk` or `config_changed_on_disk` and the console says the gateway must be restarted. The refusal stays for that file, on every later save, until the restart, because the file is not what the gateway holds in memory; restarting loads what is on disk. Reads keep working from memory meanwhile, so the console may show data that does not match the file. Editing `config.yaml` on the host is expected only for what the console cannot change (leaving Provisioned mode with `connModes: direct`, and the restart-only `hosted`); stop or restart the gateway afterwards (**Restart gateway** does it).
+**Changed on disk.** Before each write the gateway checks that the file on disk is still the one it last read or wrote. If a file was changed behind its back (a store file replaced, or `config.yaml` altered on the host), the save is refused with `store_changed_on_disk` or `config_changed_on_disk` and the console says the gateway must be restarted. The refusal stays for that file, on every later save, until the restart, because the file is not what the gateway holds in memory; restarting loads what is on disk. Reads keep working from memory meanwhile, so the console may show data that does not match the file. This is a safeguard, not a way to change settings: the files are never edited by hand. The recoveries on this page that remove or move a whole file all end with a start or a restart, which loads what is on the volume.
+
+**Starting the settings again.** To get past a start the gateway refuses over its settings, or to leave Provisioned mode, remove `/data/config.yaml` with the gateway stopped, then start it. The gateway writes the file again from the variables and the built-in defaults, so every setting made in the console is back at its default until you set it again: the access list is empty (everyone), two-factor is `optional`, and the session and sign-in limits are the defaults. `SMU_CONN_MODES` decides the mode of the new file, so check that it still names the one you want. Then set the settings on Gateway Settings, or import them from a backup (Settings: **Replace**). The users, the connections and the backup schedule are not touched.
 
 ---
 
@@ -486,7 +488,7 @@ The gateway refuses to start, saying which file and why, when the stores and the
 | Message | Fix |
 | --- | --- |
 | The key is missing beside an existing store (or `backup.yaml`) | Restore the key, or delete the store files and `backup.yaml` to start over, then import a backup. |
-| The key is unreadable, or not 64 hex characters | Restore the right file. On a fresh volume, make one with `head -c 32 /dev/urandom \| xxd -p -c 64`. `EACCES` means UID `65532` cannot read it. |
+| The key is unreadable, or not 64 hex characters | Restore the right file. On a fresh volume with no stores, remove it and the gateway makes a new key at the next start; if you supply the key yourself as a mounted secret, make one with `head -c 32 /dev/urandom \| xxd -p -c 64`. `EACCES` means UID `65532` cannot read it. |
 | A store file is not encrypted | Plain stores are not read: delete them and enter the users and connections again, or import a backup. |
 | A store cannot be decrypted, or is damaged | The wrong key, or a damaged store: restore the matching pair from a backup. |
 
@@ -494,10 +496,10 @@ A key file other users can read is only warned about, because Docker secrets are
 
 Other refusals at start:
 
-- **`login.twoFactor` has an invalid value:** the key is not `optional`, `admins` or `mandatory` (`off` is not a value). Fix `config.yaml`.
+- **`login.twoFactor` has an invalid value:** the gateway's settings hold a value other than `optional`, `admins` or `mandatory` (`off` is not a value). Start the settings again: see [Stored files and recovery](#stored-files-and-recovery).
 - **A user's two-factor secret or recovery code is malformed:** `users.yaml` was damaged or replaced; the message names the user and the rule, never the value. Restore the matching file from your volume backup.
-- **`connModes=... offers Provisioned sign-in but hosted is false`:** remove `SMU_HOSTED=false`, or set `hosted: true` in `config.yaml`.
-- **`invalid config file ... field managed not found`:** the `config.yaml` holds a `managed:` key, which is not a setting. Delete the `managed:` line.
+- **`connModes=... offers Provisioned sign-in but hosted is false`:** remove `SMU_HOSTED=false`. Provisioned mode needs the gateway to carry the broker connections.
+- **`invalid config file ... field ... not found`:** the gateway's settings hold a key it does not know (`managed`, for example). Start the settings again: see [Stored files and recovery](#stored-files-and-recovery).
 - **`TLS directory recovery failed`:** a certificate replacement was interrupted and its journal in the certificate's directory cannot be read. The log names the file and the cause; the start stops rather than load a pair that may be half written. Restore the certificate and key from your copy and see [Stored files and recovery](#stored-files-and-recovery) for how the journal is settled.
 - **Certificates page: `tls_read_only` or the read-only notes:** `/tls` is mounted read-only, or the certificate and key are in two directories. See [Locking them](#locking-them) and [Letting the console manage them](#letting-the-console-manage-them).
 - **Certificates page: `tls_write_failed`:** the write failed and was rolled back (a full disk, a permission problem, or a single-file bind mount of the certificate). The log has the cause; nothing changed.

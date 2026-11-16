@@ -46,8 +46,9 @@ services:
     ports:
       - "9443:9443"
     environment:
-      # Seed config.yaml on the first start only; afterwards the admin console's
-      # Gateway Settings, or the file in the data volume, wins.
+      # Seed config.yaml on the first start only; afterwards an administrator
+      # changes the settings on the admin console's Gateway Settings page, and a
+      # different value here is ignored and logged.
       # provisioned: everyone signs in, the recommended setting. both also
       # offers the Direct form, where anyone can connect with credentials they
       # know, outside their grants.

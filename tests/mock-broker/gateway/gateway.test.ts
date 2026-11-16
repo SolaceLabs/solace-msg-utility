@@ -200,7 +200,7 @@ describe('mock-broker/gateway -- settings', () => {
         const res: any = await putSettings({ connModes: 'direct' });
         expect(res.status).toBe(422);
         expect(res.json.field).toBe('connModes');
-        expect(res.json.reason).toMatch(/set connModes: direct in config\.yaml on the gateway host and restart\.$/);
+        expect(res.json.reason).toMatch(/remove config\.yaml from the gateway's data volume and start the gateway with SMU_CONN_MODES=direct, so that it seeds its settings again\.$/);
         expect(gw.settings.current().connModes).toBe(before);
     });
 
@@ -215,7 +215,7 @@ describe('mock-broker/gateway -- settings', () => {
         for (const res of [await call('GET', '/managed/settings'), await putSettings({})]) {
             expect(res.status).toBe(500);
             expect((res.json as any).error).toBe('config_unreadable');
-            expect((res.json as any).reason).toMatch(/Fix the file on the gateway host, then reload this page\.$/);
+            expect((res.json as any).reason).toMatch(/The cause is on the gateway host; once the gateway can read the file again, reload this page\.$/);
         }
     });
 });

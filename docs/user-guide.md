@@ -509,7 +509,7 @@ If the gateway takes your access away while you are connected (you signed out in
 
 ## Administration (`/solAdmin`)
 
-This part is for administrators of a Provisioned deployment. It covers the admin app's pages and what each button does. The settings files, environment variables and recovery steps behind them are in [provisioned-mode.md](provisioned-mode.md).
+This part is for administrators of a Provisioned deployment. It covers the admin app's pages and what each button does. The settings in detail, the environment variables and the recovery steps behind them are in [provisioned-mode.md](provisioned-mode.md).
 
 ### Opening the admin app
 
@@ -588,12 +588,12 @@ List, add, edit and delete broker connections, with the same pencil and bin icon
 
 ### Gateway Settings
 
-The gateway's own settings, one card each: Connections, Access, Sessions, Sign-in throttle, Two-factor sign-in, Modules, Logging, Audit trail and Broker trust. Then **Save**, then a **Gateway** card with **Restart gateway** (see [Restart gateway](#restart-gateway)). The file these settings are stored in, and its keys, are described in [provisioned-mode.md](provisioned-mode.md#configure).
+The gateway's own settings, one card each: Connections, Access, Sessions, Sign-in throttle, Two-factor sign-in, Modules, Logging, Audit trail and Broker trust. Then **Save**, then a **Gateway** card with **Restart gateway** (see [Restart gateway](#restart-gateway)). What the settings do, with their defaults and recommended values, is in [provisioned-mode.md](provisioned-mode.md#configure); the log level and the broker certificate check are in [deployment.md](deployment.md#settings).
 
 | Card | What you set |
 | --- | --- |
 | Connections | Which connection tabs the app offers: Provisioned only, or Direct and Provisioned. Leaving Provisioned mode is not done on this page; see [provisioned-mode.md](provisioned-mode.md#connection-modes) |
-| Access | The client access list. It opens with one line, "Your address as the gateway sees it", naming your address and whether it is the TCP peer or came from X-Forwarded-For through a trusted proxy. If it shows a proxy's address, see [Client addresses behind Docker and proxies](deployment.md#client-addresses-behind-docker-and-proxies) |
+| Access | The client access list (**Allowed clients**) and the **Trusted reverse proxies**. It opens with one line, "Your address as the gateway sees it", naming your address and whether it is the TCP peer or came from X-Forwarded-For through a trusted proxy. If it shows a proxy's address, see [Client addresses behind Docker and proxies](deployment.md#client-addresses-behind-docker-and-proxies) |
 | Sessions | Idle and absolute session limits |
 | Sign-in throttle | How many wrong passwords lock sign-in, and for how long |
 | Two-factor sign-in (code from an authenticator app) | *Optional* (the default), *Administrators must use it* or *Everyone must use it*; applies at the next sign-in |
@@ -608,7 +608,7 @@ The gateway's own settings, one card each: Connections, Access, Sessions, Sign-i
 
 - The gateway refuses an access list that would shut out your own address (the error names it).
 - If someone else saved the settings after you opened the page, your save is refused and the page offers **Reload** (see [Saving at the same time as someone else](#saving-at-the-same-time-as-someone-else)).
-- After anyone edits the settings file directly on the gateway host, the gateway refuses every save: a banner says so and Save stays off until the gateway is restarted.
+- If the settings file was changed on the gateway host, outside the console, the gateway refuses every save: a banner says so and Save stays off until the gateway is restarted. The file is the gateway's own and is not meant to be edited.
 - If the gateway cannot read its settings file, the page says so instead of showing the settings.
 
 The users and connections stores and the store key have no setting: they always live in the gateway's `/data` folder, and [Backup & Restore](#backup--restore) is how you move them.
