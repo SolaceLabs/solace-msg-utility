@@ -239,9 +239,8 @@ describe('queue-browser/service-events', () => {
         });
     });
 
-    // ACK/REJECT/timeout/inflight-tracking moved to src/core/services/solace-publisher
-    // in the May 2026 publisher lift. Their tests now live in
-    // tests/core/services/solace-publisher.test.ts.
+    // ACK/REJECT/timeout/inflight-tracking live in src/core/services/solace-publisher
+    // and are tested in tests/core/services/solace-publisher.test.ts.
 
     describe('onMessage()', () => {
         // `any`: tests override the SDK getters they exercise on the returned object.
@@ -921,9 +920,8 @@ describe('queue-browser/service-events', () => {
     });
 
     // onSessionAck/Reject branches (correlation-key absent, generic-error
-    // fallback, null-event safety) are now covered by the publisher unit
-    // tests in tests/core/services/solace-publisher.test.ts. Their previous
-    // wrapper here was deleted during the May 2026 publisher lift.
+    // fallback, null-event safety) are covered by the publisher unit
+    // tests in tests/core/services/solace-publisher.test.ts.
 
     describe('onConnectFailed()', () => {
         it('shows browser error when current queue matches and calls disconnectBrowser', () => {

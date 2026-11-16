@@ -1,7 +1,7 @@
 /**
  * SEMP v2 monitor endpoints, with real cursor paging.
  *
- * `semp-discovery.ts` is not mocked any more: it runs for real against these
+ * `semp-discovery.ts` is not mocked: it runs for real against these
  * responses, following `meta.paging.nextPageUri` until it is absent. So the
  * page size is deliberately small — the demo exercises the multi-page path
  * rather than always fitting in one response.

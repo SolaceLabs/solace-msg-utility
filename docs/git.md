@@ -1,5 +1,7 @@
 # Git Workflow & Release Process
 
+This page is for maintainers: whoever merges to `main`, cuts a release or has to read a red release run. It covers how branches work, how a `v*` tag becomes a release, how the workflow's pins are kept current, and what to do when a run fails. Day-to-day developer setup is in [developer-guide.md](developer-guide.md) and [contributing.md](contributing.md).
+
 This project ships in three forms:
 
 1. A **container image** at `ghcr.io/solacelabs/solace-msg-utility` (produced by [docker/Dockerfile](../docker/Dockerfile)): one image for Gateway mode, the default, and Provisioned mode.
@@ -37,7 +39,7 @@ The tag itself is the single source of version truth. There is no version field 
 
 - `main` is the integration branch. It must stay releasable at all times.
 - Feature work happens on short-lived branches off `main` and lands via pull request.
-- `main` is protected — direct pushes should be avoided. Merge via PR after review.
+- `main` is protected -- direct pushes should be avoided. Merge via PR after review.
 - The repo uses `pull.ff = only` locally; keep `main` linear by rebasing feature branches before merging.
 
 There is **no** `develop`, `release/*`, or long-lived staging branch. The tag workflow runs only against the commit the tag points at, so whatever is on `main` at tag time is what ships.
@@ -58,7 +60,7 @@ There is **no** `develop`, `release/*`, or long-lived staging branch. The tag wo
 ./scripts/dev.ps1 full    # the same, on Windows
 ```
 
-Run it on a **clean checkout**. Nothing else catches a file you built against locally but never committed — there is no CI on push to find it for you.
+Run it on a **clean checkout**. Nothing else catches a file you built against locally but never committed -- there is no CI on push to find it for you.
 
 Then confirm the version actually got stamped:
 
@@ -77,7 +79,7 @@ Each task truncates `scripts/logs/<task>.log`, tees everything into it, and clos
 2026-09-05T18:21:00+0800 | scan | 45s | OK
 ```
 
-CI runs `cov`, so the 100% web thresholds in `vitest.config.ts` gate every release. The previous run's coverage totals in `logs/cov.log` are the local floor for what has no threshold (the Go total). CI is a fresh checkout with no prior log, so it cannot compare against it -- that check is yours.
+CI runs `cov`; what it gates and what only you can check locally is in [testing.md](testing.md#coverage-policy).
 
 ---
 
@@ -98,7 +100,7 @@ git push origin v3.4.0
 
 Tag format **must** be `vX.Y.Z`. The `plan` job fails any other `v*` tag, a pre-release such as `v3.5.0-rc.1` included, before anything builds. `docker/metadata-action` semver parsing expects the leading `v`.
 
-That push is the whole release. The workflow creates the GitHub Release itself, last, and only if every job passed — so a failure anywhere leaves no Release and nothing to clean up. Read the logs artifact, push a fix, tag again.
+That push is the whole release. The workflow creates the GitHub Release itself, last, and only if every job passed -- so a failure anywhere leaves no Release and nothing to clean up. Read the logs artifact, push a fix, tag again.
 
 ```bash
 gh run watch
@@ -110,21 +112,21 @@ gh run watch
 
 ## What the workflow does
 
-| Job | Depends on | What it does | Fails the release if… |
+| Job | Depends on | What it does | Fails the release if... |
 | --- | --- | --- | --- |
 | `plan` | -- | Checks the tag is `vX.Y.Z` and whether it is the highest release tag (which decides `latest`), then resolves the project shape once, loudly: is there a `docker/Dockerfile`, and is the `BUILD_TARGETS` repo variable valid JSON. | The tag is not `vX.Y.Z`, `BUILD_TARGETS` is malformed, or nothing at all would ship. |
 | `gates` | `plan` | Calls [`ci.yml`](../.github/workflows/ci.yml), which runs `./scripts/dev.sh all cov scan` on `ubuntu-24.04` and `./scripts/dev.ps1 all cov scan` on `windows-2025`, then uploads `scripts/logs/` as an artifact. | A build, type, lint, test, coverage-threshold, `npm audit`, `govulncheck` or Trivy failure on either platform. |
 | `image` | `plan`, `gates` | Builds the image multi-arch (`linux/amd64,linux/arm64`) with buildx and pushes to GHCR **by digest only** (no tag) with provenance and SBOM, then Trivy-scans each platform's manifest of that digest separately (Trivy on a multi-arch index scans only one platform). One image serves every container mode: it carries `index.html`, `provisioned.html` and `solAdmin.html`, and the gateway picks by `SMU_CONN_MODES` at run time. The image builds its own bundles and runs `npm run check:bundles` on them before copying them in. | Any HIGH/CRITICAL fixable OS or library vuln on either platform, or a pushed platform with no Trivy step. Nothing is tagged yet, so `latest` stays where it was. |
 | `binaries` | `plan`, `gates` | Runs `./scripts/dev.sh build` for the one `BUILD_TARGETS` entry and uploads only the Release bundles (`RELEASE_BUNDLES`, set once at the top of `tag.yml`) as the `bundles-<os>-<arch>` artifact. The gateway binary it also compiles, and the image-only `provisioned.html` and `solAdmin.html`, never leave the runner: the gateway ships only inside the image, and on a public repository a workflow artifact is a download too. | A build failure, or a Release bundle the build did not emit. |
 | `publish` | `image`, `binaries` | Points every tag `docker/metadata-action` derived (see [Image tags](#image-tags)) at the digest `image` scanned, with `docker buildx imagetools create`. That re-pushes the index byte-for-byte, so the digest does not change; it then checks that each tag resolves to that digest. Runs only when the image and the binaries passed, one tag run at a time. | A registry error, or a tag that does not resolve to the scanned digest. |
-| `pages` | `plan`, `gates`, `image`, `binaries`, `publish` | Checks out the `dist` branch, copies *only* `index.html` into the branch root, commits, pushes. Pages auto-redeploys. | Only runs when everything upstream passed — a red scan no longer redeploys the site. |
+| `pages` | `plan`, `gates`, `image`, `binaries`, `publish` | Checks out the `dist` branch, copies *only* `index.html` into the branch root, commits, pushes. Pages auto-redeploys. | Runs only when everything upstream passed, so a red scan never redeploys the site. |
 | `release` | `plan`, `gates`, `image`, `binaries`, `publish` | Merges every `bundles-*` artifact into one `dist/`, writes `SHA256SUMS.txt`, generates notes, appends the image digest, and creates the Release with everything attached. It is marked the Latest Release only when the tag is the highest release (`plan`). | Never publishes unless at least one producer actually succeeded. |
 
-`binaries` keeps its name from the standard template. Should `BUILD_TARGETS` ever list more than one target, each leg emits an identical copy of the bundles and `merge-multiple` collapses them.
+`binaries` follows the standard template's job name. If `BUILD_TARGETS` lists more than one target, each leg emits an identical copy of the bundles and `merge-multiple` collapses them.
 
 ### Repo variables
 
-*Settings → Secrets and variables → Actions → Variables*:
+*Settings -> Secrets and variables -> Actions -> Variables*:
 
 | Variable | Value | Why |
 | --- | --- | --- |
@@ -157,7 +159,7 @@ The two vendor JS files (`solclient.js`, `jszip.min.js`) are **not** release ass
 
 ### Why scans block the release
 
-`scan` inside the dev scripts is fatal on **fixable** CVEs and warns-and-passes on unfixable ones: there is nothing to act on for the latter, and blocking on it would freeze releases on someone else's patch schedule. There is no report-only mode — local and CI behave identically, so a contributor never meets a CI-only finding.
+`scan` inside the dev scripts is fatal on **fixable** CVEs and warns-and-passes on unfixable ones: there is nothing to act on for the latter, and blocking on it would freeze releases on someone else's patch schedule. There is no report-only mode -- local and CI behave identically, so a contributor never meets a CI-only finding.
 
 In `tag.yml` the order is the point: `image` pushes by digest only and scans every platform of that digest before any tag exists, and `publish` tags it only after everything passed. The same pinned Trivy version runs locally, in `gates` and in `image`; see [Keeping the workflow pins current](#keeping-the-workflow-pins-current).
 
@@ -169,31 +171,31 @@ Note that an advisory-database update can turn a tag red with no code change (th
 
 Pages is fed from the **`dist` branch**, not from a workflow-uploaded Pages artifact. The published URL is:
 
-- `https://solacelabs.github.io/solace-msg-utility/` → `index.html` (production bundle)
+- `https://solacelabs.github.io/solace-msg-utility/` -> `index.html` (production bundle)
 
 The other Direct-only variants and `provisioned-demo.html` are built and attached to the Release but **not** deployed to Pages. Provisioned deployments run the image with `SMU_CONN_MODES=provisioned`: the gateway then serves `provisioned.html` (the only bundle with the Provisioned sign-in) at `/` and `solAdmin.html` at `/solAdmin`.
 
-Pages is gateway-less, so it is Direct-connection-only by design.
+Pages has no gateway, so it offers Direct connections only.
 
 #### Why a separate branch
 
-The PWA needs two vendor JS files at runtime — `solclient.js` (Solace SDK) and `jszip.min.js` (used by the queue browser's "Download" feature). They're not bundled by Vite, and the project has chosen not to commit them into `main`. Instead they live in the `dist` branch, where the PWA can find them as siblings of `index.html`.
+The PWA needs two vendor JS files at runtime -- `solclient.js` (Solace SDK) and `jszip.min.js` (used by the queue browser's "Download" feature). They're not bundled by Vite, and the project has chosen not to commit them into `main`. Instead they live in the `dist` branch, where the PWA can find them as siblings of `index.html`.
 
 #### What the workflow touches on `dist`
 
-The `pages` job only overwrites `index.html`. **Every other file on the `dist` branch is left untouched** — vendor files, `.nojekyll`, `CNAME`, or anything else committed there manually. Stale files are never auto-removed; drop them by hand.
+The `pages` job only overwrites `index.html`. **Every other file on the `dist` branch is left untouched** -- vendor files, `.nojekyll`, `CNAME`, or anything else committed there manually. Stale files are never auto-removed; drop them by hand.
 
 > **One-time setup:** before the first release:
 >
 > 1. Create the `dist` branch with the vendor files committed at the root: `solclient.js`, `jszip.min.js`, plus an empty `.nojekyll` file. (See [docs/deployment.md](deployment.md) for where to obtain the SDK.)
 > 2. Push it: `git push -u origin dist`.
-> 3. In *Settings → Pages*, set **Source: Deploy from a branch → Branch: `dist` → Folder: `/` (root)**. Save.
+> 3. In *Settings -> Pages*, set **Source: Deploy from a branch -> Branch: `dist` -> Folder: `/` (root)**. Save.
 
 ---
 
 ## Keeping the workflow pins current
 
-Every action is pinned by commit SHA, never by a mutable tag like `@v4`. The one exception is the organisation's reusable SCA workflow in [`sca-scan-and-guard.yml`](../.github/workflows/sca-scan-and-guard.yml), tracked at `@main` by organisation decision (commit `bb300f7`); its write and OIDC permissions are scoped to that one job, and the workflow's top-level token is read-only. [`.github/dependabot.yml`](../.github/dependabot.yml) opens weekly PRs that bump the SHA and its `# <tag>` comment together -- minor/patch grouped into one PR, majors separately so a breaking change is never buried in a batch. Those PRs run the full gate because `ci.yml` carries a narrow `pull_request` trigger on the workflow and dev-script paths.
+Every action is pinned by commit SHA, never by a mutable tag like `@v4`. The one exception is the organisation's reusable SCA workflow in [`sca-scan-and-guard.yml`](../.github/workflows/sca-scan-and-guard.yml), tracked at `@main` by organisation decision; its write and OIDC permissions are scoped to that one job, and the workflow's top-level token is read-only. [`.github/dependabot.yml`](../.github/dependabot.yml) opens weekly PRs that bump the SHA and its `# <tag>` comment together -- minor/patch grouped into one PR, majors separately so a breaking change is never buried in a batch. Those PRs run the full gate because `ci.yml` carries a narrow `pull_request` trigger on the workflow and dev-script paths.
 
 Dependabot manages **actions and the Dockerfile's base images only, on purpose**. The builder images (`golang`, `node`) and the `# syntax=docker/dockerfile` frontend are pinned `tag@sha256:<digest>` in [docker/Dockerfile](../docker/Dockerfile), so a re-pushed tag cannot change the build; the `docker` entry in `dependabot.yml` moves the digest (and minor or patch tags, grouped; majors are ignored) in a PR that runs the full gate, since `ci.yml`'s `pull_request` paths include `docker/Dockerfile`. A PR that moves `golang` or `node` must move `toolchain` in `go-web-proxy/go.mod` or `nodejs` in `.tool-versions` with it. To pin by hand: `docker buildx imagetools inspect <image>:<tag>` and take the top-level `Digest:` (the multi-arch index). Language dependencies move the other way round: `scan` fails on a fixable CVE and the bump is made deliberately with gates re-run. The same goes for the manifest-pinned `govulncheck` (a `tool` directive in [go-web-proxy/go.mod](../go-web-proxy/go.mod), invoked as `go tool govulncheck`) and the toolchain pins.
 
@@ -213,7 +215,7 @@ If the workflow fails partway (e.g. a transient Trivy DB download error), re-run
 gh run rerun <run-id> --failed
 ```
 
-The release step is idempotent — it leaves an existing Release alone — and the `concurrency:` group is keyed on the tag, so re-runs serialize cleanly.
+The release step is idempotent -- it leaves an existing Release alone -- and the `concurrency:` group is keyed on the tag, so re-runs serialize cleanly.
 
 `image` pushes by digest only, so a run that fails before `publish` leaves an untagged image in GHCR that no tag and no Release points at. Leave it; it is harmless. Do **not** bulk-delete untagged versions under *Packages -> versions*: the per-platform and attestation manifests of every published multi-arch image are listed there as untagged too, and deleting one breaks the tagged image that references it. If `publish` itself fails partway (a registry error), `gh run rerun <run-id> --failed` re-runs it; pointing a tag at the same digest again is idempotent. Re-run an older tag's `publish` only if no newer release has published since, because it moves `<major>` and `<major>.<minor>` as well (and `latest`, when that tag was the highest release at the time its `plan` ran).
 
@@ -240,21 +242,21 @@ Do **not** retag an existing version. Image consumers cache by digest, so retagg
 | --- | --- | --- |
 | Workflow does not fire at all | The tag doesn't match `v*`, or `tag.yml` isn't on the default branch yet. | Workflows must be merged to `main` before they can be relied on. Check the tag name. |
 | `plan` fails with `the tag must be vX.Y.Z` | A pre-release (`v3.5.0-rc.1`) or malformed (`v3.5`) tag. Nothing was built. | Delete the tag (`git push origin :refs/tags/<tag>`, `git tag -d <tag>`) and push a `vX.Y.Z` tag. |
-| `plan` fails with `BUILD_TARGETS must be a non-empty JSON array` | The repo variable is malformed. | `gh variable set BUILD_TARGETS --body '[{"os":"linux","arch":"amd64"}]'` — mind the quoting. |
+| `plan` fails with `BUILD_TARGETS must be a non-empty JSON array` | The repo variable is malformed. | `gh variable set BUILD_TARGETS --body '[{"os":"linux","arch":"amd64"}]'` -- mind the quoting. |
 | `gates` fails on the npm audit gate (`FATAL:` lines in `scan.log`) | A transitive npm dep has a new fixable HIGH/CRITICAL advisory: a release outside its range exists. Unfixable ones only print `WARN unfixable`. | `npm update <pkg>` for an in-range fix, else bump the direct dependency or add an `overrides` entry -- never `npm audit fix --force`. Re-run `./scripts/dev.sh scan`, commit, re-tag. |
 | `gates` fails on `govulncheck` | A new Go stdlib or module vuln affects `go-web-proxy/`. | Update [go-web-proxy/go.mod](../go-web-proxy/go.mod) (often just `go get -u` on the affected module) and re-tag. |
 | `gates` fails only on `windows-2025` | Usually a path or shell difference between the two dev scripts. | Reproduce with `./scripts/dev.ps1 all cov scan`. The two scripts must stay behaviourally identical. |
-| `gates` passes locally but fails in CI on a Go build | The runner's preinstalled Go is older than yours and the toolchain pin is missing or unhonoured. | Check `toolchain` is present in [go-web-proxy/go.mod](../go-web-proxy/go.mod). Never invoke a Go tool as `go run pkg@version` — that runs module-less and ignores the pin. |
+| `gates` passes locally but fails in CI on a Go build | The runner's preinstalled Go is older than yours and the toolchain pin is missing or unhonoured. | Check `toolchain` is present in [go-web-proxy/go.mod](../go-web-proxy/go.mod). Never invoke a Go tool as `go run pkg@version` -- that runs module-less and ignores the pin. |
 | `image` fails on a `Trivy gate (<platform>)` step | The runtime image is `FROM scratch`, so there is no OS base to patch -- a finding means a statically-linked Go module or a bundled asset. The step name says which platform; nothing was tagged. | Update [go-web-proxy/go.mod](../go-web-proxy/go.mod) (or the npm dep behind the bundled asset), and bump the builder-stage `FROM` tag and digest in [docker/Dockerfile](../docker/Dockerfile) if the toolchain itself is implicated. |
-| `image` fails on *Resolve per-platform digests* | `PLATFORMS` gained or lost a platform without a matching Trivy step. | Add or drop a `Trivy gate (<platform>)` step and its entry in `SCANNED` beside it. |
-| `publish` fails with `<tag> resolves to …, not the scanned …` | Something other than this run's `imagetools create` wrote the tag: a hand-pushed tag, or an index rewrite (an `--annotation` added to the create). Concurrent tag runs are serialised by `publish`'s concurrency group. | Compare `docker buildx imagetools inspect <tag>` with the digest in the run's *Record the scanned digest* step. Re-run `publish` only if this is the newest release. |
+| `image` fails on *Resolve per-platform digests* | `PLATFORMS` lists a platform that has no matching Trivy step, or the reverse. | Add or drop a `Trivy gate (<platform>)` step and its entry in `SCANNED` beside it. |
+| `publish` fails with `<tag> resolves to ..., not the scanned ...` | Something other than this run's `imagetools create` wrote the tag: a hand-pushed tag, or an index rewrite (an `--annotation` added to the create). Concurrent tag runs are serialised by `publish`'s concurrency group. | Compare `docker buildx imagetools inspect <tag>` with the digest in the run's *Record the scanned digest* step. Re-run `publish` only if this is the newest release. |
 | `publish` is *Canceled* while waiting | Three or more tags were pushed at once; GitHub keeps one pending job per concurrency group and cancels the older one. | Re-run that run's failed jobs, then re-run the newest release's `publish` so `latest` ends on the newest. |
-| `image` or `publish` fails with `denied: permission_denied` | The tag was pushed to a fork, or `packages: write` is missing from repo settings. | Push tags on `SolaceLabs/solace-msg-utility`. Verify *Settings → Actions → Workflow permissions* allows `GITHUB_TOKEN` to write packages. |
-| The first GHCR push creates a **private** package | GHCR defaults new packages to private. | A one-time repo setting: *Packages → the package → Package settings → Change visibility*. |
-| The gateway reports `dev` instead of the tag | The `-ldflags` injection did not reach the build. | The injection is a linker flag — when it goes missing the binary silently reports its compiled-in default and the build stays green. Check `-X main.version=` in [scripts/dev.sh](../scripts/dev.sh) and the `APP_VERSION` build-arg in [docker/Dockerfile](../docker/Dockerfile). |
-| `git describe` returns a bare SHA locally | A shallow clone, or a fetch without `--tags`. | `git fetch --tags`. The release path never depends on it — CI exports `VERSION` from the tag ref. |
+| `image` or `publish` fails with `denied: permission_denied` | The tag was pushed to a fork, or `packages: write` is missing from repo settings. | Push tags on `SolaceLabs/solace-msg-utility`. Verify *Settings -> Actions -> Workflow permissions* allows `GITHUB_TOKEN` to write packages. |
+| The first GHCR push creates a **private** package | GHCR defaults new packages to private. | A one-time repo setting: *Packages -> the package -> Package settings -> Change visibility*. |
+| The gateway reports `dev` instead of the tag | The `-ldflags` injection did not reach the build. | The injection is a linker flag -- when it goes missing the binary silently reports its compiled-in default and the build stays green. Check `-X main.version=` in [scripts/dev.sh](../scripts/dev.sh) and the `APP_VERSION` build-arg in [docker/Dockerfile](../docker/Dockerfile). |
+| `git describe` returns a bare SHA locally | A shallow clone, or a fetch without `--tags`. | `git fetch --tags`. The release path never depends on it -- CI exports `VERSION` from the tag ref. |
 | `pages` fails on `Check out dist branch` with `Remote branch dist not found` | The `dist` branch hasn't been created yet. | Create it once locally with the vendor files + `.nojekyll` committed and push: `git push -u origin dist`. See the one-time setup note above. |
-| `pages` fails on `git push` with `Permission to ... denied` | Repo settings restrict `GITHUB_TOKEN` to read-only. | *Settings → Actions → General → Workflow permissions: Read and write permissions*. The job already declares `contents: write`. |
+| `pages` fails on `git push` with `Permission to ... denied` | Repo settings restrict `GITHUB_TOKEN` to read-only. | *Settings -> Actions -> General -> Workflow permissions: Read and write permissions*. The job already declares `contents: write`. |
 | Pages serves the new HTML but the SDK fails to load (404 on `solclient.js`) | The vendor file is missing from the `dist` branch. | Switch to the `dist` branch locally, commit `solclient.js` (and `jszip.min.js`), push. |
 | `dev.sh scan` skips the image half locally | Docker is absent or running Windows containers; a Linux image cannot be built or scanned there. | Expected, and the same rule applies on the `windows-2025` runner. The ubuntu leg still enforces it. |
 
@@ -270,7 +272,7 @@ git checkout main && git pull --ff-only
 ./scripts/dev.sh full
 ./dist/go-web-proxy-linux-amd64 --version   # must equal git describe
 
-# 3. Tag — this is the whole release
+# 3. Tag -- this is the whole release
 git tag -a v3.4.0 -m "Release 3.4.0"
 git push origin v3.4.0
 

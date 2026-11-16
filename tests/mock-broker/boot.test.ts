@@ -6,7 +6,7 @@ import { DIRECT_BANNER } from '../../src/mock-broker/controls/panel';
 import { scenario } from '../../src/mock-broker/fixtures';
 
 /**
- * Regression cover for the race that made the demo fail with the real SDK's
+ * Covers the race that would make the demo fail with the real SDK's
  * "Profile binding not initialized. Call solace.SolclientFactory.init".
  *
  * `dist/solclient.js` sits beside `demo.html`, so the shell's vendor loader

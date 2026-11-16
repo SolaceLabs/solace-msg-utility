@@ -278,7 +278,7 @@ describe('core/services/solace-client', () => {
         });
 
         // A second connect while the first is still in flight would race it:
-        // the first session's teardown used to dispose the second one.
+        // the first session's teardown would dispose the second one.
         it('refuses a connect while an earlier one is in flight, and allows one once it has failed', () => {
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
             const hooks = makeHooks();

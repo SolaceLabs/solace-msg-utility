@@ -2,6 +2,8 @@
 
 Provisioned mode is for teams whose users should not handle broker credentials. Users sign in to the gateway with their own account and see only the brokers and Message VPNs an administrator granted them. They never see or type a broker's address or password.
 
+This page is for the people who run a Provisioned gateway: operators who deploy and configure it, and administrators who look after its users and connections. It covers setup, every setting, two-factor sign-in, certificates, backup and restore, the files the gateway keeps, the audit trail, what the security model does and does not guarantee, and what to do when the gateway will not start. The screens an administrator clicks through are in [user-guide.md](user-guide.md#administration-soladmin). The design of the gateway is in [architecture.md](architecture.md).
+
 It is the same container image as [Gateway mode](deployment.md#gateway-mode), with one setting changed. Everything in the deployment guide about the image, TLS and mounts applies here too.
 
 ---
@@ -37,6 +39,9 @@ It is the same container image as [Gateway mode](deployment.md#gateway-mode), wi
 - [Back up and restore](#back-up-and-restore)
 - [Stored files and recovery](#stored-files-and-recovery)
 - [Audit trail](#audit-trail)
+- [Security model](#security-model)
+  - [What the gateway enforces](#what-the-gateway-enforces)
+  - [What it does not enforce](#what-it-does-not-enforce)
 - [Security checklist](#security-checklist)
 - [Troubleshooting](#troubleshooting)
 
@@ -66,7 +71,7 @@ To see it without deploying anything, open `provisioned-demo.html` from any Rele
 
 Because the browser receives a VPN's client password while it is connected, give each VPN a client username scoped to what its users may do (see the [security checklist](#security-checklist)).
 
-**Queue Copy's destination** follows the primary connection. In a Provisioned session it is one shared connection card (Broker and Message VPN pickers from the signed-in profile, one Connect, Disconnect, a status line); the typed Broker URL, SEMP and Client cards and the Provisioned/Manual radio are not shown, so a Provisioned user has no manual destination and no way to type a broker address. Connect calls `ctx.managedProfile.dial(target, { connect })` and builds the destination client inside that callback: the VPN's client credential goes straight to the SDK and is never stored, and destination SEMP goes through the gateway's relay (`/managed/relay/{broker}/SEMP...`), opened only when the destination broker differs from the primary's. Both dials are checked against the user's entitlements by the gateway as for the primary. The card is locked while a connect is in flight, a refresh that withdraws the connected VPN cancels the connect or closes the destination, and typed-credential destinations exist only with a Direct primary connection (Standalone or Gateway mode). For operators: with `SMU_CONN_MODES=both` the manual destination bypass that previously existed beside Provisioned is gone; a Provisioned session can write only where its entitlements allow.
+**Queue Copy's destination** follows the primary connection: a Provisioned user has no manual destination and cannot type a broker address, and the gateway checks the destination against the user's grants like the primary. What the user sees is in [user-guide.md](user-guide.md).
 
 ---
 
@@ -150,7 +155,7 @@ A wrong code at the two-factor step counts as a wrong password and brings the sa
 
 | Key | Default | Recommended |
 | --- | --- | --- |
-| `modules.offered` | `[queue-browser, queue-copy, queue-subscription-explorer]` | All three, unless no one should copy or move messages (drop `queue-copy`), or queue and topic names in VPNs a user is not granted must stay hidden from them (drop `queue-subscription-explorer`, see the [security checklist](#security-checklist)). A `config.yaml` written by an earlier version lists only the first two: add Queue Subscriptions in Gateway Settings to offer it. |
+| `modules.offered` | `[queue-browser, queue-copy, queue-subscription-explorer]` | All three, unless no one should copy or move messages (drop `queue-copy`), or queue and topic names in VPNs a user is not granted must stay hidden from them (drop `queue-subscription-explorer`, see the [security checklist](#security-checklist)). A `config.yaml` whose list names only the first two offers only those: add Queue Subscriptions in Gateway Settings to offer it. |
 | `modules.userDefault` | `all` | `all` for a small team; `none` if each user should get modules explicitly on their account. |
 
 ### Audit settings
@@ -166,7 +171,7 @@ All three are on the Gateway Settings page (`audit.onFailure` is a select beside
 
 ### Environment variables
 
-These seed `config.yaml` on the first start only, except the two `SMU_ADMIN_PASSWORD` variables, which are never written to it. The users store, the connections store and the store key are not settings: they always live at `/data/users.yaml`, `/data/connections.yaml` and `/data/store.key`, and you move data with Backup & Restore. A deployment that still sets `USERS_FILE`, `CONNECTIONS_FILE` or `STORE_KEY_FILE` (or the `usersFile` / `connectionsFile` keys in `config.yaml`) starts with a warning that the value is ignored. Gateways renamed their variables with an `SMU_` prefix; a start with an old name set is refused, see [deployment.md](deployment.md#settings).
+These seed `config.yaml` on the first start only, except the two `SMU_ADMIN_PASSWORD` variables, which are never written to it. The users store, the connections store and the store key are not settings: they always live at `/data/users.yaml`, `/data/connections.yaml` and `/data/store.key`, and you move data with Backup & Restore. A deployment that still sets `USERS_FILE`, `CONNECTIONS_FILE` or `STORE_KEY_FILE` (or the `usersFile` / `connectionsFile` keys in `config.yaml`) starts with a warning that the value is ignored. Every variable carries the `SMU_` prefix; a start with an unprefixed name set is refused, see [deployment.md](deployment.md#settings).
 
 | Variable | Default | Recommended |
 | --- | --- | --- |
@@ -237,16 +242,16 @@ Codes come from the time. The gateway accepts the code of the current 30-second 
 
 ### Backups and two-factor
 
-A backup carries each user's two-factor secret and the hashes of the unused recovery codes, inside the passphrase-sealed file. Treat the file and its passphrase as you do broker credentials: with both, someone holds the secrets that make the codes. An import restores them. It replaces a user with the file's record, so a user whose record in the file has no two-factor ends up without it, and **Preview** lists a user whose two-factor differs as changed. Users whose two-factor an import adds, removes or replaces are signed out. A backup made before the setting existed has no `login.twoFactor` and reads as `optional`: importing its settings with **Replace** sets the mode to `optional`, which is looser than `mandatory`, so check the mode afterwards. Import restores two-factor as the file holds it, and nothing else.
+A backup carries each user's two-factor secret and the hashes of the unused recovery codes, inside the passphrase-sealed file. Treat the file and its passphrase as you do broker credentials: with both, someone holds the secrets that make the codes. An import restores them. It replaces a user with the file's record, so a user whose record in the file has no two-factor ends up without it, and **Preview** lists a user whose two-factor differs as changed. Users whose two-factor an import adds, removes or replaces are signed out. A backup that holds no `login.twoFactor` reads as `optional`: importing its settings with **Replace** sets the mode to `optional`, which is looser than `mandatory`, so check the mode afterwards. Import restores two-factor as the file holds it, and nothing else.
 
 ---
 
 ## Administer
 
-The admin console is at `https://<host>:9443/solAdmin`, for administrator accounts only.
+The admin console is at `https://<host>:9443/solAdmin`, for administrator accounts only. Its pages, click by click, are in [user-guide.md](user-guide.md#administration-soladmin); this section gives the facts an operator needs.
 
 - **User Management:** add users, reset passwords, make someone an administrator, and grant brokers, VPNs and queues. A grant can use `*` wildcards, for example queues `orders.*`. The **Two-factor** column shows On or Off, and **Reset two-factor** on an On row removes it (see [A lost phone](#a-lost-phone)); a save never carries or clears it.
-- **Connection Management:** add brokers, their SEMP account and their VPNs' client credentials. Leave a password blank to keep the stored one. The gateway reaches each broker over TLS (`https` for SEMP, `wss` for messaging), so the ports are the broker's TLS ports, unless the connection's `scheme` names the plain one (`http` for SEMP, `ws` for messaging; each side set on its own). A connection stored before the field existed stays on TLS: an absent or blank scheme means TLS, so no record needs a migration. Pick `http` or `ws` only for a broker on a trusted network that does not serve TLS on that port: the gateway then reaches it unencrypted, and the SEMP and SMF credentials cross that hop in clear text. Set the scheme in Connections -> Add or Edit connection.
+- **Connection Management:** add brokers, their SEMP account and their VPNs' client credentials. Leave a password blank to keep the stored one. The gateway reaches each broker over TLS (`https` for SEMP, `wss` for messaging), so the ports are the broker's TLS ports, unless the connection's `scheme` names the plain one (`http` for SEMP, `ws` for messaging; each side set on its own). A connection with no scheme, or a blank one, uses TLS. Pick `http` or `ws` only for a broker on a trusted network that does not serve TLS on that port: the gateway then reaches it unencrypted, and the SEMP and SMF credentials cross that hop in clear text. Set the scheme in Connections -> Add or Edit connection.
 - **Gateway Settings:** the settings above, one card each (the two-factor mode is under its own heading, **Two-factor sign-in**; the offered modules are toggle tiles under **Modules**), **Skip broker certificate checks (insecure)** under **Broker trust**, the **Restart gateway** button in the **Gateway** card, and a line under Access, "Your address as the gateway sees it", saying whether the address is the TCP peer or came from `X-Forwarded-For` through a trusted proxy. If it shows your proxy's address rather than yours, see [Client addresses behind Docker and proxies](deployment.md#client-addresses-behind-docker-and-proxies).
 
 Every change to a user, a connection or the settings is also logged at `info` with the administrator's name and what changed (never a password), but the record to keep is the [audit trail](#audit-trail): it is always written, whatever `LOG_LEVEL` says.
@@ -287,7 +292,7 @@ The certificate and its key must sit in one directory to be replaced from the co
 
 ### Locking them
 
-To keep certificates out of the console's hands, mount `/tls` read-only (`:ro`). The page still shows the certificate and the CA files, says that the files are read-only on the gateway host, and disables **Replace certificate**, **Add CA certificate** and **Delete**; a request that tries anyway is refused with `409 tls_read_only`. The same happens when the certificate and its key sit in two different directories (the certificate then cannot be replaced, though CAs still can if their directory is writable). Then you change certificates the way you did before: replace the files on the host and restart the container. A write that fails for another reason (a full disk, a permission problem) is `500 tls_write_failed`: nothing changed, the cause is in the gateway's log.
+To keep certificates out of the console's hands, mount `/tls` read-only (`:ro`). The page still shows the certificate and the CA files, says that the files are read-only on the gateway host, and disables **Replace certificate**, **Add CA certificate** and **Delete**; a request that tries anyway is refused with `409 tls_read_only`. The same happens when the certificate and its key sit in two different directories (the certificate then cannot be replaced, though CAs still can if their directory is writable). Certificates then change on the host: replace the files and restart the container. A write that fails for another reason (a full disk, a permission problem) is `500 tls_write_failed`: nothing changed, the cause is in the gateway's log.
 
 ### What applies at once
 
@@ -307,9 +312,7 @@ You rarely need it: settings, certificates and trusted CAs apply without one. Us
 
 ### Paths come from the environment
 
-The three file locations are not settings. The gateway reads `SMU_SSL_CERTFILE` (default `/tls/tls.crt`), `SMU_SSL_CERTKEYFILE` (default `/tls/tls.key`) and `SMU_SSL_TRUSTDIR` (default `/tls/trust`) at every start; `config.yaml` has no key for them, the settings page and its API have no field for them (a request that names one is refused, `400 bad_request`), and no path appears in any answer. Changing one means recreating the container with the new value.
-
-An older `config.yaml` that still holds `tls.certFile`, `tls.keyFile` or `tls.trustDir` still starts. The keys are ignored, so the paths in use are the environment's (or the defaults), and the next settings save drops them from the file. When a key's value differs from the path in use, one warning at start names it, so a deployment that had moved the files with those keys sees at once that the move no longer holds and sets the variables instead. A backup that holds them imports; they are ignored there too.
+The certificate, its key and the trust directory are set by `SMU_SSL_CERTFILE`, `SMU_SSL_CERTKEYFILE` and `SMU_SSL_TRUSTDIR`, never by `config.yaml` or the settings page (a request that names one is refused, `400 bad_request`, and no path appears in any answer). Changing one means recreating the container. The defaults, and what happens to a `config.yaml` that still holds `tls.certFile`, `tls.keyFile` or `tls.trustDir`, are in [TLS and trusted CAs](deployment.md#tls-and-trusted-cas) and [Variables and keys the gateway refuses or ignores](deployment.md#variables-and-keys-the-gateway-refuses-or-ignores).
 
 ---
 
@@ -359,7 +362,7 @@ The gateway keeps its state in a few files on the `/data` volume: `users.yaml`, 
 
 **After a crash or power loss.** The gateway settles any change that was in flight before it reads anything else at start. If the journal shows a change that had not finished, it puts back the previous files, as if the change had never happened, and the administrator whose save was lost gets no answer; saving again with the version they read works. If the change had finished, the new files stand and a retry with the old version is refused as changed by someone else, which is the cue to reload. No action is needed. The gateway logs a warning when it rolls a change back. If `txn` is unreadable (damaged, or it names something it should not), the gateway stops the start and says so rather than guess: restore `/data` from your volume backup, or import a backup into a fresh volume.
 
-**Changed on disk.** Before each write the gateway checks that the file on disk is still the one it last read or wrote. If a store file was replaced behind its back, or `config.yaml` was edited by hand, the save is refused with `store_changed_on_disk` or `config_changed_on_disk` and the console says the gateway must be restarted. The refusal stays for that file, on every later save, until the restart, because the file is not what the gateway holds in memory; restarting loads what is on disk. Reads keep working from memory meanwhile, so the console may show data that no longer matches the file. Editing `config.yaml` on the host is expected only for what the console cannot change (leaving Provisioned mode with `connModes: direct`, and the restart-only `hosted`); stop or restart the gateway afterwards (**Restart gateway** does it).
+**Changed on disk.** Before each write the gateway checks that the file on disk is still the one it last read or wrote. If a store file is replaced behind its back, or `config.yaml` was edited by hand, the save is refused with `store_changed_on_disk` or `config_changed_on_disk` and the console says the gateway must be restarted. The refusal stays for that file, on every later save, until the restart, because the file is not what the gateway holds in memory; restarting loads what is on disk. Reads keep working from memory meanwhile, so the console may show data that does not match the file. Editing `config.yaml` on the host is expected only for what the console cannot change (leaving Provisioned mode with `connModes: direct`, and the restart-only `hosted`); stop or restart the gateway afterwards (**Restart gateway** does it).
 
 ---
 
@@ -416,6 +419,47 @@ Refusals are recorded as well, with `outcome` `refused` and the code the gateway
 
 ---
 
+## Security model
+
+This section says what the gateway checks and what it leaves to you, so you can decide whether Provisioned mode fits your network. It is written for operators and security reviewers. Provisioned mode is meant for **trusted internal** networks.
+
+### What the gateway enforces
+
+| Area | What the gateway does |
+| --- | --- |
+| Broker and VPN access | SEMP and messaging reach a broker only for a signed-in user entitled to it: for SEMP, to any of its VPNs; for messaging, to that VPN. An unknown broker or VPN and one the user is not entitled to get the same `404`. Grants are read from the store on every request, so an edit applies at once. |
+| Sessions | A session is 32 random bytes in the `__Host-smu-session` cookie (`Secure`, `HttpOnly`, `SameSite=Lax`, no `Domain`, no `Max-Age`). It ends on idle or absolute timeout (`session.*`), sign-out, a restart (the table is in memory), or a change to the account: password, administrator flag, deletion or two-factor drop every session of that user. |
+| Passwords | Stored as PBKDF2-SHA256 hashes (600,000 iterations, a salt per user) and compared in constant time; an unknown user costs the same as a wrong password. Length is 12 to 128 characters. The bootstrap administrator has no fixed password and must change it at the first sign-in before anything else is reachable. |
+| Guessing | Wrong passwords and wrong two-factor codes are counted per account and per client (IPv6 by its /64). After `login.maxFailures` the key waits `login.backoffSeconds`, doubling up to `login.maxBackoffSeconds`; a blocked attempt is refused before the password is checked, and sign-ins for one account are checked one at a time. Every request without a session also draws from a per-client budget (`login.unauthenticatedPerMinute`). The tables are capped, so a flood of new names costs the attacker a `429`, not the gateway its memory. |
+| Cross-site requests | A change request from another site is refused (`403 cross_origin`; the sign-in forms say "Request refused"). The relay refuses a cross-site read too, and the messaging socket needs an `Origin` that names this gateway over `https`. The half-finished sign-in's cookie is `SameSite=Strict`. Pages are served with `Cache-Control: no-store`, a restrictive Content-Security-Policy (`frame-ancestors 'none'`) and `nosniff`. |
+| Request size | The session is checked before any body is read. Every gateway request body is capped at 64 KiB, with unknown fields and trailing data rejected; a relayed SEMP v1 request is capped at 1 MiB. |
+| The SEMP relay | Read-only by rule: `GET` and `HEAD` under `/SEMP/v2/`, and `POST /SEMP` only when the body is one `<rpc>` holding one `<show>` command. Everything else is `403 read_only`. Of the browser's headers only `Accept` reaches the broker, so the session cookie never does; of the broker's, only a short list comes back, never `Set-Cookie`. At most 16 relayed requests per user run at once. |
+| Messaging sockets | Opened only for an entitled user, at most 20 dials and socket opens per user per minute. The gateway forwards bytes to the broker with the VPN's stored credential; the socket closes when the user's session is revoked, or their access to that broker or VPN is. |
+| Broker credentials | SEMP credentials stay on the gateway. The one credential the browser receives is the client password of a VPN the user is granted, from `dial`, and it is masked in every gateway log line. A Provisioned session holds no other. |
+| The Direct relay | Under `provisioned` it answers `404`. Under `both` it works, and it strips the gateway's own cookies from what it forwards, so a Direct connection to any host never carries a gateway session. |
+| Stored files | The users, connections and backup-schedule files are sealed whole with AES-256-GCM under the store key, with the file's role in the authenticated header, so one file cannot stand in for another. Backups use a key derived from their own passphrase (PBKDF2-SHA256, 600,000 iterations). See [Stored files and recovery](#stored-files-and-recovery). |
+| Transport | The gateway serves TLS 1.2 or later only. It reaches brokers over TLS unless a connection's scheme says `http` or `ws`; the trusted broker CAs and **Skip broker certificate checks (insecure)** are described in [Certificates from the console](#certificates-from-the-console). |
+| What is written down | Every administrator change and every sign-in is in the [audit trail](#audit-trail), never with a secret in it. |
+| Code that ships | The Release bundles carry no Provisioned UI and no gateway call; the build checks that on the built files. |
+
+### What it does not enforce
+
+- **Queue rules are not a security boundary.** The gateway checks the broker and the VPN, not the queue. The per-queue patterns and the read-only rows filter what the app shows, refuse a bind to a queue the user may not use, and withhold Delete, but they run in the browser. A messaging session can do whatever the VPN's client username allows. Scope each VPN's client username to what its users may do.
+- **The relay reads whatever the SEMP account can see.** A user granted one VPN on a broker can read, through the relay, every VPN that broker's stored SEMP account can. The gateway rewrites no SEMP response: the app narrows the lists, so a user with the browser's developer tools sees the rest. Give each audience its own broker entry and a SEMP account scoped to it.
+- **The password a user is given works outside the app.** An entitled user receives their VPN's client password and can use it against the broker from anywhere that reaches it. Keep the brokers' own ports off networks users can reach.
+- **Offered modules are a menu, not a lock.** `modules.offered` and a user's module list decide what the app shows. They do not stop a user from sending the same read requests to the relay. Queue Subscriptions reads every queue's subscriptions on the connected broker; leave it out where queue and topic names must stay hidden between teams.
+- **A messaging socket outlives the session's timeouts.** It closes on revocation (sign-out, a change to the account, loss of the grant), not when the session idles out or reaches its absolute limit.
+- **The session cookie is a bearer credential** while the session lives. TLS and the access list protect it; the gateway cannot tell its owner from someone who copied it.
+- **`SMU_CONN_MODES=both` bypasses all of this.** The Direct tab accepts any credentials the user can type. Only `provisioned` makes the grants hold.
+- **A lockout can be used against a known user.** Failures count against the account as well as the client, so someone guessing a known username keeps that user waiting. Restrict who reaches the gateway.
+- **The store key opens the stores.** A stolen `users.yaml` or `connections.yaml` is useless without `/data/store.key`; with both, the stores open. Keep the key on a separate mount or secret where you can.
+- **The audit trail is only as good as the gateway's user.** The gateway's user can rewrite its own audit file; ship the lines off the host if you need evidence you can rely on.
+- **Administrators are trusted.** They edit grants, the access list, sign-in settings and, with a writable `/tls`, the certificate and the trusted CAs.
+
+Each of these has a line in the [security checklist](#security-checklist).
+
+---
+
 ## Security checklist
 
 Provisioned mode is meant for **trusted internal** networks. Before exposing it:
@@ -443,7 +487,7 @@ The gateway refuses to start, saying which file and why, when the stores and the
 | --- | --- |
 | The key is missing beside an existing store (or `backup.yaml`) | Restore the key, or delete the store files and `backup.yaml` to start over, then import a backup. |
 | The key is unreadable, or not 64 hex characters | Restore the right file. On a fresh volume, make one with `head -c 32 /dev/urandom \| xxd -p -c 64`. `EACCES` means UID `65532` cannot read it. |
-| A store is unencrypted, from an earlier release | Stores are not migrated: delete them and enter the users and connections again. |
+| A store file is not encrypted | Plain stores are not read: delete them and enter the users and connections again, or import a backup. |
 | A store cannot be decrypted, or is damaged | The wrong key, or a damaged store: restore the matching pair from a backup. |
 
 A key file other users can read is only warned about, because Docker secrets are mounted `0444`.
@@ -453,13 +497,23 @@ Other refusals at start:
 - **`login.twoFactor` has an invalid value:** the key is not `optional`, `admins` or `mandatory` (`off` is not a value). Fix `config.yaml`.
 - **A user's two-factor secret or recovery code is malformed:** `users.yaml` was damaged or replaced; the message names the user and the rule, never the value. Restore the matching file from your volume backup.
 - **`connModes=... offers Provisioned sign-in but hosted is false`:** remove `SMU_HOSTED=false`, or set `hosted: true` in `config.yaml`.
-- **`invalid config file ... field managed not found`:** a `config.yaml` from a pre-release build. Delete the `managed:` line.
+- **`invalid config file ... field managed not found`:** the `config.yaml` holds a `managed:` key, which is not a setting. Delete the `managed:` line.
 - **`TLS directory recovery failed`:** a certificate replacement was interrupted and its journal in the certificate's directory cannot be read. The log names the file and the cause; the start stops rather than load a pair that may be half written. Restore the certificate and key from your copy and see [Stored files and recovery](#stored-files-and-recovery) for how the journal is settled.
 - **Certificates page: `tls_read_only` or the read-only notes:** `/tls` is mounted read-only, or the certificate and key are in two directories. See [Locking them](#locking-them) and [Letting the console manage them](#letting-the-console-manage-them).
 - **Certificates page: `tls_write_failed`:** the write failed and was rolled back (a full disk, a permission problem, or a single-file bind mount of the certificate). The log has the cause; nothing changed.
-- **`config.yaml holds TLS paths that differ ...` at start:** an old `config.yaml` names TLS paths that are no longer read. Set `SMU_SSL_CERTFILE`, `SMU_SSL_CERTKEYFILE` or `SMU_SSL_TRUSTDIR` instead; the next settings save drops the keys. See [Paths come from the environment](#paths-come-from-the-environment).
+- **`config.yaml holds TLS paths that differ ...` at start:** a `config.yaml` names TLS paths, which are not read. Set `SMU_SSL_CERTFILE`, `SMU_SSL_CERTKEYFILE` or `SMU_SSL_TRUSTDIR` instead; the next settings save drops the keys. See [Paths come from the environment](#paths-come-from-the-environment).
 - **`data directory recovery failed` or a message about the `txn` journal:** a change was interrupted and the journal cannot be read. The log names the file and the cause. See [Stored files and recovery](#stored-files-and-recovery).
-- **A file's `rev` is above its `seq`, or is zero:** the store file was replaced by one from another deployment or edited. Restore the matching file from your volume backup, or delete the stores and import a backup.
+- **A file's `rev` is above its `seq`, or is zero:** the store file is from another deployment, or was edited. Restore the matching file from your volume backup, or delete the stores and import a backup.
 - **`read backup schedule ...` or `backup schedule ...: ...; delete it and set the schedule again`:** `backup.yaml` cannot be opened with this key, or is damaged. Delete it, start the gateway, and set the schedule again on Backup & Restore; the backups already in `/backup` are not affected.
+
+**What an administrator sees.** The console words these refusals in plain text, and the gateway's log has the cause of each:
+
+| The console says | The gateway's code | What it means |
+| --- | --- | --- |
+| A data file was edited on the gateway host since the gateway loaded it (and the same for the settings file) | `store_changed_on_disk`, `config_changed_on_disk` | Nothing for that file saves until a restart. See [Stored files and recovery](#stored-files-and-recovery). |
+| The gateway could not write its data files, so nothing was changed | `store_write_failed` | The write failed and was rolled back. Fix the cause (a full disk, a permission) and save again. |
+| The gateway cannot write its audit log and is set to refuse changes | `audit_unavailable` | `audit.onFailure` is `refuse` and the audit log is failing. See [Audit trail](#audit-trail). |
+| The certificate or trust files are read-only on the host | `tls_read_only` | See [Locking them](#locking-them). |
+| The gateway could not write its certificate or trust files | `tls_write_failed` | Rolled back; the old files stand. The log has the cause. |
 
 If every user's code is refused, including right ones, the gateway's clock is out by more than about 30 seconds: see [The gateway's clock](#the-gateways-clock).

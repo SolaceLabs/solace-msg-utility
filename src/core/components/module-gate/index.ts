@@ -1,7 +1,7 @@
 /**
  * Module gate — a full-view "… Required" card a module shows in place of its UI
  * until a precondition is met (e.g. broker connected, hosted mode, admin
- * session). It standardises the gate the modules previously hand-rolled: a
+ * session). It standardises the gate the modules share: a
  * centered card built from the shared design-system classes
  * (`card text-center p-6`, `text-secondary`).
  *

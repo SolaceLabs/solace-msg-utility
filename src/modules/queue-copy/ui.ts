@@ -83,7 +83,7 @@ export interface CopyUiElements {
     btnDestPick: HTMLButtonElement;
     destError: HTMLElement;
 
-    // Mode (lives inside Destination card now)
+    // Mode (lives inside the Destination card)
     modeRadios: NodeListOf<HTMLInputElement>;
 
     // Footer action

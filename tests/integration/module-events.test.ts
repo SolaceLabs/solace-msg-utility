@@ -48,7 +48,7 @@ vi.mock('../../src/modules/queue-discovery/service.js', () => ({
 }));
 
 vi.mock('../../src/core/services/solace-client', () => ({
-    // Factory signature changed from (ctx) to (hooks) in Stage B. The hooks
+    // The factory takes lifecycle hooks, not ctx. The hooks
     // object is captured but not invoked here — integration tests assert on
     // cross-module events (emitted by connections module's bridging code),
     // not on factory-internal SDK wiring. Hooks are exercised in
@@ -201,9 +201,9 @@ describe('Integration: module cross-talk', () => {
 
     describe('client:disconnected triggers disconnectAll', () => {
         it('client:disconnected calls disconnectAll', async () => {
-            // Post-publisher-lift, the explicit forward-queue sweep was removed
-            // from queue-browser/module.ts: in-flight forward promises are
-            // resolved by publisher.dispose('Client disconnected.') inside
+            // queue-browser/module.ts does not sweep the forward queue: in-flight
+            // forward promises are resolved by
+            // publisher.dispose('Client disconnected.') inside
             // service.ts, and the .then handler in ui-events.handleForwardSend
             // calls ui.updateForwardItemStatus with the disposal reason. That
             // end-to-end flow is covered by tests/core/services/solace-publisher

@@ -12,8 +12,7 @@ permissions:
 
 jobs:
   sca_scan:
-    # Tracked by branch, not by commit SHA: an organisation decision (commit
-    # bb300f7), the one exception to docs/git.md's SHA-pin rule. The write and
+    # Tracked by branch, not by commit SHA: an organisation decision, the one exception to docs/git.md's SHA-pin rule. The write and
     # OIDC rights below are the reusable workflow's, scoped to this job.
     permissions:
       contents: read

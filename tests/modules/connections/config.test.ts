@@ -64,8 +64,7 @@ describe('connections/config', () => {
         });
 
         it('returns null when stored value is NOT in OBF1 format (legacy plaintext is rejected)', () => {
-            // Legacy plaintext JSON from older versions is no longer accepted —
-            // the user has to reconfigure. Matches the "no back-compat" decision.
+            // Plaintext JSON is not accepted -- the user has to reconfigure.
             (localStorage.getItem as any).mockReturnValue('{"host":"old.plaintext"}');
             expect(config.load()).toBeNull();
         });

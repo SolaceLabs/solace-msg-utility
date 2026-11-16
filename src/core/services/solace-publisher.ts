@@ -96,9 +96,8 @@ type Pending = {
  * supported property copied via per-call try/catch. Content priority chain
  * SDT → XML → Binary short-circuits at the first successful write.
  *
- * Pure module-level helper — no closure state. Same shape as the historical
- * cloneForCopy / forwardMessage inline cloners; lifted to the publisher so
- * both queue-copy and queue-browser send identical messages off the wire.
+ * Pure module-level helper -- no closure state. Shared by queue-copy and
+ * queue-browser so both send identical messages off the wire.
  */
 function cloneMessage(originalMsg: any, dest: DestTarget): any {
     const newMsg = solace.SolclientFactory.createMessage();

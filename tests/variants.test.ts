@@ -62,7 +62,7 @@ describe('variants', () => {
     });
 
     it('no shipping variant carries the admin modules — they live at /solAdmin', () => {
-        // The entitlement editors moved to their own app, so an everyday bundle
+        // The entitlement editors are their own app, so an everyday bundle
         // must not carry them even hidden: the surface should not exist. The
         // managed demo is the one exception, below.
         [STANDARD_VARIANT, MIN_VARIANT, NO_QUEUE_COPY_VARIANT, MANAGED_VARIANT].forEach((v) => {

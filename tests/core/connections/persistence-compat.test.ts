@@ -6,13 +6,13 @@ import type { ConnectionConfig } from '../../../src/core/connections/types';
  * Persistence compatibility test.
  *
  * Ensures blobs persisted by the connections module's config.js deserialize
- * into a shape that satisfies the lifted `ConnectionConfig` type. This is the
+ * into a shape that satisfies the `ConnectionConfig` type. This is the
  * contract that lets queue-copy (and any other future consumer) safely treat
  * a loaded config as `ConnectionConfig` without defensive re-validation of
  * every field.
  *
  * Also guards against the "older version saved a shorter shape" case — if a
- * user upgrades from a pre-refactor build, `load()` must still succeed and
+ * user upgrades from a build that saved the shorter shape, `load()` must still succeed and
  * return usable data rather than throw or silently corrupt.
  *
  * These are structural (runtime) checks; TypeScript type assertions are

@@ -9,7 +9,7 @@ import (
 	"runtime/debug"
 )
 
-// The gateway's logging standard (docs/developer-guide.md has the full text; docs/contributing.md the reviewer checklist):
+// The gateway's logging standard (docs/developer-guide.md, Logging standard, has the full text; docs/contributing.md the PR checklist):
 //
 //   - ERROR needs attention: the gateway, or a request, could not do its job.
 //   - WARN is a recoverable problem: a refusal worth a look, a fallback taken.

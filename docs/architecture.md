@@ -1,21 +1,20 @@
 # Architecture
 
+This document is for developers who work on the code, in the web app (`src/`) or in the Go gateway (`go-web-proxy/`). It explains how the pieces fit together and why: the module and event design, the queue browser and queue copy engines, paged discovery, how the build assembles a bundle from a variant, and how Provisioned mode (sign-in, entitlements, the stores, auditing, two-factor, live TLS, restart and the admin modules) is built. It does not repeat how to run the product ([deployment.md](deployment.md), [provisioned-mode.md](provisioned-mode.md)), how to use it ([user-guide.md](user-guide.md)), or the coding conventions and how-tos ([developer-guide.md](developer-guide.md)).
+
 ## Contents
 
 - [System Overview](#system-overview)
   - [Publishing pipeline (`solace-publisher`)](#publishing-pipeline-solace-publisher)
   - [Hosted mode (gateway tunnelling)](#hosted-mode-gateway-tunnelling)
-  - [Container image](#container-image)
   - [Gateway routes](#gateway-routes)
 - [Module Isolation](#module-isolation)
   - [Install-phase buffering (`hold` / `release`)](#install-phase-buffering-hold--release)
 - [Cross-Module Event Flow](#cross-module-event-flow)
   - [VPN-switch handoff (Queue Copy / Queue Browser -> Connections)](#vpn-switch-handoff-queue-copy--queue-browser---connections)
   - [State Change Propagation](#state-change-propagation)
-- [Dependency Injection](#dependency-injection)
 - [Logging](#logging)
 - [Queue Browser Internal Architecture](#queue-browser-internal-architecture)
-  - [Circular Dependency Resolution](#circular-dependency-resolution)
 - [Data Flow: Message Lifecycle](#data-flow-message-lifecycle)
 - [SEMP v2 Paged Discovery (core library)](#semp-v2-paged-discovery-core-library)
   - [Service contract](#service-contract)
@@ -31,12 +30,15 @@
   - [Module registration: variant manifests](#module-registration-variant-manifests)
   - [Build flavors vs variants](#build-flavors-vs-variants)
 - [Provisioned Connections (RBAC)](#provisioned-connections-rbac)
+  - [Topology](#topology)
+  - [Locked decisions](#locked-decisions)
   - [Connection modes](#connection-modes)
   - [The connections module: two entries, one owner](#the-connections-module-two-entries-one-owner)
   - [Managed profile (core-owned, names only)](#managed-profile-core-owned-names-only)
   - [RBAC state + matchers](#rbac-state--matchers)
   - [Kernel gating](#kernel-gating)
   - [Credential custody](#credential-custody)
+  - [Stored file schemas](#stored-file-schemas)
   - [Enforcement points](#enforcement-points)
   - [Provisioned secondary connections](#provisioned-secondary-connections)
   - [The admin app (`/solAdmin`)](#the-admin-app-soladmin)
@@ -47,7 +49,6 @@
   - [Live TLS and restart](#live-tls-and-restart)
   - [Admin modules + the Go store](#admin-modules--the-go-store)
 - [CSS Organization](#css-organization)
-  - [Required-Element Invariant](#required-element-invariant)
 - [Technology Decisions](#technology-decisions)
 
 ---
@@ -56,16 +57,16 @@
 
 ```mermaid
 flowchart TB
-    subgraph browser["Browser — Single Page"]
-        kernel["<b>Kernel</b><br/>module lifecycle · install / navigate<br/>global state — AppState<br/>sidebar navigation<br/>SEMP auth injection · clipboard helper"]
-        bus["<b>Typed EventBus</b><br/>on(event, handler) · emit(event, payload) · off(event, handler)"]
+    subgraph browser["Browser -- Single Page"]
+        kernel["<b>Kernel</b><br/>module lifecycle . install / navigate<br/>global state -- AppState<br/>sidebar navigation<br/>SEMP auth injection . clipboard helper"]
+        bus["<b>Typed EventBus</b><br/>on(event, handler) . emit(event, payload) . off(event, handler)"]
 
         conn["<b>Connections</b><br/>P=100"]
         qb["<b>Queue Browser</b><br/>P=80"]
         qc["<b>Queue Copy</b><br/>P=70"]
         qse["<b>Queue Subscription<br/>Explorer</b><br/>P=45"]
 
-        core["<b>src/core/</b> — libraries · imported, not navigated<br/><br/><b>services/</b><br/>solace-client · solace-publisher · semp-client · semp-discovery · semp-errors · sempContext · queue-source · managed-*<br/><br/><b>connections/</b> — types · defaults · conn-modes<br/><b>components/</b> — queue-picker · row-list · provisioned-connection · confirm-dialog · notification-center · module-gate"]
+        core["<b>src/core/</b> -- libraries . imported, not navigated<br/><br/><b>services/</b><br/>solace-client . solace-publisher . semp-client . semp-discovery . semp-errors . sempContext . queue-source . managed-*<br/><br/><b>connections/</b> -- types . defaults . conn-modes<br/><b>components/</b> -- queue-picker . row-list . provisioned-connection . confirm-dialog . notification-center . module-gate"]
 
         kernel --> bus
         bus --> conn & qb & qc & qse
@@ -73,31 +74,31 @@ flowchart TB
     end
 
     core --> broker["<b>Solace Broker</b><br/>WS / WSS"]
-    core --> semp["<b>SEMP API — REST</b><br/>HTTP / S"]
+    core --> semp["<b>SEMP API -- REST</b><br/>HTTP / S"]
 ```
 
-The broker-side service factories live in `src/core/services/` as **pure libraries** — they take lifecycle hooks (no AppContext, no UI, no global bus). The connections module (priority 100) is the *primary specialist*: `installDirect` in its `module.ts` (shared by both of its entry files) defines `solaceHooks` / `sempHooks` that bridge factory lifecycle events to global AppState + bus events that other modules consume. This pattern lets another module (queue-copy) own a *secondary* connection by passing different hooks to the same factories — module symmetry, no cross-module imports.
+The broker-side service factories live in `src/core/services/` as **pure libraries** -- they take lifecycle hooks (no AppContext, no UI, no global bus). The connections module (priority 100) is the *primary specialist*: `installDirect` in its `module.ts` (shared by both of its entry files) defines `solaceHooks` / `sempHooks` that bridge factory lifecycle events to global AppState + bus events that other modules consume. This pattern lets another module (queue-copy) own a *secondary* connection by passing different hooks to the same factories -- module symmetry, no cross-module imports.
 
 ### Publishing pipeline (`solace-publisher`)
 
-`src/core/services/solace-publisher.ts` is the single home for the "clone an SDK message + force PERSISTENT delivery + stamp a `{ Solace_Msg_Utility_Seq_Num, Original_Msg_ID }` correlation key + send + await ACK/REJECT with a 30-s timeout" pipeline. The factory `createSolacePublisher(session, opts?)` returns `{ send(orig, dest, opts?), rejectAllPending(reason), dispose(reason?), isPending(key) }`. `send()` resolves with `{ ok: true } | { ok: false; error }` (never rejects) and also accepts optional `onAck` / `onReject` / `onTimeout` callbacks for fire-many-then-update-on-resolution patterns. ACK/REJECT listeners attach on construction; `dispose()` detaches them and resolves any in-flight publishes with the supplied reason — used by callers to surface user-friendly errors like `'Client disconnected.'` end-to-end without writing per-module sweep code.
+`src/core/services/solace-publisher.ts` is the single home for the "clone an SDK message + force PERSISTENT delivery + stamp a `{ Solace_Msg_Utility_Seq_Num, Original_Msg_ID }` correlation key + send + await ACK/REJECT with a 30-s timeout" pipeline. The factory `createSolacePublisher(session, opts?)` returns `{ send(orig, dest, opts?), rejectAllPending(reason), dispose(reason?), isPending(key) }`. `send()` resolves with `{ ok: true } | { ok: false; error }` (never rejects) and also accepts optional `onAck` / `onReject` / `onTimeout` callbacks for fire-many-then-update-on-resolution patterns. ACK/REJECT listeners attach on construction; `dispose()` detaches them and resolves any in-flight publishes with the supplied reason -- used by callers to surface user-friendly errors like `'Client disconnected.'` end-to-end without writing per-module sweep code.
 
 Two callers today:
 
 - **queue-browser** owns its publisher inside `service.ts`, lifecycle-managed via `client:connected` / `client:disconnected`. `forwardMessage` returns the publisher's `Promise<SendResult>`; `handleForwardSend` fires all sends concurrently and updates UI status from `.then` / `.catch`. `hasInFlightForward` delegates to `publisher.isPending` so the forward modal still detects UUID collisions across modal sessions.
 - **queue-copy** stores `state.destPublisher` and `state.primaryPublisher` (one per Solace session), created in the corresponding hooks/bus subscribers. `service-copy.ts runCopyJob` takes the publisher `selectPublisher(state)` names (the primary's when Same Broker and Same VPN are both on, otherwise the destination's, and only one connected for the destination the form names now) and awaits each `send()` sequentially.
 
-Two publishers can coexist on the same session (e.g. queue-copy's sameVpn case, where the primary session also hosts the secondary publisher) — each maintains its own pending-key map, and the listener pair only resolves entries it owns. The publisher knows nothing about AppContext, bus events, or modules; modules know nothing about ACK correlation, timer management, or the property-copy chain. This is the same module-symmetry split as solace-client / semp-client.
+Two publishers can coexist on the same session (e.g. queue-copy's sameVpn case, where the primary session also hosts the secondary publisher) -- each maintains its own pending-key map, and the listener pair only resolves entries it owns. The publisher knows nothing about AppContext, bus events, or modules; modules know nothing about ACK correlation, timer management, or the property-copy chain. This is the same module-symmetry split as solace-client / semp-client.
 
 ### Hosted mode (gateway tunnelling)
 
-The PWA can run standalone (talking directly to brokers) OR behind the Go gateway in `go-web-proxy/`, which serves the same bundle and also reverse-proxies SEMP HTTP and Solace WebSocket traffic. In the gateway deployment, the broker is internal and unreachable from the browser; every broker URL must be tunnelled through the gateway's path scheme `{pageOrigin}/{scheme}/{port}/{host}{urlPath}`, where `scheme ∈ { http, https, ws, wss }`.
+The PWA can run standalone (talking directly to brokers) OR behind the Go gateway in `go-web-proxy/`, which serves the same bundle and also reverse-proxies SEMP HTTP and Solace WebSocket traffic. In the gateway deployment, the broker is internal and unreachable from the browser; every broker URL must be tunnelled through the gateway's path scheme `{pageOrigin}/{scheme}/{port}/{host}{urlPath}`, where `scheme is one of http, https, ws, wss`.
 
-The gateway's settings live in `config.yaml` ([go-web-proxy/configfile.go](../go-web-proxy/configfile.go)): on the first start the file is seeded from the environment and written (an unwritable path is fatal), afterwards it is authoritative and a differing env var is only reported. The file is always `configFilePath` (`/data/config.yaml`), like `appRoot`: a `CONFIG_FILE` from an earlier release that names another file stops the start (`resolveConfig`), since seeding a fresh file would drop that file's settings, the access list among them, without a word; one that names the same file is only warned about (`removedInUse`). The users store, connections store and store key have no setting at all: they are always `/data/users.yaml`, `/data/connections.yaml` and `/data/store.key`, so neither the file nor the environment can redirect the gateway to another secret, and data moves with Backup & Restore. Three variables guard the migration. `checkRenamedEnv` (the first step of `resolveConfig`, before any read or write) refuses to start while any pre-rename variable (`SSL_CERT_FILE`, `SSL_KEY_FILE`, `SSL_TRUST_DIR`, `SSL_INSECURE_SKIP_VERIFY`, `HOSTED`, `CONN_MODES`, `DEFAULT_CONN`, `ADMIN_PASSWORD`, `ADMIN_PASSWORD_FILE`) is set, with one error that lists each old name beside its `SMU_` name and never a value (Go reads `SSL_CERT_FILE` itself as its CA bundle, so the old name silently replaced the gateway's trust pool). `removedInUse` only warns, and ignores the value, for `USERS_FILE`, `CONNECTIONS_FILE` and `STORE_KEY_FILE`, and for `usersFile` / `connectionsFile` keys in an older `config.yaml` (carried in `fileConfig` as `RemovedUsersFile` / `RemovedConnectionsFile` beside `RemovedAppDir`, dropped on the gateway's next write). The three TLS paths are not settings either: `tlsPathsFromEnv` reads `SMU_SSL_CERTFILE`, `SMU_SSL_CERTKEYFILE` and `SMU_SSL_TRUSTDIR` at every start (defaults `/tls/tls.crt`, `/tls/tls.key`, `/tls/trust`) into `config` and `secretPaths`, never into the file or the page. A `config.yaml` from an earlier release that still holds `tls.certFile`, `tls.keyFile` or `tls.trustDir` loads (`fileTLS.RemovedCertFile`, `RemovedKeyFile` and `RemovedTrustDir` keep the strict decoder from refusing them, and are never written back), one warning at start names each whose value differs from the path in use, and the next write of the file drops them; a backup that holds them imports, and they are ignored. `go-web-proxy/live_test.go` `TestFileConfig_EveryKeyIsClassifiedOnce` fails when a `fileConfig` key is not exactly one of live or restart-only (`hosted` is the only restart-only key). Tests that need the stores elsewhere set the `process.dataDir` seam (`config.inDataDir`), which moves the three files under a temporary directory; `main` leaves it empty. The request pipeline is `accessLog(withClient(clientACL(root)))` ([access.go](../go-web-proxy/access.go)): `withClient` resolves the client address once (trusted proxies) for the access list and the sign-in throttle, and the access list runs on every route, inside the access log so a denial is recorded as a 403 like any other response; an empty allow list admits everyone. The file's keys are documented in [deployment.md](deployment.md).
+The gateway's settings live in `config.yaml` ([go-web-proxy/configfile.go](../go-web-proxy/configfile.go)). On the first start the file is seeded from the environment and written (an unwritable path is fatal); afterwards it is authoritative and a differing environment variable is only reported. The file and the stores sit at fixed paths under `/data`, and the three TLS paths come only from the environment, so neither the file nor a request can point the gateway at another secret. The seeding rules, the file's keys, and the variables and keys the gateway refuses or ignores are in [deployment.md](deployment.md). `go-web-proxy/live_test.go` `TestFileConfig_EveryKeyIsClassifiedOnce` fails when a `fileConfig` key is not exactly one of live or restart-only (`hosted` is the only restart-only key). Tests that need the stores elsewhere set the `process.dataDir` seam (`config.inDataDir`), which moves the three files under a temporary directory; `main` leaves it empty. The request pipeline is `accessLog(withClient(clientACL(root)))` ([access.go](../go-web-proxy/access.go)): `withClient` resolves the client address once (trusted proxies) for the access list and the sign-in throttle, and the access list runs on every route, inside the access log so a denial is recorded as a 403 like any other response; an empty allow list admits everyone.
 
-**Live settings.** The keys an administrator can change without a restart (`connModes`, `defaultConn`, `logLevel`, `access.*`, `session.*`, `login.*`, `modules.*`, `tls.insecureSkipVerify`, which `apply` hands to the trust holder, see [Live TLS and restart](#live-tls-and-restart)) are not read from `config` after startup. `serve()` copies them into a `*live` ([live.go](../go-web-proxy/live.go)), an `atomic.Pointer` swapped as one value plus the logger's `slog.LevelVar`, and passes it to every reader: `withClient`, `clientACL`, `/hosted`, the bundle gate, the session table and the throttle each load the current value per request. The only writer is the settings endpoint ([settings.go](../go-web-proxy/settings.go)): `PUT /managed/settings` decodes into a copy of the saved file, runs the same `toConfig` and connection-mode checks as startup, refuses `connModes: direct` (it would end Provisioned mode, and the console with it, at the next restart, so that change is the host's), refuses a body that names a TLS path (`400 bad_request`, an unknown field: the paths come only from the environment, so the endpoint can never point the gateway at its own secrets), an access list that would deny the requesting client (`would_lock_out`) and a write over a hand edit (a fingerprint of the bytes it last read or wrote no longer matches, `config_changed_on_disk`; a file it cannot read is `config_unreadable`, not a hand edit), writes atomically, then swaps the live value. `restartOnlyKeys` lists the rest; `pendingRestart` compares the saved file with the running config. A new live key goes in `liveSettings` and `apply`; a reader must take it from `*live`, never from `config`.
+**Live settings.** The keys an administrator can change without a restart (`connModes`, `defaultConn`, `logLevel`, `access.*`, `session.*`, `login.*`, `modules.*`, `tls.insecureSkipVerify`, which `apply` hands to the trust holder, see [Live TLS and restart](#live-tls-and-restart)) are not read from `config` after startup. `serve()` copies them into a `*live` ([live.go](../go-web-proxy/live.go)), an `atomic.Pointer` swapped as one value plus the logger's `slog.LevelVar`, and passes it to every reader: `withClient`, `clientACL`, `/hosted`, the bundle gate, the session table and the throttle each load the current value per request. The only writer is the settings endpoint ([settings.go](../go-web-proxy/settings.go)): `PUT /managed/settings` decodes into a copy of the saved file, runs the same `toConfig` and connection-mode checks as startup, refuses `connModes: direct` (it would end Provisioned mode, and the console with it, at the next restart, so that change is the host's), refuses a body that names a TLS path (`400 bad_request`, an unknown field: the paths come only from the environment, so the endpoint can never point the gateway at its own secrets), an access list that would deny the requesting client (`would_lock_out`) and a write over a hand edit (the bytes on disk differ from the fingerprint of what it last read or wrote, `config_changed_on_disk`; a file it cannot read is `config_unreadable`, not a hand edit), writes atomically, then swaps the live value. `restartOnlyKeys` lists the rest; `pendingRestart` compares the saved file with the running config. A new live key goes in `liveSettings` and `apply`; a reader must take it from `*live`, never from `config`.
 
-The connections module probes the gateway-only `/hosted` endpoint at the very start of its `install(app)`. A 200 response carrying JSON `{hosted, connModes, defaultConn}` flips the singleton in `src/core/hosted.ts` **and** resolves the deployment's connection modes (see [Connection modes](#connection-modes)); a gateway older than that contract answers with the plaintext `'true'`, which is still accepted and means *hosted, Direct only*. `probeDeployment` has three outcomes. A **hosted** answer is the 200 above. A **conclusive no-gateway** answer (a non-OK status below 500 such as the 404 of a standalone deployment, `false` or an empty body, a non-JSON body, or `hosted: false`) leaves hosted mode off and the app Direct-only. An **inconclusive** answer (no complete answer within `HOSTED_PROBE_TIMEOUT_MS`, a network error, or a 5xx) returns the same Direct-only placeholders plus `inconclusive: true` on `DeploymentInfo`, with a warn log carrying the cause. One deadline (`raceDeadline`) covers the fetch **and** the body read, so a gateway that sends headers and stalls on the body also ends inconclusive; `managedRequest` in `core/services/managed-api.ts` applies the same single deadline through its internal `exchange()` (a stalled body is code `network`, whether the status was ok or not). The connections entries act on `inconclusive`: [module.ts](../src/modules/connections/module.ts) stays standalone and shows `#conn-probe-notice`; [module.managed.ts](../src/modules/connections/module.managed.ts) hides the Direct panel, shows `#conn-probe-notice-managed`, publishes no `connConfig` and installs no panels or routers (a Provisioned bundle has no Direct-only fallback). Retry is `location.reload`, injectable as `install(app, { reload })`; the shared `showProbeNotice` is exported from `module.ts`. The probe is awaited before any service factory is created so a Connect click can't race the flag.
+The connections module probes the gateway-only `/hosted` endpoint at the very start of its `install(app)`. A 200 response carrying JSON `{hosted, connModes, defaultConn}` flips the singleton in `src/core/hosted.ts` **and** resolves the deployment's connection modes (see [Connection modes](#connection-modes)); a plaintext `true` body is also accepted and means *hosted, Direct only*. `probeDeployment` has three outcomes. A **hosted** answer is the 200 above. A **conclusive no-gateway** answer (a non-OK status below 500 such as the 404 of a standalone deployment, `false` or an empty body, a non-JSON body, or `hosted: false`) leaves hosted mode off and the app Direct-only. An **inconclusive** answer (no complete answer within `HOSTED_PROBE_TIMEOUT_MS`, a network error, or a 5xx) returns the same Direct-only placeholders plus `inconclusive: true` on `DeploymentInfo`, with a warn log carrying the cause. One deadline (`raceDeadline`) covers the fetch **and** the body read, so a gateway that sends headers and stalls on the body also ends inconclusive; `managedRequest` in `core/services/managed-api.ts` applies the same single deadline through its internal `exchange()` (a stalled body is code `network`, whether the status was ok or not). The connections entries act on `inconclusive`: [module.ts](../src/modules/connections/module.ts) stays standalone and shows `#conn-probe-notice`; [module.managed.ts](../src/modules/connections/module.managed.ts) hides the Direct panel, shows `#conn-probe-notice-managed`, publishes no `connConfig` and installs no panels or routers (a Provisioned bundle has no Direct-only fallback). Retry is `location.reload`, injectable as `install(app, { reload })`; the shared `showProbeNotice` is exported from `module.ts`. The probe is awaited before any service factory is created so a Connect click can't race the flag.
 
 `buildBrokerUrl(scheme, host, port, urlPath, isWebSocket)` in `src/core/hosted.ts` is the single rewrite point. In direct mode it returns the original `${scheme}://${host}:${port}${urlPath}` shape; in hosted mode it returns `${wireScheme}://${pageHost}/${scheme}/${port}/${host}${urlPath}`, with `wireScheme` upgraded to `wss`/`ws` for WebSocket (matching the page's https/http) and `https`/`http` for plain HTTP. Both `solace-client` and `semp-client` route through this builder. A SEMP caller never builds a URL itself: it passes a path (`/SEMP/v2/monitor/...`, or `/SEMP` for a v1 RPC) to `sempCtx.fetch`, which rebuilds the full URL through `buildBrokerUrl` on every call (or, in a Provisioned session, prefixes the relay base), so every downstream request (SEMP v2 fetches, SEMP v1 RPCs, the queue-discovery paged fetches, queue-subscription-explorer's RPC POSTs, the queue-picker's caches) inherits the rewrite. `sempCtx.baseUrl` is diagnostic only (log lines, error text), never a request base, and a broker-emitted URL such as `nextPageUri` is cut to its path and query before it is fetched.
 
@@ -108,23 +109,9 @@ Two related details:
 - A SEMP v1 RPC is a `POST` of `/SEMP` through the same `sempCtx.fetch` (the connection's URL path, if any, in front), so in hosted mode it routes through the gateway exactly as a v2 call does.
 - The wss TLS handshake probe in `solace-client.ts` is skipped in hosted mode. The browser only sees the gateway's TLS endpoint (already trusted by the PWA load); probing the internal broker would be wrong. Same reasoning suppresses the "click to trust this URL" help link in connection-error toasts.
 
-`AppState.sempCredentials` carries the user-typed `protocol/host/port/urlPath` alongside the rewritten `baseUrl`, so UI code (queue-copy source/dest readout, modal summary) displays the broker the user reached for — not the gateway-prefixed wire URL.
+`AppState.sempCredentials` carries the user-typed `protocol/host/port/urlPath` alongside the rewritten `baseUrl`, so UI code (queue-copy source/dest readout, modal summary) displays the broker the user reached for -- not the gateway-prefixed wire URL.
 
-### Container image
-
-The image ([docker/Dockerfile](../docker/Dockerfile), whose header is the authoritative list) is `FROM scratch`: the gateway binary, the bundles it serves, and three directories baked empty, everything owned by UID `65532`, the user it runs as. Operator docs name only `/tls` and `/backup` ([deployment.md -> Mounts](deployment.md#mounts)). `/data` is deliberately left out of them, apart from the variable defaults: the deployment compose files mount a named volume there, and a `docker run` without one keeps it in the container (re-seeded from the environment by the next container; Provisioned mode's stores carried over by a backup export and import).
-
-| Path | Holds |
-| --- | --- |
-| `/gateway` | The version-stamped gateway binary built from `go-web-proxy/`; the entrypoint, listening on `:9443`. |
-| `/tls` | `tls.crt` and `tls.key` (generated self-signed on the first start when both are missing, so the directory ships writable) and `trust/`, the broker CAs (`*.crt`, `*.pem`). The console replaces the pair and adds or deletes CA files only where these are writable (see [Live TLS and restart](#live-tls-and-restart)); a read-only mount locks it. |
-| `/data` | `config.yaml` in every mode; `users.yaml`, `connections.yaml`, `backup.yaml` (all encrypted), `store.key` and the plain audit trail `audit.log` (with its rotated `audit.log.1` to `.50`) in Provisioned mode. Baked empty so a named volume inherits the ownership. |
-| `/backup` | `backupRoot`, a fixed path: Provisioned mode's scheduled backups (see Backup & Restore below). Baked empty and private (`0700`). |
-| `/SolaceMsgUtility` | `appRoot`, a fixed path: `index.html` (the Direct Release bundle), `provisioned.html`, `solAdmin.html`, `solclient.js`, `jszip.min.js`, and the vendor licences under `licenses/solclientjs/` and `licenses/jszip/`. Nothing else from `dist/` is copied in. |
-
-**Which bundle is served.** `pwaHandler` ([proxy.go](../go-web-proxy/proxy.go)) serves `index.html` at `/` in Gateway mode and `provisioned.html` in Provisioned mode (`appIndexFile`), and `404` for any path that is not a file: there is no history-mode fallback, because the app has no client-side routes and the bundle's relative vendor paths (`solclient.js`, `jszip.min.js`) only resolve at `/` and `/solAdmin`. Such a path is never redirected either: a browser keeps a permanent redirect, and would go on sending the path to `/` after the gateway had started to serve it. `solAdmin.html` is reached only through `/solAdmin`, behind the admin gate, and a request for `solAdmin.html` or `provisioned.html` by name gets `404`.
-
-**Serving your own build.** Mount it over `/SolaceMsgUtility`, with the bundles the mode serves and both vendor scripts beside them; the mount may be read-only. The path is not configurable: the `APP_DIR` variable and `appDir` key of earlier releases are ignored. A `config.yaml` that still has `appDir` loads (`fileConfig.RemovedAppDir` keeps the strict decoder from refusing it), `removedInUse` names it and a set `APP_DIR` for a warning at start, and the gateway's next write of the file drops the key.
+The container image (its paths, mounts and the way to serve your own build) is described in [deployment.md](deployment.md); the image is `FROM scratch` and runs as UID `65532`.
 
 ### Gateway routes
 
@@ -142,6 +129,8 @@ The image ([docker/Dockerfile](../docker/Dockerfile), whose header is the author
 
 A new route goes in `newRootHandler` above the app's catch-all, or under `/managed/` when it needs a session; anything that falls through is the app's, so a path the gateway does not serve is a `404`, never a redirect.
 
+**Which bundle is served.** `pwaHandler` ([proxy.go](../go-web-proxy/proxy.go)) serves `index.html` at `/` in Gateway mode and `provisioned.html` in Provisioned mode (`appIndexFile`), and `404` for any path that is not a file: there is no history-mode fallback, because the app has no client-side routes and the bundle's relative vendor paths (`solclient.js`, `jszip.min.js`) only resolve at `/` and `/solAdmin`. Such a path is never redirected either: a browser keeps a permanent redirect, and would go on sending the path to `/` after the gateway had started to serve it. `solAdmin.html` is reached only through `/solAdmin`, behind the admin gate, and a request for `solAdmin.html` or `provisioned.html` by name gets `404`.
+
 ---
 
 ## Module Isolation
@@ -150,10 +139,10 @@ Modules have **zero cross-module imports**. Each module is a self-contained dire
 
 ```text
 src/core/                          Shared infrastructure
-  types.ts                         Interfaces only — no runtime code
+  types.ts                         Interfaces only -- no runtime code
   event-bus.ts                     Pub/sub factory
   kernel.ts                        Orchestrator (module lifecycle, state, navigation, SEMP auth)
-  dom.ts                           `required()` helper — fail-fast required-element assertion
+  dom.ts                           `required()` helper -- fail-fast required-element assertion
   utils.ts                         Pure utilities (escapeHtml, escapeXml, formatBytes, generateUuid, matchString,
                                    matchContains, topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
                                    isValidHost, isValidPort)
@@ -161,24 +150,29 @@ src/core/                          Shared infrastructure
   download.ts                      downloadBlob(): save a Blob as a named file (queue-browser's downloads, backup's export)
 
 src/modules/connections/                  Module -- primary connection setup: module.ts (Direct, every Release bundle), module.managed.ts (Direct + Provisioned tabs, provisioned.html)
-src/modules/queue-browser/                Module — queue-browser session + message table
-src/modules/queue-copy/                   Module — cross-broker queue copy
-src/modules/queue-subscription-explorer/  Module — flat (vpn, queue, topic) table (SEMP v1)
-src/modules/queue-discovery/              Module — vestigial; no shipping variant activates it
-src/modules/admin-login/                  Module — /solAdmin entry point (admin variant only)
-src/modules/user-management/              Module — admin-only user + entitlement CRUD (admin variant only)
-src/modules/connection-management/        Module — admin-only broker-connection CRUD (admin variant only)
+src/modules/queue-browser/                Module -- queue-browser session + message table
+src/modules/queue-copy/                   Module -- cross-broker queue copy
+src/modules/queue-subscription-explorer/  Module -- flat (vpn, queue, topic) table (SEMP v1)
+src/modules/queue-discovery/              Module -- carried in the tree; no variant activates it
+src/modules/admin-login/                  Module -- /solAdmin entry point (admin variant)
+src/modules/user-management/              Module -- admin-only user + entitlement CRUD
+src/modules/connection-management/        Module -- admin-only broker-connection CRUD
+src/modules/gateway-settings/             Module -- admin-only config.yaml editor
+src/modules/tls-certificates/             Module -- admin-only gateway certificate and trusted broker CAs
+src/modules/backup/                       Module -- admin-only export, import and scheduled backups
 
 Install order + sidebar order are the priorities in the variant manifest ([src/variants/](../src/variants/)), one `'<id>': <priority>` line per module; [src/registry.ts](../src/registry.ts) turns each line into a `{ module, priority }` tuple, so a variant's whole ordering decision lives in its one file.
 ```
 
-There are no `*-mock` service siblings: the demo build (`vite build --mode demo`) runs these same modules against the in-browser broker -- see [The demo broker](#the-demo-broker-demohtml-provisioned-demohtml) and the **Build Modes** section in [CLAUDE.md](../CLAUDE.md).
+There are no `*-mock` service siblings: the demo build (`vite build --mode demo`) runs these same modules against the in-browser broker -- see [The demo broker](#the-demo-broker-demohtml-provisioned-demohtml); the build commands are in [developer-guide.md](developer-guide.md).
 
-All module coordination goes through the EventBus — every module publishes and subscribes through the single shared bus instance, with no direct module-to-module references.
+All module coordination goes through the EventBus -- every module publishes and subscribes through the single shared bus instance, with no direct module-to-module references.
+
+The kernel builds one `AppContext` for each module: its own `container` (an isolated DOM subtree) and `loadSelf` (bound to its id), plus the shared `appState`, `eventBus`, `setState`, `sempFetch` and helpers, all the same references for every module. How a module uses the context, and how a circular dependency inside a module is broken with late `wire()` binding (queue-browser's `service-events.ts` is the example), is in [developer-guide.md](developer-guide.md).
 
 ### Install-phase buffering (`hold` / `release`)
 
-Modules install in priority order, so an earlier module that emits during its `install()` could reach later-installing modules that haven't subscribed yet. The kernel wraps the install loop in `eventBus.hold()` / `eventBus.release()` — emits fired while held are queued FIFO and flushed (in order) once every module has finished install. Subscriptions made during install are honoured when the flush runs.
+Modules install in priority order, so an earlier module that emits during its `install()` could reach later-installing modules that haven't subscribed yet. The kernel wraps the install loop in `eventBus.hold()` / `eventBus.release()` -- emits fired while held are queued FIFO and flushed (in order) once every module has finished install. Subscriptions made during install are honoured when the flush runs.
 
 Modules do emit during install, and rely on the flush: queue-browser announces `browser:available` at the end of its install (queue-discovery's "Open in Browser" listens for it); the managed connections entry publishes `connConfig` (an `app:state-change`), and its panel's session restore emits `rbac:changed`, on which the kernel and the session-gated modules settle what they show. A module installing later would otherwise miss each of them. No `setTimeout`, no sticky-event semantics -- just a single install-phase gate.
 
@@ -192,18 +186,18 @@ These methods are kernel-only. Modules never call `hold()`/`release()`.
 
 A module that needs the primary connection on a specific VPN emits `connection:check-connection` with `{vpn, queue, returnTo}`. Connections either confirms it's already on that VPN (fires the finish event synchronously and the caller resumes) or prompts the user, reconnects, and fires the finish event once the new session is up. This is the same conditional-reconnect flow queue-copy and queue-browser both use when a picked queue lives in a different VPN than the current primary.
 
-**Navigation contract — single source of truth.** The connections module navigates the user to its own screen **only when there is actual connection work to do**, and only at the moment the work is committed:
+**Navigation contract -- single source of truth.** The connections module navigates the user to its own screen **only when there is actual connection work to do**, and only at the moment the work is committed:
 
 | Path | Navigates? |
 | --- | --- |
-| Auto-connect (not yet connected) | yes — before initiating connect |
-| Already on the target VPN | no — nothing to do |
-| VPN switch, user confirms | yes — *after* confirm |
-| VPN switch, user cancels | no — caller stays put |
+| Auto-connect (not yet connected) | yes -- before initiating connect |
+| Already on the target VPN | no -- nothing to do |
+| VPN switch, user confirms | yes -- *after* confirm |
+| VPN switch, user cancels | no -- caller stays put |
 
-The `returnTo` field only selects which finish event fires (`browser:browse-queue` for `'queue-browser'` and the default, `copy:vpn-switched` for `'queue-copy'`) — it does **not** alter navigation. Future modules using this handshake inherit the policy automatically: pick a `returnTo`, add a finish-event branch in [connections/module.ts](../src/modules/connections/module.ts), don't reintroduce per-caller navigation differences. Tests in [tests/modules/connections/module.test.ts](../tests/modules/connections/module.test.ts) lock the four rows above in place.
+The `returnTo` field only selects which finish event fires (`browser:browse-queue` for `'queue-browser'` and the default, `copy:vpn-switched` for `'queue-copy'`) -- it does **not** alter navigation. Future modules using this handshake inherit the policy automatically: pick a `returnTo`, add a finish-event branch in [connections/module.ts](../src/modules/connections/module.ts), don't reintroduce per-caller navigation differences. Tests in [tests/modules/connections/module.test.ts](../tests/modules/connections/module.test.ts) lock the four rows above in place.
 
-**Why the picker does not own the confirm.** The reusable `pickQueue()` core component resolves a `{vpn, queue}` tuple and nothing more. Whether that VPN matches the consumer's "current" VPN (different concept across consumers — primary for queue-browser, destination form for queue-copy's dest picker) and whether to disrupt the primary session are app-layer decisions. Keeping them in the consumer + connections module lets the picker stay generic across all current and future callers.
+**Why the picker does not own the confirm.** The reusable `pickQueue()` core component resolves a `{vpn, queue}` tuple and nothing more. Whether that VPN matches the consumer's "current" VPN (different concept across consumers -- primary for queue-browser, destination form for queue-copy's dest picker) and whether to disrupt the primary session are app-layer decisions. Keeping them in the consumer + connections module lets the picker stay generic across all current and future callers.
 
 ```mermaid
 sequenceDiagram
@@ -221,7 +215,7 @@ sequenceDiagram
             CN->>CN: emit('client:connected')
             CN-->>QC: emit('copy:vpn-switched', {queue})
         else user cancels
-            CN--xQC: abort — caller stays put
+            CN--xQC: abort -- caller stays put
         end
     end
 
@@ -239,39 +233,14 @@ sequenceDiagram
     M->>K: ctx.setState('isConnected', true)
     K->>K: state.isConnected = true
     K->>All: emit('app:state-change',<br/>{key:'isConnected', value:true})
-    K->>K: updateGlobalUI() — status indicators
+    K->>K: updateGlobalUI() -- status indicators
 ```
-
----
-
-## Dependency Injection
-
-The Kernel builds an `AppContext` for each module, injecting all shared services:
-
-```text
-                    Kernel
-                      |
-          +-----------+-----------+
-          |           |           |
-    AppContext A  AppContext B  AppContext C
-    {                {                {
-     container: A    container: B    container: C
-     appState: *     appState: *     appState: *     <-- same reference
-     eventBus: *     eventBus: *     eventBus: *     <-- same instance
-     setState: fn    setState: fn    setState: fn    <-- bound to Kernel
-     loadSelf: fn    loadSelf: fn    loadSelf: fn    <-- navigateTo(A/B/C)
-     sempFetch: fn   sempFetch: fn   sempFetch: fn   <-- same function
-     ...             ...             ...
-    }                }                }
-```
-
-Each module gets its own `container` (isolated DOM subtree) and `loadSelf` (bound to its ID), but shares the same `appState`, `eventBus`, and helper functions.
 
 ---
 
 ## Logging
 
-Every runtime log goes through the singleton `logger` in [src/core/logger.ts](../src/core/logger.ts) — a drop-in replacement for `console.*` with a level filter:
+Every runtime log goes through the singleton `logger` in [src/core/logger.ts](../src/core/logger.ts) -- a drop-in replacement for `console.*` with a level filter:
 
 ```ts
 import { logger } from '../../core/logger';
@@ -284,9 +253,9 @@ log.error('failure', err);
 
 Levels (numeric severity, defined in [src/core/constants.ts](../src/core/constants.ts)): `DEBUG=0`, `INFO=1`, `WARN=2`, `ERROR=3`, `SILENT=4`. A call fires when the current level is `<=` the call's level; `SILENT` mutes everything.
 
-The current level is module-scoped state, set once at boot in `Kernel.start()` from the `?logLevel=<NAME>` URL parameter (case-insensitive). Invalid values fall back to `DEFAULT_LOG_LEVEL` (`INFO`). The logger is **not** routed through `AppContext` — it's set-once boot configuration, not application state, and forcing every service factory to take a `logger` argument purely for delegation would be high churn for no reuse benefit.
+The current level is module-scoped state, set once at boot in `Kernel.start()` from the `?logLevel=<NAME>` URL parameter (case-insensitive). Invalid values fall back to `DEFAULT_LOG_LEVEL` (`INFO`). The logger is **not** routed through `AppContext` -- it's set-once boot configuration, not application state, and forcing every service factory to take a `logger` argument purely for delegation would be high churn for no reuse benefit.
 
-What a line says -- the level by meaning, the component tag, facts as attributes, no secrets -- follows the one standard for the web app and the gateway in [developer-guide.md -> Logging standard](developer-guide.md#logging-standard); [contributing.md](contributing.md#logging-standard) holds the reviewer checklist and [deployment.md -> Logs](deployment.md#logs) the gateway's side.
+What a line says -- the level by meaning, the component tag, facts as attributes, no secrets -- follows the one standard for the web app and the gateway in [developer-guide.md -> Logging standard](developer-guide.md#logging-standard); [deployment.md -> Logs](deployment.md#logs) covers the gateway's side.
 
 Each `logger.*` method delegates to the matching `console.*` channel so DevTools severity filtering keeps working and existing test instrumentation (`vi.spyOn(console, 'warn')`) is unchanged.
 
@@ -298,7 +267,7 @@ The raw `console.*` calls in [src/index.html](../src/index.html) (the inline `<s
 
 **Shell composition and the vendor loader.** The shell holds two `<!-- @vendor:start -->` ... `<!-- @vendor:end -->` blocks: the head loader and the library banner with its small after-banner script. A variant manifest may export `NEEDS_VENDOR_SCRIPTS = false` (declared after `ACTIVE_MODULES`; `admin` does), and `injectModuleTemplates` in `vite.config.ts` then strips both blocks with `stripVendorBlocks` (`variantNeedsVendorScripts` and `stripVendorBlocks` are exported by `scripts/module-registry-plugin.mjs`), so `solAdmin.html` has no `solclient.js`/`jszip.min.js` loader and no banner. `check:bundles` requires every other bundle to carry all the markers (`js/solclient.js`, `jszip.min.js`, `missing-lib-banner`) and `solAdmin.html` none. The banner ships visible and neutral (`.notification-banner.is-pending`, "Loading the Solace library..."). The loader records the banner outcome (none yet, hide, or error HTML) and exposes `window.solaceLibApplyBanner`; the script after the banner applies it, so whichever of the two runs second wins when the outcome arrives before the banner is parsed. A 30 s watchdog replaces "Loading" with a did-not-finish message and is replaced in turn by a late outcome, and cleared by success or failure. A `solclient.js` that loads without defining `window.solace` counts as a failure and tries the `js/` fallback, then missing.
 
-**Startup placeholder and install failures.** The shell's `#module-container` holds one child, `#app-loading` ("Loading..."). The kernel no longer empties the container at `start()`; it removes `#app-loading` on the first `navigateTo`, and when no module is installed (none registered, none visible, or every install failed) replaces its text with "No modules are available. Check the browser console." A module whose `install` throws gets one 8 s error toast naming it (the console has the error) and the others still install; a missing template only logs. The `hold()` / install / `release()` sequence is wrapped in `try/finally`, so a throw outside a module still releases the bus. `src/main.ts` logs a rejected `kernel.start()` instead of leaving an unhandled rejection.
+**Startup placeholder and install failures.** The shell's `#module-container` holds one child, `#app-loading` ("Loading..."). The kernel leaves the container alone at `start()`; it removes `#app-loading` on the first `navigateTo`, and when no module is installed (none registered, none visible, or every install failed) replaces its text with "No modules are available. Check the browser console." A module whose `install` throws gets one 8 s error toast naming it (the console has the error) and the others still install; a missing template only logs. The `hold()` / install / `release()` sequence is wrapped in `try/finally`, so a throw outside a module still releases the bus. `src/main.ts` logs a rejected `kernel.start()` instead of leaving an unhandled rejection.
 
 ---
 
@@ -308,7 +277,7 @@ The largest module is decomposed into single-responsibility files:
 
 ```text
 queue-browser/
-  module.ts          Orchestrator — wires DOM events to handlers
+  module.ts          Orchestrator -- wires DOM events to handlers
        |
        +--- service.ts           Broker operations + publisher lifecycle
        |      createBrowser()       Create queue browser
@@ -320,7 +289,6 @@ queue-browser/
        |      onMessage()           Parse incoming messages
        |      onBrowserUp()         Queue connected
        |      onConnectFailed()     Connection error
-       |      (ACK/REJECT handlers moved into core/services/solace-publisher)
        |
        +--- state.js             Local state (not shared via EventBus)
        |      messageStore          Map<queueName, Message[]>
@@ -351,49 +319,34 @@ queue-browser/
        |      openForwardModal()    Prepare modal with messages
        |      updateForwardStatus() Update ACK/REJECT status
        |
-       +--- constants.js         Module-scoped SVG icon strings (downloadContent, forward, delete, copy …)
+       +--- constants.js         Module-scoped SVG icon strings (downloadContent, forward, delete, copy ...)
 ```
 
 Queue-browser's production `service.ts` runs unmodified in both real and demo builds. In the demo, its SDK calls reach the `window.solace` emulation installed by the demo broker, and publish-with-ACK (delegated to the core `solace-publisher`) round-trips through the broker's acknowledgement events -- see [The demo broker](#the-demo-broker-demohtml-provisioned-demohtml).
-
-### Circular Dependency Resolution
-
-`service-events.ts` needs `disconnectBrowser` from `service.ts`, but `service.ts` passes `serviceEvents` callbacks to the Solace SDK. This circular dependency is broken by the `wire()` pattern:
-
-```text
-module.ts (install):
-  1. const serviceEvents = createServiceEvents();     // No deps yet
-  2. const service = createService(app, serviceEvents); // Receives serviceEvents
-  3. serviceEvents.wire({ disconnectBrowser: service.disconnectBrowser }); // Late binding
-```
-
-`onConnectFailed` throws `wire() not called before onConnectFailed` if step 3 was ever skipped — surfaces the missing-wiring regression at first failure instead of silently no-oping.
-
----
 
 ## Data Flow: Message Lifecycle
 
 ```mermaid
 flowchart TD
-    broker["<b>Solace Broker</b>"] -->|WebSocket message| svc["service.ts<br/>browser.on(MESSAGE, …)"]
-    svc --> onmsg["service-events.ts — onMessage(queueName, msg)<br/>1. extract type — Text / Binary / Map / Stream<br/>2. extract content — SDT, then Binary, then XML<br/>3. parse timestamp<br/>4. extract properties + user properties<br/>5. build message object"]
+    broker["<b>Solace Broker</b>"] -->|WebSocket message| svc["service.ts<br/>browser.on(MESSAGE, ...)"]
+    svc --> onmsg["service-events.ts -- onMessage(queueName, msg)<br/>1. extract type -- Text / Binary / Map / Stream<br/>2. extract content -- SDT, then Binary, then XML<br/>3. parse timestamp<br/>4. extract properties + user properties<br/>5. build message object"]
     onmsg --> store["state.js<br/>messageStore.get(queueName).push(msg)"]
     store --> active{"Is this the<br/>active queue?"}
     active -->|no| storedOnly["stored in messageStore only"]
     active -->|yes| allMsgs["state.allMessages.push(msg)"]
     allMsgs --> filter{"shouldShowMessage(msg, filters)?"}
     filter -->|no| notShown["stored but not displayed"]
-    filter -->|yes| display["state.displayedMessages.push(msg)<br/>ui-table.ts — addMessageRow(msg)"]
-    display --> row["ui-table.ts — row appears in table"]
-    row -->|user clicks row| details["ui-details.ts — showDetails(msg)"]
-    details --> panel["Detail panel renders<br/>properties · content · destination"]
+    filter -->|yes| display["state.displayedMessages.push(msg)<br/>ui-table.ts -- addMessageRow(msg)"]
+    display --> row["ui-table.ts -- row appears in table"]
+    row -->|user clicks row| details["ui-details.ts -- showDetails(msg)"]
+    details --> panel["Detail panel renders<br/>properties . content . destination"]
 ```
 
 ---
 
 ## SEMP v2 Paged Discovery (core library)
 
-SEMPv2 monitor endpoints page their results — the `meta.paging.nextPageUri` field on a response carries an absolute URL for the next page. Brokers in production frequently host hundreds of VPNs/queues, so the discovery service streams pages instead of accumulating them.
+SEMPv2 monitor endpoints page their results -- the `meta.paging.nextPageUri` field on a response carries an absolute URL for the next page. Brokers in production frequently host hundreds of VPNs/queues, so the discovery service streams pages instead of accumulating them.
 
 ### Service contract
 
@@ -409,23 +362,23 @@ export function createSempDiscovery(sempCtx: SempContext): {
 type FetchPage = { ok: true; data: string[] } | { ok: false; error: string };
 ```
 
-A primary `SempContext` is built via `unfilteredPrimarySempContext(ctx)` from `src/core/services/sempContext.ts` (named for what it does NOT do — see [Enforcement points](#enforcement-points)); secondary SempContexts (queue-copy's destination broker) are built directly from the secondary `createServiceSemp` factory's `onConnected` hook.
+A primary `SempContext` is built via `unfilteredPrimarySempContext(ctx)` from `src/core/services/sempContext.ts` (named for what it does NOT do -- see [Enforcement points](#enforcement-points)); secondary SempContexts (queue-copy's destination broker) are built directly from the secondary `createServiceSemp` factory's `onConnected` hook.
 
 A shared `fetchPaged()` helper drives the pagination loop:
 
 ```text
 while (url) {
     if (pageNum > 0) await sleep(PAGE_DELAY_MS);   // 370ms throttle between pages
-    sempCtx.fetch(url) → yield { ok: true, data: [...] }
+    sempCtx.fetch(url) -> yield { ok: true, data: [...] }
     url = json.meta?.paging?.nextPageUri || null
 }
 ```
 
-The first error terminates the stream — the generator yields `{ok: false, error}` and returns. Any pages already yielded remain valid for the caller. The throttle protects the broker from a burst of back-to-back requests when paging through hundreds of items.
+The first error terminates the stream -- the generator yields `{ok: false, error}` and returns. Any pages already yielded remain valid for the caller. The throttle protects the broker from a burst of back-to-back requests when paging through hundreds of items.
 
 ### Consumers: the `QueueSource` seam
 
-Discovery is a capability **of a connection**, owned by whoever owns that connection — never by the reusable consumer. Components receive a `QueueSource` (the discovery analog of `SempContext`) and call `listVpns()` / `listQueues(vpn)`; they never run their own SEMP discovery:
+Discovery is a capability **of a connection**, owned by whoever owns that connection -- never by the reusable consumer. Components receive a `QueueSource` (the discovery analog of `SempContext`) and call `listVpns()` / `listQueues(vpn)`; they never run their own SEMP discovery:
 
 ```ts
 // src/core/services/queue-source.ts
@@ -441,11 +394,11 @@ export function sempQueueSource(sempCtx: SempContext, access: Access): QueueSour
 export function queueSourceFrom(ctx: AppContext, scope: Scope): QueueSource | null;   // primary
 ```
 
-`queueSourceFrom(ctx, scope)` is the single place that branches managed-vs-direct. `scope` says what the list is FOR: `browse` filters by `isQueueVisible`, `operate` by `canOperate` — so a destination picker (copying into a queue is a write) cannot offer a queue the user may only read.
+`queueSourceFrom(ctx, scope)` is the single place that branches managed-vs-direct. `scope` says what the list is FOR: `browse` filters by `isQueueVisible`, `operate` by `canOperate` -- so a destination picker (copying into a queue is a write) cannot offer a queue the user may only read.
 
-- **VPNs** — managed yields the **provisioned set** (`appState.managed.vpns`, published by the connections module from `/managed/me`) with no SEMP call; standard does live SEMP discovery. This is why the managed queue-picker lists exactly the VPNs the Connections dropdown shows, instead of every VPN a broad entitlement glob (`msgVpns: '*'`) would admit.
-- **Queues** — always live SEMP (no provisioned queue inventory exists anywhere; RBAC specifies queue *globs*, applied by `filterSempFetch`). The asymmetry is in the *data*, not the handling — both are `QueueSource` methods.
-- **`key`** — managed folds in the provisioned set + entitlement rows, so a permission/provisioning change (e.g. via Refresh) flips it and the picker's cache (keyed by `key`, not `baseUrl`) misses → re-reads. Standard uses the `baseUrl`.
+- **VPNs** -- managed yields the **provisioned set** (`appState.managed.vpns`, published by the connections module from `/managed/me`) with no SEMP call; standard does live SEMP discovery. This is why the managed queue-picker lists exactly the VPNs the Connections dropdown shows, instead of every VPN a broad entitlement glob (`msgVpns: '*'`) would admit.
+- **Queues** -- always live SEMP (no provisioned queue inventory exists anywhere; RBAC specifies queue *globs*, applied by `filterSempFetch`). The asymmetry is in the *data*, not the handling -- both are `QueueSource` methods.
+- **`key`** -- managed folds in the provisioned set + entitlement rows, so a permission/provisioning change (e.g. via Refresh) flips it and the picker's cache (keyed by `key`, not `baseUrl`) misses -> re-reads. Standard uses the `baseUrl`.
 
 The reusable [`pickQueue(source, opts?)`](../src/core/components/queue-picker/index.ts) component consumes a `QueueSource` with `for await`, accumulating + sorting + re-rendering after every yielded page:
 
@@ -461,7 +414,7 @@ for await (const page of source.listVpns()) {
 }
 ```
 
-The user sees results populate progressively rather than waiting for every page. queue-browser builds its source with `queueSourceFrom(ctx)`; queue-copy uses `queueSourceFrom(ctx)` for the source / same-broker destination and `sempQueueSource(state.destSempCtx)` for a different-broker destination. The picker behaves identically in every variant — the connection's source decides where the names come from, and the picker never calls SEMP itself.
+The user sees results populate progressively rather than waiting for every page. queue-browser builds its source with `queueSourceFrom(ctx)`; queue-copy uses `queueSourceFrom(ctx)` for the source / same-broker destination and `sempQueueSource(state.destSempCtx)` for a different-broker destination. The picker behaves identically in every variant -- the connection's source decides where the names come from, and the picker never calls SEMP itself.
 
 ### Demo mode
 
@@ -471,7 +424,7 @@ There is no discovery mock: the real `semp-discovery` runs in the demo against t
 
 ## SEMP v1 Pagination (Queue Subscription Explorer)
 
-Subscription listing uses SEMP **v1** — the `<rpc><show><queue><subscriptions/>` endpoint — not the v2 monitor REST API. The two pagination protocols differ:
+Subscription listing uses SEMP **v1** -- the `<rpc><show><queue><subscriptions/>` endpoint -- not the v2 monitor REST API. The two pagination protocols differ:
 
 | | SEMP v2 (core paged discovery) | SEMP v1 (queue-subscription-explorer) |
 | --- | --- | --- |
@@ -482,10 +435,10 @@ Subscription listing uses SEMP **v1** — the `<rpc><show><queue><subscriptions/
 
 Callers pass the literal path `'/SEMP'` to `sempCtx.fetch`; the kernel's `sempFetch` assembles the wire URL from `appState.sempCredentials` (via `normalizeUrlPath` + `buildBrokerUrl`) on every call, so the v1 RPC inherits hosted-mode routing exactly like a v2 request.
 
-The subscription service (`src/modules/queue-subscription-explorer/service.ts`) follows the same async-generator shape as `createSempDiscovery` — same `{ ok, data | error }` envelope, same `PAGE_DELAY_MS = 370ms` throttle between pages — so the consumer code in `module.ts` looks structurally identical:
+The subscription service (`src/modules/queue-subscription-explorer/service.ts`) follows the same async-generator shape as `createSempDiscovery` -- same `{ ok, data | error }` envelope, same `PAGE_DELAY_MS = 370ms` throttle between pages -- so the consumer code in `module.ts` looks structurally identical:
 
 ```ts
-let body: string | null = INITIAL_BODY;       // <rpc>…<num-elements>100</num-elements>…</rpc>
+let body: string | null = INITIAL_BODY;       // <rpc>...<num-elements>100</num-elements>...</rpc>
 while (body) {
     if (pageNum > 0) await sleep(PAGE_DELAY_MS);
     res = await sempCtx.fetch(url, { method: 'POST', headers, body });
@@ -496,11 +449,11 @@ while (body) {
 }
 ```
 
-The XML→`SubscriptionRow[]` parser is split into its own `parse.ts` module so the pure logic (queue/topic extraction, more-cookie inner-`<rpc>` serialization via `XMLSerializer`) is unit-testable without mocking `fetch`. Queues with zero topic subscriptions are intentionally omitted from the dataset — the user opted to drop them rather than render blank-subscription rows.
+The XML->`SubscriptionRow[]` parser is split into its own `parse.ts` module so the pure logic (queue/topic extraction, more-cookie inner-`<rpc>` serialization via `XMLSerializer`) is unit-testable without mocking `fetch`. Queues with zero topic subscriptions are intentionally omitted from the dataset -- the user opted to drop them rather than render blank-subscription rows.
 
 ### Topic intersection filter
 
-The Subscription column filter uses **`topicFilterMatches(filter, topic)`** — an intentionally *asymmetric* wrapper (the user's pattern is matched loosely; the broker-stored topic follows Solace's stricter wildcard rule), which normalizes onto the symmetric intersection primitive: both the user-typed pattern and the stored subscription may carry `*` (single-level) or `>` (multi-level trailing) wildcards, and the filter matches when the topic-sets overlap. The pure helper lives in core at `src/core/utils.ts` as `topicsIntersect(a, b)` so both sides are split on `/` and matched level-by-level — this is symmetric in `a` and `b` by design.
+The Subscription column filter uses **`topicFilterMatches(filter, topic)`** -- an intentionally *asymmetric* wrapper (the user's pattern is matched loosely; the broker-stored topic follows Solace's stricter wildcard rule), which normalizes onto the symmetric intersection primitive: both the user-typed pattern and the stored subscription may carry `*` (single-level) or `>` (multi-level trailing) wildcards, and the filter matches when the topic-sets overlap. The pure helper lives in core at `src/core/utils.ts` as `topicsIntersect(a, b)` so both sides are split on `/` and matched level-by-level -- this is symmetric in `a` and `b` by design.
 
 VPN and Queue column filters use a different rule (per user spec): plain substring match by default, escalating to anchored wildcard via `matchString()` when the input contains `*`. The shared `matchString` helper lives in `src/core/utils.ts`.
 
@@ -508,27 +461,27 @@ VPN and Queue column filters use a different rule (per user spec): plain substri
 
 ## Queue Copy: Verify Flow & Broker Bug Workaround
 
-The queue-copy module's verify phase snapshots the source queue (count, oldest-msg-id, newest-msg-id, access-type) before the run phase begins. The snapshot is **immutable for the duration of the run**: the engine copies oldest → newest in one pass and stops. New arrivals after verify are explicitly out of scope. The newest-msg-id is the **hard stop boundary** for the copy engine; the access-type gates the modal's Move button when the source queue is read-only.
+The queue-copy module's verify phase snapshots the source queue (count, oldest-msg-id, newest-msg-id, access-type) before the run phase begins. The snapshot is **immutable for the duration of the run**: the engine copies oldest -> newest in one pass and stops. New arrivals after verify are explicitly out of scope. The newest-msg-id is the **hard stop boundary** for the copy engine; the access-type gates the modal's Move button when the source queue is read-only.
 
 ### Two-call SEMP v1 workaround
 
-The broker SEMP v1 `show queue … detail` RPC has a bug (`soltr/10_25_0VMR`): `<info>/<newest-msg-id>` always returns `0`. The same bug surfaces in SEMP v2 as `highestMsgId`. To recover the real value, [`verifyViaSempV1`](../src/modules/queue-copy/service-verify.ts) issues a **second** SEMP v1 POST per verify call:
+The broker SEMP v1 `show queue ... detail` RPC has a bug (`soltr/10_25_0VMR`): `<info>/<newest-msg-id>` always returns `0`. The same bug surfaces in SEMP v2 as `highestMsgId`. To recover the real value, [`verifyViaSempV1`](../src/modules/queue-copy/service-verify.ts) issues a **second** SEMP v1 POST per verify call:
 
-1. **Detail call** — `<rpc><show><queue><name>…</name><vpn-name>…</vpn-name><detail/></queue></show></rpc>` → populates count, size, quota, max-msg-size, oldest-msg-id from `<info>/*`. The `<newest-msg-id>` field is intentionally ignored (parse line commented out for traceability).
-2. **Supplementary call** — `<rpc><show><queue><name>…</name><vpn-name>…</vpn-name><messages/><newest/><count/><num-elements>1</num-elements></queue></show></rpc>` → returns one spooled-message record; `result.newestMsgId` is taken from `spooled-messages/spooled-message/message-id`.
+1. **Detail call** -- `<rpc><show><queue><name>...</name><vpn-name>...</vpn-name><detail/></queue></show></rpc>` -> populates count, size, quota, max-msg-size, oldest-msg-id from `<info>/*`. The `<newest-msg-id>` field is intentionally ignored (parse line commented out for traceability).
+2. **Supplementary call** -- `<rpc><show><queue><name>...</name><vpn-name>...</vpn-name><messages/><newest/><count/><num-elements>1</num-elements></queue></show></rpc>` -> returns one spooled-message record; `result.newestMsgId` is taken from `spooled-messages/spooled-message/message-id`.
 
 The supplementary call is best-effort: on non-2xx, parse error, fail execute-result, or non-numeric ID, `newestMsgId` stays `null` without failing verification. An empty queue legitimately yields `null`. The signal is checked between the two calls so Cancel-during-verify still aborts promptly.
 
-The QueueBrowser-accumulate fallback (no-SEMP path) is unaffected — it tracks max(seenIds) directly from the browsed messages.
+The QueueBrowser-accumulate fallback (no-SEMP path) is unaffected -- it tracks max(seenIds) directly from the browsed messages.
 
 ### Access-type capture (gate for Copy and Move)
 
 Both verify paths populate `result.accessType: 'no-access' | 'read-only' | 'read-write' | null`:
 
-- **SEMP path:** the existing detail RPC's `<info>/<others-permission>` value is parsed in `parseSempV1Response` via [`normalizeAccessType`](../src/modules/queue-copy/service-verify.ts). Format examples: `Read-Only (1000)`, `No-Access (1001)`, `Consume (1100)`, `Modify-Topic (1110)`, `Delete (1111)`. Match by prefix (the trailing `(NNNN)` is broker-version-dependent and ignored). Mapping: `No-Access*` → `'no-access'`; `Read-Only*` → `'read-only'`; `Consume*` / `Modify-Topic*` / `Delete*` → `'read-write'`. The SEMP RPC also returns `<info>/<owner>`, captured into `result.owner`.
-- **QueueBrowser fallback:** the temp browser's `_messageConsumer._permissions` (same SDK property queue-browser reads) is captured on UP and normalized. SDK returns `'READ_ONLY'` or `'READ_WRITE'`. The SDK has already evaluated the user's effective access from the client's perspective — owner status is baked in — so `result.owner` is left null and the gate trusts `accessType` directly.
+- **SEMP path:** the existing detail RPC's `<info>/<others-permission>` value is parsed in `parseSempV1Response` via [`normalizeAccessType`](../src/modules/queue-copy/service-verify.ts). Format examples: `Read-Only (1000)`, `No-Access (1001)`, `Consume (1100)`, `Modify-Topic (1110)`, `Delete (1111)`. Match by prefix (the trailing `(NNNN)` is broker-version-dependent and ignored). Mapping: `No-Access*` -> `'no-access'`; `Read-Only*` -> `'read-only'`; `Consume*` / `Modify-Topic*` / `Delete*` -> `'read-write'`. The SEMP RPC also returns `<info>/<owner>`, captured into `result.owner`.
+- **QueueBrowser fallback:** the temp browser's `_messageConsumer._permissions` (same SDK property queue-browser reads) is captured on UP and normalized. SDK returns `'READ_ONLY'` or `'READ_WRITE'`. The SDK has already evaluated the user's effective access from the client's perspective -- owner status is baked in -- so `result.owner` is left null and the gate trusts `accessType` directly.
 
-**Modal owner override (SEMP path only).** SEMP queue metadata reports `<owner>` and `<others-permission>` independently — the broker's actual access-control rule "owners have full access regardless of others-permission" is the application's responsibility to apply. After `verifySource` returns, `runVerify` in [`ui-modal.ts`](../src/modules/queue-copy/ui-modal.ts) performs a **case-sensitive strict equals** between `result.owner` and `clientUser` (from `ctx.appState.solaceConnection?.user`, defaulting to `''`). On match: lift `result.accessType` to `'read-write'`. On mismatch: fall through to the others-permission gate downstream. The only guard is `result.owner !== null` — null means SEMP didn't surface owner (element missing) or the path was QB-fallback (where owner is not extracted because the SDK's `_permissions` already factored it in). Empty owner is a legitimate value (server-created queue) and is compared with strict equals like any other string.
+**Modal owner override (SEMP path only).** SEMP queue metadata reports `<owner>` and `<others-permission>` independently -- the broker's actual access-control rule "owners have full access regardless of others-permission" is the application's responsibility to apply. After `verifySource` returns, `runVerify` in [`ui-modal.ts`](../src/modules/queue-copy/ui-modal.ts) performs a **case-sensitive strict equals** between `result.owner` and `clientUser` (from `ctx.appState.solaceConnection?.user`, defaulting to `''`). On match: lift `result.accessType` to `'read-write'`. On mismatch: fall through to the others-permission gate downstream. The only guard is `result.owner !== null` -- null means SEMP didn't surface owner (element missing) or the path was QB-fallback (where owner is not extracted because the SDK's `_permissions` already factored it in). Empty owner is a legitimate value (server-created queue) and is compared with strict equals like any other string.
 
 **Gate matrix.** `evaluateStartGate`:
 
@@ -537,34 +490,34 @@ Both verify paths populate `result.accessType: 'no-access' | 'read-only' | 'read
 | `'no-access'` | blocked (no-access banner) | blocked (no-access banner) |
 | `'read-only'` | enabled | blocked (read-only banner) |
 | `'read-write'` | enabled | enabled |
-| `null` | enabled (permissive — let broker enforce) | enabled |
+| `null` | enabled (permissive -- let broker enforce) | enabled |
 
 Move requires consume-or-higher because it deletes from the source after publishing to the destination. The engine itself contains no permission check; gating is entirely a verify-phase + modal concern.
 
 ### Run engine: two-phase model
 
-The copy engine separates **stop detection** (Phase 1) from **outcome evaluation** (Phase 2). MESSAGE handlers, the idle timer, browser-event handlers, and the cancel-check together set a single first-wins `stopReason` and call `browser.stop()`; in-flight publishes settle naturally (cancel rejects them via `publisher.rejectAllPending`). Once `inFlight` drains to zero, `evaluateAndFinish` consumes the `stopReason` plus `cancelRequested` and produces a `status` of `'completed' | 'cancelled' | 'error'`, calling `onComplete` exactly once.
+The copy engine separates **stop detection** (the stop phase) from **outcome evaluation** (the outcome phase). MESSAGE handlers, the idle timer, browser-event handlers, and the cancel-check together set a single first-wins `stopReason` and call `browser.stop()`; in-flight publishes settle naturally (cancel rejects them via `publisher.rejectAllPending`). Once `inFlight` drains to zero, `evaluateAndFinish` consumes the `stopReason` plus `cancelRequested` and produces a `status` of `'completed' | 'cancelled' | 'error'`, calling `onComplete` exactly once.
 
 Stop reasons: `cancel`, `source-drift` (first msg id != recorded oldest), `max-consumed` (msg id > recorded newest AND we never saw the recorded newest -- see below), `reached-max` (processed the recorded newest), `idle` ([`IDLE_TIMEOUT_MS`](../src/modules/queue-copy/constants.ts) = 30 s with no MESSAGE), `publish-error`, `browser-error`. `reached-max` and `idle` produce `completed` only when `copied === total` -- otherwise `error` with a count-mismatch message. Cancel always upgrades the final classification. The failure text follows the same rule: the source browser's `CONNECT_FAILED_ERROR` and `DOWN_ERROR` handlers write `job.lastError` only while no stop reason is set, so when two browser events stop one run the reason shown after it is the first event's (the log line still carries each event's text).
 
-All five tunable knobs (`IDLE_TIMEOUT_MS`, `PUBLISH_CONCURRENCY_HIGH=20`, `PUBLISH_CONCURRENCY_LOW=10`, `BIND_PROBE_TIMEOUT_MS`, `ACCUMULATE_IDLE_MS`) live in [`queue-copy/constants.ts`](../src/modules/queue-copy/constants.ts) — single source of truth, motivated by an earlier 30s/60s drift between `service-copy.ts` and the since-deleted `service-copy-mock.ts`. `service-copy.ts` / `service-verify.ts` re-export them via barrel lines for existing test imports.
+All five tunable knobs (`IDLE_TIMEOUT_MS`, `PUBLISH_CONCURRENCY_HIGH=20`, `PUBLISH_CONCURRENCY_LOW=10`, `BIND_PROBE_TIMEOUT_MS`, `ACCUMULATE_IDLE_MS`) live in [`queue-copy/constants.ts`](../src/modules/queue-copy/constants.ts) -- single source of truth. `service-copy.ts` / `service-verify.ts` re-export them via barrel lines for existing test imports.
 
 **`msgId > maxMsgId` is disambiguated by a `seenMaxMsgId` flag, not blindly fatal.** Same-broker copy/move creates a feedback loop: our own published clones land back on the source queue and may be re-delivered as MESSAGE events while the originals' ACKs are still in flight. To distinguish "benign clone" from "the recorded max was consumed externally", the engine sets `seenMaxMsgId = true` synchronously (before the publish await) when a MESSAGE matches the recorded max. The pre-process gate then branches:
 
-- `msgId > maxMsgId` AND `seenMaxMsgId === true` → silent drop. The maxMsgId message is somewhere in our in-flight set, and the post-process gate will end the run when its ACK lands.
-- `msgId > maxMsgId` AND `seenMaxMsgId === false` → `triggerStop('max-consumed')`. Solace delivers QB messages in spool-ID order, so a strictly-greater id without ever having seen the recorded max means the max is gone from the queue.
+- `msgId > maxMsgId` AND `seenMaxMsgId === true` -> silent drop. The maxMsgId message is somewhere in our in-flight set, and the post-process gate will end the run when its ACK lands.
+- `msgId > maxMsgId` AND `seenMaxMsgId === false` -> `triggerStop('max-consumed')`. Solace delivers QB messages in spool-ID order, so a strictly-greater id without ever having seen the recorded max means the max is gone from the queue.
 
-**Phase 1 calls `browser.disconnect()`, not `browser.stop()`.** Disconnect is permanent — no further MESSAGE events can be delivered, even speculatively, while Phase 2 waits for in-flight publishes to settle. This is the cut that prevents same-queue clones from racing the ACK drain.
+**The stop phase calls `browser.disconnect()`, not `browser.stop()`.** Disconnect is permanent -- no further MESSAGE events can be delivered, even speculatively, while the outcome phase waits for in-flight publishes to settle. This is the cut that prevents same-queue clones from racing the ACK drain.
 
 **Backpressure: source browser pauses at `PUBLISH_CONCURRENCY_HIGH`, resumes at `PUBLISH_CONCURRENCY_LOW`.** The Solace SDK enforces a per-session publish window (default ~50 unACK'd messages); exceeding it makes the next `session.send` return "Guaranteed Message Window Closed". To stay safely under the broker limit even with messages already buffered in the SDK transport window, the engine calls `browser.stop()` when in-flight reaches HIGH and `browser.start()` when it drops to LOW. Hysteresis between the two prevents flapping. Pause is reversible (the SDK's transport buffer holds undelivered messages and re-flushes them on `start()`); separate from the permanent `disconnect()` used by `triggerStop`.
 
-**The idle timer is suspended for the duration of a pause.** Idle's semantics is "no MESSAGE arrived in `IDLE_TIMEOUT_MS`" — but during pause no MESSAGE *can* arrive, because we asked the broker to stop sending them. Leaving the timer armed would erroneously fire `'idle'` whenever the pause exceeds the timeout while in-flight publishes are still settling. So when pausing: `clearTimeout(idleTimer); idleTimer = null`. When resuming: `resetIdleTimer()`. The `finally` block's idle-reset is gated on `!browserPaused` so ACKs landing during pause don't re-arm the suspended timer.
+**The idle timer is suspended for the duration of a pause.** Idle's semantics is "no MESSAGE arrived in `IDLE_TIMEOUT_MS`" -- but during pause no MESSAGE *can* arrive, because we asked the broker to stop sending them. Leaving the timer armed would erroneously fire `'idle'` whenever the pause exceeds the timeout while in-flight publishes are still settling. So when pausing: `clearTimeout(idleTimer); idleTimer = null`. When resuming: `resetIdleTimer()`. The `finally` block's idle-reset is gated on `!browserPaused` so ACKs landing during pause don't re-arm the suspended timer.
 
-A late cancel detected during pause triggers stop on the next ACK landing — no need to wait for the idle timer.
+A late cancel detected during pause triggers stop on the next ACK landing -- no need to wait for the idle timer.
 
-**In-flight publishes that ACK after a stop still count toward `copied`.** When a stop fires (e.g. `max-consumed` because a brand-new msg arrived after the recorded max was consumed externally), publishes that were already in flight to the destination continue to settle. Their successful ACKs increment `copied` — the messages truly made it, so the user-facing count must reflect that. Phase 2's `copied` vs `total` comparison then produces the right outcome (`error` with "Sent N of M expected" rather than the misleading "Sent 0 of M"). For move mode, the per-message `removeMessageFromQueue` is skipped when the source browser is already disconnected, so the source-queue copy of a successful publish remains and will be re-delivered to the next consumer (best-effort: we'd rather leave a duplicate than lose a message). Only failed in-flight publishes (e.g. `publisher.rejectAllPending` resolutions on cancel) are skipped — and only the FIRST publish failure escalates to `publish-error` (subsequent failures land with `stopReason` already set and are no-ops).
+**In-flight publishes that ACK after a stop still count toward `copied`.** When a stop fires (e.g. `max-consumed` because a brand-new msg arrived after the recorded max was consumed externally), publishes that were already in flight to the destination continue to settle. Their successful ACKs increment `copied` -- the messages truly made it, so the user-facing count must reflect that. The outcome phase's `copied` vs `total` comparison then produces the right outcome (`error` with "Sent N of M expected" rather than the misleading "Sent 0 of M"). For move mode, the per-message `removeMessageFromQueue` is skipped when the source browser is already disconnected, so the source-queue copy of a successful publish remains and will be re-delivered to the next consumer (best-effort: we'd rather leave a duplicate than lose a message). Only failed in-flight publishes (e.g. `publisher.rejectAllPending` resolutions on cancel) are skipped -- and only the FIRST publish failure escalates to `publish-error` (subsequent failures land with `stopReason` already set and are no-ops).
 
-In move mode, `browser.removeMessageFromQueue(msg)` is called per message immediately after that message's publish ACK lands — never batched.
+In move mode, `browser.removeMessageFromQueue(msg)` is called per message immediately after that message's publish ACK lands -- never batched.
 
 ---
 
@@ -573,15 +526,15 @@ In move mode, `browser.removeMessageFromQueue(msg)` is called per message immedi
 Each module owns its own `index.html` next to its code:
 
 ```text
-src/modules/<id>/index.html   ← canonical per-module HTML
+src/modules/<id>/index.html   <- canonical per-module HTML
 src/modules/<id>/module.ts
 src/modules/<id>/...
 ```
 
-The repo-root `index.html` is a generic PWA shell — sidebar, header, `#module-container`, status bar — and contains a single marker comment where module templates get injected at build time:
+The repo-root `index.html` is a generic PWA shell -- sidebar, header, `#module-container`, status bar -- and contains a single marker comment where module templates get injected at build time:
 
 ```html
-<!-- index.html (repo root) — shell only -->
+<!-- index.html (repo root) -- shell only -->
 <div id="module-container"></div>
 ...
 <!-- @module-templates -->
@@ -606,16 +559,16 @@ At startup, the Kernel:
 4. Passes the wrapper as `container` in AppContext
 5. Calls `module.install(ctx)`
 
-Navigation toggles the `.hidden` class on module wrappers — no routing, no page reloads.
+Navigation toggles the `.hidden` class on module wrappers -- no routing, no page reloads.
 
-**Editing rule:** Module HTML changes go in `src/modules/<id>/index.html` only. Don't edit the shell `src/index.html` for module markup — those edits won't survive the next build (the marker gets re-expanded). The shell itself (sidebar layout, header, status bar) stays in `src/index.html`.
+**Editing rule:** Module HTML changes go in `src/modules/<id>/index.html` only. Don't edit the shell `src/index.html` for module markup -- those edits won't survive the next build (the marker gets re-expanded). The shell itself (sidebar layout, header, status bar) stays in `src/index.html`.
 
 ### Module registration: variant manifests
 
-Active modules are listed in **variant manifest** files under [src/variants/](../src/variants/). Each manifest is a small file exporting `ACTIVE_MODULES: Record<string, number>` — id → priority. To disable a module in a variant, comment one line. To enable, uncomment. To create a new module, drop `src/modules/<id>/{module.ts, index.html}` and add a line to the variant. No second list to maintain. A manifest may also export `MODULE_ENTRIES: Record<string, string>` (id → entry name) to install a different entry file for a module: `{ connections: 'managed' }` installs `src/modules/connections/module.managed.ts` with `index.managed.html`. The module keeps its id and sidebar entry; only the file changes. An override for an id the manifest does not list fails the build.
+Active modules are listed in **variant manifest** files under [src/variants/](../src/variants/). Each manifest is a small file exporting `ACTIVE_MODULES: Record<string, number>` -- id -> priority. To disable a module in a variant, comment one line. To enable, uncomment. To create a new module, drop `src/modules/<id>/{module.ts, index.html}` and add a line to the variant. No second list to maintain. A manifest may also export `MODULE_ENTRIES: Record<string, string>` (id -> entry name) to install a different entry file for a module: `{ connections: 'managed' }` installs `src/modules/connections/module.managed.ts` with `index.managed.html`. The module keeps its id and sidebar entry; only the file changes. An override for an id the manifest does not list fails the build.
 
 ```ts
-// src/variants/standard.ts — every module the default build ships
+// src/variants/standard.ts -- every module the default build ships
 export const ACTIVE_MODULES: Record<string, number> = {
     'connections':                 100,
     'queue-browser':                80,
@@ -623,7 +576,7 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'queue-subscription-explorer':  45,
 };
 
-// src/variants/min.ts — minimal: connections + queue-browser only
+// src/variants/min.ts -- minimal: connections + queue-browser only
 export const ACTIVE_MODULES: Record<string, number> = {
     'connections':                 100,
     'queue-browser':                80,
@@ -634,19 +587,20 @@ export const ACTIVE_MODULES: Record<string, number> = {
 export const ACTIVE_MODULES = { 'connections': 100, 'queue-browser': 80, 'queue-copy': 70, 'queue-subscription-explorer': 45 };
 export const MODULE_ENTRIES = { 'connections': 'managed' };
 
-// src/variants/admin.ts — the standalone /solAdmin app (no messaging modules)
+// src/variants/admin.ts -- the standalone /solAdmin app (no messaging modules)
 export const ACTIVE_MODULES: Record<string, number> = {
     'admin-login':                 100,
     'user-management':              20,    // admin-only (gated by isModuleVisible)
     'connection-management':        15,    // admin-only
     'gateway-settings':             10,    // admin-only: config.yaml
+    'tls-certificates':              8,    // admin-only: gateway certificate, trusted broker CAs
     'backup':                        5,    // admin-only: export, import, scheduled backups
 };
 ```
 
 [src/variants/_active.ts](../src/variants/_active.ts) is a one-line re-export from one variant (default `./standard`). The registry imports `ACTIVE_MODULES` from `_active`, so the registry never changes when variants do. To ship a different variant, build with `node scripts/vite-build.mjs --variant=<name> --out-filename=<name>` -- the wrapper exists because Vite's CLI parser rejects unknown options, and passes both flags to `vite.config.ts` as private env vars. The variant drives `vite.config.ts`'s variant-redirect resolver (which rewrites `_active` to the chosen variant file), the module registry and the template injection. Do not edit the re-export instead: with no `--variant`, the registry plugin falls back to `standard` regardless of what `_active` points at.
 
-A module directory may exist on disk but not appear in any variant (e.g. [`src/modules/queue-discovery/`](../src/modules/queue-discovery/)). Neither its `<template>` block nor its code is emitted: the `inject-module-templates` plugin and the **module registry** both work from the active variant's manifest only (see below), so the kernel never installs it. This is the intentional "carry the code, ship the bundle without it" shape — stronger than tree-shaking, because the unlisted module's `module.ts` is never imported.
+A module directory may exist on disk but not appear in any variant (e.g. [`src/modules/queue-discovery/`](../src/modules/queue-discovery/)). Neither its `<template>` block nor its code is emitted: the `inject-module-templates` plugin and the **module registry** both work from the active variant's manifest only (see below), so the kernel never installs it. This is the intentional "carry the code, ship the bundle without it" shape -- stronger than tree-shaking, because the unlisted module's `module.ts` is never imported.
 
 **Manifest-driven registry (manifest is authoritative for bundling, not just activation).** [src/registry.ts](../src/registry.ts) reads `ACTIVE_MODULES` from `_active` for the id->priority map and resolves each id to its `PwaModule` via `moduleFiles` from the **`virtual:module-registry`** module. That virtual module is generated per build by the `moduleRegistryPlugin` ([scripts/module-registry-plugin.mjs](../scripts/module-registry-plugin.mjs)) -- it reads the active `src/variants/<name>.ts`, then emits literal `import * as` statements for **exactly** the listed ids (each id's `module.ts`, or `module.<entry>.ts` under `MODULE_ENTRIES`), keyed by module id. So a module absent from the active variant is never imported and never reaches the bundle, and neither is the entry file a variant does not select. For the one split that matters today, the build proves it on the output: `npm run check:bundles` ([scripts/check-bundles.mjs](../scripts/check-bundles.mjs), run by the `build` task) fails if any Release bundle carries a managed-UI marker, or if `provisioned.html` lacks one. If a manifest lists an id with no matching entry file, the plugin fails the build; if an entry file's exported `.id` doesn't match its directory, the registry throws a clear error -- boot fails fast. (vitest registers the same plugin so tests resolve `virtual:module-registry`, defaulting to the `standard` variant.)
 
@@ -658,23 +612,73 @@ The `inject-module-templates` Vite plugin takes the active variant's module ids 
 
 ### Build flavors vs variants
 
-A **variant** decides *which modules* ship (the `ACTIVE_MODULES` manifest). A **flavor** decides *how a module behaves* at build time, via a build-time feature flag — orthogonal to the variant. The two compose: any variant can be built in any flavor.
+A **variant** decides *which modules* ship (the `ACTIVE_MODULES` manifest). A **flavor** decides *how a module behaves* at build time, via a build-time feature flag -- orthogonal to the variant. The two compose: any variant can be built in any flavor.
 
 The first flavor is the queue-browser **no-payload** build. [src/modules/queue-browser/features.ts](../src/modules/queue-browser/features.ts) exports `showPayload()`, which reads `import.meta.env.VITE_SHOW_PAYLOAD` (default `'true'`). The flag is module-local -- only queue-browser consumes it, and "payload" is a queue-browser concept (cross-module RBAC gating is a separate mechanism -- see [Provisioned Connections](#provisioned-connections-rbac)). When `VITE_SHOW_PAYLOAD='false'`:
 
 - **The body is never decoded onto state.** `service-events.onMessage` skips the SDT/binary/XML decode and never sets `content` on the stored message object, so the payload is completely inaccessible through app state. The raw SDK message (`_originalMsg`) is retained only because Forward/Delete need it.
 - **Payload DOM is removed at install.** Every payload-bearing element in [index.html](../src/modules/queue-browser/index.html) carries a `data-payload` attribute (the single source of truth for "what is payload"); `module.ts` removes `[data-payload]` nodes up-front, and the `required()` assertion list is conditional so the removed elements aren't asserted. Removed: Content Preview, Copy Content, Show Raw + Raw modal, Download Content, Download Full, and the Body-Content filter. **Kept**: Forward, Delete, all metadata, and every other filter.
-- **The build plumbs the flag** through `scripts/vite-build.mjs` (`--show-payload=false` → `__VITE_SHOW_PAYLOAD`) into a `vite.config.ts` `define` of `import.meta.env.VITE_SHOW_PAYLOAD`. Because `showPayload()` then folds to a constant, Rollup dead-code-eliminates the payload branches from `dist/no-payload.html` (the inert `data-payload` markup stays in the injected `<template>`, but the live nodes are removed at install and the decode/wiring JS is gone). Emitted by `npm run build:no-payload`.
+- **The build plumbs the flag** through `scripts/vite-build.mjs` (`--show-payload=false` -> `__VITE_SHOW_PAYLOAD`) into a `vite.config.ts` `define` of `import.meta.env.VITE_SHOW_PAYLOAD`. Because `showPayload()` then folds to a constant, Rollup dead-code-eliminates the payload branches from `dist/no-payload.html` (the inert `data-payload` markup stays in the injected `<template>`, but the live nodes are removed at install and the decode/wiring JS is gone). Emitted by `npm run build:no-payload`.
 
 ---
 
 ## Provisioned Connections (RBAC)
 
-**Provisioned** is a connection *mode* that only one product bundle carries. Every Direct Release bundle installs the Direct-only connections entry; the login-gated (**Provisioned**) path ships in `dist/provisioned.html` (the `managed` variant -- internal names keep "managed": the variant, [module.managed.ts](../src/modules/connections/module.managed.ts), the `/managed/*` API, `managedProfile`), which the gateway serves at `/` in Provisioned mode, and in the offline `provisioned-demo.html` (against a fake gateway, see The demo broker). Within that bundle, which of the two modes the app offers is resolved at runtime from the gateway. Provisioned mode abstracts broker credentials away from the user: they sign in with an app account, and the deployment holds the broker credentials and grants each account a scoped set of brokers, VPNs and queues. It runs only behind the [go-web-proxy](../go-web-proxy), with `connModes` `provisioned` or `both` (and `hosted` true, the default). The user-facing design, locked decisions, and **threat model** live in [rbac-variant-plan.md](rbac-variant-plan.md); operations in [deployment.md](deployment.md). This section is the *how*.
+**Provisioned** is a connection *mode* that only one product bundle carries. Every Direct Release bundle installs the Direct-only connections entry; the login-gated (**Provisioned**) path ships in `dist/provisioned.html` (the `managed` variant -- internal names keep "managed": the variant, [module.managed.ts](../src/modules/connections/module.managed.ts), the `/managed/*` API, `managedProfile`), which the gateway serves at `/` in Provisioned mode, and in the offline `provisioned-demo.html` (against a fake gateway, see The demo broker). Within that bundle, which of the two modes the app offers is resolved at runtime from the gateway. Provisioned mode abstracts broker credentials away from the user: they sign in with an app account, and the deployment holds the broker credentials and grants each account a scoped set of brokers, VPNs and queues. It runs only behind the [go-web-proxy](../go-web-proxy), with `connModes` `provisioned` or `both` (and `hosted` true, the default). The threat model (what this protects and what it does not) is in [provisioned-mode.md -> Security model](provisioned-mode.md#security-model); running it is in [provisioned-mode.md](provisioned-mode.md) and [deployment.md](deployment.md). This section is the *how*.
 
 On the gateway side there is **one binary and one image** for every container mode. `main.go` reaches the store and the `/managed/*` handler through `newManagedRouting`, which builds them only when the `connModes` at startup offers Provisioned sign-in (`config.provisioned()`); in Gateway mode it returns nil and `/managed/*`, `/login` and `/solAdmin` are 404s. The image ships both app bundles, and `appIndexFile` picks the one served at `/`: `index.html` (Direct only) in Gateway mode, `provisioned.html` in Provisioned mode; neither file, nor `solAdmin.html`, is served by its own name.
 
 Enforcement is **proxy connection-gating + client guardrails**: the proxy returns only the connections a user is entitled to (plus per-queue permission globs), `dial` and the SMF gate open only an entitled VPN, and the SEMP relay is read-only (SEMP v2 `GET`/`HEAD`, a v1 `<show>`) and refuses a broker the user may not use; the client filters discovery and guardrails the UI. Within an entitled broker the relay filters neither VPNs nor queues, so those filters and the per-queue Operate / Read-only split are client guardrails: UX, not a security boundary.
+
+### Topology
+
+```text
+ Browser (provisioned.html, served by go-web-proxy in Provisioned mode)
+   /login (gateway page) -- password -> session cookie (HttpOnly, SameSite=Lax)
+   connections -- Provisioned tab: GET /managed/me on the cookie
+        +- profile (broker + VPN NAMES only) -> core managed profile; on Connect:
+             SEMP -- /managed/relay/{broker}/SEMP/...   (no Authorization header)
+             SMF  -- POST /managed/dial {broker, vpn} -> {smfPath, vpn, user, pass}
+                     -> SDK opens wss://{page host}/managed/smf/{broker}/{vpn}
+   queue-browser -- entitlement-filtered queue picker; read-only rows downgrade Delete
+   queue-copy -- source filtered the same way; with a Provisioned primary the destination is
+                 the shared provisioned connection card (no typed destination)
+   administration is a separate app at /solAdmin (admin-login, user-management,
+   connection-management, gateway-settings, tls-certificates, backup), served only to an
+   administrator's session; it opens no broker connection
+        | every request: same origin, same session cookie
+        v
+ go-web-proxy (Provisioned mode)
+   /hosted {hosted, connModes, defaultConn}, the app bundle
+   Direct relay /{scheme}/{port}/{host}/... -- 404 under connModes provisioned, open under both
+   users.yaml + connections.yaml sealed whole with the store key, loaded strictly;
+     a missing users file is bootstrapped with one administrator who must change the password
+   /login, /login/password, /login/code, /login/two-factor
+     -> slow per-user password hash, throttle, optional TOTP, session cookie
+   GET /managed/me -> entitled broker/VPN names + queue globs + modules; POST /managed/logout
+   /managed/relay/{broker}/SEMP... -> reads only; adds the stored SEMP account
+   POST /managed/dial -> one VPN's client credential to an entitled user
+   /managed/smf/{broker}/{vpn} -> own-origin WebSocket joined to the broker's SMF port (TLS);
+     closed on revocation
+   /managed/{users,connections,settings,backup,tls,restart} (administrators only)
+        v
+ Solace broker (SEMP + SMF over WebSocket) -- use a read-only, least-privilege SEMP account
+```
+
+### Locked decisions
+
+These hold across the code; changing one is a design change, not a refactor.
+
+- **Gateway custody per broker and VPN, client guardrails per queue.** The gateway holds every broker credential and relays SEMP (reads only) and SMF only for a signed-in user entitled to the broker and VPN. Queue globs filter discovery and guardrail the UI in the browser.
+- **The gateway owns sign-in and the session.** Passwords go over TLS to the gateway's own `/login` page and are checked against a slow per-user hash with a constant-time compare; the gateway throttles guessing and sets an `HttpOnly`, `Secure`, `SameSite=Lax` session cookie whose idle and absolute limits are `session.idleMinutes` and `session.absoluteMinutes` in `config.yaml`. Every `/managed/*` call, admin calls included, authenticates by that cookie. See [Credential custody](#credential-custody).
+- **SEMP never reaches the browser; SMF needs the password once.** The relay forwards reads only (`403 read_only` otherwise). `POST /managed/dial` returns the VPN's client login to an entitled user; the browser passes it straight to the SDK inside the dial callback, and a reconnect dials again.
+- **A socket is revocable.** The SMF socket closes on sign-out, a password change, a deleted user, a changed administrator flag, or an entitlement, VPN or broker removed.
+- **Bootstrap administrator.** A missing users file is created with one administrator (`admin`, no broker access). Its password comes from `SMU_ADMIN_PASSWORD` or `SMU_ADMIN_PASSWORD_FILE`, or is generated and logged once; the first sign-in must change it before anything else is reachable.
+- **Entitlement rules.** `operate` contains `read-only`, and the pickers show the union. Globs are case-sensitive and take multiple, leading, middle and trailing `*`. A row matches only when its `brokers`, `msgVpns` and `queues` all match the connected broker, VPN and candidate queue. The matchers are in [src/core/rbac.ts](../src/core/rbac.ts), mirrored in the gateway's `rbac.go` and pinned by a shared conformance vector.
+- **Modules that cannot be filtered are hidden, not trusted.** See [RBAC state + matchers](#rbac-state--matchers).
+- **Provisioned is a convenience unless the deployment makes it exclusive.** Under `connModes: both` a user can use the Direct tab and type any credentials they know, so every entitlement guarantee holds only under `connModes: provisioned`. `both` is supported for mixed audiences and is a documented bypass.
+- **The profile is core-owned and injected.** Broker and VPN names live in [managed-profile.ts](../src/core/services/managed-profile.ts), reached through `AppContext.managedProfile`; `AppState.managed` carries matcher inputs only. A second module opens a provisioned connection by asking the profile to dial a target it names, without importing the connections module and without credential-bearing state.
+- **Writes are gated where they happen.** Copying into a queue is a write: the destination picker lists at `operate` scope, and topic destinations are refused on any provisioned publish path (see [Enforcement points](#enforcement-points)).
 
 ### Connection modes
 
@@ -683,7 +687,7 @@ Enforcement is **proxy connection-gating + client guardrails**: the proxy return
 The config reaches the app through the gateway probe only:
 
 - **No `/hosted`** (static file, any web server, `dist/index.html` opened from disk) => `DEFAULT_CONN_CONFIG` => **Direct only**. Provisioned can never appear without a gateway, because without one there is nothing to authenticate against.
-- **Hosted** -> the gateway reads `connModes` / `defaultConn` from its `config.yaml` (seeded from `SMU_CONN_MODES` / `SMU_DEFAULT_CONN` on the first start) and returns them in the `/hosted` JSON (`{hosted, connModes, defaultConn}`); [core/hosted.ts](../src/core/hosted.ts)'s `probeDeployment` applies it over the default. A gateway older than this contract answers with the plaintext `true`, which is still accepted and means *hosted, Direct only*. `coerceConnConfig` never throws -- a malformed response degrades to Direct only.
+- **Hosted** -> the gateway reads `connModes` / `defaultConn` from its `config.yaml` (seeded from `SMU_CONN_MODES` / `SMU_DEFAULT_CONN` on the first start) and returns them in the `/hosted` JSON (`{hosted, connModes, defaultConn}`); [core/hosted.ts](../src/core/hosted.ts)'s `probeDeployment` applies it over the default. A plaintext `true` body is also accepted and means *hosted, Direct only*. `coerceConnConfig` never throws -- a malformed response degrades to Direct only.
 - The gateway **refuses to start** when `connModes` offers Provisioned sign-in with `hosted: false` (`validateConnModes`, run on the loaded file and before the file is first written), so a half-configured deployment fails at boot rather than showing a tab that cannot work.
 
 The resolved config is published once to `AppState.connConfig` by the connections module, so no other module probes the gateway again. Queue Copy does not read the enum: its destination mode follows the primary connection (a signed-in managed profile means Provisioned), so `conn-modes.ts` keeps only `resolveConnTabs`.
@@ -695,19 +699,19 @@ The resolved config is published once to `AppState.connConfig` by the connection
 - [module.ts](../src/modules/connections/module.ts) is the Release entry. It exports `installDirect(app, { onBeforeConnect? })` -- the Direct form (`ui.js` / `config.js`), its factory pair bridged to global state, and the Direct VPN-switch dance -- and installs it alone. It publishes a Direct-only `connConfig` whatever `/hosted` advertises (warning when the gateway offers Provisioned sign-in), so no module offers a provisioned mode this bundle cannot back.
 - [module.managed.ts](../src/modules/connections/module.managed.ts) is the managed entry. It renders the Direct / Provisioned tab bar, calls the same `installDirect`, then builds [managed-panel.ts](../src/modules/connections/managed-panel.ts) (which uses the `/managed/*` client in [core/services/managed-service.ts](../src/core/services/managed-service.ts)). Its template `index.managed.html` wraps the shared Direct markup in the Direct tab panel.
 
-Both modes drive the *same* pure core factories and produce the same AppState writes and bus emits — the module is still the one place that bridges factory hooks to global state (Anchor #4).
+Both modes drive the *same* pure core factories and produce the same AppState writes and bus emits -- the module is still the one place that bridges factory hooks to global state.
 
 Three consequences of running both modes in the managed entry are load-bearing:
 
 - **Mode interlock.** Only one mode may be live. Connecting on Provisioned tears down a Direct session (`direct.disconnect()`); connecting on Direct clears `appState.managed` (the entry's `onBeforeConnect`). Without this, RBAC -- which keys entirely off that field -- would keep filtering a session it knows nothing about. Switching *tabs* is non-destructive; teardown happens at connect time.
 - **Single cross-module router.** In the managed entry, `connection:check-connection` and `connection:edit-requested` route to the Provisioned panel when `appState.managed` is set, else run the Direct form's VPN-switch dance. The Release entry routes both to the Direct form and registers no `rbac:sign-out-requested` listener, since no Provisioned session can exist there. Callers stay mode-agnostic. `rbac:sign-out-requested` is routed the same way, to the Provisioned panel's logout (the Direct-connect interlock's teardown), and is a no-op without a Provisioned session.
-- **The Provisioned tab is offered only when the deployment offers it** -- tab visibility *is* the availability signal, which is why the old "Deployment Gateway Required" gate card was removed.
+- **The Provisioned tab is offered only when the deployment offers it** -- tab visibility *is* the availability signal, so there is no "gateway required" card.
 
 **The gateway owns the session.** Users sign in on the gateway's own page (`/login`, a form with no script); the gateway checks the password against a slow per-user hash, throttles guessing, and sets an `HttpOnly` `SameSite=Lax` session cookie (go-web-proxy: `pages.go`, `session.go`, `throttle.go`, `password.go`). The bundle never sees a password or a credential for the gateway. At install the Provisioned panel calls `GET /managed/me` (`restore()`): a live session's profile goes to the managed profile (below), `appState.managed` is published and the Provisioned tab opens; `401` leaves the signed-out view, whose **Sign in** button is a plain link to `/login`; `403 password_change_required` points it at `/login/password`. Because the cookie survives a page reload, so does the session. **Refresh** re-reads `/managed/me`; a `401` there means the gateway ended the session (idle or absolute limit, or an admin changed the account) and the panel drops its local state to match. **Sign out** calls `POST /managed/logout` and clears local state. All `/managed/*` calls go through [managed-api.ts](../src/core/services/managed-api.ts) (`managedRequest`, which never rejects, and `managedErrorMessage`, which maps the gateway's JSON error codes to text). A Provisioned session reaches brokers only through the gateway: SEMP through its relay and SMF through its socket gate, both behind the session (see Credential custody below); under `SMU_CONN_MODES=provisioned` the Direct relay answers `404`.
 
 ### Managed profile (core-owned, names only)
 
-`/managed/me` names the user's brokers and Message VPNs and nothing else: no address, port, username or password. [src/core/services/managed-profile.ts](../src/core/services/managed-profile.ts) holds that profile; the kernel creates one per app and passes it on every `AppContext` as `managedProfile`, so it is injected, never global (Anchor #2). The managed entry attaches the gateway calls (`attachDialer`, from `createManagedService`), which keeps the `/managed/*` endpoint paths out of every bundle without the Provisioned UI (`check:bundles`).
+`/managed/me` names the user's brokers and Message VPNs and nothing else: no address, port, username or password. [src/core/services/managed-profile.ts](../src/core/services/managed-profile.ts) holds that profile; the kernel creates one per app and passes it on every `AppContext` as `managedProfile`, so it is injected, never global. The managed entry attaches the gateway calls (`attachDialer`, from `createManagedService`), which keeps the `/managed/*` endpoint paths out of every bundle without the Provisioned UI (`check:bundles`).
 
 ```ts
 interface ManagedProfileStore {
@@ -731,15 +735,15 @@ An inactive session or an unprovisioned target is refused before any gateway cal
 
 ### RBAC state + matchers
 
-One optional field is added to `AppState` ([src/core/types.ts](../src/core/types.ts)): `managed?: ManagedSession | null`. `null`/absent ⇒ allow-all (every Direct session), so the helpers below are safe to call unconditionally.
+One optional field is added to `AppState` ([src/core/types.ts](../src/core/types.ts)): `managed?: ManagedSession | null`. `null`/absent => allow-all (every Direct session), so the helpers below are safe to call unconditionally.
 
 ```ts
 interface ManagedSession {
   admin: boolean;      // gates the admin-only modules
   username: string;    // to recognise a change to the session's own account; not a credential
-  broker: string;      // connected broker NAME — the `broker` arg to matchers
+  broker: string;      // connected broker NAME -- the `broker` arg to matchers
   vpns: string[];      // PROVISIONED VPN names for that broker (names only)
-  operate: QGlob[];    // queues the user may browse + delete on (operate ⊇ read-only)
+  operate: QGlob[];    // queues the user may browse + delete on (operate includes read-only)
   readOnly: QGlob[];   // queues the user may only browse
 }
 ```
@@ -757,7 +761,7 @@ Module visibility is a **requirement map**, `MODULE_REQUIREMENTS: Record<string,
 
 `unfiltered-semp` exists for a module that reads over **SEMP v1 RPC**, which the discovery filter deliberately never rewrites (below), with nothing else filtering its rows -- its listing would be entirely unfiltered under RBAC, so it is hidden. `queue-subscription-explorer` also reads over v1 RPC (one broker-wide `<show><queue>...<subscriptions/>` paged by `<more-cookie>`), but in a Provisioned session its service passes each page through `visibleQueueRows(managed, rows)` ([managed-semp-filter.ts](../src/core/managed-semp-filter.ts)): a row stays when its VPN is one of the provisioned VPNs (`isListedVpn`, the rule the VPN-list filter uses) and its queue passes `isQueueVisible`. So it is under module control like Queue Browser and Queue Copy. The broker's whole subscription list still reaches the browser; like the queue lists, this is an app-side guardrail, not a gateway boundary.
 
-A module absent from the map is under **module control**: in a Provisioned session it is visible only if it is in `session.modules`, except the sign-in surfaces (`connections`, `admin-login`), which are always visible. `session.modules` comes from `/managed/me`: the user's own `modules` list in `users.yaml`, or `config.yaml`'s `modules.userDefault`, always cut down to `modules.offered`. The gateway grants only ids in `moduleCatalog()` ([configfile.go](../go-web-proxy/configfile.go)) -- `queue-browser`, `queue-copy`, `queue-subscription-explorer` -- which leaves the `unfiltered-semp` modules out, so they stay hidden twice over. A fresh `config.yaml` offers the whole catalog; one written before a module joined the catalog keeps its own `modules.offered` until an administrator adds it. [tests/variants.test.ts](../tests/variants.test.ts) checks that the catalog equals the managed variant's module-controlled modules: a module added to the `managed` variant must be added to `moduleCatalog()` too, or no signed-in user can ever see it.
+A module absent from the map is under **module control**: in a Provisioned session it is visible only if it is in `session.modules`, except the sign-in surfaces (`connections`, `admin-login`), which are always visible. `session.modules` comes from `/managed/me`: the user's own `modules` list in `users.yaml`, or `config.yaml`'s `modules.userDefault`, always cut down to `modules.offered`. The gateway grants only ids in `moduleCatalog()` ([configfile.go](../go-web-proxy/configfile.go)) -- `queue-browser`, `queue-copy`, `queue-subscription-explorer` -- which leaves the `unfiltered-semp` modules out, so they stay hidden twice over. A `config.yaml` keeps the `modules.offered` it holds until an administrator adds a module to it. [tests/variants.test.ts](../tests/variants.test.ts) checks that the catalog equals the managed variant's module-controlled modules: a module added to the `managed` variant must be added to `moduleCatalog()` too, or no signed-in user can ever see it.
 
 ### Kernel gating
 
@@ -772,13 +776,42 @@ Broker credentials live in the gateway only, and the browser never holds one lon
 - **SMF.** `POST /managed/dial` ([dial.go](../go-web-proxy/dial.go)) returns one VPN's client username and password to an entitled user, and the SMF gate ([smf.go](../go-web-proxy/smf.go)) carries the SDK's WebSocket to the broker; open sockets close on revocation ([sockets.go](../go-web-proxy/sockets.go)). The dialled password is the one broker credential the browser ever receives.
 - **Direct relay.** Under `SMU_CONN_MODES=provisioned` the open Direct relay (`/{scheme}/{port}/{host}/...`) answers `404`, read live, so a Provisioned-only deployment offers no path to a broker that skips the session; under `both` it stays for the Direct tab.
 
-See [rbac-variant-plan.md](rbac-variant-plan.md) for the threat model: what this protects and what it does not.
+[provisioned-mode.md -> Security model](provisioned-mode.md#security-model) states what this protects and what it does not.
+
+### Stored file schemas
+
+The two stores are sealed whole, so they are never edited by hand; these are the shapes the gateway loads and writes (`userRec` and `connRec` in [store.go](../go-web-proxy/store.go)). The administrator edits them through the admin app only.
+
+```yaml
+# users.yaml
+seq: 12                          # counter, moves by one on every commit
+msg-utility-users:
+  - username: admin
+    rev: 3                       # the seq of the last change the list view shows
+    password: <password hash>    # written by the gateway; the password never leaves it
+    mustChangePassword: true     # until the first password change
+    admin: true
+    operate:   [{ brokers: '*', msgVpns: vpn1, queues: queue1 }]
+    read-only: [{ brokers: '*', msgVpns: '*',  queues: '*' }]
+    modules:   [queue-browser]   # optional: absent = modules.userDefault, [] = none
+    totp: { secret: <base32>, recovery: [<sha-256 hex>, ...] }   # present once two-factor is set up
+# connections.yaml  (use a read-only SEMP account)
+seq: 7
+msg-utility-connections:
+  - broker: broker-name
+    rev: 7
+    hostname: www.example.com
+    semp:   { port: 1943, username: monitor, password: <password> }   # added to relayed SEMP requests
+    client: { port: 1443, msgVpns: [ { name: vpn-name, username: default, password: <password> } ] }   # handed out by dial
+```
+
+A blank `scheme` on `semp` or `client` means TLS (https and wss); an administrator may choose `http` or `ws` per connection. How `seq` and `rev` work is in [The single writer](#the-single-writer).
 
 ### Enforcement points
 
 Five seams do the work. Everything else in the app calls the ordinary APIs and inherits the filtering.
 
-**1. Discovery — the `QueueSource` seam.** The queue-picker never touches SEMP; it consumes a `QueueSource` (see the *QueueSource seam* section above). `sempQueueSource(sempCtx, access)` takes a typed **`Access`**:
+**1. Discovery -- the `QueueSource` seam.** The queue-picker never touches SEMP; it consumes a `QueueSource` (see the *QueueSource seam* section above). `sempQueueSource(sempCtx, access)` takes a typed **`Access`**:
 
 ```ts
 type Scope  = 'browse' | 'operate';
@@ -787,9 +820,9 @@ type Access = { session: ManagedSession; broker: string; scope: Scope } | 'unman
 
 `'unmanaged'` is not an absence of information -- it is an explicit, greppable declaration that this list is deliberately unfiltered, so the audited bypasses can be enumerated. `queueSourceFrom(ctx, scope)` builds the primary's source and is the **one** managed-vs-direct branch point: in a Provisioned session VPNs come from the provisioned set (`appState.managed.vpns`, no SEMP call at all) and queues come from live SEMP filtered by `scope`. `browse` filters by `isQueueVisible`, `operate` by `canOperate` -- so a *destination* picker (copying into a queue is a write) cannot offer a queue the user may only read.
 
-The source's `key` — the picker's cache identity — folds in scope, broker and an entitlement fingerprint, so a cached list can never be served across a change of identity, scope or permissions.
+The source's `key` -- the picker's cache identity -- folds in scope, broker and an entitlement fingerprint, so a cached list can never be served across a change of identity, scope or permissions.
 
-**2. Fetch-layer backstop.** `unfilteredPrimarySempContext(ctx)` ([src/core/services/sempContext.ts](../src/core/services/sempContext.ts)) wraps `ctx.sempFetch` with `filterSempFetch` ([src/core/managed-semp-filter.ts](../src/core/managed-semp-filter.ts)) whenever `appState.managed` is set: it bounds the `…/monitor/msgVpns` list to the provisioned set (falling back to the `isVpnVisible` glob before a set is published), drops non-entitled queues from `…/msgVpns/{vpn}/queues`, and preserves `meta` so pagination still works.
+**2. Fetch-layer backstop.** `unfilteredPrimarySempContext(ctx)` ([src/core/services/sempContext.ts](../src/core/services/sempContext.ts)) wraps `ctx.sempFetch` with `filterSempFetch` ([src/core/managed-semp-filter.ts](../src/core/managed-semp-filter.ts)) whenever `appState.managed` is set: it bounds the `.../monitor/msgVpns` list to the provisioned set (falling back to the `isVpnVisible` glob before a set is published), drops non-entitled queues from `.../msgVpns/{vpn}/queues`, and preserves `meta` so pagination still works.
 
 The name is a warning, not a description: **only those two SEMP v2 monitor list shapes are rewritten.** Single-object GETs, non-200s, non-JSON, and **every SEMP v1 RPC (`POST /SEMP`)** pass through untouched; the one v1 lister, `queue-subscription-explorer`, filters its parsed rows itself with `visibleQueueRows`. Treat a context obtained this way as unfiltered unless the call is one of those two shapes. Its docstring lists the sanctioned consumers; a new one needs design sign-off.
 
@@ -797,32 +830,32 @@ The name is a warning, not a description: **only those two SEMP v2 monitor list 
 
 **4. Module requirements and module control.** `isModuleVisible` + `MODULE_REQUIREMENTS` (above) keep whole modules out of a Provisioned session when they cannot be filtered, and module control hides every other module the user was not granted. Queue Subscriptions is granted like any module and filters its own rows (`visibleQueueRows`, above).
 
-**5. The queue-copy gate pipeline.** Queue Copy reaches the broker over paths the seams above do not cover — verify is SEMP v1 RPC, and publishing is not a read at all — so it carries its own gates, in order:
+**5. The queue-copy gate pipeline.** Queue Copy reaches the broker over paths the seams above do not cover -- verify is SEMP v1 RPC, and publishing is not a read at all -- so it carries its own gates, in order:
 
 | Stage | Where | Refuses |
 | --- | --- | --- |
 | Source gate | `runVerify`, **before** the probe is spawned | a source queue failing `isQueueVisible` -- otherwise a signed-in user could type any queue name and read back its depth, size and message IDs over v1 RPC |
-| Verify | `service-verify` | (unchanged; broker truth) |
-| Start gate | `evaluateStartGate` | intersects the broker's verdict with RBAC: `effectiveSourceAccess` downgrades read-write → read-only when `canOperate` is false, and → no-access when `isQueueVisible` is false, so **move** on a browse-only queue is blocked |
+| Verify | `service-verify` | broker truth, unchanged |
+| Start gate | `evaluateStartGate` | intersects the broker's verdict with RBAC: `effectiveSourceAccess` downgrades read-write -> read-only when `canOperate` is false, and -> no-access when `isQueueVisible` is false, so **move** on a browse-only queue is blocked |
 | Destination gate | `destinationRefusal`, last check before any publish | a **topic** on a provisioned publish path (entitlements are per queue; a topic fans out to every queue subscribed to it, so it cannot be checked), and a destination queue failing `canOperate` |
-| Run | engine | — |
+| Run | engine | -- |
 
 `destinationRefusal` resolves *where the publish will actually land* -- the primary's broker/VPN when the destination reuses it, or `destForm.provisioned` when a secondary was dialled with provisioned credentials -- and checks that. A **typed-credential** destination is ungated, which is the documented bypass; it is reachable only with a Direct primary connection, where no managed session governs the publish, so the gate does not apply.
 
-The provisioned connection card -- [src/core/components/provisioned-connection/](../src/core/components/provisioned-connection/) (`createProvisionedConnectionCard`) -- now serves two features, which is what qualifies it for core (anchor 9): the connections module's Provisioned entry (`managed-panel.ts`, the primary connection) and Queue Copy's destination. Queue Copy builds it in `ui-events.ts` with a profile wrapper that lists only the primary's own broker while Same broker is on; its `onConnect` hands the chosen names to `module.ts` (`connectDestProvisioned`), which sets `destForm.provisioned`, dials inside the callback and mirrors the Client/SEMP hooks back into the card (`mirrorProv`). The card never sees a credential. The destination mode is derived, not chosen: `deriveDestMode` pins `destForm.credMode` from `ctx.managedProfile.isActive()` (Provisioned primary: the card; Direct primary: the typed cards), and a mode change under a live destination disposes it.
+The provisioned connection card -- [src/core/components/provisioned-connection/](../src/core/components/provisioned-connection/) (`createProvisionedConnectionCard`) -- serves two features, which is what qualifies it for core: the connections module's Provisioned entry (`managed-panel.ts`, the primary connection) and Queue Copy's destination. Queue Copy builds it in `ui-events.ts` with a profile wrapper that lists only the primary's own broker while Same broker is on; its `onConnect` hands the chosen names to `module.ts` (`connectDestProvisioned`), which sets `destForm.provisioned`, dials inside the callback and mirrors the Client/SEMP hooks back into the card (`mirrorProv`). The card never sees a credential. The destination mode is derived, not chosen: `deriveDestMode` pins `destForm.credMode` from `ctx.managedProfile.isActive()` (Provisioned primary: the card; Direct primary: the typed cards), and a mode change under a live destination disposes it.
 
 ### Provisioned secondary connections
 
-Queue Copy's destination is a *secondary* connection: its hooks write only module-local state, never AppState and never the bus (Anchor #4). It is opened one of two ways, which follows the primary connection (`deriveDestMode` in `ui-events.ts`):
+Queue Copy's destination is a *secondary* connection: its hooks write only module-local state, never AppState and never the bus. It is opened one of two ways, which follows the primary connection (`deriveDestMode` in `ui-events.ts`):
 
 - **Typed** (Direct primary: Standalone or Gateway mode) -- the user types host + credentials in the Destination cards, as before.
 - **Provisioned** (Provisioned primary) -- the shared connection card replaces the typed cards: the user picks a broker and VPN from `managedProfile.brokers()` / `vpnsFor(broker)`; there are no password fields. `module.ts` calls `managedProfile.dial(target, { connect })` and opens its own factory pair inside the callback: SEMP through the gateway's relay, SMF with the dialled credential, which goes straight to the SDK. A relay `401` or a dial refused because the session ended asks the session owner to sign out (`rbac:sign-out-requested`); the connection's lifecycle stays entirely in the module.
 
-A destination Client connect is guarded three ways: the engine publishes through the session the form names (`selectPublisher`), a late session whose target no longer matches the connect generation (`destSolPending` vs `destTargetKey`) is discarded in `onConnected`, and the controls that choose the target stay locked while it is in flight (the Same-broker / Same-VPN toggles via `setDestTargetLocked`, the provisioned card via `card.lock` and its own Connecting state). The `rbac:changed` teardown applies only to a live or connecting provisioned secondary (`destLive` in `module.ts`), never to a destination that was not connected.
+A destination Client connect is guarded three ways: the engine publishes through the session the form names (`selectPublisher`), a late session whose target differs from the connect generation (`destSolPending` vs `destTargetKey`) is discarded in `onConnected`, and the controls that choose the target stay locked while it is in flight (the Same-broker / Same-VPN toggles via `setDestTargetLocked`, the provisioned card via `card.lock` and its own Connecting state). The `rbac:changed` teardown applies only to a live or connecting provisioned secondary (`destLive` in `module.ts`), never to a destination that was not connected.
 
-This is the payoff of the dial interface: a second module opens a provisioned connection **without importing the connections module** (Anchor #1) and **without credential-bearing state** (Anchor #2).
+This is the payoff of the dial interface: a second module opens a provisioned connection **without importing the connections module** and **without credential-bearing state**.
 
-When entitlements change under a live run (`rbac:changed`), the module halts the run through the engine's ordinary halt path — the same one Cancel uses, deliberately reported as `cancelled` because the treatment is mechanically identical and `rbac:changed` only ever fires downstream of a user action. Teardown applies to the **destination only**: the source rides the app-wide primary connection, which the connections module owns, so revoking one queue must never disconnect it.
+When entitlements change under a live run (`rbac:changed`), the module halts the run through the engine's ordinary halt path -- the same one Cancel uses, deliberately reported as `cancelled` because the treatment is mechanically identical and `rbac:changed` only ever fires downstream of a user action. Teardown applies to the **destination only**: the source rides the app-wide primary connection, which the connections module owns, so revoking one queue must never disconnect it.
 
 ### The admin app (`/solAdmin`)
 
@@ -845,7 +878,7 @@ The entitlement editors and the settings page do not ship in the everyday bundle
 | `POST /managed/backup/preview` | `{file \| backup, passphrase}` -> per-section added/changed/removed names, the changed settings keys, and whether each users mode would end the caller's session, plus the `basis` the import must send back. |
 | `POST /managed/backup/import` | The same plus `users`, `connections` (`replace` / `merge` / `skip`) and `settings` (`replace` / `skip`) -> `{restartRequired, signedOut}`. |
 
-- **Format.** A JSON envelope, `{"format":"smu-backup","version":1,"kdf":{"name":"pbkdf2-sha256","iter":N,"salt":...},"data":...}`. `data` is the stores' own sealing (`sealer.seal` in [storecrypt.go](../go-web-proxy/storecrypt.go): AES-256-GCM, random nonce, the authenticated `SMUS` header) with role `backup` (4), under a key PBKDF2 derives from the passphrase at the password hasher's cost and in its slots, never the store key. So a file opens on any deployment, and a store file can never pass for a backup or the reverse. The kdf parameters need no separate authentication: changing them derives another key and the file no longer opens. The sealed text is JSON under the store files' YAML names (`msg-utility-users` with password hashes, `msg-utility-connections` with credentials, `settings`), which the gateway decodes with the stores' strict YAML rules (JSON is YAML) and the demo's fake gateway reads without a YAML parser.
+- **Format.** A JSON envelope, `{"format":"smu-backup","version":1,"kdf":{"name":"pbkdf2-sha256","iter":N,"salt":...},"data":...}`. `data` is the stores' own sealing (`sealer.seal` in [storecrypt.go](../go-web-proxy/storecrypt.go): AES-256-GCM, random nonce, the authenticated `SMUS` header) with role `backup` (4), under a key PBKDF2 derives from the passphrase at the password hasher's cost and in its slots, never the store key. So a file opens on any deployment, and a store file can never pass for a backup or the reverse. The kdf parameters need no separate authentication: changing them derives another key, so the file does not open. The sealed text is JSON under the store files' YAML names (`msg-utility-users` with password hashes, `msg-utility-connections` with credentials, `settings`), which the gateway decodes with the stores' strict YAML rules (JSON is YAML) and the demo's fake gateway reads without a YAML parser.
 - **Import.** Stateless: preview and import each resend the file or a saved file's name (which must match `smu-backup-<UTC>.json`, so no path reaches the directory) and the passphrase. The body also carries the `basis` the preview returned, and a section whose versions moved since is refused with `409 stale`. Everything is validated inside the writer's transaction, on the current lists: the load rules and `409 last_admin` when no administrator would remain (`store.stageImport`), and the settings through `checkSettings`, the check `PUT /managed/settings` runs. Then users, connections and `config.yaml` commit as one journaled transaction: all three change or none. `stageImport` returns the users whose sessions end (removed, or a new hash or admin flag: `sessionEnders`), and the store's `onChange` re-checks the open SMF sockets as for any edit. Preview compares records as the store file holds them (`sameRecord`), so an export of an unchanged gateway previews as no change.
 - **Schedule.** One schedule: hourly, daily, weekly or monthly in UTC (`nextRun`; a monthly day past the month's end runs on its last day). It is kept in `/data/backup.yaml` beside the users file, sealed with the store key (role `backup schedule`, 3), holding the passphrase-derived key and its salt, never the passphrase, and a `seq` that is the schedule's rev; a missing store key beside it refuses to start, as beside a store. The image has no cron: `serve()` runs `backupService.loop`, the gateway's one periodic goroutine, on a context it cancels at shutdown (and waits for a backup in progress). The loop sleeps at most an hour at a time and keeps the due time across wake-ups, so a suspended host or a changed clock delays a run rather than skipping it; a schedule change wakes it. Each run writes `smu-backup-<UTC>.partial` (0600, created exclusively, synced) and only then renames it to `smu-backup-<UTC>.json`, never over an existing file, so a `.json` is always whole; it first deletes any `.partial` a stopped run left (runs are serialised, so none is in progress). The directory is `backupRoot` (`/backup`, fixed like `appRoot`; `config.backupDir` exists only for tests). After a run the oldest `.json` beyond `keep` are deleted, touching only names the gateway writes. The last run is kept in memory for the page and logged.
 
@@ -864,7 +897,7 @@ instead (the `managed-demo` variant gets [boot.managed.ts](../src/mock-broker/bo
 code reaches the other's bundle; what both do to the shell is in [shell.ts](../src/mock-broker/shell.ts)), which
 installs three things before any module installs:
 
-1. **`window.solace`** — a full SDK emulation (factory, constructors, enums, session, queue browser, message).
+1. **`window.solace`** -- a full SDK emulation (factory, constructors, enums, session, queue browser, message).
 2. **A `window.fetch` interceptor** answering `/hosted` (hosted, Direct only), the SEMP v2 monitor endpoints and
    SEMP v1 RPCs, for the demo host `broker.solace.com` only (`sempHost` reads it from the hosted URL, `file://`
    pages included), as the SDK emulator connects only to it. What it does not answer, SEMP for any other host
@@ -882,9 +915,7 @@ Both boots also call `blockNetworkApis`, which makes `WebSocket`, `EventSource`,
 
 Because both seams present the real contract, `solace-client`, `semp-client`, `solace-publisher`,
 `semp-discovery`, queue-copy's verify and copy engines and the subscription parser all run **unmodified** in the
-demo. That is the point of the design: the demo exercises shipping code paths, so it cannot drift from them. It
-replaced seven hand-written `*-mock` files, two of which had already drifted into disagreeing with each other
-about which queues exist.
+demo. That is the point of the design: the demo exercises shipping code paths, so it cannot drift from them.
 
 **Isolation** is structural, not tree-shaking: `serviceDemoRedirect` is only registered when `mode === 'demo'`
 ([vite.config.ts](../vite.config.ts)), so a production build has no import edge into `src/mock-broker/` and Rollup
@@ -940,7 +971,7 @@ before queue-browser's, and the Provisioned demo runs that patch against the emu
 `ACKNOWLEDGED_MESSAGE` with the correlation key nested exactly where the publisher looks; the queue browser
 delivers in **spool-ID order** and its `stop()`/`start()` genuinely suspend delivery (the copy engine's drift
 detection and backpressure depend on both). The SEMP v1 detail response even reproduces the broker bug the product
-works around — `newest-msg-id` of `0` — so the two-call workaround is exercised rather than bypassed.
+works around -- `newest-msg-id` of `0` -- so the two-call workaround is exercised rather than bypassed.
 
 ### The audit trail
 
@@ -963,7 +994,7 @@ Every change to `users.yaml`, `connections.yaml`, `backup.yaml` and `config.yaml
 - **Publishing.** `tx.onPublish` registers the memory swap (a store's lists, the settings, the schedule). All swaps for one commit run in one critical section under the publish lock (`pub`), so a reader never sees half of an import. Reads (the lists, `GET /managed/settings`, `/managed/me`, the relay and the SMF gate) never take the writer lock. A backup, an export or a scheduled run reads users, connections and settings inside `writer.snapshot`, which holds the publish lock for reading. Lock order is writer, then `pub`, then a store's or the settings file's own mutex; nothing waits for the writer while holding another lock, and slow work (hashing a password, deriving a backup key) is done before `Do`.
 - **seq and rev.** Each sealed file starts with `seq`, a counter that moves by one on every commit and is stored, never derived. Each user and each connection carries `rev`, the file's seq as of the last change that its list view shows (`userToOutput`, `connToOutput`, compared by `sameUserView` and `sameConnView`). A create and an import stamp the new seq. A save that only sets a password keeps the rev: the hash is never returned, and a blank password means "keep", resolved inside the lock against the current record. A rev is never reused, because a delete moves seq and no record holds it. At load every rev must be between 1 and the file's seq, or the gateway refuses to start. `backup.yaml` holds `seq` and the schedule; its rev is that seq, a delete keeps the file with the counter and no schedule, and no schedule is rev 0. The rev of `config.yaml`, a hand-editable file with no counter, is its checksum.
 - **The checksum.** `checksums` ([storecrypt.go](../go-web-proxy/storecrypt.go)) is a keyed hash over a file's bytes (the sealed bytes for a sealed file), with a key derived from the store key. It lives in memory only and is recomputed at load: a stored copy could add no protection. Each loader remembers the bytes it read (`rememberDisk`, `remember`), a file that did not exist is remembered as absent, and the settings rev is that checksum as opaque text. Sealing uses a fresh nonce, so a file is never compared by sealing it again.
-- **Reads come from memory; the disk is checked when writing.** Memory is a cache of the last read or write. Before a write, the checksum of the bytes on disk must equal the remembered one, else the request is refused (`store_changed_on_disk`, or `config_changed_on_disk` for `config.yaml`) and every later write to that file is refused too, until a restart, because the cause does not go away. The disk check runs before the rev compare, so it wins over `stale`. A check on every read is parked with the multi-instance plan.
+- **Reads come from memory; the disk is checked when writing.** Memory is a cache of the last read or write. Before a write, the checksum of the bytes on disk must equal the remembered one, else the request is refused (`store_changed_on_disk`, or `config_changed_on_disk` for `config.yaml`) and every later write to that file is also refused until a restart, because the cause persists. The disk check runs before the rev compare, so it wins over `stale`. A check on every read is parked with the multi-instance plan.
 - **The commit journal.** One path for every write, one file or three ([fileutil.go](../go-web-proxy/fileutil.go)), in the data directory only. (1) Write `txn`, a small JSON file naming the targets and which of them did not exist, and sync it. (2) Copy each existing target to `<target>.bak`. (3) Seal the new content, write each `.tmp-*` file and sync it, then open and parse it again (the round-trip check): a file the gateway could not read back fails the commit here. (4) Rename each temp over its target and sync the directory. (5) Delete `txn`: this is the commit point. (6) Delete the backups. A rename is old or new, never torn, and `txn` makes the group atomic, since several renames are not.
 - **When a write fails.** Before the commit point `Do` rolls back in the running process (restores the backups, removes temps and `txn`), answers `500 store_write_failed` and publishes nothing. A rollback that itself fails, or a panic after the commit point, is logged and the process exits (an injectable `exit` hook, `os.Exit` in production), so the restart's recovery settles it. A panic before the commit point rolls back and goes up to the recover middleware. A client that leaves after the commit started does not stop it. A failure after the commit point (syncing the directory, deleting a backup) is logged and the commit stands.
 - **Recovery at start.** `recoverDataDir` runs once in `serve()`, before `config.yaml` is read, in every mode that has a data directory. With a `txn` present it restores every backup over its target, removes the targets recorded as not existing before, removes the temps and `txn`: the change that was in flight never happened. With no `txn` it sweeps stray backups and temps left by a completed change. It touches only `.tmp-*` and the `.bak` of the four store file names, and a `txn` it cannot parse, or that names anything outside the directory, stops the start with instructions rather than being guessed at. Then the loaders run: keyed checksums, the load check on seq and rev.
@@ -1005,9 +1036,9 @@ Neither the gateway's certificate nor its trust is read once at start and then f
 
 ### Admin modules + the Go store
 
-`tls-certificates` (the Certificates page, priority 8 between `gateway-settings` and `backup`, `admin` in `MODULE_REQUIREMENTS`) is the fifth admin module and the one without a `rev`: the TLS writes are last-write-wins (see [Live TLS and restart](#live-tls-and-restart)). Its `service.ts` wraps the six routes through `managedRequest`; the module keeps the private key in a local of one function (`replaceCertificate`) and empties the key field and file input in a `finally`, so no path leaves it in the page. It re-reads the view on `tls_read_only`, and on `not_found` after a delete.
+`tls-certificates` (the Certificates page, priority 8 between `gateway-settings` and `backup`, `admin` in `MODULE_REQUIREMENTS`) is the admin module without a `rev`: the TLS writes are last-write-wins (see [Live TLS and restart](#live-tls-and-restart)). Its `service.ts` wraps the six routes through `managedRequest`; the module keeps the private key in a local of one function (`replaceCertificate`) and empties the key field and file input in a `finally`, so no path leaves it in the page. It re-reads the view on `tls_read_only`, and on `not_found` after a delete.
 
-`user-management` and `connection-management` (shipped only in the `admin` variant) are admin-only CRUD over the gateway store (`GET /managed/users`, `PUT`/`DELETE /managed/users/{name}`, and the same for `/managed/connections/{broker}`) on the session cookie, through `managedRequest`; every gateway error code is shown as text, and `reportManagedFailure` turns a `401` into a sign-out request. Each renders a full-view **gate** card (the shared "... Required" pattern) whenever `!appState.managed?.admin` -- not logged in, or logged in as a non-admin -- and only shows its list/form for an admin session; the gate re-evaluates on every `rbac:changed` (login / logout / self-demote), so it appears and clears reactively. A change that ended the admin's own session (own password, own administrator flag, own account deleted) instead asks the session owner to sign out (`rbac:sign-out-requested`), so the list is never reloaded on a session the gateway has ended. They import only from `src/core/*` and their own `service.ts` (no cross-module imports). Both share two reusable core components: [row-list](../src/core/components/row-list/) (`createRowList`) for the dynamic entitlement / VPN row editors, and [module-gate](../src/core/components/module-gate/) (`createGate`) for the admin "... Required" gate card. `createGate` is the shared implementation of the full-view gate pattern used across the app -- `queue-browser` / `queue-copy` (primary-connection-required) and `queue-subscription-explorer` (SEMP-connection-required) all create their gate via `createGate` rather than hand-rolled markup (the connections module needs none: the Provisioned tab is simply not offered when the deployment does not advertise it); each module owns the mutual exclusion between the gate and its own views (e.g. queue-browser injects the gate into its `ui` layer via `ui.setGate`, since its `updateVisibility` also drives header fields). `connection-management` sends broker passwords as typed, over TLS, and the gateway keeps them in its encrypted connections file (a blank one on edit keeps the stored one); `user-management` sends the password as typed, over TLS, and the gateway hashes it. The four editing admin modules keep the `rev` of what they loaded and send it back on a save or delete (0 creates); a `stale` or `not_found` answer goes to the shared `handleConflict` in [src/core/admin-conflict.ts](../src/core/admin-conflict.ts), which asks to reload (or says the record was deleted by someone else and reloads), so no module words these itself. The gateway ([go-web-proxy/](../go-web-proxy): `store.go`, `managed.go`, `rbac.go`) keeps the two YAML files encrypted whole with the store key ([keyfile.go](../go-web-proxy/keyfile.go), [storecrypt.go](../go-web-proxy/storecrypt.go): generated only on a fresh volume, and a store it cannot open stops the start), loads them strictly (unknown keys, duplicates and malformed entries stop the start) under an `RWMutex`, persists every mutation through [the single writer](#the-single-writer) (a journaled commit of temp files, then the in-memory swap), versions each record so a save made from a stale read is refused, and bootstraps an admin who must change the password at first sign-in, plus the store key, on first run. The SEMP relay ([relay.go](../go-web-proxy/relay.go)) serves `/managed/relay/{broker}/SEMP...` behind the same gate: it parses the escaped path itself (the router would clean it first), refuses a decoded segment that is empty, `.`, `..`, or holds a backslash, `%`, `;` or a control character, and a query it cannot parse, admits `GET`/`HEAD` under `/SEMP/v2/` and a `POST /SEMP` whose body is one `<rpc>` with one `<show>` (`403 read_only` otherwise), checks the broker against the same entitlement `/managed/me` uses (`entitledVPNs` in `store.go`; an unknown broker and one the user may not use are the same `404`), and sends each request as one round trip on the transport the Direct relay uses (`newUpstreamTransport`), not through a reverse proxy, so no redirect is followed, no interim response or extra header is forwarded, and the allow-lists for the headers in both directions are complete; the stored SEMP account is the only `Authorization`, and a v1 body goes out as `application/xml` whatever type the client named. A broker `401`/`407` or redirect becomes `502 upstream_auth`/`upstream_unavailable`, so a wrong stored credential never looks like an ended session; at most 16 requests per user are in flight. `POST /managed/dial` ([dial.go](../go-web-proxy/dial.go)) is the one route that hands a broker credential to the browser: an entitled user, read-only users included, gets `{smfPath, vpn, user, pass}` for one Message VPN (an unknown VPN and one the user may not use are the same `404`); the password is held in a type that prints and logs masked, and nothing is issued as a ticket, so the SDK's own reconnects keep working. The SMF gate ([smf.go](../go-web-proxy/smf.go)) serves `GET /managed/smf/{broker}/{vpn}[/tail]` behind the same gate: it requires an `Origin` naming the gateway itself over `https` (a WebSocket is not subject to CORS, and a `GET` passes the cross-origin write check), a WebSocket upgrade and the entitlement, then opens the broker's SMF port over TLS with one round trip on the same transport and joins the two connections; only the `Sec-WebSocket-*` headers pass in either direction, so the browser's cookie and `Origin` never reach the broker. Dials and upgrades share a window of 20 per minute per user. The gateway sets no timer on an open socket (the SMF API's keep-alive owns its lifetime); [sockets.go](../go-web-proxy/sockets.go) registers each one and closes it on revocation: a sign-out or a replaced session (`sessions.onDrop`), a password change, changed administrator flag or deleted user (`sessions.onDropUser`, which fires even when the session had already expired), and any user or connection edit after which the user may no longer reach the VPN (`store.onChange`, which re-checks every socket). A socket is registered before its final session and entitlement check, so a revocation that lands during the upgrade is never missed. Server-side invariants: every `/managed/*` request without a session gets the **same 401** whatever the path; a non-admin gets `403 forbidden`; bodies are capped at 64 KiB and unknown JSON fields are rejected; a state change from another site is refused (`cross_origin`); **list responses strip stored secrets and password hashes**; a blank password on edit keeps the stored one while creating a user with a blank password is rejected (`422`); deleting or demoting the **last admin** is refused (`409 last_admin`); and a new password, a changed administrator flag or a deletion ends that user's sessions.
+`user-management` and `connection-management` (in the `admin` variant and the Provisioned demo) are admin-only CRUD over the gateway store (`GET /managed/users`, `PUT`/`DELETE /managed/users/{name}`, and the same for `/managed/connections/{broker}`) on the session cookie, through `managedRequest`; every gateway error code is shown as text, and `reportManagedFailure` turns a `401` into a sign-out request. Each renders a full-view **gate** card (the shared "... Required" pattern) whenever `!appState.managed?.admin` -- not logged in, or logged in as a non-admin -- and only shows its list/form for an admin session; the gate re-evaluates on every `rbac:changed` (login / logout / self-demote), so it appears and clears reactively. A change that ended the admin's own session (own password, own administrator flag, own account deleted) instead asks the session owner to sign out (`rbac:sign-out-requested`), so the list is never reloaded on a session the gateway has ended. They import only from `src/core/*` and their own `service.ts` (no cross-module imports). Both share two reusable core components: [row-list](../src/core/components/row-list/) (`createRowList`) for the dynamic entitlement / VPN row editors, and [module-gate](../src/core/components/module-gate/) (`createGate`) for the admin "... Required" gate card. `createGate` is the shared implementation of the full-view gate pattern used across the app -- `queue-browser` / `queue-copy` (primary-connection-required) and `queue-subscription-explorer` (SEMP-connection-required) all create their gate via `createGate` rather than hand-rolled markup (the connections module needs none: the Provisioned tab is simply not offered when the deployment does not advertise it); each module owns the mutual exclusion between the gate and its own views (e.g. queue-browser injects the gate into its `ui` layer via `ui.setGate`, since its `updateVisibility` also drives header fields). `connection-management` sends broker passwords as typed, over TLS, and the gateway keeps them in its encrypted connections file (a blank one on edit keeps the stored one); `user-management` sends the password as typed, over TLS, and the gateway hashes it. The four editing admin modules keep the `rev` of what they loaded and send it back on a save or delete (0 creates); a `stale` or `not_found` answer goes to the shared `handleConflict` in [src/core/admin-conflict.ts](../src/core/admin-conflict.ts), which asks to reload (or says the record was deleted by someone else and reloads), so no module words these itself. The gateway ([go-web-proxy/](../go-web-proxy): `store.go`, `managed.go`, `rbac.go`) keeps the two YAML files encrypted whole with the store key ([keyfile.go](../go-web-proxy/keyfile.go), [storecrypt.go](../go-web-proxy/storecrypt.go): generated only on a fresh volume, and a store it cannot open stops the start), loads them strictly (unknown keys, duplicates and malformed entries stop the start) under an `RWMutex`, persists every mutation through [the single writer](#the-single-writer) (a journaled commit of temp files, then the in-memory swap), versions each record so a save made from a stale read is refused, and bootstraps an admin who must change the password at first sign-in, plus the store key, on first run. The SEMP relay ([relay.go](../go-web-proxy/relay.go)) serves `/managed/relay/{broker}/SEMP...` behind the same gate: it parses the escaped path itself (the router would clean it first), refuses a decoded segment that is empty, `.`, `..`, or holds a backslash, `%`, `;` or a control character, and a query it cannot parse, admits `GET`/`HEAD` under `/SEMP/v2/` and a `POST /SEMP` whose body is one `<rpc>` with one `<show>` (`403 read_only` otherwise), checks the broker against the same entitlement `/managed/me` uses (`entitledVPNs` in `store.go`; an unknown broker and one the user may not use are the same `404`), and sends each request as one round trip on the transport the Direct relay uses (`newUpstreamTransport`), not through a reverse proxy, so no redirect is followed, no interim response or extra header is forwarded, and the allow-lists for the headers in both directions are complete; the stored SEMP account is the only `Authorization`, and a v1 body goes out as `application/xml` whatever type the client named. A broker `401`/`407` or redirect becomes `502 upstream_auth`/`upstream_unavailable`, so a wrong stored credential never looks like an ended session; at most 16 requests per user are in flight. `POST /managed/dial` ([dial.go](../go-web-proxy/dial.go)) is the one route that hands a broker credential to the browser: an entitled user, read-only users included, gets `{smfPath, vpn, user, pass}` for one Message VPN (an unknown VPN and one the user may not use are the same `404`); the password is held in a type that prints and logs masked, and nothing is issued as a ticket, so the SDK's own reconnects keep working. The SMF gate ([smf.go](../go-web-proxy/smf.go)) serves `GET /managed/smf/{broker}/{vpn}[/tail]` behind the same gate: it requires an `Origin` naming the gateway itself over `https` (a WebSocket is not subject to CORS, and a `GET` passes the cross-origin write check), a WebSocket upgrade and the entitlement, then opens the broker's SMF port over TLS with one round trip on the same transport and joins the two connections; only the `Sec-WebSocket-*` headers pass in either direction, so the browser's cookie and `Origin` never reach the broker. Dials and upgrades share a window of 20 per minute per user. The gateway sets no timer on an open socket (the SMF API's keep-alive owns its lifetime); [sockets.go](../go-web-proxy/sockets.go) registers each one and closes it on revocation: a sign-out or a replaced session (`sessions.onDrop`), a password change, changed administrator flag or deleted user (`sessions.onDropUser`, which fires even when the session had already expired), and any user or connection edit after which the user cannot reach the VPN (`store.onChange`, which re-checks every socket). A socket is registered before its final session and entitlement check, so a revocation that lands during the upgrade is never missed. Server-side invariants: every `/managed/*` request without a session gets the **same 401** whatever the path; a non-admin gets `403 forbidden`; bodies are capped at 64 KiB and unknown JSON fields are rejected; a state change from another site is refused (`cross_origin`); **list responses strip stored secrets and password hashes**; a blank password on edit keeps the stored one while creating a user with a blank password is rejected (`422`); deleting or demoting the **last admin** is refused (`409 last_admin`); and a new password, a changed administrator flag or a deletion ends that user's sessions.
 
 `src/core/dom.ts` exports `required(root, selector)`, `setError(el, msg)` and `attachBackdropClose(dialog)`. `setError(el, msg)` shows `msg` in an error banner and unhides it, or clears and hides it for null or empty; modules import it instead of keeping a local copy (gateway-settings wraps it in a one-line `setError(msg)` bound to its banner). [`src/core/components/row-list/`](../src/core/components/row-list/index.ts) holds two pieces: `createRowList` (the editable rows of labelled inputs) and `renderAdminRows` (the admin table body: data cells, an Edit and a Delete icon button per row, and the empty or no-match row), used by connection-management and user-management.
 
@@ -1021,10 +1052,10 @@ Styles are split by responsibility -- design system vs. per-module. The design s
 src/css/
   variables.css     :root design tokens (colors, spacing, radii, shadows)
   reset.css         *, body, box-sizing resets
-  layout.css        shell — app container, sidebar, top bar, nav, status footer
-  components.css    generic UI — buttons, cards, forms, modals, tables, badges,
+  layout.css        shell -- app container, sidebar, top bar, nav, status footer
+  components.css    generic UI -- buttons, cards, forms, modals, tables, badges,
                     display outputs, scrollbar, spinner
-  utilities.css     Tailwind-ish atomics — flex, gap, spacing, sizing, text
+  utilities.css     Tailwind-ish atomics -- flex, gap, spacing, sizing, text
   main.css          @import all of the above + each src/core/components/<name>/styles.css
 
 src/modules/<id>/
@@ -1033,29 +1064,7 @@ src/modules/<id>/
 
 `src/main.ts` imports `./css/main.css`, then `./registry`, whose `virtual:module-registry` ([scripts/module-registry-plugin.mjs](../scripts/module-registry-plugin.mjs)) imports each active module's `styles.css` after the module code. So a variant's bundle carries exactly its modules' stylesheets (the admin editors' only where a variant lists them, `all-test.html` included, and no module's that no variant lists), after the design system, with no hand-kept list to update; `tests/build/module-registry-plugin.test.ts` holds it for every variant. Vite + `vite-plugin-singlefile` inline everything into `dist/index.html` at build time -- no runtime fetch.
 
-**Editing rule:** rules belong to the file whose selectors they match.
-
-- A selector shaped like `.browser-*`, `.detail-*`, `.filter-*`, `.searchable-*` → module's `styles.css`.
-- A selector shared across modules (generic `.btn-*`, `.modal-*`, `.badge-*`, `.form-*`) → `components.css`.
-- A Tailwind-style atomic (`.mt-4`, `.flex-row`, `.hidden`) → `utilities.css`.
-- Shell chrome (anything the user sees *outside* a module's content area) → `layout.css`.
-
-If a rule needs `!important` to beat another file's rule, something is probably in the wrong file — fix the placement rather than fighting specificity.
-
-### Required-Element Invariant
-
-Since each module's template is authored alongside its code, the DOM contract is known at install time. Rather than defensively null-checking every access, modules assert that their contracted elements exist up-front using the [`required()`](../src/core/dom.ts) helper:
-
-```ts
-import { required } from '../../core/dom';
-
-const btnCopy = required<HTMLButtonElement>(container, '#btn-copy-config');
-btnCopy.disabled = false;  // non-null after required()
-```
-
-If a template drifts and a selector doesn't match, `install()` throws `Required element missing: <selector>` immediately — a loud fail-fast signal that beats silent partial wiring. Downstream code can rely on the element being present and skips null-guards.
-
-Optional elements (conditionally rendered — e.g. `.btn-delete-row` only present for non-read-only queues) stay nullable and retain `if (el)` guards. The distinction is: "authored in my template" vs "may or may not exist depending on data."
+Where a rule goes (module selectors in the module's `styles.css`, shared primitives in `components.css`, atomics in `utilities.css`, shell chrome in `layout.css`, no `!important` to win across files) and the required-element invariant (`required()` in [src/core/dom.ts](../src/core/dom.ts) asserts a module's own elements at install) are conventions for anyone writing code: they are stated once, in [developer-guide.md](developer-guide.md).
 
 ---
 

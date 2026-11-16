@@ -5,8 +5,8 @@ import type { AppContext, AppState } from '../../../src/core/types';
 import { completeContext } from '../../helpers/appContext';
 
 /**
- * After Stage C the queue-discovery service is a thin wrapper around the
- * lifted core `createSempDiscovery`. The paged-fetch / pagination /
+ * The queue-discovery service is a thin wrapper around the
+ * core `createSempDiscovery`. The paged-fetch / pagination /
  * error-mapping behaviors are tested at the core layer in
  * `tests/core/services/semp-discovery.test.ts`. These tests cover the
  * wrapper-only contract:

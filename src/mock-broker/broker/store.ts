@@ -5,7 +5,7 @@
  * depth drops; a copy run publishes into the destination queue, so browsing it
  * afterwards shows the same messages with the same IDs. The SEMP layer reports
  * depth and spool usage by reading this store, so verify's numbers always agree
- * with what browsing shows — the thing the old canned mocks could never do.
+ * with what browsing shows.
  *
  * Messages are held in spool-ID order, because the copy engine's drift
  * detection and max-consumed logic assume the broker delivers them that way.

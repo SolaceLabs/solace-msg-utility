@@ -425,7 +425,7 @@ describe('queue-copy/module', () => {
         });
     });
 
-    describe('refreshFromPrimary state sync (regression)', () => {
+    describe('refreshFromPrimary state sync', () => {
         // Repro: install with primary connection populated. The DOM gets
         // prefilled via applyDestPrefill, but state.destForm.host must also
         // be synced — otherwise unchecking "Same broker" and clicking Connect

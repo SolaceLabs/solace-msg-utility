@@ -550,10 +550,10 @@ describe('queue-browser/module', () => {
             consoleSpy.mockRestore();
         });
 
-        // Session-level ACK/REJECT listener wiring moved out of module.ts into
-        // src/core/services/solace-publisher (May 2026 publisher lift). The
+        // Session-level ACK/REJECT listener wiring lives in
+        // src/core/services/solace-publisher. The
         // service-level client:connected handler in queue-browser/service.ts
-        // now owns the publisher's lifecycle; coverage of session-switch
+        // owns the publisher's lifecycle; coverage of session-switch
         // (dispose + re-create) lives in service.test.ts › "disposes the
         // prior publisher when client:connected fires with a fresh session".
         // Coverage of ACK/REJECT dispatch on the listener pair is in
@@ -640,8 +640,8 @@ describe('queue-browser/module', () => {
             consoleSpy.mockRestore();
         });
 
-        // In-flight forward sweep was previously done explicitly in module.ts's
-        // handleDisconnect. After the publisher lift, publisher.dispose('Client
+        // module.ts's handleDisconnect does not sweep in-flight forwards:
+        // publisher.dispose('Client
         // disconnected.') (called from service.ts on client:disconnected and
         // app:state-change isConnected=false) resolves every in-flight send
         // promise with that error; the .then handler in handleForwardSend
@@ -717,10 +717,10 @@ describe('queue-browser/module', () => {
             consoleSpy.mockRestore();
         });
 
-        // Note: historical null-guard tests for `msgList` and `btnForwardSend`
-        // were removed — both are asserted via `required()` in module.install(),
-        // so "does not throw when null" tests against a state that cannot occur
-        // in production. Per CLAUDE.md anchor #5 (required-element policy): if
+        // Note: there are no null-guard tests for `msgList` and `btnForwardSend`
+        // -- both are asserted via `required()` in module.install(),
+        // so "does not throw when null" tests would target a state that cannot
+        // occur in production. Per the required-element rule in CLAUDE.md: if
         // the element is required, assert it; don't add nullable guards to the
         // handlers. The missing-element path IS tested via the `install()
         // rejects with "Required element missing"` case above.

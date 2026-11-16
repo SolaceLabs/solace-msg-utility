@@ -263,14 +263,14 @@ describe('queue-copy/service-copy', () => {
             });
 
             it('max-consumed with in-flight publishes — ACKs after stop STILL increment copied', async () => {
-                // Scenario from the user's bug report: 4 originals (with ids
+                // Scenario: 4 originals (with ids
                 // ≤ max) are queued for publish concurrently — their publish
                 // promises haven't resolved yet. Then a brand-new message
                 // with id > max arrives, triggering max-consumed. The
                 // in-flight publishes finish successfully at the destination
-                // AFTER the stop. Pre-fix, those ACKs hit the "settled after
-                // stop — discard result" branch and `copied` stayed 0. The
-                // fix: count successful in-flight ACKs regardless of stop.
+                // AFTER the stop. Those ACKs must not be discarded as "settled
+                // after stop": successful in-flight ACKs count toward `copied`
+                // regardless of stop.
                 const { state, session, onComplete, fireUp, fireMessage, ackAt } = setup();
                 state.verify = {
                     inProgress: false, abort: null,
@@ -553,11 +553,10 @@ describe('queue-copy/service-copy', () => {
             it('surfaces the reason from a real OperationError, which carries .message', async () => {
                 // The SDK emits an OperationError for this event (verified against
                 // dist/solclient.js): an Error subclass with `.message` and NO
-                // `infoStr`. This engine used to read only `infoStr`, so against a
-                // live broker it discarded the reason and showed the generic
-                // fallback while queue-browser showed the real text for the same
-                // failure. The other fixtures here pass `{ infoStr }`, which is the
-                // shape the SDK never sends — hence the bug went unnoticed.
+                // `infoStr`. The engine must read `.message`: reading only `infoStr`
+                // would discard the reason against a live broker and show the
+                // generic fallback. The other fixtures here pass `{ infoStr }`,
+                // which is the shape the SDK never sends.
                 const { state, session, onComplete } = setup();
                 state.verify = {
                     inProgress: false, abort: null,

@@ -3,7 +3,7 @@
  *
  * Because this provides the real SDK shape, the production `solace-client`,
  * `semp-client` and `solace-publisher` all run unmodified in the demo — there
- * are no `*-mock` siblings for them any more. That is the point: the demo
+ * are no `*-mock` siblings for them. That is the point: the demo
  * exercises the shipping code paths, so it cannot drift from them.
  *
  * Mock-only.

@@ -37,8 +37,8 @@ function setupBrowserDOM() {
  * Build a session that exposes both the ACK-listener surface the publisher
  * needs at construction (`session.on` / `session.removeListener` / `_handlers`)
  * AND lets us control which Browser instance is returned to createBrowser.
- * Replaces the historical inline `{ createQueueBrowser: vi.fn() }` shape —
- * those minimal objects no longer satisfy the publisher's session contract.
+ * A bare `{ createQueueBrowser: vi.fn() }` does not satisfy the publisher's
+ * session contract.
  */
 function sessionWithBrowser(browser: any = createBrowserMock()) {
     const session = createSessionMock();

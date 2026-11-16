@@ -1,7 +1,8 @@
 # Demos
 
-Two downloads attached to every [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) run the
-app with no broker and no gateway:
+This page is for anyone who wants to try the app, or show it, without a broker or a gateway. It covers what the two
+demos hold, what they accept and what they simulate. Two downloads attached to every
+[GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) run the app with no broker and no gateway:
 
 - [`demo.html`](#direct-demo-demohtml) -- Standalone and Gateway mode: the Direct connection form and every module,
   against a broker inside the page.
@@ -37,7 +38,7 @@ screens: the broker holds real queues and messages, so actions compose. Delete a
 a queue and the destination genuinely receives it -- browse it afterwards and the same messages are there.
 
 It needs nothing alongside it. The demo installs its own Solace SDK, so unlike the other
-[variants](user-guide.md#shipped-variants) you do **not** need `solclient.js` next to the HTML. (`jszip.min.js` is
+variants (see [deployment.md](deployment.md)) you do **not** need `solclient.js` next to the HTML. (`jszip.min.js` is
 still required for the Queue Browser's ZIP download; every other export works without it.)
 
 It never works with a real broker. It makes no network request: anything it does not answer itself fails as if the
@@ -49,7 +50,8 @@ network were down, and only the demo host connects, so a real broker typed into 
 required.
 
 (For developers building from source, `npm run build:demo` produces `dist/demo.html`; `npm run build` produces
-every variant in one pass, including `provisioned-demo.html` and the image-only `provisioned.html` and `solAdmin.html`. See [developer-guide.md](developer-guide.md) for the full build workflow.)
+every variant in one pass, including `provisioned-demo.html` and the image-only `provisioned.html` and `solAdmin.html`. See
+[developer-guide.md](developer-guide.md) for the build workflow.)
 
 ### Connecting
 
@@ -166,7 +168,7 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
 - **A damaged saved state does not lock the tab.** If the saved state has the current version but cannot be loaded,
   the demo clears it, starts from the seed with a fresh fake gateway, still mounts the Demo controls (so **Reset demo
   data** is there) and shows the warning "Saved demo state could not be restored; the demo was reset." for 8 seconds.
-  A snapshot of an older version, or one that cannot be read at all, is ignored without a message.
+  A snapshot of a different version, or one that cannot be read at all, is ignored without a message.
 - **Changes apply at once,** to the signed-in user too. Change your own password or Administrator flag, or delete
   your account, and you are signed out. Revoke a user's access and that user's broker connection closes.
 - **Versions and stale saves are simulated.** Each user, connection, the settings and the schedule carry a version,
@@ -176,11 +178,11 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
   a second session in the same page changes the record first.
   The rules (a password-only change keeps a record's version, an import restamps every record it imports) follow the
   gateway's.
-- **Not simulated, beyond the list below:** a write that fails (full disk; a certificate or CA write that fails, `tls_write_failed`), a store file changed on the host
+- **Not simulated (storage and recovery):** a write that fails (full disk; a certificate or CA write that fails, `tls_write_failed`), a store file changed on the host
   (`store_changed_on_disk`), an audit log that cannot be written (`audit_unavailable`, with `audit.onFailure` set to
   `refuse`), and the journal and its recovery after a crash: the demo has no disk. The **Demo controls** can still make
   `config.yaml` read as edited on the host or unreadable.
-- **Not simulated:**
+- **Not simulated (request limits):**
   - the cross-site request check;
   - the request size limit;
   - the sign-in limit for clients without a session (the per-account lockout after five wrong passwords is

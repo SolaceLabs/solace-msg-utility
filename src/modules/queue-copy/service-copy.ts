@@ -96,8 +96,7 @@ export function selectPublisher(state: QueueCopyState): SolacePublisher | null {
  *
  * **Per-message remove (move mode):** `browser.removeMessageFromQueue(msg)`
  * is called inside the MESSAGE handler immediately after the publish ACK
- * lands — not batched at end-of-run. This matches the original behavior and
- * is preserved by the refactor.
+ * lands -- not batched at end-of-run.
  */
 export function runCopyJob(
     state: QueueCopyState,

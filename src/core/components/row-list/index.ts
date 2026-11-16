@@ -7,7 +7,7 @@
  * connection-management edits a VPN list (each row = name/user/pass). The row
  * shape is parameterised by `fields`, so the same factory serves all three.
  *
- * Function API (anchor #9): the caller passes the container it owns; this owns
+ * Function API (the reusable-component rule in CLAUDE.md): the caller passes the container it owns; this owns
  * its content: the rows, their remove-button wiring, a header naming the
  * columns (from each field's `label`; the placeholders vanish once a row is
  * filled, so they cannot label it) and, with `RowListOptions.empty`, a note

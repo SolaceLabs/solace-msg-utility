@@ -4,9 +4,9 @@
  * imports anything in this tree. The managed demo has its own
  * (`boot.managed.ts`; `demoRedirects` in vite.config.ts picks by variant).
  *
- * Installing the SDK ourselves means the demo no longer needs `solclient.js`
- * beside the HTML: we satisfy the shell's vendor loader directly, including the
- * version gate it now enforces.
+ * Installing the SDK ourselves means the demo needs no `solclient.js` beside
+ * the HTML: we satisfy the shell's vendor loader directly, including the
+ * version gate it enforces.
  *
  * It never reaches a network, like the managed demo: `./network` refuses a
  * request the mock server does not answer, and the server answers SEMP only for

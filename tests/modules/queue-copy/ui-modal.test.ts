@@ -939,9 +939,8 @@ describe('queue-copy/ui-modal', () => {
         });
 
         it('onProgress is coalesced via requestAnimationFrame — multiple ACKs schedule ONE paint', async () => {
-            // Direct regression for the user-reported bug where the progress
-            // bar jumped straight to 100% instead of incrementing live. Fix
-            // (ui-modal.ts handleModalStart): N rapid onProgress calls in one
+            // The progress bar must increment live, not jump straight to 100%.
+            // ui-modal.ts handleModalStart: N rapid onProgress calls in one
             // microtask burst update `latestJob` but schedule exactly ONE
             // requestAnimationFrame; the rAF callback flushes the latest
             // state. This test stubs rAF to capture callbacks WITHOUT running

@@ -149,9 +149,9 @@ describe('EventBus', () => {
 
     describe('dispatch snapshot — listeners registered during dispatch do not fire in the same emit', () => {
         it('listeners added during dispatch do NOT fire in the same emit', () => {
-            // Regression for the VPN-switch bug: the connections module registered
-            // onFail on `client:disconnected` from inside a `client:disconnected`
-            // handler. With naive Set.forEach, onFail would fire in the same emit
+            // The connections module registers onFail on `client:disconnected`
+            // from inside a `client:disconnected` handler (VPN switch). With
+            // naive Set.forEach, onFail would fire in the same emit
             // and tear down its sibling onSuccess before the reconnect completed.
             const bus = createEventBus();
             const calls: string[] = [];

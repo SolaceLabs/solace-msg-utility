@@ -7,7 +7,7 @@ import type { AppContext } from '../../core/types';
 export type { FetchPage };
 
 /**
- * Queue Discovery SEMP service — thin wrapper around the lifted core
+ * Queue Discovery SEMP service -- thin wrapper around the core
  * `createSempDiscovery`, scoped to the primary SEMP connection.
  *
  * Guards calls before SEMP is connected by yielding a single

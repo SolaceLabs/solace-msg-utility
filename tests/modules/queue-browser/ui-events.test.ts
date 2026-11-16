@@ -134,10 +134,8 @@ describe('queue-browser/ui-events', () => {
             );
             // Once the .then fires and the only item lands SUCCESS,
             // checkForwardCompletion swaps the button text to 'Send Complete'.
-            // Under the historical (pre-publisher-lift) flow, status updates
-            // landed asynchronously from session listeners and the button
-            // remained 'Sending...' through the test's awaits — the new flow
-            // is faster, hence the terminal-state assertion here.
+            // The status lands within the test's awaits, hence the
+            // terminal-state assertion here.
             expect(state.forwardQueue[0].status).toBe('SUCCESS');
             expect(els.btnForwardSend.textContent).toBe('Send Complete');
         });

@@ -231,10 +231,9 @@ describe('queue-browser/ui-core', () => {
     });
 
     describe('resetQueueSelection edge cases', () => {
-        // The previous "handles missing filter elements gracefully" test exercised the
-        // dead defensive guards on hdrQueueName / hdrPermissions / filter inputs / btnFilter
-        // and was deleted when those guards were dropped (all are required elements per
-        // the queue-browser/module.ts required() list).
+        // There is no "missing filter elements" test: hdrQueueName / hdrPermissions /
+        // filter inputs / btnFilter are required elements (see the
+        // queue-browser/module.ts required() list), so there is no guard to exercise.
 
         it('handles missing renderList and clearDetails — state still reset', () => {
             const savedRender = ui.renderList;

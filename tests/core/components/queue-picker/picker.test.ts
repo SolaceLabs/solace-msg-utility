@@ -947,7 +947,7 @@ describe('core/components/queue-picker', () => {
         });
 
         it('re-fetches when the source key changes (RBAC/provisioning edit) and reuses it when unchanged', async () => {
-            // Symptom-1 regression (tests/.../picker.test.ts): the picker caches
+            // The picker caches
             // by `source.key`, so a managed permission/provisioning change — which
             // flips `queueSourceFrom`'s key while the broker baseUrl is unchanged —
             // invalidates the cache and forces a re-read. Same key → cache hit.

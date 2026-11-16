@@ -2,11 +2,10 @@
  * Error payloads, shaped like the ones the real SDK delivers.
  *
  * The SDK is not consistent, and the emulator must reproduce that rather than
- * smooth it over — an earlier version populated `message` AND `infoStr` on
- * every event, which made the demo *hide* a real defect: queue-copy read
- * `infoStr` off a QueueBrowser event, which a real broker never sets, so it
- * silently reported generic text while the queue browser showed the true
- * reason. The mock looked fine; production did not.
+ * smooth it over. Populating `message` AND `infoStr` on every event would hide
+ * a consumer reading `infoStr` off a QueueBrowser event, which a real broker
+ * never sets: it would silently show generic text while the true reason sat
+ * in `message`. The mock must fail the way production does.
  *
  * Verified against the vendored SDK (`dist/solclient.js`):
  *

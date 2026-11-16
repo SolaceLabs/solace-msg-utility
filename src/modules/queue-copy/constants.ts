@@ -1,13 +1,10 @@
 /**
  * Tunable constants for the queue-copy module.
  *
- * Single source of truth so production and demo builds stay aligned (an
- * earlier 30s/60s drift on `IDLE_TIMEOUT_MS` between `service-copy.ts` and
- * `service-copy-mock.ts` was the motivating bug for this file).
+ * Single source of truth so production and demo builds stay aligned (the demo
+ * runs the same copy engine, so there is one value for each).
  *
- * Consumers should import from here (or from the re-export barrel lines in
- * `service-copy.ts` / `service-verify.ts` for backward compatibility with
- * existing test imports). Full semantic docstrings stay in the consuming
+ * Consumers import from here. Full semantic docstrings stay in the consuming
  * files where they're most relevant; this file is the value registry.
  */
 

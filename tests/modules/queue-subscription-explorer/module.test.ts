@@ -161,8 +161,7 @@ describe('QueueSubscriptionExplorerModule', () => {
     });
 
     it('subscription filter supports within-level wildcards (B*/* matches BULKQ/TEST)', async () => {
-        // Regression for the user-reported bug where `B*/*` was being treated
-        // as a literal level name ("B*") instead of a prefix wildcard.
+        // `B*/*` must be a prefix wildcard, not a literal level name ("B*").
         const container = createDOM();
         const { ctx } = createTestContext(container);
         (ctx.sempFetch as any).mockResolvedValueOnce(textRes(PAGE_OK));
@@ -447,18 +446,16 @@ describe('QueueSubscriptionExplorerModule', () => {
     });
 
     it('SEMP disconnect mid-load supersedes the in-flight load (no clobber + no toast)', async () => {
-        // Closes the supersession branch at module.ts:122. Bug discovered
-        // alongside this test: the disconnect handler used to NOT bump
-        // `loadGen`, so a slow load could yield a page AFTER the disconnect
-        // reset and then write `allRows = accumulated` + show "Loaded N"
-        // toast, clobbering the cleared state. Fix: the disconnect handler
-        // now bumps loadGen too.
+        // Covers the supersession branch in module.ts. The disconnect handler
+        // bumps `loadGen`, so a slow load cannot yield a page AFTER the
+        // disconnect reset and then write `allRows = accumulated` + show a
+        // "Loaded N" toast, clobbering the cleared state.
         //
         // Mechanics: hang the SEMP fetch on the first call. While it's
-        // hanging, emit `isSempConnected=false`, which now bumps loadGen.
+        // hanging, emit `isSempConnected=false`, which bumps loadGen.
         // Then resolve the fetch with a successful page; the generator
         // yields, and the for-await body's `if (myGen !== loadGen) return;`
-        // check at line 122 fires, discarding the page.
+        // check fires, discarding the page.
         const container = createDOM();
         const toasts = document.createElement('div');
         toasts.id = 'toast-container';

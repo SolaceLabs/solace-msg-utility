@@ -17,7 +17,7 @@ declare const solace: any;
  * try/catch so any SDK getter that's missing or throws (common for older message
  * subtypes) is silently omitted rather than aborting the whole extraction.
  *
- * Preserves per-field truthiness rules from the pre-refactor version:
+ * Per-field truthiness rules:
  *   - Priority returns 0 (valid priority) but skips `null`
  *   - Delivery Mode translates the numeric enum to a readable label
  *   - Everything else skips falsy values ('', 0, null, undefined)

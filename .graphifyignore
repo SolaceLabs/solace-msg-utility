@@ -8,3 +8,8 @@ coverage/*
 CLAUDE.md
 node_modules/*
 graphify-out/*
+# Local working files and logs: not part of the project's material
+tmp/*
+scripts/logs/*
+docs/review/*
+docs/improvement-plan.md

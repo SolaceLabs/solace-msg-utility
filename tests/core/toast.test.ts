@@ -5,8 +5,7 @@ import { showToast, TOAST_EVENT, type ToastEventDetail } from '../../src/core/to
  * Tests for the auto-dismiss lifecycle. The happy-path "append + add class" is
  * already exercised by the module tests that call showToast on user actions.
  * These tests target the two `setTimeout` callbacks (visible → leaving → remove)
- * that were previously never fired in the suite, letting a regression remove
- * the cleanup path without any test noticing.
+ * so a regression cannot remove the cleanup path unnoticed.
  */
 describe('core/toast', () => {
     beforeEach(() => {

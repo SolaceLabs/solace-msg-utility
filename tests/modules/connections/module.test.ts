@@ -623,9 +623,9 @@ describe('ConnectionsModule', () => {
     it('solace connect button disconnects when connected', async () => {
         // Realistic flow: connect (UP_NOTICE fires bridging onConnected) → click
         // again to disconnect → SDK DISCONNECTED fires bridging onDisconnected.
-        // After the Stage B refactor the factory no longer reaches into AppState
-        // directly — state writes happen exclusively through bridging hooks fired
-        // from real SDK lifecycle events.
+        // The factory never reaches into AppState directly -- state writes
+        // happen exclusively through bridging hooks fired from real SDK
+        // lifecycle events.
         const { ctx, appState } = createTestContext(container);
         await ConnectionsModule.install(ctx);
 
@@ -790,9 +790,9 @@ describe('ConnectionsModule', () => {
     });
 
     it('handles connection:check-connection when connected different VPN (user cancels)', async () => {
-        // Regression: previously the navigateToConnections() call ran BEFORE
-        // confirm() for the queue-browser flow, so a Cancel left the user
-        // stranded on the connections page even though they declined the switch.
+        // Cancel must not navigate away: navigateToConnections() has to run
+        // only AFTER confirm() for the queue-browser flow, or a Cancel would
+        // strand the user on the connections page after declining the switch.
         const { ctx, eventBus, appState } = createTestContext(container);
         await ConnectionsModule.install(ctx);
 
@@ -1218,9 +1218,9 @@ describe('ConnectionsModule', () => {
     });
 
     it('check-connection returnTo=queue-copy: VPN switch with user-cancel does NOT navigate (stays on queue-copy)', async () => {
-        // Regression: previously the navigateToConnections() call ran BEFORE
-        // confirm(), so a Cancel left the user stranded on the connections
-        // page even though they declined the switch.
+        // Cancel must not navigate away: navigateToConnections() has to run
+        // only AFTER confirm(), or a Cancel would strand the user on the
+        // connections page after declining the switch.
         const { ctx, eventBus, appState } = createTestContext(container);
         await ConnectionsModule.install(ctx);
 
@@ -1287,7 +1287,7 @@ describe('ConnectionsModule', () => {
 
     // ====================================================================
     // Bridging: factory hooks → UI updates + AppState writes + bus emits.
-    // After the Stage B refactor, the broker-side factories live in
+    // The broker-side factories live in
     // src/core/services/ and are pure (no AppContext, no UI). The connections
     // module wires lifecycle hooks that route factory events into global
     // state, the event bus, and the connections form's UI. These tests

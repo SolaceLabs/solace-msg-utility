@@ -129,7 +129,7 @@ describe('core/utils', () => {
         });
 
         it('rejects non-integer-only strings', () => {
-            // Previously these slipped through because parseInt accepts leading digits.
+            // parseInt accepts leading digits, so these must be rejected explicitly.
             expect(isValidPort('8080abc')).toBe(false);
             expect(isValidPort('12.5')).toBe(false);
             expect(isValidPort(' 8080 ')).toBe(false);
@@ -340,7 +340,7 @@ describe('core/utils', () => {
 
     describe('topicFilterMatches() — asymmetric user-vs-stored', () => {
         it('user input treats * as wildcard ANYWHERE in a level', () => {
-            // The user-reported case + family.
+            // Wildcard positions within a level.
             expect(topicFilterMatches('B*/*', 'BULKQ/TEST')).toBe(true);     // trailing-* in user
             expect(topicFilterMatches('*Q/T*', 'BULKQ/TEST')).toBe(true);    // leading-* in user
             expect(topicFilterMatches('B*Q/T*T', 'BULKQ/TEST')).toBe(true);  // middle-* in user
@@ -449,7 +449,7 @@ describe('core/utils solaceErrorText', () => {
     });
 
     it('never stringifies the object, so [object Object] cannot reach a user', () => {
-        // The old `err.message || err` idiom did exactly that.
+        // The `err.message || err` idiom would do exactly that.
         expect(solaceErrorText({ nope: 1 }, 'fallback')).toBe('fallback');
         expect(solaceErrorText(42, 'fallback')).toBe('fallback');
     });

@@ -11,8 +11,8 @@ import { DEFAULT_MAX_MESSAGES_PER_QUEUE } from './constants.js';
 
 /**
  * Single source of truth for the activeFilters shape. Every reset site must
- * go through this factory so new fields can't be silently dropped by one of
- * three previously-divergent inline resets. `properties` is included in the
+ * go through this factory so a new field can't be silently dropped by an
+ * inline reset that forgot it. `properties` is included in the
  * default so readers don't have to defensively `&& properties.length > 0`.
  */
 export function defaultActiveFilters() {

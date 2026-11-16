@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,13 +10,15 @@ import { fileURLToPath } from 'node:url';
  * its anchor, and nothing else notices: every `(#anchor)` and
  * `(file.md#anchor)` link in README.md and docs/*.md must name a heading that
  * exists, and every doc in docs/ opens with a `## Contents` list equal to its
- * `##` and `###` headings. docs/improvement-plan.md is left out of the
- * contents rule: the audit-improvement-plan skill rewrites it whole.
+ * `##` and `###` headings. The docs are the ones git knows (tracked, or new and
+ * not ignored), so a git-ignored local working file in docs/ is not checked.
  */
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const DOCS = fs.readdirSync(path.join(REPO_ROOT, 'docs')).filter(f => f.endsWith('.md')).map(f => `docs/${f}`);
+const DOCS = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '--', 'docs'], { cwd: REPO_ROOT, encoding: 'utf-8' })
+    .split('\n')
+    .filter(f => /^docs\/[^/]+\.md$/.test(f) && fs.existsSync(path.join(REPO_ROOT, f)))
+    .sort();
 const FILES = ['README.md', ...DOCS];
-const NO_CONTENTS = new Set(['docs/improvement-plan.md']);
 
 interface Heading { level: number; text: string; slug: string }
 
@@ -86,7 +89,7 @@ describe('docs -- links', () => {
 });
 
 describe('docs -- contents', () => {
-    it.each(DOCS.filter(d => !NO_CONTENTS.has(d)))('%s opens with a Contents list of its ## and ### headings', (rel) => {
+    it.each(DOCS)('%s opens with a Contents list of its ## and ### headings', (rel) => {
         const text = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf-8');
         const all = headingsOf(rel);
         const first = all.findIndex(h => h.level === 2);

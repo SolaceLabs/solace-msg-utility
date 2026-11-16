@@ -28,20 +28,18 @@ name: Tag
 #   1. DOCKERFILE is docker/Dockerfile, not the repo root, in `plan` and
 #      `image`. Without it the shape auto-detect finds no Dockerfile and no
 #      image ships.
-#   2. Retired. `image` was a 2-leg matrix (standard, managed) until one image
-#      came to serve every container mode (November 2026); it is a single
-#      job again, as in the template.
+#   2. `image` is a single job, as in the template (no deviation): one image
+#      serves every container mode.
 #   3. The build passes APP_VERSION so the tag reaches the Go binary's ldflags
 #      and the PWA bundle's __APP_VERSION__. Git is not available inside the
 #      build, so it has to arrive as a build-arg.
-#   4. A `pages` job, carried over from the old release.yml, redeploys
-#      solacelabs.github.io/solace-msg-utility from the `dist` branch. Gated
-#      on everything else passing, so a red scan no longer redeploys the site.
+#   4. A `pages` job redeploys solacelabs.github.io/solace-msg-utility from
+#      the `dist` branch. Gated on everything else passing, so a red scan
+#      never redeploys the site.
 #   5. The image digest travels to `publish` and `release` as an artifact
 #      (imgref-image), not as a job output, together with the tags `publish`
-#      applies. Carried over from the 2-leg matrix, whose legs overwrote each
-#      other's outputs; `publish` and `release` read every imgref-* file, so
-#      the shape needs no change for one image.
+#      applies. `publish` and `release` read every imgref-* file, so the shape
+#      needs no change if more images are added.
 #   6. A setup-node step in `binaries`, reading .tool-versions -- Node has no
 #      self-honouring in-repo pin the way go.mod's `toolchain` directive does.
 #      ci.yml carries the same step for the same reason.
@@ -53,7 +51,7 @@ name: Tag
 #   8. Only the Release bundles leave the pipeline outside the images:
 #      `binaries` uploads RELEASE_BUNDLES as its artifact, not dist/*, and
 #      `release` attaches them with their checksums. The gateway ships only
-#      inside the images (decided 2026-11-06), so the binaries `build` also
+#      inside the images, so the binaries `build` also
 #      compiles stay on the runner: a public repo's workflow artifacts can be
 #      downloaded by any signed-in user. `binaries` keeps its name and stays
 #      because it emits the bundles. The build also emits provisioned.html and

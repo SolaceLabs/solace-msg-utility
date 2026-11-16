@@ -429,9 +429,8 @@ export function wireUiEvents(
  * Resolve the QueueSource to use for destination discovery:
  *   - same broker: the primary connection's source (queueSourceFrom)
  *   - different broker: a SEMP-backed source over the module-local destSempCtx
- *     if the user has established one (this module no longer has an in-form
- *     Connect button, but future flows may populate it — e.g. auto-connect on
- *     picker click)
+ *     if the user has established one (the form has no Connect button; a flow
+ *     such as auto-connect on picker click could populate it)
  */
 function destQueueSource(ctx: AppContext, state: QueueCopyState): QueueSource | null {
     if (state.destForm.sameBroker) {

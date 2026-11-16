@@ -86,7 +86,7 @@ describe('mock-broker/server — /hosted', () => {
         expect(body.hosted).toBe(true);
     });
 
-    it('still reports Direct-only without the interceptor, which is the bug this fixes', async () => {
+    it('reports Direct-only without the interceptor', async () => {
         window.fetch = (() => Promise.reject(new Error('no gateway'))) as typeof window.fetch;
 
         const info = await probeDeployment();
@@ -99,12 +99,11 @@ describe('mock-broker/server — /hosted', () => {
 describe('mock-broker/server — SEMP v2 discovery', () => {
     /**
      * Drive the REAL discovery generator, not a hand-rolled loop over
-     * `nextPageUri`. An earlier version of this suite followed the cursor
-     * itself and so was more permissive than the shipping consumer: the mock
-     * emitted a *relative* nextPageUri, which `extractNextPath` rejects
-     * (`new URL(uri)` with no base throws), silently ending pagination after
-     * page one. The demo lost the 4th and 5th queue of every VPN and nothing
-     * here failed. Always page through the code that ships.
+     * `nextPageUri`. A hand-rolled cursor loop is more permissive than the
+     * shipping consumer: a *relative* nextPageUri is rejected by
+     * `extractNextPath` (`new URL(uri)` with no base throws), which would
+     * silently end pagination after page one. Always page through the code
+     * that ships.
      */
     function discovery() {
         const baseUrl = 'https://broker.solace.com:1943';

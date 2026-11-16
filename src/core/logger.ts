@@ -49,7 +49,7 @@ export const logger = {
     /**
      * A logger that prefixes every line with `[tag]` -- the component that
      * wrote it (`Connections`, `semp-client`, ...). The level filter is the
-     * shared one. See "Logging" in docs/developer-guide.md for what each level
+     * shared one. See "Logging standard" in docs/developer-guide.md for what each level
      * means and what a line must name.
      */
     withTag(tag: string): TaggedLogger {

@@ -31,7 +31,7 @@ describe('core/connections/conn-modes — coerceConnConfig', () => {
 
     it('falls back invalid/missing fields to the Direct-only default', () => {
         expect(coerceConnConfig({ connModes: 'nope', defaultConn: 'nope' })).toEqual(DEFAULT_CONN_CONFIG);
-        // The retired value is no longer a mode: Direct only.
+        // 'managed' is not a mode: Direct only.
         expect(coerceConnConfig({ connModes: 'managed', defaultConn: 'managed' })).toEqual(DEFAULT_CONN_CONFIG);
         expect(coerceConnConfig({ connModes: 'provisioned' })).toEqual({ connModes: 'provisioned', defaultConn: 'direct' });
         expect(coerceConnConfig({})).toEqual(DEFAULT_CONN_CONFIG);

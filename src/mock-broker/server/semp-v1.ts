@@ -2,7 +2,7 @@
  * SEMP v1 RPC responses.
  *
  * The real parsers run against these — `queue-copy/service-verify.ts` and
- * `queue-subscription-explorer/parse.ts` are not mocked any more — so the
+ * `queue-subscription-explorer/parse.ts` are not mocked -- so the
  * element nesting has to match what those `querySelector` paths expect exactly.
  *
  * One deliberate piece of un-tidiness: the `<detail/>` response reports

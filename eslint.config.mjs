@@ -2,7 +2,7 @@ import tseslint from 'typescript-eslint';
 
 /**
  * Lint rules that hold the house rules a linter can see (CLAUDE.md,
- * docs/contributing.md). Not the recommended sets: type errors are tsc's
+ * docs/developer-guide.md, Linting). Not the recommended sets: type errors are tsc's
  * (`npm run typecheck`, `npm run typecheck:tests`), and each rule here is a
  * stated rule, so a finding is a defect rather than a style debate.
  * `./scripts/dev.sh vet` (and dev.ps1) runs it as `npm run lint`.

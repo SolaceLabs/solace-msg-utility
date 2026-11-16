@@ -168,9 +168,8 @@ export const QueueDiscoveryModule = {
         // --- Setup Components ---
         // No closeScope passed → outside-click listener attaches to `document` so
         // clicks anywhere outside the dropdown (sidebar, top-bar, other modules)
-        // close it. Container-scoping was tried earlier (see plan item 3.1) to
-        // avoid a theoretical re-install leak, but modules only install once per
-        // session in this app, so the trade-off was bad UX for no real benefit.
+        // close it. Modules install once per session, so there is no re-install
+        // listener leak to guard against by scoping it to the container.
         ui.setupSearchableSelect(vpnInput, vpnList, handleVpnSelect);
         ui.setupSearchableSelect(queueInput, queueList, handleQueueSelect);
 

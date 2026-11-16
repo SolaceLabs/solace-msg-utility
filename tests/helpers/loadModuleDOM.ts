@@ -22,9 +22,8 @@ const htmlCache = new Map<string, string>();
  * a malformed or partial template for defensive-path tests).
  *
  * `moduleId` is a plain `string`. A module with no template throws, so a typo
- * is loud. Compile-time enumeration was dropped along with
- * `src/module-ids.ts` when the registry became the single source of truth via
- * the variant manifests in `src/variants/`.
+ * is loud. The variant manifests in `src/variants/` are the single source of
+ * truth for module ids, so there is no compile-time enumeration.
  */
 export function loadModuleDOM(moduleId: string, entry?: string): HTMLElement {
     const key = `${moduleId}:${entry ?? ''}`;

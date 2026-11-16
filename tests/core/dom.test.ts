@@ -94,7 +94,7 @@ describe('core/dom', () => {
         });
 
         it('click on dialog padding (target === dialog, coords inside rect) does NOT close the dialog', () => {
-            // Regression: dialog has padding, so clicking the inner whitespace
+            // The dialog has padding, so clicking the inner whitespace
             // that no child element catches bubbles up with target === dialog.
             // The hit-test against getBoundingClientRect keeps the dialog open.
             const dialog = document.createElement('dialog');

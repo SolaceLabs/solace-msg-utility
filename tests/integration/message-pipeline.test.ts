@@ -159,7 +159,7 @@ describe('Integration: message pipeline (onMessage → filter → DOM)', () => {
         expect(after).toBe(before);
     });
 
-    it('destination-type filter uses window.solace enum (previously guarded by if(window.solace))', () => {
+    it('destination-type filter uses window.solace enum', () => {
         // shouldShowMessage reads the enum from window.solace directly, and
         // destination-type filtering works end-to-end through onMessage.
         state.activeFilters = { ...defaultActiveFilters(), type: 'Queue' };
