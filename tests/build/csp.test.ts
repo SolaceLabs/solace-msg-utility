@@ -54,7 +54,7 @@ describe('csp -- hashSource', () => {
 describe('csp -- buildPolicy', () => {
     it('writes the Direct policy: hashed scripts and those they load, the hashed stylesheet, any broker, the TLS probe frame', () => {
         expect(buildPolicy({ ...DIRECT, scripts: [ALERT_HASH], styles: [STYLE_HASH] })).toBe(
-            `default-src 'none'; script-src 'strict-dynamic' ${ALERT_HASH}; style-src ${STYLE_HASH}; img-src data:; ` +
+            `default-src 'none'; script-src 'strict-dynamic' ${ALERT_HASH}; style-src ${STYLE_HASH}; img-src data: blob:; ` +
             "connect-src http: https: ws: wss:; frame-src https:; base-uri 'none'; form-action 'none'",
         );
     });

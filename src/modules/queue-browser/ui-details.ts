@@ -1,10 +1,13 @@
-import { ui } from './ui-core.js';
+import { ui, NOTICE_TOAST_MS } from './ui-core.js';
 import { state } from './state.js';
-import { escapeHtml } from '../../core/utils';
+import { errMessage, escapeHtml } from '../../core/utils';
 import { logger } from '../../core/logger';
+import { showToast } from '../../core/toast';
 import { showPayload } from './features.js';
-import { bytesToBase64 } from './payload.js';
-import { downloadBlob } from '../../core/download';
+import { bytesToBase64, contentFileName } from './payload.js';
+import { detectKind, hexDump, imageSize, MAX_PREVIEW_PIXELS, type FileKind } from './file-kind.js';
+import { toJsonValue } from './sdt.js';
+import { downloadBlob, saveBlob } from '../../core/download';
 import type { AppContext } from '../../core/types';
 
 const log = logger.withTag('queue-browser');
@@ -23,16 +26,20 @@ export function initDetails(ctx: AppContext) {
         downloadBlob(blob, filename);
     };
 
+    /**
+     * Save the message's body: its original bytes (a binary attachment, or a
+     * map's or stream's wire bytes), else its text, always as
+     * application/octet-stream so the browser never opens it, under the name
+     * contentFileName() suggests. Called from the click: the save dialog
+     * needs the user's gesture.
+     */
     ui.downloadMessageContent = function (msg: any) {
         if (!msg) return;
-        const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}`;
-        if (msg.bytes) {
-            // A binary attachment: its original bytes, typed by the publisher's HTTP Content-Type.
-            const type = msg.msgProperties['HTTP Type'] || 'application/octet-stream';
-            ui.triggerDownloadBlob(new Blob([msg.bytes], { type }), filename);
-        } else {
-            ui.triggerDownload(filename, msg.content);
-        }
+        const name = contentFileName(msg);
+        saveBlob(new Blob([msg.bytes ?? msg.content], { type: 'application/octet-stream' }), name).catch((e: unknown) => {
+            log.error(`Could not save ${name}`, e);
+            showToast(`Could not save ${name}: ${errMessage(e)}`, 'error', NOTICE_TOAST_MS);
+        });
     };
 
     ui.getFullMessageJson = function (msg: any) {
@@ -45,9 +52,11 @@ export function initDetails(ctx: AppContext) {
             },
             applicationProperties: msg.appProperties,
             // A binary payload rides as base64, flagged so a reader can decode it; text stays text.
-            payload: msg.binary ? bytesToBase64(msg.bytes) : msg.content
+            // A map or stream rides as its wire bytes too, with its fields decoded beside them.
+            payload: msg.binary || msg.sdt ? bytesToBase64(msg.bytes) : msg.content
         };
-        if (msg.binary) fullObj.payloadEncoding = 'base64';
+        if (msg.binary || msg.sdt) fullObj.payloadEncoding = 'base64';
+        if (msg.sdt) fullObj.payloadDecoded = toJsonValue(msg.sdt);
 
         // _originalMsg is set by service-events.onMessage for every broker-delivered
         // message and is always present here. getDestination() can still return null
@@ -71,6 +80,105 @@ export function initDetails(ctx: AppContext) {
         const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}-full.json`;
         ui.triggerDownload(filename, JSON.stringify(fullObj, null, 2), 'application/json');
     };
+
+    // The preview's object URL, revoked when the pane moves on.
+    let previewUrl: string | null = null;
+
+    /** Hide the binary payload's kind, preview, hex view and note, and let the preview's bytes go. */
+    function resetBinary(): void {
+        const els = ui.getElements();
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        previewUrl = null;
+        els.detailPreview.onerror = null;
+        for (const el of [els.detailBinary, els.btnShowPreview, els.btnShowHex, els.detailBinaryNote, els.detailPreview, els.detailHex]) {
+            el.classList.add('hidden');
+        }
+        els.detailPreview.removeAttribute('src');
+        els.detailHex.textContent = '';
+        els.detailBinaryNote.textContent = '';
+        els.btnShowPreview.textContent = 'Show preview';
+        els.btnShowHex.textContent = 'Show hex';
+    }
+
+    function note(text: string): void {
+        const els = ui.getElements();
+        els.detailBinaryNote.textContent = text;
+        els.detailBinaryNote.classList.remove('hidden');
+    }
+
+    /**
+     * Show or hide an image payload. Nothing decodes it until the user asks,
+     * and an image whose header declares more than MAX_PREVIEW_PIXELS, or no
+     * size at all, is refused before it is decoded. The bytes are
+     * attachmentBytes()'s own copy, so an ArrayBuffer backs them (a Blob
+     * takes no shared memory).
+     */
+    function togglePreview(bytes: Uint8Array<ArrayBuffer>, image: NonNullable<FileKind['image']>): void {
+        const els = ui.getElements();
+        if (previewUrl) {
+            URL.revokeObjectURL(previewUrl);
+            previewUrl = null;
+            els.detailPreview.onerror = null;
+            els.detailPreview.removeAttribute('src');
+            els.detailPreview.classList.add('hidden');
+            els.detailBinaryNote.classList.add('hidden');
+            els.btnShowPreview.textContent = 'Show preview';
+            return;
+        }
+        const size = imageSize(bytes, image);
+        if (!size) {
+            note('Not shown: the image\'s header does not say how large it is.');
+            return;
+        }
+        if (size.width * size.height > MAX_PREVIEW_PIXELS) {
+            note(`Not shown: ${size.width} x ${size.height} pixels is more than the ${MAX_PREVIEW_PIXELS / 1_000_000}-megapixel limit.`);
+            return;
+        }
+        const url = URL.createObjectURL(new Blob([bytes], { type: image }));
+        previewUrl = url;
+        // Undecodable after all: let its bytes go, and offer Show preview again.
+        // Cleared whenever the preview goes, so a late event cannot reach the
+        // next message's tools.
+        els.detailPreview.onerror = () => {
+            URL.revokeObjectURL(url);
+            previewUrl = null;
+            els.detailPreview.onerror = null;
+            els.detailPreview.removeAttribute('src');
+            els.detailPreview.classList.add('hidden');
+            els.btnShowPreview.textContent = 'Show preview';
+            note('The image could not be decoded.');
+        };
+        els.detailPreview.src = url;
+        els.detailPreview.classList.remove('hidden');
+        note(`${size.width} x ${size.height} pixels`);
+        els.btnShowPreview.textContent = 'Hide preview';
+    }
+
+    function toggleHex(bytes: Uint8Array): void {
+        const els = ui.getElements();
+        const show = els.detailHex.classList.contains('hidden');
+        els.detailHex.textContent = show ? hexDump(bytes) : '';
+        els.detailHex.classList.toggle('hidden', !show);
+        els.btnShowHex.textContent = show ? 'Hide hex' : 'Show hex';
+    }
+
+    /** Under a binary payload's placeholder: what its bytes look like, and its preview or hex button. */
+    function showBinary(msg: any): void {
+        const els = ui.getElements();
+        resetBinary();
+        if (!msg.binary) return;
+        const kind = detectKind(msg.bytes);
+        els.detailBinaryKind.textContent = kind ? `Looks like: ${kind.label}` : 'Kind not recognised';
+        els.detailBinary.classList.remove('hidden');
+        const image = kind?.image;
+        if (image) {
+            els.btnShowPreview.classList.remove('hidden');
+            els.btnShowPreview.onclick = () => togglePreview(msg.bytes, image);
+        } else {
+            els.btnShowHex.classList.remove('hidden');
+            els.btnShowHex.onclick = () => toggleHex(msg.bytes);
+        }
+    }
 
     ui.selectMessage = function (id: string) {
         const els = ui.getElements();
@@ -130,6 +238,7 @@ export function initDetails(ctx: AppContext) {
                 els.btnShowRaw.disabled = false;
                 els.btnShowRaw.onclick = () => ui.showRawContent(msg);
                 els.btnCopyContent.disabled = msg.binary === true;
+                showBinary(msg);
             }
 
             els.btnCopyDest.disabled = false;
@@ -158,6 +267,7 @@ export function initDetails(ctx: AppContext) {
             els.detailContent.textContent = '';
             els.btnShowRaw.disabled = true;
             els.btnCopyContent.disabled = true;
+            resetBinary();
         }
         els.btnCopyDest.disabled = true;
         els.btnCopyReplMsgId.disabled = true;

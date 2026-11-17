@@ -107,6 +107,21 @@ describe('queue-copy engine against the demo broker', () => {
         expect(payloads('vpn-dev', 'dev-scratch').slice(destBefore)).toEqual(before);
     }, 30_000);
 
+    it('copies the payload samples queue so a map stays a map, a stream a stream, and every binary sample keeps its bytes', async () => {
+        const source = spooled('default', 'demo/payload-samples');
+        const destBefore = spooled('default', 'test-queue-2').length;
+
+        const { completed } = await run(await openSession('default'),
+            { vpn: 'default', from: 'demo/payload-samples', to: 'test-queue-2', mode: 'copy' });
+
+        expect(completed).toEqual([expect.objectContaining({ status: 'completed', copied: source.length, lastError: null })]);
+        const copies = spooled('default', 'test-queue-2').slice(destBefore).map(m => m.msg);
+        expect(copies.map(m => m.getCorrelationId())).toEqual(source.map(m => m.msg.getCorrelationId()));
+        expect(copies.map(m => m.getBinaryAttachment())).toEqual(source.map(m => m.msg.getBinaryAttachment()));
+        expect(copies.map(m => m._fields.sdt)).toEqual(source.map(m => m.msg._fields.sdt));
+        expect(copies.filter(m => m._fields.sdt).map(m => m.getType())).toEqual([sdk.MessageType.MAP, sdk.MessageType.STREAM]);
+    });
+
     it('moves every message: the destination gains them in order and the source is left empty', async () => {
         const before = payloads('vpn-prod', 'Q/ORDER/PROCESS');
         const destBefore = spooled('vpn-prod', 'Q/ORDER/ARCHIVE').length;

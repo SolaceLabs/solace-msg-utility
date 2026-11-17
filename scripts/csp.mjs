@@ -15,7 +15,8 @@
  *   - styles: the inlined stylesheet by its hash; no style attribute and no
  *     other `<style>` (writes through the CSSOM, `el.style.x = ...`, are not
  *     affected);
- *   - images: `data:` URLs (the favicon);
+ *   - images: `data:` URLs (the favicon) and the page's own `blob:` URLs
+ *     (Queue Browser's preview of an image payload);
  *   - connections and frames: what the bundle's kind needs (CSP_KINDS);
  *   - nothing else: no `<base>`, no form submission, no plugin, no worker.
  *
@@ -112,7 +113,7 @@ export function buildPolicy({ kind, vendor, scripts, styles }) {
         ['default-src', ["'none'"]],
         ['script-src', listOrNone([...(vendor ? ["'strict-dynamic'"] : []), ...scripts])],
         ['style-src', listOrNone(styles)],
-        ['img-src', ['data:']],
+        ['img-src', ['data:', 'blob:']],
         ['connect-src', k.connect],
         ...(k.frame.length ? [/** @type {[string, string[]]} */ (['frame-src', k.frame])] : []),
         ['base-uri', ["'none'"]],

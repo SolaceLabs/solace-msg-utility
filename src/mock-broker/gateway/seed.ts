@@ -19,6 +19,9 @@ import type { GatewaySeed } from './types';
 const q = (name: string, seed: number, subscriptions: string[], state: QueueFixture['state'] = QUEUE_STATE.NORMAL): QueueFixture =>
     ({ name, seed, subscriptions, state });
 
+/** The queue of fixed payload samples (images, files, maps, streams); reads like any queue the account may browse. */
+const samples = (name: string): QueueFixture => ({ name, seed: 0, subscriptions: [], state: QUEUE_STATE.NORMAL, samples: true });
+
 /** The demo broker's view of each provisioned broker. VPN names are unique across the demo. */
 export const DEMO_TOPOLOGY: Record<string, VpnFixture[]> = {
     'east-prod': [
@@ -30,6 +33,7 @@ export const DEMO_TOPOLOGY: Record<string, VpnFixture[]> = {
                 q('orders.archive', 0, []),
                 q('audit.orders', 9, ['audit/orders/>'], QUEUE_STATE.READ_ONLY),
                 q('scratch.orders', 3, ['scratch/>']),
+                samples('payload-samples'),
             ],
         },
         {

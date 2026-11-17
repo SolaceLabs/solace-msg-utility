@@ -17,14 +17,25 @@
  *   and wins over `payload`. `getXmlContent()`/`setXmlContent()` stay a plain
  *   string stored as given: the real SDK's raw XML is a byte string too, so the
  *   demo does not model UTF-8 XML as mojibake.
- * - `getSdtContainer()` returns null for seeded messages, so the publisher's
- *   first-match-wins content chain (`setSdtContainer || setXmlContent ||
- *   setBinaryAttachment`) falls through to the binary attachment, which is the
- *   path real browsed messages take.
+ * - `getSdtContainer()` returns null unless the message holds an `sdt` body (a
+ *   map or stream, written as plain JSON-able data, see `SdtBody`); then it
+ *   returns a stand-in for the SDK's SDTField (`getType`, `getValue`; a map's
+ *   `getKeys`/`getField`; a stream's `hasNext`/`getNext`/`rewind`). Without a
+ *   body the publisher's first-match-wins content chain (`setSdtContainer ||
+ *   setXmlContent || setBinaryAttachment`) falls through to the binary
+ *   attachment, the path real browsed messages take. `setSdtContainer` converts
+ *   whatever container it is handed (this stand-in or the SDK's own) back to an
+ *   `SdtBody`, so a copy or forward keeps a map a map.
+ * - The wire bytes of an SDT message are NOT Solace's SDT encoding, which the
+ *   demo cannot produce: `getBinaryAttachment()` returns a labelled stand-in,
+ *   `SDT_WIRE_HEADER` followed by the body's JSON (UTF-8, one char per byte), so
+ *   Download Content and the size have something real to save and count. The
+ *   body wins over `payload`/`payloadBytes`; setting an attachment drops it.
+ *   Non-finite floats are not representable in the JSON-safe body.
  *
  * Mock-only.
  */
-import { DestinationType, MessageDeliveryModeType, MessageType } from './enums';
+import { DestinationType, MessageDeliveryModeType, MessageType, SDTFieldType } from './enums';
 
 /** A byte string (one char per byte, as the SDK's version10 profile returns) from bytes. */
 export function bytesToLatin1(bytes: Uint8Array): string {
@@ -37,6 +48,26 @@ export function bytesToLatin1(bytes: Uint8Array): string {
 function textToLatin1(text: string): string {
     return bytesToLatin1(new TextEncoder().encode(text));
 }
+
+/** First line of an SDT message's stand-in wire bytes; the body's JSON follows it. */
+export const SDT_WIRE_HEADER = 'SDT demo stand-in (not the Solace SDT encoding)\n';
+
+/**
+ * A map or stream body (or a value inside one) as plain JSON-able data. The
+ * integer kinds carry a number, or a decimal string when the value is beyond
+ * 2^53 (the real SDK hands such a 64-bit value back as a Long); `bytes` is a
+ * byte string (one char per byte).
+ */
+export type SdtBody =
+    | { type: 'map'; entries: [string, SdtBody][] }
+    | { type: 'stream'; items: SdtBody[] }
+    | { type: 'string'; value: string }
+    | { type: 'bool'; value: boolean }
+    | { type: 'int8' | 'int16' | 'int32' | 'int64' | 'uint8' | 'uint16' | 'uint32' | 'uint64'; value: number | string }
+    | { type: 'float' | 'double'; value: number }
+    | { type: 'bytes'; value: string }
+    | { type: 'destination'; kind: 'topic' | 'queue'; name: string }
+    | { type: 'null' };
 
 export interface MockDestination {
     getName(): string;
@@ -53,6 +84,8 @@ export interface MessageFields {
     payload?: string;
     /** Payload as a byte string (one char per byte, all <= 0xFF): a published or binary-seeded attachment. */
     payloadBytes?: string;
+    /** A map or stream body; wins over `payload` and `payloadBytes`. Its wire bytes are a stand-in (see the file note). */
+    sdt?: SdtBody;
     destination?: MockDestination;
     guaranteedMessageId?: string;
     deliveryMode?: number;
@@ -92,8 +125,81 @@ export interface MockMessage {
     smfHeader: { messageLength: number };
 }
 
-/** The attachment as the SDK returns it: a byte string, or null when none is set. */
+/** SDT body type -> the SDK's field type, and back. */
+const FIELD_TYPE: Record<SdtBody['type'], number> = {
+    map: SDTFieldType.MAP, stream: SDTFieldType.STREAM, string: SDTFieldType.STRING, bool: SDTFieldType.BOOL,
+    int8: SDTFieldType.INT8, int16: SDTFieldType.INT16, int32: SDTFieldType.INT32, int64: SDTFieldType.INT64,
+    uint8: SDTFieldType.UINT8, uint16: SDTFieldType.UINT16, uint32: SDTFieldType.UINT32, uint64: SDTFieldType.UINT64,
+    float: SDTFieldType.FLOATTYPE, double: SDTFieldType.DOUBLETYPE, bytes: SDTFieldType.BYTEARRAY,
+    destination: SDTFieldType.DESTINATION, null: SDTFieldType.NULLTYPE,
+};
+const BODY_TYPE = new Map(Object.entries(FIELD_TYPE).map(([name, n]): [number, SdtBody['type']] => [n, name as SdtBody['type']]));
+
+/** A 64-bit value as the SDK returns it: a number while exact, else a Long-like object whose text is the decimal. */
+function wideValue(v: number | string): number | { toString(): string } {
+    const n = Number(v);
+    return Number.isSafeInteger(n) ? n : { toString: () => String(v) };
+}
+
+/** The SDK's SDTField for a body: `getType()`, `getValue()` (a map or stream container for those two). */
+export function sdtField(body: SdtBody): { getType(): number; getValue(): any } {
+    const getType = () => FIELD_TYPE[body.type];
+    switch (body.type) {
+        case 'map': {
+            const fields = new Map(body.entries);
+            const container = {
+                getKeys: () => body.entries.map(([k]) => k),
+                getField: (key: string) => (fields.has(key) ? sdtField(fields.get(key)!) : undefined),
+            };
+            return { getType, getValue: () => container };
+        }
+        case 'stream': {
+            let at = 0;
+            const container = {
+                hasNext: () => at < body.items.length,
+                getNext: () => sdtField(body.items[at++]),
+                rewind: () => { at = 0; },
+            };
+            return { getType, getValue: () => container };
+        }
+        case 'int64': case 'uint64': return { getType, getValue: () => wideValue(body.value) };
+        case 'destination': return { getType, getValue: () => createDestination(body.name, body.kind === 'topic' ? DestinationType.TOPIC : DestinationType.QUEUE) };
+        case 'null': return { getType, getValue: () => null };
+        default: return { getType, getValue: () => body.value };
+    }
+}
+
+/** The body an SDK container (this file's stand-in or the SDK's own SDTField) holds, as plain data. Throws on a field type the demo does not hold. */
+export function sdtBodyOf(field: any): SdtBody {
+    const type = BODY_TYPE.get(field.getType());
+    if (type === undefined) throw new Error(`SDT field type ${String(field.getType())} is not supported by the demo broker`);
+    const value = field.getValue();
+    switch (type) {
+        case 'map': return { type, entries: value.getKeys().map((k: string): [string, SdtBody] => [k, sdtBodyOf(value.getField(k))]) };
+        case 'stream': {
+            // Reading a stream moves its cursor: leave it where a later reader expects it.
+            const items: SdtBody[] = [];
+            value.rewind();
+            while (value.hasNext()) items.push(sdtBodyOf(value.getNext()));
+            value.rewind();
+            return { type, items };
+        }
+        case 'string': return { type, value: String(value) };
+        case 'bool': return { type, value: Boolean(value) };
+        case 'float': case 'double': return { type, value: Number(value) };
+        case 'bytes': return { type, value: toByteString(value) ?? '' };
+        case 'destination': return { type, kind: value.getType() === DestinationType.TOPIC ? 'topic' : 'queue', name: value.getName() };
+        case 'null': return { type };
+        default: {
+            const n = Number(String(value));
+            return { type, value: Number.isSafeInteger(n) ? n : String(value) };
+        }
+    }
+}
+
+/** The attachment as the SDK returns it: a byte string, or null when none is set. An SDT body's is the labelled stand-in. */
 function attachmentOf(f: MessageFields): string | null {
+    if (f.sdt !== undefined) return textToLatin1(SDT_WIRE_HEADER + JSON.stringify(f.sdt));
     if (f.payloadBytes !== undefined) return f.payloadBytes;
     return f.payload === undefined ? null : textToLatin1(f.payload);
 }
@@ -133,9 +239,9 @@ export function createMessage(fields: MessageFields = {}): MockMessage {
         smfHeader: { messageLength: payloadByteLength(f) + 120 },
 
         // ---- content -------------------------------------------------
-        getType: () => MessageType.BINARY,
+        getType: () => (f.sdt?.type === 'map' ? MessageType.MAP : f.sdt?.type === 'stream' ? MessageType.STREAM : MessageType.BINARY),
         getBinaryAttachment: () => attachmentOf(f),
-        getSdtContainer: () => null,
+        getSdtContainer: () => (f.sdt ? sdtField(f.sdt) : null),
         getXmlContent: () => f.xmlContent ?? null,
 
         // ---- identity ------------------------------------------------
@@ -194,10 +300,15 @@ export function createMessage(fields: MessageFields = {}): MockMessage {
     const setters: Record<string, (v: any) => void> = {
         setBinaryAttachment: v => {
             delete f.payload;
+            delete f.sdt;
             f.payloadBytes = toByteString(v);
         },
         setXmlContent: v => { f.xmlContent = v; },
-        setSdtContainer: () => { throw new Error('SDT container not supported by the demo broker'); },
+        setSdtContainer: v => {
+            f.sdt = sdtBodyOf(v);
+            delete f.payload;
+            delete f.payloadBytes;
+        },
         setDestination: v => { f.destination = v; },
         setDeliveryMode: v => { f.deliveryMode = v; },
         setCorrelationKey: v => { f.correlationKey = v; },
@@ -236,7 +347,7 @@ export function createMessage(fields: MessageFields = {}): MockMessage {
     for (const [name, apply] of Object.entries(setters)) {
         msg[name] = function (v: any) {
             apply(v);
-            if (name === 'setBinaryAttachment') msg.smfHeader.messageLength = payloadByteLength(f) + 120;
+            if (name === 'setBinaryAttachment' || name === 'setSdtContainer') msg.smfHeader.messageLength = payloadByteLength(f) + 120;
             return this;
         };
     }

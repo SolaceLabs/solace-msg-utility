@@ -58,6 +58,8 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
         it('removes every payload-bearing element from the live DOM', () => {
             for (const sel of [
                 '#detail-content', '#btn-copy-content', '#btn-show-raw',
+                '#detail-binary', '#detail-binary-kind', '#btn-show-preview', '#btn-show-hex',
+                '#detail-binary-note', '#detail-preview', '#detail-hex',
                 '#browser-raw-content-modal', '#raw-content-text', '#btn-raw-close',
                 '#btn-browser-download-content', '#btn-browser-download-full', '#filter-content'
             ]) {

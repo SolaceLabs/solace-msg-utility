@@ -319,7 +319,12 @@ queue-browser/
        |
        +--- ui-details.ts        Detail panel
        |      showDetails()         Render message details
+       |      showBinary()          A binary payload's kind, preview or hex view
        |      addPropertyFilterRow() Dynamic filter rows
+       |
+       +--- payload.ts           Attachment bytes, text vs binary, download names
+       +--- file-kind.ts         Kind from the first bytes, image size, hex dump
+       +--- sdt.ts               Map and stream bodies decoded, as YAML and JSON
        |
        +--- ui-forward.js        Forward modal
        |      openForwardModal()    Prepare modal with messages
@@ -327,6 +332,14 @@ queue-browser/
        |
        +--- constants.js         Module-scoped SVG icon strings (downloadContent, forward, delete, copy ...)
 ```
+
+**Message bodies (payload flavor).** `extractPayload` in `service-events.ts` stores what the pane shows in `content`, and the original bytes in `bytes`:
+
+- A text body keeps its text.
+- A binary attachment keeps its bytes, and `classifyAttachment` (`payload.ts`) decides whether they are text. UTF-8 with no stray control characters is text; anything else is `binary`, shown as a size placeholder.
+- A map or stream (an SDT container) keeps its wire bytes, which the SDK still holds as the attachment. `decodeSdt` (`sdt.ts`) turns the container into a typed tree that the pane shows as YAML (`toYaml`, also what Copy Content copies and the body filter matches) and that Download Full adds as `payloadDecoded` (`toJsonValue`). A container the SDK cannot parse falls back to its bytes, with a warning.
+
+`file-kind.ts` reads a binary payload's first bytes against a list of signatures. The result gives the pane's "Looks like" label, and, for PNG, JPEG, GIF and WebP, a preview. The preview starts only on request, after `imageSize` has read the header and refused anything above 40 megapixels or with no size. It loads from a `blob:` URL, which the bundle's policy allows (`img-src data: blob:`) and which is revoked when the pane moves on. Every other binary payload gets a hex view of its first 512 bytes. An executable is only named: its download suggests `.bin`. `contentFileName` (`payload.ts`) names a download, single or in the content ZIP, `solace-message-<id>.<ext>`. `saveBlob` ([src/core/download.ts](../src/core/download.ts)) opens the browser's save dialog where there is one and falls back to a plain download. The blob is always `application/octet-stream`, so the browser never renders it.
 
 Queue-browser's production `service.ts` runs unmodified in both real and demo builds. In the demo, its SDK calls reach the `window.solace` emulation installed by the demo broker, and publish-with-ACK (delegated to the core `solace-publisher`) round-trips through the broker's acknowledgement events -- see [The demo broker](#the-demo-broker-demohtml-provisioned-demohtml).
 
@@ -916,7 +929,7 @@ instead (the `managed-demo` variant gets [boot.managed.ts](../src/mock-broker/bo
 code reaches the other's bundle; what both do to the shell is in [shell.ts](../src/mock-broker/shell.ts)), which
 installs three things before any module installs:
 
-1. **`window.solace`** -- a full SDK emulation (factory, constructors, enums, session, queue browser, message).
+1. **`window.solace`** -- a full SDK emulation (factory, constructors, enums, session, queue browser, message). A message may carry a map or stream body (`sdt` in [src/mock-broker/sdk/message.ts](../src/mock-broker/sdk/message.ts)); its wire bytes are a labelled stand-in, not Solace's SDT encoding.
 2. **A `window.fetch` interceptor** answering `/hosted` (hosted, Direct only), the SEMP v2 monitor endpoints and
    SEMP v1 RPCs, for the demo host `broker.solace.com` only (`sempHost` reads it from the hosted URL, `file://`
    pages included), as the SDK emulator connects only to it. What it does not answer, SEMP for any other host
@@ -1097,7 +1110,7 @@ Every bundle carries its policy in a `<meta http-equiv="Content-Security-Policy"
 | `style-src` | the inlined stylesheet by its hash | the same | the same |
 | `connect-src` | `http: https: ws: wss:` (SEMP and messaging to any broker) | `'self'` | `'none'` |
 | `frame-src` | `https:` (the TLS probe) | none | none |
-| Every bundle | `default-src 'none'`, `img-src data:` (the favicon), `base-uri 'none'`, `form-action 'none'` | | |
+| Every bundle | `default-src 'none'`, `img-src data: blob:` (the favicon, and Queue Browser's preview of an image payload), `base-uri 'none'`, `form-action 'none'` | | |
 
 **How the build writes it.** The `content-security-policy` plugin in `vite.config.ts` calls `applyCsp` on each emitted HTML file in a `generateBundle` hook ordered after `vite-plugin-singlefile`'s, so the hashes are of the final inlined text. The browser turns CRLF into LF before it hashes, and so does `hashSource`. The kind follows the build: demo mode is `demo`; a variant manifest that exports `GATEWAY_ONLY = true` (`managed`, `admin`; read by `variantGatewayOnly` in [scripts/module-registry-plugin.mjs](../scripts/module-registry-plugin.mjs)) is `gateway`; every other variant is `direct`. `'strict-dynamic'` is there only with the shell's vendor loader (`NEEDS_VENDOR_SCRIPTS`): the loader adds `solclient.js` and `jszip.min.js` with `createElement('script')`, and a script a hashed script adds is trusted from any origin, `file:` included. Neither library needs `eval`: each holds one `new Function`, which runs only in a browser without `globalThis` (solclient.js) or when JSZip's `setImmediate` polyfill is handed a string.
 

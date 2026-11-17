@@ -9,6 +9,7 @@ import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 import type { EventBus, AppContext, AppState } from '../../../src/core/types';
 import { completeContext } from '../../helpers/appContext';
+import { stubSavePicker, blobBytes } from '../../helpers/savePicker';
 
 function createBrowserDOM() {
     return loadModuleDOM('queue-browser');
@@ -408,7 +409,7 @@ describe('queue-browser/ui-table', () => {
             });
 
             state.displayedMessages = [
-                { id: '1', content: 'Hello', date: '', size: 0, type: 'Text' }
+                { id: '1', content: 'Hello', binary: false, msgProperties: {}, date: '', size: 0, type: 'Text' }
             ];
             state.allMessages = state.displayedMessages;
             ui.renderList();
@@ -421,22 +422,22 @@ describe('queue-browser/ui-table', () => {
 
             await ui.downloadMessagesZip('content');
 
-            expect(fileFn).toHaveBeenCalledWith('solace-message-1', 'Hello');
+            expect(fileFn).toHaveBeenCalledWith('solace-message-1.txt', 'Hello');
             expect(generateAsyncFn).toHaveBeenCalledWith({ type: 'blob' });
             expect(blobSpy).toHaveBeenCalledTimes(1);
             expect(blobSpy.mock.calls[0][1]).toMatch(/^solace-messages-content-.*\.zip$/);
             blobSpy.mockRestore();
         });
 
-        it('puts a binary attachment in the content ZIP as its original bytes', async () => {
+        it('puts a binary attachment in the content ZIP as its original bytes, named by its kind', async () => {
             const fileFn = vi.fn();
             (window as any).JSZip = vi.fn(function(this: any) {
                 this.file = fileFn;
                 this.generateAsync = vi.fn().mockResolvedValue(new Blob(['zip']));
             });
-            const bytes = new Uint8Array([0x89, 0x50, 0x4E, 0x47]);
+            const bytes = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
             state.displayedMessages = [
-                { id: '7', content: '[Binary payload: 4 bytes]', bytes, binary: true, date: '', size: 0, type: 'Binary' }
+                { id: '7', content: '[Binary payload: 8 bytes]', bytes, binary: true, date: '', size: 0, type: 'Binary' }
             ];
             state.allMessages = state.displayedMessages;
             ui.renderList();
@@ -445,8 +446,36 @@ describe('queue-browser/ui-table', () => {
             await ui.downloadMessagesZip('content');
 
             expect(fileFn).toHaveBeenCalledTimes(1);
-            expect(fileFn.mock.calls[0][0]).toBe('solace-message-7');
+            expect(fileFn.mock.calls[0][0]).toBe('solace-message-7.png');
             expect(fileFn.mock.calls[0][1]).toBe(bytes);
+        });
+
+        it('names each content entry by its payload: JSON text, a map\'s wire bytes, an unrecognised binary, and a sanitised id', async () => {
+            const fileFn = vi.fn();
+            (window as any).JSZip = vi.fn(function(this: any) {
+                this.file = fileFn;
+                this.generateAsync = vi.fn().mockResolvedValue(new Blob(['zip']));
+            });
+            const wire = new Uint8Array([0x2B, 0x10, 0x00]);
+            const unknown = new Uint8Array([0x01, 0x02]);
+            state.displayedMessages = [
+                { id: '1', content: '{"a":1}', binary: false, msgProperties: {}, date: '', size: 0, type: 'Text' },
+                { id: '2', content: 'a: 1', bytes: wire, binary: false, sdt: { type: 'map', entries: [] }, msgProperties: {}, date: '', size: 0, type: 'Map' },
+                { id: '3', content: '[Binary payload: 2 bytes]', bytes: unknown, binary: true, msgProperties: {}, date: '', size: 0, type: 'Binary' },
+                { id: 'a/b:4', content: 'plain', binary: false, msgProperties: { 'HTTP Type': 'text/csv' }, date: '', size: 0, type: 'Text' },
+            ];
+            state.allMessages = state.displayedMessages;
+            ui.renderList();
+            document.querySelectorAll<HTMLInputElement>('.msg-check').forEach(c => { c.checked = true; });
+
+            await ui.downloadMessagesZip('content');
+
+            expect(fileFn.mock.calls.map((c: unknown[]) => c[0])).toEqual([
+                'solace-message-1.json', 'solace-message-2.bin', 'solace-message-3.bin', 'solace-message-ab4.csv',
+            ]);
+            expect(fileFn.mock.calls[1][1]).toBe(wire);
+            expect(fileFn.mock.calls[2][1]).toBe(unknown);
+            expect(fileFn.mock.calls[3][1]).toBe('plain');
         });
 
         it('creates full JSON ZIP for selected messages', async () => {
@@ -485,7 +514,7 @@ describe('queue-browser/ui-table', () => {
                 this.generateAsync = vi.fn().mockRejectedValue(new Error('zip error'));
             });
 
-            state.displayedMessages = [{ id: '1', content: 'test' }];
+            state.displayedMessages = [{ id: '1', content: 'test', binary: false, msgProperties: {} }];
             state.allMessages = state.displayedMessages;
             ui.renderList();
 
@@ -502,7 +531,7 @@ describe('queue-browser/ui-table', () => {
             (window as any).JSZip = zipCtor;
             const toasts = freshToasts();
 
-            state.displayedMessages = [{ id: '1', content: 'test' }];
+            state.displayedMessages = [{ id: '1', content: 'test', binary: false, msgProperties: {} }];
             state.allMessages = state.displayedMessages;
             ui.renderList();
 
@@ -572,23 +601,26 @@ describe('queue-browser/ui-table', () => {
             expect(ui.getElements().detailId.textContent).toBe('');
         });
 
-        it('download content button triggers download', () => {
-            state.displayedMessages = [
-                { id: '1', date: '', size: 0, type: 'Text', content: 'payload' }
-            ];
-            state.allMessages = state.displayedMessages;
-            ui.renderList();
+        it('download content button saves that row\'s content under its name', async () => {
+            const picker = stubSavePicker();
+            try {
+                state.displayedMessages = [
+                    { id: '1', date: '', size: 0, type: 'Text', content: 'payload', binary: false, msgProperties: {} }
+                ];
+                state.allMessages = state.displayedMessages;
+                ui.renderList();
 
-            const triggerSpy = vi.spyOn(ui, 'triggerDownload');
-            const btn = document.querySelector('.btn-download-content') as HTMLElement;
-            btn.click();
+                const btn = document.querySelector('.btn-download-content') as HTMLElement;
+                btn.click();
 
-            // Verify both filename sanitization AND payload routing — a regression
-            // that swapped `msg.content` for `msg.id` would still call createObjectURL.
-            expect(triggerSpy).toHaveBeenCalledTimes(1);
-            expect(triggerSpy.mock.calls[0][0]).toBe('solace-message-1');
-            expect(triggerSpy.mock.calls[0][1]).toBe('payload');
-            triggerSpy.mockRestore();
+                // Both the name and the bytes: a regression that saved `msg.id`
+                // instead of `msg.content` would still save a file.
+                await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
+                expect(picker.names).toEqual(['solace-message-1.txt']);
+                expect(await blobBytes(picker.blobs[0])).toEqual(Array.from(new TextEncoder().encode('payload')));
+            } finally {
+                picker.restore();
+            }
         });
 
         it('download full button triggers download', () => {

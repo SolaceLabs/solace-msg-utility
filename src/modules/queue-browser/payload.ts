@@ -1,13 +1,15 @@
 /**
- * Binary-attachment helpers for the queue browser (payload flavor only).
+ * Payload helpers for the queue browser (payload flavor only).
  *
  * The SDK runs with the version10 factory profile, under which
  * getBinaryAttachment() returns a Latin-1 string: one character per byte.
  * attachmentBytes() turns that back into the original bytes once, at ingest;
  * classifyAttachment() then decides whether those bytes are text to show or a
  * true binary payload that the details pane shows as a size-only placeholder.
- * Downloads always write the original bytes.
+ * Downloads always write the original bytes, under the name contentFileName()
+ * suggests.
  */
+import { detectKind } from './file-kind.js';
 
 // Control characters other than tab, LF and CR: UTF-8 that carries them is data, not text.
 const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
@@ -62,6 +64,65 @@ function binaryPayload(bytes: Uint8Array): AttachmentPayload {
         bytes,
         binary: true,
     };
+}
+
+/**
+ * The extensions a text payload's download may take from the publisher's HTTP
+ * Content-Type. A type outside the list (HTML and SVG among them: text a
+ * browser would render) gets what the text looks like instead, at most JSON
+ * or XML, else `.txt`.
+ */
+const TEXT_TYPE_EXT: Record<string, string> = {
+    'application/json': 'json',
+    'text/json': 'json',
+    'application/xml': 'xml',
+    'text/xml': 'xml',
+    'text/csv': 'csv',
+    'application/yaml': 'yaml',
+    'application/x-yaml': 'yaml',
+    'text/yaml': 'yaml',
+    'text/plain': 'txt',
+};
+
+/** The extension a text payload's download suggests: from its Content-Type when listed, else from its text. */
+export function textExtension(text: string, contentType?: string): string {
+    const type = (contentType ?? '').split(';')[0].trim().toLowerCase();
+    if (TEXT_TYPE_EXT[type]) return TEXT_TYPE_EXT[type];
+    const t = text.trim();
+    if (t.startsWith('<?xml')) return 'xml';
+    if (t.startsWith('{') || t.startsWith('[')) {
+        try {
+            JSON.parse(t);
+            return 'json';
+        } catch {
+            // Not JSON after all: plain text.
+        }
+    }
+    return 'txt';
+}
+
+/** What `contentFileName` reads of a browsed message. */
+export interface PayloadFileSource {
+    id: string;
+    content: string;
+    bytes?: Uint8Array;
+    binary: boolean;
+    /** A map or stream body, decoded (sdt.ts): its download is the raw wire bytes. */
+    sdt?: unknown;
+    msgProperties: Record<string, unknown>;
+}
+
+/**
+ * The name Download Content suggests and a content ZIP entry takes:
+ * `solace-message-<id>.<ext>`. The extension is `bin` for a map or stream
+ * (Solace's own encoding) and for a binary payload no signature names; a
+ * recognised one takes its kind's (file-kind.ts); text takes `textExtension`.
+ */
+export function contentFileName(msg: PayloadFileSource): string {
+    const ext = msg.sdt !== undefined ? 'bin'
+        : msg.binary ? (detectKind(msg.bytes as Uint8Array)?.ext ?? 'bin')
+        : textExtension(msg.content, msg.msgProperties['HTTP Type'] as string | undefined);
+    return `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}.${ext}`;
 }
 
 /** Base64 of `bytes`, built in chunks so a large payload cannot overflow the argument limit. */

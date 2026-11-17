@@ -83,6 +83,8 @@ export interface QueueFixture {
     subscriptions: string[];
     /** Starting behaviour; the panel can change it at runtime. */
     state: QueueState;
+    /** Holds the fixed payload samples (`broker/samples.ts`) instead of `seed` generated messages; volume does not scale it. */
+    samples?: boolean;
 }
 
 export interface VpnFixture {
@@ -103,6 +105,7 @@ export const VPNS: VpnFixture[] = [
             { name: 'test-queue-1', seed: 24, subscriptions: ['orders/new/>', 'orders/amend/*'], state: QUEUE_STATE.NORMAL },
             { name: 'test-queue-2', seed: 8, subscriptions: ['telemetry/>'], state: QUEUE_STATE.NORMAL },
             { name: 'Q/EMPTY', seed: 0, subscriptions: [], state: QUEUE_STATE.EMPTY },
+            { name: 'demo/payload-samples', seed: 0, subscriptions: [], state: QUEUE_STATE.NORMAL, samples: true },
         ],
     },
     {

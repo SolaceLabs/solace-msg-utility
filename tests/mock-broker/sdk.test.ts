@@ -345,7 +345,7 @@ describe('mock-broker/sdk — message', () => {
         expect(msg.smfHeader.messageLength).toBeGreaterThan(0);
     });
 
-    it('leaves getSdtContainer null so the publisher falls through to the binary attachment', () => {
+    it('leaves getSdtContainer null for a message with no SDT body, so the publisher falls through to the binary attachment', () => {
         const sdk = buildSolaceSdk();
         expect(sdk.SolclientFactory.createMessage().getSdtContainer()).toBeNull();
     });

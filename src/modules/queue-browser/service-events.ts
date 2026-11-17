@@ -2,8 +2,9 @@ import { state, ingestMessage, getMessages, shouldShowMessage } from './state.js
 import { ui, NOTICE_TOAST_MS } from './ui-core.js';
 import { showPayload } from './features.js';
 import { attachmentBytes, classifyAttachment } from './payload.js';
+import { decodeSdt, toYaml, type SdtNode } from './sdt.js';
 import { showToast } from '../../core/toast';
-import { solaceErrorText } from '../../core/utils';
+import { errMessage, solaceErrorText } from '../../core/utils';
 import { logger } from '../../core/logger';
 
 const log = logger.withTag('queue-browser');
@@ -57,24 +58,27 @@ const STANDARD_PROPERTY_GETTERS: Array<[string, (m: any) => unknown]> = [
 /**
  * The body as the payload flavor stores it: `content` is what the details pane
  * shows; a binary attachment also keeps its original `bytes`, and `binary`
- * marks a payload that is not text (see payload.ts). `contentType` is the
- * publisher's HTTP Content-Type, a hint for the text/binary verdict.
+ * marks a payload that is not text (see payload.ts). A map or stream keeps
+ * its wire bytes in `bytes` (what Download Content saves), its decoded value
+ * in `sdt`, and shows as YAML: text the body filter and Copy Content use.
+ * `contentType` is the publisher's HTTP Content-Type, a hint for the
+ * text/binary verdict.
  */
-function extractPayload(msg: any, contentType: string | undefined): { content: string; bytes?: Uint8Array; binary: boolean } {
-    const sdtCnt = msg.getSdtContainer();
-    if (sdtCnt !== null) {
-        let content: string;
-        if (sdtCnt.getType() === solace.SDTFieldType.STRING) {
-            content = sdtCnt.getValue();
-        } else if (sdtCnt.getType() === solace.SDTFieldType.MAP) {
-            content = '[SDT Map Data - Not Supported Yet]';
-        } else if (sdtCnt.getType() === solace.SDTFieldType.STREAM) {
-            content = '[SDT Stream Data - Not Supported Yet]';
-        } else {
-            content = '[SDT Unknown Data - Not Supported Yet]';
+function extractPayload(msg: any, contentType: string | undefined): { content: string; bytes?: Uint8Array; binary: boolean; sdt?: SdtNode } {
+    let sdtCnt: any;
+    try {
+        sdtCnt = msg.getSdtContainer();
+        if (sdtCnt !== null && sdtCnt.getType() !== solace.SDTFieldType.STRING) {
+            const sdt = decodeSdt(sdtCnt, solace);
+            return { content: toYaml(sdt), bytes: attachmentBytes(msg.getBinaryAttachment()), binary: false, sdt };
         }
-        return { content, binary: false };
+    } catch (e) {
+        // One body the SDK cannot parse: show its bytes, and browse on. (The SDK
+        // finds a container only in a non-empty attachment, so the bytes are there.)
+        log.warn(`A map or stream body could not be decoded (${errMessage(e)}); showing its bytes`);
+        return classifyAttachment(attachmentBytes(msg.getBinaryAttachment()), contentType);
     }
+    if (sdtCnt !== null) return { content: sdtCnt.getValue(), binary: false };
     const attachment = msg.getBinaryAttachment();
     if (attachment) return classifyAttachment(attachmentBytes(attachment), contentType);
     // getXmlContent() is the SDK's raw string in every profile (the wire bytes, one char

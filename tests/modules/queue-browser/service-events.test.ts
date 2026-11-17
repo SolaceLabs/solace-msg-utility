@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createServiceEvents } from '../../../src/modules/queue-browser/service-events';
 import { state, shouldShowMessage } from '../../../src/modules/queue-browser/state.js';
 import { ui } from '../../../src/modules/queue-browser/ui-core.js';
@@ -9,6 +9,7 @@ import { createEventBus } from '../../../src/core/event-bus';
 import { createSolaceMock, createMessageMock } from '../../setup';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
+import { stubSavePicker, blobBytes } from '../../helpers/savePicker';
 
 function setupBrowserDOM() {
     const container = loadModuleDOM('queue-browser');
@@ -35,11 +36,34 @@ function latin1(bytes: Uint8Array): string {
     return String.fromCharCode(...bytes);
 }
 
+// SDK SDT fields as decodeSdt reads them. The type numbers are the mock's (STRING 0, MAP 1,
+// STREAM 2) plus the two scalar types the tests add to the mock's enum in beforeEach.
+const SDT = { STRING: 0, MAP: 1, STREAM: 2, BOOL: 3, INT32: 4 };
+
+const sdtField = (type: number, value: unknown) => ({ getType: () => type, getValue: () => value });
+
+const sdtMap = (entries: [string, ReturnType<typeof sdtField>][]) => {
+    const fields = new Map(entries);
+    return sdtField(SDT.MAP, { getKeys: () => [...fields.keys()], getField: (k: string) => fields.get(k) });
+};
+
+const sdtStream = (items: ReturnType<typeof sdtField>[]) => {
+    let at = 0;
+    return sdtField(SDT.STREAM, { rewind: () => { at = 0; }, hasNext: () => at < items.length, getNext: () => items[at++] });
+};
+
 describe('queue-browser/service-events', () => {
     let solaceMock: any;
+    let picker: ReturnType<typeof stubSavePicker>;
+
+    afterEach(() => {
+        picker.restore();
+    });
 
     beforeEach(() => {
         solaceMock = createSolaceMock();
+        Object.assign(solaceMock.SDTFieldType, { BOOL: SDT.BOOL, INT32: SDT.INT32 });
+        picker = stubSavePicker();
         (window as any).solace = solaceMock;
         resetQueueBrowserState();
         setupBrowserDOM();
@@ -341,11 +365,11 @@ describe('queue-browser/service-events', () => {
             state.activeFilters.content = 'gr\u00fc\u00dfe';
             expect(shouldShowMessage(stored)).toBe(true);
 
-            const saved = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
             ui.downloadMessageContent(stored);
-            const blob = saved.mock.calls[0][0] as Blob;
-            expect(blob.type).toBe('application/octet-stream');
-            expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual(Array.from(utf8));
+            await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
+            expect(picker.names).toEqual(['solace-message-300.txt']);
+            expect(picker.blobs[0].type).toBe('application/octet-stream');
+            expect(await blobBytes(picker.blobs[0])).toEqual(Array.from(utf8));
         });
 
         it('shows a non-UTF-8 binary attachment as a size placeholder the body filter never matches, and saves its original bytes', async () => {
@@ -370,11 +394,12 @@ describe('queue-browser/service-events', () => {
             state.activeFilters.content = 'binary';
             expect(shouldShowMessage(stored)).toBe(false);
 
-            const saved = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
+            // Seven bytes are too few for a PNG signature, so no kind is named and the name ends in .bin.
             ui.downloadMessageContent(stored);
-            const blob = saved.mock.calls[0][0] as Blob;
-            expect(blob.type).toBe('image/png');
-            expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual(Array.from(bytes));
+            await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
+            expect(picker.names).toEqual(['solace-message-301.bin']);
+            expect(picker.blobs[0].type).toBe('application/octet-stream');
+            expect(await blobBytes(picker.blobs[0])).toEqual(Array.from(bytes));
         });
 
         it('decodes UTF-8 XML content from the SDK byte string: shown as text, filterable, saved byte for byte', async () => {
@@ -393,52 +418,117 @@ describe('queue-browser/service-events', () => {
             state.activeFilters.content = 'gr\u00fc\u00dfe';
             expect(shouldShowMessage(stored)).toBe(true);
 
-            const saved = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
             ui.downloadMessageContent(stored);
-            const blob = saved.mock.calls[0][0] as Blob;
-            expect(blob.type).toBe('application/xml');
-            expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual(Array.from(utf8));
+            await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
+            expect(picker.names).toEqual(['solace-message-302.xml']);
+            expect(picker.blobs[0].type).toBe('application/octet-stream');
+            expect(await blobBytes(picker.blobs[0])).toEqual(Array.from(utf8));
         });
 
-        it('handles SDT Map and Stream types', () => {
+        it('decodes a map message to YAML content, keeping its decoded tree and its wire bytes, and treats it as text', async () => {
             const se = createServiceEvents();
             state.messageStore.set('q1', []);
             state.currentQueue = 'q1';
-            state.allMessages = [];
-            state.displayedMessages = [];
+            const wire = new Uint8Array([0x2B, 0x10, 0x00, 0xFF, 0x80]);
+            const container = sdtMap([['name', sdtField(SDT.STRING, 'bob')], ['age', sdtField(SDT.INT32, 42)], ['active', sdtField(SDT.BOOL, true)]]);
+            se.onMessage('q1', createSolaceMessage({ type: 2, gmid: 400, binaryAttachment: latin1(wire), sdtContainer: container }));
 
-            const msg = createSolaceMessage({
-                sdtContainer: { getType: () => 1, getValue: () => {} },
-                gmid: 104
+            const stored = state.messageStore.get('q1')![0];
+            expect(stored.type).toBe('Map');
+            expect(stored.content).toBe('name: bob\nage: 42\nactive: true');
+            expect(stored.binary).toBe(false);
+            expect(Array.from(stored.bytes as Uint8Array)).toEqual(Array.from(wire));
+            expect(stored.sdt).toEqual({
+                type: 'map',
+                entries: [['name', { type: 'string', value: 'bob' }], ['age', { type: 'integer', value: 42 }], ['active', { type: 'boolean', value: true }]],
             });
-            se.onMessage('q1', msg);
-            expect(state.messageStore.get('q1')![0].content).toContain('SDT Map');
 
-            state.messageStore.set('q2', []);
-            state.currentQueue = 'q2';
-            state.allMessages = [];
-            state.displayedMessages = [];
-            const msg2 = createSolaceMessage({
-                sdtContainer: { getType: () => 2, getValue: () => {} },
-                gmid: 105
-            });
-            se.onMessage('q2', msg2);
-            expect(state.messageStore.get('q2')![0].content).toContain('SDT Stream');
+            // The body filter reads the YAML; the details pane shows it and Copy Content stays on.
+            state.activeFilters.content = 'age: 42';
+            expect(shouldShowMessage(stored)).toBe(true);
+            ui.selectMessage('400');
+            expect(ui.getElements().detailContent.textContent).toBe('name: bob\nage: 42\nactive: true');
+            expect(ui.getElements().btnCopyContent.disabled).toBe(false);
+            expect(ui.getElements().detailBinary.classList.contains('hidden')).toBe(true);
+
+            // Download Content saves the wire bytes, not the YAML.
+            ui.downloadMessageContent(stored);
+            await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
+            expect(picker.names).toEqual(['solace-message-400.bin']);
+            expect(await blobBytes(picker.blobs[0])).toEqual(Array.from(wire));
         });
 
-        it('handles SDT unknown type', () => {
+        it('decodes a stream message to a YAML list, nested map included, with its wire bytes', () => {
             const se = createServiceEvents();
             state.messageStore.set('q1', []);
             state.currentQueue = 'q1';
-            state.allMessages = [];
-            state.displayedMessages = [];
+            const wire = new Uint8Array([0x2C, 0x01]);
+            const container = sdtStream([sdtField(SDT.INT32, 1), sdtField(SDT.INT32, 2), sdtMap([['k', sdtField(SDT.STRING, 'v')]])]);
+            se.onMessage('q1', createSolaceMessage({ type: 3, gmid: 401, binaryAttachment: latin1(wire), sdtContainer: container }));
 
-            const msg = createSolaceMessage({
-                sdtContainer: { getType: () => 99, getValue: () => {} },
-                gmid: 106
-            });
-            se.onMessage('q1', msg);
-            expect(state.messageStore.get('q1')![0].content).toContain('SDT Unknown');
+            const stored = state.messageStore.get('q1')![0];
+            expect(stored.type).toBe('Stream');
+            expect(stored.content).toBe('- 1\n- 2\n-\n  k: v');
+            expect(stored.binary).toBe(false);
+            expect(Array.from(stored.bytes as Uint8Array)).toEqual([0x2C, 0x01]);
+            expect(stored.sdt.type).toBe('stream');
+            expect(stored.sdt.items).toHaveLength(3);
+        });
+
+        it('decodes a scalar container, and keeps a type it does not know as a commented null', () => {
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            state.currentQueue = 'q1';
+            const wire = new Uint8Array([0x01]);
+            se.onMessage('q1', createSolaceMessage({ gmid: 404, binaryAttachment: latin1(wire), sdtContainer: sdtField(SDT.INT32, 7) }));
+            se.onMessage('q1', createSolaceMessage({ gmid: 405, binaryAttachment: latin1(wire), sdtContainer: sdtField(99, undefined) }));
+
+            const [int, odd] = state.messageStore.get('q1')!;
+            expect([int.content, int.sdt]).toEqual(['7', { type: 'integer', value: 7 }]);
+            expect([odd.content, odd.sdt]).toEqual(['null # a field of type 99, not shown', { type: 'unsupported', name: '99' }]);
+        });
+
+        it('shows the text of an SDT string payload as it is: no decoded tree, no bytes', () => {
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            state.currentQueue = 'q1';
+            se.onMessage('q1', createSolaceMessage({ gmid: 403, sdtContainer: sdtField(SDT.STRING, 'Hello <b>World</b>: 1') }));
+
+            const stored = state.messageStore.get('q1')![0];
+            expect(stored.content).toBe('Hello <b>World</b>: 1');
+            expect(stored.binary).toBe(false);
+            expect('sdt' in stored).toBe(false);
+            expect('bytes' in stored).toBe(false);
+        });
+
+        it('falls back to the attachment, with a warning, when a map cannot be decoded: its bytes are a binary payload', () => {
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            state.currentQueue = 'q1';
+            const wire = new Uint8Array([0x00, 0xFF, 0x2B]);
+            const broken = sdtField(SDT.MAP, { getKeys: () => { throw new Error('corrupt map header'); } });
+            se.onMessage('q1', createSolaceMessage({ type: 2, gmid: 406, binaryAttachment: latin1(wire), sdtContainer: broken }));
+
+            const stored = state.messageStore.get('q1')![0];
+            expect([stored.content, stored.binary]).toEqual(['[Binary payload: 3 bytes]', true]);
+            expect(Array.from(stored.bytes as Uint8Array)).toEqual([0x00, 0xFF, 0x2B]);
+            expect('sdt' in stored).toBe(false);
+            expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('A map or stream body could not be decoded (corrupt map header); showing its bytes');
+        });
+
+        it('falls back to the attachment as text when the container throws and the bytes are text', () => {
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            state.currentQueue = 'q1';
+            const broken = { getType: () => { throw new Error('bad container'); }, getValue: () => null };
+            se.onMessage('q1', createSolaceMessage({ gmid: 407, binaryAttachment: 'plain words', sdtContainer: broken }));
+
+            const stored = state.messageStore.get('q1')![0];
+            expect([stored.content, stored.binary]).toEqual(['plain words', false]);
+            expect('sdt' in stored).toBe(false);
+            expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('bad container');
         });
 
         it('handles timestamp extraction', () => {
@@ -797,74 +887,6 @@ describe('queue-browser/service-events', () => {
 
             expect(state.displayedMessages.map((m: any) => m.id)).toEqual(['121']);
             expect(ui.getElements().msgList.querySelector('tr[data-id="121"]')).not.toBeNull();
-        });
-
-        it('handles SDT Map message type via createMessageMock', () => {
-            const solace = (window as any).solace;
-            const se = createServiceEvents();
-            state.messageStore.set('q1', []);
-            state.currentQueue = 'q1';
-            state.allMessages = [];
-            state.displayedMessages = [];
-
-            const msg = createMessageMock();
-            msg.getType.mockReturnValue(solace.MessageType.MAP);
-            msg.getSdtContainer.mockReturnValue({
-                getType: () => solace.SDTFieldType.MAP,
-                getValue: () => null
-            });
-            msg.getGuaranteedMessageId.mockReturnValue(789);
-
-            se.onMessage('q1', msg);
-
-            const stored = state.messageStore.get('q1')!;
-            expect(stored[0].content).toBe('[SDT Map Data - Not Supported Yet]');
-            expect(stored[0].type).toBe('Map');
-        });
-
-        it('handles SDT Stream message type via createMessageMock', () => {
-            const solace = (window as any).solace;
-            const se = createServiceEvents();
-            state.messageStore.set('q1', []);
-            state.currentQueue = 'q1';
-            state.allMessages = [];
-            state.displayedMessages = [];
-
-            const msg = createMessageMock();
-            msg.getType.mockReturnValue(solace.MessageType.STREAM);
-            msg.getSdtContainer.mockReturnValue({
-                getType: () => solace.SDTFieldType.STREAM,
-                getValue: () => null
-            });
-            msg.getGuaranteedMessageId.mockReturnValue(790);
-
-            se.onMessage('q1', msg);
-
-            const stored = state.messageStore.get('q1')!;
-            expect(stored[0].content).toBe('[SDT Stream Data - Not Supported Yet]');
-            expect(stored[0].type).toBe('Stream');
-        });
-
-        it('handles SDT Unknown type via createMessageMock', () => {
-            const solace = (window as any).solace;
-            const se = createServiceEvents();
-            state.messageStore.set('q1', []);
-            state.currentQueue = 'q1';
-            state.allMessages = [];
-            state.displayedMessages = [];
-
-            const msg = createMessageMock();
-            msg.getType.mockReturnValue(solace.MessageType.TEXT);
-            msg.getSdtContainer.mockReturnValue({
-                getType: () => 99,
-                getValue: () => null
-            });
-            msg.getGuaranteedMessageId.mockReturnValue(791);
-
-            se.onMessage('q1', msg);
-
-            const stored = state.messageStore.get('q1')!;
-            expect(stored[0].content).toBe('[SDT Unknown Data - Not Supported Yet]');
         });
 
         it('stores message but does not add to UI if different queue is active', () => {

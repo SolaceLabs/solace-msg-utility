@@ -209,7 +209,11 @@ Click any row to see its details in the panel below:
 - **Replication Group Message ID** -- if the broker provides it
 - **Message Properties** -- standard Solace properties (Delivery Mode, TTL, Priority, Correlation ID, and so on)
 - **Application Properties** -- user-defined key/value properties set by the publisher
-- **Content Preview** -- the payload as text: TEXT messages, XML content, and binary attachments that hold UTF-8 text. A binary attachment that is not text shows only its size, for example `[Binary payload: 1,234 bytes]`, next to the **Binary** type badge, and its Copy button stays disabled; use **Download Content** to get its bytes.
+- **Content Preview** -- the payload as text: TEXT messages, XML content, and binary attachments that hold UTF-8 text. A map or stream message shows its fields as YAML: strings, numbers, true and false, `null`, nested maps and lists, bytes as `!!binary` followed by base64, and a destination as `{ topic: name }` or `{ queue: name }`. Its Copy button copies that YAML.
+  - A binary attachment that is not text shows its size, for example `[Binary payload: 1,234 bytes]`, next to the **Binary** type badge, and its Copy button stays disabled. Under it, **Looks like:** names what its first bytes say it is (for example *PNG image*, *gzip-compressed data*, *PDF document*, *ELF executable or library*), or says the kind is not recognised.
+  - A PNG, JPEG, GIF or WebP image has a **Show preview** button. Nothing is decoded until you press it. An image whose header declares more than 40 megapixels, or no size at all, is not shown, and a line says why. **Hide preview** removes it.
+  - Any other binary payload, PDF included, has a **Show hex** button: the first 512 bytes as offset, hex and ASCII columns, and how many bytes follow. Nothing is ever opened or run, and an SVG or HTML payload is only ever shown as text.
+  - Use **Download Content** to get the bytes.
 - **Show Raw Content** -- opens a modal with the full raw message dump
 
 Copy buttons next to Destination, Repl Grp Msg Id and Content copy to the clipboard in one click.
@@ -291,7 +295,12 @@ If any messages fail, **Send** changes to **Resend failed messages (N)**, N bein
 
 Two download formats are available:
 
-- **Download Content** -- the message payload only. Each message becomes a separate file in a ZIP archive, named `solace-message-{id}`. A binary attachment is saved byte for byte (a per-row download is typed with the publisher's HTTP Content-Type, else `application/octet-stream`); TEXT and XML messages are saved as UTF-8 text. The saved file has no extension: rename it (for example to `.pdf` or `.png`) before opening.
+- **Download Content** -- the message payload only, saved byte for byte: a binary attachment as it is, a map or stream as its raw wire bytes (Solace's own encoding, which only a Solace API reads back; the YAML is in Download Full), and TEXT and XML messages as UTF-8 text. The file is named `solace-message-{id}.{ext}`:
+  - A binary payload takes the extension of the kind its first bytes show (`.png`, `.jpg`, `.gz`, `.zip`, `.pdf`, `.mp4` and so on), or `.bin` when the kind is not recognised. An executable also gets `.bin`, never `.exe` or its own extension.
+  - Text takes `.json`, `.xml`, `.csv`, `.yaml` or `.txt`, from the publisher's HTTP Content-Type when it names one of those, else from what the text looks like. HTML and SVG are saved as `.txt`.
+  - A map or stream gets `.bin`.
+
+  The per-row button opens the browser's save dialog on that name in Chrome and Edge, where you can change the name or the folder. Cancel saves nothing. Firefox and Safari save it straight to your downloads under that name. The file is always sent as `application/octet-stream`, so the browser never opens it. The bulk button puts each message into a ZIP archive under the same name.
 - **Download Full** -- the complete message as JSON, with all properties, headers, destination, timestamp and content. Each message becomes `solace-message-{id}-full.json` in a ZIP archive. The JSON shape is:
 
   ```json
@@ -305,7 +314,7 @@ Two download formats are available:
   > [!IMPORTANT]
   > This JSON structure is specific to this tool and may change in a future release. If you build automation against it, pin the tool's version.
 
-  A binary payload that is not text is carried as base64, with `"payloadEncoding": "base64"` next to `"payload"`. A text payload stays text and has no `payloadEncoding`.
+  A binary payload that is not text is carried as base64, with `"payloadEncoding": "base64"` next to `"payload"`. A map or stream is carried the same way, as its raw wire bytes, with `"payloadDecoded"` beside them: its fields as plain JSON (a map as an object, a stream as an array, bytes as `{ "base64": ... }`, a destination as `{ "topic": ... }`, and a 64-bit integer too large for JSON's numbers as text). A text payload stays text and has no `payloadEncoding`.
 
 Both are available as per-row buttons and as bulk toolbar buttons (when messages are selected).
 

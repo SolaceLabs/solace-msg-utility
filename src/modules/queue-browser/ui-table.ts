@@ -5,6 +5,7 @@ import { escapeHtml, solaceErrorText } from '../../core/utils';
 import { showToast } from '../../core/toast';
 import { required } from '../../core/dom';
 import { showPayload } from './features.js';
+import { contentFileName } from './payload.js';
 import { logger } from '../../core/logger';
 import { canOperate } from '../../core/rbac';
 import type { AppState, EventBus } from '../../core/types';
@@ -235,14 +236,14 @@ export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}
         const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
 
         // type is one of 'content' | 'full' — only call sites are ui-events.ts which
-        // pass those literals. A binary attachment goes in as its original bytes; any
-        // other body as its text (set in service-events.onMessage; '' when empty).
+        // pass those literals. A binary attachment, map or stream goes in as its
+        // original bytes; any other body as its text (set in service-events.onMessage;
+        // '' when empty). Each entry takes the name Download Content suggests.
         let zipFilename = '';
         if (type === 'content') {
             zipFilename = `solace-messages-content-${timestamp}.zip`;
             msgs.forEach((msg: any) => {
-                const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}`;
-                zip.file(filename, msg.bytes ?? msg.content);
+                zip.file(contentFileName(msg), msg.bytes ?? msg.content);
             });
         } else {
             zipFilename = `solace-messages-full-${timestamp}.zip`;

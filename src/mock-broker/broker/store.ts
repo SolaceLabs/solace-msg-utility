@@ -20,6 +20,7 @@
  */
 import { bytesToLatin1, createDestination, createMessage, payloadByteLength, type MessageFields, type MockDestination, type MockMessage } from '../sdk/message';
 import { DestinationType } from '../sdk/enums';
+import { PAYLOAD_SAMPLES } from './samples';
 import { BROKERS, DIRECT_BROKER, brokerVpns, scenario, queueStateOf, QUEUE_STATE } from '../fixtures';
 
 export interface SpooledMessage {
@@ -67,6 +68,25 @@ function key(vpn: string, queue: string): string {
     return `${vpn}/${queue}`;
 }
 
+/** A message of the payload samples queue: the sample's body, named by its correlation id and `sample` property. */
+function buildSample(vpn: string, queueName: string, n: number): SpooledMessage {
+    const id = nextId++;
+    const sample = PAYLOAD_SAMPLES[n];
+    const msg = createMessage({
+        ...sample.fields,
+        guaranteedMessageId: String(id),
+        destination: createDestination(queueName, DestinationType.QUEUE),
+        applicationMessageId: `sample-${sample.name}`,
+        correlationId: sample.name,
+        senderId: 'demo-publisher-0',
+        senderTimestamp: Date.parse('2026-08-01T09:00:00Z') + n * 60_000,
+        sequenceNumber: n + 1,
+        deliveryCount: 1,
+        userProperties: { source: `demo/${vpn}`, sample: sample.name },
+    });
+    return { id, msg, sizeBytes: payloadByteLength(msg._fields) + 120 };
+}
+
 function buildMessage(vpn: string, queueName: string, n: number): SpooledMessage {
     const id = nextId++;
     const variant = n % PAYLOAD_TEMPLATES.length;
@@ -107,9 +127,10 @@ export function seed(): void {
     for (const vpn of Array.from(BROKERS.values()).flat()) {
         for (const q of vpn.queues) {
             const state = queueStateOf(vpn.name, q.name);
-            const count = state === QUEUE_STATE.EMPTY ? 0 : Math.round(q.seed * scenario.volume);
+            // A samples queue is fixed: the volume lever does not scale it.
+            const count = state === QUEUE_STATE.EMPTY ? 0 : q.samples ? PAYLOAD_SAMPLES.length : Math.round(q.seed * scenario.volume);
             const messages: SpooledMessage[] = [];
-            for (let n = 0; n < count; n++) messages.push(buildMessage(vpn.name, q.name, n));
+            for (let n = 0; n < count; n++) messages.push(q.samples ? buildSample(vpn.name, q.name, n) : buildMessage(vpn.name, q.name, n));
             queues.set(key(vpn.name, q.name), {
                 vpn: vpn.name,
                 name: q.name,

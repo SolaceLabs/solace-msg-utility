@@ -20,6 +20,7 @@ request. For what each module does, see the [User Guide](user-guide.md).
   - [Opening the demo](#opening-the-demo)
   - [Connecting](#connecting)
   - [The demo topology](#the-demo-topology)
+  - [The payload samples queue](#the-payload-samples-queue)
   - [Demo controls](#demo-controls)
   - [What is not in the demo](#what-is-not-in-the-demo)
 - [Provisioned demo (`provisioned-demo.html`)](#provisioned-demo-provisioned-demohtml)
@@ -65,23 +66,44 @@ simulates an untrusted certificate on the messaging connection, so the error pat
 
 | VPN | Queues |
 | --- | --- |
-| `default` | `test-queue-1`, `test-queue-2`, `Q/EMPTY` |
+| `default` | `test-queue-1`, `test-queue-2`, `Q/EMPTY`, `demo/payload-samples` |
 | `vpn-prod` | `Q/ORDER/NEW`, `Q/ORDER/PROCESS`, `Q/ORDER/ARCHIVE`, `Q/LOGS/AUDIT`, `Q/DENIED` |
 | `vpn-dev` | `dev-scratch`, `Q/BULK` |
 | `vpn-finance` | `payments-Q`, `reports-daily` |
 
-Five of those are shaped to exercise a specific path rather than to look realistic:
+Six of those are shaped to exercise a specific path rather than to look realistic:
 
 - **`Q/LOGS/AUDIT`** is read-only -- Delete is hidden and the read-only badge shows.
 - **`Q/DENIED`** refuses to bind, so the bind-error path is visible.
 - **`Q/EMPTY`** binds and delivers nothing.
 - **`Q/BULK`** holds several hundred messages, enough for paging and for the copy engine's backpressure to engage.
 - **`Q/ORDER/ARCHIVE`** starts empty and is the natural destination for a Queue Copy demo.
+- **`demo/payload-samples`** holds one message of each kind the details pane tells apart; see [The payload samples queue](#the-payload-samples-queue).
 
 Two messages in `test-queue-1` and in `Q/ORDER/PROCESS` (the 5th and 6th) exercise payload handling. The 5th is UTF-8 text with non-ASCII characters and shows decoded in the details pane. The 6th is a 12-byte binary payload that is not valid UTF-8, so the details pane shows the size-only placeholder `[Binary payload: 12 bytes]` with the binary type badge. The demo SDK hands payloads back the way the real SDK does under its version10 profile (a Latin-1 string, one character per byte) and a copy or move stores them byte for byte, so the binary message arrives in the destination unchanged. At Small volume (a quarter of the seed) `test-queue-1` keeps both messages, but `Q/ORDER/PROCESS` holds only 4 messages, so it loses both; use Normal volume or larger to see them there.
 
 Queues carry topic subscriptions, so a forward to a topic really fans out: publishing to `orders/new/uk` lands in
 `Q/ORDER/NEW`, because that queue subscribes to `orders/new/>`.
+
+### The payload samples queue
+
+`demo/payload-samples` holds fourteen small messages, one of each kind of body Queue Browser can show. Each message's correlation ID and its `sample` user property name it. The queue always holds all fourteen: the volume setting does not change it. Browse it and select each message in turn:
+
+| Sample | What the details pane offers |
+| --- | --- |
+| `png-16x16`, `jpeg-16x16`, `gif-1x1`, `webp-16x16` | The image's kind and **Show preview**. Press it to see the picture. |
+| `png-too-large` | A PNG whose header declares 10000 x 10000 pixels (100 megapixels). **Show preview** refuses it, because the app decodes nothing above 40 megapixels. |
+| `pdf`, `gzip`, `zip` | The kind, and **Show hex**: the first bytes as a hex dump. |
+| `elf-header` | "ELF executable or library", and **Show hex**. It is only the 64-byte header of an executable; nothing in it runs, and the download is named `.bin`. |
+| `unknown-bytes` | No kind, since the bytes match no known file type, and **Show hex**. |
+| `json-text` | Text. Its publisher's Content-Type is `application/json`, so **Download Content** suggests `.json`. |
+| `xml-text` | Text with no Content-Type. It starts with `<?xml`, so **Download Content** suggests `.xml`. |
+| `sdt-map` | A map message shown as YAML: every scalar kind (text, whole numbers of several sizes, one beyond 2^53 that keeps all its digits, decimals, true or false, bytes, a topic and a queue, null), a map inside the map and a stream inside it. |
+| `sdt-stream` | A stream message shown as YAML, one `-` line per item, with a map and a stream among the items. |
+
+**Download Content** saves a binary sample's bytes as they are, under the name the kind suggests (`solace-message-<id>.png`, `.pdf`, `.gz`, `.zip`; `.bin` for the ELF header and the unknown bytes). The binary samples are generated, and none is larger than 600 bytes. The WebP is a plain orange square.
+
+The map and stream messages are the one place the demo is not exact. A real broker holds them in Solace's binary encoding, which the demo cannot produce. Their **Download Content** therefore saves a stand-in: a first line reading "SDT demo stand-in (not the Solace SDT encoding)" and the message's contents as JSON. The file is named `.bin`, the size shown is the stand-in's, and the YAML in the pane is decoded from the same contents, so it is what a real map or stream would show. Copy or forward either message and it arrives as a map or stream again, as it would on a real broker.
 
 ### Demo controls
 
@@ -145,12 +167,14 @@ With the setting at *Administrators must use it* or *Everyone must use it*, a si
 
 | Broker | Message VPN | Queues |
 | --- | --- | --- |
-| `east-prod` | `orders` | `orders.new`, `orders.process`, `orders.archive` (empty), `audit.orders` (read-only on the broker), `scratch.orders` |
+| `east-prod` | `orders` | `orders.new`, `orders.process`, `orders.archive` (empty), `audit.orders` (read-only on the broker), `scratch.orders`, `payload-samples` |
 | `east-prod` | `payments` | `payments.settled`, `payments.reversal`, `audit.payments` |
 | `west-dr` | `orders-dr` | `orders.new`, `orders.replay` (empty) |
 | `lab` | `sandbox` | `sandbox.scratch`, `sandbox.bulk` (300 messages) |
 
 Their hosts end in `.demo.invalid`, a name that never resolves.
+
+`payload-samples` is the same set of messages as `demo/payload-samples` in the Direct demo (see [The payload samples queue](#the-payload-samples-queue)). Every account that may browse `east-prod` / `orders` can open it; it is not a queue the operator can write to, because the operator's write rights are `orders.*` only.
 
 ### How it differs from a real gateway
 

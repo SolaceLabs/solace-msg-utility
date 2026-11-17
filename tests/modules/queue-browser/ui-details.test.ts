@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ui, els } from '../../../src/modules/queue-browser/ui-core.js';
 import { initDetails } from '../../../src/modules/queue-browser/ui-details';
 import { state } from '../../../src/modules/queue-browser/state.js';
@@ -8,6 +8,20 @@ import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 import type { AppContext } from '../../../src/core/types';
 import { completeContext } from '../../helpers/appContext';
+import { stubSavePicker, blobBytes } from '../../helpers/savePicker';
+
+// The toast container is declared once in src/index.html; the module test DOM
+// lacks it. Returns it emptied so a test reads only its own toasts.
+function freshToasts(): HTMLElement {
+    let c = document.getElementById('toast-container');
+    if (!c) {
+        c = document.createElement('div');
+        c.id = 'toast-container';
+        document.body.appendChild(c);
+    }
+    c.innerHTML = '';
+    return c;
+}
 
 function createBrowserDOM() {
     return loadModuleDOM('queue-browser');
@@ -54,54 +68,117 @@ describe('queue-browser/ui-details', () => {
     });
 
     describe('downloadMessageContent()', () => {
+        let picker: ReturnType<typeof stubSavePicker>;
+        let errorCalls: unknown[][];
+        let restoreError: () => void;
+
+        beforeEach(() => {
+            picker = stubSavePicker();
+            const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            errorCalls = spy.mock.calls;
+            restoreError = () => spy.mockRestore();
+        });
+
+        afterEach(() => {
+            picker.restore();
+            restoreError();
+        });
+
         it('returns early for null message', () => {
             ui.downloadMessageContent(null);
+            expect(picker.names).toEqual([]);
             expect(URL.createObjectURL).not.toHaveBeenCalled();
         });
 
-        it('handles empty content', () => {
-            const triggerSpy = vi.spyOn(ui, 'triggerDownload').mockImplementation(() => {});
-            ui.downloadMessageContent({ id: 'msg-2', content: '' });
+        it('saves text as application/octet-stream under a name that takes its extension from what the text is', async () => {
+            ui.downloadMessageContent({ id: 'msg-2', content: '{"a":1}', msgProperties: {} });
+            await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
 
-            expect(triggerSpy).toHaveBeenCalledTimes(1);
-            expect(triggerSpy.mock.calls[0][0]).toBe('solace-message-msg-2');
-            expect(triggerSpy.mock.calls[0][1]).toBe('');
-            triggerSpy.mockRestore();
+            expect(picker.names).toEqual(['solace-message-msg-2.json']);
+            expect(picker.blobs[0].type).toBe('application/octet-stream');
+            expect(await blobBytes(picker.blobs[0])).toEqual(Array.from(new TextEncoder().encode('{"a":1}')));
         });
 
-        it('sanitizes filename from message id', () => {
-            const triggerSpy = vi.spyOn(ui, 'triggerDownload');
-            const msg = { id: 'msg/special:chars!', content: 'test' };
-            ui.downloadMessageContent(msg);
-
-            // `/`, `:`, `!` are stripped by /[^a-zA-Z0-9-_]/g sanitizer in ui-details.ts.
-            expect(triggerSpy).toHaveBeenCalledTimes(1);
-            expect(triggerSpy.mock.calls[0][0]).toBe('solace-message-msgspecialchars');
-            expect(triggerSpy.mock.calls[0][1]).toBe('test');
-            triggerSpy.mockRestore();
+        it('takes the extension from the HTTP Type when it lists one', async () => {
+            ui.downloadMessageContent({ id: 'msg-5', content: 'a,b\n1,2', msgProperties: { 'HTTP Type': 'text/csv' } });
+            await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
+            expect(picker.names).toEqual(['solace-message-msg-5.csv']);
         });
 
-        it('saves a binary attachment byte for byte, typed by its HTTP Content-Type', async () => {
-            const saved = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
-            const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0xE2, 0xE3]);
+        it('saves empty content as an empty .txt file', async () => {
+            ui.downloadMessageContent({ id: 'msg-2', content: '', msgProperties: {} });
+            await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
+
+            expect(picker.names).toEqual(['solace-message-msg-2.txt']);
+            expect(picker.blobs[0].size).toBe(0);
+        });
+
+        it('sanitizes the message id in the file name', async () => {
+            ui.downloadMessageContent({ id: 'msg/special:chars!', content: 'test', msgProperties: {} });
+            await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
+
+            // `/`, `:`, `!` are stripped by the id sanitiser in contentFileName.
+            expect(picker.names).toEqual(['solace-message-msgspecialchars.txt']);
+        });
+
+        it('saves a recognised binary attachment byte for byte, with its kind\'s extension, never typed as the HTTP Type', async () => {
+            const bytes = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0xE2, 0xE3]);
             ui.downloadMessageContent({
-                id: 'msg-3', content: '[Binary payload: 6 bytes]', bytes, binary: true,
-                msgProperties: { 'HTTP Type': 'application/pdf' }
+                id: 'msg-3', content: '[Binary payload: 10 bytes]', bytes, binary: true,
+                msgProperties: { 'HTTP Type': 'image/png' }
             });
+            await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
 
-            const [blob, filename] = saved.mock.calls[0] as [Blob, string];
-            expect([filename, blob.type]).toEqual(['solace-message-msg-3', 'application/pdf']);
-            expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual(Array.from(bytes));
+            expect(picker.names).toEqual(['solace-message-msg-3.png']);
+            expect(picker.blobs[0].type).toBe('application/octet-stream');
+            expect(await blobBytes(picker.blobs[0])).toEqual(Array.from(bytes));
         });
 
-        it('saves a binary attachment without an HTTP Content-Type as application/octet-stream', () => {
-            const saved = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
+        it('saves a binary attachment no signature names as .bin', async () => {
             ui.downloadMessageContent({
                 id: 'msg-4', content: '[Binary payload: 1 byte]', bytes: new Uint8Array([0x00]), binary: true,
                 msgProperties: {}
             });
+            await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
+            expect(picker.names).toEqual(['solace-message-msg-4.bin']);
+        });
 
-            expect((saved.mock.calls[0][0] as Blob).type).toBe('application/octet-stream');
+        it('saves a map or stream as its wire bytes, not the YAML shown, as .bin', async () => {
+            const wire = new Uint8Array([0x2B, 0x10, 0x00, 0xFF]);
+            ui.downloadMessageContent({
+                id: 'msg-6', content: 'a: 1', bytes: wire, binary: false,
+                sdt: { type: 'map', entries: [['a', { type: 'integer', value: 1 }]] },
+                msgProperties: { 'HTTP Type': 'application/json' }
+            });
+            await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
+
+            expect(picker.names).toEqual(['solace-message-msg-6.bin']);
+            expect(await blobBytes(picker.blobs[0])).toEqual(Array.from(wire));
+        });
+
+        it('shows an error toast naming the file and the cause when the save fails', async () => {
+            picker.restore();
+            picker = stubSavePicker({ writeError: new Error('disk full') });
+            const toasts = freshToasts();
+
+            ui.downloadMessageContent({ id: 'msg-7', content: 'x', msgProperties: {} });
+
+            await vi.waitFor(() => expect(toasts.querySelector('.toast--error')).not.toBeNull());
+            expect(toasts.querySelector('.toast--error')!.textContent).toBe('Could not save solace-message-msg-7.txt: disk full');
+            expect(errorCalls.length).toBeGreaterThan(0);
+        });
+
+        it('shows no toast when the user cancels the save dialog', async () => {
+            picker.restore();
+            picker = stubSavePicker({ cancel: true });
+            const toasts = freshToasts();
+
+            ui.downloadMessageContent({ id: 'msg-8', content: 'x', msgProperties: {} });
+            await vi.waitFor(() => expect(picker.names).toEqual(['solace-message-msg-8.txt']));
+            await new Promise(resolve => setTimeout(resolve, 0));
+
+            expect(toasts.children).toHaveLength(0);
+            expect(picker.blobs).toEqual([]);
         });
     });
 
@@ -135,6 +212,42 @@ describe('queue-browser/ui-details', () => {
             };
             const result = ui.getFullMessageJson(msg);
             expect([result.payload, result.payloadEncoding]).toEqual(['iVBORw==', 'base64']);
+            expect(result).not.toHaveProperty('payloadDecoded');
+        });
+
+        it('carries a map as its wire bytes in base64, with its decoded fields beside them', () => {
+            const wire = new Uint8Array([0x2B, 0x10, 0x00, 0xFF]);
+            const msg = {
+                id: 'msg-1', type: 'Map', content: 'a: 1', bytes: wire, binary: false,
+                sdt: {
+                    type: 'map',
+                    entries: [
+                        ['a', { type: 'integer', value: 1 }],
+                        ['big', { type: 'integer', value: '9223372036854775807' }],
+                        ['raw', { type: 'bytes', value: new Uint8Array([1, 2, 3]) }],
+                        ['list', { type: 'stream', items: [{ type: 'float', value: NaN }, { type: 'destination', kind: 'topic', name: 'a/b' }] }],
+                    ],
+                },
+                msgProperties: {}, appProperties: {},
+                _originalMsg: { getDestination: () => null }
+            };
+            const result = ui.getFullMessageJson(msg);
+
+            expect([result.payload, result.payloadEncoding]).toEqual(['KxAA/w==', 'base64']);
+            expect(result.payloadDecoded).toEqual({
+                a: 1, big: '9223372036854775807', raw: { base64: 'AQID' }, list: ['NaN', { topic: 'a/b' }],
+            });
+        });
+
+        it('carries a stream the same way', () => {
+            const msg = {
+                id: 'msg-1', type: 'Stream', content: '- x', bytes: new Uint8Array([0x2C]), binary: false,
+                sdt: { type: 'stream', items: [{ type: 'string', value: 'x' }] },
+                msgProperties: {}, appProperties: {},
+                _originalMsg: { getDestination: () => null }
+            };
+            const result = ui.getFullMessageJson(msg);
+            expect([result.payload, result.payloadEncoding, result.payloadDecoded]).toEqual(['LA==', 'base64', ['x']]);
         });
 
         it('extracts destination from _originalMsg with Topic type', () => {
@@ -392,6 +505,254 @@ describe('queue-browser/ui-details', () => {
             els.btnShowRaw.click();
             expect(els.rawContentText.textContent).toBe('raw text');
             expect(els.modalRaw.open).toBe(true);
+        });
+    });
+
+    describe('binary payload tools', () => {
+        const originalMsg = {
+            getDestination: () => ({ getName: () => 'd', getType: () => 0 }),
+            getReplicationGroupMessageId: () => null,
+            dump: () => '',
+        };
+        const u32be = (n: number): number[] => [(n >>> 24) & 0xFF, (n >>> 16) & 0xFF, (n >>> 8) & 0xFF, n & 0xFF];
+
+        /** A PNG's signature and IHDR chunk header declaring `w` x `h`, then a few bytes of data. */
+        const png = (w: number, h: number): Uint8Array => Uint8Array.from([
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, ...u32be(13), 0x49, 0x48, 0x44, 0x52, ...u32be(w), ...u32be(h), 8, 6, 0, 0, 0,
+        ]);
+        const ascii = (s: string): Uint8Array => new TextEncoder().encode(s);
+
+        const textMsg = (id: string) => ({ id, type: 'Text', content: 'hello', binary: false, msgProperties: {}, appProperties: {}, _originalMsg: originalMsg });
+        const binaryMsg = (id: string, bytes: Uint8Array) => ({
+            id, type: 'Binary', content: `[Binary payload: ${bytes.length} bytes]`, bytes, binary: true,
+            msgProperties: {}, appProperties: {}, _originalMsg: originalMsg,
+        });
+        const show = (...msgs: any[]) => {
+            state.displayedMessages = msgs;
+            state.allMessages = msgs;
+            ui.renderList();
+        };
+        const isHidden = (el: Element) => el.classList.contains('hidden');
+        const useUrl = (url: string) => (URL.createObjectURL as any).mockReturnValue(url);
+
+        it('shows none of the tools for a text message, and revokes nothing', () => {
+            show(textMsg('t1'), textMsg('t2'));
+            ui.selectMessage('t1');
+            ui.selectMessage('t2');
+
+            for (const el of [els.detailBinary, els.btnShowPreview, els.btnShowHex, els.detailBinaryNote, els.detailPreview, els.detailHex]) {
+                expect(isHidden(el)).toBe(true);
+            }
+            expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+        });
+
+        it('offers an image only Show preview, and decodes nothing until it is clicked', () => {
+            show(binaryMsg('b1', png(640, 480)));
+            ui.selectMessage('b1');
+
+            expect(els.detailContent.textContent).toBe('[Binary payload: 29 bytes]');
+            expect(els.detailBinaryKind.textContent).toBe('Looks like: PNG image');
+            expect(isHidden(els.detailBinary)).toBe(false);
+            expect(isHidden(els.btnShowPreview)).toBe(false);
+            expect(els.btnShowPreview.textContent).toBe('Show preview');
+            expect(isHidden(els.btnShowHex)).toBe(true);
+            expect(isHidden(els.detailPreview)).toBe(true);
+            expect(els.detailPreview.hasAttribute('src')).toBe(false);
+            expect(URL.createObjectURL).not.toHaveBeenCalled();
+        });
+
+        it('offers a recognised non-image only Show hex', () => {
+            show(binaryMsg('b1', ascii('%PDF-1.7')));
+            ui.selectMessage('b1');
+
+            expect(els.detailBinaryKind.textContent).toBe('Looks like: PDF document');
+            expect(isHidden(els.btnShowHex)).toBe(false);
+            expect(els.btnShowHex.textContent).toBe('Show hex');
+            expect(isHidden(els.btnShowPreview)).toBe(true);
+        });
+
+        it('says so when no kind is recognised, and still offers Show hex', () => {
+            show(binaryMsg('b1', Uint8Array.from([1, 2, 3, 4])));
+            ui.selectMessage('b1');
+
+            expect(els.detailBinaryKind.textContent).toBe('Kind not recognised');
+            expect(isHidden(els.btnShowHex)).toBe(false);
+            expect(isHidden(els.btnShowPreview)).toBe(true);
+        });
+
+        it('shows the bytes as a hex dump on Show hex and hides them again on Hide hex', () => {
+            show(binaryMsg('b1', ascii('%PDF-1.7')));
+            ui.selectMessage('b1');
+
+            els.btnShowHex.click();
+            expect(isHidden(els.detailHex)).toBe(false);
+            expect(els.detailHex.textContent).toBe(`00000000  25 50 44 46 2d 31 2e 37  ${' '.repeat(23)}  |%PDF-1.7|`);
+            expect(els.btnShowHex.textContent).toBe('Hide hex');
+
+            els.btnShowHex.click();
+            expect(isHidden(els.detailHex)).toBe(true);
+            expect(els.detailHex.textContent).toBe('');
+            expect(els.btnShowHex.textContent).toBe('Show hex');
+        });
+
+        it('shows only the first 512 bytes in hex, and says how many it left out', () => {
+            show(binaryMsg('b1', new Uint8Array(600).fill(0xAB)));
+            ui.selectMessage('b1');
+            els.btnShowHex.click();
+
+            const lines = els.detailHex.textContent.split('\n');
+            expect(lines).toHaveLength(33);
+            expect(lines[32]).toBe('... 88 more bytes');
+        });
+
+        it('previews an image on Show preview: an object URL of the image type, its size, and a Hide preview button', async () => {
+            useUrl('blob:preview-1');
+            const bytes = png(640, 480);
+            show(binaryMsg('b1', bytes));
+            ui.selectMessage('b1');
+
+            els.btnShowPreview.click();
+
+            const blob = (URL.createObjectURL as any).mock.calls[0][0] as Blob;
+            expect(blob.type).toBe('image/png');
+            expect(await blobBytes(blob)).toEqual(Array.from(bytes));
+            expect(els.detailPreview.getAttribute('src')).toBe('blob:preview-1');
+            expect(isHidden(els.detailPreview)).toBe(false);
+            expect(els.detailBinaryNote.textContent).toBe('640 x 480 pixels');
+            expect(isHidden(els.detailBinaryNote)).toBe(false);
+            expect(els.btnShowPreview.textContent).toBe('Hide preview');
+        });
+
+        it('hides the preview on Hide preview and revokes its URL, and a second Show preview makes a fresh one', () => {
+            useUrl('blob:preview-1');
+            show(binaryMsg('b1', png(640, 480)));
+            ui.selectMessage('b1');
+            els.btnShowPreview.click();
+
+            els.btnShowPreview.click();
+            expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+            expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-1');
+            expect(isHidden(els.detailPreview)).toBe(true);
+            expect(els.detailPreview.hasAttribute('src')).toBe(false);
+            expect(isHidden(els.detailBinaryNote)).toBe(true);
+            expect(els.btnShowPreview.textContent).toBe('Show preview');
+
+            useUrl('blob:preview-2');
+            els.btnShowPreview.click();
+            expect(els.detailPreview.getAttribute('src')).toBe('blob:preview-2');
+            expect(isHidden(els.detailPreview)).toBe(false);
+            expect(els.btnShowPreview.textContent).toBe('Hide preview');
+        });
+
+        it('refuses a preview, before decoding, when the image header gives no size', () => {
+            show(binaryMsg('b1', Uint8Array.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3])));
+            ui.selectMessage('b1');
+
+            els.btnShowPreview.click();
+
+            expect(els.detailBinaryNote.textContent).toBe('Not shown: the image\'s header does not say how large it is.');
+            expect(isHidden(els.detailBinaryNote)).toBe(false);
+            expect(URL.createObjectURL).not.toHaveBeenCalled();
+            expect(isHidden(els.detailPreview)).toBe(true);
+            expect(els.btnShowPreview.textContent).toBe('Show preview');
+        });
+
+        it('refuses a preview above 40 megapixels, naming the size and the limit, and allows exactly 40', () => {
+            show(binaryMsg('big', png(8001, 5000)), binaryMsg('edge', png(8000, 5000)));
+            ui.selectMessage('big');
+            els.btnShowPreview.click();
+
+            expect(els.detailBinaryNote.textContent).toBe('Not shown: 8001 x 5000 pixels is more than the 40-megapixel limit.');
+            expect(URL.createObjectURL).not.toHaveBeenCalled();
+            expect(isHidden(els.detailPreview)).toBe(true);
+
+            useUrl('blob:preview-1');
+            ui.selectMessage('edge');
+            els.btnShowPreview.click();
+            expect(els.detailBinaryNote.textContent).toBe('8000 x 5000 pixels');
+            expect(els.detailPreview.getAttribute('src')).toBe('blob:preview-1');
+        });
+
+        it('hides the image and says it could not be decoded when the browser cannot decode it', () => {
+            useUrl('blob:preview-1');
+            show(binaryMsg('b1', png(10, 10)));
+            ui.selectMessage('b1');
+            els.btnShowPreview.click();
+
+            els.detailPreview.dispatchEvent(new Event('error'));
+
+            expect(isHidden(els.detailPreview)).toBe(true);
+            expect(els.detailBinaryNote.textContent).toBe('The image could not be decoded.');
+            expect(isHidden(els.detailBinaryNote)).toBe(false);
+            // Its bytes are let go, and Show preview is offered again.
+            expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-1');
+            expect(els.btnShowPreview.textContent).toBe('Show preview');
+        });
+
+        it('a late error event from an image the pane has moved on from changes nothing', () => {
+            useUrl('blob:preview-1');
+            show(binaryMsg('b1', png(10, 10)), binaryMsg('b2', new Uint8Array([0x9c, 0x01, 0x02])));
+            ui.selectMessage('b1');
+            els.btnShowPreview.click();
+            ui.selectMessage('b2');
+
+            els.detailPreview.dispatchEvent(new Event('error'));
+
+            expect(isHidden(els.detailBinaryNote)).toBe(true);
+            expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+        });
+
+        it('revokes a shown preview\'s URL and hides every tool when the details are cleared', () => {
+            useUrl('blob:preview-1');
+            show(binaryMsg('b1', png(640, 480)));
+            ui.selectMessage('b1');
+            els.btnShowPreview.click();
+
+            ui.clearDetails();
+
+            expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+            expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-1');
+            for (const el of [els.detailBinary, els.btnShowPreview, els.btnShowHex, els.detailBinaryNote, els.detailPreview, els.detailHex]) {
+                expect(isHidden(el)).toBe(true);
+            }
+            expect(els.detailPreview.hasAttribute('src')).toBe(false);
+            expect(els.detailBinaryNote.textContent).toBe('');
+
+            ui.clearDetails();
+            expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+        });
+
+        it('revokes a shown preview\'s URL when another message is selected, and hides the tools for a text message', () => {
+            useUrl('blob:preview-1');
+            show(binaryMsg('b1', png(640, 480)), textMsg('t1'));
+            ui.selectMessage('b1');
+            els.btnShowPreview.click();
+
+            ui.selectMessage('t1');
+
+            expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-1');
+            expect(isHidden(els.detailBinary)).toBe(true);
+            expect(isHidden(els.detailPreview)).toBe(true);
+            expect(els.detailPreview.hasAttribute('src')).toBe(false);
+        });
+
+        it('starts the next binary message clean: no hex left open, and its own buttons act on its own bytes', async () => {
+            const second = png(32, 16);
+            show(binaryMsg('b1', ascii('%PDF-1.7')), binaryMsg('b2', second));
+            ui.selectMessage('b1');
+            els.btnShowHex.click();
+
+            ui.selectMessage('b2');
+            expect(isHidden(els.detailHex)).toBe(true);
+            expect(els.detailHex.textContent).toBe('');
+            expect(els.btnShowHex.textContent).toBe('Show hex');
+            expect(isHidden(els.btnShowHex)).toBe(true);
+            expect(isHidden(els.btnShowPreview)).toBe(false);
+
+            els.btnShowPreview.click();
+            const blob = (URL.createObjectURL as any).mock.calls[0][0] as Blob;
+            expect(await blobBytes(blob)).toEqual(Array.from(second));
+            expect(els.detailBinaryNote.textContent).toBe('32 x 16 pixels');
         });
     });
 

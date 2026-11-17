@@ -157,7 +157,7 @@ src/
                        # matchContains, topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
                        # solaceErrorText, isValidHost, isValidPort)
     icons.ts           # Shared inline SVG icons (ICONS) + iconButton() -- labelled icon-only buttons
-    download.ts        # downloadBlob(): save a Blob as a named file (queue-browser, backup)
+    download.ts        # downloadBlob(): save a Blob as a named file (queue-browser, backup); saveBlob(): the save dialog where the browser has one
     timing.ts          # Shared INPUT_DEBOUNCE_MS for input-driven feedback
     toast.ts           # Toast notification system
     logger.ts          # Leveled logger every module writes through (?logLevel= URL override)
@@ -231,13 +231,15 @@ src/
       module.ts        # Event listener wiring
       service.ts       # Browser create, forward, delete
       features.ts      # Build-time flavor flag -- showPayload() reads VITE_SHOW_PAYLOAD
-      payload.ts       # Binary-attachment helpers: attachmentBytes, classifyAttachment (text vs size-only placeholder)
+      payload.ts       # Payload helpers: attachmentBytes, classifyAttachment (text vs size-only placeholder), contentFileName
+      file-kind.ts     # A binary payload's kind from its first bytes, image size, hex dump
+      sdt.ts           # Map and stream bodies decoded: YAML for the pane, JSON for Download Full
       service-events.ts # onMessage, onBrowserUp/Down, ACK/REJECT
       state.js         # Message store, filter logic
       ui-core.js       # Element cache, visibility, counts
       ui-events.ts     # User action handlers
       ui-table.ts      # Table rendering, ZIP download
-      ui-details.ts    # Detail panel, property display
+      ui-details.ts    # Detail panel, property display, a binary payload's preview and hex view
       ui-forward.js    # Forward modal + ACK tracking
       constants.js     # SVG icon strings used in rendered rows
       styles.css       # Module-scoped styles

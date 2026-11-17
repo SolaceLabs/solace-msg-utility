@@ -87,14 +87,16 @@ export const QueueBrowserModule = {
             '#forward-dest-name', '#forward-dest-type',
             '#forward-error', '#forward-msg-list', '#forward-queue-count'
         ];
-        // Payload-bearing elements (Content Preview, Show Raw + modal, Download
-        // Content/Full, Body filter) exist only in the show-payload flavor — they were
+        // Payload-bearing elements (Content Preview with its binary preview and
+        // hex view, Show Raw + modal, Download Content/Full, Body filter) exist only in the show-payload flavor — they were
         // removed from the DOM above in the no-payload flavor, so assert them only when present.
         if (showPayload()) {
             requiredSelectors.push(
                 '#filter-content',
                 '#btn-browser-download-content', '#btn-browser-download-full',
                 '#btn-copy-content', '#detail-content',
+                '#detail-binary', '#detail-binary-kind', '#btn-show-preview', '#btn-show-hex',
+                '#detail-binary-note', '#detail-preview', '#detail-hex',
                 '#btn-show-raw', '#btn-raw-close', '#browser-raw-content-modal', '#raw-content-text'
             );
         }
