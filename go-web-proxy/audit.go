@@ -132,7 +132,9 @@ type auditWrote struct {
 // audit.onFailure values: what the gateway does once an audit record could
 // not be written. continue (the default) logs the lost record loudly and goes
 // on; refuse also refuses every change (503 audit_unavailable) until a record
-// can be written again. Sign-ins and reads are never refused.
+// can be written again. Reads, sign-outs, a restart and a sign-in that writes
+// nothing are never refused; the sign-in steps that write (a recovery code, a
+// forced password change or two-factor set-up) are.
 const (
 	auditOnFailureContinue = "continue"
 	auditOnFailureRefuse   = "refuse"

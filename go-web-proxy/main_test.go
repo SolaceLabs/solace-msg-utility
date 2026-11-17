@@ -532,6 +532,12 @@ func TestServe_GatewayModeStartsAndShutsDownOnASignal(t *testing.T) {
 	if strings.Contains(log, "administration app enabled") {
 		t.Error("Gateway mode enabled the admin console")
 	}
+	// The lifecycle lines name their component, as every other line does.
+	for _, msg := range []string{`msg="config file seeded`, `msg=listening`, `msg="shutdown signal received"`, `msg="shutdown complete"`} {
+		if line := logLine(log, msg); !strings.Contains(line, "component=gateway") {
+			t.Errorf("want component=gateway on %q", line)
+		}
+	}
 }
 
 // A start in Provisioned mode: the stores and their key are made, the admin

@@ -66,7 +66,7 @@ func (d *dialer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	target, ok := d.store.smfTarget(user, body.Broker, body.Vpn)
 	if !ok {
-		d.logger.Info("dial denied", "user", user, "broker", body.Broker, "vpn", body.Vpn)
+		d.logger.Warn("dial denied", "user", user, "broker", body.Broker, "vpn", body.Vpn)
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}

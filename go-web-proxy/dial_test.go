@@ -66,8 +66,8 @@ func TestDial_Refusals(t *testing.T) {
 			t.Errorf("%v: the 404 differs: %q", bv, rec.Body.String())
 		}
 	}
-	if !strings.Contains(e.log.String(), `msg="dial denied" component=dial user=viewer broker=b2 vpn=v9`) {
-		t.Errorf("a denied dial must be logged:\n%s", e.log.String())
+	if !strings.Contains(e.log.String(), `level=WARN msg="dial denied" component=dial user=viewer broker=b2 vpn=v9`) {
+		t.Errorf("a denied dial is a WARN, as every refusal:\n%s", e.log.String())
 	}
 	for _, tc := range []struct {
 		method, body string

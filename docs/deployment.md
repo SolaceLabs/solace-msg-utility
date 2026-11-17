@@ -229,14 +229,14 @@ The gateway keys three things on the client's address: the access list (`access.
 
 The gateway logs to standard error, one `key=value` line per event, at the level `LOG_LEVEL` sets (the `logLevel` setting, which in Provisioned mode changes live on Gateway Settings):
 
-- **error:** something failed and needs attention: a start that cannot proceed, a request the gateway could not serve (a handler that crashed is answered `500` and logged here, with a stack trace at `debug`), a failed backup.
+- **error:** something failed and needs attention: a start that cannot proceed, a request the gateway could not serve (a handler that crashed is answered `500` and logged here, with its stack trace on the same line), a failed backup.
 - **warn:** a recoverable problem: a denied client, a burst of failed sign-ins, a broker the relay could not reach, a full throttle table, a setting that is ignored.
 - **info:** what happened: each request (with the resolved client and the signed-in user), sign-ins, dials, every administrator's change to users, connections and settings, backups written, imports and exports.
 - **debug:** traces.
 
 Provisioned mode also keeps an [audit trail](provisioned-mode.md#audit-trail) of who did what, in `/data/audit.log`, apart from this log and never filtered by `LOG_LEVEL`; `SMU_SHOW_AUDIT=true` copies it to standard output.
 
-Each line names its `component` and what it concerns (`user`, `client`, `broker`, `vpn`, `path`, `target`); no password or key is ever logged (the standard is in [developer-guide.md -> Logging standard](developer-guide.md#logging-standard)). One line, `gateway starting`, is written at every level: the version, the mode, the files, the access list, the trusted proxies, the TLS settings and, in Provisioned mode, the sign-in and session limits the gateway runs with.
+Each line names its `component` and what it concerns (`user`, `client`, `broker`, `vpn`, `path`, `target`); no password or key is ever logged, except the first administrator's generated password, once, in Provisioned mode (see [provisioned-mode.md -> Start it](provisioned-mode.md#start-it); the standard is in [developer-guide.md -> Logging standard](developer-guide.md#logging-standard)). One line, `gateway starting`, is written at every level: the version, the mode, the files, the access list, the trusted proxies, the TLS settings and, in Provisioned mode, the sign-in and session limits the gateway runs with.
 
 ---
 

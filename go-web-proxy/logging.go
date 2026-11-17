@@ -20,8 +20,10 @@ import (
 // Every line names its component (a "component" attribute, set once per
 // handler with logger.With) and the identifiers it concerns as attributes,
 // never inside the message: user, client, broker, vpn, path, op, target.
-// Secrets are never logged. The startup summary (logStartup) is the one line
-// every level shows.
+// Secrets are never logged, with one exception: the bootstrap administrator's
+// generated password, once, on a first start with no SMU_ADMIN_PASSWORD
+// (store.go), as the log is the only place an operator can read it. The
+// startup summary (logStartup) is the one line every level shows.
 
 type requestInfoKey struct{}
 
@@ -81,7 +83,8 @@ func requestLogger(base *slog.Logger, r *http.Request) *slog.Logger {
 
 // recoverPanics turns a handler panic into a 500 server_error and an ERROR
 // line naming the request (client, method, path, user; never its body), with
-// the stack at DEBUG. Without it net/http recovers the panic itself and logs
+// the stack on the same line, so the first panic on a deployment at the
+// default level can be located (as the writer's own panic lines are). Without it net/http recovers the panic itself and logs
 // it through ErrorLog, which carries TLS handshake noise at INFO and is
 // therefore dropped at the default level. http.ErrAbortHandler is net/http's
 // own way to abort a response, not a fault: it passes on.
@@ -96,8 +99,7 @@ func recoverPanics(next http.Handler, logger *slog.Logger) http.Handler {
 				panic(v)
 			}
 			log := requestLogger(logger, r)
-			log.Error("handler panicked; answered 500", "panic", fmt.Sprint(v))
-			log.Debug("handler panic stack", "stack", string(debug.Stack()))
+			log.Error("handler panicked; answered 500", "panic", fmt.Sprint(v), "stack", string(debug.Stack()))
 			writeError(w, http.StatusInternalServerError, "server_error")
 		}()
 		next.ServeHTTP(w, r)

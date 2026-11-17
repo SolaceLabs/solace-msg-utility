@@ -32,8 +32,8 @@ func TestRecoverPanics_LogsAndAnswers500(t *testing.T) {
 			t.Errorf("the panic line lacks %q: %s", want, line)
 		}
 	}
-	if !strings.Contains(logLine(log, "handler panic stack"), "level=DEBUG") || !strings.Contains(log, "logging_test.go") {
-		t.Errorf("the stack goes to debug: %s", log)
+	if !strings.Contains(line, "stack=") || !strings.Contains(line, "logging_test.go") {
+		t.Errorf("the stack is on the ERROR line, so the default level shows where it happened: %s", line)
 	}
 	if strings.Contains(log, "secret-request-body") {
 		t.Error("the request body must never be logged")

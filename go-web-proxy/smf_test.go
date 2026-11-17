@@ -311,6 +311,9 @@ func TestSMF_RefusalsNeverReachTheBroker(t *testing.T) {
 	if n := s.broker.hits(); n != 0 {
 		t.Errorf("a refused socket must never reach the broker (%d calls)", n)
 	}
+	if logLine(s.log.String(), "level=WARN", `msg="smf denied"`, "user=viewer", "broker=b2", "vpn=v9") == "" {
+		t.Errorf("a socket refused for entitlement is a WARN naming the user, broker and VPN:\n%s", s.log.String())
+	}
 }
 
 // A revocation between the session gate and the socket's registration is

@@ -190,15 +190,15 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, fmt.Errorf("LOG_LEVEL=%q: %w", os.Getenv("LOG_LEVEL"), err)
 	}
-	hosted, err := parseHosted(os.Getenv("SMU_HOSTED"))
+	hosted, err := parseStrictBool(os.Getenv("SMU_HOSTED"), d.hosted)
 	if err != nil {
 		return config{}, fmt.Errorf("SMU_HOSTED=%q: %w", os.Getenv("SMU_HOSTED"), err)
 	}
-	insecure, err := parseInsecureSkipVerify(os.Getenv("SMU_SSL_SKIP_CERT_VERIFY"))
+	insecure, err := parseStrictBool(os.Getenv("SMU_SSL_SKIP_CERT_VERIFY"), d.insecureSkipVerify)
 	if err != nil {
 		return config{}, fmt.Errorf("SMU_SSL_SKIP_CERT_VERIFY=%q: %w", os.Getenv("SMU_SSL_SKIP_CERT_VERIFY"), err)
 	}
-	showAudit, err := parseShowAudit(os.Getenv("SMU_SHOW_AUDIT"))
+	showAudit, err := parseStrictBool(os.Getenv("SMU_SHOW_AUDIT"), d.audit.stdout)
 	if err != nil {
 		return config{}, fmt.Errorf("SMU_SHOW_AUDIT=%q: %w", os.Getenv("SMU_SHOW_AUDIT"), err)
 	}
@@ -224,43 +224,19 @@ func loadConfig() (config, error) {
 	}, nil
 }
 
-// parseHosted reads SMU_HOSTED. Gateway mode is the image's purpose, so unset is
-// true; "false" makes the gateway serve the files only (browsers then connect
-// to brokers themselves). Anything else is refused rather than guessed.
-func parseHosted(raw string) (bool, error) {
+// parseStrictBool reads a boolean seed variable (SMU_HOSTED,
+// SMU_SSL_SKIP_CERT_VERIFY, SMU_SHOW_AUDIT): unset is def, the setting's
+// default; "true" and "false" are themselves; anything else (TRUE, 1, yes) is
+// refused rather than guessed, since the value is written into config.yaml on
+// the first start.
+func parseStrictBool(raw string, def bool) (bool, error) {
 	switch raw {
-	case "", "true":
+	case "":
+		return def, nil
+	case "true":
 		return true, nil
 	case "false":
 		return false, nil
-	}
-	return false, errors.New(`must be "true" or "false"`)
-}
-
-// parseInsecureSkipVerify reads SMU_SSL_SKIP_CERT_VERIFY as strictly as
-// parseHosted: unset or "false" verifies brokers' certificates, "true" turns
-// that off, and anything else (TRUE, 1, yes) is refused rather than guessed,
-// since the value is written into config.yaml on the first start.
-func parseInsecureSkipVerify(raw string) (bool, error) {
-	switch raw {
-	case "", "false":
-		return false, nil
-	case "true":
-		return true, nil
-	}
-	return false, errors.New(`must be "true" or "false"`)
-}
-
-// parseShowAudit reads SMU_SHOW_AUDIT as strictly as parseInsecureSkipVerify:
-// unset or "false" keeps the audit copy off stdout, "true" turns it on, and
-// anything else is refused, since the value is written into config.yaml on the
-// first start.
-func parseShowAudit(raw string) (bool, error) {
-	switch raw {
-	case "", "false":
-		return false, nil
-	case "true":
-		return true, nil
 	}
 	return false, errors.New(`must be "true" or "false"`)
 }
@@ -403,7 +379,7 @@ func serve(p process) error {
 	// Everything serveUntilStopped opened is closed: the audit log, the stores,
 	// the listener.
 	if err := p.restart(); err != nil {
-		slog.New(slog.NewTextHandler(p.log, nil)).Error("gateway restart failed: the program could not be started again, so the gateway is exiting for the platform's restart policy to start it", "err", err)
+		slog.New(slog.NewTextHandler(p.log, nil)).With("component", "gateway").Error("gateway restart failed: the program could not be started again, so the gateway is exiting for the platform's restart policy to start it", "err", err)
 		return err
 	}
 	return nil
@@ -416,7 +392,7 @@ func serveUntilStopped(p process, restart *bool) error {
 	// exist yet. A bootstrap logger at the default level carries the one error
 	// that can happen before it.
 	configFile := p.configFile
-	boot := slog.New(slog.NewTextHandler(p.log, nil))
+	boot := slog.New(slog.NewTextHandler(p.log, nil)).With("component", "gateway")
 
 	// Before anything reads config.yaml: a store write the last process left
 	// half done is rolled back, or its leftovers are swept (fileutil.go). The
@@ -441,7 +417,10 @@ func serveUntilStopped(p process, restart *bool) error {
 	// The live keys (live.go), the log level among them, are read per request
 	// from lv, so a save on the settings page reaches them without a restart.
 	lv := newLive(cfg)
-	logger := slog.New(slog.NewTextHandler(p.log, &slog.HandlerOptions{Level: &lv.level}))
+	// base is what each component's logger is made from; logger, the
+	// gateway's own lifecycle lines (start, the listener, the shutdown).
+	base := slog.New(slog.NewTextHandler(p.log, &slog.HandlerOptions{Level: &lv.level}))
+	logger := base.With("component", "gateway")
 
 	if load.seeded {
 		logger.Info("config file seeded from the environment; it is authoritative from now on", "path", configFile)
@@ -463,7 +442,7 @@ func serveUntilStopped(p process, restart *bool) error {
 
 	// A certificate replacement the last process left half done is rolled back
 	// (or its leftovers swept) before the pair is loaded.
-	tlsLog := logger.With("component", "tls")
+	tlsLog := base.With("component", "tls")
 	if err := recoverTLSPair(cfg.certFile, cfg.keyFile, tlsLog); err != nil {
 		logger.Error("TLS directory recovery failed", "err", err)
 		return err
@@ -490,7 +469,7 @@ func serveUntilStopped(p process, restart *bool) error {
 	upstream := newUpstreamTransport(trust)
 	// Files only (hosted: false): browsers reach brokers themselves, so the
 	// relay paths are refused, not left open.
-	var relay http.Handler = newReverseProxy(upstream, logger.With("component", "direct-relay"))
+	var relay http.Handler = newReverseProxy(upstream, base.With("component", "direct-relay"))
 	if !cfg.hosted {
 		relay = http.HandlerFunc(refuseRelay)
 	}
@@ -503,7 +482,7 @@ func serveUntilStopped(p process, restart *bool) error {
 	if auditOut == nil {
 		auditOut = io.Discard
 	}
-	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, data: load.data}, upstream, tm, auditOut, logger)
+	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, data: load.data}, upstream, tm, auditOut, base)
 	if err != nil {
 		logger.Error("provisioned store load failed", "err", err)
 		return err
@@ -517,7 +496,7 @@ func serveUntilStopped(p process, restart *bool) error {
 
 	// The mode's bundle must be there, or every page would be a 404: a
 	// packaging or mount fault stops the start, naming the file.
-	pwa, err := newPWAHandler(p.appDir, appIndexFile(mr != nil), logger.With("component", "app"))
+	pwa, err := newPWAHandler(p.appDir, appIndexFile(mr != nil), base.With("component", "app"))
 	if err != nil {
 		logger.Error("app bundle check failed", "err", err)
 		return err
@@ -527,7 +506,7 @@ func serveUntilStopped(p process, restart *bool) error {
 
 	// The admin console edits the stores, so it only exists in Provisioned
 	// mode, where they are served.
-	admin := newAdminHandler(p.appDir, cfg.hosted && mr != nil, logger.With("component", "app"))
+	admin := newAdminHandler(p.appDir, cfg.hosted && mr != nil, base.With("component", "app"))
 	if admin.enabled {
 		logger.Info("administration app enabled", "path", adminPath)
 	}
@@ -539,8 +518,8 @@ func serveUntilStopped(p process, restart *bool) error {
 	// same client. The access list sits inside the access log, so a denial is
 	// logged as a 403 like any other response (the ACL adds its own warn line
 	// with the reason), and so does a recovered handler panic (a 500).
-	accessLogger := logger.With("component", "access")
-	handler := withClient(lv, accessLog(recoverPanics(clientACL(lv, root, accessLogger), logger.With("component", "http")), accessLogger))
+	accessLogger := base.With("component", "access")
+	handler := withClient(lv, accessLog(recoverPanics(clientACL(lv, root, accessLogger), base.With("component", "http")), accessLogger))
 
 	srv := &http.Server{
 		Handler:           handler,
@@ -553,7 +532,7 @@ func serveUntilStopped(p process, restart *bool) error {
 		// net/http's own errors go to the same log, at info: they are mostly
 		// TLS handshakes a client gave up on. A handler panic never gets here
 		// (recoverPanics logs it at error).
-		ErrorLog: slog.NewLogLogger(logger.With("component", "http").Handler(), slog.LevelInfo),
+		ErrorLog: slog.NewLogLogger(base.With("component", "http").Handler(), slog.LevelInfo),
 	}
 
 	// The backup schedule runs in the gateway: the image has no cron. It

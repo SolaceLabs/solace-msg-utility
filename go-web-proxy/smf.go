@@ -97,7 +97,7 @@ func (g *smfGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	target, ok := g.store.smfTarget(as.user, p.broker, p.vpn)
 	if !ok {
-		g.logger.Info("smf denied", "user", as.user, "broker", p.broker, "vpn", p.vpn)
+		g.logger.Warn("smf denied", "user", as.user, "broker", p.broker, "vpn", p.vpn)
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}

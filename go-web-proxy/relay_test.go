@@ -320,8 +320,8 @@ func TestRelay_EntitlementIsTheBrokers(t *testing.T) {
 	if fb.hits() != 1 {
 		t.Errorf("only the entitled call may reach the broker, got %d calls", fb.hits())
 	}
-	if line := logLine(e.log.String(), "semp relay denied", "user=viewer", "broker=b2"); !strings.Contains(line, "level=INFO") {
-		t.Errorf("a refusal is logged at info with the user and the broker: %s", e.log.String())
+	if line := logLine(e.log.String(), "semp relay denied", "user=viewer", "broker=b2"); !strings.Contains(line, "level=WARN") {
+		t.Errorf("a refusal is logged at warn with the user and the broker: %s", e.log.String())
 	}
 }
 
@@ -405,8 +405,8 @@ func TestRelay_InFlightCapPerUser(t *testing.T) {
 	if rec.Header().Get("Retry-After") == "" {
 		t.Error("want Retry-After")
 	}
-	if logLine(e.log.String(), "semp relay limited", "user=viewer", "broker=b1") == "" {
-		t.Errorf("the cap is logged with the user and the broker: %s", e.log.String())
+	if logLine(e.log.String(), "level=WARN", "semp relay limited", "user=viewer", "broker=b1") == "" {
+		t.Errorf("the cap is logged at warn with the user and the broker: %s", e.log.String())
 	}
 	close(release)
 	wg.Wait()

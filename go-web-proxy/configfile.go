@@ -313,12 +313,12 @@ type seedVar struct {
 }
 
 var seedVars = []seedVar{
-	{"SMU_HOSTED", "hosted", hostedEnv, func(c config) string { return strconv.FormatBool(c.hosted) }},
+	{"SMU_HOSTED", "hosted", boolEnv(defaultConfig().hosted), func(c config) string { return strconv.FormatBool(c.hosted) }},
 	{"SMU_CONN_MODES", "connModes", strings.ToLower, func(c config) string { return c.connModes }},
 	{"SMU_DEFAULT_CONN", "defaultConn", strings.ToLower, func(c config) string { return c.defaultConn }},
-	{"SMU_SSL_SKIP_CERT_VERIFY", "tls.insecureSkipVerify", insecureEnv, func(c config) string { return strconv.FormatBool(c.insecureSkipVerify) }},
+	{"SMU_SSL_SKIP_CERT_VERIFY", "tls.insecureSkipVerify", boolEnv(defaultConfig().insecureSkipVerify), func(c config) string { return strconv.FormatBool(c.insecureSkipVerify) }},
 	{"LOG_LEVEL", "logLevel", strings.ToLower, func(c config) string { return levelName(c.logLevel) }},
-	{"SMU_SHOW_AUDIT", "audit.stdout", showAuditEnv, func(c config) string { return strconv.FormatBool(c.audit.stdout) }},
+	{"SMU_SHOW_AUDIT", "audit.stdout", boolEnv(defaultConfig().audit.stdout), func(c config) string { return strconv.FormatBool(c.audit.stdout) }},
 }
 
 // renamedEnv are the variables an earlier release read, with their names now.
@@ -354,31 +354,16 @@ func checkRenamedEnv() error {
 	return fmt.Errorf("environment variables renamed, so the gateway will not start with the old names set: %s. Rename them in the deployment (same values) and start again", strings.Join(found, ", "))
 }
 
-// insecureEnv mirrors parseInsecureSkipVerify for the override comparison,
-// as hostedEnv mirrors parseHosted.
-func insecureEnv(raw string) string {
-	if b, err := parseInsecureSkipVerify(raw); err == nil {
-		return strconv.FormatBool(b)
+// boolEnv is the fromEnv of a boolean seed variable whose default is def: the
+// value parseStrictBool reads, as loadConfig reads it, or the raw string when
+// it would be refused, so it is reported as differing from the file.
+func boolEnv(def bool) func(raw string) string {
+	return func(raw string) string {
+		if b, err := parseStrictBool(raw, def); err == nil {
+			return strconv.FormatBool(b)
+		}
+		return raw
 	}
-	return raw
-}
-
-// showAuditEnv mirrors parseShowAudit for the override comparison.
-func showAuditEnv(raw string) string {
-	if b, err := parseShowAudit(raw); err == nil {
-		return strconv.FormatBool(b)
-	}
-	return raw
-}
-
-// hostedEnv mirrors parseHosted for the override comparison: unset or "true" is
-// true, "false" is false, and any other value stays as typed, so it is
-// reported as differing from the file.
-func hostedEnv(raw string) string {
-	if b, err := parseHosted(raw); err == nil {
-		return strconv.FormatBool(b)
-	}
-	return raw
 }
 
 // secretPaths are the locations of the gateway's secrets and its TLS files.

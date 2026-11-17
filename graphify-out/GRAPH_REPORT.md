@@ -1,28 +1,28 @@
 # Graph Report - smu-dirty  (2026-11-18)
 
 ## Corpus Check
-- 363 files · ~723,603 words
+- 363 files · ~723,811 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 32 file(s) not represented in the graph (top: .css 25, (none) 6, .dockerignore 1)
 
 ## Summary
-- 5230 nodes · 17086 edges · 183 communities (148 shown, 35 thin omitted)
+- 5226 nodes · 17082 edges · 179 communities (141 shown, 38 thin omitted)
 - Extraction: 86% EXTRACTED · 14% INFERRED · 0% AMBIGUOUS · INFERRED: 2338 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a0f97c78`
+- Built from commit: `6395e2e2`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- loadConfig
+- settings.ts
 - createManagedPanel
 - createGateway
 - connections/module.test.ts
 - semp-client Test Suite
 - Architecture
-- backupService
+- backup.go
 - core event-bus
 - notification-center/index.ts
 - dest-provisioned.test.ts
@@ -39,7 +39,7 @@
 - Git Workflow & Release Process
 - vite.config.ts
 - Results Table (VPN, Queue, Subscription columns)
-- utils.ts
+- managed-panel.ts
 - managed-api.ts
 - pages_test.go
 - vitest
@@ -49,7 +49,7 @@
 - broker/store.ts
 - tls-certificates/module.test.ts
 - backup.ts
-- ui-modal.test.ts
+- demo-flow.test.ts
 - backup.go
 - Filter Messages Dialog
 - logger.ts
@@ -59,7 +59,7 @@
 - log/slog.Logger
 - net/http.ResponseWriter
 - time.Time
-- gateway/index.ts
+- tls.ts
 - newCapturingLogger
 - panel.ts
 - ui.selectMessage
@@ -68,21 +68,21 @@
 - authPages
 - queue-picker/index.ts
 - queue-discovery index.html
-- newUpstreamTransport
-- fileConfigFromConfig
-- gateway/types.ts
+- trustHolder
+- context.Context
+- gateway/index.ts
 - tests variants
 - ui-modal.ts
 - routes.test.ts
-- configfile_test.go
+- relay_test.go
 - Testing
 - queue-discovery module
 - Forward Message Dialog Screenshot
-- Code Standards
-- createVpnSwitch
+- queue-copy/ui-events.test.ts
+- showToast
 - Managed Variant (RBAC)
 - store_test.go
-- storecrypt_test.go
+- access_test.go
 - session
 - Deployment Guide
 - managed.go
@@ -91,55 +91,55 @@
 - Contributing
 - file-kind.ts
 - SEMP v2 Paged Discovery (core library)
-- writeError
+- backup_api.go
 - Administration (`/solAdmin`)
 - broker/store.ts
 - socketRegistry
 - Module 2: Queue Browser
 - DOM Template System
 - Cross-Module Event Flow
-- defaultConfig
+- keyfile_test.go
 - Kernel Test Suite
 - Direct demo (`demo.html`)
 - Solace Client Service
-- Queue Copy: Verify Flow & Broker Bug Workaround
+- go_pkg_encoding_json
 - Queue Browser Internal Architecture
 - user-management/module.test.ts
 - CSS Organization
-- error-codes.test.ts
-- configfile.go
-- download.ts
-- Cutting a release
-- .stage
+- checksums
+- configfile_test.go
+- Kernel.installModule
+- Setup
+- secret
 - newManagedEnv
 - sempContext Test Suite
 - dev.ps1
 - Features
 - totp_test.go
-- testing.T
+- smf_test.go
 - package.json
 - Blob URL deferred revoke
 - SEMP v1 XML response parsing
-- demo-flow.test.ts
+- backup/module.ts
 - Provisioned Mode
-- state.ts
+- ui-modal.test.ts
 - Deployment Options
-- newRootHandler
+- Certificates from the console
 - queue-subscription-explorer parse
 - queue-subscription-explorer ui
-- live
+- log/slog.Logger
 - gateway-settings/module.test.ts
 - <!-- @module-templates --> marker
 - README
 - managed-panel.test.ts
 - proxy.go (handlers)
 - tls.go (server cert + trust pool)
-- How the tests are organized
+- RowList
 - parseSetCookie
 - MockEmitter
 - createPages
 - semp-client.ts
-- backup_test.go
+- testHasher
 - Developer Guide
 - auditMissing
 - queue-subscription-explorer parse
@@ -148,14 +148,14 @@
 - tests core/hosted
 - tests core/logger
 - loadModuleDOM
-- System Overview
+- clientGoneError
 - solace-message-utility (package)
 - ui.openSslModal
 - queue-browser service-events Test Suite
 - Module Isolation
 - queue-copy/module.ts
 - backup_api_test.go
-- SEMP v1 Pagination (Queue Subscription Explorer)
+- writeFailedError
 - connections/module.ts
 - queue-discovery module.ts
 - boot.managed.ts
@@ -169,26 +169,22 @@
 - devDependencies
 - queue-discovery service.ts
 - store
-- .serveIndex
+- pwaHandler
 - vite-build.mjs
 - module-registry-plugin.mjs
 - queue-discovery ui.js
 - ConnectionsModule Test Suite
-- syncBuffer
-- connection-management/service.ts
-- .checkSettings
+- live
 - User Guide
-- verifyViaSempV1
 - code:ts (for await (const page of createSempDiscovery(sempCtx).fetchV)
 - shell-loader.test.ts
 - main
 - Writing tests
-- Audit trail
+- End-to-end run
 - csp.mjs
 - settings_test.go
 - queue-copy/ui-events.ts
 - tls_test.go
-- service-verify.ts
 - Configure
 - runChecks
 - tsconfig.test.json
@@ -233,51 +229,51 @@
 - **Two independent broker connections (Solace client + SEMP REST) sharing one host** — readme_dualConnection, connhtml_brokerHost, connmoduletest_bridgingHooks [INFERRED 0.85]
 - **Path-only fetch closure invariant (broker-direct URLs cannot reach the wire)** — sempclienttest_pathOnlyClosure, sempdiscoverytest_nextPageUriStripping, kerneltest_hostedSempFetch, deploymentdoc_proxyPathScheme [INFERRED 0.95]
 
-## Communities (183 total, 35 thin omitted)
+## Communities (179 total, 38 thin omitted)
 
-### Community 0 - "loadConfig"
-Cohesion: 0.08
-Nodes (26): hostedEnv(), insecureEnv(), levelName(), showAuditEnv(), TestLevelName(), logStartup(), modeName(), TestLogStartup_ShowsAtEveryLevel() (+18 more)
+### Community 0 - "settings.ts"
+Cohesion: 0.07
+Nodes (51): connsProblem(), usersProblem(), UpstreamAnswer, cidrList(), clone(), connModesProblem(), createSettings(), DEFAULTS (+43 more)
 
 ### Community 1 - "createManagedPanel"
-Cohesion: 0.08
-Nodes (42): Build commands, Build internals, Build-time feature flags, Building variants, Maintaining dependencies, Setup, ConnectOutcome, ConnectPart (+34 more)
+Cohesion: 0.10
+Nodes (35): ConnectOutcome, ConnectPart, connectProvisioned(), failure(), gatewayCodeOf(), outcomeDetails(), outcomeLines(), PART_LABEL (+27 more)
 
 ### Community 2 - "createGateway"
-Cohesion: 0.10
-Nodes (38): clock(), acceptedStep(), base32(), frac32(), groupSecret(), HASH_RULE, hashRecovery(), isTwoFactorMode() (+30 more)
+Cohesion: 0.05
+Nodes (65): QueueFixture, acceptedStep(), base32(), frac32(), groupSecret(), HASH_RULE, hashRecovery(), isTwoFactorMode() (+57 more)
 
 ### Community 3 - "connections/module.test.ts"
-Cohesion: 0.10
-Nodes (12): ConnectionConfig, ConnectionCredentials, TaggedLogger, config, SWITCH_CONNECT_TIMEOUT_MS, SWITCH_DISCONNECT_TIMEOUT_MS, VpnSwitch, createConnectionsDOM() (+4 more)
+Cohesion: 0.07
+Nodes (19): MAX_MESSAGES_PER_QUEUE, ConnectionConfig, ConnectionCredentials, TaggedLogger, config, SWITCH_CONNECT_TIMEOUT_MS, SWITCH_DISCONNECT_TIMEOUT_MS, VpnSwitch (+11 more)
 
 ### Community 4 - "semp-client Test Suite"
 Cohesion: 0.14
 Nodes (5): queue-subscription-explorer service Test Suite, makeHooks (test helper), semp-client Test Suite, allPages async generator drain helper, semp-discovery Test Suite
 
 ### Community 5 - "Architecture"
-Cohesion: 0.10
-Nodes (8): Architecture, code:block10 (Solace Broker), code:block6 (Kernel), code:ts (import { logger } from '../../core/logger';), Data Flow: Message Lifecycle, Dependency Injection, Logging, Technology Decisions
+Cohesion: 0.07
+Nodes (19): Access-type capture (gate for Copy and Move), Architecture, code:block1 (+-----------------------------------------------------------), code:block10 (Solace Broker), code:ts (let body: string | null = INITIAL_BODY;       // <rpc>…<num-), code:block6 (Kernel), code:ts (import { logger } from '../../core/logger';), Data Flow: Message Lifecycle (+11 more)
 
-### Community 6 - "backupService"
-Cohesion: 0.09
-Nodes (21): backupName(), newBackupService(), partialName(), backupRun, backupService, createExclusive(), existingStore(), loadStoreKey() (+13 more)
+### Community 6 - "backup.go"
+Cohesion: 0.08
+Nodes (25): backupName(), connName(), diffByName(), flattenSettings(), newBackupService(), partialName(), sameRecord(), sealBackup() (+17 more)
 
 ### Community 7 - "core event-bus"
 Cohesion: 0.08
 Nodes (30): core event-bus, core solace-publisher service, loadModuleDOM helper, resetQueueBrowserState helper, queue-copy module, queue-discovery module, queue-subscription-explorer module, queue-copy service-copy (+22 more)
 
 ### Community 8 - "notification-center/index.ts"
-Cohesion: 0.11
-Nodes (24): createNotificationCenter(), changed(), defaultStorage(), el(), isEntry(), LEVELS, log, mountNotificationBell() (+16 more)
+Cohesion: 0.10
+Nodes (25): clock(), createNotificationCenter(), changed(), defaultStorage(), el(), isEntry(), LEVELS, log (+17 more)
 
 ### Community 9 - "dest-provisioned.test.ts"
 Cohesion: 0.08
-Nodes (26): DEST_TARGET_LOCKED_TITLE, cardError(), cardStatus(), connectBtn(), connectedWithTarget(), { destSempConnect, destSempDisconnect, destSolConnect, destSolDisconnect }, { destSempHooks, destSolHooks }, DIALER (+18 more)
+Nodes (25): cardError(), cardStatus(), connectBtn(), connectedWithTarget(), { destSempConnect, destSempDisconnect, destSolConnect, destSolDisconnect }, { destSempHooks, destSolHooks }, DIALER, dialling() (+17 more)
 
 ### Community 10 - "quietLogger"
-Cohesion: 0.11
-Nodes (54): adminHandler, fakeClock, fixed(), newTestAuditor(), newAdminHandler(), TestAdminHandler_DisabledIs404(), TestAdminHandler_DoesNotFallBackToTheSPA(), TestAdminHandler_EnabledButNotDeployed() (+46 more)
+Cohesion: 0.14
+Nodes (46): fakeClock, fixed(), newSessions(), newSigninTickets(), newFakeClock(), newTestTickets(), TestSessionCookie_FlagsAndRequestLookup(), TestSessions_AbsoluteExpiry() (+38 more)
 
 ### Community 11 - "Solace Messaging (Client) Section"
 Cohesion: 0.08
@@ -300,48 +296,48 @@ Cohesion: 0.08
 Nodes (29): Confirm Queue Copy Modal, Destination Topic (test topic), Destination Panel, Queue/Topic Toggle, Modal Cancel Button, Modal Copy Confirm Button, Modal Destination Section, Modal Refresh Button (+21 more)
 
 ### Community 16 - "backup_test.go"
-Cohesion: 0.11
-Nodes (32): fileOfSchedule(), backupFixtureFrom(), newBackupFixture(), slicesIndexUser(), TestBackup_ScheduleDocProblem(), TestBackup_ScheduleDocYAML(), TestBackup_ScheduleProblem(), TestBackupService_ConcurrentSavesLeaveDiskAndMemoryEqual() (+24 more)
+Cohesion: 0.09
+Nodes (46): newBackupKey(), openBackup(), backupFixtureFrom(), envelope(), mustSealer(), newBackupFixture(), reseal(), sampleBackup() (+38 more)
 
 ### Community 17 - "scripts"
 Cohesion: 0.09
 Nodes (23): scripts, audit:gate, build, build:admin, build:all, build:demo, build:no-payload, build:no-queue-copy (+15 more)
 
 ### Community 18 - "writer_test.go"
-Cohesion: 0.11
-Nodes (33): changeUsersBehindTheWriter(), checkRev(), countAdmins(), txn, wfix, classifyStoreError(), newStaleBasis(), newWFix() (+25 more)
+Cohesion: 0.13
+Nodes (32): TestStageSettings_RefusalsComeBackAsErrors(), wfix, classifyStoreError(), newStale(), newStaleBasis(), newWFix(), recoverValue(), TestClassifyStoreError_OneMappingForEveryHandler() (+24 more)
 
 ### Community 19 - "ManagedResult"
-Cohesion: 0.15
-Nodes (5): ManagedResult, ManagedService, ConnMgmtService, SettingsService, UserMgmtService
+Cohesion: 0.12
+Nodes (6): ManagedResult, ManagedDialer, ManagedService, ConnMgmtService, SettingsService, UserMgmtService
 
 ### Community 20 - "Git Workflow & Release Process"
-Cohesion: 0.11
-Nodes (16): code:bash (npm ci), code:bash (gh run rerun <run-id> --failed), code:bash (# 1. Bump version, merge to main), Day-to-day branching, Git Workflow & Release Process, Image tags, Pages deploy, Pre-release checklist (local) (+8 more)
+Cohesion: 0.08
+Nodes (24): 1. Bump `package.json`, 2. Tag the release commit, 3. Publish the GitHub Release, code:bash (npm ci), code:bash (git checkout -b release/3.4.0), code:bash (git checkout main), code:bash (gh release create v3.4.0 \), code:bash (gh run watch) (+16 more)
 
 ### Community 21 - "vite.config.ts"
-Cohesion: 0.09
-Nodes (12): moduleRegistryPlugin(), scripts/vite-build.mjs wrapper, TS path aliases (@core, @modules), MOCK_REDIRECTS table, appVersion, DEMO_BOOTS, DemoRedirect, vite-env.d.ts (__APP_VERSION__) (+4 more)
+Cohesion: 0.08
+Nodes (13): moduleRegistryPlugin(), scripts/vite-build.mjs wrapper, TS path aliases (@core, @modules), MOCK_REDIRECTS table, appVersion, DEMO_BOOTS, DemoRedirect, vite-env.d.ts (__APP_VERSION__) (+5 more)
 
 ### Community 22 - "Results Table (VPN, Queue, Subscription columns)"
 Cohesion: 0.13
 Nodes (18): About Panel (description of subscription explorer), Active Nav Item: Queue Subscriptions, Filter Input: Queue, Filter Input: Subscription (wildcard-capable, e.g. test/*), Filter Input: VPN, Load Action (initial data fetch), Rows: VPN with Long Names and Spaces, Rows: VPN with Many Queues (QUEUE-000, QUEUE-001, QUEUE-002) (+10 more)
 
-### Community 23 - "utils.ts"
-Cohesion: 0.09
-Nodes (30): formatBytes(), generateUuid(), isValidHost(), isValidPort(), levelsIntersect(), rec(), LITERAL_STAR_SENTINEL, matchContains() (+22 more)
+### Community 23 - "managed-panel.ts"
+Cohesion: 0.04
+Nodes (40): AccountControl, AccountControlOptions, AccountUser, createAccountControl(), DEFAULT_MAX_MESSAGES_PER_QUEUE, PROVISIONED_SDK_CONNECT, SempConfig, SolaceConfig (+32 more)
 
 ### Community 24 - "managed-api.ts"
 Cohesion: 0.03
-Nodes (96): askReload(), goneMessage(), handleConflict(), STALE_IMPORT_MESSAGE, staleMessage(), confirmDialog(), ConfirmOptions, createGate() (+88 more)
+Nodes (77): Adding a New Module, DOM Access, pickQueue() reusable picker, askReload(), goneMessage(), handleConflict(), STALE_IMPORT_MESSAGE, staleMessage() (+69 more)
 
 ### Community 25 - "pages_test.go"
-Cohesion: 0.11
-Nodes (85): newClientWatch(), beginEnrol(), codeForm(), confirmForm(), cookieEnded(), expectPage(), expectRedirect(), managedEnv (+77 more)
+Cohesion: 0.12
+Nodes (83): usersWrote(), newClientWatch(), beginEnrol(), codeForm(), confirmForm(), cookieEnded(), expectPage(), expectRedirect() (+75 more)
 
 ### Community 26 - "vitest"
 Cohesion: 0.04
-Nodes (78): AppContext (Dependency Injection), Factory Pattern, Key Concepts, Module tests, createService (subscription-explorer), fetchAllSubscriptions, SempContext, createEventBus() (+70 more)
+Nodes (83): Event Handling, Integration tests, Module tests, vitest, createEventBus(), INPUT_DEBOUNCE_MS, AppContext, AppState (+75 more)
 
 ### Community 27 - "e2e.mjs"
 Cohesion: 0.07
@@ -356,112 +352,112 @@ Cohesion: 0.11
 Nodes (19): RFC-2606, ADMIN_BUNDLE, ALLOWED_HOSTS, BUNDLE_CSP, checkBundles(), DEMO_BUNDLE, DEMO_FORBIDDEN, DEMO_MARKERS (+11 more)
 
 ### Community 30 - "broker/store.ts"
-Cohesion: 0.05
-Nodes (87): allQueues(), BINARY_SAMPLE, CONTENT_TYPES, DESTINATION_FIELDS, findQueueAnyVpn(), getQueue(), key(), listQueues() (+79 more)
+Cohesion: 0.04
+Nodes (104): The payload samples queue, PAYLOAD_SAMPLES, allQueues(), BINARY_SAMPLE, CONTENT_TYPES, DESTINATION_FIELDS, dumpStore(), findQueueAnyVpn() (+96 more)
 
 ### Community 31 - "tls-certificates/module.test.ts"
 Cohesion: 0.07
-Nodes (41): EXPIRY_WARN_DAYS, expiryMark(), fillDetails(), formatUtc(), markElement(), MAX_PEM_BYTES, namesList(), TlsCertificatesModule (+33 more)
+Nodes (43): EXPIRY_WARN_DAYS, expiryMark(), fillDetails(), formatUtc(), markElement(), MAX_PEM_BYTES, namesList(), TlsCertificatesModule (+35 more)
 
 ### Community 32 - "backup.ts"
-Cohesion: 0.03
-Nodes (142): BackupDeps, BackupKey, BackupProblem, BackupSchedule, Basis, canonConn(), canonRows(), canonUser() (+134 more)
+Cohesion: 0.06
+Nodes (73): BACKUP_ITER, BackupKey, BackupProblem, BackupSchedule, Basis, canonConn(), canonRows(), canonUser() (+65 more)
 
-### Community 33 - "ui-modal.test.ts"
-Cohesion: 0.15
-Nodes (24): ManagedSession, createInitialState(), resetTransientState(), buildDestSummary(), buildSourceSummary(), destinationRefusal(), effectiveSourceAccess(), evaluateStartGate() (+16 more)
+### Community 33 - "demo-flow.test.ts"
+Cohesion: 0.09
+Nodes (30): QueueCopyModule, ACTIVE_MODULES, GATEWAY_ONLY, NEEDS_VENDOR_SCRIPTS, ACTIVE_MODULES, MODULE_ENTRIES, ACTIVE_MODULES, ACTIVE_MODULES (+22 more)
 
 ### Community 34 - "backup.go"
-Cohesion: 0.04
-Nodes (41): diffByName(), sameRecord(), TestBackup_DiffIgnoresRev(), TestBackup_DiffShowsTwoFactor(), withoutRev(), backupFileInfo, backupRunJSON, backupScheduleJSON (+33 more)
+Cohesion: 0.05
+Nodes (35): auditCategory, changedOnDiskError, smfPathFor(), dialRequest, TestFileConfig_EveryKeyIsClassifiedOnce(), yamlLeaves(), pagePolicy(), TestPagePolicy_StyleBlockOrNone() (+27 more)
 
 ### Community 35 - "Filter Messages Dialog"
 Cohesion: 0.16
 Nodes (17): Add Property Filter Button, Apply Filter Button, Body Content Contains Filter, Cancel Button, Clear Filter Button, Destination Name Filter, Destination Type Filter, Filter Messages Dialog (+9 more)
 
 ### Community 36 - "logger.ts"
-Cohesion: 0.04
-Nodes (54): Event Handling, EventBus (Cross-Module Communication), The Module Contract, boot(), DEFAULT_LOG_LEVEL, LogLevel, DEBUG, ERROR (+46 more)
+Cohesion: 0.05
+Nodes (39): AppContext (Dependency Injection), EventBus (Cross-Module Communication), Factory Pattern, Key Concepts, The Module Contract, boot(), DEFAULT_LOG_LEVEL, LogLevel (+31 more)
 
 ### Community 38 - "proxy_test.go"
-Cohesion: 0.05
-Nodes (81): clientACL(), aclChain(), prefixes(), rawStatusLine(), TestClientACL_Allowed(), TestClientACL_BadPeerFailsClosed(), TestClientACL_DeniedIsOpaque403(), TestClientACL_EmptyAllowListAdmitsEveryClient() (+73 more)
+Cohesion: 0.04
+Nodes (82): TestAudit_ReopenFailureLosesTheRecordLoudly(), hostedInfo, newLive(), liveWith(), TestLive_ApplyCarriesSkipVerifyIntoTheTrustHolder(), TestRecoverPanics_LetsAbortHandlerThrough(), TestRecoverPanics_LogsAndAnswers500(), go-web-proxy main (gateway entrypoint) (+74 more)
 
 ### Community 39 - "contract_test.go"
-Cohesion: 0.15
-Nodes (21): contractAllStrings(), contractNormalize(), contractNormalizeCert(), contractNormalizeCerts(), contractNormalizeRevs(), decodeAny(), managedEnv, loadContractSeed() (+13 more)
+Cohesion: 0.12
+Nodes (23): contractAllStrings(), contractNormalize(), contractNormalizeCert(), contractNormalizeCerts(), contractNormalizeRevs(), contractResolveBody(), decodeAny(), managedEnv (+15 more)
 
 ### Community 40 - "log/slog.Logger"
-Cohesion: 0.06
-Nodes (27): certHolder, browserKeyProblem(), newCertHolder(), newTLSManager(), newTrustHolder(), parseCertificatePEM(), parseKeyPEM(), pemCertificates() (+19 more)
+Cohesion: 0.07
+Nodes (23): certHolder, browserKeyProblem(), newCertHolder(), parseCertificatePEM(), parseKeyPEM(), pemCertificates(), probeWritable(), readableName() (+15 more)
 
 ### Community 41 - "net/http.ResponseWriter"
-Cohesion: 0.14
-Nodes (16): Changing the TLS files, auditCall, auditWrote, decodeJSON(), decodeJSONLimit(), pathTarget(), queryRev(), userSaveAction() (+8 more)
+Cohesion: 0.13
+Nodes (17): auditCall, auditEntry, auditWriter, auditWrote, decodeJSON(), decodeJSONLimit(), pathTarget(), queryRev() (+9 more)
 
 ### Community 42 - "time.Time"
-Cohesion: 0.11
-Nodes (22): clientIP(), normalizeAddr(), prefixContains(), accessConfig, monthSlot(), nextRun(), TestBackup_NextRun(), backupSchedule (+14 more)
+Cohesion: 0.13
+Nodes (18): monthSlot(), nextRun(), backupSchedule, bucket, clientWatch, newRateWindow(), failures, fakeAfter (+10 more)
 
-### Community 43 - "gateway/index.ts"
-Cohesion: 0.04
-Nodes (66): BACKUP_ITER, BackupsState, EnrolResult, GatewaySnapshot, PageResult, responseHeaders(), SignInResult, toResponse() (+58 more)
+### Community 43 - "tls.ts"
+Cohesion: 0.08
+Nodes (32): CertInfo, clone(), createTls(), decode(), DEMO_SUBJECT, error(), fingerprint(), GatewayTls (+24 more)
 
 ### Community 44 - "newCapturingLogger"
-Cohesion: 0.11
-Nodes (30): mustSealer(), TestBackupService_MissingKeyBesideAScheduleRefusesToStart(), parseStoreKey(), sealer, adminSeed(), bootstrapUsers(), loadStore(), bootstrapFixture() (+22 more)
+Cohesion: 0.14
+Nodes (23): TestBackupService_MissingKeyBesideAScheduleRefusesToStart(), sealer, adminSeed(), bootstrapUsers(), loadStore(), bootstrapFixture(), envOf(), TestLoadStore_BootstrapFromEnvironmentIsNeverLogged() (+15 more)
 
 ### Community 45 - "panel.ts"
-Cohesion: 0.08
-Nodes (49): authenticatorSection(), rebuild(), refresh(), ManagedPanelDeps, managedSections(), TLS_READ_ONLY_ID, button(), connectionReference() (+41 more)
+Cohesion: 0.12
+Nodes (33): ManagedDemo, authenticatorSection(), rebuild(), refresh(), ManagedPanelDeps, managedSections(), TLS_READ_ONLY_ID, button() (+25 more)
 
 ### Community 46 - "ui.selectMessage"
 Cohesion: 0.33
 Nodes (6): createServiceEvents, ui.getFullMessageJson, initDetails (ui-details), onBrowserUp handler, onMessage handler, ui.selectMessage
 
 ### Community 47 - "audit_test.go"
-Cohesion: 0.12
-Nodes (26): openAuditor(), fileLines(), newAuditEnv(), TestAudit_AccessEntriesOnlyWhileEnabled(), TestAudit_ALostRecordIsLoggedLoudlyWithItsFields(), TestAudit_ConcurrentRecordsAreWholeLines(), TestAudit_EntryShapeFieldOrderAndTime(), TestAudit_MessageCannotBreakTheLine() (+18 more)
+Cohesion: 0.18
+Nodes (24): openAuditor(), fileLines(), newAuditEnv(), TestAudit_AccessEntriesOnlyWhileEnabled(), TestAudit_ALostRecordIsLoggedLoudlyWithItsFields(), TestAudit_ConcurrentRecordsAreWholeLines(), TestAudit_EntryShapeFieldOrderAndTime(), TestAudit_MessageCannotBreakTheLine() (+16 more)
 
 ### Community 48 - "fileutil_test.go"
 Cohesion: 0.08
 Nodes (53): Layout of tests, commitStep, checkJournalName(), commitJournal(), journalTargetNames(), newJournal(), parseTxn(), recoverDataDir() (+45 more)
 
 ### Community 49 - "authPages"
-Cohesion: 0.07
-Nodes (37): Adding a sign-in step, clientOf(), activeSession, auditFor(), signedInMsg(), signedInRecoveryMsg(), TestAudit_TwoFactorActionsAndMessages(), twoFactorEnrolMsg() (+29 more)
+Cohesion: 0.10
+Nodes (25): Adding a sign-in step, clientOf(), activeSession, auditFor(), signedInMsg(), signedInRecoveryMsg(), TestAudit_TwoFactorActionsAndMessages(), TestAuditFor_ActorAndClient() (+17 more)
 
 ### Community 50 - "queue-picker/index.ts"
-Cohesion: 0.05
-Nodes (49): pickQueue() reusable picker, applyQueueFilter(), applyVpnFilter(), attachHandlers(), chevronSvg(), createDialogDOM(), ensureCache(), fetchQueues() (+41 more)
+Cohesion: 0.11
+Nodes (27): applyQueueFilter(), applyVpnFilter(), attachHandlers(), chevronSvg(), createDialogDOM(), ensureCache(), fetchQueues(), fetchVpns() (+19 more)
 
-### Community 52 - "newUpstreamTransport"
-Cohesion: 0.14
-Nodes (17): dialUpstreamTLS(), dropSessionCookie(), dropSessionSetCookie(), newReverseProxy(), newUpstreamTransport(), TestDialUpstreamTLS_FailsBeforeTheHandshakeWhenItCannotConnect(), TestDialUpstreamTLS_NegotiatesHTTP11OnlyEvenWhenTheServerOffersH2(), TestDropSessionCookie() (+9 more)
+### Community 52 - "trustHolder"
+Cohesion: 0.12
+Nodes (21): dialUpstreamTLS(), newReverseProxy(), newUpstreamTransport(), TestDialUpstreamTLS_FailsBeforeTheHandshakeWhenItCannotConnect(), TestDialUpstreamTLS_NegotiatesHTTP11OnlyEvenWhenTheServerOffersH2(), TestNewUpstreamTransport(), TestReverseProxy_BadPathReturns400(), TestReverseProxy_HTTPRoundTrip() (+13 more)
 
-### Community 53 - "fileConfigFromConfig"
-Cohesion: 0.15
-Nodes (20): Adding a gateway config.yaml setting, Gateway and Admin How-tos, Writing a config.yaml by hand (development only), checkAuditOnFailure(), defaultFileConfig(), fileConfigFromConfig(), onFailureOrDefault(), prefixStrings() (+12 more)
+### Community 53 - "context.Context"
+Cohesion: 0.20
+Nodes (9): fileOfSchedule(), mergeByName(), sessionEnders(), TestBackup_DiffMergeAndSessionEnders(), TestBackupService_LoadRefusesADamagedSchedule(), checkRev(), countAdmins(), recoveryIndex() (+1 more)
 
-### Community 54 - "gateway/types.ts"
+### Community 54 - "gateway/index.ts"
 Cohesion: 0.04
-Nodes (57): TwoFactorMode, BackupDoc, declRefused(), forward(), headerOf(), isShowRpc(), parseRelayPath(), pathUnescape() (+49 more)
+Nodes (94): DialResponse, QGlob, TwoFactorMode, BackupDeps, BackupDoc, BackupsState, DEMO_GATEWAY_MARKER, EnrolResult (+86 more)
 
 ### Community 56 - "ui-modal.ts"
-Cohesion: 0.16
-Nodes (19): filterSempFetch(), isListedVpn(), rowField(), SempFetch, visibleQueueRows(), ALWAYS_VISIBLE, canOperate(), explainAccess() (+11 more)
+Cohesion: 0.17
+Nodes (18): filterSempFetch(), isListedVpn(), rowField(), SempFetch, visibleQueueRows(), AccessExplanation, ALWAYS_VISIBLE, explainAccess() (+10 more)
 
 ### Community 57 - "routes.test.ts"
-Cohesion: 0.08
-Nodes (31): delay(), DEMO_GATEWAY_MARKER, RESTART_PAUSE_MS, handleSemp(), hostedResponse(), installMockServer(), json(), MockRoute (+23 more)
+Cohesion: 0.05
+Nodes (34): MANAGED_ERROR_CODES, createThrottle(), Failures, LoginLimits, retrySeconds(), bundleSources(), productSources(), REPO_ROOT (+26 more)
 
-### Community 58 - "configfile_test.go"
-Cohesion: 0.16
-Nodes (33): decodeConfigFile(), encodeConfigFile(), resolveConfig(), clearSeedEnv(), removedNames(), TestDecodeConfigFile_EmptyBadYAMLBadVersion(), TestDecodeConfigFile_MissingKeysKeepDefaults(), TestDecodeConfigFile_OnFailureDefaultsAndIsWritten() (+25 more)
+### Community 58 - "relay_test.go"
+Cohesion: 0.12
+Nodes (22): errReader, fakeBroker, gatedWriter, isShowRPC(), answerJSON(), newRelayEnv(), TestIsShowRPC(), TestRelay_AddsTheStoredCredentialAndDropsTheBrowsers() (+14 more)
 
 ### Community 59 - "Testing"
-Cohesion: 0.15
-Nodes (13): Broker details, Contents, Coverage policy, End-to-end run, Gateway contract cases, Requirements, Running the tests, Testing (+5 more)
+Cohesion: 0.17
+Nodes (12): Contents, Coverage policy, Demo and fake gateway suite, Go suite, How the tests are organized, Running the tests, Testing, Thresholds and floors (+4 more)
 
 ### Community 60 - "queue-discovery module"
 Cohesion: 0.29
@@ -471,37 +467,37 @@ Nodes (8): queue-copy ui, queue-copy ui-modal, queue-discovery module, queue-dis
 Cohesion: 0.18
 Nodes (10): Cancel Button, Close (X) Button, Destination Name Input Field, Destination Type Selector (Topic/Queue), Forward Message Modal Dialog, Per-Message Preview Row (id + payload snippet), Messages to Forward List (11 selected), Forward Message Dialog Screenshot (+2 more)
 
-### Community 62 - "Code Standards"
-Cohesion: 0.25
-Nodes (8): Code Standards, code:ts (import { required } from '../../core/dom';), DOM Access, Error Handling, Event Handling, File Organization, Modals, TypeScript / JavaScript
+### Community 62 - "queue-copy/ui-events.test.ts"
+Cohesion: 0.18
+Nodes (20): Solace mock, syncDestFormFromSnapshot(), cacheElements(), wireUiEvents(), deriveDestMode(), disposeDestSempConnection(), disposeDestSolConnection(), publishesProvisioned() (+12 more)
 
-### Community 63 - "createVpnSwitch"
-Cohesion: 0.21
-Nodes (10): Integration tests, createVpnSwitch(), connectTo(), fail(), finish(), request(), switchFrom(), waitFor() (+2 more)
+### Community 63 - "showToast"
+Cohesion: 0.09
+Nodes (20): showToast(), createVpnSwitch(), connectTo(), fail(), finish(), request(), switchFrom(), waitFor() (+12 more)
 
 ### Community 64 - "Managed Variant (RBAC)"
 Cohesion: 0.25
 Nodes (8): Admin modules + the Go store, Build-time flag, Credential transform (posture only — algorithm is code-only), Discovery filtering + queue-browser guardrails (zero changes to those modules), Kernel gating, managed-connections (the bridge), Managed Variant (RBAC), RBAC state + matchers
 
 ### Community 65 - "store_test.go"
-Cohesion: 0.11
-Nodes (69): savedUser, currentConn(), currentUser(), enrolViewer(), err2s(), newStoreFixture(), newStoreWithFixtures(), putConn() (+61 more)
+Cohesion: 0.10
+Nodes (75): TestBackupService_ExportAndImportRoundTripTwoFactor(), savedConn, savedUser, currentConn(), currentUser(), enrolViewer(), err2s(), mustHash() (+67 more)
 
-### Community 66 - "storecrypt_test.go"
-Cohesion: 0.19
-Nodes (14): newChecksums(), TestChecksums_AbsenceIsRemembered(), TestChecksums_AnUnreadableFileIsNotAChangeOnDisk(), TestChecksums_AStoreKeyOfTheWrongLengthIsRefused(), TestChecksums_WithoutAKeyThereIsNoCheckAndNoRev(), testSealer(), TestSealer_ADocumentThatDoesNotEncodeIsAFailedWrite(), TestSealer_DocVerifier() (+6 more)
+### Community 66 - "access_test.go"
+Cohesion: 0.24
+Nodes (18): aclChain(), prefixes(), rawStatusLine(), TestClientACL_Allowed(), TestClientACL_BadPeerFailsClosed(), TestClientACL_DeniedIsOpaque403(), TestClientACL_EmptyAllowListAdmitsEveryClient(), TestClientACL_FollowsLiveSettings() (+10 more)
 
 ### Community 67 - "session"
-Cohesion: 0.24
-Nodes (7): activeTicket, session, setSigninCookie(), sessionCtxKey, sessions, signinTickets, ticket
+Cohesion: 0.16
+Nodes (12): activeTicket, session, clearSigninCookie(), expired(), setSigninCookie(), TestSessionOf_ContextRoundTrip(), TestSigninCookie_Attributes(), withSession() (+4 more)
 
 ### Community 68 - "Deployment Guide"
 Cohesion: 0.12
 Nodes (11): 1. Solace JavaScript SDK (`solclient.js`), 2. JSZip (`jszip.min.js`), code:bash (docker pull ghcr.io/solacelabs/solace-msg-utility:latest), Configuration, CORS, Deployment Guide, External Runtime Dependencies, Graceful Degradation (+3 more)
 
 ### Community 69 - "managed.go"
-Cohesion: 0.09
-Nodes (23): auditPre, auditWriter, bodyRev, clientJSON, clientSeenJSON, connJSON, connListJSON, connSaveJSON (+15 more)
+Cohesion: 0.08
+Nodes (30): Changing the TLS files, auditPre, bodyRev, clientJSON, clientSeenJSON, connJSON, connListJSON, connSaveJSON (+22 more)
 
 ### Community 70 - "dev.sh"
 Cohesion: 0.15
@@ -512,20 +508,20 @@ Cohesion: 0.11
 Nodes (18): compilerOptions, allowJs, baseUrl, checkJs, esModuleInterop, module, moduleResolution, outDir (+10 more)
 
 ### Community 72 - "Contributing"
-Cohesion: 0.17
-Nodes (6): Architecture Notes, code:bash (npm install && npm test), Contributing, Development Workflow, Getting Started, Pull Request Checklist
+Cohesion: 0.10
+Nodes (14): Architecture Notes, Code Standards, code:bash (npm install && npm test), code:ts (import { required } from '../../core/dom';), Contributing, Development Workflow, DOM Access, Error Handling (+6 more)
 
 ### Community 73 - "file-kind.ts"
 Cohesion: 0.07
-Nodes (44): detectKind(), FileKind, FTYP_BRANDS, has(), HEX_VIEW_BYTES, imageSize(), JPEG_SOF, jpegSize() (+36 more)
+Nodes (47): detectKind(), FileKind, FTYP_BRANDS, has(), HEX_VIEW_BYTES, imageSize(), JPEG_SOF, jpegSize() (+39 more)
 
 ### Community 74 - "SEMP v2 Paged Discovery (core library)"
 Cohesion: 0.33
 Nodes (6): code:ts (// src/core/services/semp-discovery.ts), code:block12 (while (url) {), Consumers — the `QueueSource` seam, Mock service, SEMP v2 Paged Discovery (core library), Service contract
 
-### Community 75 - "writeError"
-Cohesion: 0.16
-Nodes (9): writeError(), writeRateLimited(), headerHasToken(), isWebSocketUpgrade(), parseSMFPath(), sameOriginSocket(), upgradeScheme(), writeSwitch() (+1 more)
+### Community 75 - "backup_api.go"
+Cohesion: 0.23
+Nodes (10): backupRunJSON, backupScheduleJSON, backupStatusJSON, importBasis, importJSON, importPreviewJSON, importResultJSON, importSourceJSON (+2 more)
 
 ### Community 76 - "Administration (`/solAdmin`)"
 Cohesion: 0.18
@@ -533,11 +529,11 @@ Nodes (11): Administration (`/solAdmin`), Backup & Restore, Certificates, Connec
 
 ### Community 77 - "broker/store.ts"
 Cohesion: 0.07
-Nodes (43): PAYLOAD_SAMPLES, PayloadSample, buildMessage(), buildSample(), AuthenticationScheme, DestinationType, LogLevel, MessageDeliveryModeType (+35 more)
+Nodes (40): PayloadSample, buildMessage(), buildSample(), AuthenticationScheme, LogLevel, MessageDeliveryModeType, MessagePublisherAcknowledgeMode, MessageType (+32 more)
 
 ### Community 78 - "socketRegistry"
-Cohesion: 0.26
-Nodes (6): openSocket, socketRegistry, newSocketRegistry(), TestNewSocketRegistry_StartsAtTheCeilings(), TestSocketRegistry_CeilingsRefuseAndRegisterNothing(), TestSocketRegistry_ClosesOnlyWhatWasRevoked()
+Cohesion: 0.21
+Nodes (8): openSocket, socketRegistry, newSocketRegistry(), TestNewSocketRegistry_StartsAtTheCeilings(), TestSocketRegistry_CeilingsRefuseAndRegisterNothing(), TestSocketRegistry_ClosesOnlyWhatWasRevoked(), TestSockets_AfterCommitHookIsLevelTriggered(), TestSockets_OpenedWhileCommitsRunAreRefusedOrClosed()
 
 ### Community 79 - "Module 2: Queue Browser"
 Cohesion: 0.22
@@ -551,21 +547,21 @@ Nodes (7): Build flavors vs variants, code:block15 (src/modules/<id>/index.html 
 Cohesion: 0.40
 Nodes (5): code:block4 (Queue Copy                         Connections              ), code:block5 (Any Module                     Kernel                       ), Cross-Module Event Flow, State Change Propagation, VPN-switch handoff (Queue Copy / Queue Browser → Connections)
 
-### Community 82 - "defaultConfig"
-Cohesion: 0.24
-Nodes (12): TestBackup_SettingsChangesNamesDottedKeys(), configVerifier(), seedConfigFile(), TestConfigVerifier_RefusesWhatAStartWouldRefuse(), TestFileConfigFromConfig_NewFieldsUnsetGiveTheDefaults(), TestSeedConfigFile_GoesThroughTheJournal(), TestSeedConfigFile_WriteFailureIsActionable(), defaultConfig() (+4 more)
+### Community 82 - "keyfile_test.go"
+Cohesion: 0.31
+Nodes (12): createExclusive(), existingStore(), loadStoreKey(), keyDir(), TestCreateExclusive_NeverReplacesAFile(), TestLoadStoreKey_AcceptsANewlineAndWarnsOnLooseMode(), TestLoadStoreKey_CreateFailures(), TestLoadStoreKey_GeneratesOnAFreshVolumeOnly() (+4 more)
 
 ### Community 83 - "Kernel Test Suite"
 Cohesion: 0.40
 Nodes (4): copyToClipboard button feedback test, createMockModule (test helper), setupDOM (test helper), Kernel Test Suite
 
 ### Community 84 - "Direct demo (`demo.html`)"
-Cohesion: 0.13
-Nodes (15): Connecting, Contents, Demo accounts, Demo controls, Demo controls, Demos, Direct demo (`demo.html`), How it differs from a real gateway (+7 more)
+Cohesion: 0.14
+Nodes (14): Connecting, Contents, Demo accounts, Demo controls, Demo controls, Demos, Direct demo (`demo.html`), How it differs from a real gateway (+6 more)
 
-### Community 86 - "Queue Copy: Verify Flow & Broker Bug Workaround"
-Cohesion: 0.50
-Nodes (4): Access-type capture (gate for Copy and Move), Queue Copy: Verify Flow & Broker Bug Workaround, Run engine: two-phase model, Two-call SEMP v1 workaround
+### Community 86 - "go_pkg_encoding_json"
+Cohesion: 0.26
+Nodes (9): dialBody(), managedEnv, TestDial_ConnectsAreRateLimitedPerUser(), TestDial_ConnectsPerMinuteIsReadLive(), TestDial_IsAuditedOnlyWhileAccessIsOn(), TestDial_IssuesTheVPNCredential(), TestDial_PathRoundTripsThroughTheGate(), TestDial_Refusals() (+1 more)
 
 ### Community 87 - "Queue Browser Internal Architecture"
 Cohesion: 0.50
@@ -573,31 +569,27 @@ Nodes (4): Circular Dependency Resolution, code:block8 (queue-browser/), code:bl
 
 ### Community 88 - "user-management/module.test.ts"
 Cohesion: 0.14
-Nodes (18): NO_OPERATE, NO_READ_ONLY, UserManagementModule, ADMIN, CHOICES, clickRow(), el(), hidden() (+10 more)
+Nodes (17): NO_OPERATE, NO_READ_ONLY, ADMIN, answerSignOut(), CHOICES, clickRow(), el(), hidden() (+9 more)
 
 ### Community 89 - "CSS Organization"
 Cohesion: 0.50
 Nodes (4): code:block19 (src/css/), code:ts (import { required } from '../../core/dom';), CSS Organization, Required-Element Invariant
 
-### Community 90 - "error-codes.test.ts"
-Cohesion: 0.20
-Nodes (11): call(), CLIENT, FAULTS, GOLDEN, Gw, NOT_SIMULATED, PAIR, relayed() (+3 more)
+### Community 91 - "configfile_test.go"
+Cohesion: 0.04
+Nodes (108): Adding a gateway config.yaml setting, Gateway and Admin How-tos, Writing a config.yaml by hand (development only), checkAuditOnFailure(), auditSettings, TestBackup_SettingsChangesNamesDottedKeys(), config, boolEnv() (+100 more)
 
-### Community 91 - "configfile.go"
-Cohesion: 0.09
-Nodes (29): config, checkModuleIDs(), checkRenamedEnv(), defaultSecretPaths(), envOverrides(), intInRange(), moduleCatalog(), removedInUse() (+21 more)
+### Community 92 - "Kernel.installModule"
+Cohesion: 0.29
+Nodes (4): Kernel.appSetState(), Kernel.installModule(), Kernel.sempFetch(), Kernel.start()
 
-### Community 92 - "download.ts"
-Cohesion: 0.36
-Nodes (6): BLOB_URL_REVOKE_DELAY_MS, createWritable(), downloadBlob(), saveBlob(), SaveFilePickerWindow, Writable
-
-### Community 93 - "Cutting a release"
-Cohesion: 0.25
-Nodes (8): 1. Bump `package.json`, 2. Tag the release commit, 3. Publish the GitHub Release, code:bash (git checkout -b release/3.4.0), code:bash (git checkout main), code:bash (gh release create v3.4.0 \), code:bash (gh run watch), Cutting a release
+### Community 93 - "Setup"
+Cohesion: 0.29
+Nodes (7): Build commands, Build internals, Build-time feature flags, Building variants, Maintaining dependencies, Setup, up()
 
 ### Community 95 - "newManagedEnv"
-Cohesion: 0.12
-Nodes (67): Auditing an action, auditLog, connsWrote(), managedEnv, holdWriter(), newManagedEnv(), raced(), runRevCases() (+59 more)
+Cohesion: 0.08
+Nodes (84): Auditing an action, auditLog, TestBackupAPI_AdminsOnly(), TestBackupAPI_BackupFailedAnswersEachError(), TestBuildManagedRoutes_GatesByMode(), TestBuildManagedRoutes_PagesAndAPIShareTheReplayGuard(), TestBuildManagedRoutes_RemembersEveryStoreFile(), changeUsersBehindTheWriter() (+76 more)
 
 ### Community 97 - "dev.ps1"
 Cohesion: 0.17
@@ -608,56 +600,52 @@ Cohesion: 0.13
 Nodes (15): Connecting to a broker, Connections, Cross-cutting, Documentation, Features, License, Option 1 — Use the hosted version (zero install), Option 2 — Run as a container (one command) (+7 more)
 
 ### Community 99 - "totp_test.go"
-Cohesion: 0.12
-Nodes (25): groupSecret(), newTOTPGuard(), qrSVG(), recoveryIndex(), loadTOTPVectors(), TestGroupSecret(), TestQRSVG_DrawsTheCodeWithItsQuietZone(), TestQRSVG_SameTextSameDrawing() (+17 more)
+Cohesion: 0.10
+Nodes (30): checkTwoFactor(), groupSecret(), newTOTPGuard(), normaliseRecoveryCode(), qrSVG(), loadTOTPVectors(), TestCheckTwoFactor(), TestGroupSecret() (+22 more)
 
-### Community 100 - "testing.T"
-Cohesion: 0.05
-Nodes (75): waitFor(), dialBody(), managedEnv, TestDial_ConnectsAreRateLimitedPerUser(), TestDial_ConnectsPerMinuteIsReadLive(), TestDial_IsAuditedOnlyWhileAccessIsOn(), TestDial_IssuesTheVPNCredential(), TestDial_PathRoundTripsThroughTheGate() (+67 more)
+### Community 100 - "smf_test.go"
+Cohesion: 0.10
+Nodes (26): Security model, What it does not enforce, What the gateway enforces, deadHijacker, fakeAnswer, fakeSMFBroker, pipe(), newFakeSMFBroker() (+18 more)
 
 ### Community 101 - "package.json"
 Cohesion: 0.09
 Nodes (21): NO_CONSOLE, NO_GET_BY_ID, allowScripts, esbuild@0.25.12, dependencies, jszip, solclientjs, name (+13 more)
 
-### Community 104 - "demo-flow.test.ts"
-Cohesion: 0.07
-Nodes (45): BackupModule, diffLines(), formatUtc(), MAX_IMPORT_BYTES, ACTIVE_MODULES, MODULE_ENTRIES, answerConfirm(), confirmOpen() (+37 more)
+### Community 104 - "backup/module.ts"
+Cohesion: 0.06
+Nodes (48): BLOB_URL_REVOKE_DELAY_MS, createWritable(), downloadBlob(), saveBlob(), SaveFilePickerWindow, describeSchedule(), diffLines(), formatUtc() (+40 more)
 
 ### Community 105 - "Provisioned Mode"
-Cohesion: 0.14
-Nodes (13): Administer, Back up and restore, Contents, How it works, Provisioned Mode, Security checklist, Security model, Start it (+5 more)
+Cohesion: 0.20
+Nodes (10): Administer, Back up and restore, Contents, How it works, Provisioned Mode, Security checklist, Start it, Stored files and recovery (+2 more)
 
-### Community 106 - "state.ts"
-Cohesion: 0.10
-Nodes (21): SolacePublisher, BIND_PROBE_TIMEOUT_MS, IDLE_TIMEOUT_MS, PUBLISH_CONCURRENCY_HIGH, PUBLISH_CONCURRENCY_LOW, CopyHooks, runCopyJob(), selectPublisher() (+13 more)
+### Community 106 - "ui-modal.test.ts"
+Cohesion: 0.05
+Nodes (66): canOperate(), SolacePublisher, escapeXml(), solaceErrorText(), rbacReadOnly(), ACCUMULATE_IDLE_MS, BIND_PROBE_TIMEOUT_MS, IDLE_TIMEOUT_MS (+58 more)
 
 ### Community 107 - "Deployment Options"
 Cohesion: 0.18
 Nodes (11): code:bash (docker run --rm -p 9443:9443 \), code:text (your-server/), code:bash (# Node.js), Containerised Gateway, Deployment Options, Embed in Solace Broker Web UI, Hosted PWA (zero install), Local file (dev exploration only) (+3 more)
 
-### Community 108 - "newRootHandler"
-Cohesion: 0.57
-Nodes (7): newRootHandler(), route(), stubHandler(), TestRootHandler_RobotsOnEveryResponse(), TestRootHandler_UnknownPathsAreNotFoundInGatewayMode(), TestRootHandler_WithManagedRouting(), TestRootHandler_WithoutManagedRouting()
+### Community 108 - "Certificates from the console"
+Cohesion: 0.40
+Nodes (5): Certificates from the console, Letting the console manage them, Locking them, Paths come from the environment, What applies at once
 
-### Community 111 - "live"
-Cohesion: 0.05
-Nodes (38): configSource, newDialer(), newRateWindow(), smfPathFor(), dialer, dialRequest, dialResponse, hostedHandler (+30 more)
+### Community 111 - "log/slog.Logger"
+Cohesion: 0.07
+Nodes (28): auditor, newDialer(), dialer, clientLogger(), clientString(), recoverPanics(), requestLogger(), requestUser() (+20 more)
 
 ### Community 112 - "gateway-settings/module.test.ts"
-Cohesion: 0.18
-Nodes (17): GatewaySettingsModule, GatewaySettingsOptions, ADMIN, clickSave(), el(), errorText(), hidden(), makeCtx() (+9 more)
+Cohesion: 0.21
+Nodes (15): ADMIN, clickSave(), el(), errorText(), hidden(), makeCtx(), pressed(), SETTINGS (+7 more)
 
 ### Community 113 - "<!-- @module-templates --> marker"
-Cohesion: 0.27
+Cohesion: 0.31
 Nodes (9): Queue Browser module template, Queue Copy module template, Queue Discovery module template, Queue Subscription Explorer module template, Desktop-only viewport gate, App Shell index.html, <!-- @module-templates --> marker, Sidebar (nav + status footer) (+1 more)
 
 ### Community 115 - "managed-panel.test.ts"
 Cohesion: 0.08
-Nodes (21): account(), clickConnect(), connectError(), connectToB1Vpn1(), connectWithSession(), el(), failed(), hidden() (+13 more)
-
-### Community 118 - "How the tests are organized"
-Cohesion: 0.40
-Nodes (5): Demo and fake gateway suite, Go suite, How the tests are organized, Type check and lint, Web suite
+Nodes (22): account(), clickConnect(), connectError(), connectToB1Vpn1(), connectWithSession(), el(), failed(), hidden() (+14 more)
 
 ### Community 119 - "parseSetCookie"
 Cohesion: 0.40
@@ -668,12 +656,12 @@ Cohesion: 0.48
 Nodes (15): createPages(), codeField(), field(), frame(), hidden(), hide(), open(), showCode() (+7 more)
 
 ### Community 122 - "semp-client.ts"
-Cohesion: 0.05
-Nodes (56): MAX_MESSAGES_PER_QUEUE, SEMP_PROBE_TIMEOUT_MS, buildBrokerUrl(), managedErrorMessage(), createServiceSemp(), connect(), log, SempClient (+48 more)
+Cohesion: 0.07
+Nodes (45): compareMsgIds, fetchNewestMsgIdViaSempV1, normalizeAccessType, parseSempV1Response, verifySource, verifyViaQueueBrowserAccumulate, verifyViaSempV1, createService (subscription-explorer) (+37 more)
 
-### Community 123 - "backup_test.go"
-Cohesion: 0.10
-Nodes (43): flattenSettings(), newBackupKey(), openBackup(), sealBackup(), settingsChanges(), sortedKeys(), envelope(), reseal() (+35 more)
+### Community 123 - "testHasher"
+Cohesion: 0.14
+Nodes (16): hasher, checkPassphrase(), checkPasswordPolicy(), newHasher(), parsePasswordHash(), passwordRuleError(), TestCheckPassphrase_FixedRule(), TestCheckPasswordPolicy() (+8 more)
 
 ### Community 124 - "Developer Guide"
 Cohesion: 0.17
@@ -688,12 +676,8 @@ Cohesion: 0.19
 Nodes (24): clip(), decodeCertAnswer(), decodeState(), managedEnv, stateNames(), TestClip(), TestTLSAPI_AddTrustDerivesTheNameAndAudits(), TestTLSAPI_AddTrustRefusals() (+16 more)
 
 ### Community 131 - "loadModuleDOM"
-Cohesion: 0.04
-Nodes (86): Circular Dependency Resolution, Laying out an admin page, vitest, send(), escapeHtml(), solaceErrorText(), ui, icons (+78 more)
-
-### Community 132 - "System Overview"
-Cohesion: 0.50
-Nodes (4): code:block1 (+-----------------------------------------------------------), Hosted mode (gateway tunnelling), Publishing pipeline (`solace-publisher`), System Overview
+Cohesion: 0.05
+Nodes (80): Circular Dependency Resolution, Laying out an admin page, escapeHtml(), icons, MAX_BROWSER_BINDINGS, showPayload(), hexDump(), log (+72 more)
 
 ### Community 136 - "Module Isolation"
 Cohesion: 0.50
@@ -701,39 +685,35 @@ Nodes (4): code:block2 (src/core/                          Shared infrastructure
 
 ### Community 137 - "queue-copy/module.ts"
 Cohesion: 0.10
-Nodes (41): DestType, applyDestMode(), applyDestPrefill(), applyDestType(), applySourceReadonly(), cacheElements(), clearDestTypedSecrets(), DestConnStatus (+33 more)
+Nodes (42): formatBytes(), DestType, applyDestMode(), applyDestPrefill(), applyDestType(), applySourceReadonly(), clearDestTypedSecrets(), DEST_TARGET_LOCKED_TITLE (+34 more)
 
 ### Community 138 - "backup_api_test.go"
-Cohesion: 0.14
+Cohesion: 0.15
 Nodes (35): decodeTo(), expectInvalid(), expectRev(), expectStale(), managedEnv, jsonBody(), scheduleBody(), staleBasis() (+27 more)
 
-### Community 139 - "SEMP v1 Pagination (Queue Subscription Explorer)"
-Cohesion: 0.67
-Nodes (3): code:ts (let body: string | null = INITIAL_BODY;       // <rpc>…<num-), SEMP v1 Pagination (Queue Subscription Explorer), Topic intersection filter
-
 ### Community 140 - "connections/module.ts"
-Cohesion: 0.04
-Nodes (75): Adding a New Module, DOM Access, AccountControl, AccountControlOptions, AccountUser, createAccountControl(), coerceConnConfig(), CONN_MODE_VALUES (+67 more)
+Cohesion: 0.05
+Nodes (67): coerceConnConfig(), CONN_MODE_VALUES, CONN_MODES_VALUES, ConnDeploymentConfig, ConnMode, ConnModes, DEFAULT_CONN_CONFIG, DeploymentConfig (+59 more)
 
 ### Community 142 - "boot.managed.ts"
-Cohesion: 0.08
-Nodes (31): boot(), boot(), clearSnapshot(), DemoSnapshot, ManagedDemo, PANEL_SEEN_KEY, readSnapshot(), SNAPSHOT_KEY (+23 more)
+Cohesion: 0.09
+Nodes (29): boot(), boot(), clearSnapshot(), DemoSnapshot, PANEL_SEEN_KEY, readSnapshot(), SNAPSHOT_KEY, writeSnapshot() (+21 more)
 
 ### Community 148 - "solace-publisher.ts"
 Cohesion: 0.09
-Nodes (30): Solace mock, cloneMessage(), createSolacePublisher(), ackListener(), dispose(), rejectAllPending(), rejectListener(), DEFAULT_PUBLISH_ACK_TIMEOUT_MS (+22 more)
+Nodes (27): cloneMessage(), createSolacePublisher(), ackListener(), dispose(), rejectAllPending(), rejectListener(), send(), DEFAULT_PUBLISH_ACK_TIMEOUT_MS (+19 more)
 
 ### Community 152 - "devDependencies"
 Cohesion: 0.18
 Nodes (11): devDependencies, eslint, jsdom, playwright-core, @types/node, typescript, typescript-eslint, vite (+3 more)
 
 ### Community 154 - "store"
-Cohesion: 0.05
-Nodes (64): Writing to the store, connName(), mergeByName(), sessionEnders(), TestBackup_DiffMergeAndSessionEnders(), userName(), brokerTarget, checksums (+56 more)
+Cohesion: 0.07
+Nodes (48): Writing to the store, slicesIndexUser(), brokerTarget, clientRec, connRec, connsDoc, newContractEnv(), contractStores (+40 more)
 
-### Community 155 - ".serveIndex"
+### Community 155 - "pwaHandler"
 Cohesion: 0.12
-Nodes (7): deadHijacker, fileResolvable(), setAppPageHeaders(), TestRecordingResponseWriter_DefaultStatus(), TestRecordingResponseWriter_HijackWithoutSupport(), recordingResponseWriter, pipe()
+Nodes (8): adminHandler, hostedHandler, setAppPageHeaders(), pwaHandler, recordingResponseWriter, headerHasToken(), isWebSocketUpgrade(), writeSwitch()
 
 ### Community 156 - "vite-build.mjs"
 Cohesion: 0.14
@@ -747,21 +727,13 @@ Nodes (14): Vendor scripts, activeModuleEntries(), activeModuleIds(), extractMod
 Cohesion: 0.14
 Nodes (4): Connections module HTML template, createTestContext (test helper), ConnectionsModule Test Suite, connections/ui Test Suite
 
-### Community 164 - "connection-management/service.ts"
-Cohesion: 0.36
-Nodes (5): connPath(), createConnMgmtService(), ManagedConnRecord, ManagedConnVpn, CONN
-
-### Community 165 - ".checkSettings"
-Cohesion: 0.33
-Nodes (5): apiError, refusalError, invalidRefusal(), TestRefusalError_IsAnsweredAsItSays(), newRefusal()
+### Community 165 - "live"
+Cohesion: 0.10
+Nodes (20): clientACL(), clientIP(), normalizeAddr(), prefixContains(), withClient(), apiError, clientCtxKey, live (+12 more)
 
 ### Community 166 - "User Guide"
 Cohesion: 0.08
 Nodes (25): Caching, Confirm Queue Copy modal, Connection Profiles, Contents, Destination connection (Provisioned sessions), Destination target, Filter syntax, Important considerations (+17 more)
-
-### Community 167 - "verifyViaSempV1"
-Cohesion: 0.38
-Nodes (7): compareMsgIds, fetchNewestMsgIdViaSempV1, normalizeAccessType, parseSempV1Response, verifySource, verifyViaQueueBrowserAccumulate, verifyViaSempV1
 
 ### Community 169 - "shell-loader.test.ts"
 Cohesion: 0.20
@@ -775,29 +747,25 @@ Nodes (27): playwright-core, aliasLookup(), askLine(), askSecret(), browserOn(),
 Cohesion: 0.22
 Nodes (8): Cross-references, Defensive-guard tests, Global hooks, Node test files, Shared state, Stubbing globals, Test DOM, Writing tests
 
-### Community 172 - "Audit trail"
+### Community 172 - "End-to-end run"
 Cohesion: 0.20
-Nodes (9): Audit trail, Certificates from the console, Letting the console manage them, Locking them, Paths come from the environment, Restart gateway, What applies at once, The checks (+1 more)
+Nodes (9): Audit trail, Restart gateway, Broker details, End-to-end run, Requirements, The checks, What it changes, What it does (+1 more)
 
 ### Community 173 - "csp.mjs"
 Cohesion: 0.36
 Nodes (9): applyCsp(), buildPolicy(), CSP_KINDS, cspProblems(), hashSource(), inlineBlocks(), markupOf(), policyFor() (+1 more)
 
 ### Community 174 - "settings_test.go"
-Cohesion: 0.12
-Nodes (38): assertNoTempFiles(), errorCode(), expect(), logLine(), saveAnswer, decodeSave(), managedEnv, mustRead() (+30 more)
+Cohesion: 0.14
+Nodes (39): assertNoTempFiles(), logLine(), rawExchange(), shortBodyDeadline(), TestDecodeJSON_WaitsForTheBodyOnlyUntilTheDeadline(), TestLoginPost_ABodyThatStopsArrivingIsRefusedAtTheDeadline(), saveAnswer, decodeSave() (+31 more)
 
 ### Community 177 - "queue-copy/ui-events.ts"
-Cohesion: 0.08
+Cohesion: 0.07
 Nodes (28): CardPart, createProvisionedConnectionCard(), populateVpns(), render(), setStatus(), fillSelect(), make(), ProvisionedConnectionCard (+20 more)
 
 ### Community 178 - "tls_test.go"
 Cohesion: 0.07
-Nodes (70): testCertPair, testCertSpec, appendPEMCerts(), buildTrustPool(), encodeCertificates(), fileExists(), formatFingerprint(), generateSelfSigned() (+62 more)
-
-### Community 179 - "service-verify.ts"
-Cohesion: 0.22
-Nodes (14): escapeXml(), ACCUMULATE_IDLE_MS, compareMsgIds(), emptyResult(), fetchNewestMsgIdViaSempV1(), msgIdToString(), normalizeAccessType(), parseSempV1Response() (+6 more)
+Nodes (75): TestSweepLeftovers_ADataDirectoryThatIsAFile(), TestSweepLeftovers_ALeftoverThatCannotBeRemovedIsLoggedNotFatal(), writeFile(), newChecksums(), TestChecksums_AbsenceIsRemembered(), TestChecksums_AnUnreadableFileIsNotAChangeOnDisk(), TestChecksums_AStoreKeyOfTheWrongLengthIsRefused(), TestChecksums_CheckComparesTheDiskWithMemory() (+67 more)
 
 ### Community 180 - "Configure"
 Cohesion: 0.29
@@ -812,16 +780,16 @@ Cohesion: 0.25
 Nodes (7): ./tsconfig.json, compilerOptions, checkJs, types, exclude, extends, include
 
 ### Community 185 - "main_test.go"
-Cohesion: 0.21
-Nodes (26): acceptWatch, expectLogged(), gatewayClient(), gatewayDir(), startServe(), TestServe_AnOldConfigWithTLSPathKeysStartsAndWarnsOnce(), TestServe_FailuresStopTheStart(), TestServe_FilesOnlyRefusesTheRelay() (+18 more)
+Cohesion: 0.10
+Nodes (43): acceptWatch, newRootHandler(), expectLogged(), gatewayClient(), gatewayDir(), route(), startServe(), stubHandler() (+35 more)
 
 ### Community 189 - "entitled"
 Cohesion: 0.43
 Nodes (5): anyMatch(), entitled(), matchGlob(), TestEntitled(), TestMatchGlob_Conformance()
 
 ### Community 190 - "Two-factor sign-in"
-Cohesion: 0.22
-Nodes (9): A lost phone, Backups and two-factor, Choosing a mode, Recovery codes, Setting it up, Signing in with a code, The gateway's clock, Troubleshooting (+1 more)
+Cohesion: 0.20
+Nodes (10): A lost phone, Backups and two-factor, Choosing a mode, Recovery codes, Setting it up, Signing in with a code, The gateway's clock, Troubleshooting (+2 more)
 
 ### Community 195 - "issueCert"
 Cohesion: 0.33
@@ -834,21 +802,21 @@ Nodes (7): keyLine(), issueCert(), issueExpiredCert(), makeCA(), resolutionOverr
 ## Knowledge Gaps
 - **167 isolated node(s):** `managedEnv`, `github.com/solace/go-web-proxy`, `@types/node`, `@vitest/coverage-v8`, `eslint` (+162 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1236 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **35 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **38 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Writing to the store` connect `store` to `store_test.go`, `managed.go`, `net/http.ResponseWriter`, `live`, `backup_test.go`, `writer_test.go`, `fileConfigFromConfig`, `managed-api.ts`, `newManagedEnv`?**
-  _High betweenness centrality (0.175) - this node is a cross-community bridge._
+- **Why does `Writing to the store` connect `store` to `store_test.go`, `live`, `managed.go`, `net/http.ResponseWriter`, `writer_test.go`, `context.Context`, `managed-api.ts`, `checksums`, `configfile_test.go`, `newManagedEnv`?**
+  _High betweenness centrality (0.179) - this node is a cross-community bridge._
 - **Are the 124 inferred relationships involving `newManagedEnv()` (e.g. with `Writing to the store` and `TestBackupAPI_ActionsAreAudited()`) actually correct?**
   _`newManagedEnv()` has 124 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `managedEnv`, `github.com/solace/go-web-proxy`, `@types/node` to the rest of the system?**
   _167 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `loadConfig` be split into smaller, more focused modules?**
-  _Cohesion score 0.07881773399014778 - nodes in this community are weakly interconnected._
-- **Why does `handleConflict()` connect `managed-api.ts` to `store`?**
-  _High betweenness centrality (0.151) - this node is a cross-community bridge._
+- **Should `settings.ts` be split into smaller, more focused modules?**
+  _Cohesion score 0.06766917293233082 - nodes in this community are weakly interconnected._
+- **Why does `handleConflict()` connect `managed-api.ts` to `backup/module.ts`, `store`, `showToast`?**
+  _High betweenness centrality (0.153) - this node is a cross-community bridge._
 - **Are the 82 inferred relationships involving `quietLogger()` (e.g. with `TestClientACL_Allowed()` and `TestClientACL_EmptyAllowListAdmitsEveryClient()`) actually correct?**
   _`quietLogger()` has 82 INFERRED edges - model-reasoned connections that need verification._
 

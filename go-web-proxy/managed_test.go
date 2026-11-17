@@ -314,6 +314,19 @@ func TestManagedAPI_CrossOriginStateChangeRefused(t *testing.T) {
 	expect(t, e.do("POST", "/managed/logout", "", c, "Origin", "https://evil.example"), http.StatusForbidden, "cross_origin")
 	expect(t, e.do("GET", "/managed/me", "", c, "Sec-Fetch-Site", "cross-site"), http.StatusOK, "")
 	expect(t, e.do("DELETE", "/managed/users/viewer?rev=2", "", c, "Sec-Fetch-Site", "same-origin"), http.StatusNoContent, "")
+	// Each refusal is a WARN naming the account and where the request came from.
+	log := e.log.String()
+	if n := strings.Count(log, "refused a cross-origin request"); n != 2 {
+		t.Fatalf("one line per refusal, got %d:\n%s", n, log)
+	}
+	for _, want := range []string{"level=WARN", "user=admin", "method=POST", "path=/managed/logout", "origin=https://evil.example"} {
+		if line := logLine(log, "origin=https://evil.example"); !strings.Contains(line, want) {
+			t.Errorf("want %q in %q", want, line)
+		}
+	}
+	if line := logLine(log, "sec_fetch_site=cross-site"); !strings.Contains(line, "path=/managed/users/viewer") {
+		t.Errorf("the other refusal names its path and Sec-Fetch-Site: %q", line)
+	}
 }
 
 func TestManagedAPI_UnknownPathOrMethodIs404(t *testing.T) {

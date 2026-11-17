@@ -95,11 +95,15 @@ func (h *managedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
+	setRequestUser(r, as.user)
 	if err := h.cop.Check(r); err != nil {
+		// A state change sent from another site with a signed-in user's
+		// cookie: a forged request the operator wants to see, as the SMF
+		// gate's cross-origin refusal.
+		h.log(r).Warn("refused a cross-origin request", "origin", r.Header.Get("Origin"), "sec_fetch_site", r.Header.Get("Sec-Fetch-Site"))
 		writeError(w, http.StatusForbidden, "cross_origin")
 		return
 	}
-	setRequestUser(r, as.user)
 	if as.mustChange && r.URL.Path != "/managed/logout" {
 		writeError(w, http.StatusForbidden, "password_change_required")
 		return

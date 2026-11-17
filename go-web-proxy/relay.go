@@ -141,12 +141,12 @@ func (rl *sempRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	target, ok := rl.store.sempTarget(user, p.broker)
 	if !ok {
-		rl.logger.Info("semp relay denied", "user", user, "broker", p.broker)
+		rl.logger.Warn("semp relay denied", "user", user, "broker", p.broker)
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if !rl.inFlight.acquire(user) {
-		rl.logger.Info("semp relay limited: too many requests in flight", "user", user, "broker", p.broker, "max_in_flight", relayMaxInFlight)
+		rl.logger.Warn("semp relay limited: too many requests in flight", "user", user, "broker", p.broker, "max_in_flight", relayMaxInFlight)
 		writeRateLimited(w, time.Second)
 		return
 	}
