@@ -270,11 +270,11 @@ export interface AppContext {
     /** Helper for clipboard copy with visual feedback */
     copyToClipboard: (text: string, btnElement?: HTMLElement) => Promise<void>;
     /**
-     * Place a module's account control in the sidebar footer, above the
-     * Client and SEMP status lights, where it stays visible on every page.
-     * The module builds and owns the element (its visibility included); the
-     * shell only holds it. One at a time: a later call replaces it. Only the
-     * connections module's managed entry uses it.
+     * Place a module's account control at the top of the sidebar, above the
+     * page items, where it stays visible on every page. The module builds
+     * and owns the element (its visibility included); the shell only holds
+     * it. One at a time: a later call replaces it. The connections module's
+     * managed entry and admin-login use it.
      */
     mountSidebarAccount: (el: HTMLElement) => void;
 }

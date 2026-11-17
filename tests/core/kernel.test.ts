@@ -156,7 +156,7 @@ describe('Kernel', () => {
             expect(sidebar.classList.contains('collapsed')).toBe(false);
         });
 
-        it('mounts a module\'s account control in the sidebar footer slot, one at a time', async () => {
+        it('mounts a module\'s account control in the sidebar\'s account slot, one at a time', async () => {
             let capturedCtx: AppContext | null = null;
             const mod = createMockModule({
                 id: 'test-module',
@@ -1148,6 +1148,26 @@ describe('Kernel', () => {
             expect((active[0] as HTMLElement).dataset.moduleId).toBe('queue-browser');
             // Active module still visible → no navigation away.
             expect(document.getElementById('page-title')?.textContent).toBe('Browser');
+        });
+
+        it('the admin order: an administrator\'s session moves the console to user-management, and signing out brings the sign-in page back', async () => {
+            let ctx: AppContext | null = null;
+            const login = createMockModule({ id: 'admin-login', name: 'Sign in', install: vi.fn(async c => { ctx = c; }) });
+            const mgr = createMockModule({ id: 'user-management', name: 'Users' });
+            setupDOM(['admin-login', 'user-management']);
+            const kernel = new Kernel([reg(login, 100), reg(mgr, 20)]);
+            await kernel.start();
+            expect(document.getElementById('page-title')?.textContent).toBe('Sign in');
+
+            ctx!.setState('managed', managedSession({ admin: true }));
+            ctx!.eventBus.emit('rbac:changed');
+            expect(document.getElementById('page-title')?.textContent).toBe('Users');
+            expect(document.getElementById('module-view-admin-login')?.classList.contains('hidden')).toBe(true);
+
+            ctx!.setState('managed', null);
+            ctx!.loadSelf();   // the sign-in module asks for its own page
+            expect(document.getElementById('page-title')?.textContent).toBe('Sign in');
+            expect(document.getElementById('module-view-admin-login')?.classList.contains('hidden')).toBe(false);
         });
 
         it('navigates away from a now-hidden active module on rbac:changed', async () => {

@@ -433,7 +433,7 @@ export class Kernel {
         }
     }
 
-    /** The shell's account slot above the status lights (AppContext.mountSidebarAccount). */
+    /** The shell's account slot at the top of the sidebar, above the page items (AppContext.mountSidebarAccount). */
     private mountSidebarAccount(el: HTMLElement): void {
         document.getElementById('sidebar-account')?.replaceChildren(el);
     }

@@ -345,7 +345,7 @@ While the destination connection is connecting, the Same Broker and Same VPN sho
 The Destination follows the primary connection.
 
 - **Direct primary connection** (Standalone or Gateway mode): the Destination keeps the typed Broker, SEMP and Client cards.
-- **Provisioned primary connection**: the Destination is one **Destination Connection** card. Pick a **Broker** and a **Message VPN** from the ones you are entitled to and press **Connect**. There are no password fields: the gateway issues the credential for the Message VPN. When the broker differs from the source's, the card also opens the destination's management connection through the gateway, which feeds the queue picker. If that management connection fails, the copy is still possible: the card stays Connected and says the queue list is unavailable, so type the queue name. While Same Solace Broker is on, the card offers only the source's broker; while both Same Broker and Same Message VPN are on, the card gives way to a note, because the destination is the source connection. **Disconnect** closes both destination connections.
+- **Provisioned primary connection**: the Destination is one **Destination Connection** card. Pick a **Broker** and a **Message VPN** from the ones you are entitled to and press **Connect**. There are no password fields: the gateway issues the credential for the Message VPN. The card follows the same rule as the Provisioned tab: it is connected only when everything it needs is up, and a failure shows one line per connection (**SEMP (management)** and **Messaging (client)**) with the full text in the notification bell (see [Signing in and connecting](#signing-in-and-connecting)). When the broker differs from the source's, the destination needs its own SEMP connection through the gateway, which feeds the queue picker, besides its messaging connection; when the broker is the source's, the source's SEMP serves and only messaging is opened. There is no half-connected destination: if the messaging connection drops later, the destination's SEMP closes with it. While Same Solace Broker is on, the card offers only the source's broker; while both Same Broker and Same Message VPN are on, the card gives way to a note, because the destination is the source connection. **Disconnect** closes both destination connections, and pressed while Connect runs it cancels the attempt and closes whatever had come up.
 
 If the primary connection mode changes while the page is open, the destination connection and the chosen target are dropped.
 
@@ -457,10 +457,35 @@ It appears as a tab in the **Connections** module: **Direct** (type your own cre
 1. **Sign in.** On a deployment that offers only Provisioned, opening the app takes you straight to the sign-in page. Otherwise open **Connections**, choose the **Provisioned** tab and click **Sign in**. Enter the username and password your administrator gave you; you return to the app with the **Provisioned** tab open.
 2. **First sign-in of a new deployment.** The bootstrap `admin` account is asked to choose a new password (at least the gateway's **Minimum password length**, 12 by default, and at most 128 characters) before anything else.
 3. Pick a **Broker** and **Message VPN** from the dropdowns. They list only what you are entitled to, by name. You never see or type the broker's address or credentials.
-4. Click **Connect**. From here the **Queue Browser** and **Queue Copy** work as usual, scoped to your entitlements.
+4. Click **Connect**. It opens both connections a provisioned connection needs (see below). From here the **Queue Browser** and **Queue Copy** work as usual, scoped to your entitlements.
 5. **Refresh** re-fetches your entitlements and brokers without signing out (useful right after an administrator grants you access).
 
-While you are signed in, the sidebar footer shows your username (tagged *admin* for an administrator) above the Client and SEMP lights, with three controls: **Change password** (the key icon: the gateway's password page), **Two-factor sign-in** (the lock icon, shown only while your gateway uses two-factor sign-in) and **Sign out** (the exit icon). They stay there on every page and while you are connected; signing out while connected disconnects first. In a collapsed sidebar only the icons show.
+**Connect opens two connections, and you are connected only when both are up.** **SEMP (management)** fills the queue lists and **Messaging (client)** browses and publishes. If either fails, the one that came up is closed again, so nothing stays half-connected. While Connect runs, the card's status line shows the step ("Connecting SEMP (management) to broker ..." and then "Connecting messaging (client) to broker ..., VPN ...") and Connect stays disabled. Messaging is tried even when SEMP failed, so one attempt shows both reasons.
+
+When Connect fails, the card shows one line per failure, naming the connection and a short reason, and a line for a connection that came up and was closed again:
+
+```
+SEMP (management): broker not reachable
+Messaging (client): connected, closed because SEMP failed
+```
+
+The full text of each failure is in the notification bell. The short reasons:
+
+| Reason on the card | What it means |
+| --- | --- |
+| broker not reachable (SEMP also "(timed out)"; messaging "timed out") | The gateway could not reach the broker in time. Try again; if it persists, tell your administrator. |
+| broker refused the gateway's account | The broker rejected the account the gateway holds for it. Your administrator must fix the connection. |
+| not available to your account | The gateway does not offer you that broker or Message VPN. Press **Refresh**, or ask your administrator. |
+| too many attempts, wait a minute | The gateway limits how often you can connect. Wait, then try again. |
+| gateway not reachable | The page could not reach the gateway. Check your network. |
+| the gateway could not complete it | The gateway failed on its side. Its log has the cause. |
+| the broker's own reason, when short | For example a refused client login. A longer one reads "failed, details in the log". |
+
+If your session has ended instead, you return to **Sign in** and the card shows nothing.
+
+**One connection afterwards.** If the messaging connection drops unexpectedly, SEMP closes too and the card says "Messaging (client): connection dropped, so SEMP was closed too"; press **Connect** again. **Disconnect** and **Sign out** are not faults: the card just reads Disconnected. When Queue Browser or Queue Copy asks to switch the Message VPN and you confirm, messaging reconnects on the new VPN while SEMP stays up; if that reconnect fails, SEMP closes too and the card says why.
+
+While you are signed in, the top of the sidebar, above the page items and separated from them by a thin line, shows three icons: **Change password** (the key: the gateway's password page), **Two-factor sign-in** (the lock: the gateway's two-factor page) and **Sign out** (the exit). Your username (tagged *admin* for an administrator) sits to their right. They stay there on every page and while you are connected; signing out while connected disconnects first. In a collapsed sidebar the icons stack and the username hides.
 
 **Your session** survives a page refresh (F5). It ends after 10 minutes without activity or 30 minutes after you signed in (your deployment may set other limits), when you sign out, and when an administrator changes your password or your administrator flag or deletes your account. You then see *Your session has ended. Sign in again.* the next time the app asks the gateway (for example on **Refresh**). Too many wrong passwords in a row lock sign-in for a while; the page says how long.
 
@@ -476,7 +501,7 @@ Your administrator may ask for a second proof after your password: a six-digit c
 
 **Signing in afterwards.** After the password you see **Two-factor sign-in**: "Enter the 6-digit code from your authenticator app, or one of your recovery codes." Type the current code (spaces or hyphens between the digits are fine), or a recovery code (case and hyphens do not matter; each recovery code works once), and press **Continue**. A wrong or already-used code answers "The code is not correct." and counts like a wrong password: after a few, the page says "Too many attempts. Try again in N seconds." A code works once, so if you sign in twice in a row, wait for the app's next code. **Start again** goes back to the password. A half-finished sign-in is dropped after the gateway's **Time to finish two-factor after the password** (10 minutes by default).
 
-**Setting it up again** (a new phone, or you chose to turn it on yourself while it is optional). While signed in, press the lock icon, or **Two-factor sign-in** on the Administration page of `/solAdmin`. The page asks for your **Password** and, if two-factor is already on, **Current code or a recovery code**; a wrong answer to either says "The password or the code is not correct." Then you scan a new picture and confirm a code as above. The new key and ten new recovery codes replace the old ones, and your other sessions are signed out; this browser stays signed in.
+**Setting it up again** (a new phone, or you chose to turn it on yourself while it is optional). While signed in, press the lock icon at the top of the sidebar (in the main app and in `/solAdmin` alike). The page asks for your **Password** and, if two-factor is already on, **Current code or a recovery code**; a wrong answer to either says "The password or the code is not correct." Then you scan a new picture and confirm a code as above. The new key and ten new recovery codes replace the old ones, and your other sessions are signed out; this browser stays signed in.
 
 **Lost phone.** Sign in with a recovery code and set it up again. With none left, ask an administrator to reset your two-factor: you are signed out everywhere and set it up again (or, if the gateway does not require it of you, sign in with your password). You cannot remove two-factor yourself.
 
@@ -513,7 +538,7 @@ This part is for administrators of a Provisioned deployment. It covers the admin
 
 ### Opening the admin app
 
-Administration is a **separate app**, not extra sidebar entries in the main one. Open `https://<your-gateway>/solAdmin`. Without a session you are sent to the sign-in page first, and an ordinary account gets an *Administrator access required* page instead of the app. Its **Administration** page shows who is signed in, with **Change password**, **Two-factor sign-in** and **Sign out**.
+Administration is a **separate app**, not extra sidebar entries in the main one. Open `https://<your-gateway>/solAdmin`. Without a session you are sent to the sign-in page first, and an ordinary account gets an *Administrator access required* page instead of the app. Once you are signed in the console opens on **User Management**, and the sidebar's top block holds your username with **Change password**, **Two-factor sign-in** and **Sign out** (the same three icons as in the main app; the gateway's pages return you to the console). The **Administration** page is only the signed-out screen: **Sign in** and, when the gateway refuses the session, the reason.
 
 The admin app never connects to a broker. It edits the deployment's users, connections and gateway settings, and backs them up. It exists only on a gateway running in Provisioned mode; anywhere else the URL answers 404. `/solAdmin/` (with a trailing slash) redirects to `/solAdmin`. The page loads neither `solclient.js` nor `jszip.min.js` and shows no library banner.
 

@@ -1,32 +1,10 @@
-<div class="module-header">
-    <h1>Administration</h1>
-    <p class="text-secondary">Manage the users and broker connections of this gateway.</p>
-</div>
-
-<!-- Signed-out view. Sign-in happens on the gateway's own page, which returns
-     here (next=/solAdmin). -->
+<!-- The signed-out screen. Sign-in happens on the gateway's own page, which
+     returns here (next=/solAdmin). Once an administrator is signed in this page
+     is hidden: the account actions live in the sidebar. -->
 <div id="admin-login-view" class="card admin-login-card">
     <div class="flex-row justify-between items-center mb-4">
         <h2 class="m-0">Not signed in</h2>
     </div>
-    <div id="admin-login-error" class="text-error mb-4 hidden" style="font-size: 0.9rem;"></div>
+    <div id="admin-login-error" class="text-error mb-4 hidden"></div>
     <a id="btn-admin-login" class="btn btn-primary" href="/login?next=/solAdmin">Sign in</a>
-</div>
-
-<!-- Signed-in view. No broker controls: this app never opens a broker connection. -->
-<div id="admin-session-view" class="card admin-login-card hidden">
-    <div class="flex-row justify-between items-center mb-4">
-        <h2 class="m-0">Signed in</h2>
-        <div class="flex-row items-center gap-4">
-            <a id="admin-change-password" class="btn btn-secondary" href="/login/password?next=/solAdmin">Change password</a>
-            <a id="admin-two-factor" class="btn btn-secondary" href="/login/two-factor?next=/solAdmin">Two-factor sign-in</a>
-            <button id="btn-admin-logout" class="btn btn-secondary">Sign out</button>
-        </div>
-    </div>
-    <div id="admin-session-summary" class="text-secondary"></div>
-    <p class="text-secondary mt-4" style="line-height: 1.5;">
-        Use <strong>User Mgmt.</strong>, <strong>Conn. Mgmt</strong>, <strong>Gateway Settings</strong> and <strong>Certificates</strong> in the sidebar.
-        Entitlement and module changes reach a signed-in user on their next Refresh; a new password or
-        administrator flag ends their session.
-    </p>
 </div>

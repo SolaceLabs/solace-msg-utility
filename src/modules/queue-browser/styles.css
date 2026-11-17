@@ -193,3 +193,78 @@
     margin-top: 1rem;
     resize: none;
 }
+
+/* Snapshot notice above the message list. */
+.browser-snapshot-notice {
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.6rem;
+    font-size: 0.8rem;
+    background: rgba(252, 171, 41, 0.12);
+    color: var(--status-warning);
+    border-radius: var(--radius-md);
+}
+
+/* "vpn :: queue" title, scrolled as one unit. */
+.browser-title-scroll {
+    overflow-x: auto;
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+}
+
+.browser-list-scroll {
+    max-height: 300px;
+}
+
+.browser-col-select {
+    width: 40px;
+}
+
+.browser-details-title {
+    font-size: 1rem;
+}
+
+.browser-filter-w-200 {
+    width: 200px;
+}
+
+.browser-raw-content {
+    max-height: calc(90vh - 120px);
+    overflow: auto;
+    background: var(--bg-tertiary);
+    padding: 1rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+dialog.browser-confirm-dialog {
+    max-width: 480px;
+}
+
+/* Forward modal: destination type and name side by side. */
+.browser-forward-type {
+    flex: 0 0 160px;
+}
+
+.browser-forward-name {
+    flex: 1 1 auto;
+}
+
+.browser-forward-list {
+    max-height: calc(90vh - 300px);
+    overflow-y: auto;
+}
+
+/* One row of the forward list (built in ui-forward.js). The error line's
+ * colour comes from .text-error. */
+.browser-forward-status {
+    width: 16px;
+}
+
+.browser-forward-row {
+    background: var(--bg-input);
+}
+
+.browser-forward-error {
+    margin-top: 2px;
+}

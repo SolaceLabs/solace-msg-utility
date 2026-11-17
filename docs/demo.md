@@ -134,7 +134,7 @@ In the Provisioned demo Queue Copy shows one Destination Connection card instead
 Two-factor sign-in is always on offer: the seed's setting is *Optional* and nobody is enrolled. Set yourself up:
 
 1. Sign in as `admin`. (**Gateway Settings** holds **Two-factor sign-in (code from an authenticator app)**, at *Optional* in the seed; *Administrators must use it* and *Everyone must use it* are the other two choices.)
-2. Press the lock icon (**Two-factor sign-in**) in the sidebar footer, enter the password, and you reach the enrol page: a grey placeholder where the QR code would be, the secret in groups of four, and "In this demo, open Demo controls > Authenticator for the code."
+2. Press the lock icon (**Two-factor sign-in**) at the top of the sidebar, enter the password, and you reach the enrol page: a grey placeholder where the QR code would be, the secret in groups of four, and "In this demo, open Demo controls > Authenticator for the code."
 3. In **Demo controls > Authenticator**, the account shows as "admin (setting up)" with its current code and the seconds left. Click the code to copy it, type it into the page and confirm. The ten recovery codes appear once; they are real random codes and work once each.
 4. Sign out and sign in again: the password now leads to the code page, which wants the Authenticator's code (or a recovery code) and refuses a used one until the next step.
 5. In **User Management**, **Reset two-factor** on a row that is On removes it and signs that user out.
@@ -208,8 +208,12 @@ The panel is the one in `demo.html`, with the Direct connection values replaced 
   - **Revoke my VPN access** removes every row of the signed-in user.
   - **Clear the sign-in lockout.**
   - The relay (the broker unreachable: `502`), the dial (rate limited: `429`) and `config.yaml` (edited on the host,
-    or unreadable).
+    or unreadable). Both faults show on a Connect, which opens SEMP and messaging together: with the relay down the
+    card reads "SEMP (management): broker not reachable" and "Messaging (client): connected, closed because SEMP
+    failed"; with the dial rate limited it reads "Messaging (client): too many attempts, wait a minute" and "SEMP
+    (management): connected, closed because messaging failed". The full texts are in the notification bell. See
+    [Signing in and connecting](user-guide.md#signing-in-and-connecting).
   - **TLS files:** *writable* (the start) or *read-only*. Read-only turns both writable flags off, so the Certificates page disables replace, add and delete and says the files are read-only on the gateway host, and the writes answer `409 tls_read_only`, as a read-only mount of `/tls` does.
 
 **Queue state**, **Connection faults** and **Latency and volume** work as in `demo.html`, across every broker. A SEMP
-`401` there reaches the app as the relay's `502 upstream_auth`, as a broker refusing the gateway's account does.
+`401` there reaches the app as the relay's `502 upstream_auth`, as a broker refusing the gateway's account does, and a Connect shows "SEMP (management): broker refused the gateway's account".

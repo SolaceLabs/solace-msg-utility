@@ -71,18 +71,18 @@
                 <button type="button" class="btn btn-secondary copy-source-edit-btn">Edit in Connections</button>
             </div>
             <div class="form-group flex-row">
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>Protocol</label>
                     <select id="copy-source-semp-protocol" class="form-control" disabled>
                         <option value="http">http://</option>
                         <option value="https" selected>https://</option>
                     </select>
                 </div>
-                <div style="width: 100px;">
+                <div class="w-100px">
                     <label>Port</label>
                     <input type="text" id="copy-source-semp-port" class="form-control" disabled>
                 </div>
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>URL Path</label>
                     <input type="text" id="copy-source-semp-urlpath" class="form-control" disabled>
                 </div>
@@ -105,19 +105,19 @@
                 <h2 class="m-0">Solace SEMP (Management)</h2>
             </div>
             <div class="form-group flex-row">
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>Protocol</label>
                     <select id="copy-dest-semp-protocol" class="form-control">
                         <option value="http">http://</option>
                         <option value="https" selected>https://</option>
                     </select>
                 </div>
-                <div style="width: 100px;">
+                <div class="w-100px">
                     <label>Port</label>
                     <input type="text" id="copy-dest-semp-port" class="form-control">
                     <div class="invalid-feedback">Invalid port.</div>
                 </div>
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>URL Path</label>
                     <input type="text" id="copy-dest-semp-urlpath" class="form-control">
                 </div>
@@ -162,18 +162,18 @@
                 <button type="button" class="btn btn-secondary copy-source-edit-btn">Edit in Connections</button>
             </div>
             <div class="form-group flex-row">
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>Protocol</label>
                     <select id="copy-source-sol-protocol" class="form-control" disabled>
                         <option value="ws">ws://</option>
                         <option value="wss" selected>wss://</option>
                     </select>
                 </div>
-                <div style="width: 100px;">
+                <div class="w-100px">
                     <label>Port</label>
                     <input type="text" id="copy-source-sol-port" class="form-control" disabled>
                 </div>
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>URL Path</label>
                     <input type="text" id="copy-source-sol-urlpath" class="form-control" disabled>
                 </div>
@@ -199,19 +199,19 @@
                 <h2 class="m-0">Solace Messaging (Client)</h2>
             </div>
             <div class="form-group flex-row">
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>Protocol</label>
                     <select id="copy-dest-sol-protocol" class="form-control">
                         <option value="ws">ws://</option>
                         <option value="wss" selected>wss://</option>
                     </select>
                 </div>
-                <div style="width: 100px;">
+                <div class="w-100px">
                     <label>Port</label>
                     <input type="text" id="copy-dest-sol-port" class="form-control">
                     <div class="invalid-feedback">Invalid port.</div>
                 </div>
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>URL Path</label>
                     <input type="text" id="copy-dest-sol-urlpath" class="form-control">
                 </div>
@@ -273,7 +273,7 @@
                     </label>
                     <span class="copy-dest-type-label" id="copy-dest-type-label-topic">Topic</span>
                 </div>
-                <div class="text-secondary hidden" id="copy-dest-topic-blocked" style="font-size: 0.85rem;">
+                <div class="text-secondary hidden copy-topic-blocked" id="copy-dest-topic-blocked">
                     Topic destinations are unavailable with provisioned connections -- entitlements are defined per queue.
                 </div>
             </div>
@@ -294,7 +294,7 @@
             </div>
             <div class="form-group">
                 <label>Mode</label>
-                <div class="flex-row gap-4" style="font-size: 0.9rem;">
+                <div class="flex-row gap-4 text-body-sm">
                     <label class="flex-row items-center font-normal cursor-pointer gap-1">
                         <input type="radio" name="copy-mode" value="copy" checked> Copy
                     </label>
@@ -368,19 +368,19 @@
                 </dl>
             </div>
 
-            <div id="copy-modal-verify-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+            <div id="copy-modal-verify-error" class="text-error mt-2 hidden text-body-sm"></div>
 
             <!-- Verify-phase red banners. The modal's evaluateStartGate
                  toggles these based on the verify result and selected mode:
                  empty queue, or read-only source under Move mode. Both
                  disable the Start button alongside being shown. -->
-            <div id="copy-modal-source-empty" class="text-error mt-2 hidden" style="font-size: 0.9rem; font-weight: 600;">
+            <div id="copy-modal-source-empty" class="text-error mt-2 hidden text-body-sm font-bold">
                 Queue is empty — nothing to copy or move.
             </div>
-            <div id="copy-modal-source-readonly" class="text-error mt-2 hidden" style="font-size: 0.9rem; font-weight: 600;">
+            <div id="copy-modal-source-readonly" class="text-error mt-2 hidden text-body-sm font-bold">
                 Move requires consume permission on this queue. Switch to Copy mode to proceed.
             </div>
-            <div id="copy-modal-source-noaccess" class="text-error mt-2 hidden" style="font-size: 0.9rem; font-weight: 600;">
+            <div id="copy-modal-source-noaccess" class="text-error mt-2 hidden text-body-sm font-bold">
                 You don't have access to this queue. Both Copy and Move are blocked — connect as the queue owner or as a user with at least Read-Only others-permission.
             </div>
         </div>
@@ -392,9 +392,9 @@
                 <div class="copy-progress-bar">
                     <div id="copy-progress-fill" class="copy-progress-fill"></div>
                 </div>
-                <div id="copy-progress-text" class="text-secondary mt-2" style="font-size: 0.9rem;">0 / 0</div>
+                <div id="copy-progress-text" class="text-secondary mt-2 text-body-sm">0 / 0</div>
             </div>
-            <div id="copy-run-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+            <div id="copy-run-error" class="text-error mt-2 hidden text-body-sm"></div>
         </div>
 
         <div class="flex-row justify-between mt-4">

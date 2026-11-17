@@ -1,4 +1,4 @@
-/* Admin login module (/solAdmin) — sign-in and session cards.
+/* Admin login module (/solAdmin) -- signed-out card.
  * Module-prefixed (.admin-login-*) so they never collide in the shared
  * (inlined) cascade. Mirrors the Managed tab's card sizing so the two
  * sign-in surfaces look like the same product. */

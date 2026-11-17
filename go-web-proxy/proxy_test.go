@@ -407,9 +407,38 @@ func TestPWAHandler_ServesTheModesBundle(t *testing.T) {
 		h := mustPWA(t, dir, appIndexFile(provisioned))
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-		if rec.Code != http.StatusOK || rec.Body.String() != "<html>"+want+"</html>" || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
+		if rec.Code != http.StatusOK || rec.Body.String() != "<html>"+want+"</html>" {
 			t.Errorf("provisioned=%v /: want the %s bundle, got %d %q", provisioned, want, rec.Code, rec.Body.String())
 		}
+		expectAppPageHeaders(t, rec)
+	}
+}
+
+// expectAppPageHeaders checks what the gateway adds to an app bundle's page:
+// HTML, its policy on top of the bundle's own (no framing, connections to
+// the gateway only), no type sniffing and no referrer.
+func expectAppPageHeaders(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	h := rec.Header()
+	if !strings.HasPrefix(h.Get("Content-Type"), "text/html") ||
+		h.Get("Content-Security-Policy") != "frame-ancestors 'none'; connect-src 'self'" ||
+		h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "no-referrer" {
+		t.Errorf("app page headers: %v", h)
+	}
+}
+
+// The vendor scripts next to the bundle are served as the type their names
+// say, never as one a browser guesses.
+func TestPWAHandler_FilesAreNotSniffed(t *testing.T) {
+	dir := writeBundles(t)
+	if err := os.WriteFile(filepath.Join(dir, "solclient.js"), []byte("var solace = {};"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	mustPWA(t, dir, directIndexFile).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/solclient.js", nil))
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		!strings.Contains(rec.Header().Get("Content-Type"), "javascript") {
+		t.Errorf("solclient.js: want 200 javascript with nosniff, got %d %v", rec.Code, rec.Header())
 	}
 }
 
@@ -877,9 +906,7 @@ func TestAdminHandler_ServesBundle(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "admin") {
 		t.Errorf("enabled: want the admin bundle, got %q", rec.Body.String())
 	}
-	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
-		t.Errorf("content-type: want text/html, got %q", got)
-	}
+	expectAppPageHeaders(t, rec)
 	// The admin surface must never be cached by an intermediary.
 	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
 		t.Errorf("cache-control: want no-store, got %q", got)

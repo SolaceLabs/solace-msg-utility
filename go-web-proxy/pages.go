@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"errors"
 	"html/template"
 	"log/slog"
@@ -17,13 +19,34 @@ import (
 	"time"
 )
 
-// pageFiles holds the sign-in page template: plain HTML, inline CSS, no
-// script, so the gateway can serve it with a CSP that allows nothing else.
+// pageFiles holds the sign-in page template: plain HTML, one <style> block,
+// no script, so the gateway can serve it with a CSP that allows nothing else.
 //
 //go:embed pages/login.html
 var pageFiles embed.FS
 
-const pageCSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+//go:embed pages/login.html
+var pageSource string
+
+// pageCSP is the sign-in pages' policy: no script, the template's one <style>
+// block by its hash, forms that post back to the gateway, and no framing.
+var pageCSP = pagePolicy(pageSource)
+
+// pagePolicy builds the policy for a page template. The <style> block holds
+// no template action, so the page carries it exactly as written; the browser
+// hashes it with CRLF line ends turned into LF, and so does this. A template
+// with no <style> block gets style-src 'none', which
+// TestPageCSP_HashesTheStyleBlockThePageCarries would catch.
+func pagePolicy(src string) string {
+	style := "'none'"
+	if _, rest, ok := strings.Cut(src, "<style>"); ok {
+		if css, _, ok := strings.Cut(rest, "</style>"); ok {
+			sum := sha256.Sum256([]byte(strings.ReplaceAll(strings.ReplaceAll(css, "\r\n", "\n"), "\r", "\n")))
+			style = "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+		}
+	}
+	return "default-src 'none'; style-src " + style + "; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+}
 
 // pageData feeds pages/login.html. Mode picks the form: "login", "password"
 // or "message" (a title and an error, nothing to submit), and for two-factor

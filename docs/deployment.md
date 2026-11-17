@@ -102,6 +102,8 @@ python -m http.server 8000
 
 Then open the served URL in a browser.
 
+Each page carries its own Content-Security-Policy: it runs only its own scripts and the two vendor libraries beside it, and connects only to brokers. If your web server adds a `Content-Security-Policy` header, the browser enforces it as well, so a header can narrow the page but never widen it. Keep a header to what the page leaves open, such as `frame-ancestors` or a `connect-src` that names your brokers: a header that limits scripts or styles stops the page. Do not edit a page either: its policy names its scripts by their hashes, and an edited script does not run.
+
 ### Embed in Solace Broker Web UI
 
 Some Solace broker deployments allow hosting custom web pages. Place the three files in the broker's web server directory.
@@ -204,6 +206,7 @@ Some names an older deployment may still carry are not settings. Each one is han
 
 - **Health check:** the image has no shell, so it declares no `HEALTHCHECK`. Probe `https://<host>:9443/hosted` from outside (`200` while `SMU_HOSTED=true`; `503` once the app bundle cannot be served, say a mounted build went away), with the certificate pinned or verification off. In Provisioned mode, a client access list must allow the prober.
 - **Paths the gateway does not serve:** there is no history-mode fallback, because the app has no client-side routes and the bundle's relative vendor paths (`solclient.js`, `jszip.min.js`) only resolve at `/` and `/solAdmin`. An unknown path (`/a/b`, a missing file, or `/login/` and `/login` in Gateway mode) answers `404` and is never redirected, so a browser cannot keep a redirect for a path the gateway serves later. `/solAdmin/` is the one alias: it answers `308` to `/solAdmin` where the admin route is enabled (`404` where it is not). A directory under the app directory without an `index.html` (for example `/licenses/`) is never listed: `404`. In Provisioned mode the session gate still answers first: a visitor without a session is sent to `/login` whatever the path.
+- **Headers:** with the app pages (`/`, `/solAdmin`) the gateway sends a Content-Security-Policy on top of the page's own, `frame-ancestors 'none'; connect-src 'self'`: no other site can frame the app, and the page connects only to the gateway. It also sends `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff` with every file. A reverse proxy may add headers, but must pass these through.
 - **Behind a reverse proxy:** pass the original `Host` header through, allow WebSocket upgrades, and in Provisioned mode list the proxy under Trusted reverse proxies on Gateway Settings (`access.trustedProxies`) so the gateway sees each client's own address. See [Client addresses behind Docker and proxies](#client-addresses-behind-docker-and-proxies).
 - **Network:** browsers need to reach only the gateway; the gateway needs the brokers' SEMP and web messaging ports. In Gateway mode the user picks `https`/`wss` or `http`/`ws` per connection; in Provisioned mode each stored connection uses TLS (`https` for SEMP, `wss` for messaging) unless an administrator gave it the plain scheme (`http`, `ws`).
 - **Stopping:** on `SIGTERM` the gateway finishes requests in flight for up to 10 seconds. A restart signs every Provisioned user out.
@@ -211,7 +214,7 @@ Some names an older deployment may still carry are not settings. Each one is han
 
 ### Serving your own build
 
-Mount it over `/SolaceMsgUtility`, with the bundles the mode serves (`index.html` in Gateway mode, `provisioned.html` in Provisioned mode, and `solAdmin.html` for the admin console) and both vendor scripts beside them. The mount may be read-only. The path is not configurable. Without the mode's bundle the gateway does not start, and the log names the file.
+Mount it over `/SolaceMsgUtility`, with the bundles the mode serves (`index.html` in Gateway mode, `provisioned.html` in Provisioned mode, and `solAdmin.html` for the admin console) and both vendor scripts beside them, as the build wrote them: each bundle's policy names its scripts by their hashes, so an edited bundle does not run. The mount may be read-only. The path is not configurable. Without the mode's bundle the gateway does not start, and the log names the file.
 
 ### Client addresses behind Docker and proxies
 

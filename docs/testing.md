@@ -78,7 +78,7 @@ The test tree mirrors the source tree. `src/foo/bar.ts` is tested by `tests/foo/
 | `tests/modules/<id>/` | One directory per module, including the admin modules (`user-management`, `connection-management`, `gateway-settings`, `backup`, `tls-certificates`) and the `admin-login` entry point. |
 | `tests/integration/` | Flows that cross modules: see [Integration tests](#integration-tests). |
 | `tests/mock-broker/` | The in-browser demo broker and the fake gateway: see [Demo and fake gateway suite](#demo-and-fake-gateway-suite). |
-| `tests/build/` | The build and gate scripts: the module registry plugin, `check-bundles`, `npm-audit-gate`, `vite-build`, the e2e helpers, the workflow and compose files, vendor scripts and blocks, and the docs links. |
+| `tests/build/` | The build and gate scripts: the module registry plugin, `check-bundles`, the Content-Security-Policy (`csp`, and `no-inline-styles`, which scans the source for what the policy refuses), `npm-audit-gate`, `vite-build`, the e2e helpers, the workflow and compose files, vendor scripts and blocks, and the docs links. |
 | `tests/helpers/` | Shared helpers, not test files: `loadModuleDOM.ts`, `appContext.ts` (a complete `AppContext` from the fields a test cares about), `confirmDialog.ts` (answers the core confirm dialog), `resetQueueBrowserState.ts`, `sources.ts` (the app's source files, for tests that scan them) and `compose.ts` (compose files read as text). |
 | `tests/` root | `main.test.ts` (bootstrap), `registry.test.ts`, `variants.test.ts` (every variant manifest resolves and keeps its shape, and the gateway's module catalog equals the Provisioned variant's module-controlled modules) and `shell-loader.test.ts`. |
 | `tests/setup.ts` | The global setup every file runs: see [Global hooks](#global-hooks). |
@@ -176,7 +176,7 @@ The cases cover the JSON API only, two-factor included: the `twoFactor` flag on 
 
 `vitest.config.ts` sets a 100% threshold on statements, branches, functions and lines. The suite meets it on all four metrics, and the policy is to keep it there. When a metric slips, `./scripts/dev.sh cov` ends with `ERROR: Coverage for ... does not meet global threshold (100%)`.
 
-- **What is measured:** `src/**/*.ts` and `src/**/*.js`, plus four scripts: `scripts/check-bundles.mjs` (the bundle-isolation gate), `scripts/module-registry-plugin.mjs` (the module registry the build generates), `scripts/npm-audit-gate.mjs` and `scripts/e2e-lib.mjs` (the end-to-end run's helpers). Each is also driven through its command-line path in `tests/build/`. The other scripts are thin wrappers (`vite-build.mjs`, tested in `tests/build/vite-build.test.ts`) or the end-to-end harness itself.
+- **What is measured:** `src/**/*.ts` and `src/**/*.js`, plus five scripts: `scripts/check-bundles.mjs` (the bundle-isolation gate), `scripts/csp.mjs` (each bundle's Content-Security-Policy, and its check), `scripts/module-registry-plugin.mjs` (the module registry the build generates), `scripts/npm-audit-gate.mjs` and `scripts/e2e-lib.mjs` (the end-to-end run's helpers). Each is also driven through its command-line path in `tests/build/`. The other scripts are thin wrappers (`vite-build.mjs`, tested in `tests/build/vite-build.test.ts`) or the end-to-end harness itself.
 - **Why the include list matters:** Vitest 4 has no `all` option and reports every file matched by `include`, even one no test imports. A file with no test therefore fails the threshold instead of being silently left out.
 - **What is excluded:** `src/css/**`, `src/index.html`, `src/modules/queue-browser/constants.js` (icon constants) and `src/mock-broker/**` (reported by `mock`, see [Demo and fake gateway suite](#demo-and-fake-gateway-suite)).
 - **Code you touch must be fully covered** by tests in the same change. Branch added, test added; branch removed, test removed or repurposed. Security and error boundaries are always covered: bad input is rejected and the downstream call is not made, every error code, every fallback path.
@@ -439,14 +439,14 @@ The numbered checks run in this order. Checks and groups described under a numbe
    - `B6` checks that browser storage holds no password, store key or session cookie.
    - `B7` checks `/solAdmin`: it refuses the e2e user with the 403 page, and the administrator signs in there and sees both users, both connections, and Backup & Restore with no schedule and a writable backup directory.
    - `B8` signs out from the sidebar. The browser's SMF socket closes, `/managed/me` gets `401`, and `/` goes to sign-in.
-   - `B9` checks that no request or socket went to another origin and that no page threw.
+   - `B9` checks that no request or socket went to another origin, that no page threw, and that the browser refused nothing under a page's Content-Security-Policy.
 
    Then the Gateway-mode checks run, against the `direct` service at `https://127.0.0.1:39445` from the harness and `https://direct:9443` from the browser:
 
    - `D1`: `/hosted` says `{"hosted":true,"connModes":"direct","defaultConn":"direct"}`; `/` serves the Direct app (the `#conn-host` form, no Provisioned panel); `/login`, an unknown path, `/managed/me`, `/solAdmin`, `/provisioned.html` and `/solAdmin.html` are plain `404`s; the log says `conn_modes=direct`.
    - `D2`: the Direct relay forwards a SEMP `GET` with the caller's own `Authorization` and returns the queue; without it, the broker's `401` passes through; a malformed path is a `400` and an unknown host a `502`.
    - `D3`: a real SMF login through `/wss/<port>/<host>`, with the SDK under Node, binds a queue browser to the queue.
-   - `D4`: in Chromium, fills the Direct form, connects SEMP and the client, and binds the queue in Queue Browser. The browser's WebSocket goes to `wss://direct:9443/wss/<port>/<host>`, the SEMP calls go through `https://direct:9443/https/...`, and nothing goes to another origin. The queue's badge is the broker's own permission for the client username, `Read-Only` or `Read-Write`. The app never reads the body of its SEMP connect probe, so that response is reported as not swept.
+   - `D4`: in Chromium, fills the Direct form, connects SEMP and the client, and binds the queue in Queue Browser. The browser's WebSocket goes to `wss://direct:9443/wss/<port>/<host>`, the SEMP calls go through `https://direct:9443/https/...`, nothing goes to another origin, and the browser refuses nothing under the page's policy. The queue's badge is the broker's own permission for the client username, `Read-Only` or `Read-Write`. The app never reads the body of its SEMP connect probe, so that response is reported as not swept.
 
 13. No response from either gateway carries a credential, except the body of the `dial` answer. This includes every response the browser received and every Gateway-mode response.
 14. Both stores are sealed at rest (`SMUS` header, no plaintext).

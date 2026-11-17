@@ -13,6 +13,11 @@ import type { AppContext, AppState, EventBus, ManagedSession } from '../../../sr
  * handles is the dialled password it passes to the SDK. With a Direct primary the
  * typed cards stay.
  *
+ * One Connect runs the shared sequence of core/services/provisioned-connect.ts:
+ * SEMP first (skipped with Same broker), then messaging, both held until both are
+ * up. The sequence itself is covered in tests/core/services/provisioned-connect.test.ts;
+ * these tests drive it through the module's hooks, as the two clients would.
+ *
  * Kept separate from `module.test.ts` because it mocks the copy engine, which
  * lets the `rbac:changed` halt be observed directly on `state.job`.
  */
@@ -63,11 +68,20 @@ vi.mock('../../../src/modules/queue-copy/service-copy', async () => {
     return { ...actual, runCopyJob: runCopyJobMock };
 });
 
+// Keep the module's own state, to move its form under a connect in flight.
+const { moduleState } = vi.hoisted(() => ({ moduleState: { current: null as any } }));
+vi.mock('../../../src/modules/queue-copy/state', async () => {
+    const actual = await vi.importActual<any>('../../../src/modules/queue-copy/state');
+    return { ...actual, createInitialState: () => (moduleState.current = actual.createInitialState()) };
+});
+
 import { QueueCopyModule } from '../../../src/modules/queue-copy/module';
 import { destinationRefusal } from '../../../src/modules/queue-copy/ui-modal';
 import { createInitialState } from '../../../src/modules/queue-copy/state';
 import { DEST_TARGET_LOCKED_TITLE } from '../../../src/modules/queue-copy/ui';
 import { completeContext } from '../../helpers/appContext';
+import { logger } from '../../../src/core/logger';
+import { managedErrorMessage } from '../../../src/core/services/managed-api';
 
 /** The /managed/me profile: names only, as the gateway sends it. */
 const PROFILE: any = {
@@ -95,9 +109,13 @@ let eventBus: EventBus;
 beforeEach(() => {
     container = loadModuleDOM('queue-copy');
     eventBus = createEventBus();
-    destSempConnect.mockClear();
-    destSempDisconnect.mockClear();
-    destSolConnect.mockClear();
+    // The relay lets the probe through; a disconnect reports itself, as the real client does.
+    destSempConnect.mockReset();
+    destSempConnect.mockImplementation(async () => { sempUp(); });
+    destSempDisconnect.mockReset();
+    destSempDisconnect.mockImplementation(() => { destSempHooks.current.onDisconnected(); });
+    destSolConnect.mockReset();
+    destSolConnect.mockReturnValue({ ok: true });
     destSolDisconnect.mockClear();
     pickQueueMock.mockClear();
     dialMock.mockReset();
@@ -169,6 +187,32 @@ const options = (el: El, sel: string) => Array.from(el<HTMLSelectElement>(sel).o
 const connectBtn = (el: El) => el<HTMLButtonElement>('#copy-btn-dest-prov-connect');
 const cardStatus = (el: El) => el('#copy-dest-prov-card .prov-conn-status').textContent;
 const cardError = (el: El) => el('#copy-dest-prov-error').textContent;
+const pickShown = (el: El) => !el('#copy-btn-dest-pick').classList.contains('hidden');
+
+const SEMP_CTX = { fetch: vi.fn(), baseUrl: '/managed/relay/b1' };
+/** The destination SEMP probe is answered. */
+const sempUp = () => destSempHooks.current.onConnected(SEMP_CTX, { user: '', pass: '' });
+/** The relay refuses the destination SEMP probe, with the gateway's code. */
+const sempRefused = (message: string, code?: string) => destSempHooks.current.onError({
+    message, isNetworkError: false, isTimeout: false, baseUrl: '/managed/relay/b1', ...(code ? { code } : {}),
+});
+/** The SDK session of the destination comes up. */
+const sessionUp = (vpn = 'v1') => destSolHooks.current.onConnected({ on: vi.fn() }, vpn);
+/** The messaging step has started its SDK session (SEMP, when there is one, has answered). */
+const messagingStarted = () => vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
+/** The card shows both sides installed: Connect has turned into Disconnect. */
+const installed = (el: El) => vi.waitFor(() => expect(connectBtn(el).textContent).toBe('Disconnect'));
+/** The card shows a refusal. */
+const failed = (el: El) => vi.waitFor(() => expect(cardError(el)).not.toBe(''));
+/** Fill both names so Next is gated only on the destination connection. */
+function names(el: El): void {
+    for (const [sel, v] of [['#copy-source-input', 'ops.src'], ['#copy-dest-input', 'ops.dest']]) {
+        el<HTMLInputElement>(sel).value = v;
+        el<HTMLInputElement>(sel).dispatchEvent(new Event('input'));
+    }
+}
+/** What the notification bell holds, as module, level and text. */
+const bell = (ctx: AppContext) => ctx.notifications.entries().map(e => ({ level: e.level, module: e.module, text: e.text }));
 
 describe('queue-copy -- the destination follows the primary connection mode', () => {
     it('Provisioned primary: the card replaces the host field, the SEMP and Client cards and the credential radio', async () => {
@@ -246,15 +290,16 @@ describe('queue-copy -- the destination follows the primary connection mode', ()
 });
 
 describe('queue-copy -- provisioned destination: connecting through the profile', () => {
-    it('one Connect dials the chosen VPN and opens destination SEMP through the relay, with no credential for SEMP', async () => {
+    it('one Connect opens destination SEMP through the relay first, then dials the chosen VPN, with no credential for SEMP', async () => {
         const { el } = await setupProvisioned();
         needSecondary(el);
         pick(el, 'b2', 'w1');
 
         connectBtn(el).click();
-        expect(cardStatus(el)).toBe('Connecting to broker "b2", VPN "w1"...');
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-        await vi.waitFor(() => expect(destSempConnect).toHaveBeenCalled());
+        expect(cardStatus(el)).toBe('Connecting SEMP (management) to broker "b2"...');
+        await messagingStarted();
+        expect(cardStatus(el)).toBe('Connecting messaging (client) to broker "b2", VPN "w1"...');
+        expect(destSempConnect.mock.invocationCallOrder[0]).toBeLessThan(destSolConnect.mock.invocationCallOrder[0]);
 
         // SMF: the dialled credential goes straight to the SDK, with a profile-composed clientName.
         const [cfg, host, pass, clientName] = destSolConnect.mock.calls[0];
@@ -271,27 +316,52 @@ describe('queue-copy -- provisioned destination: connecting through the profile'
         expect(sempPass).toBe('');
     });
 
-    it('with Same broker only the Client credential is dialled: the primary\'s SEMP serves the picker', async () => {
+    it('holds SEMP and the session until both are up, then installs both: the queue picker appears only then', async () => {
+        const { el } = await setupProvisioned();
+        needSecondary(el);
+        pick(el, 'b2', 'w1');
+
+        connectBtn(el).click();
+        await messagingStarted();
+        // SEMP has answered, the session has not: nothing is installed, and Connect stays busy.
+        expect(pickShown(el)).toBe(false);
+        expect(connectBtn(el).textContent).toBe('Connecting...');
+        expect(connectBtn(el).disabled).toBe(true);
+
+        sessionUp('w1');
+        await installed(el);
+        expect(cardStatus(el)).toBe('Broker "b2", VPN "w1"');
+        expect(pickShown(el)).toBe(true);
+        expect(destSolDisconnect).not.toHaveBeenCalled();
+        expect(destSempDisconnect).not.toHaveBeenCalled();
+        names(el);
+        expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(false);
+    });
+
+    it('with Same broker only the messaging session is opened: no SEMP step, the primary\'s SEMP serves the picker', async () => {
         const { el } = await setupProvisioned();
         otherVpn(el);
         pick(el, 'b1', 'v2');
 
         connectBtn(el).click();
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
+        expect(cardStatus(el)).toBe('Connecting messaging (client) to broker "b1", VPN "v2"...');
+        await messagingStarted();
+        sessionUp('v2');
+        await installed(el);
 
         expect(dialMock).toHaveBeenCalledWith('b1', 'v2');
         expect(destSempConnect).not.toHaveBeenCalled();
+        expect(cardStatus(el)).toBe('Broker "b1", VPN "v2"');
     });
 
-    it('shows Connected with the broker and VPN once UP lands; Disconnect tears both connections down', async () => {
+    it('shows Connected with the broker and VPN once both are up; Disconnect tears both connections down', async () => {
         const { el } = await setupProvisioned();
         needSecondary(el);
         connectBtn(el).click();
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-
-        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
+        await messagingStarted();
+        sessionUp();
+        await installed(el);
         expect(cardStatus(el)).toBe('Broker "b1", VPN "v1"');
-        expect(connectBtn(el).textContent).toBe('Disconnect');
         expect(connectBtn(el).disabled).toBe(false);
 
         connectBtn(el).click();
@@ -301,100 +371,57 @@ describe('queue-copy -- provisioned destination: connecting through the profile'
         destSolHooks.current.onDisconnected();
         expect(connectBtn(el).textContent).toBe('Connect');
         expect(cardStatus(el)).toBe('');
+        expect(pickShown(el)).toBe(false);
     });
 
-    it('a failed SEMP leaves the copy possible: the card stays connected and says the queue list is unavailable', async () => {
+    it('a session that drops after it was installed closes the destination SEMP too', async () => {
         const { el } = await setupProvisioned();
         needSecondary(el);
         connectBtn(el).click();
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
+        await messagingStarted();
+        sessionUp();
+        await installed(el);
+        expect(pickShown(el)).toBe(true);
 
-        destSempHooks.current.onError({ message: 'boom' });
-        expect(connectBtn(el).textContent).toBe('Disconnect');
-        expect(cardStatus(el)).toBe('Broker "b1", VPN "v1" -- queue list unavailable: SEMP error: boom');
+        // The SDK reports the loss; nobody pressed Disconnect.
+        destSolHooks.current.onDisconnected();
 
-        // A later SEMP UP clears the note.
-        destSempHooks.current.onConnected({ fetch: vi.fn(), baseUrl: 'https://x/SEMP/v2' }, { user: 'u', pass: 'p' });
-        expect(cardStatus(el)).toBe('Broker "b1", VPN "v1"');
+        expect(destSempDisconnect).toHaveBeenCalledTimes(1);
+        expect(destSolDisconnect).not.toHaveBeenCalled();
+        expect(pickShown(el)).toBe(false);
+        expect(connectBtn(el).textContent).toBe('Connect');
     });
 
-    it('a SEMP dial that fails before the Client is up shows in the card once it is', async () => {
+    it('a session that drops with Same broker has no SEMP of its own to close', async () => {
         const { el } = await setupProvisioned();
-        needSecondary(el);
-        destSempConnect.mockRejectedValueOnce(new Error('relay down'));
+        otherVpn(el);
+        pick(el, 'b1', 'v2');
         connectBtn(el).click();
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-        await vi.waitFor(() => expect(el('#copy-dest-semp-error').textContent).toBe('relay down'));
+        await messagingStarted();
+        sessionUp('v2');
+        await installed(el);
 
-        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
-        expect(cardStatus(el)).toBe('Broker "b1", VPN "v1" -- queue list unavailable: relay down');
+        destSolHooks.current.onDisconnected();
+
+        expect(destSempDisconnect).not.toHaveBeenCalled();
+        expect(connectBtn(el).textContent).toBe('Connect');
     });
 
-    it('a relay 401 asks for a sign-out and is noted on the card', async () => {
+    it('a relay 401 after the destination is connected asks for a sign-out and keeps the card connected', async () => {
         const { el } = await setupProvisioned();
         needSecondary(el);
         connectBtn(el).click();
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
+        await messagingStarted();
+        sessionUp();
+        await installed(el);
         const signOut = vi.fn();
         eventBus.on('rbac:sign-out-requested', signOut);
 
         destSempHooks.current.onAuthFailed();
+
         expect(el('#copy-dest-semp-error').textContent).toBe('Your session has ended. Sign in again.');
-        expect(cardStatus(el)).toContain('queue list unavailable: Your session has ended. Sign in again.');
+        expect(cardStatus(el)).toBe('Broker "b1", VPN "v1"');
         expect(signOut).toHaveBeenCalledTimes(1);
-    });
-
-    it('a dial refused because the gateway session ended shows on the card and asks for a sign-out', async () => {
-        const { el } = await setupProvisioned();
-        needSecondary(el);
-        const signOut = vi.fn();
-        eventBus.on('rbac:sign-out-requested', signOut);
-        dialMock.mockResolvedValueOnce({ ok: false, status: 401, code: 'unauthenticated' });
-
-        connectBtn(el).click();
-        await vi.waitFor(() => expect(cardError(el)).toBe('Your session has ended. Sign in again.'));
-        expect(signOut).toHaveBeenCalledTimes(1);
-        expect(destSolConnect).not.toHaveBeenCalled();
-        expect(connectBtn(el).disabled).toBe(false);
-    });
-
-    it('a profile refusal (signed out under the click) shows on the card without a sign-out request', async () => {
-        const { ctx, el } = await setupProvisioned();
-        needSecondary(el);
-        ctx.managedProfile.clear();
-        const signOut = vi.fn();
-        eventBus.on('rbac:sign-out-requested', signOut);
-
-        connectBtn(el).click();
-        await vi.waitFor(() => expect(cardError(el)).toMatch(/requires a sign-in session/i));
-        expect(destSolConnect).not.toHaveBeenCalled();
-        expect(destSempConnect).not.toHaveBeenCalled();
-        expect(signOut).not.toHaveBeenCalled();
-    });
-
-    it('a failed connect shows its reason, and the disconnect that follows does not wipe it', async () => {
-        const { el } = await setupProvisioned();
-        needSecondary(el);
-        connectBtn(el).click();
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-
-        destSolHooks.current.onConnectFailed({ infoStr: 'timeout' });
-        expect(cardError(el)).toBe('Connection failed: timeout');
-        destSolHooks.current.onDisconnected();
-        expect(cardError(el)).toBe('Connection failed: timeout');
-        expect(connectBtn(el).disabled).toBe(false);
-        expect(connectBtn(el).textContent).toBe('Connect');
-    });
-
-    it('an SDK error shows on the card too', async () => {
-        const { el } = await setupProvisioned();
-        needSecondary(el);
-        connectBtn(el).click();
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-        destSolHooks.current.onError(new Error('socket reset'));
-        expect(cardError(el)).toBe('socket reset');
     });
 
     it('a Direct destination reports only on its own rows: the hidden card is left alone', async () => {
@@ -404,6 +431,396 @@ describe('queue-copy -- provisioned destination: connecting through the profile'
         destSempHooks.current.onError({ message: 'y' });
         expect(cardError(el)).toBe('');
         expect(el('#copy-dest-sol-error').textContent).toBe('x');
+    });
+});
+
+describe('queue-copy -- provisioned destination: a connect that fails', () => {
+    const SEMP_DOWN = 'The gateway could not reach the broker.';
+
+    it('SEMP failed while messaging came up: the session is closed, the card names both sides and the bell the failure', async () => {
+        const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { ctx, el } = await setupProvisioned();
+        needSecondary(el);
+        destSempConnect.mockImplementationOnce(async () => { sempRefused(SEMP_DOWN, 'upstream_unavailable'); });
+
+        connectBtn(el).click();
+        await messagingStarted();
+        sessionUp();
+        await failed(el);
+
+        expect(cardError(el)).toBe([
+            'SEMP (management): broker not reachable',
+            'Messaging (client): connected, closed because SEMP failed',
+        ].join('\n'));
+        expect(destSolDisconnect).toHaveBeenCalledTimes(1);
+        expect(bell(ctx)).toEqual([{ level: 'error', module: 'Queue Copy', text: `SEMP (management): ${SEMP_DOWN}` }]);
+        expect(error).toHaveBeenCalledWith(expect.stringContaining(`SEMP (management): ${SEMP_DOWN}`));
+        // Nothing was installed: no picker, no usable destination.
+        expect(pickShown(el)).toBe(false);
+        names(el);
+        expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(true);
+        // The card is free for another try.
+        expect(connectBtn(el).textContent).toBe('Connect');
+        expect(connectBtn(el).disabled).toBe(false);
+        expect(el<HTMLSelectElement>('#copy-dest-prov-broker').disabled).toBe(false);
+        expect(el<HTMLInputElement>('#copy-toggle-same-broker').disabled).toBe(false);
+    });
+
+    it('the late DISCONNECTED of a held session a failed run closed leaves the card\'s lines and a newer run\'s connecting state alone', async () => {
+        vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { el } = await setupProvisioned();
+        needSecondary(el);
+        destSempConnect.mockImplementationOnce(async () => { sempRefused(SEMP_DOWN, 'upstream_unavailable'); });
+        connectBtn(el).click();
+        await messagingStarted();
+        sessionUp();
+        await failed(el);
+        const lines = cardError(el);
+
+        destSolHooks.current.onDisconnected();   // the client reports the session the run dropped
+        expect(cardError(el)).toBe(lines);
+
+        dialMock.mockImplementationOnce(() => new Promise(() => {}));
+        connectBtn(el).click();
+        await vi.waitFor(() => expect(connectBtn(el).textContent).toBe('Connecting...'));
+        destSolHooks.current.onDisconnected();
+        expect(connectBtn(el).textContent).toBe('Connecting...');
+        expect(el<HTMLSelectElement>('#copy-dest-prov-broker').disabled).toBe(true);
+    });
+
+    it('messaging failed while SEMP was up: SEMP is never installed and the card says it was closed', async () => {
+        vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { ctx, el } = await setupProvisioned();
+        needSecondary(el);
+
+        connectBtn(el).click();
+        await messagingStarted();
+        destSolHooks.current.onConnectFailed({ infoStr: 'Login failure' });
+        await failed(el);
+
+        expect(cardError(el)).toBe([
+            'Messaging (client): Connection failed: Login failure',
+            'SEMP (management): connected, closed because messaging failed',
+        ].join('\n'));
+        expect(pickShown(el)).toBe(false);
+        expect(bell(ctx)).toEqual([{ level: 'error', module: 'Queue Copy', text: 'Messaging (client): Connection failed: Login failure' }]);
+        expect(connectBtn(el).textContent).toBe('Connect');
+    });
+
+    it('both failed: the card lists each reason, the bell and the log each full text, and nothing is closed', async () => {
+        const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { ctx, el } = await setupProvisioned();
+        needSecondary(el);
+        destSempConnect.mockImplementationOnce(async () => { sempRefused('Broker refused the account.', 'upstream_auth'); });
+        dialMock.mockResolvedValueOnce({ ok: false, status: 503, code: 'upstream_unavailable' });
+        const dialRefusal = managedErrorMessage({ ok: false, status: 503, code: 'upstream_unavailable' });
+
+        connectBtn(el).click();
+        await failed(el);
+
+        expect(cardError(el)).toBe([
+            'SEMP (management): broker refused the gateway\'s account',
+            'Messaging (client): broker not reachable',
+        ].join('\n'));
+        expect(bell(ctx)).toEqual([
+            { level: 'error', module: 'Queue Copy', text: 'SEMP (management): Broker refused the account.' },
+            { level: 'error', module: 'Queue Copy', text: `Messaging (client): ${dialRefusal}` },
+        ]);
+        expect(error).toHaveBeenCalledTimes(2);
+        expect(destSolConnect).not.toHaveBeenCalled();
+        expect(destSolDisconnect).not.toHaveBeenCalled();
+    });
+
+    it('an SDK error while connecting fails the messaging side', async () => {
+        vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { el } = await setupProvisioned();
+        needSecondary(el);
+        connectBtn(el).click();
+        await messagingStarted();
+        destSolHooks.current.onError(new Error('socket reset'));
+        await failed(el);
+        expect(cardError(el)).toBe([
+            'Messaging (client): socket reset',
+            'SEMP (management): connected, closed because messaging failed',
+        ].join('\n'));
+    });
+
+    it('a session that closes before it was up fails the messaging side', async () => {
+        vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { el } = await setupProvisioned();
+        otherVpn(el);
+        connectBtn(el).click();
+        await messagingStarted();
+        destSolHooks.current.onDisconnected();
+        await failed(el);
+        expect(cardError(el)).toBe('Messaging (client): The messaging session closed before it was up.');
+    });
+
+    it('an SDK that refuses to start fails the messaging side without any hook firing', async () => {
+        vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { el } = await setupProvisioned();
+        otherVpn(el);
+        destSolConnect.mockReturnValueOnce({ ok: false, error: 'The SDK is still loading.' });
+        connectBtn(el).click();
+        await failed(el);
+        expect(cardError(el)).toBe('Messaging (client): The SDK is still loading.');
+    });
+
+    it('a SEMP probe that ends without an answer fails the SEMP side', async () => {
+        vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { el } = await setupProvisioned();
+        needSecondary(el);
+        destSempConnect.mockImplementationOnce(async () => {});
+        connectBtn(el).click();
+        await messagingStarted();
+        sessionUp();
+        await failed(el);
+        expect(cardError(el)).toMatch(/^SEMP \(management\): The SEMP check gave no answer\.\n/);
+    });
+
+    it('a failed connect leaves nothing live: a later refresh that withdraws the VPN tears nothing down', async () => {
+        vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { ctx, el } = await setupProvisioned();
+        needSecondary(el);
+        connectBtn(el).click();
+        await messagingStarted();
+        destSolHooks.current.onConnectFailed({ infoStr: 'refused' });
+        await failed(el);
+        destSolDisconnect.mockClear();
+        destSempDisconnect.mockClear();
+
+        ctx.managedProfile.setProfile({
+            ...PROFILE, brokers: [{ broker: 'b1', msgVpns: [{ name: 'v2' }] }, PROFILE.brokers[1]],
+        } as any);
+        eventBus.emit('rbac:changed');
+
+        expect(destSempDisconnect).not.toHaveBeenCalled();
+        expect(destSolDisconnect).not.toHaveBeenCalled();
+    });
+
+    it('a failed connect shows its reason, and the disconnect that follows does not wipe it', async () => {
+        vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { el } = await setupProvisioned();
+        otherVpn(el);
+        connectBtn(el).click();
+        await messagingStarted();
+
+        destSolHooks.current.onConnectFailed({ infoStr: 'timeout' });
+        await failed(el);
+        expect(cardError(el)).toBe('Messaging (client): Connection failed: timeout');
+        destSolHooks.current.onDisconnected();
+        expect(cardError(el)).toBe('Messaging (client): Connection failed: timeout');
+        expect(connectBtn(el).disabled).toBe(false);
+        expect(connectBtn(el).textContent).toBe('Connect');
+    });
+
+    it('a profile refusal on the messaging step (signed out under the click) shows on the card without a sign-out request', async () => {
+        vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { ctx, el } = await setupProvisioned();
+        otherVpn(el);
+        ctx.managedProfile.clear();
+        const signOut = vi.fn();
+        eventBus.on('rbac:sign-out-requested', signOut);
+
+        connectBtn(el).click();
+        await failed(el);
+
+        expect(cardError(el)).toMatch(/^Messaging \(client\): .*requires a sign-in session/i);
+        expect(destSolConnect).not.toHaveBeenCalled();
+        expect(signOut).not.toHaveBeenCalled();
+    });
+
+    it('a broker no longer provisioned stops the connect at SEMP: messaging is not dialled and nobody is signed out', async () => {
+        vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { ctx, el } = await setupProvisioned();
+        needSecondary(el);
+        pick(el, 'b2', 'w1');
+        // The profile loses b2 under the card, which has not re-read it.
+        ctx.managedProfile.setProfile({ ...PROFILE, brokers: [PROFILE.brokers[0]] } as any);
+        const signOut = vi.fn();
+        eventBus.on('rbac:sign-out-requested', signOut);
+
+        connectBtn(el).click();
+        await failed(el);
+
+        expect(cardError(el)).toBe('SEMP (management): Broker "b2" is not provisioned for this account.');
+        expect(destSempConnect).not.toHaveBeenCalled();
+        expect(dialMock).not.toHaveBeenCalled();
+        expect(destSolConnect).not.toHaveBeenCalled();
+        expect(signOut).not.toHaveBeenCalled();
+    });
+});
+
+describe('queue-copy -- provisioned destination: the gateway session ends', () => {
+    /** The card is back to Connect with its controls free, and nothing is on show. */
+    function expectReleased(el: El): void {
+        expect(connectBtn(el).textContent).toBe('Connect');
+        expect(connectBtn(el).disabled).toBe(false);
+        expect(cardStatus(el)).toBe('');
+        expect(cardError(el)).toBe('');
+        expect(el<HTMLSelectElement>('#copy-dest-prov-broker').disabled).toBe(false);
+        expect(el<HTMLInputElement>('#copy-toggle-same-broker').disabled).toBe(false);
+    }
+
+    it('the messaging dial refused because the session ended: the card is released, SEMP is closed and a sign-out is requested', async () => {
+        const { ctx, el } = await setupProvisioned();
+        needSecondary(el);
+        const signOut = vi.fn();
+        eventBus.on('rbac:sign-out-requested', signOut);
+        dialMock.mockResolvedValueOnce({ ok: false, status: 401, code: 'unauthenticated' });
+
+        connectBtn(el).click();
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+
+        expectReleased(el);
+        expect(destSolConnect).not.toHaveBeenCalled();
+        expect(pickShown(el)).toBe(false);
+        // The sign-out says it; the bell does not repeat it.
+        expect(bell(ctx)).toEqual([]);
+    });
+
+    it('a relay 401 on the SEMP probe ends the sequence before messaging is dialled', async () => {
+        const { el } = await setupProvisioned();
+        needSecondary(el);
+        const signOut = vi.fn();
+        eventBus.on('rbac:sign-out-requested', signOut);
+        destSempConnect.mockImplementationOnce(async () => { destSempHooks.current.onAuthFailed(); });
+
+        connectBtn(el).click();
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+
+        expectReleased(el);
+        expect(dialMock).not.toHaveBeenCalled();
+        expect(destSolConnect).not.toHaveBeenCalled();
+    });
+
+    it('a profile refusal because the user signed out under the click asks for a sign-out', async () => {
+        const { ctx, el } = await setupProvisioned();
+        needSecondary(el);
+        ctx.managedProfile.clear();
+        const signOut = vi.fn();
+        eventBus.on('rbac:sign-out-requested', signOut);
+
+        connectBtn(el).click();
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+
+        // Released, but with no profile there is nothing to pick, so Connect
+        // waits for a choice that cannot come until the next sign-in.
+        expect(connectBtn(el).textContent).toBe('Connect');
+        expect(connectBtn(el).disabled).toBe(true);
+        expect(el<HTMLSelectElement>('#copy-dest-prov-broker').options).toHaveLength(0);
+        expect(cardStatus(el)).toBe('');
+        expect(cardError(el)).toBe('');
+        expect(el<HTMLInputElement>('#copy-toggle-same-broker').disabled).toBe(false);
+        expect(destSempConnect).not.toHaveBeenCalled();
+        expect(destSolConnect).not.toHaveBeenCalled();
+    });
+});
+
+describe('queue-copy -- provisioned destination: a connect cancelled or overtaken', () => {
+    it('a Disconnect while it runs cancels it: the session that comes up late is closed and the card stays as the Disconnect left it', async () => {
+        const { ctx, el } = await setupProvisioned();
+        needSecondary(el);
+        const signOut = vi.fn();
+        eventBus.on('rbac:sign-out-requested', signOut);
+        connectBtn(el).click();
+        await messagingStarted();
+
+        // Changing the destination's toggles runs the same disconnect the card does.
+        const sameVpn = el<HTMLInputElement>('#copy-toggle-same-vpn');
+        sameVpn.dispatchEvent(new Event('change'));
+        expect(destSolDisconnect).toHaveBeenCalledTimes(1);
+        expect(connectBtn(el).textContent).toBe('Connect');
+
+        sessionUp();
+        await vi.waitFor(() => expect(destSolDisconnect).toHaveBeenCalledTimes(2));
+
+        expect(connectBtn(el).textContent).toBe('Connect');
+        expect(cardStatus(el)).toBe('');
+        expect(cardError(el)).toBe('');
+        expect(pickShown(el)).toBe(false);
+        names(el);
+        expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(true);
+        expect(bell(ctx)).toEqual([]);
+        expect(signOut).not.toHaveBeenCalled();
+    });
+
+    it('a failure that lands after the Disconnect shows nothing and tells nobody', async () => {
+        const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+        const { ctx, el } = await setupProvisioned();
+        needSecondary(el);
+        connectBtn(el).click();
+        await messagingStarted();
+        el<HTMLInputElement>('#copy-toggle-same-vpn').dispatchEvent(new Event('change'));
+
+        destSolHooks.current.onConnectFailed({ infoStr: 'refused' });
+        // Let the sequence settle, as the cancelled run would have.
+        await new Promise(r => setTimeout(r, 0));
+
+        expect(cardError(el)).toBe('');
+        expect(connectBtn(el).textContent).toBe('Connect');
+        expect(bell(ctx)).toEqual([]);
+        expect(error).not.toHaveBeenCalled();
+    });
+
+    it('a Disconnect while the SEMP step is pending: when the probe ends no credential is dialled and nothing is installed', async () => {
+        const { ctx, el } = await setupProvisioned();
+        needSecondary(el);
+        let release = () => {};
+        destSempConnect.mockImplementationOnce(() => new Promise<void>(resolve => { release = () => { sempUp(); resolve(); }; }));
+        connectBtn(el).click();
+        await vi.waitFor(() => expect(destSempConnect).toHaveBeenCalled());
+
+        el<HTMLInputElement>('#copy-toggle-same-vpn').dispatchEvent(new Event('change'));
+        expect(connectBtn(el).textContent).toBe('Connect');
+        release();
+        await new Promise(r => setTimeout(r, 0));
+
+        expect(dialMock).not.toHaveBeenCalled();
+        expect(destSolConnect).not.toHaveBeenCalled();
+        expect(connectBtn(el).textContent).toBe('Connect');
+        expect(cardStatus(el)).toBe('');
+        expect(cardError(el)).toBe('');
+        expect(pickShown(el)).toBe(false);
+        expect(bell(ctx)).toEqual([]);
+    });
+
+    it('overtaken while the newer run is still at its SEMP step: the older run\'s held session is closed', async () => {
+        const { el } = await setupProvisioned();
+        needSecondary(el);
+        connectBtn(el).click();
+        await messagingStarted();
+        el<HTMLInputElement>('#copy-toggle-same-vpn').dispatchEvent(new Event('change'));   // Disconnect
+        expect(destSolDisconnect).toHaveBeenCalledTimes(1);
+
+        destSempConnect.mockImplementationOnce(() => new Promise<void>(() => {}));   // the newer run waits at SEMP
+        connectBtn(el).click();
+        await vi.waitFor(() => expect(destSempConnect).toHaveBeenCalledTimes(2));
+
+        sessionUp();   // the older run's session comes up and is held
+        await vi.waitFor(() => expect(destSolDisconnect).toHaveBeenCalledTimes(2));
+        expect(connectBtn(el).textContent).toBe('Connecting...');
+    });
+
+    it('a destination that moved while it connected: the late session is discarded and SEMP is closed', async () => {
+        const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+        const { el } = await setupProvisioned();
+        needSecondary(el);
+        connectBtn(el).click();
+        await messagingStarted();
+        // The card locks the target while a connect runs, so move the form itself.
+        moduleState.current.destForm.provisioned = { broker: 'b2', vpn: 'w1' };
+
+        sessionUp();
+        await vi.waitFor(() => expect(cardError(el)).toMatch(/changed while connecting/));
+
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('the destination changed while it connected'));
+        expect(destSolDisconnect).toHaveBeenCalledTimes(1);
+        expect(destSempDisconnect).toHaveBeenCalledTimes(1);
+        expect(pickShown(el)).toBe(false);
+        expect(connectBtn(el).textContent).toBe('Connect');
+        names(el);
+        expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(true);
     });
 });
 
@@ -421,15 +838,8 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
         return { ...h, answerDial: (v: any) => answer(v) };
     }
 
-    /** Fill both names so Next is gated only on the destination connection. */
-    function names(el: El): void {
-        for (const [sel, v] of [['#copy-source-input', 'ops.src'], ['#copy-dest-input', 'ops.dest']]) {
-            el<HTMLInputElement>(sel).value = v;
-            el<HTMLInputElement>(sel).dispatchEvent(new Event('input'));
-        }
-    }
-
     it('locks the card and the toggles while dialling; a refused dial unlocks them and shows why', async () => {
+        vi.spyOn(logger, 'error').mockImplementation(() => {});
         const { el, answerDial } = await dialling();
         for (const sel of ['#copy-dest-prov-broker', '#copy-dest-prov-vpn', '#copy-btn-dest-prov-connect']) {
             expect(el<HTMLInputElement>(sel).disabled).toBe(true);
@@ -459,6 +869,56 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
         expect(dialMock).toHaveBeenCalledTimes(1);
     });
 
+    it('a DISCONNECTED from an earlier session while the dial is still running does not settle the attempt', async () => {
+        const { el, answerDial } = await dialling();
+        destSolHooks.current.onDisconnected();   // the late close of a session an earlier run dropped
+        await new Promise(r => setTimeout(r, 0));
+        expect(cardError(el)).toBe('');
+        expect(connectBtn(el).textContent).toBe('Connecting...');
+
+        answerDial(DIALLED_V1);
+        await messagingStarted();
+        sessionUp();
+        await installed(el);
+        expect(cardError(el)).toBe('');
+    });
+
+    it('Disconnect then a new Connect while the first dial is in flight: the first dial starts no SDK session and the second run installs its own', async () => {
+        const { el, answerDial } = await dialling();
+        el<HTMLInputElement>('#copy-toggle-same-vpn').dispatchEvent(new Event('change'));   // Disconnect
+        expect(connectBtn(el).textContent).toBe('Connect');
+
+        connectBtn(el).click();
+        await messagingStarted();
+        expect(destSolConnect).toHaveBeenCalledTimes(1);
+
+        answerDial(DIALLED_V1);   // the first run's credential arrives late
+        await new Promise(r => setTimeout(r, 0));
+        expect(destSolConnect).toHaveBeenCalledTimes(1);
+
+        sessionUp();
+        await installed(el);
+        expect(moduleState.current.destSessionTarget).not.toBeNull();
+        expect(cardError(el)).toBe('');
+    });
+
+    it('Disconnect then a new Connect while the first dial is in flight: the first dial refused late does not fail the second run', async () => {
+        const { ctx, el, answerDial } = await dialling();
+        el<HTMLInputElement>('#copy-toggle-same-vpn').dispatchEvent(new Event('change'));   // Disconnect
+        connectBtn(el).click();
+        await messagingStarted();
+
+        answerDial({ ok: false, status: 503, code: 'upstream_unavailable' });   // the first run's refusal arrives late
+        await new Promise(r => setTimeout(r, 0));
+        expect(connectBtn(el).textContent).toBe('Connecting...');
+        expect(cardError(el)).toBe('');
+        expect(bell(ctx)).toEqual([]);
+
+        sessionUp();
+        await installed(el);
+        expect(cardError(el)).toBe('');
+    });
+
     it('a refresh while dialling re-renders the card but keeps it locked', async () => {
         const { ctx, el } = await dialling();
         ctx.managedProfile.setProfile(PROFILE);
@@ -468,7 +928,7 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
         expect(el<HTMLInputElement>('#copy-toggle-same-broker').disabled).toBe(true);
     });
 
-    it('the VPN withdrawn during the dial: the connect is cancelled, the late session is discarded and nothing can start', async () => {
+    it('the VPN withdrawn during the dial: the connect is cancelled, the late session is closed and nothing can start', async () => {
         const { ctx, el, answerDial } = await dialling();
         ctx.managedProfile.setProfile({
             ...PROFILE, brokers: [{ broker: 'b1', msgVpns: [{ name: 'v2' }] }, PROFILE.brokers[1]],
@@ -478,11 +938,12 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
         expect(destSolDisconnect).toHaveBeenCalledTimes(1);
 
         answerDial(DIALLED_V1);
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
+        await messagingStarted();
+        sessionUp();
+        await vi.waitFor(() => expect(destSolDisconnect).toHaveBeenCalledTimes(2));
 
-        expect(destSolDisconnect).toHaveBeenCalledTimes(2);
-        expect(cardError(el)).toMatch(/changed while connecting/);
+        // The teardown left the card as it is for a Disconnect: nothing to report.
+        expect(cardError(el)).toBe('');
         expect(connectBtn(el).textContent).toBe('Connect');
         names(el);
         expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(true);
@@ -491,8 +952,9 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
     it('a live session whose VPN is withdrawn is torn down, and the chosen queue goes with it', async () => {
         const { ctx, el, answerDial } = await dialling();
         answerDial(DIALLED_V1);
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
+        await messagingStarted();
+        sessionUp();
+        await installed(el);
         names(el);
         expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(false);
 
@@ -511,9 +973,9 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
     it('switching a toggle on a connected destination drops it and the card reads Connect again', async () => {
         const { el, answerDial } = await dialling();
         answerDial(DIALLED_V1);
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
-        expect(connectBtn(el).textContent).toBe('Disconnect');
+        await messagingStarted();
+        sessionUp();
+        await installed(el);
 
         otherVpn(el);
         expect(destSolDisconnect).toHaveBeenCalledTimes(1);
@@ -574,8 +1036,9 @@ describe('queue-copy -- provisioned destination: the destination picker', () => 
         const { el } = await setupProvisioned();
         needSecondary(el);
         connectBtn(el).click();
-        await vi.waitFor(() => expect(destSempConnect).toHaveBeenCalled());
-        connectDestSemp();
+        await messagingStarted();
+        sessionUp();
+        await installed(el);
 
         el<HTMLButtonElement>('#copy-btn-dest-pick').click();
         await vi.waitFor(() => expect(pickQueueMock).toHaveBeenCalled());
@@ -738,8 +1201,9 @@ describe('queue-copy -- provisioned destination: rbac:changed lifecycle', () => 
         const { ctx, el } = await setupProvisioned();
         needSecondary(el);
         connectBtn(el).click();
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
+        await messagingStarted();
+        sessionUp();
+        await installed(el);
 
         // The run settles at once through the module's own onComplete.
         runCopyJobMock.mockImplementation((state: any, _session: any, hooks: any) => {
@@ -772,28 +1236,13 @@ describe('queue-copy -- provisioned destination: rbac:changed lifecycle', () => 
         const h = await setupProvisioned();
         needSecondary(h.el);
         connectBtn(h.el).click();
-        await vi.waitFor(() => expect(destSolConnect).toHaveBeenCalled());
-        destSolHooks.current.onConnected({ on: vi.fn() }, 'v1');
+        await messagingStarted();
+        sessionUp();
+        await installed(h.el);
         h.el<HTMLInputElement>('#copy-dest-input').value = 'ops.dest';
         h.el<HTMLInputElement>('#copy-dest-input').dispatchEvent(new Event('input'));
         return h;
     }
-
-    it('a destination whose Client failed but whose SEMP is up is still torn down when its VPN is withdrawn', async () => {
-        const { ctx, el } = await setupProvisioned();
-        needSecondary(el);
-        connectBtn(el).click();
-        await vi.waitFor(() => expect(destSempConnect).toHaveBeenCalled());
-        destSolHooks.current.onConnectFailed({ infoStr: 'refused' });
-        destSempHooks.current.onConnected({ fetch: vi.fn(), baseUrl: 'https://x/SEMP/v2' }, { user: 'u', pass: 'p' });
-
-        ctx.managedProfile.setProfile({
-            ...PROFILE, brokers: [{ broker: 'b1', msgVpns: [{ name: 'v2' }] }, PROFILE.brokers[1]],
-        } as any);
-        eventBus.emit('rbac:changed');
-
-        expect(destSempDisconnect).toHaveBeenCalledTimes(1);
-    });
 
     it('drops the chosen target when the connected VPN disappears', async () => {
         const { ctx, el } = await connectedWithTarget();

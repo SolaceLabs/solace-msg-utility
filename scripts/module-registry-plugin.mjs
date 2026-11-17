@@ -119,8 +119,23 @@ export function activeModuleEntries(root, variant) {
  * NEEDS_VENDOR_SCRIPTS = false;` to drop them; one without the export keeps them.
  */
 export function variantNeedsVendorScripts(root, variant) {
-    const m = stripComments(readVariant(root, variant).src).match(/NEEDS_VENDOR_SCRIPTS[^=]*=\s*(true|false)\b/);
-    return !m || m[1] === 'true';
+    return variantFlag(root, variant, 'NEEDS_VENDOR_SCRIPTS') !== false;
+}
+
+/**
+ * Whether the active variant's bundle only ever runs from the gateway, so its
+ * Content-Security-Policy lets it connect to its own origin only
+ * (scripts/csp.mjs). A manifest says `export const GATEWAY_ONLY = true;`; one
+ * without the export is a bundle that may run anywhere.
+ */
+export function variantGatewayOnly(root, variant) {
+    return variantFlag(root, variant, 'GATEWAY_ONLY') === true;
+}
+
+/** A boolean `export const <name> = true | false` of the variant's manifest, or null when it has none. */
+function variantFlag(root, variant, name) {
+    const m = stripComments(readVariant(root, variant).src).match(new RegExp(`\\b${name}\\b[^=]*=\\s*(true|false)\\b`));
+    return m ? m[1] === 'true' : null;
 }
 
 /**

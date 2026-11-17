@@ -26,3 +26,10 @@ export const ACTIVE_MODULES: Record<string, number> = {
  * shell marks `@vendor`). A variant that omits this export keeps them.
  */
 export const NEEDS_VENDOR_SCRIPTS = false;
+
+/**
+ * The gateway is the only thing that serves solAdmin.html, so its
+ * Content-Security-Policy lets it connect to its own origin only
+ * (scripts/csp.mjs). A variant that omits this export may run anywhere.
+ */
+export const GATEWAY_ONLY = true;

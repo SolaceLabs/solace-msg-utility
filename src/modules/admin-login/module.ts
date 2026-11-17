@@ -3,9 +3,12 @@
  *
  * The gateway serves `/solAdmin` only to an administrator's session (sign-in
  * happens on its own `/login` page), so this module does not sign anyone in:
- * it reads the session back (`GET /managed/me`), publishes it, and shows
- * who is signed in with Change password, Two-factor sign-in and Sign out. It
- * never creates a Solace or SEMP connection, so `AppState.isConnected` / `isSempConnected`
+ * it reads the session back (`GET /managed/me`), publishes it, and mounts the
+ * sidebar's account control (who is signed in, Change password, Two-factor
+ * sign-in, Sign out; its links return to `/solAdmin`). Its own page is only the
+ * signed-out screen: `isModuleVisible` hides it while a session is in force, so
+ * the kernel lands on the first admin page after sign-in and back here after
+ * sign-out. It never creates a Solace or SEMP connection, so `AppState.isConnected` / `isSempConnected`
  * stay false for the app's whole lifetime.
  *
  * A non-admin profile is refused before anything is published (the gateway's
@@ -18,6 +21,7 @@
  * `doLogout` as the Sign out button.
  */
 import { required } from '../../core/dom';
+import { createAccountControl } from '../../core/components/account-control';
 import { createManagedService } from '../../core/services/managed-service';
 import { managedErrorMessage } from '../../core/services/managed-api';
 import { logger } from '../../core/logger';
@@ -39,11 +43,9 @@ export const AdminLoginModule = {
             loginView: required<HTMLElement>(container, '#admin-login-view'),
             btnLogin: required<HTMLAnchorElement>(container, '#btn-admin-login'),
             loginError: required<HTMLElement>(container, '#admin-login-error'),
-
-            sessionView: required<HTMLElement>(container, '#admin-session-view'),
-            sessionSummary: required<HTMLElement>(container, '#admin-session-summary'),
-            btnLogout: required<HTMLButtonElement>(container, '#btn-admin-logout'),
         };
+
+        const account = createAccountControl(() => doLogout(), { next: '/solAdmin' });
 
         function showSignedOut(message: string | null, mustChange = false): void {
             els.btnLogin.href = mustChange ? CHANGE_PASSWORD : SIGN_IN;
@@ -51,13 +53,16 @@ export const AdminLoginModule = {
             els.loginError.textContent = message ?? '';
             els.loginError.classList.toggle('hidden', !message);
             els.loginView.classList.remove('hidden');
-            els.sessionView.classList.add('hidden');
+            account.show(null);
         }
 
         function showSession(username: string): void {
-            els.sessionSummary.textContent = `Signed in as ${username} (administrator).`;
             els.loginView.classList.add('hidden');
-            els.sessionView.classList.remove('hidden');
+            // Mounted once this module holds the session, not at install: in
+            // the kitchen-sink build the Connections Provisioned tab mounts its
+            // own control and must keep the slot while it owns the session.
+            app.mountSidebarAccount(account.element);
+            account.show({ username, admin: true });
         }
 
         // Whether THIS module holds the managed session. Module-local rather
@@ -101,7 +106,6 @@ export const AdminLoginModule = {
             app.loadSelf();
         }
 
-        els.btnLogout.addEventListener('click', doLogout);
         // Another module ended the session: user-management after a change to
         // the admin's own account, or any admin module on a 401. Sign out
         // exactly as the button does (AppState, rbac:changed, signed-out

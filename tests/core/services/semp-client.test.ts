@@ -126,7 +126,7 @@ describe('core/services/semp-client', () => {
             expect(hooks.onError).not.toHaveBeenCalled();
         });
 
-        it('fires onError on other HTTP errors with the status string', async () => {
+        it('fires onError on other HTTP errors with the status string and no gateway code', async () => {
             (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 500, statusText: 'Internal Server Error' });
 
             const hooks = makeHooks();
@@ -390,22 +390,25 @@ describe('core/services/semp-client', () => {
             [502, 'upstream_auth'],
             [502, 'upstream_unavailable'],
             [403, 'read_only'],
-        ])('a %i %s refusal reports the gateway code as text', async (status, code) => {
+        ])('a %i %s refusal reports the gateway code as text and as the code', async (status, code) => {
             (globalThis.fetch as any).mockResolvedValue({ ok: false, status, statusText: 'x', json: async () => ({ error: code }) });
             const hooks = makeHooks();
             await createServiceSemp(hooks).connect(relayCfg(), 'b1', '');
-            expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({
+            expect(hooks.onError).toHaveBeenCalledWith({
                 message: managedErrorMessage({ ok: false, status, code }), baseUrl: '/managed/relay/b1',
-            }));
+                isNetworkError: false, isTimeout: false, code,
+            });
         });
 
-        it('an answer that is not the gateway JSON, or carries no code, reports the status', async () => {
+        it('an answer that is not the gateway JSON, or carries no code, reports the status and no code', async () => {
             const hooks = makeHooks();
             (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, status: 502, statusText: 'Bad Gateway', json: async () => { throw new Error('html'); } });
             await createServiceSemp(hooks).connect(relayCfg(), 'b1', '');
             (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Internal Server Error', json: async () => ({}) });
             await createServiceSemp(hooks).connect(relayCfg(), 'b1', '');
-            expect((hooks.onError as any).mock.calls.map((c: any[]) => c[0].message)).toEqual(['502 Bad Gateway', '500 Internal Server Error']);
+            const infos = (hooks.onError as any).mock.calls.map((c: any[]) => c[0]);
+            expect(infos.map((i: any) => i.message)).toEqual(['502 Bad Gateway', '500 Internal Server Error']);
+            expect(infos.every((i: any) => !('code' in i))).toBe(true);
         });
     });
 

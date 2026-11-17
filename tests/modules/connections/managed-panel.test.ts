@@ -47,7 +47,7 @@ const hostedMock = vi.hoisted(() => ({
 
 vi.mock('../../../src/core/services/solace-client', () => ({
     createServiceSolace: (hooks: any) => {
-        const inst = { hooks, init: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), cleanup: vi.fn() };
+        const inst = { hooks, init: vi.fn(), connect: vi.fn(() => ({ ok: true })), disconnect: vi.fn(() => ({ ok: true })), cleanup: vi.fn() };
         solaceMock.instances.push(inst);
         return inst;
     },
@@ -99,10 +99,10 @@ function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
 }
 const hidden = (c: HTMLElement, sel: string) => el(c, sel).classList.contains('hidden');
 
-/** The sidebar footer slot the panel mounts its account control into. */
+/** The sidebar slot the panel mounts its account control into. */
 let sidebar: HTMLElement;
-const account = () => sidebar.querySelector<HTMLElement>('.conn-account')!;
-const signOut = () => account().querySelector<HTMLButtonElement>('.conn-account-signout')!.click();
+const account = () => sidebar.querySelector<HTMLElement>('.account-control')!;
+const signOut = () => account().querySelector<HTMLButtonElement>('.account-control-signout')!.click();
 
 function makeCtx(container: HTMLElement): AppContext {
     sidebar = document.createElement('div');
@@ -144,12 +144,64 @@ async function setup(me: unknown = NO_SESSION, before?: (ctx: AppContext) => voi
 /** Install with a live gateway session for `profile`: the panel restores it. */
 const signedIn = (profile: unknown = PROFILE, before?: (ctx: AppContext) => void) => setup(OK(profile), before);
 
-/** Signed in → connect → drive both onConnected hooks so we're fully "connected to vpn1 on b1". */
-async function connectToB1Vpn1(container: HTMLElement) {
-    el<HTMLButtonElement>(container, '#btn-managed-connect').click();
-    await vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalled());
-    sempMock.hooks.onConnected({ fetch: vi.fn(), baseUrl: '/managed/relay/b1' }, { user: '', pass: '' });
-    solaceMock.hooks.onConnected({ id: 'session' }, 'vpn1');
+const SEMP_CTX = { fetch: vi.fn(), baseUrl: '/managed/relay/b1' };
+const NO_CREDENTIALS = { user: '', pass: '' };
+
+/**
+ * How the managed pair's SEMP client answers the relay probe of a Connect: each
+ * variant fires the hook the real client would (call after the install, which
+ * creates the pair). A Connect with none of them gets no answer at all. A
+ * disconnect reports back through `onDisconnected`, as the real client does.
+ */
+function answerProbe(fire: () => void): void {
+    sempMock.connect.mockImplementation(async () => { fire(); });
+    sempMock.disconnect.mockImplementation(async () => { sempMock.hooks.onDisconnected(); });
+}
+const semp = {
+    up: () => answerProbe(() => sempMock.hooks.onConnected(SEMP_CTX, NO_CREDENTIALS)),
+    fails: (info: { message: string; code?: string; isTimeout?: boolean }) => answerProbe(() => sempMock.hooks.onError({
+        isNetworkError: false, isTimeout: false, baseUrl: '/managed/relay/b1', ...info,
+    })),
+    /** The relay answers 401: the gateway session has ended. */
+    sessionEnded: () => answerProbe(() => sempMock.hooks.onAuthFailed()),
+    /** The probe waits; the returned function lets it succeed. */
+    pending(): () => void {
+        let release = () => {};
+        sempMock.disconnect.mockImplementation(async () => { sempMock.hooks.onDisconnected(); });
+        sempMock.connect.mockImplementation(() => new Promise<void>(resolve => {
+            release = () => { sempMock.hooks.onConnected(SEMP_CTX, NO_CREDENTIALS); resolve(); };
+        }));
+        return () => release();
+    },
+};
+
+const clickConnect = (c: HTMLElement) => el<HTMLButtonElement>(c, '#btn-managed-connect').click();
+/** The Connect has reached the messaging step: the SDK was asked to connect. */
+const messagingStarted = () => vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalled());
+const connectError = (c: HTMLElement) => el(c, '#managed-connect-error').textContent;
+const failed = (c: HTMLElement) => vi.waitFor(() => expect(hidden(c, '#managed-connect-error')).toBe(false));
+/** Let every pending promise step run, for a test that asserts something did NOT happen. */
+const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+/** The failure texts the notification bell holds. */
+const bell = (ctx: AppContext) => ctx.notifications.entries().map(e => [e.level, e.module, e.text]);
+
+/** The bus events a connection announces, in order. */
+function announcements(ctx: AppContext): string[] {
+    const seen: string[] = [];
+    ctx.eventBus.on('semp:connected', () => seen.push('semp:connected'));
+    ctx.eventBus.on('semp:disconnected', () => seen.push('semp:disconnected'));
+    ctx.eventBus.on('client:connected', () => seen.push('client:connected'));
+    ctx.eventBus.on('client:disconnected', () => seen.push('client:disconnected'));
+    return seen;
+}
+
+/** Signed in, SEMP answering -> Connect -> both up: fully "connected to vpn1 on b1". */
+async function connectToB1Vpn1(container: HTMLElement, session: unknown = { id: 'session' }) {
+    semp.up();
+    clickConnect(container);
+    await messagingStarted();
+    solaceMock.hooks.onConnected(session, 'vpn1');
+    await vi.waitFor(() => expect(hidden(container, '#managed-connected-view')).toBe(false));
 }
 
 /**
@@ -216,11 +268,11 @@ describe('connections/managed panel — restoring the gateway session', () => {
         expect([...el<HTMLSelectElement>(container, '#managed-broker-select').options].map(o => o.value)).toEqual(['b1', 'b2']);
         expect([...el<HTMLSelectElement>(container, '#managed-vpn-select').options].map(o => o.value)).toEqual(['vpn1', 'vpn2']);
         expect(el<HTMLButtonElement>(container, '#btn-managed-connect').disabled).toBe(false);
-        // The account control in the sidebar footer: who, and the two actions.
+        // The account control in the sidebar: who, and the actions.
         expect(account().classList.contains('hidden')).toBe(false);
-        expect(account().querySelector('.conn-account-name')!.textContent).toBe('admin');
-        expect(account().querySelector('.conn-account-password')!.getAttribute('href')).toBe('/login/password');
-        const link = account().querySelector('.conn-account-twofactor')!;
+        expect(account().querySelector('.account-control-name')!.textContent).toBe('admin');
+        expect(account().querySelector('.account-control-password')!.getAttribute('href')).toBe('/login/password');
+        const link = account().querySelector('.account-control-twofactor')!;
         expect([link.classList.contains('hidden'), link.getAttribute('href')]).toEqual([false, '/login/two-factor']);
     });
 
@@ -287,13 +339,14 @@ describe('managed-connections — selection', () => {
 });
 
 describe('managed-connections — connect', () => {
-    it('connects SEMP through the relay and Solace through a dialled SMF socket, then emits the message cap', async () => {
+    it('connects SEMP through the relay and Solace through a dialled SMF socket, then emits the message cap once both are up', async () => {
         const { container, ctx } = await signedIn();
         const cap = vi.fn();
         ctx.eventBus.on('config:max-messages-changed', cap);
+        semp.up();
 
-        el<HTMLButtonElement>(container, '#btn-managed-connect').click();
-        await vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalled());
+        clickConnect(container);
+        await messagingStarted();
 
         expect(ctx.appState.managed!.broker).toBe('b1');
         // SEMP: the relay base, no credential at all.
@@ -306,7 +359,10 @@ describe('managed-connections — connect', () => {
             expect.objectContaining({ protocol: 'wss', vpn: 'vpn1', user: 'u-vpn1', authMode: 'basic', smfPath: '/managed/smf/b1/vpn1' }),
             'b1', 'pw-vpn1', expect.stringMatching(/^SolMsgUtil\/\d{14}\//),
         );
-        expect(cap).toHaveBeenCalledWith({ value: 100 });
+        expect(cap).not.toHaveBeenCalled();
+
+        solaceMock.hooks.onConnected({ id: 'session' }, 'vpn1');
+        await vi.waitFor(() => expect(cap).toHaveBeenCalledWith({ value: 100 }));
     });
 
     // Both guard tests log in first (which ENABLES the Connect button — jsdom
@@ -330,101 +386,390 @@ describe('managed-connections — connect', () => {
         expect(sempMock.connect).not.toHaveBeenCalled();
     });
 
-    it('SEMP onConnected publishes sempCredentials + emits semp:connected', async () => {
+    it('announces SEMP, then messaging, and nothing before both are up', async () => {
         const { container, ctx } = await signedIn();
-        const semp = vi.fn();
-        ctx.eventBus.on('semp:connected', semp);
-        el<HTMLButtonElement>(container, '#btn-managed-connect').click();
-        await vi.waitFor(() => expect(sempMock.connect).toHaveBeenCalled());
+        const seen: string[] = [];
+        ctx.eventBus.on('app:state-change', ({ key, value }: any) => {
+            if (key === 'isSempConnected' || key === 'isConnected') seen.push(`${key}=${value}`);
+        });
+        const events = announcements(ctx);
+        semp.up();
 
-        sempMock.hooks.onConnected({ fetch: vi.fn(), baseUrl: '/managed/relay/b1' }, { user: '', pass: '' });
+        clickConnect(container);
+        await messagingStarted();   // SEMP answered, messaging is on its way
+        expect([seen, events, ctx.appState.sempCredentials]).toEqual([[], [], null]);
+
+        solaceMock.hooks.onConnected({ id: 'session' }, 'vpn1');
+        await vi.waitFor(() => expect(hidden(container, '#managed-connected-view')).toBe(false));
+        expect(seen).toEqual(['isSempConnected=true', 'isConnected=true']);
+        expect(events).toEqual(['semp:connected', 'client:connected']);
+    });
+
+    it('publishes both connections once they are up, with no password anywhere in AppState, and shows the connected view', async () => {
+        const { container, ctx } = await signedIn();
+        await connectToB1Vpn1(container);
 
         expect(ctx.appState.isSempConnected).toBe(true);
         expect(ctx.appState.sempCredentials).toEqual({
             user: '', pass: '', baseUrl: '/managed/relay/b1', protocol: 'https', host: 'b1', port: '', urlPath: '',
             relay: '/managed/relay/b1',
         });
-        expect(semp).toHaveBeenCalled();
-    });
-
-    it('Solace onConnected publishes state, emits client:connected, shows connected view', async () => {
-        const { container, ctx } = await signedIn();
-        const client = vi.fn();
-        ctx.eventBus.on('client:connected', client);
-        await connectToB1Vpn1(container);
-
         expect(ctx.appState.isConnected).toBe(true);
         expect(ctx.appState.selectedVpn).toBe('vpn1');
         expect(ctx.appState.solaceConnection).toEqual({
             host: 'b1', protocol: 'wss', port: '', urlPath: '', vpn: 'vpn1', user: 'u-vpn1', pass: '',
         });
-        expect(client).toHaveBeenCalledWith({ session: { id: 'session' } });
-        expect(hidden(container, '#managed-connected-view')).toBe(false);
-        // The dialled password reached the SDK only: nothing in AppState holds it.
+        expect(el(container, '#managed-connected-summary').textContent).toBe('Broker "b1", VPN "vpn1"');
+        expect(hidden(container, '#managed-select-view')).toBe(true);
         expect(JSON.stringify(ctx.appState)).not.toContain('pw-vpn1');
     });
 
-    it("shows a refused dial's reason on the selection view", async () => {
+    it('shows the step the Connect is on, and keeps Connect disabled until the outcome', async () => {
+        const { container } = await signedIn();
+        const release = semp.pending();
+        const button = () => el<HTMLButtonElement>(container, '#btn-managed-connect');
+        const status = () => el(container, '#managed-select-view .prov-conn-status').textContent;
+
+        clickConnect(container);
+        await vi.waitFor(() => expect(sempMock.connect).toHaveBeenCalled());
+        expect([status(), button().textContent, button().disabled])
+            .toEqual(['Connecting SEMP (management) to broker "b1"...', 'Connecting...', true]);
+
+        release();
+        await messagingStarted();
+        expect([status(), button().textContent, button().disabled])
+            .toEqual(['Connecting messaging (client) to broker "b1", VPN "vpn1"...', 'Connecting...', true]);
+
+        solaceMock.hooks.onConnected({ id: 'session' }, 'vpn1');
+        await vi.waitFor(() => expect(button().textContent).toBe('Disconnect'));
+        expect(button().disabled).toBe(false);
+    });
+});
+
+describe('managed-connections -- a Connect that fails', () => {
+    /** Neither connection is announced, and what came up was closed: the state of a refused Connect. */
+    function expectNothingAnnounced(ctx: AppContext, events: string[]): void {
+        expect(events).toEqual([]);
+        expect([ctx.appState.isConnected, ctx.appState.isSempConnected, ctx.appState.sempCredentials])
+            .toEqual([false, false, null]);
+    }
+    const connectButton = (c: HTMLElement) => el<HTMLButtonElement>(c, '#btn-managed-connect');
+
+    it('SEMP failed, messaging up: messaging is closed again, nothing is announced, both lines show and the bell gets the detail', async () => {
         const { container, ctx } = await signedIn();
-        svcMock.dial.mockResolvedValueOnce({ ok: false, status: 404, code: 'not_found' });
-        el<HTMLButtonElement>(container, '#btn-managed-connect').click();
-        await vi.waitFor(() => expect(el(container, '#managed-connect-error').textContent).toBe('Not found. It may already have been removed.'));
-        expect(solaceMock.connect).not.toHaveBeenCalled();
-        expect(ctx.appState.managed).not.toBeNull();
+        const events = announcements(ctx);
+        semp.fails({ message: 'The gateway could not reach the broker.', code: 'upstream_unavailable' });
+
+        clickConnect(container);
+        await messagingStarted();   // messaging runs even though SEMP failed
+        solaceMock.hooks.onConnected({ id: 'session' }, 'vpn1');
+        await failed(container);
+
+        expect(connectError(container)).toBe(
+            'SEMP (management): broker not reachable\nMessaging (client): connected, closed because SEMP failed',
+        );
+        expect(solaceMock.disconnect).toHaveBeenCalledTimes(1);
+        solaceMock.hooks.onDisconnected();   // the SDK confirming the close announces nothing either
+        expectNothingAnnounced(ctx, events);
+        expect(bell(ctx)).toEqual([['error', 'Connections', 'SEMP (management): The gateway could not reach the broker.']]);
+        expect(hidden(container, '#managed-select-view')).toBe(false);
+        expect([connectButton(container).textContent, connectButton(container).disabled]).toEqual(['Connect', false]);
     });
 
-    it('signs out when the dial says the gateway session has ended', async () => {
+    it('SEMP up, messaging failed: SEMP is never announced', async () => {
         const { container, ctx } = await signedIn();
-        svcMock.dial.mockResolvedValueOnce({ ok: false, status: 401, code: 'unauthenticated' });
-        el<HTMLButtonElement>(container, '#btn-managed-connect').click();
+        const events = announcements(ctx);
+        semp.up();
+
+        clickConnect(container);
+        await messagingStarted();
+        solaceMock.hooks.onConnectFailed({ infoStr: 'VPN shut down' });
+        await failed(container);
+
+        expect(connectError(container)).toBe(
+            'Messaging (client): Connection failed: VPN shut down\nSEMP (management): connected, closed because messaging failed',
+        );
+        expectNothingAnnounced(ctx, events);
+        expect(sempMock.disconnect).not.toHaveBeenCalled();   // held, never opened to the app
+        expect(bell(ctx)).toEqual([['error', 'Connections', 'Messaging (client): Connection failed: VPN shut down']]);
+    });
+
+    it('both failed: one line each, short reasons on the card and the full text in the bell', async () => {
+        const { container, ctx } = await signedIn();
+        const events = announcements(ctx);
+        const timedOut = 'Connection timed out (10s). Check host and port.';
+        const long = `The SDK refused the connection with a reason that does not fit on a card line: ${'x'.repeat(40)}`;
+        semp.fails({ message: timedOut, isTimeout: true });
+
+        clickConnect(container);
+        await messagingStarted();
+        solaceMock.hooks.onError(new Error(long));
+        await failed(container);
+
+        expect(connectError(container)).toBe(
+            'SEMP (management): broker not reachable (timed out)\nMessaging (client): failed, details in the log',
+        );
+        expect(bell(ctx)).toEqual([
+            ['error', 'Connections', `SEMP (management): ${timedOut}`],
+            ['error', 'Connections', `Messaging (client): ${long}`],
+        ]);
+        expectNothingAnnounced(ctx, events);
+        expect(solaceMock.disconnect).not.toHaveBeenCalled();   // nothing came up
+    });
+
+    it('a SEMP probe that ends without an answer fails the SEMP step', async () => {
+        const { container, ctx } = await signedIn();   // no `semp.*`: the client fires no hook
+        clickConnect(container);
+        await messagingStarted();
+        solaceMock.hooks.onConnected({ id: 'session' }, 'vpn1');
+        await failed(container);
+        expect(connectError(container)).toBe(
+            'SEMP (management): The SEMP check gave no answer.\nMessaging (client): connected, closed because SEMP failed',
+        );
+        expect(ctx.appState.isConnected).toBe(false);
+    });
+
+    it('a relay 401 during the probe signs out: no dial, no messaging, nothing on the card or in the bell', async () => {
+        const { container, ctx } = await signedIn();
+        semp.sessionEnded();
+        clickConnect(container);
         await vi.waitFor(() => expect(ctx.appState.managed).toBeNull());
+        await settle();
         expect(ctx.managedProfile.isActive()).toBe(false);
         expect(hidden(container, '#managed-login-view')).toBe(false);
-        expect(el(container, '#managed-login-error').textContent).toBe('Your session has ended. Sign in again.');
-    });
-
-    it('signs out, without dialling, when the relay says the session has ended', async () => {
-        const { container, ctx } = await signedIn();
-        sempMock.connect.mockImplementationOnce(async () => { sempMock.hooks.onAuthFailed(); });
-        el<HTMLButtonElement>(container, '#btn-managed-connect').click();
-        await vi.waitFor(() => expect(ctx.appState.managed).toBeNull());
         expect(el(container, '#managed-login-error').textContent).toBe('Your session has ended. Sign in again.');
         expect(svcMock.dial).not.toHaveBeenCalled();
         expect(solaceMock.connect).not.toHaveBeenCalled();
         expect(hidden(container, '#managed-connect-error')).toBe(true);
+        expect(bell(ctx)).toEqual([]);
+    });
+
+    it('a dial refused because the session ended signs out, and the SEMP side that came up is never announced', async () => {
+        const { container, ctx } = await signedIn();
+        const events = announcements(ctx);
+        semp.up();
+        svcMock.dial.mockResolvedValueOnce({ ok: false, status: 401, code: 'unauthenticated' });
+
+        clickConnect(container);
+        await vi.waitFor(() => expect(ctx.appState.managed).toBeNull());
+        await settle();
+        expect(ctx.managedProfile.isActive()).toBe(false);
+        expect(hidden(container, '#managed-login-view')).toBe(false);
+        expect(el(container, '#managed-login-error').textContent).toBe('Your session has ended. Sign in again.');
+        expect(hidden(container, '#managed-connect-error')).toBe(true);
+        expect(solaceMock.connect).not.toHaveBeenCalled();
+        expectNothingAnnounced(ctx, events);
+        expect(bell(ctx)).toEqual([]);
+    });
+
+    it('a dial refused with a gateway code gives the short line, the full sentence goes to the bell, and SEMP is closed again', async () => {
+        const { container, ctx } = await signedIn();
+        const events = announcements(ctx);
+        semp.up();
+        svcMock.dial.mockResolvedValueOnce({ ok: false, status: 429, code: 'rate_limited' });
+
+        clickConnect(container);
+        await failed(container);
+
+        expect(connectError(container)).toBe(
+            'Messaging (client): too many attempts, wait a minute\nSEMP (management): connected, closed because messaging failed',
+        );
+        expect(solaceMock.connect).not.toHaveBeenCalled();
+        expectNothingAnnounced(ctx, events);
+        expect(bell(ctx)).toEqual([['error', 'Connections', 'Messaging (client): Too many requests. Wait a minute and try again.']]);
+        expect(ctx.appState.managed).not.toBeNull();   // still signed in
+    });
+
+    it('a connect start the SDK client refuses without reporting an error fails the messaging step', async () => {
+        const { container } = await signedIn();
+        semp.up();
+        solaceMock.connect.mockImplementation(() => ({ ok: false, error: 'A connection attempt is already in progress.' }));
+        clickConnect(container);
+        await failed(container);
+        expect(connectError(container)).toBe(
+            'Messaging (client): A connection attempt is already in progress.\nSEMP (management): connected, closed because messaging failed',
+        );
+    });
+
+    it('a session that closes before it is up fails the messaging step', async () => {
+        const { container, ctx } = await signedIn();
+        semp.up();
+        clickConnect(container);
+        await messagingStarted();
+        solaceMock.hooks.onDisconnected();
+        await failed(container);
+        expect(connectError(container)).toBe(
+            'Messaging (client): The messaging session closed before it was up.\nSEMP (management): connected, closed because messaging failed',
+        );
+        expect(ctx.appState.isSempConnected).toBe(false);
+    });
+
+    it('a DISCONNECTED from an earlier session while the dial is still running does not settle the attempt', async () => {
+        const { container } = await signedIn();
+        semp.up();
+        let answer: (v: unknown) => void = () => {};
+        svcMock.dial.mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
+        clickConnect(container);
+        await vi.waitFor(() => expect(svcMock.dial).toHaveBeenCalled());
+
+        solaceMock.hooks.onDisconnected();   // the late close of the session a dropped Connect left behind
+        await settle();
+        expect(hidden(container, '#managed-connect-error')).toBe(true);
+        expect(el<HTMLButtonElement>(container, '#btn-managed-connect').disabled).toBe(true);
+
+        answer(dialed('b1', 'vpn1'));
+        await messagingStarted();
+        solaceMock.hooks.onConnected({ id: 'session' }, 'vpn1');
+        await vi.waitFor(() => expect(hidden(container, '#managed-connected-view')).toBe(false));
+        expect(hidden(container, '#managed-connect-error')).toBe(true);
+    });
+
+    it('a broker the profile does not provision stops the Connect at SEMP with the profile\'s reason: no dial, no messaging', async () => {
+        const { container, ctx } = await signedIn();
+        // A stale choice: the page still offers a broker the profile no longer holds.
+        const broker = el<HTMLSelectElement>(container, '#managed-broker-select');
+        const vpn = el<HTMLSelectElement>(container, '#managed-vpn-select');
+        broker.add(new Option('ghost', 'ghost'));
+        broker.value = 'ghost';
+        vpn.add(new Option('v', 'v'));
+        vpn.value = 'v';
+        vpn.dispatchEvent(new Event('change'));
+
+        clickConnect(container);
+        await failed(container);
+
+        const reason = 'SEMP (management): Broker "ghost" is not provisioned for this account.';
+        expect(connectError(container)).toBe(reason);
+        expect(svcMock.dial).not.toHaveBeenCalled();
+        expect(solaceMock.connect).not.toHaveBeenCalled();
+        expect(bell(ctx)).toEqual([['error', 'Connections', reason]]);
+    });
+
+    it('a Connect clicked after the sign-out opens nothing and shows nothing', async () => {
+        const { container, ctx } = await signedIn();
+        signOut();
+        clickConnect(container);
+        await settle();
+        expect(sempMock.connect).not.toHaveBeenCalled();
+        expect(svcMock.dial).not.toHaveBeenCalled();
+        expect(solaceMock.connect).not.toHaveBeenCalled();
+        // The card is back to Connect, and no managed session was written.
+        expect(ctx.appState.managed).toBeNull();
+        expect(el<HTMLButtonElement>(container, '#btn-managed-connect').disabled).toBe(false);
+        expect(hidden(container, '#managed-select-view .prov-conn-status')).toBe(true);
+        expect(hidden(container, '#managed-login-view')).toBe(false);
+        expect(hidden(container, '#managed-connect-error')).toBe(true);
+        expect(bell(ctx)).toEqual([]);
+    });
+
+    describe('signing out while the sequence runs', () => {
+        it('during the SEMP probe: what the probe then opens is dropped, and nothing shows', async () => {
+            const { container, ctx } = await signedIn();
+            const events = announcements(ctx);
+            const release = semp.pending();
+            clickConnect(container);
+            await vi.waitFor(() => expect(sempMock.connect).toHaveBeenCalled());
+
+            signOut();
+            release();   // the probe answers after the sign-out
+            await settle();
+
+            expectNothingAnnounced(ctx, events);
+            expect(svcMock.dial).not.toHaveBeenCalled();
+            expect(hidden(container, '#managed-login-view')).toBe(false);
+            expect(hidden(container, '#managed-connect-error')).toBe(true);
+            expect(bell(ctx)).toEqual([]);
+            // The card reads Connect again, not 'connecting': no step line after the sign-out.
+            expect(el<HTMLButtonElement>(container, '#btn-managed-connect').disabled).toBe(false);
+            expect(hidden(container, '#managed-select-view .prov-conn-status')).toBe(true);
+        });
+
+        it('while messaging starts: the closing session ends the sequence quietly', async () => {
+            const { container, ctx } = await signedIn();
+            const events = announcements(ctx);
+            semp.up();
+            clickConnect(container);
+            await messagingStarted();
+
+            signOut();
+            solaceMock.hooks.onDisconnected();   // the SDK closes the session that was still connecting
+            await settle();
+
+            expectNothingAnnounced(ctx, events);
+            expect(hidden(container, '#managed-login-view')).toBe(false);
+            expect(hidden(container, '#managed-connect-error')).toBe(true);
+            expect(bell(ctx)).toEqual([]);
+        });
+
+        it('the moment messaging comes up: the held session is closed and never announced', async () => {
+            const { container, ctx } = await signedIn();
+            const events = announcements(ctx);
+            semp.up();
+            clickConnect(container);
+            await messagingStarted();
+
+            solaceMock.hooks.onConnected({ id: 'session' }, 'vpn1');
+            signOut();   // before the Connect has seen its outcome
+            await settle();
+
+            expect(solaceMock.disconnect).toHaveBeenCalledTimes(2);   // the sign-out's, then the held session's
+            expectNothingAnnounced(ctx, events);
+            expect(hidden(container, '#managed-login-view')).toBe(false);
+            expect(bell(ctx)).toEqual([]);
+        });
     });
 });
 
 describe('managed-connections — lifecycle hooks', () => {
-    it('Solace onDisconnected clears state and returns to selection', async () => {
+    it('a messaging session that drops unexpectedly closes SEMP too, and the card says so', async () => {
         const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container);
+        const events = announcements(ctx);
+
         solaceMock.hooks.onDisconnected();
-        expect(ctx.appState.isConnected).toBe(false);
-        expect(ctx.appState.solaceConnection).toBeNull();
+
+        expect([ctx.appState.isConnected, ctx.appState.selectedVpn, ctx.appState.solaceConnection]).toEqual([false, null, null]);
+        expect(sempMock.disconnect).toHaveBeenCalledTimes(1);
+        expect([ctx.appState.isSempConnected, ctx.appState.sempCredentials]).toEqual([false, null]);
+        expect(events).toEqual(['client:disconnected', 'semp:disconnected']);
+        expect(connectError(container)).toBe('Messaging (client): connection dropped, so SEMP was closed too');
         expect(hidden(container, '#managed-select-view')).toBe(false);
+        expect(hidden(container, '#managed-connected-view')).toBe(true);
     });
 
-    it('Solace onConnectFailed / onError surface to the connect error', async () => {
-        const { container } = await signedIn();
-        solaceMock.hooks.onConnectFailed({ infoStr: 'refused' });
-        expect(el(container, '#managed-connect-error').textContent).toMatch(/refused/);
-        solaceMock.hooks.onError(new Error('tls'));
-        expect(el(container, '#managed-connect-error').textContent).toBe('tls');
-    });
-
-    it('SEMP onDisconnected / onError', async () => {
+    it('an SDK failure or error with no Connect waiting and no VPN switch is only logged: the card and SEMP stay as they are', async () => {
         const { container, ctx } = await signedIn();
-        // Connect first so lastSempAttempt is set before onConnected fires
-        // (the hook only fires after connectSemp in the real flow).
-        el<HTMLButtonElement>(container, '#btn-managed-connect').click();
-        await vi.waitFor(() => expect(sempMock.connect).toHaveBeenCalled());
-        sempMock.hooks.onConnected({ fetch: vi.fn(), baseUrl: 'b' }, { user: '', pass: '' });
+        await connectToB1Vpn1(container);
+        const summary = el(container, '#managed-connected-summary').textContent;
+
+        solaceMock.hooks.onConnectFailed({ infoStr: 'late' });
+        solaceMock.hooks.onError(new Error('late'));
+
+        expect(sempMock.disconnect).not.toHaveBeenCalled();
+        expect(ctx.appState.isSempConnected).toBe(true);
+        expect(hidden(container, '#managed-connect-error')).toBe(true);
+        expect(hidden(container, '#managed-connected-view')).toBe(false);
+        expect(el(container, '#managed-connected-summary').textContent).toBe(summary);
+    });
+
+    it('SEMP onDisconnected clears the SEMP state and tells the bus', async () => {
+        const { container, ctx } = await signedIn();
+        await connectToB1Vpn1(container);
+        const events = announcements(ctx);
         sempMock.hooks.onDisconnected();
         expect(ctx.appState.isSempConnected).toBe(false);
         expect(ctx.appState.sempCredentials).toBeNull();
+        expect(events).toEqual(['semp:disconnected']);
+    });
+
+    it('a SEMP answer when no Connect is waiting for it announces nothing and shows nothing', async () => {
+        const { container, ctx } = await signedIn();
+        const events = announcements(ctx);
+        sempMock.hooks.onConnected(SEMP_CTX, NO_CREDENTIALS);
         sempMock.hooks.onError({ message: 'down', isNetworkError: true, isTimeout: false, baseUrl: 'b' });
-        expect(el(container, '#managed-connect-error').textContent).toMatch(/SEMP error: down/);
+        expect(ctx.appState.isSempConnected).toBe(false);
+        expect(events).toEqual([]);
+        expect(hidden(container, '#managed-connect-error')).toBe(true);
     });
 
     it('SEMP onAuthFailed (a relay 401: the gateway session ended) signs out', async () => {
@@ -439,12 +784,21 @@ describe('managed-connections — lifecycle hooks', () => {
 });
 
 describe('managed-connections — disconnect / logout', () => {
-    it('Disconnect button tears down both connections', async () => {
-        const { container } = await signedIn();
+    it('Disconnect closes both connections and is no fault: the card says disconnected and SEMP closes once', async () => {
+        const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container);
         el<HTMLButtonElement>(container, '#btn-managed-disconnect').click();
         expect(solaceMock.disconnect).toHaveBeenCalled();
         expect(sempMock.disconnect).toHaveBeenCalled();
+
+        solaceMock.hooks.onDisconnected();   // the SDK confirms the close
+        expect(ctx.appState.isConnected).toBe(false);
+        expect(ctx.appState.isSempConnected).toBe(false);
+        expect(hidden(container, '#managed-connect-error')).toBe(true);
+        expect(hidden(container, '#managed-select-view')).toBe(false);
+        expect(sempMock.disconnect).toHaveBeenCalledTimes(1);
+        const button = el<HTMLButtonElement>(container, '#btn-managed-connect');
+        expect([button.textContent, button.disabled]).toEqual(['Connect', false]);
     });
 
     it('Sign out ends the gateway session, clears the local one, emits rbac:changed, returns to sign-in', async () => {
@@ -598,13 +952,15 @@ describe('managed-connections — provisioned VPN publishing', () => {
 });
 
 describe('managed-connections — defensive paths', () => {
-    it('Solace onDisconnected after logout leaves the login view (no profile)', async () => {
+    it('a drop after the sign-out is no fault: the sign-in view stays and the card shows no error', async () => {
         const { container, ctx } = await signedIn();
+        await connectToB1Vpn1(container);
         signOut();
-        // A late SDK disconnect callback with the session already torn down.
+        // The SDK reports the close the sign-out asked for, with the session already gone.
         solaceMock.hooks.onDisconnected();
         expect(hidden(container, '#managed-login-view')).toBe(false);
         expect(hidden(container, '#managed-select-view')).toBe(true);
+        expect(hidden(container, '#managed-connect-error')).toBe(true);
         expect(ctx.appState.isConnected).toBe(false);
     });
 
@@ -649,9 +1005,7 @@ describe('managed-connections — createQueueBrowser wrap', () => {
     // Connect, then deliver a session that exposes createQueueBrowser so the wrap installs.
     async function connectWithSession(session: any, profile: unknown = PROFILE) {
         const { container, ctx } = await signedIn(profile);
-        el<HTMLButtonElement>(container, '#btn-managed-connect').click();
-        await vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalled());
-        solaceMock.hooks.onConnected(session, 'vpn1'); // installs the wrap on `session`
+        await connectToB1Vpn1(container, session); // installs the wrap on `session`
         return { container, ctx };
     }
 
@@ -746,25 +1100,34 @@ describe('managed-connections — connection:check-connection', () => {
         expect(copy).toHaveBeenCalledWith({ vpn: 'vpn1', queue: 'qX' });
     });
 
-    it('switches VPN: disconnect -> dial again -> reconnect -> finish', async () => {
+    it('a VPN switch keeps SEMP while it reconnects messaging: disconnect -> dial again -> reconnect -> finish', async () => {
         const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container);
         const browse = vi.fn();
         ctx.eventBus.on('browser:browse-queue', browse);
+        const seen = announcements(ctx);
 
         ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
         await answerSwitch(true);
         expect(solaceMock.disconnect).toHaveBeenCalled();
 
         solaceMock.connect.mockClear();
-        ctx.eventBus.emit('client:disconnected');
+        solaceMock.hooks.onDisconnected();   // the SDK closes the session
         await vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalledWith(
             expect.objectContaining({ vpn: 'vpn2', smfPath: '/managed/smf/b1/vpn2' }), 'b1', 'pw-vpn2', expect.any(String),
         ));
         expect(svcMock.dial.mock.calls).toEqual([['b1', 'vpn1'], ['b1', 'vpn2']]);
+        // The drop was expected: SEMP stays up and the card does not call it a fault.
+        expect(sempMock.disconnect).not.toHaveBeenCalled();
+        expect(ctx.appState.isSempConnected).toBe(true);
+        expect(hidden(container, '#managed-connect-error')).toBe(true);
 
-        ctx.eventBus.emit('client:connected', { session: {} });
+        solaceMock.hooks.onConnected({ id: 'session2' }, 'vpn2');
         expect(browse).toHaveBeenCalledWith({ queue: 'qZ' });
+        expect(seen).toEqual(['client:disconnected', 'client:connected']);
+        expect(ctx.appState.selectedVpn).toBe('vpn2');
+        expect(hidden(container, '#managed-connected-view')).toBe(false);
+        expect(el(container, '#managed-connected-summary').textContent).toBe('Broker "b1", VPN "vpn2"');
     });
 
     it('does not switch when the user cancels the confirm', async () => {
@@ -796,6 +1159,8 @@ describe('managed-connections — connection:check-connection', () => {
         ctx.eventBus.emit('client:disconnected');
         await vi.waitFor(() => expect(el(container, '#managed-connect-error').textContent).toMatch(/not provisioned/));
         expect(solaceMock.connect).not.toHaveBeenCalled();
+        // One connection: the refused reconnect closes SEMP too.
+        expect(sempMock.disconnect).toHaveBeenCalled();
     });
 
     it('signs out when the VPN switch dial finds the gateway session ended', async () => {
@@ -820,6 +1185,8 @@ describe('managed-connections — connection:check-connection', () => {
         await answerSwitch(true);
         ctx.eventBus.emit('client:disconnected');
         await vi.waitFor(() => expect(el(container, '#managed-connect-error').textContent).toMatch(/Too many requests/));
+        expect(sempMock.disconnect).toHaveBeenCalled();
+        expect(ctx.appState.isSempConnected).toBe(false);
 
         // The user connects again by hand: that is not the abandoned switch.
         ctx.eventBus.emit('client:connected', { session: {} });
@@ -862,7 +1229,7 @@ describe('managed-connections — connection:check-connection', () => {
         }
     });
 
-    it('a reconnect the SDK refuses ends the switch at once, with the reason on the selection view', async () => {
+    it('a reconnect the SDK refuses ends the switch at once, closes SEMP, and shows the reason on the selection view', async () => {
         const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container);
         const browse = vi.fn();
@@ -870,11 +1237,85 @@ describe('managed-connections — connection:check-connection', () => {
 
         ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
         await answerSwitch(true);
-        ctx.eventBus.emit('client:disconnected');
+        solaceMock.hooks.onDisconnected();
         await vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalledTimes(2));
         solaceMock.hooks.onConnectFailed({ infoStr: 'VPN shut down' });
 
-        expect(el(container, '#managed-connect-error').textContent).toBe('Connection failed: VPN shut down');
+        expect(connectError(container)).toBe('Messaging (client): connection failed: VPN shut down');
+        expect(hidden(container, '#managed-select-view')).toBe(false);
+        expect(sempMock.disconnect).toHaveBeenCalled();
+        expect(ctx.appState.isSempConnected).toBe(false);
+        ctx.eventBus.emit('client:connected', { session: {} });
+        expect(browse).not.toHaveBeenCalled();
+    });
+
+    it('a reconnect start refused without reaching onError ends the switch, closes SEMP and shows the reason', async () => {
+        const { container, ctx } = await signedIn();
+        await connectToB1Vpn1(container);
+
+        ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
+        await answerSwitch(true);
+        solaceMock.connect.mockImplementation(() => ({ ok: false, error: 'A connection attempt is already in progress.' }));
+        solaceMock.hooks.onDisconnected();
+        await vi.waitFor(() => expect(connectError(container)).toBe('Messaging (client): A connection attempt is already in progress.'));
+
+        expect(sempMock.disconnect).toHaveBeenCalled();
+        expect(ctx.appState.isSempConnected).toBe(false);
+        expect(hidden(container, '#managed-select-view')).toBe(false);
+    });
+
+    it('an SDK error on the reconnect ends the switch the same way', async () => {
+        const { container, ctx } = await signedIn();
+        await connectToB1Vpn1(container);
+
+        ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
+        await answerSwitch(true);
+        solaceMock.hooks.onDisconnected();
+        await vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalledTimes(2));
+        solaceMock.hooks.onError(new Error('tls'));
+
+        expect(connectError(container)).toBe('Messaging (client): tls');
+        expect(ctx.appState.isSempConnected).toBe(false);
+    });
+
+    it('a sign-out while the switch dials: the late credential starts nothing, SEMP is closed once and the sign-in view stays', async () => {
+        const { container, ctx } = await signedIn();
+        await connectToB1Vpn1(container);
+        let answer: (v: unknown) => void = () => {};
+        svcMock.dial.mockImplementationOnce(() => new Promise(r => { answer = r; }));
+
+        ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
+        await answerSwitch(true);
+        solaceMock.hooks.onDisconnected();
+        await vi.waitFor(() => expect(svcMock.dial).toHaveBeenCalledTimes(2));
+        ctx.eventBus.emit('rbac:sign-out-requested');
+        expect(sempMock.disconnect).toHaveBeenCalledTimes(1);
+
+        answer(dialed('b1', 'vpn2'));   // the gateway answers after the sign-out
+        await settle();
+
+        expect(solaceMock.connect).toHaveBeenCalledTimes(1);
+        expect(sempMock.disconnect).toHaveBeenCalledTimes(1);
+        expect(hidden(container, '#managed-login-view')).toBe(false);
+        expect(hidden(container, '#managed-select-view')).toBe(true);
+    });
+
+    it('a sign-out while the switch reconnects: the SDK failure that follows ends the switch and leaves the sign-in view', async () => {
+        const { container, ctx } = await signedIn();
+        await connectToB1Vpn1(container);
+        const browse = vi.fn();
+        ctx.eventBus.on('browser:browse-queue', browse);
+
+        ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
+        await answerSwitch(true);
+        solaceMock.hooks.onDisconnected();
+        await vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalledTimes(2));
+        ctx.eventBus.emit('rbac:sign-out-requested');
+        solaceMock.hooks.onConnectFailed({ infoStr: 'closed' });
+
+        expect(sempMock.disconnect).toHaveBeenCalledTimes(1);
+        expect(hidden(container, '#managed-login-view')).toBe(false);
+        expect(hidden(container, '#managed-select-view')).toBe(true);
         ctx.eventBus.emit('client:connected', { session: {} });
         expect(browse).not.toHaveBeenCalled();
     });
@@ -937,10 +1378,7 @@ describe('connections/managed panel — mode interlock + tab activation', () => 
         expect(hidden(container, '#managed-select-view')).toBe(false);
 
         // Connected → connected view.
-        el<HTMLButtonElement>(container, '#btn-managed-connect').click();
-        await vi.waitFor(() => expect(solaceMock.connect).toHaveBeenCalled());
-        sempMock.hooks.onConnected({ fetch: vi.fn(), baseUrl: 'base' }, { user: '', pass: '' });
-        solaceMock.hooks.onConnected({ id: 'session' }, 'vpn1');
+        await connectToB1Vpn1(container);
         directTab.click();
         managedTab.click();
         expect(hidden(container, '#managed-connected-view')).toBe(false);

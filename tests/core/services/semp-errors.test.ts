@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { sempErrorText, sempFailureText } from '../../../src/core/services/semp-errors';
+import { relayRefusal, sempErrorText, sempFailureText } from '../../../src/core/services/semp-errors';
 import { managedErrorMessage } from '../../../src/core/services/managed-api';
 import { REQUEST_TIMEOUT_MS } from '../../../src/core/timing';
 
@@ -8,7 +8,7 @@ import { REQUEST_TIMEOUT_MS } from '../../../src/core/timing';
  * One text for a SEMP answer at every call site (the connect probe, discovery,
  * the subscription explorer, queue-copy's verify). The probe's relay texts are
  * covered through the client in tests/core/services/semp-client.test.ts >
- * "a %i %s refusal reports the gateway code as text".
+ * "a %i %s refusal reports the gateway code as text and as the code".
  */
 const res = (init: { status: number; statusText: string; json: () => Promise<unknown> }) => ({ ok: false, ...init }) as unknown as Response;
 
@@ -29,6 +29,28 @@ describe('core/services/semp-errors -- sempErrorText', () => {
     it('reads well over HTTP/2 (no status text) and with a body that is not JSON', async () => {
         const answer = res({ status: 500, statusText: '', json: async () => { throw new SyntaxError('html'); } });
         expect(await sempErrorText(answer, 'Error fetching Queues')).toBe('Error fetching Queues (HTTP 500)');
+    });
+});
+
+describe('core/services/semp-errors -- relayRefusal', () => {
+    it.each([
+        [403, 'read_only'],
+        [502, 'upstream_auth'],
+        [502, 'upstream_unavailable'],
+    ])("a relay %i %s carries the code and the gateway's sentence", async (status, code) => {
+        const answer = res({ status, statusText: '', json: async () => ({ error: code }) });
+        expect(await relayRefusal(answer)).toEqual({ message: managedErrorMessage({ ok: false, status, code }), code });
+    });
+
+    it.each([
+        ['a body that is not JSON', async () => { throw new SyntaxError('html'); }],
+        ['a body with no error', async () => ({ meta: {} })],
+        ['an error that is not a string', async () => ({ error: { code: 1 } })],
+    ])('%s reads as the status line with no code key', async (_label, json) => {
+        const withText = await relayRefusal(res({ status: 502, statusText: 'Bad Gateway', json }));
+        expect(withText).toEqual({ message: '502 Bad Gateway' });
+        expect('code' in withText).toBe(false);
+        expect(await relayRefusal(res({ status: 500, statusText: '', json }))).toEqual({ message: '500' });
     });
 });
 

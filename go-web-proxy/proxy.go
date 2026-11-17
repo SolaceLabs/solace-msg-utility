@@ -106,9 +106,26 @@ func (h *adminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	setAppPageHeaders(w.Header())
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(data)
+}
+
+// appPageCSP is the policy the gateway adds to an app bundle's own. The
+// bundle carries its policy in a <meta> tag (scripts/csp.mjs), which holds
+// wherever the file runs but cannot say who may frame the page; and behind
+// the gateway every connection the page makes goes to the gateway itself
+// (the relays, the messaging socket, /hosted). The browser enforces both
+// policies, so the page gets the narrower of each.
+const appPageCSP = "frame-ancestors 'none'; connect-src 'self'"
+
+// setAppPageHeaders sets the headers of an app bundle's page: HTML, the
+// gateway's policy on top of the bundle's, no type sniffing and no referrer.
+func setAppPageHeaders(h http.Header) {
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Content-Security-Policy", appPageCSP)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "no-referrer")
 }
 
 // ----- PWA --------------------------------------------------------------------
@@ -157,6 +174,9 @@ func (h *pwaHandler) ready() error {
 }
 
 func (h *pwaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Every file is served as the type its name says (the vendor scripts
+	// among them), never as one a browser guesses.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	clean := path.Clean(r.URL.Path)
 	if clean == "." {
 		clean = "/"
@@ -196,7 +216,7 @@ func (h *pwaHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, h.index+" not found", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	setAppPageHeaders(w.Header())
 	_, _ = w.Write(data)
 }
 

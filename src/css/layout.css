@@ -34,6 +34,11 @@
     display: none !important;
 }
 
+/* The icon logo is hidden until the sidebar collapses (rule below). */
+.logo-icon {
+    display: none;
+}
+
 /* Show Icon Logo when collapsed */
 .sidebar.collapsed .logo-icon {
     display: block !important;
@@ -159,8 +164,7 @@
 }
 
 /* ---------- Sidebar Status Footer ---------- */
-/* The footer: a module's account control (empty unless one is mounted), then
- * the Client and SEMP status lights, as one block. */
+/* The footer: the Client and SEMP status lights. */
 .sidebar-footer {
     padding: 0.75rem 1rem;
     border-top: 1px solid var(--border-color);
@@ -170,7 +174,8 @@
     gap: 0.5rem;
 }
 
-/* No box of its own: a hidden account control leaves no gap. */
+/* The account control's slot above the page items. No box of its own: a hidden
+ * (or absent) control leaves no gap and no divider. */
 .sidebar-account {
     display: contents;
 }

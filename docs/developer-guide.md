@@ -68,7 +68,7 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 | `npm run build:provisioned` | `managed` | `provisioned.html` (standard plus the Provisioned sign-in; the gateway serves it at `/` in Provisioned mode) |
 | `npm run build:provisioned-demo` | `managed-demo`, demo mode | `provisioned-demo.html` (the Provisioned modules and the admin pages against the demo's fake gateway and broker; see [architecture.md -> The demo broker](architecture.md#the-demo-broker-demohtml-provisioned-demohtml)) |
 | `npm run build` | all of the above except `all-test.html`, plus `min` | `demo.html`, `index.html`, `min.html`, `no-payload.html`, `no-queue-copy.html`, `solAdmin.html`, `provisioned.html` and `provisioned-demo.html` in one pass |
-| `npm run check:bundles` | -- | Checks `dist/`: no Direct bundle carries Provisioned UI or the fake gateway, `provisioned.html` carries the Provisioned UI only, and `provisioned-demo.html` carries both with no way out to a network. The `build` task runs it after `npm run build` |
+| `npm run check:bundles` | -- | Checks `dist/`: no Direct bundle carries Provisioned UI or the fake gateway, `provisioned.html` carries the Provisioned UI only, `provisioned-demo.html` carries both with no way out to a network, and every bundle carries the Content-Security-Policy of its kind. The `build` task runs it after `npm run build` |
 
 `dist/` is git-ignored build output; nothing in it is committed. Tagged Releases publish the Direct-only bundles and the offline Provisioned demo (`provisioned-demo.html`), never `solAdmin.html` or `provisioned.html`, which ship only inside the image (see [git.md -> Release assets](git.md#release-assets)).
 
@@ -121,6 +121,7 @@ A **flavor** is a build-time toggle of *how a module behaves*, orthogonal to whi
 - **CSS**: inlined (no code splitting)
 - **Dynamic imports**: forced inline (`inlineDynamicImports: true`)
 - **emptyOutDir**: `false`, which preserves pre-placed files in `dist/` (vendor scripts, other variants) across builds.
+- **Content-Security-Policy**: the `content-security-policy` plugin runs after `vite-plugin-singlefile` and writes each bundle's policy, with the hashes of its inline scripts and stylesheet, into a meta tag ([architecture.md -> Content-Security-Policy](architecture.md#content-security-policy)). A variant whose bundle only the gateway serves exports `GATEWAY_ONLY = true` from its manifest (`managed` and `admin` do), which limits its connections to its own origin; add the variant's bundle to `BUNDLE_CSP` in `scripts/check-bundles.mjs`.
 
 `./scripts/dev.sh image up` builds the image from source and starts it twice with [docker/docker-compose.yaml](../docker/docker-compose.yaml): Gateway mode on host port `19443`, Provisioned mode on `29443` (`docker compose -f docker/docker-compose.yaml up --build gateway` starts one). The image takes both vendor scripts from the npm packages `package.json` pins (`solclientjs`, `jszip`), so `up` needs nothing in `dist/`.
 
@@ -174,7 +175,8 @@ src/
       sempContext.ts           # unfilteredPrimarySempContext(ctx) -> SempContext from primary AppState.
                                # Named for what it does NOT do: only two SEMP v2 list shapes are filtered
       queue-source.ts          # QueueSource + typed Access/scope -- the discovery seam components consume
-      semp-errors.ts           # One error text for a SEMP answer (relay refusal code, or the HTTP status)
+      semp-errors.ts           # One error text for a SEMP answer (relay refusal code, or the HTTP status); relayRefusal also returns the code
+      provisioned-connect.ts   # connectProvisioned(steps) -- SEMP then messaging, both or neither; the card's short reasons
       managed-profile.ts       # Provisioned broker/VPN names; dial(target, {connect}): relay config or a dialled SMF credential
       managed-api.ts           # managedRequest() -- /managed/* on the gateway session cookie; error codes -> text
       managed-service.ts       # createManagedService() -> /managed/me, /managed/logout, /managed/dial, the relay base
@@ -193,6 +195,9 @@ src/
       provisioned-connection/
         index.ts               # createProvisionedConnectionCard -- Broker + Message VPN pickers, Connect, status; used by connections and queue-copy
         styles.css             # Component-scoped styles
+      account-control/
+        index.ts               # createAccountControl(onSignOut, { next }) -- the sidebar's account actions; used by connections and admin-login
+        styles.css             # Component-scoped .account-control-* styles
       confirm-dialog/
         index.ts               # confirmDialog(message, opts) -- the yes/no question, in place of confirm()
       notification-center/
@@ -216,7 +221,6 @@ src/
       module.managed.ts # Provisioned entry (the managed variant): tab bar + installDirect + panel
       managed-panel.ts # The Provisioned tab -- gateway session restore, provisioned dropdowns, browser guardrails
       vpn-switch.ts    # The VPN switch both modes share (connection:check-connection)
-      account.ts       # The signed-in account's own actions (password, two-factor)
       optional-field.ts # Optional connection fields
       config.js        # localStorage persistence (values obfuscated at rest)
       ui.js            # Element caching, auth mode, visual feedback
@@ -325,7 +329,7 @@ interface AppContext {
     managedProfile: ManagedProfileStore;  // Provisioned names; dials targets on request
     notifications: NotificationCenter;    // The record behind the header bell
     copyToClipboard(text, btn?): Promise<void>;  // Clipboard + feedback
-    mountSidebarAccount(el): void;        // Place an account control in the sidebar footer
+    mountSidebarAccount(el): void;        // Place an account control at the top of the sidebar
 }
 ```
 
@@ -385,7 +389,7 @@ export interface SolaceConnectionHooks {
 export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient;
 ```
 
-The connections module owns the **primary** connection: `installDirect` in its `module.ts` (shared by the Release entry and the Provisioned entry) defines `solaceHooks`/`sempHooks` that bridge factory events to `ctx.setState` + `eventBus.emit('client:connected'...)` + the connections form's UI updates. Other modules subscribe to those bus events as they always have. queue-copy is the secondary-connection caller: it defines different hooks that target module-scoped state instead of global state -- same factory, different bridging. When the primary connection is Provisioned its destination is the shared provisioned connection card (`src/core/components/provisioned-connection/`) and, on Connect, it asks `ctx.managedProfile.dial(target, { connect })` and creates the client inside that callback: SEMP gets the gateway's relay base (`SempConfig.relayBase`, no credential at all), and SMF gets the VPN's dialled password and socket path (`SolaceConfig.smfPath`), which go straight to the SDK and are never stored.
+The connections module owns the **primary** connection: `installDirect` in its `module.ts` (shared by the Release entry and the Provisioned entry) defines `solaceHooks`/`sempHooks` that bridge factory events to `ctx.setState` + `eventBus.emit('client:connected'...)` + the connections form's UI updates. Other modules subscribe to those bus events as they always have. queue-copy is the secondary-connection caller: it defines different hooks that target module-scoped state instead of global state -- same factory, different bridging. When the primary connection is Provisioned its destination is the shared provisioned connection card (`src/core/components/provisioned-connection/`) and, on Connect, it asks `ctx.managedProfile.dial(target, { connect })` and creates the client inside that callback: SEMP gets the gateway's relay base (`SempConfig.relayBase`, no credential at all), and SMF gets the VPN's dialled password and socket path (`SolaceConfig.smfPath`), which go straight to the SDK and are never stored. Both Connects (the primary's and the destination's) run SEMP and messaging through `connectProvisioned` in `src/core/services/provisioned-connect.ts`: both connections or neither, each held until both are up ([architecture.md](architecture.md#provisioned-connect-sequence)).
 
 The same shape applies to SEMP: `createServiceSemp(hooks)` and the discovery generator `createSempDiscovery(sempCtx)` (from `src/core/services/semp-discovery.ts`) which is parameterized by a `SempContext` -- a `{ fetch, baseUrl }` pair scoped to a specific broker. Build a primary SempContext via `unfilteredPrimarySempContext(ctx)` from `src/core/services/sempContext.ts` -- read its docstring before adding a consumer, because only two SEMP v2 list shapes are entitlement-filtered. For discovery, prefer `queueSourceFrom(ctx, scope)` from `src/core/services/queue-source.ts`; components take a `QueueSource` and never run their own SEMP calls.
 
@@ -564,6 +568,7 @@ Styles are split by responsibility ([architecture.md -> CSS Organization](archit
 - A Tailwind-style atomic (`.mt-4`, `.flex-row`, `.hidden`) goes in `utilities.css`.
 - Shell chrome (anything the user sees outside a module's content area) goes in `layout.css`.
 - Never `@import` a module stylesheet from `main.css`, and never reach for `!important` to beat another file's rule: if a rule needs it, the rule is in the wrong file.
+- No `style` attribute, in a template or in markup built from a string, and no `setAttribute('style', ...)`: every bundle's Content-Security-Policy makes the browser ignore them. Give the element a class. Setting a property through the CSSOM (`el.style.display = 'none'`) is fine. For the same reason, no inline event handler (`onclick="..."`) and no `javascript:` URL: add a listener in code. `tests/build/no-inline-styles.test.ts` fails on any of them.
 
 ### Event Handling
 

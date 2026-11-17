@@ -1,0 +1,68 @@
+/* Account control (src/core/components/account-control): three action icons
+ * and, to their right, who is signed in, in one row with a thin divider below,
+ * at the top of the sidebar. Hidden, it leaves no space and no divider. */
+
+.account-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.account-control-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 0.25rem;
+}
+
+.account-control .btn-icon {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.account-control .btn-icon:hover {
+    color: var(--accent-primary);
+}
+
+.account-control-caption {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 1;
+    min-width: 0;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.account-control-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A small tag a shade lighter than the sidebar it sits on. */
+.account-control-role {
+    padding: 0 0.25rem;
+    font-size: 0.65rem;
+    line-height: 1.4;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+.sidebar.collapsed .account-control {
+    flex-direction: column;
+    padding: 0.75rem 0;
+}
+
+.sidebar.collapsed .account-control-actions {
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.sidebar.collapsed .account-control-caption {
+    display: none;
+}

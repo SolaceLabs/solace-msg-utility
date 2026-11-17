@@ -29,7 +29,11 @@
  *   - every bundle above carries the shell's vendor loaders and library banner
  *     (VENDOR_MARKERS), and ADMIN_BUNDLE, whose five modules use neither the Solace
  *     SDK nor JSZip, carries none of them (a hit means the admin variant lost its
- *     `NEEDS_VENDOR_SCRIPTS = false`, or the shell's `@vendor` markers broke).
+ *     `NEEDS_VENDOR_SCRIPTS = false`, or the shell's `@vendor` markers broke);
+ *   - every bundle carries the Content-Security-Policy of its kind (BUNDLE_CSP,
+ *     scripts/csp.mjs): one policy tag before any script or style, hashes that
+ *     match its inline scripts and stylesheet, and no style attribute, inline
+ *     handler or `javascript:` URL the policy would refuse.
  *
  * The managed markers are DOM ids from `index.managed.html` and endpoint paths
  * from `managed-service.ts` (sign-in, sign-out, dial and the SEMP relay):
@@ -51,6 +55,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cspProblems } from './csp.mjs';
 
 /** The Release bundles that install the Direct-only connections entry. */
 export const DIRECT_BUNDLES = ['index.html', 'min.html', 'no-payload.html', 'no-queue-copy.html', 'demo.html'];
@@ -76,6 +81,25 @@ export const VENDOR_MARKERS = ['js/solclient.js', 'jszip.min.js', 'missing-lib-b
 
 /** The bundle the gateway serves at / in Provisioned mode. */
 export const PROVISIONED_BUNDLE = 'provisioned.html';
+
+/**
+ * The policy each bundle must carry (scripts/csp.mjs): its kind, and whether
+ * it has the vendor loader whose scripts 'strict-dynamic' lets in. The kind
+ * follows the build: demo mode for the demos, a variant's `GATEWAY_ONLY` for
+ * the bundles only the gateway serves, Direct for the rest.
+ *
+ * @type {Readonly<Record<string, { kind: import('./csp.mjs').CspKind, vendor: boolean }>>}
+ */
+export const BUNDLE_CSP = Object.freeze({
+    'index.html': { kind: 'direct', vendor: true },
+    'min.html': { kind: 'direct', vendor: true },
+    'no-payload.html': { kind: 'direct', vendor: true },
+    'no-queue-copy.html': { kind: 'direct', vendor: true },
+    'demo.html': { kind: 'demo', vendor: true },
+    'provisioned-demo.html': { kind: 'demo', vendor: true },
+    'provisioned.html': { kind: 'gateway', vendor: true },
+    'solAdmin.html': { kind: 'gateway', vendor: false },
+});
 
 /** Strings only the Provisioned connections entry (`module.managed.ts`) puts into a bundle. */
 export const MANAGED_MARKERS = ['conn-panel-managed', 'btn-managed-login', '/managed/me', '/managed/logout', '/managed/dial', '/managed/relay/'];
@@ -256,6 +280,12 @@ export function checkBundles(distDir) {
     } else {
         vendor(ADMIN_BUNDLE, admin, false);
     }
+
+    // A missing bundle was reported above.
+    for (const [name, opts] of Object.entries(BUNDLE_CSP)) {
+        const text = read(name);
+        if (text !== null) problems.push(...cspProblems(name, text, opts));
+    }
     return problems;
 }
 
@@ -275,7 +305,7 @@ export function main(root = repoRoot()) {
     console.log(
         `Bundle check passed (${DIRECT_BUNDLES.length} Direct bundles carry no Provisioned UI; ${PROVISIONED_BUNDLE} does; ` +
         `${PROVISIONED_DEMO_BUNDLE} runs it against the demo gateway; both demos have no network; ` +
-        `${ADMIN_BUNDLE} ships no Solace or JSZip loader).`,
+        `${ADMIN_BUNDLE} ships no Solace or JSZip loader; every bundle carries its Content-Security-Policy).`,
     );
     return 0;
 }

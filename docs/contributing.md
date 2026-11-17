@@ -45,7 +45,7 @@ While you fix a failure, rerun only the task that failed (for example `./scripts
 
 | Task | What it runs |
 | --- | --- |
-| `build` | `npm run build` (every variant), then `npm run check:bundles` (no Direct bundle carries Provisioned UI; the demo bundles have no way out to a network), plus the gateway binary, version-stamped, into `dist/`. The binary is a compile check: it ships only inside the image |
+| `build` | `npm run build` (every variant), then `npm run check:bundles` (no Direct bundle carries Provisioned UI; the demo bundles have no way out to a network; every bundle carries its Content-Security-Policy), plus the gateway binary, version-stamped, into `dist/`. The binary is a compile check: it ships only inside the image |
 | `vet` | `npm run typecheck` (`src/`, its `.js` modules included: `checkJs`), `npm run typecheck:tests` (`tests/` and the vite/vitest configs, through `tsconfig.test.json`), `npm run lint` (ESLint, rules in [developer-guide.md](developer-guide.md)), `go vet ./...`, and `gofmt -l` on `go-web-proxy/` (any file it lists fails the task) |
 | `test` | `npm run test:app` (the web suite without `tests/mock-broker/`), then the Go suite with `go test -race` (`CGO_ENABLED=1`; with no `gcc` on PATH it runs without `-race` and `test.log` says so). When `cov` is in the same invocation (`full`, `all cov`), `test` skips both suites and says so in `test.log`: `cov` runs each once |
 | `mock` | `npm run test:mock:coverage`: `tests/mock-broker/`, the suites behind the two demos, the gateway contract included. It prints the coverage of `src/mock-broker/` (reported, no threshold). Skipped when `cov` is in the same invocation |

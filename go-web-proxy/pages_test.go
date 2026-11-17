@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -49,6 +51,40 @@ func expectPage(t *testing.T, rec *httptest.ResponseRecorder, status int, text s
 	t.Helper()
 	if rec.Code != status || !strings.Contains(rec.Body.String(), text) {
 		t.Fatalf("want %d containing %q, got %d:\n%s", status, text, rec.Code, rec.Body.String())
+	}
+}
+
+// ----- the pages' policy ------------------------------------------------------------
+
+// The policy allows the page's own stylesheet and nothing else inline: the
+// hash it names is that of the <style> block the browser receives.
+func TestPageCSP_HashesTheStyleBlockThePageCarries(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	rec := e.do("GET", "/login", "", nil)
+	_, rest, _ := strings.Cut(rec.Body.String(), "<style>")
+	css, _, found := strings.Cut(rest, "</style>")
+	if !found {
+		t.Fatalf("the sign-in page has no <style> block:\n%s", rec.Body.String())
+	}
+	sum := sha256.Sum256([]byte(css))
+	want := "style-src 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "';"
+	got := rec.Header().Get("Content-Security-Policy")
+	if !strings.Contains(got, want) || strings.Contains(got, "unsafe-inline") {
+		t.Errorf("policy %q: want %q and no 'unsafe-inline'", got, want)
+	}
+}
+
+// A template without a complete <style> block allows no style at all, and
+// CRLF line ends hash as LF, as the browser hashes them.
+func TestPagePolicy_StyleBlockOrNone(t *testing.T) {
+	for _, src := range []string{"<p>no style</p>", "<style>p{}"} {
+		if got := pagePolicy(src); !strings.Contains(got, "style-src 'none';") {
+			t.Errorf("pagePolicy(%q) = %q: want style-src 'none'", src, got)
+		}
+	}
+	lf := pagePolicy("<style>a\nb\n</style>")
+	if pagePolicy("<style>a\r\nb\r</style>") != lf {
+		t.Errorf("CRLF and CR line ends must hash as LF: %q", lf)
 	}
 }
 

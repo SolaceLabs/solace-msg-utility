@@ -7,7 +7,9 @@ import type { AppContext, AppState, EventBus } from '../../../src/core/types';
 /**
  * Admin login — the entry point of the standalone /solAdmin app. The gateway
  * signs the admin in on its own page; this module reads the session back,
- * never opens a broker connection, and refuses a non-admin profile.
+ * never opens a broker connection, and refuses a non-admin profile. Its own
+ * page is the signed-out screen; the signed-in actions are the sidebar's
+ * account control.
  */
 const { me, logout } = vi.hoisted(() => ({ me: vi.fn() as any, logout: vi.fn() as any }));
 vi.mock('../../../src/core/services/managed-service', () => ({
@@ -30,9 +32,11 @@ let container: HTMLElement;
 let eventBus: EventBus;
 let ctx: AppContext;
 let appState: AppState;
+let sidebar: HTMLElement;
 
 async function install(meResult: unknown = { ok: true, data: ADMIN_PROFILE }, onBus?: (bus: EventBus) => void) {
     me.mockResolvedValue(meResult);
+    sidebar = document.createElement('div');
     container = loadModuleDOM('admin-login');
     eventBus = createEventBus();
     onBus?.(eventBus);
@@ -47,11 +51,14 @@ async function install(meResult: unknown = { ok: true, data: ADMIN_PROFILE }, on
         sempFetch: vi.fn(),
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
+        mountSidebarAccount: vi.fn((node: HTMLElement) => { sidebar.replaceChildren(node); }),
     });
     await AdminLoginModule.install(ctx);
     const el = <T extends HTMLElement>(sel: string): T => container.querySelector(sel) as T;
     const hidden = (sel: string) => el(sel).classList.contains('hidden');
-    return { el, hidden };
+    /** The account control in the sidebar slot; null until the module mounts one. */
+    const account = () => sidebar.querySelector<HTMLElement>('.account-control');
+    return { el, hidden, account };
 }
 
 beforeEach(() => {
@@ -61,12 +68,16 @@ beforeEach(() => {
 });
 
 describe('admin-login — restoring the gateway session', () => {
-    it('adopts an admin session, publishes it and emits rbac:changed', async () => {
+    it('adopts an admin session, publishes it, emits rbac:changed and shows the sidebar account control', async () => {
         const rbac = vi.fn();
-        const { el, hidden } = await install(undefined, bus => bus.on('rbac:changed', rbac));
-        expect(hidden('#admin-session-view')).toBe(false);
+        const { hidden, account } = await install(undefined, bus => bus.on('rbac:changed', rbac));
         expect(hidden('#admin-login-view')).toBe(true);
-        expect(el('#admin-session-summary').textContent).toBe('Signed in as admin (administrator).');
+        expect(account()!.classList.contains('hidden')).toBe(false);
+        expect(account()!.querySelector('.account-control-name')!.textContent).toBe('admin');
+        expect(account()!.querySelector('.account-control-role')!.classList.contains('hidden')).toBe(false);
+        // The gateway's pages return to the admin console.
+        expect(account()!.querySelector('.account-control-password')!.getAttribute('href')).toBe('/login/password?next=/solAdmin');
+        expect(account()!.querySelector('.account-control-twofactor')!.getAttribute('href')).toBe('/login/two-factor?next=/solAdmin');
         expect(appState.managed).toEqual({
             admin: true, username: 'admin', broker: '', vpns: [],
             operate: ADMIN_PROFILE.operate, readOnly: [], modules: [],
@@ -75,13 +86,6 @@ describe('admin-login — restoring the gateway session', () => {
         // the provisioned-connection profile.
         expect(ctx.managedProfile.isActive()).toBe(false);
         expect(rbac).toHaveBeenCalledTimes(1);
-        expect(el<HTMLAnchorElement>('#admin-change-password').getAttribute('href')).toBe('/login/password?next=/solAdmin');
-    });
-
-    it('links Two-factor sign-in to the gateway\'s page once signed in', async () => {
-        const { el, hidden } = await install();
-        expect(hidden('#admin-two-factor')).toBe(false);
-        expect(el<HTMLAnchorElement>('#admin-two-factor').getAttribute('href')).toBe('/login/two-factor?next=/solAdmin');
     });
 
     it('never opens a broker connection', async () => {
@@ -92,15 +96,23 @@ describe('admin-login — restoring the gateway session', () => {
         expect(appState.sempCredentials).toBeNull();
     });
 
-    it('without a session shows the sign-in link, quietly', async () => {
-        const { el, hidden } = await install({ ok: false, status: 401, code: 'unauthenticated' });
+    it('has only the signed-out screen in its page: no title repeated, no session card', async () => {
+        const { el } = await install();
+        expect(container.querySelector('h1')).toBeNull();
+        expect(container.querySelector('#admin-session-view')).toBeNull();
+        expect(el('h2').textContent).toBe('Not signed in');
+    });
+
+    it('without a session shows the sign-in link, quietly, and mounts no account control', async () => {
+        const { el, hidden, account } = await install({ ok: false, status: 401, code: 'unauthenticated' });
         expect(hidden('#admin-login-view')).toBe(false);
-        expect(hidden('#admin-session-view')).toBe(true);
         expect(hidden('#admin-login-error')).toBe(true);
         const link = el<HTMLAnchorElement>('#btn-admin-login');
         expect(link.getAttribute('href')).toBe('/login?next=/solAdmin');
         expect(link.textContent).toBe('Sign in');
         expect(appState.managed).toBeNull();
+        expect(ctx.mountSidebarAccount).not.toHaveBeenCalled();
+        expect(account()).toBeNull();
     });
 
     it('points at the password page when the gateway requires a change', async () => {
@@ -116,24 +128,25 @@ describe('admin-login — restoring the gateway session', () => {
         expect(el('#admin-login-error').textContent).toBe('The gateway could not be reached.');
     });
 
-    it('refuses a non-admin profile, publishing nothing', async () => {
-        const { el, hidden } = await install({ ok: true, data: { ...ADMIN_PROFILE, username: 'viewer', admin: false } });
+    it('refuses a non-admin profile, publishing nothing and mounting no control', async () => {
+        const { el, account } = await install({ ok: true, data: { ...ADMIN_PROFILE, username: 'viewer', admin: false } });
         expect(el('#admin-login-error').textContent).toBe('This account is not an administrator.');
-        expect(hidden('#admin-session-view')).toBe(true);
         expect(appState.managed).toBeNull();
+        expect(account()).toBeNull();
     });
 });
 
 describe('admin-login — sign out', () => {
-    it('ends the gateway session, clears the session, then emits', async () => {
-        const { el, hidden } = await install();
+    it('ends the gateway session, clears the session, hides the control, then emits', async () => {
+        const { el, hidden, account } = await install();
         const rbac = vi.fn();
         eventBus.on('rbac:changed', rbac);
-        el<HTMLButtonElement>('#btn-admin-logout').click();
+        account()!.querySelector<HTMLButtonElement>('.account-control-signout')!.click();
         expect(logout).toHaveBeenCalledTimes(1);
         expect(appState.managed).toBeNull();
         expect(rbac).toHaveBeenCalledTimes(1);
         expect(hidden('#admin-login-view')).toBe(false);
+        expect(account()!.classList.contains('hidden')).toBe(true);
         expect(el<HTMLAnchorElement>('#btn-admin-login').getAttribute('href')).toBe('/login?next=/solAdmin');
         expect(ctx.loadSelf).toHaveBeenCalled();
     });
@@ -157,13 +170,5 @@ describe('admin-login — sign-out requested by another module', () => {
         eventBus.emit('rbac:sign-out-requested');
         expect(logout).not.toHaveBeenCalled();
         expect(appState.managed).not.toBeNull();
-    });
-});
-
-describe('admin-login -- sidebar hint', () => {
-    it('names the admin pages as the sidebar shows them', async () => {
-        const { el } = await install();
-        const hint = [...el('#admin-session-view').querySelectorAll('strong')].map(s => s.textContent);
-        expect(hint).toEqual(['User Mgmt.', 'Conn. Mgmt', 'Gateway Settings', 'Certificates']);
     });
 });

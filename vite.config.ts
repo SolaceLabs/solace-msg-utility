@@ -2,7 +2,8 @@ import { defineConfig, type PluginOption } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import fs from 'node:fs';
 import path from 'node:path';
-import { moduleRegistryPlugin, activeModuleIds, activeModuleEntries, readModuleTemplate, variantNeedsVendorScripts, stripVendorBlocks } from './scripts/module-registry-plugin.mjs';
+import { moduleRegistryPlugin, activeModuleIds, activeModuleEntries, readModuleTemplate, variantNeedsVendorScripts, variantGatewayOnly, stripVendorBlocks } from './scripts/module-registry-plugin.mjs';
+import { applyCsp, type CspKind } from './scripts/csp.mjs';
 
 /**
  * The git tag is the single source of version truth — `scripts/dev.sh` derives
@@ -169,6 +170,32 @@ function renameHtmlAsset(from: string, to: string): PluginOption {
 }
 
 /**
+ * Write the page's Content-Security-Policy into each emitted HTML file
+ * (scripts/csp.mjs). It hashes the final text, so it runs after
+ * vite-plugin-singlefile has inlined the scripts and the stylesheet: both
+ * hooks are `order: 'post'`, and this plugin comes after it in the list.
+ * Build only: the dev server injects styles of its own.
+ */
+function contentSecurityPolicy(opts: { kind: CspKind; vendor: boolean }): PluginOption {
+    return {
+        name: 'content-security-policy',
+        apply: 'build',
+        enforce: 'post',
+        generateBundle: {
+            order: 'post',
+            handler(_opts, bundle) {
+                for (const file of Object.values(bundle)) {
+                    if (file.type === 'asset' && file.fileName.endsWith('.html')) {
+                        const html = typeof file.source === 'string' ? file.source : new TextDecoder().decode(file.source);
+                        file.source = applyCsp(html, opts);
+                    }
+                }
+            },
+        },
+    };
+}
+
+/**
  * Read a build-input parameter forwarded by `scripts/vite-build.mjs`.
  *
  * Vite's CLI parser (CAC) rejects unknown options, so the wrapper strips our
@@ -198,6 +225,9 @@ export default defineConfig(({ mode }) => {
     // the current behavior. Baked into `import.meta.env.VITE_SHOW_PAYLOAD` so the
     // module's `showPayload()` reads it at runtime. (Tests stub it via vi.stubEnv.)
     const showPayloadInput = readBuildInput('__VITE_SHOW_PAYLOAD');
+    // What the bundle's policy lets it connect to: nothing for a demo, its own
+    // origin for a bundle only the gateway serves, any broker otherwise.
+    const cspKind: CspKind = isDemo ? 'demo' : variantGatewayOnly(__dirname, variant) ? 'gateway' : 'direct';
     return {
         root: 'src',
         plugins: [
@@ -208,6 +238,7 @@ export default defineConfig(({ mode }) => {
             isDemo && serviceDemoRedirect(demoRedirects(variant)),
             injectModuleTemplates(variant),
             viteSingleFile(),
+            contentSecurityPolicy({ kind: cspKind, vendor: variantNeedsVendorScripts(__dirname, variant) }),
             outputName && renameHtmlAsset('index.html', outputName)
         ].filter(Boolean) as PluginOption[],
         define: {

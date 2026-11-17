@@ -16,12 +16,14 @@ import {
     GATEWAY_MARKER,
     NETWORK_MARKER,
     DEMO_FORBIDDEN,
+    BUNDLE_CSP,
     findMarkers,
     strayHosts,
     checkBundles,
     main,
     repoRoot,
 } from '../../scripts/check-bundles.mjs';
+import { applyCsp } from '../../scripts/csp.mjs';
 import { DEMO_GATEWAY_MARKER } from '../../src/mock-broker/gateway';
 import { NETWORK_DISABLED } from '../../src/mock-broker/network';
 
@@ -41,14 +43,18 @@ const VENDOR = VENDOR_MARKERS.join(' ');
 /** What a clean demo.html holds: the network refusal, the vendor blocks, the Direct form and an inert namespace URL. */
 const DEMO_CLEAN = `<html>${NETWORK_MARKER} ${VENDOR}<div id="conn-host"></div><svg xmlns="http://www.w3.org/2000/svg"></svg></html>`;
 
+/** A bundle's content as the build writes it: a charset tag, then the policy of its kind (scripts/csp.mjs). */
+const built = (name: string, content: string) => applyCsp(`<meta charset="UTF-8">${content}`, BUNDLE_CSP[name]);
+
 /**
  * A fake project root whose dist/ holds a clean build: Direct-only bundles
  * (demo.html the offline demo), a provisioned.html carrying every managed marker,
- * and a clean provisioned-demo.html.
- * `overrides` replaces a file's content, or omits it with `null`.
+ * and a clean provisioned-demo.html, each with its policy.
+ * `overrides` replaces a file's content, or omits it with `null`; a file named
+ * in `raw` is written as given, with no policy added.
  */
 const roots: string[] = [];
-function fakeBuild(overrides: Record<string, string | null> = {}): string {
+function fakeBuild(overrides: Record<string, string | null> = {}, raw: string[] = []): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'check-bundles-'));
     roots.push(root);
     const dist = path.join(root, 'dist');
@@ -62,7 +68,7 @@ function fakeBuild(overrides: Record<string, string | null> = {}): string {
         ...overrides,
     };
     for (const [name, content] of Object.entries(files)) {
-        if (content !== null) fs.writeFileSync(path.join(dist, name), content);
+        if (content !== null) fs.writeFileSync(path.join(dist, name), raw.includes(name) ? content : built(name, content));
     }
     return root;
 }
@@ -218,6 +224,39 @@ describe('check-bundles -- the vendor loaders', () => {
     it.each(VENDOR_MARKERS)('fails solAdmin.html when it carries %s: the admin variant lost its flag', (marker: string) => {
         expect(problemsFor({ [ADMIN_BUNDLE]: `<html>${marker}</html>` })).toEqual([
             expect.stringMatching(new RegExp(`^solAdmin\\.html: contains the vendor marker "${marker}".*NEEDS_VENDOR_SCRIPTS = false`)),
+        ]);
+    });
+});
+
+// Each bundle's own policy is built and checked by scripts/csp.mjs
+// (tests/build/csp.test.ts); here, that the check runs on every bundle with the
+// kind its build gives it.
+describe('check-bundles -- the Content-Security-Policy', () => {
+    const write = (root: string, name: string, content: string) => fs.writeFileSync(path.join(root, 'dist', name), content);
+
+    it('names a policy for every bundle the build emits, and only those', () => {
+        expect(Object.keys(BUNDLE_CSP).sort()).toEqual([...RELEASE_BUNDLES, PROVISIONED_BUNDLE, ADMIN_BUNDLE].sort());
+    });
+
+    it('gives the demos no network, the gateway-only bundles their own origin, and lets only the admin app go without the vendor loader', () => {
+        expect(BUNDLE_CSP[DEMO_BUNDLE].kind).toBe('demo');
+        expect(BUNDLE_CSP[PROVISIONED_DEMO_BUNDLE].kind).toBe('demo');
+        expect(BUNDLE_CSP[PROVISIONED_BUNDLE].kind).toBe('gateway');
+        expect(BUNDLE_CSP[ADMIN_BUNDLE]).toEqual({ kind: 'gateway', vendor: false });
+        expect(Object.entries(BUNDLE_CSP).filter(([, p]) => !p.vendor).map(([n]) => n)).toEqual([ADMIN_BUNDLE]);
+    });
+
+    it.each(Object.keys(BUNDLE_CSP))('fails %s without a policy, pointing at the build step', (name: string) => {
+        const problems = checkBundles(path.join(fakeBuild({}, [name]), 'dist'));
+        expect(problems).toEqual([expect.stringMatching(new RegExp(`^${name.replace('.', '\\.')}: carries no Content-Security-Policy tag.*content-security-policy plugin`))]);
+    });
+
+    it('fails provisioned.html built with the Direct policy: it would connect beyond its gateway', () => {
+        const root = fakeBuild();
+        write(root, PROVISIONED_BUNDLE, applyCsp(`<meta charset="UTF-8"><html>${MANAGED_MARKERS.join(' ')} ${VENDOR}</html>`, { kind: 'direct', vendor: true }));
+        expect(checkBundles(path.join(root, 'dist'))).toEqual([
+            `provisioned.html: the policy's connect-src is "http: https: ws: wss:", expected "'self'".`,
+            `provisioned.html: the policy's frame-src is "https:", expected "(none)".`,
         ]);
     });
 });

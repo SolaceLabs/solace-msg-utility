@@ -22,3 +22,10 @@ export const ACTIVE_MODULES: Record<string, number> = {
 export const MODULE_ENTRIES: Record<string, string> = {
     'connections': 'managed',
 };
+
+/**
+ * The gateway is the only thing that serves provisioned.html, so its
+ * Content-Security-Policy lets it connect to its own origin only
+ * (scripts/csp.mjs). A variant that omits this export may run anywhere.
+ */
+export const GATEWAY_ONLY = true;

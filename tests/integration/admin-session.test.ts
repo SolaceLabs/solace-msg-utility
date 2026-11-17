@@ -197,7 +197,8 @@ describe('integration — admin app session lifecycle', () => {
         // The own-record save re-emits rbac:changed, which reloads the list.
         await vi.waitFor(() => expect(umSvc.listUsers).toHaveBeenCalledTimes(2));
 
-        expect(hidden(app.login, '#admin-session-view')).toBe(false);
+        expect(app.loginCtx.mountSidebarAccount).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(app.loginCtx.mountSidebarAccount).mock.calls[0][0].classList.contains('hidden')).toBe(false);
         expect(app.appState.managed!.username).toBe('admin');
         expect(app.loginCtx.loadSelf).not.toHaveBeenCalled();
         expect(logout).not.toHaveBeenCalled();

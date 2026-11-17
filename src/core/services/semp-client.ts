@@ -3,7 +3,7 @@ import { buildBrokerUrl } from '../hosted';
 import { basicAuthHeader, errMessage, normalizeUrlPath } from '../utils';
 import { deadlineSignal } from '../timing';
 import { SEMP_PROBE_TIMEOUT_MS } from '../connections/defaults';
-import { relayErrorText, statusLine, sempErrorText as errorText, sempFailureText as failureText } from './semp-errors';
+import { relayRefusal, statusLine, sempErrorText as errorText, sempFailureText as failureText } from './semp-errors';
 import type { SempConfig, SempContext } from '../connections/types';
 
 // The error texts for SEMP answers live in ./semp-errors.ts (callers that do
@@ -43,12 +43,14 @@ export interface SempConnectionHooks {
      * Fires on any other failure (HTTP non-401, network, timeout, exception).
      * `baseUrl` is the URL the connect attempt was targeting, included so the
      * caller can construct a "trust this URL" help link without re-deriving it.
+     * `code` is the gateway's error code when the relay refused the probe.
      */
     onError?: (info: {
         message: string;
         isNetworkError: boolean;
         isTimeout: boolean;
         baseUrl: string;
+        code?: string;
     }) => void;
 }
 
@@ -137,9 +139,9 @@ export function createServiceSemp(hooks: SempConnectionHooks): SempClient {
                 log.error(`SEMP authentication failed (401): ${target}`);
                 hooks.onAuthFailed?.();
             } else {
-                const message = relay ? await relayErrorText(res) : statusLine(res);
+                const { message, code } = relay ? await relayRefusal(res) : { message: statusLine(res), code: undefined };
                 log.error(`SEMP connect refused: ${target}: ${message}`);
-                hooks.onError?.({ message, isNetworkError: false, isTimeout: false, baseUrl });
+                hooks.onError?.({ message, isNetworkError: false, isTimeout: false, baseUrl, ...(code ? { code } : {}) });
             }
 
         } catch (err: unknown) {

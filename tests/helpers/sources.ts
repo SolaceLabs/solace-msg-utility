@@ -14,9 +14,18 @@ const SCANNED = /\.(ts|mjs|js|html)$/;
 
 /** Repo-relative paths (`src/...`, forward slashes). */
 export function productSources(): string[] {
+    return bundleSources().filter(f => !f.startsWith('src/mock-broker/'));
+}
+
+/**
+ * Every source file some bundle compiles, the demos' `src/mock-broker/`
+ * included (tests/build/no-inline-styles.test.ts: the policy holds in the
+ * demos too).
+ */
+export function bundleSources(): string[] {
     return fs.readdirSync(path.join(REPO_ROOT, 'src'), { recursive: true, encoding: 'utf-8' })
         .map(rel => rel.split(path.sep).join('/'))
-        .filter(rel => SCANNED.test(rel) && !rel.startsWith('mock-broker/'))
+        .filter(rel => SCANNED.test(rel))
         .map(rel => `src/${rel}`);
 }
 

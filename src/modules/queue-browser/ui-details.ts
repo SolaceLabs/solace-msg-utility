@@ -232,7 +232,7 @@ export function initDetails(ctx: AppContext) {
         row.innerHTML = `
             <input type="text" class="form-control prop-key" placeholder="Key" list="standard-properties-list" value="${escapeHtml(key)}">
             <input type="text" class="form-control prop-value" placeholder="Value" value="${escapeHtml(value)}">
-            <button class="btn-icon btn-remove-prop" title="Remove" style="color: var(--status-disconnected);">
+            <button class="btn-icon btn-icon-danger btn-remove-prop" title="Remove">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10"></circle>
                     <line x1="15" y1="9" x2="9" y2="15"></line>

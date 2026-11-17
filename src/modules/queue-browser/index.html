@@ -40,17 +40,15 @@
             </div>
         </div>
     </div>
-    <div id="browser-connect-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+    <div id="browser-connect-error" class="text-error mt-2 hidden text-body-sm"></div>
 
     <!-- Message List & Details Panel -->
     <div class="card">
         <!-- Snapshot-view notice: messages shown are a point-in-time list and may
              have already been consumed by active subscribers since binding. -->
-        <div id="browser-snapshot-notice" class="flex-row items-center gap-2" style="padding: 0.4rem 0.6rem; margin-bottom: 0.6rem; font-size: 0.8rem;
-                   background: rgba(252, 171, 41, 0.12);
-                   color: var(--status-warning); border-radius: var(--radius-md);">
+        <div id="browser-snapshot-notice" class="flex-row items-center gap-2 browser-snapshot-notice">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0;">
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="flex-shrink-0">
                 <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z">
                 </path>
                 <line x1="12" y1="9" x2="12" y2="13"></line>
@@ -60,11 +58,11 @@
         </div>
 
         <div class="flex-row justify-between items-center mb-2">
-            <div class="flex-row items-center gap-2" style="min-width: 0; flex: 1;">
-                <h2 class="m-0" style="min-width: 0; flex: 1;">
+            <div class="flex-row items-center gap-2 min-w-0 flex-1">
+                <h2 class="m-0 min-w-0 flex-1">
                     <!-- Whole "vpn :: queue" title is scrollable as one unit so arbitrarily long
                          VPN or queue names don't push the badge/filter button off-screen. -->
-                    <div style="overflow-x: auto; display: flex; align-items: center; white-space: nowrap;">
+                    <div class="browser-title-scroll">
                         <span id="browser-vpn-name" class="text-accent"></span>
                         <span class="mx-2"> :: </span>
                         <span id="browser-queue-name"></span>
@@ -102,12 +100,11 @@
 
         <div id="browser-content">
             <!-- Message List -->
-            <div class="mb-6 overflow-auto"
-                style="max-height: 300px; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+            <div class="mb-6 overflow-auto border rounded browser-list-scroll">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th style="width: 40px;"><input type="checkbox" id="browser-select-all"></th>
+                            <th class="browser-col-select"><input type="checkbox" id="browser-select-all"></th>
                             <th>Message ID</th>
                             <th>Date</th>
                             <th>Size</th>
@@ -126,7 +123,7 @@
             <div class="card-light" id="browser-details-panel">
                 <div class="flex-row justify-between items-center mb-4">
                     <div class="flex-row items-center gap-2">
-                        <h3 class="text-secondary m-0" style="font-size: 1rem;">Message Details</h3>
+                        <h3 class="text-secondary m-0 browser-details-title">Message Details</h3>
                         <span id="detail-type-badge" class="badge badge-outline-info hidden"></span>
                     </div>
                     <button id="btn-show-raw" data-payload class="btn btn-secondary btn-sm" disabled>Show Raw Content</button>
@@ -226,7 +223,7 @@
                 <label>Message ID</label>
                 <input type="text" id="filter-msg-id" class="form-control" placeholder="e.g. 1023">
             </div>
-            <div style="width: 200px;">
+            <div class="browser-filter-w-200">
                 <label>Message Type</label>
                 <select id="filter-msg-type" class="form-control">
                     <option value="ANY" selected>Any</option>
@@ -244,7 +241,7 @@
                 <label>Destination Name</label>
                 <input type="text" id="filter-destination" class="form-control" placeholder="e.g. queue/topic/name">
             </div>
-            <div style="width: 150px;">
+            <div class="w-150px">
                 <label>Type</label>
                 <select id="filter-destination-type" class="form-control">
                     <option value="ANY" selected>Any</option>
@@ -323,13 +320,12 @@
             </svg>
         </button>
     </div>
-    <pre id="raw-content-text"
-        style="max-height: calc(90vh - 120px); overflow: auto; background: var(--bg-tertiary); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);"></pre>
+    <pre id="raw-content-text" class="browser-raw-content"></pre>
 </dialog>
 
 <!-- Delete Confirmation Modal (native <dialog>). The question is set per delete;
      Delete closes it with 'delete', Cancel / Escape / backdrop close it without. -->
-<dialog id="browser-confirm-delete-modal" aria-labelledby="browser-confirm-delete-modal-title" style="max-width: 480px;">
+<dialog id="browser-confirm-delete-modal" aria-labelledby="browser-confirm-delete-modal-title" class="browser-confirm-dialog">
     <h3 id="browser-confirm-delete-modal-title" class="mb-4">Delete Messages</h3>
     <p id="browser-confirm-delete-message" class="mt-0 mb-4"></p>
     <div class="flex-row justify-end gap-2 mt-4">
@@ -350,7 +346,7 @@
         </button>
     </div>
     <div class="flex-row gap-2">
-        <div class="form-group" style="flex: 0 0 160px;">
+        <div class="form-group browser-forward-type">
             <label>Destination Type</label>
             <select id="forward-dest-type" class="form-control">
                 <option value="Topic">Topic</option>
@@ -358,18 +354,17 @@
                 <option value="Original">Original Destination</option>
             </select>
         </div>
-        <div class="form-group" style="flex: 1 1 auto;">
+        <div class="form-group browser-forward-name">
             <label>Destination Name</label>
             <input type="text" id="forward-dest-name" class="form-control" placeholder="Queue Or Topic Name">
         </div>
     </div>
-    <div id="forward-error" class="invalid-feedback mb-2" style="display: none;"></div>
+    <div id="forward-error" class="invalid-feedback mb-2"></div>
 
     <!-- Queue List -->
     <div class="form-group">
         <label><span id="forward-queue-count" class="badge mr-2">0</span>Messages to Forward</label>
-        <div id="forward-msg-list" class="display-output flex-col gap-1"
-            style="max-height: calc(90vh - 300px); overflow-y: auto;">
+        <div id="forward-msg-list" class="display-output flex-col gap-1 browser-forward-list">
             <!-- Dynamic Items -->
         </div>
     </div>

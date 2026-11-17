@@ -129,15 +129,15 @@ ui.renderForwardList = function () {
 
         return `
             <div class="flex-row gap-2 items-start mb-2">
-                <div class="forward-item-status flex-shrink-0 mt-2" data-cv="${item.correlationValue}" style="width: 16px;">
+                <div class="forward-item-status flex-shrink-0 mt-2 browser-forward-status" data-cv="${item.correlationValue}">
                     ${icon}
                 </div>
                 <div class="flex-col flex-1 min-w-0 gap-0">
-                    <div class="flex-row justify-between items-center p-2 rounded border" style="background: var(--bg-input); border-color: var(--border-color);">
+                    <div class="flex-row justify-between items-center p-2 rounded border browser-forward-row">
                         <span class="text-sm text-secondary whitespace-nowrap mr-2">${escapeHtml(item.id)}</span>
                         <span class="text-xs text-secondary whitespace-nowrap">${escapeHtml(cleanContent)}</span>
                     </div>
-                    <div class="forward-item-error text-xs text-error text-left ${hasError ? '' : 'hidden'}" data-cv="${item.correlationValue}" style="color: var(--status-disconnected); margin-top: 2px;">
+                    <div class="forward-item-error text-xs text-error text-left browser-forward-error ${hasError ? '' : 'hidden'}" data-cv="${item.correlationValue}">
                         ${escapeHtml(item.error || '')}
                     </div>
                 </div>

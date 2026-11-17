@@ -38,6 +38,7 @@ export default defineConfig({
                 // ships: the bundle check, the module registry the build
                 // generates, the npm audit gate and the e2e run's helpers.
                 'scripts/check-bundles.mjs',
+                'scripts/csp.mjs',
                 'scripts/module-registry-plugin.mjs',
                 'scripts/npm-audit-gate.mjs',
                 'scripts/e2e-lib.mjs'

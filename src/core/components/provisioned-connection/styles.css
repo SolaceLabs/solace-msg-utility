@@ -34,3 +34,8 @@
     margin-top: 0.5rem;
     font-size: 0.9rem;
 }
+
+/* A failed connect names each connection on a line of its own. */
+.prov-conn-error {
+    white-space: pre-line;
+}

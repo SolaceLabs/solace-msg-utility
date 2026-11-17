@@ -32,13 +32,15 @@ export function statusLine(res: Response): string {
 }
 
 /**
- * The text for a refused relay request: the gateway's code (`read_only`,
- * `upstream_auth`, `upstream_unavailable`, ...) as a sentence, or the bare
+ * A refused relay request: the gateway's code (`read_only`, `upstream_auth`,
+ * `upstream_unavailable`, ...) and its sentence, or no code and the bare
  * status when the body is not the gateway's JSON.
  */
-export async function relayErrorText(res: Response): Promise<string> {
+export async function relayRefusal(res: Response): Promise<{ message: string; code?: string }> {
     const code = await gatewayCode(res);
-    return code ? managedErrorMessage({ ok: false, status: res.status, code }) : statusLine(res);
+    return code
+        ? { message: managedErrorMessage({ ok: false, status: res.status, code }), code }
+        : { message: statusLine(res) };
 }
 
 /**

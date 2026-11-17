@@ -70,17 +70,25 @@ function vpnMatchesAny(rows: QGlob[], broker: string, vpn: string): boolean {
     return findVpnRow(rows, broker, vpn) !== undefined;
 }
 
-/** The sign-in surfaces: shown in every managed session, never granted. */
-const ALWAYS_VISIBLE = new Set(['connections', 'admin-login']);
+/** The sign-in surface: shown in every managed session, never granted. */
+const ALWAYS_VISIBLE = new Set(['connections']);
+
+/**
+ * The admin console's sign-in screen: shown only while no one is signed in.
+ * Once a session is in force its actions live in the sidebar's account
+ * control, so the page steps aside and the console opens on its first page.
+ */
+const SIGNED_OUT_ONLY = 'admin-login';
 
 /**
  * Whether a module's sidebar entry + view should be shown for this session.
- * Past the requirements above, a managed user sees the sign-in surfaces and
+ * Past the requirements above, a managed user sees the connections module and
  * the modules the gateway granted them (`session.modules`, from the user's
  * own list or the deployment default, within what the deployment offers).
  */
 export function isModuleVisible(s: ManagedSession | null | undefined, id: string): boolean {
     if (!s) return true;                       // no managed session — allow-all
+    if (id === SIGNED_OUT_ONLY) return false;
     const requirement = MODULE_REQUIREMENTS[id];
     if (requirement === 'admin') return s.admin;
     if (requirement === 'unfiltered-semp') return false;

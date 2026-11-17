@@ -52,7 +52,7 @@ export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}
                     <div class="browser-actions">
                         ${downloadBtns}
                         <button class="btn-icon btn-forward-row" title="Forward Message">${icons.forward}</button>
-                        ${!isReadOnly ? `<button class="btn-icon btn-delete-row" title="Delete" style="color: var(--status-disconnected);">${icons.delete}</button>` : ''}
+                        ${!isReadOnly ? `<button class="btn-icon btn-icon-danger btn-delete-row" title="Delete">${icons.delete}</button>` : ''}
                     </div>
                 </td>
             </tr>

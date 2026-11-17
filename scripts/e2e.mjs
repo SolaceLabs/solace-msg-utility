@@ -1686,6 +1686,11 @@ async function openContext(browser, seen, app = APP) {
     context.on('page', (p) => {
         p.on('websocket', (ws) => seen.sockets.push(ws.url()));
         p.on('pageerror', (e) => seen.errors.push(e.message));
+        // Whatever a Content-Security-Policy refuses (a script, a style, a
+        // connection) the browser reports only on the console.
+        p.on('console', (msg) => {
+            if (msg.type() === 'error' && /Content Security Policy/i.test(msg.text())) seen.errors.push(`refused by the policy: ${msg.text()}`);
+        });
     });
     return context;
 }
@@ -1805,8 +1810,8 @@ async function runBrowserChecks(admin) {
             expect(problems.length === 0, problems.join('; '));
             await page.waitForURL(`${APP}/`);
             await page.locator('#managed-select-view').waitFor();
-            await page.locator('.conn-account-name').waitFor();
-            const name = (await page.locator('.conn-account-name').innerText()).trim();
+            await page.locator('.account-control-name').waitFor();
+            const name = (await page.locator('.account-control-name').innerText()).trim();
             expect(name === USER, `the sidebar names ${name || 'nobody'}`);
             const held = (await user.cookies(APP)).find((c) => c.name === SESSION_COOKIE);
             expect(held?.httpOnly && held.secure && held.sameSite === 'Lax',
@@ -1941,11 +1946,11 @@ async function runBrowserChecks(admin) {
             closed.catch(() => {});
             const logout = page.waitForResponse((r) => new URL(r.url()).pathname === '/managed/logout');
             logout.catch(() => {});
-            await page.click('.conn-account-signout');
+            await page.click('.account-control-signout');
             const out = await logout;
             expect(out.status() === 204, `logout: want 204, got ${out.status()}`);
             await closed;
-            await page.locator('.conn-account').waitFor({ state: 'hidden' });
+            await page.locator('.account-control').waitFor({ state: 'hidden' });
             const me = await page.evaluate(() => fetch('/managed/me').then((r) => r.status));
             expect(me === 401, `/managed/me after sign-out: want 401, got ${me}`);
             await page.goto('/');

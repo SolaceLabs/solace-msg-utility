@@ -122,12 +122,17 @@ async function openDemo(before: (first: ManagedDemo) => void | Promise<void> = (
 
 const signInAs = (username: string) => () => panelButton(`Sign in as ${username}`).click();
 
-async function connect(broker: string, vpn: string): Promise<void> {
+/** Choose a broker and VPN on the Provisioned card and press Connect. */
+function pressConnect(broker: string, vpn: string): void {
     q<HTMLSelectElement>('#managed-broker-select').value = broker;
     q('#managed-broker-select').dispatchEvent(new Event('change'));
     q<HTMLSelectElement>('#managed-vpn-select').value = vpn;
     q('#managed-vpn-select').dispatchEvent(new Event('change'));
     q<HTMLButtonElement>('#btn-managed-connect').click();
+}
+
+async function connect(broker: string, vpn: string): Promise<void> {
+    pressConnect(broker, vpn);
     await vi.waitFor(() => expect([ctx.appState.isSempConnected, ctx.appState.isConnected]).toEqual([true, true]));
 }
 
@@ -169,6 +174,41 @@ describe('managed demo end to end', () => {
         expect(names).toContain('orders.new');
     });
 
+    it('a broker the gateway cannot reach fails the SEMP half, closes the messaging half again, and the card names both', async () => {
+        const demo = await openDemo(signInAs('operator'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
+        demo.gateway.faults.relayUnreachable = true;
+        ctx.notifications.clear();   // the center keeps its entries across reloads
+
+        pressConnect('east-prod', 'orders');
+        await vi.waitFor(() => expect(shown('#managed-connect-error')).toBe(true));
+
+        expect(q('#managed-connect-error').textContent).toBe(
+            'SEMP (management): broker not reachable\nMessaging (client): connected, closed because SEMP failed',
+        );
+        expect([ctx.appState.isSempConnected, ctx.appState.isConnected]).toEqual([false, false]);
+        expect(shown('#managed-select-view')).toBe(true);
+        expect(q<HTMLButtonElement>('#btn-managed-connect').disabled).toBe(false);
+        expect(ctx.notifications.entries().map(e => [e.level, e.module])).toEqual([['error', 'Connections']]);
+        expect(ctx.notifications.entries()[0].text).toMatch(/^SEMP \(management\): /);
+    });
+
+    it('a rate-limited dial fails the messaging half with the short line and closes the SEMP half again', async () => {
+        const demo = await openDemo(signInAs('operator'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
+        demo.gateway.faults.dialRateLimited = true;
+        ctx.notifications.clear();   // the center keeps its entries across reloads
+
+        pressConnect('east-prod', 'orders');
+        await vi.waitFor(() => expect(shown('#managed-connect-error')).toBe(true));
+
+        expect(q('#managed-connect-error').textContent).toBe(
+            'Messaging (client): too many attempts, wait a minute\nSEMP (management): connected, closed because messaging failed',
+        );
+        expect([ctx.appState.isSempConnected, ctx.appState.isConnected]).toEqual([false, false]);
+        expect(ctx.notifications.entries().map(e => e.text)).toEqual(['Messaging (client): Too many requests. Wait a minute and try again.']);
+    });
+
     it('Queue Copy follows the Provisioned connection: one destination card dials a VPN of the same broker through the fake gateway', async () => {
         await openDemo(signInAs('operator'));
         await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
@@ -192,6 +232,54 @@ describe('managed demo end to end', () => {
 
         q<HTMLButtonElement>('#copy-btn-dest-prov-connect').click();
         await vi.waitFor(() => expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').textContent).toBe('Connect'));
+    });
+
+    /** Queue Copy's destination card pointed at another provisioned broker (lab, VPN sandbox), with the primary on east-prod. */
+    async function pointDestinationAtLab(): Promise<void> {
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
+        await connect('east-prod', 'orders');
+        const sameBroker = q<HTMLInputElement>('#copy-toggle-same-broker');
+        sameBroker.checked = false;
+        sameBroker.dispatchEvent(new Event('change'));
+        expect(Array.from(q<HTMLSelectElement>('#copy-dest-prov-broker').options, o => o.value)).toEqual(['east-prod', 'lab']);
+        q<HTMLSelectElement>('#copy-dest-prov-broker').value = 'lab';
+        q('#copy-dest-prov-broker').dispatchEvent(new Event('change'));
+        expect(Array.from(q<HTMLSelectElement>('#copy-dest-prov-vpn').options, o => o.value)).toEqual(['sandbox']);
+    }
+
+    it('Queue Copy dials another provisioned broker: SEMP through its relay, then the VPN, installed together', async () => {
+        await openDemo(signInAs('operator'));
+        await pointDestinationAtLab();
+        // No destination SEMP yet, so no queue picker.
+        expect(shown('#copy-btn-dest-pick')).toBe(false);
+
+        q<HTMLButtonElement>('#copy-btn-dest-prov-connect').click();
+        await vi.waitFor(() => expect(q('#copy-dest-prov-card .prov-conn-status').textContent).toBe('Broker "lab", VPN "sandbox"'));
+        expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').textContent).toBe('Disconnect');
+        expect(shown('#copy-btn-dest-pick')).toBe(true);
+
+        q<HTMLButtonElement>('#copy-btn-dest-prov-connect').click();
+        await vi.waitFor(() => expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').textContent).toBe('Connect'));
+        expect(shown('#copy-btn-dest-pick')).toBe(false);
+    });
+
+    it('a destination broker the gateway cannot reach fails SEMP, closes the session that came up, and the card and the bell say so', async () => {
+        const demo = await openDemo(signInAs('operator'));
+        await pointDestinationAtLab();
+        demo.gateway.faults.relayUnreachable = true;
+        ctx.notifications.clear();   // the center keeps its entries across reloads
+
+        q<HTMLButtonElement>('#copy-btn-dest-prov-connect').click();
+        await vi.waitFor(() => expect(q('#copy-dest-prov-error').textContent).not.toBe(''));
+
+        expect(q('#copy-dest-prov-error').textContent).toBe(
+            'SEMP (management): broker not reachable\nMessaging (client): connected, closed because SEMP failed',
+        );
+        expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').textContent).toBe('Connect');
+        expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').disabled).toBe(false);
+        expect(shown('#copy-btn-dest-pick')).toBe(false);
+        expect(ctx.notifications.entries().map(e => [e.level, e.module])).toEqual([['error', 'Queue Copy']]);
+        expect(ctx.notifications.entries()[0].text).toMatch(/^SEMP \(management\): /);
     });
 
     it("lists only the viewer's subscriptions in Queue Subscriptions: east-prod's payments VPN is left out", async () => {
@@ -219,6 +307,9 @@ describe('managed demo end to end', () => {
         panelButton('Revoke my VPN access').click();
         await vi.waitFor(() => expect(ctx.appState.isConnected).toBe(false));
         expect(shown('#managed-select-view')).toBe(true);
+        // One connection: the dropped messaging session takes SEMP with it, and the card says why.
+        await vi.waitFor(() => expect(ctx.appState.isSempConnected).toBe(false));
+        expect(q('#managed-connect-error').textContent).toBe('Messaging (client): connection dropped, so SEMP was closed too');
 
         q<HTMLButtonElement>('#btn-managed-refresh').click();
         await vi.waitFor(() => expect(shown('#managed-empty-state')).toBe(true));
@@ -251,7 +342,7 @@ describe('managed demo end to end', () => {
         await vi.waitFor(() => expect(ctx.appState.managed ?? null).toBeNull());
         expect(demo.gateway.session()).toBeNull();
         expect(shown('#managed-login-view')).toBe(true);
-        expect(q('#sidebar-account .conn-account').classList.contains('hidden')).toBe(true);
+        expect(q('#sidebar-account .account-control').classList.contains('hidden')).toBe(true);
     }
 
     for (const [what, edit] of SELF_EDITS) {
