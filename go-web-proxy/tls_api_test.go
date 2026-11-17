@@ -552,7 +552,7 @@ func TestTLSAPI_RemoveTrustRefusals(t *testing.T) {
 	}{
 		{name: "a name with a path", path: "..%2Ftls.crt", status: 422, code: "invalid", field: "name"},
 		{name: "a name with no extension", path: "taken", status: 422, code: "invalid", field: "name"},
-		{name: "a name with a space", path: "a%20b.crt", status: 422, code: "invalid", field: "name"},
+		{name: "a name with a backslash", path: "a%5Cb.crt", status: 422, code: "invalid", field: "name"},
 		{name: "no such file", path: "nothere.crt", status: 404, code: "not_found"},
 		{name: "a directory", path: "dir.crt", status: 404, code: "not_found", setup: func(t *testing.T, e *managedEnv) {
 			if err := os.Mkdir(filepath.Join(e.tls.trustDir, "dir.crt"), 0o755); err != nil {
@@ -603,17 +603,21 @@ func TestTLSAPI_RemoveTrustRefusals(t *testing.T) {
 	}
 }
 
-// A link in the directory is never followed: it is not a regular file, so the
-// delete says there is no such file and both the link and its target stay.
-func TestTLSAPI_RemoveTrustNeverFollowsALink(t *testing.T) {
+// A link in the directory is listed, so it can be deleted, but it is never
+// followed: the delete removes the link itself, and the file it points at
+// stays, with the certificates and the served pair untouched.
+func TestTLSAPI_RemoveTrustRemovesALinkNotItsTarget(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	ca := newTestCert(t, testCertSpec{cn: "ca", ca: true})
 	e.putTrustDir(t, map[string]string{"real.crt": ca.certPEM})
 	if err := os.Symlink(filepath.Join(e.tls.trustDir, "real.crt"), filepath.Join(e.tls.trustDir, "link.crt")); err != nil {
 		t.Skipf("no symbolic links here: %v", err)
 	}
-	expect(t, e.do("DELETE", tlsTrustPath+"/link.crt", "", e.admin()), http.StatusNotFound, "not_found")
-	e.wantTLSUntouched(t, "link.crt", "real.crt")
+	expect(t, e.do("DELETE", tlsTrustPath+"/link.crt", "", e.admin()), http.StatusOK, "")
+	e.wantTLSUntouched(t, "real.crt")
+	if got := string(mustRead(t, filepath.Join(e.tls.trustDir, "real.crt"))); got != ca.certPEM {
+		t.Errorf("the link's target keeps its content, got %q", got)
+	}
 }
 
 func TestClip(t *testing.T) {

@@ -667,7 +667,15 @@ func TestWriter_SnapshotWaitsForAPublishInProgress(t *testing.T) {
 				return nil
 			})
 		}()
-		time.Sleep(50 * time.Millisecond) // long enough for the commit to reach its publish
+		// The commit has reached its publish once it waits for the write side
+		// of the publish lock: from then on no new reader gets in.
+		waitFor(t, func() bool {
+			if w.pub.TryRLock() {
+				w.pub.RUnlock()
+				return false
+			}
+			return true
+		}, "the commit to wait for the publish lock")
 		if published.Load() {
 			t.Error("a publish got in while a snapshot was being read")
 		}

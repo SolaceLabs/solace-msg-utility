@@ -69,12 +69,16 @@ const START_SHA256 = '15:75:C2:31:33:7C:6A:36:FF:2B:38:0C:DA:4A:83:78:D5:BE:A3:D
 /** What a CA added without a name is called: derived from the subject's common name, which is always DEMO_SUBJECT's here. */
 const DERIVED_NAME = 'demo-certificate.crt';
 
-/** A trust file's name: no path, a .crt or .pem extension. */
+/** A trust file's name the console writes: no path, a .crt or .pem extension. */
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.(crt|pem)$/;
+
+/** A name the listing can show, which a delete takes: one path element ending in .crt or .pem, any case. */
+const LISTED = (name: string): boolean => /\.(crt|pem)$/i.test(name) && !/[/\\\0]/.test(name);
 
 // The refusals in the gateway's own words (go-web-proxy/tls.go), which the contract goldens hold.
 const NAME_RULE = 'Use letters, digits, dots, dashes and underscores, start with a letter or digit, end in .crt or .pem, '
     + 'and keep the name before the extension to 64 characters.';
+const DELETE_RULE = 'Name one .crt or .pem file directly in the trust directory.';
 const NO_CERTIFICATE = 'No certificate was found. Send the PEM text, from -----BEGIN CERTIFICATE----- to -----END CERTIFICATE-----.';
 const KEY_AS_CERTIFICATE = 'A private key was found. A private key never belongs here: send only the certificate.';
 const AFTER_CERTIFICATES = 'There is text after the last certificate block. Send only certificate blocks.';
@@ -226,7 +230,7 @@ export function createTls({ now, readOnly }: { now: () => Date; readOnly: () => 
     };
 
     const removeTrust: Route[2] = (_req, _s, _sid, [name]) => {
-        if (!NAME.test(name)) return invalid('name', NAME_RULE);
+        if (!LISTED(name)) return invalid('name', DELETE_RULE);
         if (readOnly()) return error(409, 'tls_read_only');
         if (!trust.some(f => f.name === name)) return error(404, 'not_found');
         trust = trust.filter(f => f.name !== name);

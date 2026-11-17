@@ -1,16 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -1067,23 +1068,11 @@ func holdWriter(t *testing.T, w *writer) (release func()) {
 	}
 }
 
-// waitForWaiters returns once n goroutines are waiting for the writer's lock
-// beside the one that holds it: each is a goroutine inside writer.Do, found
-// from the goroutine dump, because nothing else says a request has got that
-// far.
-func waitForWaiters(t *testing.T, n int) {
+// waitForWaiters waits until n requests wait for w's lock beside the one
+// that holds it (holdWriter).
+func waitForWaiters(t *testing.T, w *writer, n int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		buf := make([]byte, 1<<20)
-		if strings.Count(string(buf[:runtime.Stack(buf, true)]), ".(*writer).Do(") >= n+1 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%d request(s) never reached the writer's lock", n)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitFor(t, func() bool { return int(w.waiting.Load()) >= n }, fmt.Sprintf("%d request(s) to reach the writer's lock", n))
 }
 
 // changeUsersBehindTheWriter stands in for a commit that lands while the lock
@@ -1121,7 +1110,7 @@ func TestManagedAPI_CallerIsCheckedAgainInsideTheLock(t *testing.T) {
 				release := holdWriter(t, e.api.store.wr)
 				done := make(chan *httptest.ResponseRecorder)
 				go func() { done <- e.do(tc.method, tc.path, tc.body, caller) }()
-				waitForWaiters(t, 1)
+				waitForWaiters(t, e.api.store.wr, 1)
 				changeUsersBehindTheWriter(e.api.store, func(users []userRec) []userRec {
 					i := slices.IndexFunc(users, func(u userRec) bool { return u.Username == "boss" })
 					if gone {
@@ -1178,7 +1167,7 @@ func TestManagedAPI_SettingsAndImportCheckTheCallerAgainInsideTheLock(t *testing
 			release := holdWriter(t, e.api.store.wr)
 			done := make(chan *httptest.ResponseRecorder)
 			go func() { done <- e.do(tc.method, tc.path, body, caller) }()
-			waitForWaiters(t, 1)
+			waitForWaiters(t, e.api.store.wr, 1)
 			changeUsersBehindTheWriter(e.api.store, func(list []userRec) []userRec {
 				next := slices.Clone(list)
 				next[slices.IndexFunc(next, func(u userRec) bool { return u.Username == "boss" })].Admin = false
@@ -1249,7 +1238,7 @@ func TestManagedAPI_ClientGoneWhileWaitingChangesNothing(t *testing.T) {
 		e.root.ServeHTTP(rec, req.WithContext(ctx))
 		done <- rec
 	}()
-	waitForWaiters(t, 1)
+	waitForWaiters(t, e.api.store.wr, 1)
 	cancel()
 	rec := <-done
 	release()
@@ -1305,7 +1294,7 @@ func TestManagedAPI_AuditRefuseStopsAChangeAlreadyWaiting(t *testing.T) {
 	done := make(chan *httptest.ResponseRecorder, 2)
 	go func() { done <- e.putUserAs(c, "bob", `{"password":"bob-password-1"}`) }()
 	go func() { done <- e.putConnAs(c, "b3", `{"hostname":"h3","semp":{},"client":{}}`) }()
-	waitForWaiters(t, 2)
+	waitForWaiters(t, e.api.store.wr, 2)
 	release()
 	codes := []int{(<-done).Code, (<-done).Code}
 	slices.Sort(codes)
@@ -1703,7 +1692,7 @@ func TestManagedAPI_ResetTwoFactorRefusals(t *testing.T) {
 			release := holdWriter(t, e.api.store.wr)
 			done := make(chan *httptest.ResponseRecorder)
 			go func() { done <- e.do("DELETE", path, "", caller) }()
-			waitForWaiters(t, 1)
+			waitForWaiters(t, e.api.store.wr, 1)
 			changeUsersBehindTheWriter(e.api.store, func(users []userRec) []userRec {
 				i := slices.IndexFunc(users, func(u userRec) bool { return u.Username == "boss" })
 				if gone {
@@ -1860,4 +1849,63 @@ func TestManagedAPI_SaveUser_PasswordMinimumFollowsTheLiveSetting(t *testing.T) 
 	// A save that sends no password changes none, whatever the minimum.
 	setMin(30)
 	expect(t, e.putUserAs(admin, "dave", `{"admin":false}`), http.StatusOK, "")
+}
+
+// shortBodyDeadline sets bodyReadTimeout to d for the test.
+func shortBodyDeadline(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := bodyReadTimeout
+	bodyReadTimeout = d
+	t.Cleanup(func() { bodyReadTimeout = old })
+}
+
+// rawExchange sends req, a raw HTTP/1.1 request whose body may stop short of
+// its Content-Length, to srv and returns the answer's status and body. It
+// fails the test when nothing comes back within 5 s.
+func rawExchange(t *testing.T, srv *httptest.Server, req string) string {
+	t.Helper()
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := io.WriteString(conn, req); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("no answer within 5 s: %v", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return fmt.Sprintf("%d %s", resp.StatusCode, b)
+}
+
+// A JSON body that stops arriving is refused at bodyReadTimeout with 400, not
+// waited for. Once a body is read the deadline is lifted: a handler that then
+// takes longer than it to answer keeps its context and answers.
+func TestDecodeJSON_WaitsForTheBodyOnlyUntilTheDeadline(t *testing.T) {
+	shortBodyDeadline(t, 200*time.Millisecond)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var v map[string]string
+		if !decodeJSON(w, r, &v) {
+			return
+		}
+		time.Sleep(3 * bodyReadTimeout)
+		if r.Context().Err() != nil {
+			writeError(w, http.StatusInternalServerError, "context_cancelled")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+	const head = "POST / HTTP/1.1\r\nHost: gw\r\nContent-Type: application/json\r\nContent-Length: 20\r\n\r\n"
+
+	if got := rawExchange(t, srv, head+`{"a":`); !strings.HasPrefix(got, "400 ") || !strings.Contains(got, "bad_request") {
+		t.Errorf("a body that stops arriving: want 400 bad_request, got %q", got)
+	}
+	if got := rawExchange(t, srv, head+`{"a":"bcdefghijklm"}`); got != "204 " {
+		t.Errorf("a whole body, then a slow handler: want 204, got %q", got)
+	}
 }

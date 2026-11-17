@@ -184,6 +184,13 @@ type auditor struct {
 	// failing is true while the last write lost its record. Any write that
 	// succeeds clears it. gate reads it for audit.onFailure refuse.
 	failing atomic.Bool
+
+	// outMu orders the stdout copies, apart from mu: a slow or stuck reader
+	// of stdout never holds up the file, nor splits a line. stdoutFailing is
+	// true from a failed copy until one succeeds, so the failure is logged
+	// once.
+	outMu         sync.Mutex
+	stdoutFailing atomic.Bool
 }
 
 // openAuditor opens (creating, 0600) the audit log at path. A failure is
@@ -224,7 +231,8 @@ func auditFor(r *http.Request, action string) auditEntry {
 }
 
 // record appends e. It sets the time, drops an access entry while audit.access
-// is off and copies the line to stdout while audit.stdout is on. A record that
+// is off and copies the line to stdout while audit.stdout is on, after the
+// file write and outside its lock (copyToStdout). A record that
 // could not be written is logged at ERROR as "AUDIT RECORD LOST" with every
 // field of the entry (an entry never holds a secret), so the loss is in the
 // application log and the stdout copy; it never fails the caller's request.
@@ -241,9 +249,9 @@ func (a *auditor) record(cat auditCategory, e auditEntry) {
 	line, _ := json.Marshal(e) // strings only: it always marshals, and newlines come out escaped
 	line = append(line, '\n')
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	rotateErr, writeErr := a.write(line)
 	a.failing.Store(writeErr != nil)
+	a.mu.Unlock()
 	if rotateErr != nil {
 		a.logger.Error("audit log rotation failed; the entry was written to the current file, which keeps growing until the cause is fixed", "path", a.path, "err", rotateErr)
 	}
@@ -253,7 +261,22 @@ func (a *auditor) record(cat auditCategory, e auditEntry) {
 			"outcome", e.Outcome, "code", e.Code, "changed", e.Changed, "wrote", e.Wrote, "entry_msg", e.Msg)
 	}
 	if set.stdout {
-		_, _ = a.stdout.Write(line)
+		a.copyToStdout(line)
+	}
+}
+
+// copyToStdout writes the stdout copy of a line. The file already holds it, so
+// a failed copy loses nothing: it is logged once, until a copy succeeds again.
+func (a *auditor) copyToStdout(line []byte) {
+	a.outMu.Lock()
+	_, err := a.stdout.Write(line)
+	a.outMu.Unlock()
+	if err == nil {
+		a.stdoutFailing.Store(false)
+		return
+	}
+	if !a.stdoutFailing.Swap(true) {
+		a.logger.Error("audit stdout copy failed; the audit log file still holds every entry", "err", err)
 	}
 }
 

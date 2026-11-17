@@ -90,6 +90,22 @@ func TestPagePolicy_StyleBlockOrNone(t *testing.T) {
 
 // ----- /login ---------------------------------------------------------------------
 
+// A sign-in form whose body stops arriving is refused at bodyReadTimeout: the
+// page says the form could not be read, and the handler is free again. The
+// form needs no session, so this is where a slow body costs the least to send.
+// The access log's writer sits in front, as serve mounts it: the deadline
+// reaches the connection through it.
+func TestLoginPost_ABodyThatStopsArrivingIsRefusedAtTheDeadline(t *testing.T) {
+	shortBodyDeadline(t, 200*time.Millisecond)
+	e := newManagedEnv(t, nil)
+	srv := httptest.NewServer(accessLog(e.root, quietLogger()))
+	t.Cleanup(srv.Close)
+	got := rawExchange(t, srv, "POST /login HTTP/1.1\r\nHost: gw\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 100\r\n\r\nusername=alice")
+	if !strings.HasPrefix(got, "400 ") || !strings.Contains(got, "The form could not be read.") {
+		t.Errorf("want 400 with the page that says the form could not be read, got %q", got)
+	}
+}
+
 func TestLoginPage_FormHeadersAndNext(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	rec := e.do("GET", "/login", "", nil)
@@ -431,7 +447,7 @@ func TestPasswordChange_ClientGoneIsNotAudited(t *testing.T) {
 		e.root.ServeHTTP(rec, req.WithContext(ctx))
 		done <- rec
 	}()
-	waitForWaiters(t, 1)
+	waitForWaiters(t, e.api.store.wr, 1)
 	cancel()
 	rec := <-done
 	release()
@@ -1311,6 +1327,51 @@ func TestLoginCode_AccountChangedBetweenThePasswordAndTheCode(t *testing.T) {
 	})
 }
 
+// holdTurn takes user's sign-in turn, as a request in progress holds it, and
+// returns the call that gives it back.
+func holdTurn(t *testing.T, e *managedEnv, user string) func() {
+	t.Helper()
+	release, wait, err := e.pages.throttle.loginTurn(context.Background(), user)
+	if err != nil || wait != 0 {
+		t.Fatalf("take the turn: %v %v", wait, err)
+	}
+	return release
+}
+
+// queuedFor waits until n requests wait for user's turn behind its holder.
+func queuedFor(t *testing.T, e *managedEnv, user string, n int) {
+	t.Helper()
+	th := e.pages.throttle
+	waitFor(t, func() bool {
+		th.mu.Lock()
+		defer th.mu.Unlock()
+		tn := th.turns[userKey(user)]
+		return tn != nil && tn.refs == n+1
+	}, fmt.Sprintf("%d request(s) queued for %s's turn", n, user))
+}
+
+// Two requests on one code ticket: the one queued behind the other for the
+// account's turn finds the ticket ended when its turn comes, so it starts
+// again at the sign-in instead of opening a second session with another code.
+func TestLoginCode_ARequestQueuedOnAnEndedTicketStartsAgain(t *testing.T) {
+	e, _ := optionalEnv(t)
+	codes := e.enrolWithCodes(t, "viewer", storeTOTPSecret)
+	tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	recovery := formatRecoveryCode(codes[0])
+	release := holdTurn(t, e, "viewer")
+	queued := make(chan *httptest.ResponseRecorder, 1)
+	go func() { queued <- e.form("/login/code", codeForm(recovery, "/"), tc) }()
+	queuedFor(t, e, "viewer", 1)
+	e.pages.sessions.tickets.drop(tc.Value) // the request ahead signed in, which ends the ticket
+	release()
+	rec := <-queued
+	expectRedirect(t, rec, "/login")
+	noSession(t, rec)
+	if recoveryLeft(e, "viewer") != recoveryCount {
+		t.Error("the queued request uses up no recovery code")
+	}
+}
+
 func TestLoginCode_RefusedRequests(t *testing.T) {
 	e, _ := optionalEnv(t)
 	e.enrolWithCodes(t, "viewer", storeTOTPSecret)
@@ -1492,7 +1553,7 @@ func TestEnrol_ClientGoneIsNotAudited(t *testing.T) {
 	done := make(chan *httptest.ResponseRecorder)
 	code := e.nowCode(t, secret)
 	go func() { done <- e.formFrom(ctx, "192.0.2.10:5000", "/login/two-factor", confirmForm(code, "/"), tc) }()
-	waitForWaiters(t, 1)
+	waitForWaiters(t, e.api.store.wr, 1)
 	cancel()
 	rec := <-done
 	release()
@@ -1501,6 +1562,27 @@ func TestEnrol_ClientGoneIsNotAudited(t *testing.T) {
 	}
 	if isEnrolled(e, "viewer") {
 		t.Error("nothing may be stored")
+	}
+}
+
+// A confirm queued behind another on the same enrol ticket finds the ticket
+// ended when its turn comes: it starts again at the sign-in and stores
+// nothing.
+func TestEnrol_AConfirmQueuedOnAnEndedTicketStartsAgain(t *testing.T) {
+	e := newManagedEnv(t, func(c *config) { c.twoFactor = twoFactorMandatory })
+	tc := ticketCookie(t, e.form("/login", signInForm("viewer", viewerPW, "/"), nil))
+	code := e.nowCode(t, pageSecret(t, e.do("GET", "/login/two-factor", "", tc)))
+	release := holdTurn(t, e, "viewer")
+	queued := make(chan *httptest.ResponseRecorder, 1)
+	go func() { queued <- e.form("/login/two-factor", confirmForm(code, "/"), tc) }()
+	queuedFor(t, e, "viewer", 1)
+	e.pages.sessions.tickets.drop(tc.Value) // the request ahead confirmed, which ends the ticket
+	release()
+	rec := <-queued
+	expectRedirect(t, rec, "/login")
+	noSession(t, rec)
+	if isEnrolled(e, "viewer") {
+		t.Error("the queued confirm stores nothing")
 	}
 }
 
@@ -1604,6 +1686,21 @@ func TestSetupVerify_RefusalsStoreNothingAndOpenNothing(t *testing.T) {
 	}
 	// Without two-factor there is no code to give, and a wrong password still fails.
 	expectPage(t, e.form("/login/two-factor", verifyForm("not-the-password", "", "/"), e.cookie("admin", false)), http.StatusUnauthorized, msg)
+}
+
+// A set-up's verify step queued behind another request of the same user
+// reads the account under the turn: a set-up that finished meanwhile makes the
+// current code required, so the password alone no longer starts another.
+func TestSetup_VerifyQueuedBehindAFinishedSetupNeedsTheCode(t *testing.T) {
+	e, _ := optionalEnv(t)
+	c := e.cookie("viewer", false)
+	release := holdTurn(t, e, "viewer")
+	queued := make(chan *httptest.ResponseRecorder, 1)
+	go func() { queued <- e.send("POST", "/login/two-factor", verifyForm(viewerPW, "", "/"), c) }()
+	queuedFor(t, e, "viewer", 1)
+	e.enrolWithCodes(t, "viewer", storeTOTPSecret) // the request ahead set two-factor up
+	release()
+	expectPage(t, <-queued, http.StatusUnauthorized, "The password or the code is not correct.")
 }
 
 func TestSetup_ReplacesTheSecretAndTheRecoveryCodes(t *testing.T) {

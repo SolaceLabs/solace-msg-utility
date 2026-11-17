@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
@@ -27,6 +28,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -681,6 +683,74 @@ func TestCertHolder_ANewHandshakeSeesTheReplacedCertificateWhileAnOpenConnection
 	defer conn.Close()
 	if got := fingerprintOf(conn.ConnectionState().PeerCertificates[0]); got != fingerprintOf(next.cert) || handshakes.Load() != 2 {
 		t.Errorf("a new handshake sees the replacement: got %s after %d handshakes", got, handshakes.Load())
+	}
+}
+
+// Certificate replacements and CA additions sent by several administrators at
+// once, which the store writer does not serialise: the manager's lock does. The
+// pair served is one of the pairs sent and is the pair on disk, every CA file
+// is there and trusted, and no journal, backup or temporary file is left.
+func TestTLSManager_ConcurrentWritesSerialise(t *testing.T) {
+	f := newTLSFix(t)
+	if err := os.Mkdir(f.trustDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const n = 6
+	pairs, cas := make([]testCertPair, n), make([]testCertPair, n)
+	for i := range n {
+		pairs[i] = newTestCert(t, testCertSpec{cn: fmt.Sprintf("next-%d", i)})
+		cas[i] = newTestCert(t, testCertSpec{cn: fmt.Sprintf("ca-%d", i), ca: true})
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 2*n)
+	for i := range n {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if _, err := f.m.replaceCertificate(pairs[i].certPEM, pairs[i].keyPEM); err != nil {
+				errs <- fmt.Errorf("replace %d: %w", i, err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if _, err := f.m.addTrust(fmt.Sprintf("ca-%d.crt", i), cas[i].certPEM); err != nil {
+				errs <- fmt.Errorf("add CA %d: %w", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+
+	var winner *testCertPair
+	for i := range pairs {
+		if fingerprintOf(pairs[i].cert) == f.served() {
+			winner = &pairs[i]
+		}
+	}
+	if winner == nil {
+		t.Fatalf("the served certificate %s is none of those sent", f.served())
+	}
+	f.wantFiles(t, *winner)
+	if got := len(f.m.trustFiles()); got != n {
+		t.Errorf("every CA file is listed: %d of %d", got, n)
+	}
+	for i := range cas {
+		leaf := newTestCert(t, testCertSpec{cn: "broker", parent: &cas[i]})
+		if _, err := leaf.cert.Verify(x509.VerifyOptions{Roots: f.m.trust.get().pool, DNSName: "localhost"}); err != nil {
+			t.Errorf("CA %d is trusted: %v", i, err)
+		}
+	}
+	entries, err := os.ReadDir(f.trustDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "ca-") || filepath.Ext(e.Name()) != ".crt" {
+			t.Errorf("only the CA files are left in the trust directory, found %s", e.Name())
+		}
 	}
 }
 
@@ -1561,16 +1631,17 @@ func TestTLSManager_RemoveTrustAppliesAtOnce(t *testing.T) {
 	}
 }
 
-// A delete reaches only a regular file directly in the trust directory: a
-// name that is a path is refused, a directory or a link of that name is not
-// found, and the file a link points at is never removed.
-func TestTLSManager_RemoveTrustReachesOnlyRegularFilesInTheDirectory(t *testing.T) {
+// A delete reaches only an entry directly in the trust directory: a name that
+// is a path, or that the listing could not show, is refused, and a directory
+// of that name is not found. A link is removed itself; the file it points at
+// never is.
+func TestTLSManager_RemoveTrustReachesOnlyFilesDirectlyInTheDirectory(t *testing.T) {
 	f := newTLSFix(t)
 	if err := os.Mkdir(f.trustDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, bad := range []string{"../tls.crt", "../../etc/passwd", "sub/x.crt", "tls.key", ""} {
-		wantInvalid(t, f.m.removeTrust(bad), "name", "letters, digits")
+	for _, bad := range []string{"../tls.crt", "../../etc/passwd", "sub/x.crt", `sub\x.crt`, "nul\x00.crt", "tls.key", ""} {
+		wantInvalid(t, f.m.removeTrust(bad), "name", "directly in the trust directory")
 	}
 	if _, err := os.Stat(f.certFile); err != nil {
 		t.Fatal("a path outside the directory is never reached")
@@ -1586,9 +1657,13 @@ func TestTLSManager_RemoveTrustReachesOnlyRegularFilesInTheDirectory(t *testing.
 	}
 	target := filepath.Join(f.dir, "real.crt")
 	writeFile(t, target, "keep me")
-	if err := os.Symlink(target, filepath.Join(f.trustDir, "link.crt")); err == nil {
-		if err := f.m.removeTrust("link.crt"); !errors.Is(err, errTLSNotFound) {
-			t.Errorf("a link: want errTLSNotFound, got %v", err)
+	link := filepath.Join(f.trustDir, "link.crt")
+	if err := os.Symlink(target, link); err == nil {
+		if err := f.m.removeTrust("link.crt"); err != nil {
+			t.Errorf("a link the listing shows is removed, got %v", err)
+		}
+		if _, err := os.Lstat(link); !errors.Is(err, os.ErrNotExist) {
+			t.Error("the link is gone")
 		}
 		if string(mustRead(t, target)) != "keep me" {
 			t.Error("the file behind a link is never removed")
@@ -1596,6 +1671,46 @@ func TestTLSManager_RemoveTrustReachesOnlyRegularFilesInTheDirectory(t *testing.
 	}
 	if _, err := os.Stat(filepath.Join(f.trustDir, "dir.crt")); err != nil {
 		t.Error("the directory stays")
+	}
+}
+
+// Every file the listing shows can be deleted, a host-supplied name the
+// console would not write included (upper-case extension, a space, a leading
+// underscore, more than 64 characters): the pool trusts them, so the console
+// must be able to stop it.
+func TestTLSManager_RemoveTrustTakesEveryNameTheListingShows(t *testing.T) {
+	f := newTLSFix(t)
+	if err := os.Mkdir(f.trustDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ca := newTestCert(t, testCertSpec{cn: "ca", ca: true})
+	names := []string{"Corp-Root.CRT", "my ca.pem", "_root.crt", strings.Repeat("a", 70) + ".pem"}
+	for _, n := range names {
+		writeFile(t, filepath.Join(f.trustDir, n), ca.certPEM)
+	}
+	if err := f.m.refreshTrust(); err != nil {
+		t.Fatal(err)
+	}
+	listed := func() []string {
+		var out []string
+		for _, tf := range f.m.trustFiles() {
+			out = append(out, tf.Name)
+		}
+		return out
+	}
+	if got := listed(); len(got) != len(names) {
+		t.Fatalf("the listing shows every file: %v", got)
+	}
+	for _, n := range names {
+		if trustNameRE.MatchString(n) {
+			t.Fatalf("%q is a name the console writes; the test needs one it does not", n)
+		}
+		if err := f.m.removeTrust(n); err != nil {
+			t.Errorf("delete %q: %v", n, err)
+		}
+	}
+	if got := listed(); len(got) != 0 {
+		t.Errorf("every listed file deleted, left: %v", got)
 	}
 }
 
@@ -1704,6 +1819,47 @@ func TestLoadOrGenerateServerCert_WarnsOfAKeyBrowsersCannotUse(t *testing.T) {
 				strings.Contains(log.String(), "ECDSA on P-521")
 			if warned != c.warn {
 				t.Errorf("warned %v, want %v:\n%s", warned, c.warn, log.String())
+			}
+		})
+	}
+}
+
+// A pair placed on the host is served whatever its dates, but the start warns
+// when it has expired or expires within certExpiryWarning, at WARN so the
+// default level shows it. One that has longer says nothing.
+func TestLoadOrGenerateServerCert_WarnsOfAnExpiredOrExpiringCertificate(t *testing.T) {
+	now := time.Now()
+	for _, c := range []struct {
+		name     string
+		notAfter time.Time
+		want     string // "" for no warning
+	}{
+		{"expired", now.Add(-24 * time.Hour), "the TLS server certificate has expired"},
+		{"expires in 3 days", now.Add(3*24*time.Hour + time.Hour), "the TLS server certificate expires soon"},
+		{"a year left", now.Add(365 * 24 * time.Hour), ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			pair := newTestCert(t, testCertSpec{cn: "host", notBefore: now.Add(-400 * 24 * time.Hour), notAfter: c.notAfter})
+			crt, key := filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key")
+			writeFile(t, crt, pair.certPEM)
+			writeFile(t, key, pair.keyPEM)
+			var log strings.Builder
+			if _, err := loadOrGenerateServerCert(crt, key, newCapturingLogger(&log)); err != nil {
+				t.Fatal(err)
+			}
+			got := log.String()
+			if c.want == "" {
+				if strings.Contains(got, "TLS server certificate has expired") || strings.Contains(got, "TLS server certificate expires soon") {
+					t.Errorf("no warning for a certificate with a year left:\n%s", got)
+				}
+				return
+			}
+			if !strings.Contains(got, c.want) || !strings.Contains(got, "level=WARN") || !strings.Contains(got, "not_after="+c.notAfter.UTC().Format(time.RFC3339)) {
+				t.Errorf("want a WARN %q naming not_after:\n%s", c.want, got)
+			}
+			if c.name == "expires in 3 days" && !strings.Contains(got, "days_left=3") {
+				t.Errorf("want days_left=3:\n%s", got)
 			}
 		})
 	}

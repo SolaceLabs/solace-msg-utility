@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 )
 
 // The writer is the only way the gateway changes a store file. One lock covers
@@ -62,6 +63,9 @@ type writer struct {
 	pub sync.RWMutex
 	// hooks are the commit's test seams, zero in production.
 	hooks journalHooks
+	// waiting counts the transactions waiting for the slot, so a test knows
+	// a request has queued behind the one that holds it.
+	waiting atomic.Int32
 }
 
 // newWriter makes the writer for the data directory dir; every file it writes
@@ -106,9 +110,12 @@ func (w *writer) snapshot(fn func()) {
 //     changed and is raised again for the recover middleware to turn into a
 //     500. A panic after the commit point is logged and calls the exit hook.
 func (w *writer) Do(ctx context.Context, op func(tx *txn) error) (err error) {
+	w.waiting.Add(1)
 	select {
 	case w.slot <- struct{}{}:
+		w.waiting.Add(-1)
 	case <-ctx.Done():
+		w.waiting.Add(-1)
 		return &clientGoneError{err: ctx.Err()}
 	}
 	defer func() { <-w.slot }()

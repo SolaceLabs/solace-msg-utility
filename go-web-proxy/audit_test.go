@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -314,6 +315,80 @@ func TestAudit_RotationFailureIsLoggedAndTheLineIsKept(t *testing.T) {
 	}
 	if log := e.log.String(); strings.Contains(log, "AUDIT RECORD LOST") || e.a.failing.Load() {
 		t.Errorf("the line was written, so no record was lost and the log is not failing: %s", log)
+	}
+}
+
+// waitFor polls cond every 5 ms and fails the test after 5 s, naming what it
+// waited for.
+func waitFor(t *testing.T, cond func() bool, what string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// gatedWriter blocks every Write until open is closed, then fails each one
+// while fail is set; it counts the lines it took.
+type gatedWriter struct {
+	open  chan struct{}
+	fail  atomic.Bool
+	mu    sync.Mutex
+	lines int
+}
+
+func (g *gatedWriter) Write(p []byte) (int, error) {
+	<-g.open
+	if g.fail.Load() {
+		return 0, errors.New("write /dev/stdout: broken pipe")
+	}
+	g.mu.Lock()
+	g.lines++
+	g.mu.Unlock()
+	return len(p), nil
+}
+
+// A stdout copy that cannot be written (a log pipe under back-pressure) holds
+// up neither the audit file nor the next record's file line: the file gets
+// both while the first copy is still stuck. Once stdout drains, both copies go
+// out. A copy that fails is logged once, not per line, and logged again only
+// after a copy has succeeded in between.
+func TestAudit_StuckOrFailingStdoutNeverHoldsUpTheFile(t *testing.T) {
+	e := newAuditEnv(t, auditSettings{stdout: true})
+	out := &gatedWriter{open: make(chan struct{})}
+	e.a.stdout = out
+
+	first := make(chan struct{})
+	go func() { e.rec("first"); close(first) }()
+	waitFor(t, func() bool { return len(fileLines(t, e.path)) == 1 }, "the first line in the file while its stdout copy is stuck")
+	second := make(chan struct{})
+	go func() { e.rec("second"); close(second) }()
+	waitFor(t, func() bool { return len(fileLines(t, e.path)) == 2 }, "the second line in the file while the first copy is still stuck")
+	close(out.open)
+	<-first
+	<-second
+	if out.lines != 2 {
+		t.Errorf("both copies go out once stdout drains, got %d", out.lines)
+	}
+
+	out.fail.Store(true)
+	e.rec("third")
+	e.rec("fourth")
+	if n := strings.Count(e.log.String(), "audit stdout copy failed"); n != 1 {
+		t.Errorf("a failing stdout is logged once, got %d:\n%s", n, e.log)
+	}
+	out.fail.Store(false)
+	e.rec("fifth")
+	out.fail.Store(true)
+	e.rec("sixth")
+	if n := strings.Count(e.log.String(), "audit stdout copy failed"); n != 2 {
+		t.Errorf("a new failure after a copy succeeded is logged again, got %d:\n%s", n, e.log)
+	}
+	if got := len(fileLines(t, e.path)); got != 6 || e.a.failing.Load() {
+		t.Errorf("the file holds every line (%d of 6) and is not failing: %v", got, e.a.failing.Load())
 	}
 }
 

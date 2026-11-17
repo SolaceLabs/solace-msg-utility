@@ -152,12 +152,12 @@ func signInBootstrapAdmin(t *testing.T, client *http.Client, base string) *http.
 
 // restartServe starts a Provisioned gateway (Direct relay open too, for a slow
 // request to hold) with the given restart hook, and signs the administrator in.
-func restartServe(t *testing.T, ln net.Listener, restart func() error) (r *serveRun, client *http.Client, base, dir string, session *http.Cookie) {
+func restartServe(t *testing.T, ln net.Listener, shutdown time.Duration, restart func() error) (r *serveRun, client *http.Client, base, dir string, session *http.Cookie) {
 	t.Helper()
 	dir = gatewayDir(t)
 	t.Setenv("SMU_ADMIN_PASSWORD", "serve-test-password")
 	configFile := writeServeConfig(t, dir, "connModes: both\n")
-	p := process{configFile: configFile, dataDir: dir, restart: restart}
+	p := process{configFile: configFile, dataDir: dir, restart: restart, shutdown: shutdown}
 	if ln != nil {
 		p.listen = func() (net.Listener, error) { return ln, nil }
 	}
@@ -175,9 +175,8 @@ func restartServe(t *testing.T, ln net.Listener, restart func() error) (r *serve
 // is not called, until it has finished), the listener is closed when the hook
 // runs, the hook runs once, and the audit trail holds the line. It is the
 // SIGTERM shutdown (main_test.go TestServe_ProvisionedModeStartsAndShutsDownOnASignal)
-// followed by the hook. A restart whose shutdown overruns its deadline fails like
-// a signal's (main_test.go TestServe_ShutdownThatOverrunsItsDeadlineFails) and
-// never reaches the hook.
+// followed by the hook. A restart whose shutdown overruns its deadline still
+// reaches the hook (TestServe_RestartWhoseDrainOverrunsClosesWhatIsLeftAndRestarts).
 func TestServe_RestartDrainsRequestsInFlightThenCallsTheHookOnce(t *testing.T) {
 	started, release := make(chan struct{}, 1), make(chan struct{})
 	var releaseOnce sync.Once
@@ -205,7 +204,7 @@ func TestServe_RestartDrainsRequestsInFlightThenCallsTheHookOnce(t *testing.T) {
 		}
 		return nil
 	}
-	r, client, base, dir, session := restartServe(t, ln, hook)
+	r, client, base, dir, session := restartServe(t, ln, 0, hook)
 
 	_, port, _ := net.SplitHostPort(upstream.Listener.Addr().String())
 	type answer struct {
@@ -264,13 +263,65 @@ func TestServe_RestartDrainsRequestsInFlightThenCallsTheHookOnce(t *testing.T) {
 	}
 }
 
+// A restart whose drain overruns the shutdown deadline still starts the program
+// again: the request still open is cut (the exec would cut it anyway), the
+// overrun is a warning, and the hook runs once. A signal's overrun fails
+// (main_test.go TestServe_ShutdownThatOverrunsItsDeadlineFails).
+func TestServe_RestartWhoseDrainOverrunsClosesWhatIsLeftAndRestarts(t *testing.T) {
+	started, release := make(chan struct{}, 1), make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		started <- struct{}{}
+		<-release
+	}))
+	t.Cleanup(func() { close(release); upstream.Close() })
+	var calls atomic.Int32
+	r, client, base, _, session := restartServe(t, nil, 200*time.Millisecond, func() error {
+		calls.Add(1)
+		return nil
+	})
+
+	_, port, _ := net.SplitHostPort(upstream.Listener.Addr().String())
+	slow := make(chan error, 1)
+	go func() {
+		resp, err := client.Get(base + "/http/" + port + "/127.0.0.1/slow")
+		if err == nil {
+			_, err = io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+		}
+		slow <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("the slow request never reached the upstream; log:\n%s", r.log)
+	}
+
+	if resp := postTo(t, client, base, "/managed/restart", nil, session); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("restart answered %d", resp.StatusCode)
+	}
+	if err := r.result(t); err != nil {
+		t.Fatalf("a restart's overrun is not a failure: %v\n%s", err, r.log)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("hook called %d times", calls.Load())
+	}
+	if err := <-slow; err == nil {
+		t.Error("the request still open at the deadline is cut, not answered")
+	}
+	log := r.log.String()
+	expectLogged(t, log, "restart requested", "graceful shutdown overran its deadline")
+	if strings.Contains(log, "graceful shutdown failed") || strings.Contains(log, "gateway restart failed") {
+		t.Errorf("an overrun restart is neither a failed shutdown nor a failed restart:\n%s", log)
+	}
+}
+
 // A hook that fails (the program could not be started again): the cause is
 // logged and serve returns it, so main exits with status 1 and the platform's
 // restart policy takes over.
 func TestServe_RestartWhoseHookFailsLogsWhyAndReturnsTheError(t *testing.T) {
 	cause := errors.New("cannot start /usr/local/bin/gateway again: exec format error")
 	var calls atomic.Int32
-	r, client, base, _, session := restartServe(t, nil, func() error {
+	r, client, base, _, session := restartServe(t, nil, 0, func() error {
 		calls.Add(1)
 		return cause
 	})

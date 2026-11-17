@@ -142,18 +142,21 @@ func (p *authPages) allowAnon(w http.ResponseWriter, r *http.Request) bool {
 	return allowed
 }
 
-// readForm parses a POSTed form within the body cap and the cross-origin
-// check. On false the response has been written.
+// readForm parses a POSTed form within the body cap, the body deadline
+// (bodyDeadline) and the cross-origin check. On false the response has been
+// written.
 func (p *authPages) readForm(w http.ResponseWriter, r *http.Request) bool {
 	if err := p.cop.Check(r); err != nil {
 		p.message(w, http.StatusForbidden, "Request refused", "This form was submitted from another site.")
 		return false
 	}
+	lift := bodyDeadline(w)
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	if err := r.ParseForm(); err != nil {
 		p.message(w, http.StatusBadRequest, "Request refused", "The form could not be read.")
 		return false
 	}
+	lift()
 	return true
 }
 
@@ -577,6 +580,15 @@ func (p *authPages) takeTurn(w http.ResponseWriter, r *http.Request, user string
 	return release, true
 }
 
+// ticketStands reports, once the account's turn is held, whether the ticket
+// read before the turn still exists at the same stage. A request queued behind
+// another on the same ticket finds it ended (that one signed in or set
+// two-factor up), so a ticket is used once however many requests carry it.
+func (p *authPages) ticketStands(id, stage string) bool {
+	cur, ok := p.sessions.tickets.lookup(id)
+	return ok && cur.stage == stage
+}
+
 // spendCode checks the one code field of a user who has two-factor with the
 // given secret: six digits, once spaces and hyphens are taken out ("123 456"
 // as authenticator apps show it), is a TOTP code (a replayed one is refused);
@@ -681,6 +693,10 @@ func (p *authPages) submitCode(w http.ResponseWriter, r *http.Request, prior act
 		return
 	}
 	defer release()
+	if !p.ticketStands(at.id, stageCode) {
+		http.Redirect(w, r, loginURL(next), http.StatusSeeOther)
+		return
+	}
 	secret, enrolled := p.store.totpSecret(user)
 	if !enrolled {
 		changed() // two-factor was removed, or the account deleted, after the password step
@@ -796,6 +812,10 @@ func (p *authPages) submitSetup(w http.ResponseWriter, r *http.Request, next str
 		return
 	}
 	defer release()
+	// Read again under the turn: a set-up that finished while this request
+	// waited makes the current code required.
+	secret, enrolled = p.store.totpSecret(as.user)
+	page.Enrolled = enrolled
 	check, err := p.store.verifyPassword(r.Context(), as.user, pw)
 	if err != nil {
 		unavailable(err)
@@ -873,6 +893,10 @@ func (p *authPages) submitConfirm(w http.ResponseWriter, r *http.Request, next s
 		return
 	}
 	defer release()
+	if !p.ticketStands(at.id, at.stage) {
+		http.Redirect(w, r, loginURL(next), http.StatusSeeOther)
+		return
+	}
 	wasEnrolled, exists := p.store.twoFactorOf(user)
 	if !exists || (at.stage == stageEnrol && wasEnrolled) {
 		// Deleted meanwhile, or enrolled elsewhere since the password step: an

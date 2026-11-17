@@ -81,7 +81,17 @@ func TestLoadStoreKey_RefusesAMalformedKey(t *testing.T) {
 			if tc.content != "" && strings.Contains(err.Error(), tc.content) {
 				t.Error("the error must not echo the file's content")
 			}
+			if !strings.Contains(err.Error(), "No store exists yet") || !strings.Contains(err.Error(), "delete it and start again") {
+				t.Errorf("with no store yet, the error says the file may be a stopped first start's and can go: %v", err)
+			}
 		})
+	}
+	// Beside a store the key is that store's, so deleting it is never offered.
+	path, stores := keyDir(t)
+	writeFile(t, path, good[:62])
+	writeFile(t, stores[0], "anything")
+	if _, err := loadStoreKey(path, stores, quietLogger()); err == nil || strings.Contains(err.Error(), "delete it") {
+		t.Errorf("beside a store, want the refusal without the offer to delete, got %v", err)
 	}
 }
 

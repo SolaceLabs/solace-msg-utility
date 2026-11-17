@@ -99,7 +99,7 @@
       "area": "resilience",
       "severity": "minor",
       "confidence": "verified",
-      "status": "open",
+      "status": "accepted",
       "locations": [
         "go-web-proxy/backup.go:876-893",
         "go-web-proxy/backup_api.go:91-103",
@@ -118,7 +118,7 @@
         "2026-11-16: severity major -> minor",
         "2026-11-16: title was 'Backup directory check cannot tell an unmounted /backup: scheduled backups silently land in the container layer'"
       ],
-      "notes": ""
+      "notes": "2026-11-17: Accepted. From inside the container the gateway cannot reliably tell a mounted /backup from a plain directory. docs/provisioned-mode.md (docker run, Scheduled backups) says to mount /backup and what happens without it; compose.provisioned.yaml mounts it."
     },
     {
       "id": "CR-0004",
@@ -5624,7 +5624,7 @@
       "area": "observability",
       "severity": "nit",
       "confidence": "verified",
-      "status": "open",
+      "status": "accepted",
       "locations": [
         "go-web-proxy/pages.go:140-145",
         "go-web-proxy/pages.go:253",
@@ -5644,7 +5644,7 @@
       },
       "resolved": null,
       "history": [],
-      "notes": ""
+      "notes": "2026-11-17: Accepted. The audit keeps the name a refused sign-in tried, as typed, so an administrator can see which accounts are attacked; docs/provisioned-mode.md (Audit trail, What is never recorded) states that a password typed into the Username field is recorded and should be changed."
     },
     {
       "id": "CR-0193",

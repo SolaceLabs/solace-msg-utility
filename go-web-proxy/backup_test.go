@@ -1063,6 +1063,13 @@ func TestBackupService_Read(t *testing.T) {
 	if _, err := x.b.read(filepath.Base(big)); err != errNotBackup {
 		t.Fatalf("an oversized file: %v", err)
 	}
+	// Not UTF-8 (a hand-edited or damaged copy): a download would rewrite its
+	// bytes, so it is refused by name, not sent altered.
+	binary := filepath.Join(x.dir, "smu-backup-20261109T040000Z.json")
+	writeFile(t, binary, "{\"format\":\"smu-backup\",\"x\":\"\xff\xfe\"}")
+	if _, err := x.b.read(filepath.Base(binary)); err != errNotBackup {
+		t.Fatalf("a file that is not UTF-8: %v", err)
+	}
 }
 
 func TestBackupService_DirProblem(t *testing.T) {

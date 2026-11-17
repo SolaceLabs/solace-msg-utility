@@ -250,11 +250,17 @@ describe('mock-broker/gateway/tls -- the trusted CAs', () => {
         expect(res.json).toEqual(await get(gw));
     });
 
-    it('answers 404 not_found for a file that is not there, and 422 for a name that could leave the directory', async () => {
+    it('answers 404 not_found for a file that is not there, and 422 for a name the listing cannot show', async () => {
         const gw = gateway();
         await add(gw, { name: 'a.crt', certificate: CA });
-        expect(await call(gw, 'DELETE', '/managed/tls/trust/ghost.crt')).toEqual({ status: 404, json: { error: 'not_found' } });
-        for (const name of ['..%2Fa.crt', 'a.txt', '.crt']) expect(await call(gw, 'DELETE', `/managed/tls/trust/${name}`)).toEqual(INVALID('name'));
+        // A delete takes any name the listing shows, one the console would not write included.
+        for (const name of ['ghost.crt', '.crt', 'Corp-Root.CRT', 'my%20ca.pem']) {
+            expect(await call(gw, 'DELETE', `/managed/tls/trust/${name}`)).toEqual({ status: 404, json: { error: 'not_found' } });
+        }
+        for (const name of ['..%2Fa.crt', 'sub%5Ca.crt', 'a.txt']) {
+            expect(await call(gw, 'DELETE', `/managed/tls/trust/${name}`))
+                .toEqual({ status: 422, json: { error: 'invalid', field: 'name', reason: 'Name one .crt or .pem file directly in the trust directory.' } });
+        }
         expect((await get(gw)).trust.map((f: any) => f.name)).toEqual(['a.crt']);
     });
 });

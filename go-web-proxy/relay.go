@@ -113,7 +113,11 @@ func (rl *sempRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case p.v1 && r.Method == http.MethodPost:
 		var err error
+		lift := bodyDeadline(w)
 		body, err = io.ReadAll(http.MaxBytesReader(w, r.Body, relayMaxBody))
+		if err == nil {
+			lift()
+		}
 		var tooLarge *http.MaxBytesError
 		switch {
 		case errors.As(err, &tooLarge):

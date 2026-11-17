@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -777,7 +778,9 @@ func (b *backupService) run() (string, error) {
 }
 
 // writeNew writes a backup that must not exist yet, owner-only: the data goes
-// to its .partial name, is synced, and only then is renamed to name.
+// to its .partial name, is synced, and only then is renamed to name; the
+// directory is synced after the rename, so a backup reported written is
+// there after a power loss.
 func (b *backupService) writeNew(name string, data []byte) error {
 	path := filepath.Join(b.dir, name)
 	if _, err := os.Lstat(path); err == nil {
@@ -791,7 +794,7 @@ func (b *backupService) writeNew(name string, data []byte) error {
 		_ = os.Remove(partial)
 		return fmt.Errorf("cannot rename %s to %s: %w%s", partial, name, err, ownershipHint(err))
 	}
-	return nil
+	return syncDir(b.dir)
 }
 
 // removePartials deletes the .partial files runs that stopped left behind.
@@ -856,7 +859,10 @@ func (b *backupService) list() ([]backupFileInfo, error) {
 	return out, nil
 }
 
-// read returns one of the gateway's backups by name.
+// read returns one of the gateway's backups by name. A file over the size cap,
+// or one that is not UTF-8 text, is refused as errNotBackup: the gateway
+// writes JSON, and a download carries the content as a JSON string, which
+// would rewrite every byte that is not UTF-8.
 func (b *backupService) read(name string) ([]byte, error) {
 	if !backupNamePattern.MatchString(name) {
 		return nil, fs.ErrNotExist
@@ -867,7 +873,7 @@ func (b *backupService) read(name string) ([]byte, error) {
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, maxStoreFile+1))
-	if err == nil && len(data) > maxStoreFile {
+	if err == nil && (len(data) > maxStoreFile || !utf8.Valid(data)) {
 		return nil, errNotBackup
 	}
 	return data, err

@@ -543,6 +543,10 @@ type recordingResponseWriter struct {
 	hijacked    bool
 }
 
+// Unwrap lets http.ResponseController reach the connection beneath it, for
+// the read deadline a handler sets on its body (bodyDeadline).
+func (r *recordingResponseWriter) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
 func (r *recordingResponseWriter) WriteHeader(code int) {
 	if r.wroteHeader {
 		return

@@ -35,17 +35,19 @@ func loadStoreKey(path string, stores []string, logger *slog.Logger) ([]byte, er
 	case err == nil:
 		key, perr := parseStoreKey(data)
 		if perr != nil {
-			return nil, fmt.Errorf("store key file %q %w; it must hold %d hex characters (to make one: %s)", path, perr, storeKeyHexChars, keyGenerateHint)
+			fresh := ""
+			if _, found := existingStore(stores); !found {
+				fresh = ". No store exists yet, so a first start that stopped while writing the key may have left it: delete it and start again, and a new key is generated"
+			}
+			return nil, fmt.Errorf("store key file %q %w; it must hold %d hex characters (to make one: %s)%s", path, perr, storeKeyHexChars, keyGenerateHint, fresh)
 		}
 		warnLooseKeyMode(path, logger)
 		return key, nil
 	case !errors.Is(err, fs.ErrNotExist):
 		return nil, fmt.Errorf("cannot read store key file %q: %w%s", path, err, ownershipHint(err))
 	}
-	for _, p := range stores {
-		if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("store key file %q is missing but %q exists; restore the key file, or delete the store files to start over", path, p)
-		}
+	if p, found := existingStore(stores); found {
+		return nil, fmt.Errorf("store key file %q is missing but %q exists; restore the key file, or delete the store files to start over", path, p)
 	}
 	key := make([]byte, storeKeyBytes)
 	rand.Read(key) // never fails: crypto/rand.Read crashes the process instead
@@ -54,6 +56,17 @@ func loadStoreKey(path string, stores []string, logger *slog.Logger) ([]byte, er
 	}
 	logger.Warn("store key file generated; back it up: without it the users and connections files cannot be read", "path", path)
 	return key, nil
+}
+
+// existingStore returns the first of stores that exists, or that cannot be
+// told apart from existing (any error but not-exist).
+func existingStore(stores []string) (string, bool) {
+	for _, p := range stores {
+		if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
+			return p, true
+		}
+	}
+	return "", false
 }
 
 // parseStoreKey accepts exactly 64 hex characters, plus a trailing newline
@@ -92,7 +105,8 @@ func ownershipHint(err error) string {
 }
 
 // createExclusive writes a file that must not exist yet (O_EXCL), so a second
-// start racing the first can never replace a key already in use.
+// start racing the first can never replace a key already in use. The file is
+// synced, and then its directory, so the new name survives a power loss too.
 func createExclusive(path string, data []byte, perm fs.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -106,5 +120,5 @@ func createExclusive(path string, data []byte, perm fs.FileMode) error {
 		_ = os.Remove(path)
 		return err
 	}
-	return nil
+	return syncDir(filepath.Dir(path))
 }

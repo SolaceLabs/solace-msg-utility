@@ -349,6 +349,29 @@ func writeRateLimited(w http.ResponseWriter, wait time.Duration) {
 	writeError(w, http.StatusTooManyRequests, "rate_limited")
 }
 
+// bodyReadTimeout bounds how long a handler waits for a request body it reads
+// whole: a form, a JSON document, a SEMP v1 request. The server sets no
+// ReadTimeout, because the Direct relay and the sockets stream, so without it
+// a client that sends its headers and then dribbles the body would hold its
+// handler for as long as it liked. A variable so tests can shorten it.
+var bodyReadTimeout = 30 * time.Second
+
+// bodyDeadline sets a read deadline bodyReadTimeout from now on the request's
+// connection and returns the call that lifts it, to be made once the whole
+// body has been read: left in place, the deadline would cancel the request's
+// context (net/http's background read fails at it) in a handler that takes
+// longer than that to answer. After a read that failed it stays: net/http
+// drains the unread body before it writes the answer, and without the
+// deadline that drain would wait on the slow client for ever. A writer that
+// takes no deadline (a test's recorder) keeps only the size cap.
+func bodyDeadline(w http.ResponseWriter) (lift func()) {
+	rc := http.NewResponseController(w)
+	if rc.SetReadDeadline(time.Now().Add(bodyReadTimeout)) != nil {
+		return func() {}
+	}
+	return func() { _ = rc.SetReadDeadline(time.Time{}) }
+}
+
 // decodeJSON reads one JSON value of at most maxBodyBytes into dst, rejecting
 // unknown fields and trailing data. On failure it has written the response
 // (413 too_large or 400 bad_request) and returns false.
@@ -357,8 +380,10 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 }
 
 // decodeJSONLimit is decodeJSON with another size cap, for the one body that
-// carries a file (an import).
+// carries a file (an import). Either waits at most bodyReadTimeout for the
+// body.
 func decodeJSONLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) bool {
+	lift := bodyDeadline(w)
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	dec.DisallowUnknownFields()
 	err := dec.Decode(dst)
@@ -381,6 +406,7 @@ func decodeJSONLimit(w http.ResponseWriter, r *http.Request, dst any, limit int6
 		}
 		return false
 	}
+	lift()
 	return true
 }
 

@@ -393,7 +393,8 @@ type process struct {
 // exits 1). A restart asked for from the console (restart.go) shuts down the
 // same way and then calls p.restart, which does not return when it works; if
 // it fails, the reason is logged and serve returns it, so main exits 1 and the
-// platform's restart policy takes over.
+// platform's restart policy takes over. A restart's shutdown that overruns its
+// deadline closes what is still open and restarts all the same.
 func serve(p process) error {
 	var restart bool
 	if err := serveUntilStopped(p, &restart); err != nil || !restart {
@@ -594,6 +595,13 @@ func serveUntilStopped(p process, restart *bool) error {
 	stopBackups()
 	<-backupsDone
 	if err != nil {
+		if *restart && errors.Is(err, context.DeadlineExceeded) {
+			// The restart the administrator asked for goes ahead: the exec
+			// would cut what is still open anyway. A signal's overrun fails.
+			logger.Warn("graceful shutdown overran its deadline; closing the connections still open and starting the program again", "timeout", p.shutdown.String())
+			_ = srv.Close()
+			return nil
+		}
 		logger.Error("graceful shutdown failed", "err", err)
 		return err
 	}

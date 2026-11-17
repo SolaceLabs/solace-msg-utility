@@ -34,6 +34,11 @@ import (
 // that no deployment runs on it. It is never renewed.
 const bootstrapCertValidity = 7 * 24 * time.Hour
 
+// certExpiryWarning is how close to its end a loaded server certificate is
+// when the start warns that it expires soon. The bootstrap pair is always
+// that close, so every start on it warns.
+const certExpiryWarning = 30 * 24 * time.Hour
+
 // loadOrGenerateServerCert returns the TLS keypair the gateway serves.
 //   - Both files exist: parse them. A pair that does not parse stops the
 //     start; the gateway never writes over material it did not make.
@@ -58,6 +63,7 @@ func loadOrGenerateServerCert(certFile, keyFile string, logger *slog.Logger) (tl
 		if problem := browserKeyProblem(cert.Leaf.PublicKey); problem != "" {
 			logger.Warn("browsers cannot connect with this TLS server certificate", "cert_file", certFile, "reason", problem)
 		}
+		warnIfExpiring(logger, certFile, cert.Leaf, time.Now())
 		return cert, nil
 	}
 	if certExists != keyExists {
@@ -85,6 +91,21 @@ func loadOrGenerateServerCert(certFile, keyFile string, logger *slog.Logger) (tl
 		"validity_days", int(bootstrapCertValidity/(24*time.Hour)),
 	)
 	return cert, nil
+}
+
+// warnIfExpiring logs, at WARN so it shows at the default level, a loaded
+// server certificate that has expired or expires within certExpiryWarning.
+// Without it the operator learns of it from browsers.
+func warnIfExpiring(logger *slog.Logger, certFile string, leaf *x509.Certificate, now time.Time) {
+	notAfter := leaf.NotAfter.UTC().Format(time.RFC3339)
+	switch left := leaf.NotAfter.Sub(now); {
+	case left <= 0:
+		logger.Warn("the TLS server certificate has expired, so browsers refuse it: put a renewed certificate and key in place (the Certificates page of the admin console in Provisioned mode, or the files named here)",
+			"cert_file", certFile, "not_after", notAfter)
+	case left <= certExpiryWarning:
+		logger.Warn("the TLS server certificate expires soon: put a renewed certificate and key in place before then (the Certificates page of the admin console in Provisioned mode, or the files named here)",
+			"cert_file", certFile, "not_after", notAfter, "days_left", int(left/(24*time.Hour)))
+	}
 }
 
 func fileExists(p string) bool {
@@ -149,7 +170,7 @@ func generateSelfSigned(certFile, keyFile string) (tls.Certificate, error) {
 
 // writePEM writes block to path through path.partial: the data is synced
 // and closed, and only then renamed into place, so path is either absent or
-// whole. A failed write removes the partial: a truncated file would make the
+// whole; the directory is synced after the rename. A failed write removes the partial: a truncated file would make the
 // next start refuse "user-supplied material" the gateway wrote itself.
 func writePEM(path string, mode os.FileMode, block *pem.Block) error {
 	partial := path + ".partial"
@@ -167,6 +188,9 @@ func writePEM(path string, mode os.FileMode, block *pem.Block) error {
 	}
 	if err == nil {
 		err = os.Rename(partial, path)
+	}
+	if err == nil {
+		err = syncDir(filepath.Dir(path))
 	}
 	if err != nil {
 		_ = os.Remove(partial)
@@ -454,19 +478,32 @@ var (
 	errTLSReadOnly = errors.New("the TLS files are read-only on the gateway host")
 	// errTLSExists: a CA file of that name is there (409 exists).
 	errTLSExists = errors.New("a CA file with that name already exists")
-	// errTLSNotFound: no such regular file directly in the trust directory
-	// (404 not_found).
+	// errTLSNotFound: no such file directly in the trust directory, or a
+	// directory of that name (404 not_found).
 	errTLSNotFound = errors.New("there is no such CA file")
 )
 
-// trustNameRE is the CA file names the console writes and deletes: a plain
-// name directly in the trust directory, ending in .crt or .pem.
+// trustNameRE is the CA file names the console writes: a plain name directly
+// in the trust directory, ending in .crt or .pem.
 var trustNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.(crt|pem)$`)
+
+// trustListedName reports whether name is one the trust listing can show
+// (trustFiles' rule): one path element ending in .crt or .pem, in any case.
+// A delete takes every such name, so the console can remove any file it lists,
+// one placed on the host under another name included; a new file is held to
+// trustNameRE.
+func trustListedName(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return (ext == ".crt" || ext == ".pem") && !strings.ContainsAny(name, "/\\\x00")
+}
 
 // dashRuns is a run of dashes, which trustFileName makes one.
 var dashRuns = regexp.MustCompile(`-+`)
 
 const trustNameReason = "Use letters, digits, dots, dashes and underscores, start with a letter or digit, end in .crt or .pem, and keep the name before the extension to 64 characters."
+
+// trustDeleteReason is a delete's refusal of a name the listing cannot show.
+const trustDeleteReason = "Name one .crt or .pem file directly in the trust directory."
 
 // tlsSeams are the faults tests make: production uses newTLSManager's defaults.
 type tlsSeams struct {
@@ -949,13 +986,14 @@ func (m *tlsManager) addTrust(name, certText string) (string, error) {
 	return name, nil
 }
 
-// removeTrust deletes the CA file called name (a regular file directly in the
-// trust directory, never a link or a directory) and rebuilds the pool, which
-// applies at once. Refusals: *tlsInvalidError (field name), errTLSReadOnly,
-// errTLSNotFound, *tlsWriteError.
+// removeTrust deletes the CA file called name, any the listing shows
+// (trustListedName), and rebuilds the pool, which applies at once. It reaches
+// only an entry directly in the trust directory and never a directory; a link
+// is removed itself, never the file it points at. Refusals: *tlsInvalidError
+// (field name), errTLSReadOnly, errTLSNotFound, *tlsWriteError.
 func (m *tlsManager) removeTrust(name string) error {
-	if !trustNameRE.MatchString(name) {
-		return &tlsInvalidError{Field: "name", Reason: trustNameReason}
+	if !trustListedName(name) {
+		return &tlsInvalidError{Field: "name", Reason: trustDeleteReason}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -963,7 +1001,7 @@ func (m *tlsManager) removeTrust(name string) error {
 		return errTLSReadOnly
 	}
 	path := filepath.Join(m.trustDir, name)
-	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+	if info, err := os.Lstat(path); err != nil || info.IsDir() {
 		return errTLSNotFound
 	}
 	if err := m.seams.remove(path); err != nil {
