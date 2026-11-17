@@ -69,7 +69,7 @@ If your broker uses a self-signed certificate, the app's SSL Trust dialog walks 
 
 ### GitHub Pages (zero install)
 
-Open <https://solacelabs.github.io/solace-msg-utility/> in a browser. It is published from this repo by the tag workflow and redeployed on every `v*` tag that passes every gate. Allow CORS for SEMP from `https://solacelabs.github.io`.
+Open <https://solacelabs.github.io/solace-msg-utility/> in a browser. It is published from this repo by the tag workflow and always serves the newest release: it is redeployed once that release's GitHub Release is published, and a fix released for an older version leaves it as it is. Allow CORS for SEMP from `https://solacelabs.github.io`.
 
 ### Self-host the static files
 
@@ -124,10 +124,10 @@ The image serves the app over HTTPS and connects to your brokers for it: browser
 
 ### Quick start
 
-[`docker/compose.gateway.yaml`](../docker/compose.gateway.yaml) is a ready-made deployment, locked down (non-root, read-only, no capabilities):
+[`compose.gateway.yaml`](../docker/compose.gateway.yaml) is a ready-made deployment, locked down (non-root, read-only, no capabilities). Download it from the [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) you deploy (`SHA256SUMS.txt` on the same Release verifies it), or use `docker/` in a checkout of that release's tag, and run it from its folder:
 
 ```bash
-SMU_VERSION=3.6.0 docker compose -f docker/compose.gateway.yaml up -d
+SMU_VERSION=3.6.0 docker compose -f compose.gateway.yaml up -d
 ```
 
 Or with `docker run`:
@@ -142,7 +142,7 @@ Then open <https://localhost:9443/>.
 
 ### Image and tags
 
-`ghcr.io/solacelabs/solace-msg-utility` serves every container mode. Every release publishes `:<major>.<minor>.<patch>`, `:<major>.<minor>`, `:<major>` and `:latest`, for `linux/amd64` and `linux/arm64`. Pin a full version in production. The Release notes quote the image's digest, and a tag only ever moves to an image that passed the vulnerability scan.
+`ghcr.io/solacelabs/solace-msg-utility` serves every container mode. Every release publishes `:<major>.<minor>.<patch>`, `:<major>.<minor>` and `:<major>`, for `linux/amd64` and `linux/arm64`; `:latest` moves only to the highest release, so a fix released for an older version leaves it. Pin a full version in production. The Release notes quote the image's digest, and a tag only ever moves to an image that passed the vulnerability scan.
 
 The image includes the two scripts the app loads, `solclient.js` (Solace's JavaScript messaging API) and `jszip.min.js`, with their licences. It also carries the licence notices of the Go code compiled into the gateway binary: Go's own (BSD-3-Clause), `gopkg.in/yaml.v3` (Apache-2.0 and MIT, with its `NOTICE`) and `rsc.io/qr` (BSD-3-Clause). All of them sit under `/SolaceMsgUtility/licenses/` (`solclientjs/`, `jszip/`, `go/`, `gopkg.in-yaml.v3/`, `rsc.io-qr/`); the build copies them from the toolchain's module cache and fails if one is missing, and `tests/build/vendor-scripts.test.ts` fails when a direct requirement in `go.mod` has no licence copied.
 
@@ -248,7 +248,7 @@ Users sign in and get only the brokers and Message VPNs an administrator granted
 
 ## Files you can download
 
-Every [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) carries these HTML files, each self-contained for the app code (CSS and JS inlined). All are Direct-only (Standalone and Gateway mode) except `provisioned-demo.html`. `index.html` is also what GitHub Pages and the image serve in Gateway mode. In Provisioned mode the image serves its own bundle, `provisioned.html` (standard plus the Provisioned sign-in), at `/` and `solAdmin.html` at `/solAdmin`; neither is a Release download.
+Every [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) carries these HTML files, each self-contained for the app code (CSS and JS inlined). All are Direct-only (Standalone and Gateway mode) except `provisioned-demo.html`. `index.html` is also what GitHub Pages and the image serve in Gateway mode. In Provisioned mode the image serves its own bundle, `provisioned.html` (standard plus the Provisioned sign-in), at `/` and `solAdmin.html` at `/solAdmin`; neither is a Release download. A Release also carries the two ready-made deployments of the image, `compose.gateway.yaml` ([Gateway mode](#gateway-mode)) and `compose.provisioned.yaml` ([provisioned-mode.md](provisioned-mode.md#start-it)), and `SHA256SUMS.txt` over every file.
 
 | File | Variant | Use |
 | --- | --- | --- |
@@ -339,7 +339,7 @@ Connection profiles are stored in the browser's `localStorage`. They persist acr
 
 ## Updating
 
-- **GitHub Pages:** nothing to do; it is redeployed on every published Release.
+- **GitHub Pages:** nothing to do; it is redeployed with each newest release.
 - **Container:** change the tag and recreate the container:
 
   ```bash

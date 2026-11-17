@@ -702,15 +702,15 @@
     "semantic_hash": ""
   },
   "docs/contributing.md": {
-    "mtime": 1794880967.979983,
-    "seen": 1794882223.9073997,
-    "ast_hash": "0ecc88502fcea1ab9a06fce0ad3e4ce9",
+    "mtime": 1794926524.7940788,
+    "seen": 1794926885.6846676,
+    "ast_hash": "b557bc6939ec3cb72468445711b17f24",
     "semantic_hash": ""
   },
   "docs/deployment.md": {
-    "mtime": 1794880967.9822636,
-    "seen": 1794882223.907402,
-    "ast_hash": "eef607e01f8bc2dfce3054daf425e4b4",
+    "mtime": 1794910291.7628543,
+    "seen": 1794926885.6846707,
+    "ast_hash": "73b39fa0720f5ce47fb181ced336e295",
     "semantic_hash": ""
   },
   "docs/developer-guide.md": {
@@ -720,9 +720,9 @@
     "semantic_hash": ""
   },
   "docs/git.md": {
-    "mtime": 1794794717.5697124,
-    "seen": 1794800927.3184536,
-    "ast_hash": "d55c08a827e9bf1cf74ec92d866e09bb",
+    "mtime": 1794926591.6371732,
+    "seen": 1794926885.6846738,
+    "ast_hash": "2a72b08b85fcccaaa2aa37e5fa0605de",
     "semantic_hash": ""
   },
   "docs/user-guide.md": {
@@ -1194,15 +1194,15 @@
     "semantic_hash": ""
   },
   "scripts/dev.ps1": {
-    "mtime": 1794848795.4098039,
-    "seen": 1794853637.2886162,
-    "ast_hash": "242b9ad37fd5eb5c925839632050f131",
+    "mtime": 1794926524.7936966,
+    "seen": 1794926885.6840627,
+    "ast_hash": "7ca0885b367185cab4681b63eb05d71d",
     "semantic_hash": ""
   },
   "scripts/dev.sh": {
-    "mtime": 1794789546.1869514,
-    "seen": 1794792449.6938887,
-    "ast_hash": "a75d72994e0f4a5a6f893ff1107aa126",
+    "mtime": 1794926524.7922828,
+    "seen": 1794926885.6840665,
+    "ast_hash": "32a3fe62bdf34e601e2631dc411d0ed2",
     "semantic_hash": ""
   },
   ".github/dependabot.yml": {
@@ -1218,9 +1218,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/tag.yml": {
-    "mtime": 1794794191.882215,
-    "seen": 1794800927.3184407,
-    "ast_hash": "f673391320552195b76d8abc36032582",
+    "mtime": 1794926536.4943783,
+    "seen": 1794926885.684655,
+    "ast_hash": "a87ba8fe5936a087f129a7bbfc0aaa16",
     "semantic_hash": ""
   },
   ".github/workflow-config.json": {
@@ -1800,9 +1800,9 @@
     "semantic_hash": ""
   },
   "docs/provisioned-mode.md": {
-    "mtime": 1794880967.9825747,
-    "seen": 1794882223.9074059,
-    "ast_hash": "647561d4e3b1a64a27264637958c296b",
+    "mtime": 1794910291.7635472,
+    "seen": 1794926885.6846747,
+    "ast_hash": "9708d944ad63ebfcf720a512e626825f",
     "semantic_hash": ""
   },
   "src/core/icons.ts": {
@@ -2268,9 +2268,9 @@
     "semantic_hash": ""
   },
   "docs/testing.md": {
-    "mtime": 1794885056.308261,
-    "seen": 1794893392.564279,
-    "ast_hash": "740dd6d579d5b2eccd94cdd2ff7c07a8",
+    "mtime": 1794926524.7942739,
+    "seen": 1794926885.6846764,
+    "ast_hash": "75c83345ebeaf397f5318cde538f7d45",
     "semantic_hash": ""
   },
   "src/core/components/account-control/index.ts": {

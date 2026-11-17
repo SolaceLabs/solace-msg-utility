@@ -1,7 +1,7 @@
 # Graph Report - smu-dirty  (2026-11-17)
 
 ## Corpus Check
-- 363 files · ~718,854 words
+- 363 files · ~719,861 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 32 file(s) not represented in the graph (top: .css 25, (none) 6, .dockerignore 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `695d945c`
+- Built from commit: `b364b03d`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -894,7 +894,7 @@ Nodes (7): keyLine(), issueCert(), issueExpiredCert(), makeCA(), resolutionOverr
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Writing to the store` connect `writer_test.go` to `store_test.go`, `managed.go`, `log/slog.Logger`, `net/http.ResponseWriter`, `settings_test.go`, `checksums`, `managed-api.ts`, `store`, `newManagedEnv`?**
-  _High betweenness centrality (0.179) - this node is a cross-community bridge._
+  _High betweenness centrality (0.182) - this node is a cross-community bridge._
 - **Are the 122 inferred relationships involving `newManagedEnv()` (e.g. with `Writing to the store` and `TestBackupAPI_ActionsAreAudited()`) actually correct?**
   _`newManagedEnv()` has 122 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `managedEnv`, `github.com/solace/go-web-proxy`, `@types/node` to the rest of the system?**
@@ -902,7 +902,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `proxy_test.go` be split into smaller, more focused modules?**
   _Cohesion score 0.061016949152542375 - nodes in this community are weakly interconnected._
 - **Why does `handleConflict()` connect `managed-api.ts` to `backup/module.ts`, `writer_test.go`, `loadModuleDOM`?**
-  _High betweenness centrality (0.154) - this node is a cross-community bridge._
+  _High betweenness centrality (0.156) - this node is a cross-community bridge._
 - **Are the 81 inferred relationships involving `quietLogger()` (e.g. with `TestClientACL_Allowed()` and `TestClientACL_EmptyAllowListAdmitsEveryClient()`) actually correct?**
   _`quietLogger()` has 81 INFERRED edges - model-reasoned connections that need verification._
 

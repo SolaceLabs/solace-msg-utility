@@ -186,12 +186,17 @@ task_test() {
 }
 
 # go_test runs the Go suite for task $1 with any extra flags. The race detector
-# needs cgo, so a C compiler: gcc is on both CI runners. Without one the suite
-# still runs, without -race, and the task's log says so.
+# needs cgo, so a C compiler: gcc is on both CI runners. Locally, without one,
+# the suite still runs without -race and the task's log says so. In CI (CI
+# set) a missing gcc fails the task: the concurrency tests only fail under
+# -race, so a green run without it would prove nothing about them.
 go_test() {
   local task="$1"; shift
   if command -v gcc >/dev/null 2>&1; then
     run "$task" env CGO_ENABLED=1 go -C "$GO_DIR" test -race -count=1 "$@" ./...
+  elif [ -n "${CI:-}" ]; then
+    note "$task" "error: go test: no gcc on PATH, and CI must run the race detector -- install gcc on the runner"
+    return 1
   else
     note "$task" "go test: -race skipped, no gcc on PATH"
     run "$task" go -C "$GO_DIR" test -count=1 "$@" ./...

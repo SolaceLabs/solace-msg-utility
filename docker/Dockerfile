@@ -88,6 +88,9 @@ FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2
 WORKDIR /src
 # pages/ holds the sign-in page the binary embeds (go:embed).
 COPY go-web-proxy/go.mod go-web-proxy/go.sum ./
+# The modules in a layer of their own, as npm ci is below: a source change
+# does not fetch them again.
+RUN go mod download
 COPY go-web-proxy/*.go ./
 COPY go-web-proxy/pages/ ./pages/
 ARG APP_VERSION="0.0.0-dev"

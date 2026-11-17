@@ -267,8 +267,10 @@ function Task-test {
 }
 
 # Invoke-GoTest runs the Go suite for a task with any extra flags. The race
-# detector needs cgo, so a C compiler: gcc is on both CI runners. Without one
-# the suite still runs, without -race, and the task's log says so.
+# detector needs cgo, so a C compiler: gcc is on both CI runners. Locally,
+# without one, the suite still runs without -race and the task's log says so.
+# In CI ($env:CI set) a missing gcc fails the task: the concurrency tests only
+# fail under -race, so a green run without it would prove nothing about them.
 function Invoke-GoTest([string]$Task, [string[]]$Extra = @()) {
   $flags = @($Extra | Where-Object { $_ }) + @('./...')
   if (Get-Command gcc -ErrorAction SilentlyContinue) {
@@ -278,6 +280,10 @@ function Invoke-GoTest([string]$Task, [string[]]$Extra = @()) {
     } finally {
       Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
     }
+  }
+  if ($env:CI) {
+    Write-Note $Task 'error: go test: no gcc on PATH, and CI must run the race detector -- install gcc on the runner'
+    return 1
   }
   Write-Note $Task 'go test: -race skipped, no gcc on PATH'
   return (Invoke-Logged $Task 'go' (@('-C',$GoDir,'test','-count=1') + $flags))

@@ -27,6 +27,13 @@ docs/
 scripts/logs/
 docker/e2e-broker.env
 
+# Local TLS material (cert/ is git-ignored and holds a private key). No COPY
+# names it; this keeps it out of the context sent to the builder, and out of
+# any broader COPY added later.
+cert/
+**/*.key
+**/*.pem
+
 # Editor scratch.
 *.swp
 *.swo

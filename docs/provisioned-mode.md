@@ -79,7 +79,7 @@ Because the browser receives a VPN's client password while it is connected, give
 
 You need Docker with Compose, and a host your users' browsers can reach on port 9443.
 
-1. Download [`docker/compose.provisioned.yaml`](../docker/compose.provisioned.yaml) from the release you are deploying.
+1. Download [`compose.provisioned.yaml`](../docker/compose.provisioned.yaml) from the assets of the [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) you are deploying (`SHA256SUMS.txt` on the same Release verifies it), or use `docker/` in a checkout of that release's tag.
 2. Beside it, put the first administrator's password, 12 to 128 characters, in a file named `admin-password` (a password outside that length is ignored with a warning, and the gateway generates one as below), and make the directory for scheduled backups. Give both to the gateway's user only (left to Docker, the directory would be root's and take no backups):
 
    ```bash

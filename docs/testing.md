@@ -64,7 +64,7 @@ npm run test:mock:coverage                          # the demo suite with its co
 
 All npm test scripts pass `--pool=threads` and leave the worker count to Vitest (one less than the CPU count in a run, half of it in watch mode). If multi-file instability ever appears (`Vitest failed to find the runner` and similar), `--pool=forks` is the fallback: each file runs in its own process, at the cost of start-up time.
 
-The Go suite runs with the race detector (`CGO_ENABLED=1 go test -race`) wherever `gcc` is on the path, on both CI runners included. Without `gcc` it runs without `-race` and says so in the task log. Run it directly from the gateway directory with `go test ./...`.
+The Go suite runs with the race detector (`CGO_ENABLED=1 go test -race`) wherever `gcc` is on the path, on both CI runners included. Without `gcc` it runs without `-race` and says so in the task log; in CI a missing `gcc` fails the task instead, because the concurrency tests only fail under the detector. Run it directly from the gateway directory with `go test ./...`.
 
 ## How the tests are organized
 

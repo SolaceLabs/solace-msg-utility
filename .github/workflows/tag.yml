@@ -12,13 +12,15 @@ name: Tag
 #                 only, then a trivy gate on every platform -- no tag yet
 #     -> binaries `build` per BUILD_TARGETS (one linux/amd64 leg); uploads
 #                 only the Release bundles, never a gateway binary
-#     -> publish  point the tags (semver; latest only for the highest
-#                 release) at the scanned digest
-#     -> pages    sync dist/index.html into the `dist` branch
-#     -> release  created last, with the bundles, checksums, digests
+#     -> publish  check every platform of the image serves the Release's
+#                 index.html, then point the tags (semver; latest only for
+#                 the highest release) at the scanned digest
+#     -> release  with the bundles, the compose files, checksums, digests
+#     -> pages    last: sync index.html into the `dist` branch, only for the
+#                 highest release and only once its Release exists
 #
-# A failure anywhere leaves no release. Read the logs artifact, push a fix,
-# tag again.
+# A failure before `release` leaves no release. Read the logs artifact, push
+# a fix, tag again. A failed `pages` leaves the Release in place: re-run it.
 #
 # Do NOT also add `on: release`. The release this workflow creates would
 # re-trigger the whole pipeline.
@@ -34,8 +36,9 @@ name: Tag
 #      and the PWA bundle's __APP_VERSION__. Git is not available inside the
 #      build, so it has to arrive as a build-arg.
 #   4. A `pages` job redeploys solacelabs.github.io/solace-msg-utility from
-#      the `dist` branch. Gated on everything else passing, so a red scan
-#      never redeploys the site.
+#      the `dist` branch. It runs last, only once `release` succeeded and
+#      only for the highest release (plan's `latest`), so neither a red scan
+#      nor a hotfix on an older line changes the site.
 #   5. The image digest travels to `publish` and `release` as an artifact
 #      (imgref-image), not as a job output, together with the tags `publish`
 #      applies. `publish` and `release` read every imgref-* file, so the shape
@@ -50,15 +53,20 @@ name: Tag
 #      pointed at the failing image.
 #   8. Only the Release bundles leave the pipeline outside the images:
 #      `binaries` uploads RELEASE_BUNDLES as its artifact, not dist/*, and
-#      `release` attaches them with their checksums. The gateway ships only
-#      inside the images, so the binaries `build` also
-#      compiles stay on the runner: a public repo's workflow artifacts can be
+#      `release` attaches them with their checksums (and, when an image
+#      shipped, the compose files that run it, RELEASE_COMPOSE, from the
+#      tagged commit). The gateway ships only inside the images, so the
+#      gateway binaries the `build` also compiles stay on the runner: a public repo's workflow artifacts can be
 #      downloaded by any signed-in user. `binaries` keeps its name and stays
 #      because it emits the bundles. The build also emits provisioned.html and
 #      solAdmin.html, which exist only inside the image. The one Provisioned
 #      UI a Release carries is provisioned-demo.html, which runs it against an
 #      in-browser fake gateway and holds no gateway or broker address
 #      (scripts/check-bundles.mjs proves both on the build).
+#   9. `publish` first compares the index.html every platform of the image
+#      serves with the one `binaries` built for the Release (and Pages), byte
+#      for byte. The image builds its own from source (docker/Dockerfile), so
+#      this proves the three copies are one build before any tag moves.
 #
 # Repo variables (Settings > Secrets and variables > Actions > Variables):
 #   BUILD_TARGETS  JSON array: [{"os":"linux","arch":"amd64"}]. One target is
@@ -80,6 +88,10 @@ permissions:
 # tests/build/check-bundles.test.ts fails if the two drift.
 env:
   RELEASE_BUNDLES: "index.html min.html no-payload.html no-queue-copy.html demo.html provisioned-demo.html"
+  # The ready-made deployments of the image, under docker/: `release`
+  # attaches them when an image shipped, so the operator docs can send a
+  # reader to the Release for them.
+  RELEASE_COMPOSE: "compose.gateway.yaml compose.provisioned.yaml"
 
 concurrency:
   group: tag-${{ github.ref_name }}
@@ -103,8 +115,8 @@ jobs:
       # A release tag is vX.Y.Z and nothing else (docs/git.md). metadata-action
       # skips a non-semver tag, and a pre-release would still be published as
       # the current release (Pages, the Latest Release). `latest` -- the image
-      # tag and the Latest Release -- moves only for the highest release, so a
-      # hotfix on an older line leaves it where it is.
+      # tag, the Latest Release and Pages -- moves only for the highest
+      # release, so a hotfix on an older line leaves them where they are.
       - id: tag
         run: |
           set -euo pipefail
@@ -414,6 +426,47 @@ jobs:
           merge-multiple: true
           path: imgrefs/
 
+      # Deviation 9. The Release and Pages carry the binaries job's
+      # index.html; the image built its own. Every platform the index serves
+      # must hold the same bytes, before any tag moves. `docker create` pulls
+      # a platform's image without running it, so no emulation is needed.
+      # Skipped only when `binaries` was, as then there is no Release bundle.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.binaries.result == 'success'
+        with:
+          pattern: bundles-*
+          merge-multiple: true
+          path: bundles/
+
+      - name: Check the image serves the Release's index.html
+        if: needs.binaries.result == 'success'
+        run: |
+          set -euo pipefail
+          want="$(sha256sum < bundles/index.html | cut -d' ' -f1)"
+          for f in imgrefs/*.json; do
+            image="$(jq -r .image "$f")"
+            digest="$(jq -r .digest "$f")"
+            mapfile -t legs < <(docker buildx imagetools inspect "$image@$digest" --raw | jq -r '.manifests[]
+                | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest")
+                | "\(.platform.os)/\(.platform.architecture) \(.digest)"')
+            if [ "${#legs[@]}" -eq 0 ]; then
+              echo "::error::$image@$digest lists no platform image"
+              exit 1
+            fi
+            for leg in "${legs[@]}"; do
+              read -r platform pdigest <<<"$leg"
+              cid="$(docker create --platform "$platform" "$image@$pdigest")"
+              docker cp "$cid:/SolaceMsgUtility/index.html" image-index.html
+              docker rm "$cid" >/dev/null
+              got="$(sha256sum < image-index.html | cut -d' ' -f1)"
+              if [ "$got" != "$want" ]; then
+                echo "::error::$platform serves /SolaceMsgUtility/index.html $got, the Release's index.html is $want -- the image's build and the binaries job's differ"
+                exit 1
+              fi
+              echo "::notice::$platform serves the Release's index.html ($want)"
+            done
+          done
+
       - name: Tag the scanned digests
         run: |
           set -euo pipefail
@@ -437,52 +490,6 @@ jobs:
               echo "::notice::$t -> $digest"
             done
           done
-
-  # Deviation 4. Pages serves the PWA from the `dist` branch, which already
-  # holds the vendor files (solclient.js, jszip.min.js), .nojekyll and CNAME.
-  # We overlay only index.html; everything else on that branch is left alone.
-  # Pages is gateway-less, so it is Direct-connection-only by design.
-  pages:
-    needs: [plan, gates, image, binaries, publish]
-    if: >-
-      always()
-      && needs.gates.result == 'success'
-      && needs.image.result != 'failure' && needs.image.result != 'cancelled'
-      && needs.publish.result != 'failure' && needs.publish.result != 'cancelled'
-      && needs.binaries.result == 'success'
-    runs-on: ubuntu-24.04 # pinned; see ci.yml
-    permissions:
-      contents: write
-    steps:
-      - name: Check out the dist branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: dist
-          fetch-depth: 0
-
-      # Any leg's bundle would do -- they are identical -- but naming one keeps
-      # the step deterministic.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: bundles-linux-amd64
-          path: _bundle
-
-      - name: Publish index.html
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          cp _bundle/index.html ./index.html
-          rm -rf _bundle
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --staged --quiet; then
-            echo "::notice::no bundle change; nothing to deploy"
-            exit 0
-          fi
-          git commit -m "Deploy $TAG"
-          git push origin dist
 
   release:
     needs: [plan, gates, image, binaries, publish]
@@ -524,6 +531,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           LATEST: ${{ needs.plan.outputs.latest }} # true or false, from plan
+          IMAGE_SHIPPED: ${{ needs.publish.result == 'success' }}
         run: |
           set -euo pipefail
 
@@ -534,8 +542,9 @@ jobs:
           fi
 
           # Assets: the listed bundles (RELEASE_BUNDLES, workflow env), the
-          # only files the binaries artifact holds (deviation 8). No binaries
-          # artifact means no assets at all.
+          # only files the binaries artifact holds (deviation 8), and, when an
+          # image shipped, the compose files that run it (RELEASE_COMPOSE),
+          # from this checkout of the tag. Nothing shipped, no assets.
           assets=()
           if [ -d dist ] && [ -n "$(ls -A dist 2>/dev/null)" ]; then
             for f in $RELEASE_BUNDLES; do
@@ -545,6 +554,19 @@ jobs:
               fi
               assets+=("dist/$f")
             done
+          fi
+          if [ "$IMAGE_SHIPPED" = "true" ]; then
+            mkdir -p dist
+            for f in $RELEASE_COMPOSE; do
+              if [ ! -f "docker/$f" ]; then
+                echo "::error::docker/$f is missing -- RELEASE_COMPOSE names a file the tag does not hold"
+                exit 1
+              fi
+              cp "docker/$f" "dist/$f"
+              assets+=("dist/$f")
+            done
+          fi
+          if [ "${#assets[@]}" -gt 0 ]; then
             # Checksums over exactly the assets, before SHA256SUMS.txt joins
             # them, so it never hashes itself.
             ( cd dist && sha256sum -- "${assets[@]#dist/}" > ../SHA256SUMS.txt )
@@ -569,3 +591,53 @@ jobs:
             --latest="$LATEST" \
             --notes-file notes.md \
             "${assets[@]}"
+
+  # Deviation 4. Pages serves the PWA from the `dist` branch, which already
+  # holds the vendor files (solclient.js, jszip.min.js), .nojekyll and CNAME.
+  # We overlay only index.html; everything else on that branch is left alone.
+  # Pages is gateway-less, so it is Direct-connection-only by design.
+  # Last, and only for the highest release once its Release exists: the site
+  # is the current release, so a hotfix on an older line (latest=false)
+  # leaves it alone, and a failed `release` never puts the site ahead of the
+  # Releases. `!cancelled()`, not `always()`: a run cancelled after the
+  # release does not deploy.
+  pages:
+    needs: [plan, binaries, release]
+    if: >-
+      !cancelled()
+      && needs.plan.outputs.latest == 'true'
+      && needs.binaries.result == 'success'
+      && needs.release.result == 'success'
+    runs-on: ubuntu-24.04 # pinned; see ci.yml
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the dist branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dist
+          fetch-depth: 0
+
+      # Any leg's bundle would do -- they are identical -- but naming one keeps
+      # the step deterministic.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bundles-linux-amd64
+          path: _bundle
+
+      - name: Publish index.html
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cp _bundle/index.html ./index.html
+          rm -rf _bundle
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "::notice::no bundle change; nothing to deploy"
+            exit 0
+          fi
+          git commit -m "Deploy $TAG"
+          git push origin dist
