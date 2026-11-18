@@ -684,9 +684,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1794794073.5566618,
-    "seen": 1794800927.3184419,
-    "ast_hash": "1f6efb6d4a0430723153e1bcb4d0c7ac",
+    "mtime": 1795019536.0500526,
+    "seen": 1795019803.404929,
+    "ast_hash": "0d1cd78a43283960045f470dac69bc39",
     "semantic_hash": ""
   },
   "docker/docker-compose.yaml": {
@@ -726,9 +726,9 @@
     "semantic_hash": ""
   },
   "docs/user-guide.md": {
-    "mtime": 1794983766.3494105,
-    "seen": 1794988359.27748,
-    "ast_hash": "367f84d427008831825c38cef099d08e",
+    "mtime": 1795019541.0958772,
+    "seen": 1795019803.4049485,
+    "ast_hash": "aa89f378d0f5c8a31807463652714c5d",
     "semantic_hash": ""
   },
   "src/index.html": {
@@ -1800,9 +1800,9 @@
     "semantic_hash": ""
   },
   "docs/provisioned-mode.md": {
-    "mtime": 1794930707.8825548,
-    "seen": 1794932771.3789256,
-    "ast_hash": "4030c3d4b5a346d357f84ea1439e688e",
+    "mtime": 1795019536.0491261,
+    "seen": 1795019803.4049459,
+    "ast_hash": "6334582129f01100b9e003c61411830c",
     "semantic_hash": ""
   },
   "src/core/icons.ts": {

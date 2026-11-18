@@ -147,7 +147,7 @@ The SEMP connection shares the Broker Host with the Solace client connection.
 
 ### Connection Profiles
 
-- **Save All Config** -- saves all connection fields to browser localStorage. If localStorage is unavailable or its quota is exceeded, an error toast appears instead of a success toast.
+- **Save All Config** -- saves the connection fields to browser localStorage, except the passwords (and an OAuth access token), which are never saved: type them again after **Load All Config**. The saved value is obfuscated, not encrypted: anyone who can use the browser profile can read it. If localStorage is unavailable or its quota is exceeded, an error toast appears instead of a success toast.
 - **Load All Config** -- restores the saved fields. A saved `ws://` or `http://` that the page cannot use (served over `https://` without the gateway) loads as `wss://` or `https://`, with a warning toast: check the port, which is likely still the unencrypted one. The same happens when the app opens with saved fields.
 - **Reset Form** -- clears all fields back to their defaults.
 
