@@ -2233,7 +2233,7 @@
       "area": "tests",
       "severity": "minor",
       "confidence": "verified",
-      "status": "open",
+      "status": "accepted",
       "locations": [
         "go-web-proxy/contract_test.go:386-403",
         "go-web-proxy/testdata/contract/cases.json",
@@ -2251,7 +2251,7 @@
       "history": [
         "2026-11-16: title was 'The gateway contract pins only refusals and admin CRUD: no successful relay, no 429/5xx, no sign-in, no headers'"
       ],
-      "notes": ""
+      "notes": "2026-11-18: Accepted for the sign-in and two-factor pages only. cases.json now pins Cache-Control and Content-Type on one read and one write per /managed family, and both 429s with Retry-After (login.unauthenticatedPerMinute, session.connectsPerMinute), which the fake now enforces (throttle.ts createRequestBudget, createConnectWindow). The fake draws the sign-in pages in the page rather than serving them, so they stay covered by pages_test.go, tests/mock-broker/gateway/pages.test.ts, two-factor.test.ts and the e2e run; docs/testing.md (Gateway contract cases) says so."
     },
     {
       "id": "CR-0072",

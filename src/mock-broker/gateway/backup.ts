@@ -413,11 +413,13 @@ export interface BackupDeps {
     /** PBKDF2 iterations for new keys (BACKUP_ITER; tests pass fewer). */
     iter: number;
     now: () => Date;
+    /** Forget a user's accepted code steps: an imported secret is not compared with the old one's. */
+    forgetCodes: (user: string) => void;
 }
 
 type Route = [string, string, (req: GatewayRequest, s: Session, sid: string, params: string[]) => GatewayResponse | Promise<GatewayResponse>];
 
-export function createBackups({ store, settings, sessions, iter, now }: BackupDeps) {
+export function createBackups({ store, settings, sessions, iter, now, forgetCodes }: BackupDeps) {
     const files = new Map<string, string>();
     let sched: ScheduleState | null = null;
     let lastRun: BackupsState['lastRun'] = null;
@@ -609,7 +611,10 @@ export function createBackups({ store, settings, sessions, iter, now }: BackupDe
         if (users) {
             const drop = sessionEnders(cur.users, users);
             store.replaceUsers(users);
-            for (const name of drop) sessions.dropUser(name);
+            for (const name of drop) {
+                sessions.dropUser(name);
+                forgetCodes(name);
+            }
             signedOut = drop.includes(s.user);
         }
         if (conns) store.replaceConnections(conns);

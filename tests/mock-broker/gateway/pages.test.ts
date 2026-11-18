@@ -264,7 +264,10 @@ describe('mock-broker/gateway/pages -- two-factor', () => {
         gw.sessions.drop(gw.cookie()!);
         gw.setCookie(null);
     };
-    /** `user` has two-factor under `optional`, with the browser signed out; its secret and recovery codes. */
+    /**
+     * `user` has two-factor under `optional`, with the browser signed out; its secret and recovery
+     * codes. The confirming code is spent, so a sign-in after it takes the next step's code.
+     */
     function enrolled(user: string, password: string) {
         setMode('mandatory');
         gw.signIn(user, password);
@@ -358,7 +361,7 @@ describe('mock-broker/gateway/pages -- two-factor', () => {
         });
 
         it('signs in with the code and lands on the app', () => {
-            submit({ code: codeNow(secret) });
+            submit({ code: codeNow(secret, 1) });
             expect(landed).toEqual(['app']);
             expect(gw.session()).toEqual({ user: 'viewer', mustChange: false });
         });
@@ -379,20 +382,20 @@ describe('mock-broker/gateway/pages -- two-factor', () => {
             const other = enrolled('newadmin', 'demo-change-me-01');
             pages.open('/login');
             submit({ username: 'newadmin', password: 'demo-change-me-01' });
-            submit({ code: codeNow(other.secret) });
+            submit({ code: codeNow(other.secret, 1) });
             expect(landed).toEqual(['password']);
         });
 
         it('says how long to wait when the throttle holds, and refuses the right code', () => {
             for (let i = 0; i < 5; i++) submit({ code: '000000' });
-            submit({ code: codeNow(secret) });
+            submit({ code: codeNow(secret, 1) });
             expect(error()).toMatch(/^Too many attempts\. Try again in \d+ seconds\.$/);
             expect(landed).toEqual([]);
         });
 
         it('goes back to the sign-in with the message when the account changed meanwhile', () => {
             gw.store.setPassword('viewer', 'another-password-1');
-            submit({ code: codeNow(secret) });
+            submit({ code: codeNow(secret, 1) });
             expect(title()).toBe('Sign in');
             expect(error()).toBe('Sign-in failed. Check the username and password.');
         });
@@ -431,7 +434,7 @@ describe('mock-broker/gateway/pages -- two-factor', () => {
             const { secret } = enrolled('viewer', 'demo-viewer-0001');
             pages.open('/login');
             submit({ username: 'viewer', password: 'demo-viewer-0001' });
-            submit({ code: codeNow(secret) });   // the code page, to be signed in
+            submit({ code: codeNow(secret, 1) });   // the code page, to be signed in
             pages.open('/login/two-factor');
             expect(title()).toBe('Two-factor sign-in');
             expect(layer()!.textContent).toContain('Setting it up again replaces the current one and its recovery codes');
@@ -485,7 +488,7 @@ describe('mock-broker/gateway/pages -- two-factor', () => {
             gw.signIn('viewer', 'demo-viewer-0001');
             pages.show('code');
             expect(title()).toBe('Two-factor sign-in');
-            gw.submitCode(codeNow(secret));
+            gw.submitCode(codeNow(secret, 1));
             pages.show('two-factor');
             expect(title()).toBe('Two-factor sign-in');
             pages.show('app');

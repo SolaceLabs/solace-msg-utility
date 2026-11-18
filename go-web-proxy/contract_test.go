@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +18,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -36,7 +41,7 @@ import (
 // rewrites the answers in cases.json from the real gateway; the fake must then
 // be brought in line.
 
-var updateContract = flag.Bool("update", false, "rewrite testdata/contract/cases.json from the real gateway")
+var updateContract = flag.Bool("update", false, "rewrite testdata/contract/cases.json and error-codes.json from the real gateway")
 
 const contractDir = "testdata/contract"
 
@@ -537,4 +542,130 @@ func TestContract_Validation(t *testing.T) {
 			t.Errorf("modules %q: want invalid", ids)
 		}
 	}
+}
+
+// TestContract_ErrorCodes reads, from the handlers' source, every code the
+// gateway can put in a JSON answer's "error" field: a string handed to
+// writeError or set as an apiError's Error, directly or through a local the
+// same function assigns. testdata/contract/error-codes.json lists them for
+// the app: tests/mock-broker/gateway/error-codes.test.ts holds the app's
+// messages to that list, so a new code fails here until it is listed (-update
+// rewrites the list), then there until the app has a message for it.
+func TestContract_ErrorCodes(t *testing.T) {
+	got := sentErrorCodes(t)
+	if *updateContract {
+		out, err := json.MarshalIndent(got, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(contractDir, "error-codes.json"), append(out, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	var want []string
+	if err := json.Unmarshal(readContract(t, "error-codes.json"), &want); err != nil {
+		t.Fatalf("error-codes.json: %v", err)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the handlers send these error codes; list them in testdata/contract/error-codes.json (go test -run TestContract_ErrorCodes -update), then give the app a message for a new one:\nsent   %q\nlisted %q", got, want)
+	}
+}
+
+// sentErrorCodes is every error code in the package's non-test source,
+// sorted. An Error or writeError argument it cannot read (neither a string,
+// the function's own parameter, nor a local it assigns a string) fails the
+// test, so a code cannot slip past the list.
+func sentErrorCodes(t *testing.T) []string {
+	t.Helper()
+	names, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	seen := map[string]bool{}
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			params := map[string]bool{}
+			for _, field := range fn.Type.Params.List {
+				for _, n := range field.Names {
+					params[n.Name] = true
+				}
+			}
+			assigned := map[string][]string{}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if as, ok := n.(*ast.AssignStmt); ok && len(as.Lhs) == len(as.Rhs) {
+					for i, lhs := range as.Lhs {
+						if id, ok := lhs.(*ast.Ident); ok {
+							if s, ok := goString(as.Rhs[i]); ok && s != "" {
+								assigned[id.Name] = append(assigned[id.Name], s)
+							}
+						}
+					}
+				}
+				return true
+			})
+			sent := func(e ast.Expr) {
+				if s, ok := goString(e); ok {
+					seen[s] = true
+					return
+				}
+				id, ok := e.(*ast.Ident)
+				switch {
+				case ok && params[id.Name]:
+					// The caller's argument, read at its call.
+				case ok && len(assigned[id.Name]) > 0:
+					for _, s := range assigned[id.Name] {
+						seen[s] = true
+					}
+				default:
+					t.Errorf("%s: an error code this test cannot read; pass a string, or assign one to a local in the same function", fset.Position(e.Pos()))
+				}
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.CallExpr:
+					if id, ok := n.Fun.(*ast.Ident); ok && id.Name == "writeError" && len(n.Args) == 3 {
+						sent(n.Args[2])
+					}
+				case *ast.CompositeLit:
+					if id, ok := n.Type.(*ast.Ident); ok && id.Name == "apiError" {
+						for _, el := range n.Elts {
+							if kv, ok := el.(*ast.KeyValueExpr); ok {
+								if k, ok := kv.Key.(*ast.Ident); ok && k.Name == "Error" {
+									sent(kv.Value)
+								}
+							}
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
+	if len(seen) == 0 {
+		t.Fatal("no error code found: the test no longer recognises how the handlers send them")
+	}
+	return slices.Sorted(maps.Keys(seen))
+}
+
+// goString is a string literal's value.
+func goString(e ast.Expr) (string, bool) {
+	lit, ok := e.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	s, err := strconv.Unquote(lit.Value)
+	return s, err == nil
 }

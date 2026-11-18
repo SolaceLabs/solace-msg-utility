@@ -37,12 +37,30 @@ interface Step {
     response: unknown;
 }
 
+/**
+ * The fields contractCases, contractCase, contractStep and contractUpstream in
+ * contract_test.go know. The Go runner refuses any other (DisallowUnknownFields),
+ * and so does this one: a field only one runner reads would let the two prove
+ * different things with both suites green.
+ */
+const KNOWN = {
+    file: ['cases'],
+    case: ['name', 'steps'],
+    step: ['as', 'mustChange', 'method', 'path', 'body', 'raw', 'upstream', 'status', 'headers', 'response'] satisfies (keyof Step)[],
+    upstream: ['url', 'status', 'headers', 'body', 'error'] satisfies (keyof NonNullable<Step['upstream']>)[],
+};
+
+/** Every key of `v` that `known` does not list, as `where: key`. */
+const unknownKeys = (where: string, v: object, known: readonly string[]): string[] =>
+    Object.keys(v).filter(k => !known.includes(k)).map(k => `${where}: ${k}`);
+
 /** A header by name, any case; "" when absent. */
 const header = (h: Record<string, string>, name: string): string =>
     Object.entries(h).find(([k]) => k.toLowerCase() === name.toLowerCase())?.[1] ?? '';
 
 const seed: GatewaySeed = read('seed.json');
-const cases: { name: string; steps: Step[] }[] = read('cases.json').cases;
+const file: { cases: { name: string; steps: Step[] }[] } = read('cases.json');
+const cases = file.cases;
 
 /**
  * contractNormalize in contract_test.go: a backup's next run, an export, a
@@ -116,6 +134,23 @@ describe('mock-broker/gateway -- the gateway contract', () => {
     it('reads the contract files', () => {
         expect(cases.length).toBeGreaterThan(0);
         expect(seed['msg-utility-users'].length).toBeGreaterThan(0);
+    });
+
+    it('knows every field of cases.json, as the Go runner does', () => {
+        const unknown = unknownKeys('cases.json', file, KNOWN.file);
+        for (const c of cases) {
+            unknown.push(...unknownKeys(c.name, c, KNOWN.case));
+            for (const [i, s] of c.steps.entries()) {
+                unknown.push(...unknownKeys(`${c.name}, step ${i + 1}`, s, KNOWN.step));
+                if (s.upstream) unknown.push(...unknownKeys(`${c.name}, step ${i + 1} upstream`, s.upstream, KNOWN.upstream));
+            }
+        }
+        expect(unknown).toEqual([]);
+    });
+
+    it('names a field it does not know, with where it is', () => {
+        const step = { method: 'GET', path: '/managed/me', status: 200, response: null, clock: '+30s' };
+        expect(unknownKeys('a case, step 1', step, KNOWN.step)).toEqual(['a case, step 1: clock']);
     });
 
     for (const c of cases) {

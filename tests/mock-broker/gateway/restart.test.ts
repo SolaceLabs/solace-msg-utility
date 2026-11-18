@@ -3,6 +3,7 @@ import { createGateway, RESTART_PAUSE_MS } from '../../../src/mock-broker/gatewa
 import { installMockServer } from '../../../src/mock-broker/server';
 import { resetScenario, scenario } from '../../../src/mock-broker/fixtures';
 import { contractSeed } from './helpers';
+import { mockCode, stepOf } from '../../../src/mock-broker/gateway/authenticator';
 
 /**
  * The fake gateway's restart (POST /managed/restart): the in-place restart of
@@ -62,6 +63,38 @@ describe('mock-broker/gateway -- restart', () => {
         expect(dropped.sort()).toEqual(['admin', 'viewer']);
         expect([gw.ticket(), gw.cookie(), gw.session()]).toEqual([null, null, null]);
         expect(gw.tickets.dump()).toEqual([]);
+    });
+
+    it('starts the sign-in lockouts and the code-replay record empty, as a new process does', async () => {
+        const users = contractSeed()['msg-utility-users'];
+        const pw = (name: string) => users.find(u => u.username === name)!.password;
+        gw.settings.save({ login: { twoFactor: 'mandatory' } }, gw.settings.rev());
+        expect(gw.signIn('operator', pw('operator'))).toEqual({ ok: true, step: 'enrol' });
+        const secret = gw.ticket()!.secret;
+        const code = mockCode(secret, stepOf(Date.now()));
+        expect(gw.confirmTwoFactor(code).ok).toBe(true);
+        for (let i = 0; i < 5; i++) gw.throttle.failed('viewer');
+        expect(gw.signIn('viewer', pw('viewer'))).toMatchObject({ ok: false });
+
+        expect((await call('POST', '/managed/restart')).status).toBe(202);
+        expect(gw.throttle.dump()).toEqual({ users: [], client: null });
+        expect(gw.snapshot().lastSteps).toEqual([]);
+        // The code that confirmed is no longer a replay, and the locked account signs in.
+        expect(gw.signIn('operator', pw('operator'))).toEqual({ ok: true, step: 'code' });
+        expect(gw.submitCode(code)).toMatchObject({ ok: true });
+        expect(gw.signIn('viewer', pw('viewer'))).toMatchObject({ ok: true });
+    });
+
+    it('starts the request budget and the connect windows empty, as a new process does', async () => {
+        await putSettings({ session: { connectsPerMinute: 1 }, login: { unauthenticatedPerMinute: 1 } });
+        const dial = () => call('POST', '/managed/dial', { broker: 'b1', vpn: 'v1' }, 'viewer');
+        const anonymous = () => call('GET', '/managed/me', undefined, '');
+        expect([(await dial()).status, (await dial()).status]).toEqual([200, 429]);
+        expect([(await anonymous()).status, (await anonymous()).status]).toEqual([401, 429]);
+
+        expect((await call('POST', '/managed/restart')).status).toBe(202);
+        expect((await dial()).status).toBe(200);
+        expect((await anonymous()).status).toBe(401);
     });
 
     describe('the pause before the gateway is back', () => {

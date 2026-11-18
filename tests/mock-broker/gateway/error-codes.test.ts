@@ -11,7 +11,9 @@ import { CONTRACT_DIR, contractSeed, seedContractBrokers } from './helpers';
  * Every error code the app has a message for, against the managed demo: the
  * fake gateway sends it (a contract golden, or a fault the control panel
  * arms), the app makes it itself, or it is named here as not simulated. A
- * code added to managed-api.ts's messages fails this suite until it is placed.
+ * code added to managed-api.ts's messages fails this suite until it is placed,
+ * and a code the real gateway sends (error-codes.json) fails it until the app
+ * has a message for it.
  */
 type Gw = ReturnType<typeof createGateway>;
 
@@ -24,6 +26,15 @@ const GOLDEN = new Set(cases.flatMap(c => c.steps)
 
 /** `invalid` always carries the gateway's reason, which the app shows instead of a stock line. */
 const REASON_ONLY = 'invalid';
+
+/**
+ * Every code the real gateway can send, read from its handlers by
+ * go-web-proxy/contract_test.go › TestContract_ErrorCodes.
+ */
+const SENT: string[] = JSON.parse(readFileSync(path.join(CONTRACT_DIR, 'error-codes.json'), 'utf-8'));
+
+/** Sent, but to a browser that has already gone: nobody reads it. */
+const UNREAD = ['client_gone'];
 
 const call = (gw: Gw, method: string, p: string, body?: unknown) => gw.handle({
     method, path: p, query: '', body: body === undefined ? '' : JSON.stringify(body), session: gw.openSession('admin', false),
@@ -101,6 +112,14 @@ describe('mock-broker/gateway -- the error codes', () => {
         const placed = groups.flat();
         expect([...placed].sort()).toEqual([...MANAGED_ERROR_CODES].sort());
         expect(new Set(placed).size).toBe(placed.length);
+    });
+
+    it('has a message for every code the real gateway can send, and none for a code it cannot', () => {
+        const gatewayCodes = MANAGED_ERROR_CODES.filter(c => !CLIENT.includes(c));
+        const shown = SENT.filter(c => c !== REASON_ONLY && !UNREAD.includes(c));
+        expect([...gatewayCodes].sort()).toEqual([...shown].sort());
+        expect(SENT).toContain(REASON_ONLY);
+        expect(SENT).toEqual(expect.arrayContaining(UNREAD));
     });
 
     it('has a message for every code the contract pins, but the reason-only one', () => {

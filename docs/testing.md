@@ -152,15 +152,16 @@ The build (Vite and esbuild) and Vitest strip TypeScript types without checking 
 | File | Holds | Read by |
 |---|---|---|
 | `seed.json` | Users, connections, the settings the gateway starts with, and the client address. | `contract_test.go`, `tests/mock-broker/gateway/contract.test.ts` |
-| `cases.json` | Request steps, each with the status and body the real gateway answers. | the same two |
+| `cases.json` | Request steps, each with the status, the body and, where a step lists them, the headers the real gateway answers (`""` for a header that must be absent). | the same two |
+| `error-codes.json` | Every error code the real gateway can send, read from its source: each `writeError` call and each `apiError` literal. | `contract_test.go`, `tests/mock-broker/gateway/error-codes.test.ts` |
 | `validation.json` | Vectors for the checks behind a `422`, and the glob vectors. | `contract_test.go`, `rbac_test.go`, `tests/core/rbac.test.ts` |
 | `throttle.json` | Sign-in throttle vectors: fail, succeed, advance the clock, the wait a sign-in must get. | `throttle_test.go`, `tests/mock-broker/gateway/throttle.test.ts` |
 | `totp.json` | The RFC 6238 SHA-1 vectors (the ASCII secret `12345678901234567890`, as base32 too). The fake gateway's codes are not TOTP, so it does not read it. | `totp_test.go`, `tests/build/e2e-lib.test.ts` |
 | `backup.json` | One encrypted backup file with its passphrase, which both gateways must open. | `backup_test.go`, `tests/mock-broker/gateway/backup.test.ts`; `cases.json` previews and imports it against `seed.json` |
 
-`contract_test.go` proves the real gateway gives exactly the `seed.json`, `cases.json` and `validation.json` answers, and `tests/mock-broker/gateway/contract.test.ts` proves the fake gives the same ones from the same files. A gateway change that alters one answer fails the Go test first, then the fake's, until the fake follows.
+`contract_test.go` proves the real gateway gives exactly the `seed.json`, `cases.json` and `validation.json` answers, and `tests/mock-broker/gateway/contract.test.ts` proves the fake gives the same ones from the same files. A gateway change that alters one answer fails the Go test first, then the fake's, until the fake follows. `contract_test.go` also proves `error-codes.json` lists exactly the codes the gateway's source can send, and `tests/mock-broker/gateway/error-codes.test.ts` proves the app has a message for each of them and for no other gateway code.
 
-When a change is deliberate, rewrite the answers in `cases.json` from the real gateway (the other files are written by hand), review the diff, then bring the fake in line:
+When a change is deliberate, rewrite the answers in `cases.json` and the list in `error-codes.json` from the real gateway (the other files are written by hand), review the diff, then bring the fake and the app's messages in line:
 
 ```bash
 cd go-web-proxy && go test -run Contract -update .
@@ -168,7 +169,13 @@ cd go-web-proxy && go test -run Contract -update .
 
 Each case runs on a fresh gateway over the seed. A case's sessions are opened before its first step, so a step after a revocation still uses the cookie the user held. To write a step, put `as` (a username) on it to send it signed in, `mustChange: true` for a session held at the password page, `body` for JSON and `raw` for an XML body. Store paths in a settings body read `<path>`.
 
-The cases cover the JSON API only, two-factor included: the `twoFactor` flag on user rows and in `me`, the reset (`404` for an unknown user, `200` with the rev unchanged for a user without two-factor), and a settings save of each of the three `login.twoFactor` values (`optional`, `admins`, `mandatory`) and of bad ones, `off` among them (`422`, the mode unchanged). The seed and every recorded `me` body hold `optional`. The enrolled paths, which need codes, are covered by each gateway's own tests and by the end-to-end run.
+The cases cover the JSON API, `/managed/*`:
+
+- **Headers.** One read and one write of each family pin `Cache-Control: no-store` and `Content-Type` (`application/json` on a body, none on a `204`); the relay's cases pin the headers it passes on and the ones it drops.
+- **Rate limits.** Past `login.unauthenticatedPerMinute`, a request without a session is `429 rate_limited` with `Retry-After`, and a signed-in request is not charged. Past `session.connectsPerMinute`, a dial is the same `429`, after the entitlement check, and each user has their own count.
+- **Two-factor:** the `twoFactor` flag on user rows and in `me`, the reset (`404` for an unknown user, `200` with the rev unchanged for a user without two-factor), and a settings save of each of the three `login.twoFactor` values (`optional`, `admins`, `mandatory`) and of bad ones, `off` among them (`422`, the mode unchanged). The seed and every recorded `me` body hold `optional`.
+
+The sign-in and two-factor pages are not in the cases, because the fake draws them in the page instead of serving them. They, and the enrolled paths, which need codes, are covered by each gateway's own tests (`pages_test.go`; `tests/mock-broker/gateway/pages.test.ts` and `two-factor.test.ts`) and by the end-to-end run.
 
 ## Coverage policy
 

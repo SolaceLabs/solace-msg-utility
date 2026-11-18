@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from '../helpers/sources';
 import { createEmitter } from '../../src/mock-broker/emitter';
-import { buildSolaceSdk } from '../../src/mock-broker/sdk';
+import { buildSolaceSdk, dropAllSessions } from '../../src/mock-broker/sdk';
 import { createMessage } from '../../src/mock-broker/sdk/message';
 import { seed, getQueue } from '../../src/mock-broker/broker/store';
 import { FAULT, QUEUE_STATE, resetScenario, scenario } from '../../src/mock-broker/fixtures';
@@ -108,6 +108,32 @@ describe('mock-broker/sdk — session', () => {
         retry.on(sdk.SessionEventCode.UP_NOTICE, up);
         retry.connect();
         await vi.waitFor(() => expect(up).toHaveBeenCalled());
+    });
+
+    it('drops every live session on the panel lever, and forgets a disposed one', async () => {
+        const sdk = buildSolaceSdk();
+        const open = (vpnName: string) => {
+            const session = sdk.SolclientFactory.createSession({ url: 'wss://broker.solace.com', vpnName });
+            const down = vi.fn();
+            session.on(sdk.SessionEventCode.DISCONNECTED, down);
+            const up = vi.fn();
+            session.on(sdk.SessionEventCode.UP_NOTICE, up);
+            session.connect();
+            return { session, up, down };
+        };
+        const kept = open('default');
+        const gone = open('vpn-prod');
+        await vi.waitFor(() => expect(kept.up).toHaveBeenCalled());
+        await vi.waitFor(() => expect(gone.up).toHaveBeenCalled());
+
+        gone.session.dispose();
+        // A disposed session leaves the list, so the lever never touches it,
+        // even if the app holds on to it.
+        gone.session._mockDrop = vi.fn();
+        dropAllSessions();
+
+        expect(kept.down).toHaveBeenCalledOnce();
+        expect(gone.session._mockDrop).not.toHaveBeenCalled();
     });
 });
 

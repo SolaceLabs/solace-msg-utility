@@ -8,8 +8,15 @@
  * account's count and nothing else: the client's count ages out. A count with
  * no new failure for `login.resetMinutes` starts again.
  *
- * Not simulated: the cap on tracked keys (one client cannot fill the table)
- * and the per-client request budget (`login.unauthenticatedPerMinute`).
+ * Beside it, the two request limits: the client's budget for requests without
+ * a session (`createRequestBudget`, `login.unauthenticatedPerMinute`) and each
+ * user's connect window (`createConnectWindow`, `session.connectsPerMinute`).
+ * Both start empty on a restart, as in a new process, and are not carried
+ * across a page reload.
+ *
+ * Not simulated: the cap on tracked keys (one client cannot fill the table),
+ * and the sign-in pages' share of the request budget (the gateway charges them
+ * too; the budget here is charged by `/managed/*` alone).
  *
  * Mock-only.
  */
@@ -91,3 +98,64 @@ export function createThrottle(limits: () => LoginLimits, now: () => number = ()
         },
     };
 }
+
+/**
+ * The client's budget for requests without a session (allowUnauthenticated in
+ * throttle.go): a bucket of `perMinute()` tokens, refilled evenly over the
+ * minute and full at first. Each request without a session takes one; an empty
+ * bucket is a 429 that waits for the next token. The limit is read at each
+ * request, so a changed setting applies at once.
+ */
+export function createRequestBudget(perMinute: () => number, now: () => number) {
+    let bucket: { tokens: number; last: number } | null = null;
+    return {
+        /** Takes one token: 0, or the ms until the next one when the bucket is empty. */
+        take(): number {
+            const t = now();
+            const capacity = perMinute();
+            const perMs = capacity / 60_000;
+            const b = bucket ?? { tokens: capacity, last: t };
+            b.tokens = Math.min(capacity, b.tokens + (t - b.last) * perMs);
+            b.last = t;
+            bucket = b;
+            if (b.tokens >= 1) {
+                b.tokens--;
+                return 0;
+            }
+            return (1 - b.tokens) / perMs;
+        },
+        clear(): void {
+            bucket = null;
+        },
+    };
+}
+
+/** connectWindow in dial.go. */
+const CONNECT_WINDOW_MS = 60_000;
+
+/**
+ * The connect window (rateWindow in dial.go): `perMinute()` connects per user
+ * in each minute from the first. Dial and the SMF socket share it, so a
+ * reconnect loop cannot open sockets faster than it could fetch passwords. The
+ * limit is read at each connect, so a changed setting applies at once.
+ */
+export function createConnectWindow(perMinute: () => number, now: () => number) {
+    let byUser = new Map<string, { start: number; n: number }>();
+    return {
+        /** Counts one connect for `user`: 0, or the ms until their window starts again. */
+        take(user: string): number {
+            const t = now();
+            const prev = byUser.get(user);
+            const c = prev && t - prev.start < CONNECT_WINDOW_MS ? prev : { start: t, n: 0 };
+            if (c.n >= perMinute()) return c.start + CONNECT_WINDOW_MS - t;
+            c.n++;
+            byUser.set(user, c);
+            return 0;
+        },
+        clear(): void {
+            byUser = new Map();
+        },
+    };
+}
+
+export type ConnectWindow = ReturnType<typeof createConnectWindow>;

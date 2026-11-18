@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
-    allQueues, dumpStore, findQueueAnyVpn, getQueue, listQueues, listVpns, loadStore, publish, publishRejection, seed, vpnOn,
+    allQueues, dumpStore, findQueueAnyVpn, getQueue, listQueues, listVpns, loadStore, publish, publishRejection, removeMessage, seed, vpnOn,
 } from '../../../src/mock-broker/broker/store';
 import {
     BROKERS, DIRECT_BROKER, QUEUE_STATE, VPNS, queueStateOf, resetScenario, scenario, setBrokers,
@@ -73,6 +73,25 @@ describe('mock-broker/store -- brokers', () => {
         expect(getQueue('orders-dr', 'orders.new')!.messages).toHaveLength(before);
         // Direct's queues subscribe to orders/new/> only; this topic reaches none.
         expect(publish('orders/created', DestinationType.TOPIC, createMessage({ payload: 'x' }))).toBe(0);
+    });
+
+    it('spools its own copy, with its own id, in every queue a topic reaches', () => {
+        // Direct's default/test-queue-1 and vpn-prod/Q/ORDER/NEW both subscribe to orders/new/>.
+        const msg = createMessage({ payload: 'fan-out' });
+        expect(publish('orders/new/eu', DestinationType.TOPIC, msg)).toBe(2);
+
+        const spooled = ['default/test-queue-1', 'vpn-prod/Q/ORDER/NEW'].map(path => {
+            const [vpn, ...name] = path.split('/');
+            return { vpn, name: name.join('/'), entry: getQueue(vpn, name.join('/'))!.messages.at(-1)! };
+        });
+        expect(spooled[0].entry.msg).not.toBe(spooled[1].entry.msg);
+        for (const { vpn, name, entry } of spooled) {
+            // The SDK hands the id back as a Long; the app reads it with toString().
+            const id = String(entry.msg.getGuaranteedMessageId());
+            expect(id).toBe(String(entry.id));
+            // A browse-and-delete reads the id off the message; it must name this queue's entry.
+            expect(removeMessage(vpn, name, id)).toBe(true);
+        }
     });
 
     it('refuses a VPN name another broker already uses', () => {

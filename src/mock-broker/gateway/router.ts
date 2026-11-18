@@ -2,7 +2,9 @@
  * The fake gateway's `/managed/*` API (go-web-proxy/managed.go, dial.go),
  * behind the same gates in the same order:
  *
- *   1. no session: the same `401 unauthenticated` on every path;
+ *   1. no session: the same `401 unauthenticated` on every path, or
+ *      `429 rate_limited` with `Retry-After` once the client's budget
+ *      (`login.unauthenticatedPerMinute`, throttle.ts) is spent;
  *   2. a session held at the password page: `403 password_change_required`
  *      everywhere but logout;
  *   3. the relay prefix goes to the relay; anything without a route, or with
@@ -17,6 +19,10 @@
  * alone settles (422, then rev_required), then the record, then its rev, then
  * the rules that need the rest of the store.
  *
+ * Dial counts against the user's connect window, which the SMF socket shares
+ * (`session.connectsPerMinute`, throttle.ts): past it, after the entitlement
+ * check, `429 rate_limited` with `Retry-After`.
+ *
  * Two-factor: `me` carries the setting and whether the caller is enrolled, the
  * user list a flag per user, and `DELETE /managed/users/{name}/totp` is an
  * administrator's reset (no rev is sent; the answer carries the user's rev,
@@ -27,9 +33,9 @@
  * only like the rest. A restart answers `202 { restarting: true }` and then,
  * through `restart` (index.ts), ends every session and ticket.
  *
- * Not simulated: the cross-site write check, the body cap and the
- * unauthenticated throttle, and the refusals of a store that cannot be
- * written (store_changed_on_disk, store_write_failed, audit_unavailable).
+ * Not simulated: the cross-site write check, the body cap, and the refusals
+ * of a store that cannot be written (store_changed_on_disk,
+ * store_write_failed, audit_unavailable).
  *
  * Mock-only.
  */
@@ -40,6 +46,7 @@ import type { GatewayStore } from './store';
 import type { GatewaySessions, Session } from './sessions';
 import { refusalBody, splitRev, type GatewaySettingsFile, type Refusal } from './settings';
 import { bodyRev, exists, notFound, queryRev, revRequired, stale } from './versions';
+import { retrySeconds, type ConnectWindow } from './throttle';
 import type { ClientSeen, ConnRec, DialResponse, GatewayRequest, GatewayResponse, ManagedProfile, UserList } from './types';
 import type { QGlob } from '../../core/types';
 
@@ -47,7 +54,7 @@ import type { QGlob } from '../../core/types';
 export interface RouterFaults {
     /** The relay cannot reach the broker. */
     relayUnreachable: boolean;
-    /** Dial is over its per-minute window. */
+    /** Dial answers as over its window, whatever the count (the Demo controls' lever). */
     dialRateLimited: boolean;
 }
 
@@ -56,6 +63,10 @@ export interface RouterDeps {
     sessions: GatewaySessions;
     settings: GatewaySettingsFile;
     faults: () => RouterFaults;
+    /** Takes from the client's budget for requests without a session: 0, or the wait in ms (throttle.ts). */
+    anonymous: () => number;
+    /** The connect window dial shares with the SMF socket (throttle.ts). */
+    connects: ConnectWindow;
     /** Backup & Restore's routes (backup.ts), admin only like the editors'. */
     backupRoutes: [string, string, Handler][];
     /** The TLS console's routes (tls.ts), admin only too. */
@@ -72,6 +83,8 @@ const ok = (json: unknown): GatewayResponse => ({ status: 200, json });
 const noContent: GatewayResponse = { status: 204 };
 const error = (status: number, code: string): GatewayResponse => ({ status, json: { error: code } });
 const invalid = (field: string, reason: string): GatewayResponse => ({ status: 422, json: { error: 'invalid', field, reason } });
+/** writeRateLimited: the wait in whole seconds. */
+const rateLimited = (ms: number): GatewayResponse => ({ ...error(429, 'rate_limited'), headers: { 'Retry-After': String(retrySeconds(ms)) } });
 
 /** url.PathEscape: what dial puts in smfPath. */
 export function pathEscape(s: string): string {
@@ -88,7 +101,7 @@ const glob = (x: unknown): QGlob => {
 
 export type Handler = (req: GatewayRequest, s: Session, sid: string, params: string[]) => GatewayResponse | Promise<GatewayResponse>;
 
-export function createRouter({ store, sessions, settings, faults, backupRoutes, tlsRoutes, restart, client, upstream }: RouterDeps) {
+export function createRouter({ store, sessions, settings, faults, anonymous, connects, backupRoutes, tlsRoutes, restart, client, upstream }: RouterDeps) {
     const adminOnly = (fn: Handler): Handler => (req, s, sid, params) => {
         const admin = store.isAdmin(s.user);
         if (admin === null) return error(401, 'unauthenticated');
@@ -114,7 +127,9 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
         const vpn = string(b.vpn);
         const t = store.smfTarget(s.user, broker, vpn);
         if (!t) return error(404, 'not_found');
-        if (faults().dialRateLimited) return { ...error(429, 'rate_limited'), headers: { 'Retry-After': '60' } };
+        if (faults().dialRateLimited) return rateLimited(60_000);
+        const wait = connects.take(s.user);
+        if (wait > 0) return rateLimited(wait);
         const body: DialResponse = { smfPath: `/managed/smf/${pathEscape(broker)}/${pathEscape(vpn)}`, vpn, user: t.user, pass: t.pass };
         return ok(body);
     };
@@ -284,7 +299,10 @@ export function createRouter({ store, sessions, settings, faults, backupRoutes, 
     /** One request through the gates. */
     async function handle(req: GatewayRequest): Promise<GatewayResponse> {
         const s = sessions.get(req.session);
-        if (!s || !req.session) return error(401, 'unauthenticated');
+        if (!s || !req.session) {
+            const wait = anonymous();
+            return wait > 0 ? rateLimited(wait) : error(401, 'unauthenticated');
+        }
         if (s.mustChange && req.path !== '/managed/logout') return error(403, 'password_change_required');
         if (req.path.startsWith(RELAY_PREFIX)) {
             return relay(req, broker => store.sempTarget(s.user, broker), faults().relayUnreachable, upstream);

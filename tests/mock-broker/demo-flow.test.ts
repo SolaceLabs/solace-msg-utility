@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { boot, type ManagedDemo } from '../../src/mock-broker/boot.managed';
 import { resetScenario, scenario, setBrokers } from '../../src/mock-broker/fixtures';
 import { setSocketGate } from '../../src/mock-broker/sdk/session';
+import { STEP_MS } from '../../src/mock-broker/gateway/authenticator';
 import { Kernel } from '../../src/core/kernel';
 import { ACTIVE_MODULES, MODULE_ENTRIES } from '../../src/variants/managed-demo';
 import { ConnectionsModule } from '../../src/modules/connections/module.managed';
@@ -68,6 +69,7 @@ afterEach(() => {
     delete (navigator as any).sendBeacon;
     setSocketGate(null);
     setBrokers({});
+    vi.useRealTimers();
 });
 
 const startDemo = () => {
@@ -424,6 +426,8 @@ describe('managed demo two-factor sign-in', () => {
     };
 
     it('is made mandatory, enrols with the panel\'s code, signs in with a code and then a recovery code, and loses it to an administrator\'s reset', async () => {
+        // The clock is held, so each code is known to come from the step it is read in.
+        vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-01-01T00:00:05Z') });
         let demo = startDemo();
         await setMode(demo, 'mandatory');
 
@@ -444,6 +448,8 @@ describe('managed demo two-factor sign-in', () => {
         expect([demo.gateway.session(), title()]).toEqual([{ user: 'viewer', mustChange: false }, null]);
 
         // Signed out, the password leads to the code page, and only the code opens a session.
+        // A code cannot be used twice, so the sign-in waits for the next step's code.
+        vi.setSystemTime(Date.now() + STEP_MS);
         demo = signOutAndBackIn(demo);
         expect(title()).toBe('Sign in');
         submitPage({ username: 'viewer', password: PASSWORD });

@@ -12,8 +12,8 @@ import * as enums from './enums';
 import { createSession, type MockSession } from './session';
 import { createMessage, createDurableQueueDestination, createTopicDestination } from './message';
 
-/** Live sessions, so the control panel can drop one mid-demo. */
-const sessions: MockSession[] = [];
+/** Sessions not yet disposed, so the control panel can drop one mid-demo. */
+const sessions = new Set<MockSession>();
 
 export function buildSolaceSdk(): Record<string, any> {
     /**
@@ -40,8 +40,8 @@ export function buildSolaceSdk(): Record<string, any> {
         SolclientFactory: {
             init: () => { /* nothing to configure in the emulator */ },
             createSession: (props: any) => {
-                const session = createSession(props);
-                sessions.push(session);
+                const session = createSession(props, { onDispose: () => sessions.delete(session) });
+                sessions.add(session);
                 return session;
             },
             createMessage: () => createMessage(),

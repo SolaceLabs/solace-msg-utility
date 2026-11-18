@@ -5,10 +5,11 @@
  * (connModes and defaultConn reach the next `/hosted`, modules the next
  * `/me`; audit.stdout, audit.access and audit.onFailure the next audit event,
  * which the demo does not write and cannot fail to write: the keys are saved
- * and shown only; the login keys at the next sign-in or password change, and
- * login.twoFactorMinutes at the next ticket check; tls.insecureSkipVerify at
- * once, as the gateway's trust holder takes it; session.connectsPerMinute is
- * saved and shown only, as the demo has no connect window). Nothing a save
+ * and shown only; the login keys at the next sign-in or password change,
+ * login.twoFactorMinutes at the next ticket check and
+ * login.unauthenticatedPerMinute at the next request without a session;
+ * tls.insecureSkipVerify at once, as the gateway's trust holder takes it;
+ * session.connectsPerMinute at the next dial or SMF socket). Nothing a save
  * writes waits for a restart. A seed, snapshot or backup without a key reads
  * it as its default. The TLS paths are environment variables, not keys: a
  * seed, snapshot or backup that still holds them is read and they are
@@ -267,6 +268,13 @@ export function connModesProblem(s: { connModes: string; defaultConn: string; ho
 
 /** toConfig plus fileConfigFromConfig: the file as the gateway would save it, or the first problem. */
 function normalize(f: GatewaySettings): { ok: true; value: GatewaySettings } | { ok: false; reason: string; field?: string } {
+    // First and named by its own field, as checkSettings does: the settings page marks the select it came from.
+    if (!isTwoFactorMode(f.login.twoFactor)) {
+        return {
+            ok: false, field: 'login.twoFactor',
+            reason: `key "login.twoFactor" has invalid value ${quote(f.login.twoFactor)}: must be "optional", "admins" or "mandatory"`,
+        };
+    }
     const level = parseLogLevel(f.logLevel);
     if (!level) return { ok: false, reason: `key "logLevel" has invalid value ${quote(f.logLevel)}: must be one of debug, info, warn, error` };
     const allow = cidrList('access.allow', f.access.allow);
@@ -294,12 +302,6 @@ function normalize(f: GatewaySettings): { ok: true; value: GatewaySettings } | {
         ?? (['continue', 'refuse'].includes(f.audit.onFailure) ? null
             : `key "audit.onFailure" has invalid value ${quote(f.audit.onFailure)}: must be "continue" or "refuse"`);
     if (modulesProblem) return { ok: false, reason: modulesProblem };
-    if (!isTwoFactorMode(l.twoFactor)) {
-        return {
-            ok: false, field: 'login.twoFactor',
-            reason: `key "login.twoFactor" has invalid value ${quote(l.twoFactor)}: must be "optional", "admins" or "mandatory"`,
-        };
-    }
     const value: GatewaySettings = {
         ...clone(f),
         connModes: f.connModes.toLowerCase(),

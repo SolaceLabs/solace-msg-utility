@@ -9,6 +9,7 @@ import {
 } from '../../../src/mock-broker/gateway/backup';
 import { settingsFromBackup } from '../../../src/mock-broker/gateway/settings';
 import { CONTRACT_DIR, contractSeed } from './helpers';
+import { mockCode, stepOf } from '../../../src/mock-broker/gateway/authenticator';
 import type { UserRec } from '../../../src/mock-broker/gateway/types';
 
 /**
@@ -522,6 +523,30 @@ describe('mock-broker/gateway/backup -- two-factor', () => {
             expect(gw.store.totpOf('viewer')).toEqual(totp);
             expect(gw.sessions.get(session)).toBeNull();
             expect(gw.sessions.get(operator)).not.toBeNull();
+        });
+
+        it('forgets the accepted code steps of each user it signs out, and only theirs', async () => {
+            const gw = gateway();
+            const pw = (name: string) => gw.store.findUser(name)!.password;
+            arm(gw, 'operator');
+            const file = await exportFile(gw);   // operator with two-factor, viewer without
+            arm(gw, 'viewer');
+            gw.settings.save({ login: { twoFactor: 'optional' } }, gw.settings.rev());
+            const code = mockCode(totp.secret, stepOf(clock.getTime()));
+            for (const name of ['viewer', 'operator']) {
+                expect(gw.signIn(name, pw(name))).toEqual({ ok: true, step: 'code' });
+                expect(gw.submitCode(code)).toMatchObject({ ok: true });
+            }
+
+            await call(gw, '/managed/backup/import', { file, passphrase: PASS, users: 'replace', connections: 'skip', settings: 'skip', basis: basisOf(gw) });
+            // viewer's two-factor changed, so its sessions ended and its steps are forgotten;
+            // operator's did not, and the code it used is still a replay.
+            expect(gw.snapshot().lastSteps!.map(([user]) => user)).toEqual(['operator']);
+            arm(gw, 'viewer');
+            expect(gw.signIn('viewer', pw('viewer'))).toEqual({ ok: true, step: 'code' });
+            expect(gw.submitCode(code)).toMatchObject({ ok: true });
+            expect(gw.signIn('operator', pw('operator'))).toEqual({ ok: true, step: 'code' });
+            expect(gw.submitCode(code)).toEqual({ ok: false, error: 'The code is not correct.' });
         });
 
         it('removes it on import when the file has none', async () => {

@@ -127,9 +127,10 @@ const MESSAGES: Record<string, string> = {
 /**
  * Every code with a stock message: the gateway's error codes plus `network`
  * and `bad_response`, which managedRequest makes itself.
- * tests/mock-broker/gateway/error-codes.test.ts holds the managed demo to
- * this list: each code is sent by the fake gateway or named as one it does
- * not simulate.
+ * tests/mock-broker/gateway/error-codes.test.ts holds this list to the codes
+ * the real gateway's handlers send (go-web-proxy/testdata/contract/error-codes.json),
+ * and the managed demo to it: each code is sent by the fake gateway or named
+ * as one it does not simulate.
  */
 export const MANAGED_ERROR_CODES: readonly string[] = Object.keys(MESSAGES);
 

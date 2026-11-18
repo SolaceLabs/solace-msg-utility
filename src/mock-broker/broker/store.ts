@@ -216,8 +216,9 @@ export function publish(destName: string, destType: number, msg: MockMessage, br
 
     for (const q of targets) {
         const id = nextId++;
-        // Re-stamp identity: the broker owns spool ids, not the publisher.
-        const stored = msg;
+        // Each queue spools its own copy, stamped with its own id: the broker
+        // owns spool ids, not the publisher, and a topic reaches many queues.
+        const stored = createMessage(msg._fields);
         stored.setGuaranteedMessageId(String(id));
         q.messages.push({ id, msg: stored, sizeBytes: payloadByteLength(stored._fields) + 120 });
     }

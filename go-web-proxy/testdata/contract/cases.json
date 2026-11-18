@@ -56,7 +56,7 @@
     {
       "name": "gate: no session is the same 401 on every path",
       "steps": [
-        { "method": "GET", "path": "/managed/me", "status": 401, "response": { "error": "unauthenticated" } },
+        { "method": "GET", "path": "/managed/me", "status": 401, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": { "error": "unauthenticated" } },
         { "method": "GET", "path": "/managed/users", "status": 401, "response": { "error": "unauthenticated" } },
         { "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 401, "response": { "error": "unauthenticated" } },
         { "method": "GET", "path": "/managed/nope", "status": 401, "response": { "error": "unauthenticated" } }
@@ -65,15 +65,15 @@
     {
       "name": "gate: a forced password change allows only logout",
       "steps": [
-        { "as": "viewer", "mustChange": true, "method": "GET", "path": "/managed/me", "status": 403, "response": { "error": "password_change_required" } },
+        { "as": "viewer", "mustChange": true, "method": "GET", "path": "/managed/me", "status": 403, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": { "error": "password_change_required" } },
         { "as": "viewer", "mustChange": true, "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 403, "response": { "error": "password_change_required" } },
-        { "as": "viewer", "mustChange": true, "method": "POST", "path": "/managed/logout", "status": 204, "response": null }
+        { "as": "viewer", "mustChange": true, "method": "POST", "path": "/managed/logout", "status": 204, "headers": { "Content-Type": "", "Cache-Control": "no-store" }, "response": null }
       ]
     },
     {
       "name": "gate: an unknown path or a wrong method is 404, never 405",
       "steps": [
-        { "as": "viewer", "method": "GET", "path": "/managed/nope", "status": 404, "response": { "error": "not_found" } },
+        { "as": "viewer", "method": "GET", "path": "/managed/nope", "status": 404, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": { "error": "not_found" } },
         { "as": "viewer", "method": "DELETE", "path": "/managed/me", "status": 404, "response": { "error": "not_found" } },
         { "as": "viewer", "method": "GET", "path": "/managed/dial", "status": 404, "response": { "error": "not_found" } }
       ]
@@ -81,9 +81,31 @@
     {
       "name": "gate: admin routes refuse a non-admin",
       "steps": [
-        { "as": "viewer", "method": "GET", "path": "/managed/users", "status": 403, "response": { "error": "forbidden" } },
+        { "as": "viewer", "method": "GET", "path": "/managed/users", "status": 403, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": { "error": "forbidden" } },
         { "as": "viewer", "method": "GET", "path": "/managed/connections", "status": 403, "response": { "error": "forbidden" } },
         { "as": "viewer", "method": "GET", "path": "/managed/settings", "status": 403, "response": { "error": "forbidden" } }
+      ]
+    },
+    {
+      "name": "gate: past login.unauthenticatedPerMinute a request without a session is 429 with Retry-After, and a session is not charged",
+      "steps": [
+        { "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "unauthenticatedPerMinute": 1 } }, "status": 200, "response": { "rev": "<rev>" } },
+        { "method": "GET", "path": "/managed/me", "status": 401, "response": { "error": "unauthenticated" } },
+        {
+          "method": "GET", "path": "/managed/users", "status": 429,
+          "headers": { "Retry-After": "60", "Content-Type": "application/json", "Cache-Control": "no-store" },
+          "response": { "error": "rate_limited" }
+        },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "viewer", "admin": false, "twoFactor": { "mode": "optional", "enrolled": false },
+            "operate": [],
+            "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }],
+            "brokers": [{ "broker": "b1", "msgVpns": [{ "name": "v1" }] }],
+            "modules": ["queue-browser"]
+          }
+        }
       ]
     },
     {
@@ -98,6 +120,7 @@
       "steps": [
         {
           "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 200,
+          "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": { "smfPath": "/managed/smf/b1/v1", "vpn": "v1", "user": "u1", "pass": "cli-b1v1-pw" }
         },
         {
@@ -124,6 +147,26 @@
       "name": "dial: a field name matches without regard to case",
       "steps": [
         { "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "Broker": "b2", "VPN": "v1" }, "status": 404, "response": { "error": "not_found" } }
+      ]
+    },
+    {
+      "name": "dial: past session.connectsPerMinute a dial is 429 with Retry-After, after the entitlement check, and each user has their own count",
+      "steps": [
+        { "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "session": { "connectsPerMinute": 1 } }, "status": 200, "response": { "rev": "<rev>" } },
+        {
+          "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 200,
+          "response": { "smfPath": "/managed/smf/b1/v1", "vpn": "v1", "user": "u1", "pass": "cli-b1v1-pw" }
+        },
+        {
+          "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 429,
+          "headers": { "Retry-After": "60", "Content-Type": "application/json", "Cache-Control": "no-store" },
+          "response": { "error": "rate_limited" }
+        },
+        { "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b2", "vpn": "v9" }, "status": 404, "response": { "error": "not_found" } },
+        {
+          "as": "operator", "method": "POST", "path": "/managed/dial", "body": { "broker": "b2", "vpn": "v9" }, "status": 200,
+          "response": { "smfPath": "/managed/smf/b2/v9", "vpn": "v9", "user": "u9", "pass": "cli-b2v9-pw" }
+        }
       ]
     },
     {
@@ -161,6 +204,7 @@
       "steps": [
         {
           "as": "admin", "method": "GET", "path": "/managed/users", "status": 200,
+          "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": {
             "users": [
               {
@@ -188,7 +232,7 @@
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
           "body": { "rev": 0, "password": "", "admin": false, "operate": [], "readOnly": [], "modules": null },
-          "status": 422, "response": { "error": "invalid", "field": "password", "reason": "A new user needs a password." }
+          "status": 422, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": { "error": "invalid", "field": "password", "reason": "A new user needs a password." }
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/bad%20name",
@@ -235,7 +279,7 @@
         {
           "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
           "body": { "rev": 0, "password": "newbie-password-1", "admin": false, "operate": [], "readOnly": [{ "brokers": "b2", "msgVpns": "v9", "queues": "q.*" }], "modules": [] },
-          "status": 200, "response": { "rev": 2 }
+          "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": { "rev": 2 }
         },
         {
           "as": "admin", "method": "GET", "path": "/managed/users", "status": 200,
@@ -309,7 +353,7 @@
     {
       "name": "users: a deleted user's session is refused",
       "steps": [
-        { "as": "admin", "method": "DELETE", "path": "/managed/users/viewer?rev=1", "status": 204, "response": null },
+        { "as": "admin", "method": "DELETE", "path": "/managed/users/viewer?rev=1", "status": 204, "headers": { "Content-Type": "", "Cache-Control": "no-store" }, "response": null },
         { "as": "viewer", "method": "GET", "path": "/managed/me", "status": 401, "response": { "error": "unauthenticated" } }
       ]
     },
@@ -318,6 +362,7 @@
       "steps": [
         {
           "as": "admin", "method": "GET", "path": "/managed/connections", "status": 200,
+          "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": {
             "connections": [
               {
@@ -397,7 +442,7 @@
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b1",
           "body": { "rev": 1, "hostname": "host1", "semp": { "port": "1943", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] } },
-          "status": 200, "response": { "rev": 1 }
+          "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": { "rev": 1 }
         },
         {
           "as": "viewer", "method": "POST", "path": "/managed/dial", "body": { "broker": "b1", "vpn": "v1" }, "status": 200,
@@ -429,7 +474,7 @@
     {
       "name": "connections: a deleted broker leaves the profile",
       "steps": [
-        { "as": "admin", "method": "DELETE", "path": "/managed/connections/b2?rev=1", "status": 204, "response": null },
+        { "as": "admin", "method": "DELETE", "path": "/managed/connections/b2?rev=1", "status": 204, "headers": { "Content-Type": "", "Cache-Control": "no-store" }, "response": null },
         {
           "as": "operator", "method": "GET", "path": "/managed/me", "status": 200,
           "response": {
@@ -447,6 +492,7 @@
       "steps": [
         {
           "as": "admin", "method": "GET", "path": "/managed/settings", "status": 200,
+          "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": {
             "settings": {
               "hosted": true, "connModes": "both", "defaultConn": "direct",
@@ -595,7 +641,7 @@
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "modules": { "userDefault": "none" } },
-          "status": 200, "response": { "rev": "<rev>" }
+          "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": { "rev": "<rev>" }
         },
         {
           "as": "operator", "method": "GET", "path": "/managed/me", "status": 200,
@@ -698,6 +744,7 @@
           "method": "GET",
           "path": "/managed/backup",
           "status": 200,
+          "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": {
             "schedule": null,
             "nextRun": null,
@@ -896,6 +943,7 @@
             "passphrase": "contract-vector-passphrase"
           },
           "status": 200,
+          "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": {
             "rev": 1
           }
@@ -966,6 +1014,7 @@
           "method": "DELETE",
           "path": "/managed/backup/schedule?rev=2",
           "status": 204,
+          "headers": { "Content-Type": "", "Cache-Control": "no-store" },
           "response": null
         },
         {
@@ -1008,6 +1057,7 @@
             "passphrase": "contract-vector-passphrase"
           },
           "status": 200,
+          "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": {
             "filename": "<file>",
             "content": "<file>"
@@ -1027,6 +1077,7 @@
             "passphrase": "contract-vector-passphrase"
           },
           "status": 200,
+          "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": {
             "created": "2026-11-09T02:00:00Z",
             "gateway": "v3.7.0",
@@ -1310,6 +1361,7 @@
             "settings": "replace"
           },
           "status": 200,
+          "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": {
             "signedOut": false
           }
@@ -2059,6 +2111,7 @@
       "steps": [
         {
           "as": "admin", "method": "GET", "path": "/managed/client", "status": 200,
+          "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" },
           "response": { "address": "192.0.2.10", "peer": "192.0.2.10", "viaProxy": false }
         },
         { "as": "viewer", "method": "GET", "path": "/managed/client", "status": 403, "response": { "error": "forbidden" } }
@@ -2153,7 +2206,7 @@
       ]
     },
     {
-      "name": "settings: a login.twoFactor that is not a mode (off included) is refused with its field, and nothing is saved",
+      "name": "settings: a login.twoFactor that is not a mode (off included) is refused with its field, before any other bad value, and nothing is saved",
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactor": "sometimes" } },
@@ -2166,6 +2219,10 @@
         {
           "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "login": { "twoFactor": "on" } },
           "status": 422, "response": { "error": "invalid", "field": "login.twoFactor", "reason": "key \"login.twoFactor\" has invalid value \"on\": must be \"optional\", \"admins\" or \"mandatory\"" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/settings", "body": { "rev": "<settings-rev>", "logLevel": "loud", "login": { "maxFailures": 0, "twoFactor": "sometimes" } },
+          "status": 422, "response": { "error": "invalid", "field": "login.twoFactor", "reason": "key \"login.twoFactor\" has invalid value \"sometimes\": must be \"optional\", \"admins\" or \"mandatory\"" }
         },
         {
           "as": "admin", "method": "GET", "path": "/managed/me", "status": 200,
@@ -2186,7 +2243,7 @@
     {
       "name": "tls and restart: every route refuses no session and a non-admin before it reads the body",
       "steps": [
-        { "method": "GET", "path": "/managed/tls", "status": 401, "response": {"error": "unauthenticated"} },
+        { "method": "GET", "path": "/managed/tls", "status": 401, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"error": "unauthenticated"} },
         { "method": "POST", "path": "/managed/tls/certificate/check", "body": {"certificate": "x", "key": "y"}, "status": 401, "response": {"error": "unauthenticated"} },
         { "method": "PUT", "path": "/managed/tls/certificate", "body": {"certificate": "x", "key": "y"}, "status": 401, "response": {"error": "unauthenticated"} },
         { "method": "POST", "path": "/managed/tls/trust", "body": {"certificate": "x"}, "status": 401, "response": {"error": "unauthenticated"} },
@@ -2203,7 +2260,7 @@
     {
       "name": "tls: the certificate and the CA files, every certificate field normalised",
       "steps": [
-        { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": []} }
+        { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": []} }
       ]
     },
     {
@@ -2220,7 +2277,7 @@
     {
       "name": "tls: a CA file is added and listed, refused when taken, badly named or not a certificate, and deleted",
       "steps": [
-        { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "contract-ca.crt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": [{"name": "contract-ca.crt", "certificates": [{"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}], "problem": ""}]} },
+        { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "contract-ca.crt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": [{"name": "contract-ca.crt", "certificates": [{"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}], "problem": ""}]} },
         { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "contract-ca.crt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 409, "response": {"error": "exists"} },
         { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": [{"name": "contract-ca.crt", "certificates": [{"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}], "problem": ""}]} },
         { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "notes.txt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 422, "response": {"error": "invalid", "field": "name", "reason": "Use letters, digits, dots, dashes and underscores, start with a letter or digit, end in .crt or .pem, and keep the name before the extension to 64 characters."} },
@@ -2229,7 +2286,7 @@
         { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "key.crt", "certificate": "-----BEGIN PRIVATE KEY-----\ndGhyb3dhd2F5\n-----END PRIVATE KEY-----\n"}, "status": 422, "response": {"error": "invalid", "field": "certificate", "reason": "A private key was found. A private key never belongs here: send only the certificate."} },
         { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/notes.txt", "status": 422, "response": {"error": "invalid", "field": "name", "reason": "Name one .crt or .pem file directly in the trust directory."} },
         { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/absent.crt", "status": 404, "response": {"error": "not_found"} },
-        { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/contract-ca.crt", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": []} },
+        { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/contract-ca.crt", "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": []} },
         { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/contract-ca.crt", "status": 404, "response": {"error": "not_found"} },
         { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": []} }
       ]
@@ -2237,7 +2294,7 @@
     {
       "name": "restart: an administrator is answered 202",
       "steps": [
-        { "as": "admin", "method": "POST", "path": "/managed/restart", "status": 202, "response": {"restarting": true} }
+        { "as": "admin", "method": "POST", "path": "/managed/restart", "status": 202, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"restarting": true} }
       ]
     }
   ]

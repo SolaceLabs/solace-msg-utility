@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { createThrottle, type LoginLimits } from '../../../src/mock-broker/gateway/throttle';
+import { createConnectWindow, createRequestBudget, createThrottle, type LoginLimits } from '../../../src/mock-broker/gateway/throttle';
 import { CONTRACT_DIR } from './helpers';
 
 /**
@@ -13,7 +13,9 @@ import { CONTRACT_DIR } from './helpers';
  * larger block wins, a success clears only the signing-in user, and a quiet
  * count starts again (the account limit, the client limit and the reset time
  * each have their own). `login.perClient` is held below. tests/mock-broker/gateway/pages.test.ts
- * covers the message and the countdown on the sign-in page.
+ * covers the message and the countdown on the sign-in page. Below them, the
+ * request budget (allowUnauthenticated in throttle.go) and the connect window
+ * (rateWindow in dial.go), whose 429s the gateway contract pins.
  */
 interface VectorStep { fail?: string; times?: number; succeed?: string; advance?: number; wait?: string; want?: number }
 const VECTORS: { limits: Omit<LoginLimits, 'perClient'>; cases: { name: string; steps: VectorStep[] }[] } =
@@ -76,5 +78,63 @@ describe('mock-broker/gateway/throttle', () => {
         expect(other.wait('viewer')).toBe(30_000);
         other.clear();
         expect(other.wait('viewer')).toBe(0);
+    });
+});
+
+describe('mock-broker/gateway/throttle -- the request budget', () => {
+    let perMinute: number;
+    let budget: ReturnType<typeof createRequestBudget>;
+    beforeEach(() => {
+        perMinute = 60;
+        budget = createRequestBudget(() => perMinute, () => t);
+    });
+
+    it('starts full, waits for the next token once empty, and refills evenly up to the limit', () => {
+        for (let i = 0; i < 60; i++) expect(budget.take()).toBe(0);
+        expect(budget.take()).toBe(1000);
+        t += 500;
+        expect(budget.take()).toBe(500);
+        t += 500;
+        expect(budget.take()).toBe(0);
+        t += 10 * 60_000;
+        for (let i = 0; i < 60; i++) expect(budget.take()).toBe(0);
+        expect(budget.take()).toBe(1000);
+    });
+
+    it('reads the limit at each request, so a lower one caps the bucket at once', () => {
+        expect(budget.take()).toBe(0);
+        perMinute = 1;
+        expect(budget.take()).toBe(0);
+        expect(budget.take()).toBe(60_000);
+    });
+});
+
+describe('mock-broker/gateway/throttle -- the connect window', () => {
+    let perMinute: number;
+    let connects: ReturnType<typeof createConnectWindow>;
+    beforeEach(() => {
+        perMinute = 2;
+        connects = createConnectWindow(() => perMinute, () => t);
+    });
+
+    it('counts each user on their own, and refuses past the limit until a minute after their first connect', () => {
+        expect(connects.take('viewer')).toBe(0);
+        t += 10_000;
+        expect(connects.take('viewer')).toBe(0);
+        expect(connects.take('viewer')).toBe(50_000);
+        expect(connects.take('operator')).toBe(0);
+        t += 50_000;
+        expect(connects.take('viewer')).toBe(0);
+        expect(connects.take('viewer')).toBe(0);
+        expect(connects.take('viewer')).toBe(60_000);
+    });
+
+    it('reads the limit at each connect, so a raised one applies at once', () => {
+        connects.take('viewer');
+        connects.take('viewer');
+        expect(connects.take('viewer')).toBe(60_000);
+        perMinute = 3;
+        expect(connects.take('viewer')).toBe(0);
+        expect(connects.take('viewer')).toBe(60_000);
     });
 });

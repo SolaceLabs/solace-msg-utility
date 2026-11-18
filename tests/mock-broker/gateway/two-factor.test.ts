@@ -40,13 +40,17 @@ const sessionsOf = (user: string) => gw.sessions.dump().filter(([, s]) => s.user
 const userRow = (name: string) => gw.store.listUsers().find(u => u.username === name)!;
 const seq = () => gw.store.seqs().users;
 
-/** Sign `user` in under `mandatory` and set two-factor up: signed in at the end, with the secret and the ten codes. */
+/**
+ * Sign `user` in under `mandatory` and set two-factor up: signed in at the end, with the secret
+ * and the ten codes, and the clock one step on, as the confirming code cannot also sign in.
+ */
 function enrol(user: keyof typeof PW, mode = 'mandatory') {
     setMode(mode);
     expect(gw.signIn(user, PW[user])).toEqual({ ok: true, step: 'enrol' });
     const secret = gw.ticket()!.secret;
     const r = gw.confirmTwoFactor(codeNow(secret));
     if (!r.ok) throw new Error(r.error);
+    clock += STEP_MS;
     return { secret, recovery: r.recovery };
 }
 
@@ -200,6 +204,7 @@ describe('mock-broker/gateway two-factor -- the code step', () => {
         expect(gw.confirmTwoFactor(codeNow(secret))).toMatchObject({ ok: true, mustChange: true });
         expect(gw.session()).toEqual({ user: 'newadmin', mustChange: true });
         signOut();
+        clock += STEP_MS;
         gw.signIn('newadmin', PW.newadmin);
         expect(gw.submitCode(codeNow(secret))).toEqual({ ok: true, mustChange: true });
         expect(gw.session()).toEqual({ user: 'newadmin', mustChange: true });
@@ -324,12 +329,17 @@ describe('mock-broker/gateway two-factor -- setting it up', () => {
         expect(gw.ticket()).toBeNull();
     });
 
-    it('does not bring the code that confirmed it back as a sign-in replay: the new secret starts its own history', () => {
-        const { secret } = enrol('viewer');
-        signOut();
-        setMode('optional');
+    it('does not let the code that confirmed it also sign in; the next step\'s code does', () => {
+        setMode('mandatory');
         gw.signIn('viewer', PW.viewer);
-        expect(gw.submitCode(codeNow(secret)).ok).toBe(true);
+        const secret = gw.ticket()!.secret;
+        const confirming = codeNow(secret);
+        expect(gw.confirmTwoFactor(confirming).ok).toBe(true);
+        signOut();
+        gw.signIn('viewer', PW.viewer);
+        expect(gw.submitCode(confirming)).toEqual({ ok: false, error: 'The code is not correct.' });
+        clock += STEP_MS;
+        expect(gw.submitCode(codeNow(secret))).toEqual({ ok: true, mustChange: false });
     });
 
     it('sends a browser with no enrol ticket, or only a code ticket, back to the sign-in', () => {

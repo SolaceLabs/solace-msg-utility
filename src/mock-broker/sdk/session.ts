@@ -56,7 +56,10 @@ export function setSocketGate(gate: SocketGate | null): void {
 
 const SMF_PATH = /\/managed\/smf\/([^/?#]+)\/([^/?#]+)/;
 
-export function createSession(props: any): MockSession {
+/** What the SDK index hears about a session's lifecycle. */
+export interface SessionHooks { onDispose?: () => void }
+
+export function createSession(props: any, hooks: SessionHooks = {}): MockSession {
     const emitter = createEmitter();
     const vpn: string = props?.vpnName ?? 'default';
     const host: string = String(props?.url ?? '');
@@ -136,6 +139,7 @@ export function createSession(props: any): MockSession {
 
         dispose(): void {
             end();
+            hooks.onDispose?.();
         },
 
         getSessionProperties: () => props,

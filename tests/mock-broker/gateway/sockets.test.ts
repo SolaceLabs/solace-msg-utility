@@ -86,6 +86,18 @@ describe('mock-broker/gateway/sockets -- opening', () => {
         expect(events[0].info).toMatch(/^Login failure: 401 Unauthorized/);
     });
 
+    it('counts against the connect window it shares with dial, and refuses past it before the broker', async () => {
+        gw.settings.save({ session: { connectsPerMinute: 2 } }, gw.settings.rev());
+        const sid = gw.openSession('viewer', false);
+        gw.setCookie(sid);
+        const dial = await gw.handle({ method: 'POST', path: '/managed/dial', query: '', body: JSON.stringify({ broker: 'b1', vpn: 'v1' }), session: sid });
+        expect(dial.status).toBe(200);
+        expect(codes((await open()).events)).toEqual([UP]);
+        const { events } = await open();
+        expect(events).toEqual([{ code: FAILED, info: 'Connection error: the gateway refused the SMF socket (429 rate_limited)' }]);
+        expect(gw.sockets.list()).toHaveLength(1);
+    });
+
     it('leaves a socket path an unknown host when no gate is set (demo.html)', async () => {
         setSocketGate(null);
         const { events } = await open();

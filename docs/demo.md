@@ -206,13 +206,17 @@ Their hosts end in `.demo.invalid`, a name that never resolves.
   (`store_changed_on_disk`), an audit log that cannot be written (`audit_unavailable`, with `audit.onFailure` set to
   `refuse`), and the journal and its recovery after a crash: the demo has no disk. The **Demo controls** can still make
   `config.yaml` read as edited on the host or unreadable.
+- **Request limits are simulated in part.** The lockouts after wrong passwords, per account and per client, follow
+  the gateway's. A request to the gateway's API without a session draws from the request budget
+  (`login.unauthenticatedPerMinute`) and, past it, answers `429` with the wait. A user's dials and broker connections
+  share one window of `session.connectsPerMinute` a minute, and one more answers `429`. Both limits start again on a
+  restart, and also on a page reload.
 - **Not simulated (request limits):**
   - the cross-site request check;
   - the request size limit;
-  - the request budget for clients without a session, which every sign-in attempt also draws from (the lockouts
-    after wrong passwords, per account and per client, are simulated);
-  - the per-user connect window (`session.connectsPerMinute`) and the cap on open sockets (20 per user, 1000 in
-    all), though the **Demo controls** can make the dial answer `429`;
+  - the sign-in pages' share of the request budget: in the product every sign-in attempt also draws from it;
+  - the cap on open sockets (20 per user, 1000 in all), though the **Demo controls** can make the dial answer `429`
+    whatever the count;
   - the limit on concurrent requests.
 - **The audit options are saved, no audit trail is written.** Gateway Settings shows the two Audit trail checkboxes (`audit.stdout`, `audit.access`, both off at first) and the `audit.onFailure` choice (`continue` at first) and saves them, but the demo keeps no audit log and has no Audit page, as the real gateway has none in the console.
 - **The Certificates page holds a demo certificate, not a parsed one.** The fake gateway cannot read X.509, so it accepts PEM that is well formed (the armour lines and base64 that decodes) and describes what it was given with fixed demo values: subject and issuer `CN=demo certificate`, no names, valid from the moment it was added to one year later, self-signed, never expired. The fingerprint is the real SHA-256 of the decoded bytes. A key is any single `PRIVATE KEY` block, and the pair is taken to match, so the page's "does not match" and "expired" refusals never appear. It starts with one certificate, both files writable and no trusted CA; an unnamed CA is saved as `demo-certificate.crt` (a second unnamed one is refused as already existing). A replace, add or delete changes what the page shows and nothing else: the demo makes no TLS connection.

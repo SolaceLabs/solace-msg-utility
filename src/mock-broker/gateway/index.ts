@@ -34,7 +34,7 @@ import { createSockets } from './sockets';
 import { createStore, type GatewayStore } from './store';
 import { createTls, type TlsFaults, type TlsState } from './tls';
 import { createTickets, type Ticket } from './tickets';
-import { createThrottle, throttledText, type ThrottleState } from './throttle';
+import { createConnectWindow, createRequestBudget, createThrottle, throttledText, type ThrottleState } from './throttle';
 import { PASSWORD_MAX, passwordOk } from './validate';
 import type { GatewayRequest, GatewayResponse, GatewaySeed, GatewaySettings, UserTotp } from './types';
 import type { Session } from './sessions';
@@ -129,33 +129,41 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
     const store = createStore(seed, () => changeListeners.forEach(fn => fn()));
     const sessions = createSessions();
     const settings = createSettings(seed.settings, seed.client, () => faults);
-    const backups = createBackups({ store, settings, sessions, iter: backupIter, now });
+    /** The last TOTP step accepted per user: a step at or below it is a replay. */
+    const lastStep = new Map<string, number>();
+    const backups = createBackups({ store, settings, sessions, iter: backupIter, now, forgetCodes: user => lastStep.delete(user) });
     const tls = createTls({ now, readOnly: () => faults.tlsReadOnly });
+    const budget = createRequestBudget(() => settings.current().login.unauthenticatedPerMinute, () => now().getTime());
+    const connects = createConnectWindow(() => settings.current().session.connectsPerMinute, () => now().getTime());
     const router = createRouter({
-        store, sessions, settings, faults: () => faults, backupRoutes: backups.routes, tlsRoutes: tls.routes, restart, client: seed.client, upstream,
+        store, sessions, settings, faults: () => faults, anonymous: budget.take, connects,
+        backupRoutes: backups.routes, tlsRoutes: tls.routes, restart, client: seed.client, upstream,
     });
     let cookie: string | null = null;
     let ticketCookie: string | null = null;
     /** Between a restart and the gateway being back: nothing answers. */
     let down = false;
     const restartListeners: (() => void)[] = [];
-    /** The last TOTP step accepted per user: a step at or below it is a replay. */
-    const lastStep = new Map<string, number>();
     const tickets = createTickets(() => now().getTime(), () => settings.current().login.twoFactorMinutes * 60_000);
     // A user-wide drop (a password change, a delete, an import, a reset) ends that user's tickets too.
     sessions.onDropUser(user => tickets.dropUser(user));
-    const sockets = createSockets(store, sessions, () => cookie);
+    const sockets = createSockets(store, sessions, () => cookie, connects);
     changeListeners.push(() => sockets.recheck());
     const throttle = createThrottle(() => settings.current().login);
 
     /**
-     * The gateway restarts in place: every session, ticket and socket ends, and nothing
-     * answers until it is back, when the listeners run.
+     * The gateway restarts in place: every session, ticket and socket ends, the sign-in
+     * lockouts, the request budget, the connect windows and the code-replay record start
+     * empty as in a new process, and nothing answers until it is back, when the listeners run.
      */
     function restart(): void {
         sessions.dropAll();
         tickets.clear();
         sockets.closeAll();
+        throttle.clear();
+        budget.clear();
+        connects.clear();
+        lastStep.clear();
         cookie = null;
         ticketCookie = null;
         down = true;
@@ -290,7 +298,8 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
         if (!t || t.stage === 'code') return { ok: false, error: '', signedOut: true };
         const wait = throttle.wait(t.user);
         if (wait > 0) return { ok: false, error: throttledText(wait) };
-        if (acceptedStep(t.secret, code, now().getTime(), undefined) === null) {
+        const step = acceptedStep(t.secret, code, now().getTime(), undefined);
+        if (step === null) {
             throttle.failed(t.user);
             return { ok: false, error: BAD_CODE };
         }
@@ -303,7 +312,9 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
             return { ok: false, error: SIGNIN_FAILED, signedOut: true };
         }
         if (t.stage === 'enrol') cookie = sessions.create(t.user, t.mustChange);
-        lastStep.delete(t.user);   // a new secret starts its own history (forget in totp.go)
+        // The old secret's history means nothing for the new one; the code just used is
+        // recorded so it cannot also sign in (forget, then check, in pages.go).
+        lastStep.set(t.user, step);
         throttle.succeeded(t.user);
         sessions.dropOthers(t.user, cookie);
         endTicket();
