@@ -344,7 +344,7 @@ A guard on a module-owned element is not tested at all: the element is captured 
 
 ### Shared state
 
-Modules such as `queue-browser/state.js` export singletons that accumulate state across calls. Reset them in `beforeEach`.
+Queue Browser keeps its own state in one module-level object (`queue-browser/state.js`) that accumulates state across calls. Reset it in `beforeEach`.
 
 For Queue Browser, call `resetQueueBrowserState()` from [tests/helpers/resetQueueBrowserState.ts](../tests/helpers/resetQueueBrowserState.ts). It resets every field `state.js` declares on the singleton, and every Queue Browser test file, unit and integration, uses it so a partial reset cannot leak mutations across files. A field a UI file starts to use belongs in `state.js` with a default, never added to the state object at runtime.
 

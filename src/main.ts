@@ -7,7 +7,7 @@
 
 import './css/main.css';
 import { boot as preBoot } from './core/boot';
-import { Kernel } from './core/kernel';
+import { createKernel } from './core/kernel';
 import { logger } from './core/logger';
 import { modules } from './registry';
 
@@ -16,7 +16,7 @@ import { modules } from './registry';
 // before any module installs.
 preBoot();
 
-const kernel = new Kernel(modules);
+const kernel = createKernel(modules);
 
 // Start at once. This module script runs after the document is parsed, and
 // nothing at install needs the Solace SDK: it is used only once a session is

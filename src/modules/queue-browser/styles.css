@@ -67,10 +67,6 @@
     color: var(--text-primary);
 }
 
-.data-table tr.selected:hover td {
-    background-color: var(--solace-mint) !important;
-}
-
 /* ---------- Detail panel ---------- */
 .detail-label {
     font-size: 0.75rem;

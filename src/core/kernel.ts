@@ -9,6 +9,13 @@ import { logger, setLogLevel, getLogLevel, readLogLevelFromUrl } from './logger'
 import { LogLevel } from './constants';
 import { TOAST_EVENT, showToast, type ToastEventDetail } from './toast';
 import { createNotificationCenter, mountNotificationBell, type NotificationCenter } from './components/notification-center';
+import { createQueuePicker } from './components/queue-picker';
+
+/** The kernel `createKernel` returns: `start()` boots the app, `navigateTo()` shows one module's view. */
+export interface Kernel {
+    start(): Promise<void>;
+    navigateTo(id: string): void;
+}
 
 /**
  * Application Kernel
@@ -18,68 +25,63 @@ import { createNotificationCenter, mountNotificationBell, type NotificationCente
  * `src/registry.ts`), not on the module itself, so the entire ordering is
  * visible in one place; the kernel sorts by it before installing.
  *
- * Provides AppContext (eventBus, appState, setState, sempFetch, copyToClipboard)
- * as the shared platform for all modules.
+ * Provides AppContext (eventBus, appState, setState, sempFetch, queuePicker, copyToClipboard)
+ * as the shared platform for all modules. Its state lives in this closure.
  */
-export class Kernel {
+export function createKernel(registered: RegisteredModule[]): Kernel {
+    // Sort by priority descending (higher priority initializes first).
+    const sorted = [...registered].sort((a, b) => b.priority - a.priority);
     /** Modules in install order (priority descending). */
-    private modules: PwaModule[];
+    const modules: PwaModule[] = sorted.map(r => r.module);
     /** Priority lookup keyed by module id, populated from the registry input. */
-    private priorities: Map<string, number>;
-    private loadedModules: Map<string, { mod: PwaModule; container: HTMLElement }> = new Map();
-    private eventBus: EventBus;
-    private state: AppState;
+    const priorities = new Map<string, number>(sorted.map(r => [r.module.id, r.priority]));
+    const loadedModules = new Map<string, { mod: PwaModule; container: HTMLElement }>();
+    const eventBus: EventBus = createEventBus();
+    const state: AppState = {
+        activeModuleId: null,
+        isConnected: false,
+        selectedVpn: null,
+        solaceConnection: null,
+        sempCredentials: null,
+        isSempConnected: false
+    };
     /**
      * Managed profile handed to every module via AppContext. Created once per
      * kernel and inert until a managed login populates it, so non-managed
      * deployments are unaffected.
      */
-    private managedProfile: ManagedProfileStore = createManagedProfile();
+    const managedProfile: ManagedProfileStore = createManagedProfile();
     /**
      * The app's notification record (AppContext.notifications), one per
      * kernel, fed by every ok/warn/error toast and the connection lifecycle
      * (`wireNotifications`) and shown by the header bell.
      */
-    private notifications: NotificationCenter = createNotificationCenter();
-    private moduleContainer: HTMLElement | null = null;
-    private sidebarNav: HTMLElement | null = null;
-    private pageTitle: HTMLElement | null = null;
-    // Guard against accidental double-start — otherwise window listeners (5.3)
-    // and module install() calls (5.4) would accumulate duplicates. The invariant
-    // is "start() runs exactly once per Kernel instance". Enforcing it here keeps
-    // modules simple: they don't each need to defend against being installed twice.
-    private started = false;
-
-    constructor(registered: RegisteredModule[]) {
-        // Sort by priority descending (higher priority initializes first).
-        const sorted = [...registered].sort((a, b) => b.priority - a.priority);
-        this.modules = sorted.map(r => r.module);
-        this.priorities = new Map(sorted.map(r => [r.module.id, r.priority]));
-        this.eventBus = createEventBus();
-
-        this.state = {
-            activeModuleId: null,
-            isConnected: false,
-            selectedVpn: null,
-            solaceConnection: null,
-            sempCredentials: null,
-            isSempConnected: false
-        };
-    }
+    const notifications: NotificationCenter = createNotificationCenter();
+    /** The queue picker every module opens (AppContext.queuePicker), so its cache is shared. */
+    const queuePicker = createQueuePicker();
+    let moduleContainer: HTMLElement | null = null;
+    let sidebarNav: HTMLElement | null = null;
+    let pageTitle: HTMLElement | null = null;
+    /** The shell's "Loading..." placeholder in #module-container, until the first view is shown. */
+    let loading: Element | null | undefined = null;
+    // One start per kernel: a second would add the window listeners and
+    // install every module again. Enforcing it here keeps modules simple:
+    // none has to defend against being installed twice.
+    let started = false;
 
     /**
      * Bootstrap the application.
      * Called once after DOMContentLoaded + external libraries are loaded.
-     * Idempotent: a second call is a no-op that logs a warning — usually a sign
+     * Idempotent: a second call is a no-op that logs a warning -- usually a sign
      * main.ts was re-imported (HMR) or start() was invoked programmatically.
      */
-    async start(): Promise<void> {
-        if (this.started) {
-            logger.warn('[Kernel] start() called more than once — ignoring. '
+    async function start(): Promise<void> {
+        if (started) {
+            logger.warn('[Kernel] start() called more than once -- ignoring. '
                 + 'This usually means main.ts was re-imported (HMR) or start() was invoked programmatically.');
             return;
         }
-        this.started = true;
+        started = true;
 
         // Apply URL-overridden log level before any other kernel logging so the
         // very first banner respects the user's choice.
@@ -87,21 +89,22 @@ export class Kernel {
         if (fromUrl !== null) setLogLevel(fromUrl);
 
         logger.info(`[Kernel] Starting Solace Message Utility v${__APP_VERSION__} (logLevel=${LogLevel[getLogLevel()]})`);
-        logger.info(`[Kernel] ${this.modules.length} module(s) registered, sorted by priority:`);
-        this.modules.forEach(m => logger.info(`  → ${m.name} (priority: ${this.priorities.get(m.id)})`));
+        logger.info(`[Kernel] ${modules.length} module(s) registered, sorted by priority:`);
+        modules.forEach(m => logger.info(`  -> ${m.name} (priority: ${priorities.get(m.id)})`));
 
         // Cache DOM references
-        this.sidebarNav = document.getElementById('sidebar-nav');
-        this.moduleContainer = document.getElementById('module-container');
-        this.pageTitle = document.getElementById('page-title');
+        sidebarNav = document.getElementById('sidebar-nav');
+        moduleContainer = document.getElementById('module-container');
+        pageTitle = document.getElementById('page-title');
 
         // #module-container's only initial child is the shell's #app-loading
         // placeholder. It stays until the first module view is shown
         // (navigateTo) or is replaced by the no-modules message below.
+        loading = moduleContainer?.querySelector('#app-loading');
 
         // Before any module installs, so a toast or a connection event raised
         // during install is recorded too.
-        this.wireNotifications();
+        wireNotifications();
 
         // Sidebar toggle
         const mainSidebar = document.getElementById('main-sidebar');
@@ -118,45 +121,44 @@ export class Kernel {
         // subscribed yet. release() flushes the buffered emits in FIFO order once
         // every module has finished install().
         // try/finally: the bus must never stay held, whatever an install path throws.
-        this.eventBus.hold();
+        eventBus.hold();
         try {
-            for (const mod of this.modules) {
-                await this.installModule(mod);
+            for (const mod of modules) {
+                await installModule(mod);
             }
         } finally {
-            this.eventBus.release();
+            eventBus.release();
         }
 
-        // Bridge: HTML bootstrap script fires window 'jszip:loaded' — forward to EventBus
-        window.addEventListener('jszip:loaded', () => this.eventBus.emit('jszip:loaded'));
+        // Bridge: HTML bootstrap script fires window 'jszip:loaded' -- forward to EventBus
+        window.addEventListener('jszip:loaded', () => eventBus.emit('jszip:loaded'));
         // If JSZip already loaded before we registered the listener, emit now
-        if ((window as any).jszipLoaded) {
-            this.eventBus.emit('jszip:loaded');
+        if (window.jszipLoaded) {
+            eventBus.emit('jszip:loaded');
         }
 
         // Render sidebar navigation
-        this.renderSidebar();
+        renderSidebar();
 
         // Re-render the sidebar (and navigate away from a now-hidden view) when
         // the managed RBAC session changes. No-op in non-managed variants, which
         // never emit this event. Registered once per kernel.
-        this.eventBus.on('rbac:changed', () => this.handleRbacChanged());
+        eventBus.on('rbac:changed', () => handleRbacChanged());
 
         // Activate the first module that actually installed AND is visible under
         // the current session. If `modules[0]` failed (template missing, install()
         // threw) it isn't in `loadedModules`; if it's hidden by RBAC it's skipped.
         // Fall through to the next module so the user still sees something.
-        const firstInstalled = this.modules.find(
-            m => this.loadedModules.has(m.id) && isModuleVisible(this.state.managed, m.id)
+        const firstInstalled = modules.find(
+            m => loadedModules.has(m.id) && isModuleVisible(state.managed, m.id)
         );
         if (firstInstalled) {
-            this.navigateTo(firstInstalled.id);
+            navigateTo(firstInstalled.id);
         } else {
-            if (this.modules.length > 0) {
+            if (modules.length > 0) {
                 logger.error('[Kernel] No modules installed successfully -- nothing to navigate to.');
             }
             // Replace the shell's "Loading..." with a visible reason.
-            const loading = this.moduleContainer?.querySelector('#app-loading');
             if (loading) loading.textContent = 'No modules are available. Check the browser console.';
         }
 
@@ -166,12 +168,12 @@ export class Kernel {
     /**
      * Install a single module: create its DOM container, clone template, call install().
      */
-    private async installModule(mod: PwaModule): Promise<void> {
+    async function installModule(mod: PwaModule): Promise<void> {
         logger.info(`[Kernel] Installing module: ${mod.name} (${mod.id})`);
 
         // Find the module's HTML template
         const tpl = document.querySelector(`template[data-module-id="${mod.id}"]`) as HTMLTemplateElement | null;
-        if (!tpl || !this.moduleContainer) {
+        if (!tpl || !moduleContainer) {
             logger.error(
                 `[Kernel] Template for module "${mod.name}" (data-module-id="${mod.id}") not found. ` +
                 `Make sure src/modules/${mod.id}/index.html exists if "${mod.id}" is in the active variant manifest (src/variants/).`
@@ -184,27 +186,28 @@ export class Kernel {
         wrapper.id = `module-view-${mod.id}`;
         wrapper.className = 'module-view hidden';
         wrapper.appendChild(document.importNode(tpl.content, true));
-        this.moduleContainer.appendChild(wrapper);
+        moduleContainer.appendChild(wrapper);
 
         // Build the AppContext for this module
         const appContext: AppContext = {
             container: wrapper,
-            appState: this.state,
-            eventBus: this.eventBus,
-            setState: this.appSetState.bind(this),
-            loadSelf: () => this.navigateTo(mod.id),
-            sempFetch: this.sempFetch.bind(this),
+            appState: state,
+            eventBus,
+            setState: appSetState,
+            loadSelf: () => navigateTo(mod.id),
+            sempFetch,
             // One profile shared by every module: the module owning the managed
             // login writes it, others read provisioned names and dial through it.
-            managedProfile: this.managedProfile,
-            notifications: this.notifications,
-            copyToClipboard: this.copyToClipboard.bind(this),
-            mountSidebarAccount: this.mountSidebarAccount.bind(this)
+            managedProfile,
+            notifications,
+            queuePicker,
+            copyToClipboard,
+            mountSidebarAccount
         };
 
         try {
             await mod.install(appContext);
-            this.loadedModules.set(mod.id, { mod, container: wrapper });
+            loadedModules.set(mod.id, { mod, container: wrapper });
             logger.info(`[Kernel] ✓ Module "${mod.name}" installed successfully`);
         } catch (err) {
             logger.error(`[Kernel] ✗ Failed to install module "${mod.name}":`, err);
@@ -221,31 +224,31 @@ export class Kernel {
      * before `client:disconnected`, so the identity is remembered at connect.
      * Both shell elements are optional (the kernel owns the shell).
      */
-    private wireNotifications(): void {
-        const center = this.notifications;
+    function wireNotifications(): void {
+        const center = notifications;
         document.getElementById('toast-container')?.addEventListener(TOAST_EVENT, (e) => {
             const { message, type } = (e as CustomEvent<ToastEventDetail>).detail;
             if (type === 'info') return;
-            const active = this.loadedModules.get(this.state.activeModuleId ?? '');
+            const active = loadedModules.get(state.activeModuleId ?? '');
             center.add(type, active?.mod.name ?? 'App', message);
         });
         const slot = document.getElementById('notification-bell-slot');
         if (slot) mountNotificationBell(slot, center);
 
         let last = { host: '', vpn: '' };
-        this.eventBus.on('client:connected', () => {
-            const conn = this.state.solaceConnection;
+        eventBus.on('client:connected', () => {
+            const conn = state.solaceConnection;
             last = { host: conn?.host ?? '', vpn: conn?.vpn ?? '' };
-            center.noteConnected({ broker: last.host, provisioned: !!this.state.managed });
+            center.noteConnected({ broker: last.host, provisioned: !!state.managed });
             center.add('info', 'Connections', `Connected to broker "${last.host}", VPN "${last.vpn}".`);
         });
-        this.eventBus.on('client:disconnected', () => {
+        eventBus.on('client:disconnected', () => {
             center.add('info', 'Connections', `Disconnected from broker "${last.host}", VPN "${last.vpn}".`);
         });
-        this.eventBus.on('semp:connected', () => {
-            center.add('info', 'Connections', `SEMP connected to "${this.state.sempCredentials?.host ?? ''}".`);
+        eventBus.on('semp:connected', () => {
+            center.add('info', 'Connections', `SEMP connected to "${state.sempCredentials?.host ?? ''}".`);
         });
-        this.eventBus.on('semp:disconnected', () => {
+        eventBus.on('semp:disconnected', () => {
             center.add('info', 'Connections', 'SEMP disconnected.');
         });
     }
@@ -253,11 +256,11 @@ export class Kernel {
     /**
      * Navigate to a module view (show its container, hide others).
      */
-    navigateTo(id: string): void {
-        const entry = this.loadedModules.get(id);
+    function navigateTo(id: string): void {
+        const entry = loadedModules.get(id);
         if (!entry) return;
 
-        this.state.activeModuleId = id;
+        state.activeModuleId = id;
 
         // Update sidebar active state
         document.querySelectorAll('.nav-item').forEach(el => {
@@ -265,65 +268,67 @@ export class Kernel {
         });
 
         // Update page title
-        if (this.pageTitle) this.pageTitle.textContent = entry.mod.name;
+        if (pageTitle) pageTitle.textContent = entry.mod.name;
 
-        // Toggle visibility
-        if (this.moduleContainer) {
-            this.moduleContainer.querySelectorAll('.module-view').forEach(v => v.classList.add('hidden'));
-            // The shell's "Loading..." placeholder goes with the first view shown.
-            this.moduleContainer.querySelector('#app-loading')?.remove();
+        // Show this view and hide the others. A view whose install failed was
+        // created hidden and stays so. The shell's "Loading..." placeholder
+        // goes with the first view shown.
+        for (const { container } of loadedModules.values()) {
+            container.classList.toggle('hidden', container !== entry.container);
         }
-        entry.container.classList.remove('hidden');
+        loading?.remove();
+        loading = null;
     }
 
     /**
      * Render sidebar navigation items from loaded modules.
      */
-    private renderSidebar(): void {
-        if (!this.sidebarNav) return;
-        this.sidebarNav.innerHTML = '';
+    function renderSidebar(): void {
+        const nav = sidebarNav;
+        if (!nav) return;
+        nav.innerHTML = '';
 
         // Default icon for modules without a custom one
         const defaultIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>';
 
         // Sort by priority descending for consistent ordering. `priorities`
-        // is populated from the registry in the constructor for every loaded
-        // module — the `!` assertion makes the contract executable. Then filter
-        // by RBAC visibility (allow-all when there's no managed session, so
-        // non-managed variants render every module exactly as before).
-        const sorted = [...this.loadedModules.values()]
+        // is populated from the registry for every loaded module -- the `!`
+        // assertion makes the contract executable. Then filter by RBAC
+        // visibility (allow-all when there's no managed session, so
+        // non-managed variants render every module).
+        const visible = [...loadedModules.values()]
             .sort((a, b) => {
-                const pa = this.priorities.get(a.mod.id)!;
-                const pb = this.priorities.get(b.mod.id)!;
+                const pa = priorities.get(a.mod.id)!;
+                const pb = priorities.get(b.mod.id)!;
                 return pb - pa;
             })
-            .filter(({ mod }) => isModuleVisible(this.state.managed, mod.id));
+            .filter(({ mod }) => isModuleVisible(state.managed, mod.id));
 
-        sorted.forEach(({ mod }) => {
+        visible.forEach(({ mod }) => {
             const item = document.createElement('div');
             item.className = 'nav-item';
             item.dataset.moduleId = mod.id;
             item.title = mod.name;
 
             // mod.name is developer-controlled (registry), but escape for defense-in-depth.
-            // mod.icon is intentionally raw SVG markup from the module — not escaped.
+            // mod.icon is intentionally raw SVG markup from the module -- not escaped.
             item.innerHTML = `
         <span class="nav-icon">${mod.icon || defaultIcon}</span>
         <span class="nav-text">${escapeHtml(mod.name)}</span>
       `;
 
-            item.onclick = () => this.navigateTo(mod.id);
-            this.sidebarNav!.appendChild(item);
+            item.onclick = () => navigateTo(mod.id);
+            nav.appendChild(item);
         });
 
-        // Re-apply the active highlight after rebuilding — navigateTo is the only
+        // Re-apply the active highlight after rebuilding -- navigateTo is the only
         // other place that sets it, so a re-render (e.g. on rbac:changed) would
         // otherwise drop the highlight on the currently-viewed module.
-        if (this.state.activeModuleId) {
-            this.sidebarNav!.querySelectorAll('.nav-item').forEach(el => {
+        if (state.activeModuleId) {
+            nav.querySelectorAll('.nav-item').forEach(el => {
                 (el as HTMLElement).classList.toggle(
                     'active',
-                    (el as HTMLElement).dataset.moduleId === this.state.activeModuleId
+                    (el as HTMLElement).dataset.moduleId === state.activeModuleId
                 );
             });
         }
@@ -331,27 +336,27 @@ export class Kernel {
 
     /**
      * React to a managed RBAC session change: re-render the sidebar (module
-     * visibility), then — if the active module is now hidden — navigate to the
+     * visibility), then -- if the active module is now hidden -- navigate to the
      * highest-priority module that is still installed AND visible. No-op in
      * non-managed variants, where this event never fires.
      */
-    private handleRbacChanged(): void {
-        this.renderSidebar();
-        if (this.state.activeModuleId && !isModuleVisible(this.state.managed, this.state.activeModuleId)) {
-            const firstVisible = this.modules.find(
-                m => this.loadedModules.has(m.id) && isModuleVisible(this.state.managed, m.id)
+    function handleRbacChanged(): void {
+        renderSidebar();
+        if (state.activeModuleId && !isModuleVisible(state.managed, state.activeModuleId)) {
+            const firstVisible = modules.find(
+                m => loadedModules.has(m.id) && isModuleVisible(state.managed, m.id)
             );
-            if (firstVisible) this.navigateTo(firstVisible.id);
+            if (firstVisible) navigateTo(firstVisible.id);
         }
     }
 
     /**
      * Typed state updater exposed to modules via AppContext.setState().
      */
-    private appSetState<K extends keyof AppState>(key: K, value: AppState[K]): void {
-        this.state[key] = value;
-        this.updateGlobalUI();
-        this.eventBus.emit('app:state-change', { key, value });
+    function appSetState<K extends keyof AppState>(key: K, value: AppState[K]): void {
+        state[key] = value;
+        updateGlobalUI();
+        eventBus.emit('app:state-change', { key, value });
     }
 
     /**
@@ -361,7 +366,7 @@ export class Kernel {
      * the connection-form values (protocol/host/port/urlPath) are the single
      * source of truth, run through `buildBrokerUrl()` so hosted-mode gateway
      * routing is applied uniformly. Broker-emitted URLs (e.g. nextPageUri)
-     * never reach the wire — callers extract pathname+search from them
+     * never reach the wire -- callers extract pathname+search from them
      * before calling here. Basic auth is auto-injected, built by the same
      * `basicAuthHeader` as the connect probe so both send the same bytes.
      * Every request has a deadline (`REQUEST_TIMEOUT_MS`), joined to the
@@ -374,9 +379,9 @@ export class Kernel {
      * ended, so the session owner is also asked to sign out; the relay's own
      * refusals (403 read_only, 502 upstream_*) leave the connection as it is.
      */
-    private async sempFetch(path: string, options: RequestInit = {}): Promise<Response> {
+    async function sempFetch(path: string, options: RequestInit = {}): Promise<Response> {
         const defaults: RequestInit = { headers: {} };
-        const creds = this.state.sempCredentials;
+        const creds = state.sempCredentials;
 
         let url = path;
         if (creds?.relay) {
@@ -385,7 +390,7 @@ export class Kernel {
             const { user, pass, protocol, host, port, urlPath } = creds;
             (defaults.headers as Record<string, string>)['Authorization'] = basicAuthHeader(user, pass);
             const fullPath = normalizeUrlPath(urlPath) + path;
-            url = buildBrokerUrl(protocol, host, port, fullPath, false, isHostedDeployment(this.state));
+            url = buildBrokerUrl(protocol, host, port, fullPath, false, isHostedDeployment(state));
         }
 
         const finalOptions: RequestInit = {
@@ -402,10 +407,10 @@ export class Kernel {
         const response = await fetch(url, finalOptions);
         if (response.status === 401) {
             logger.warn(`[Kernel] SEMP 401 Unauthorized from ${url} -- terminating connection`);
-            this.appSetState('isSempConnected', false);
-            this.appSetState('sempCredentials', null);
-            this.eventBus.emit('semp:disconnected');
-            if (creds?.relay) this.eventBus.emit('rbac:sign-out-requested');
+            appSetState('isSempConnected', false);
+            appSetState('sempCredentials', null);
+            eventBus.emit('semp:disconnected');
+            if (creds?.relay) eventBus.emit('rbac:sign-out-requested');
         }
         return response;
     }
@@ -413,7 +418,7 @@ export class Kernel {
     /**
      * Clipboard copy helper with visual feedback on button.
      */
-    private async copyToClipboard(text: string, btnElement?: HTMLElement): Promise<void> {
+    async function copyToClipboard(text: string, btnElement?: HTMLElement): Promise<void> {
         if (!text) return;
         try {
             await navigator.clipboard.writeText(text);
@@ -434,22 +439,24 @@ export class Kernel {
     }
 
     /** The shell's account slot at the top of the sidebar, above the page items (AppContext.mountSidebarAccount). */
-    private mountSidebarAccount(el: HTMLElement): void {
+    function mountSidebarAccount(el: HTMLElement): void {
         document.getElementById('sidebar-account')?.replaceChildren(el);
     }
 
     /**
      * Update global status indicators in the sidebar footer.
      */
-    private updateGlobalUI(): void {
+    function updateGlobalUI(): void {
         const indClient = document.getElementById('status-indicator-client');
         const indSemp = document.getElementById('status-indicator-semp');
 
         if (indClient) {
-            indClient.classList.toggle('status-connected', !!this.state.isConnected);
+            indClient.classList.toggle('status-connected', !!state.isConnected);
         }
         if (indSemp) {
-            indSemp.classList.toggle('status-connected', !!this.state.isSempConnected);
+            indSemp.classList.toggle('status-connected', !!state.isSempConnected);
         }
     }
+
+    return { start, navigateTo };
 }

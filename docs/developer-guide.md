@@ -63,7 +63,7 @@ The dev server hot-reloads on file changes. TypeScript compilation errors appear
 | `npm run build:demo` | `standard`, demo mode | `demo.html` (interactive demo backed by the in-browser mock broker) |
 | `npm run build:no-payload` | `standard`, `--show-payload=false` | `no-payload.html` (queue-browser with the message body hidden; see [Build-time feature flags](#build-time-feature-flags)) |
 | `npm run build:no-queue-copy` | `no-queue-copy` | `no-queue-copy.html` (standard minus the Queue Copy module) |
-| `npm run build:all` | `all-for-testing-only` | `all-test.html` (kitchen-sink QA build: every module, including the admin ones) |
+| `npm run build:all` | `all-for-testing-only` | `all-test.html` (kitchen-sink QA build: every module a variant ships, including the admin ones) |
 | `npm run build:admin` | `admin` | `solAdmin.html` (the standalone administration app; see [architecture.md -> The admin app](architecture.md#the-admin-app-soladmin)) |
 | `npm run build:provisioned` | `managed` | `provisioned.html` (standard plus the Provisioned sign-in; the gateway serves it at `/` in Provisioned mode) |
 | `npm run build:provisioned-demo` | `managed-demo`, demo mode | `provisioned-demo.html` (the Provisioned modules and the admin pages against the demo's fake gateway and broker; see [architecture.md -> The demo broker](architecture.md#the-demo-broker-demohtml-provisioned-demohtml)) |
@@ -187,7 +187,7 @@ src/
                                # resolveConnTabs (fed by SMU_CONN_MODES/SMU_DEFAULT_CONN)
     components/                # Reusable UI components with function APIs.
       queue-picker/
-        index.ts               # pickQueue(source, opts?) -- takes a QueueSource, never SEMP directly
+        index.ts               # createQueuePicker() -> ctx.queuePicker.pick(source, opts?) -- takes a QueueSource, never SEMP directly
         styles.css             # Component-scoped .picker-* styles
       row-list/
         index.ts               # createRowList(container, fields) -- dynamic add/remove row editor (admin forms);
@@ -203,7 +203,7 @@ src/
       notification-center/
         index.ts               # The bell in the header: a record of toasts and the connection lifecycle
       module-gate/
-        index.ts               # createGate(container, {id,title,message}) -- full-view "... Required" gate card
+        index.ts               # createGate(container, {id,title,message}) -- full-view "... Required" gate card; gateOnAdminSession(app, handlers) for admin modules
   css/                 # Split by responsibility; aggregated by main.css
     variables.css      # :root design tokens
     reset.css          # * resets
@@ -264,7 +264,7 @@ src/
     admin.ts           # The /solAdmin app -- admin-login, the two entitlement editors, gateway settings, certificates, backup
     managed.ts         # provisioned.html, served in Provisioned mode -- standard + connections' managed entry (MODULE_ENTRIES)
     managed-demo.ts    # provisioned-demo.html -- the Provisioned modules and the admin pages against the fake gateway
-    all-for-testing-only.ts  # Kitchen-sink QA build -- every module, incl. the admin ones
+    all-for-testing-only.ts  # Kitchen-sink QA build -- every module a variant ships, incl. the admin ones
     _active.ts         # One-line re-export from one variant (default ./standard)
   mock-broker/         # DEMO ONLY -- entered solely via the demo-mode import redirect,
                        # so no production bundle contains it.
@@ -330,6 +330,7 @@ interface AppContext {
     sempFetch(path, opts): Promise<Response>;  // SEMP with auto-injected auth (Provisioned: the gateway relay)
     managedProfile: ManagedProfileStore;  // Provisioned names; dials targets on request
     notifications: NotificationCenter;    // The record behind the header bell
+    queuePicker: QueuePicker;             // The queue picker dialog: pick(source, opts?)
     copyToClipboard(text, btn?): Promise<void>;  // Clipboard + feedback
     mountSidebarAccount(el): void;        // Place an account control at the top of the sidebar
 }
@@ -481,7 +482,7 @@ A browser event that arrives before step 3 throws `wire() not called before a br
 
    **Admin list modules:** an admin CRUD list calls `renderAdminRows(tbody, shown, total, query, { plural, noun, classPrefix, cells, label, onEdit, onDelete })` from `core/components/row-list` for its rows and filter feedback, and `setError(el, msg)` from `core/dom` for banners. Do not write a local `setError` or a hand-built row and actions cell.
 
-   **Install renders from current state; an event handler acts only on a real change of the state it depends on.** The kernel replays a held `rbac:changed` to every module after install, so a handler that refetches or re-gates on every `rbac:changed` repeats the work `install` just did. The admin modules (`user-management`, `connection-management`, `gateway-settings`, `backup`) keep a session key (`JSON.stringify([username, admin])`, `null` when signed out) and their `rbac:changed` handler returns early when the key equals the one last applied. A direct `applyGate()` after a save or Refresh stays unconditional, so a module that emits `rbac:changed` for others about its own change (User Management saving its own entitlements) also calls `applyGate()` itself. Test it with one case for the unchanged session (no request) and one for a real change (sign-out and in, another admin, a demotion).
+   **Install renders from current state; an event handler acts only on a real change of the state it depends on.** The kernel replays a held `rbac:changed` to every module after install, so a handler that refetches or re-gates on every `rbac:changed` repeats the work `install` just did. The admin modules (`user-management`, `connection-management`, `gateway-settings`, `tls-certificates`, `backup`) gate through `gateOnAdminSession(app, { onAdmin, onNoAdmin })` in `src/core/components/module-gate/`: it keeps a session key (`JSON.stringify([username, admin])`, `null` when signed out), and its `rbac:changed` handler returns early when the key equals the one last applied. The `applyGate()` it returns is unconditional: the module calls it at the end of install and after a save or Refresh, so a module that emits `rbac:changed` for others about its own change (User Management saving its own entitlements) also calls `applyGate()` itself. Test it with one case for the unchanged session (no request) and one for a real change (sign-out and in, another admin, a demotion).
 
 6. **Write tests** in `tests/modules/your-module/module.test.ts`, mirroring the source path. Load the real template with `loadModuleDOM('your-module')` from `tests/helpers/loadModuleDOM.ts`. [testing.md](testing.md) has the conventions, the shared helpers and the coverage rules.
 
@@ -505,7 +506,7 @@ One set of conventions for the whole codebase. Where a rule can be checked by a 
 ### File Organization
 
 - One concern per file (not one class per file: there are no classes).
-- Factory functions over classes; module-scoped state lives in closures, not global singletons. Modules receive their dependencies through `AppContext`.
+- Factory functions over classes. State the app shares across modules goes through `AppContext`; a module's own state stays inside the module, in a factory closure for new code. A core component that keeps state is created once per app and handed out on the context, as the queue picker is (`ctx.queuePicker`). Modules receive their dependencies through `AppContext`.
 - Services: `service.ts`, `service-*.ts`. Never add a `service-*-mock.ts` sibling: the demo build runs the real services against the in-browser broker, so new demo behaviour goes in `src/mock-broker/` and is covered in `tests/mock-broker/`.
 - UI: `ui.js`, `ui-*.ts`, `ui-*.js`
 - State: `state.js`

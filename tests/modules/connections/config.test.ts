@@ -92,7 +92,7 @@ describe('connections/config', () => {
         it('returns null and logs when localStorage.getItem throws', () => {
             // localStorage can throw SecurityError in browser privacy mode,
             // sandboxed iframes, or file:// origins where storage is denied.
-            // The outer catch at config.js:64-67 turns that into "no saved config"
+            // The outer catch in config.load() turns that into "no saved config"
             // so install() doesn't break — covered here.
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             const err = new DOMException('storage denied', 'SecurityError');

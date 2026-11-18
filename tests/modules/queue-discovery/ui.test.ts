@@ -210,7 +210,7 @@ describe('queue-discovery/ui', () => {
         });
 
         it('handles null vpnInput (production shape — refresh-queues passes null vpnInput, real queue/btn)', () => {
-            // Production callers at queue-discovery/module.ts:192, 222, 270 pass
+            // Production callers in queue-discovery/module.ts pass
             // `null` for vpnInput but always pass real `required()` elements for
             // queueInput and btnCopy. This test exercises that real call shape.
             const queueInput = document.createElement('input');

@@ -82,14 +82,14 @@ export interface GatewaySnapshot {
     cookie: string | null;
     faults: GatewayFaults;
     throttle: ThrottleState;
-    /** Absent in a snapshot from a build before Backup & Restore. */
+    /** Optional: a snapshot saved without Backup & Restore state lacks it. */
     backups?: BackupsState;
-    /** Absent in a snapshot from a build before two-factor sign-in. */
+    /** Optional: a snapshot saved without two-factor state lacks it. */
     tickets?: [string, Ticket][];
     ticketCookie?: string | null;
     /** The last step accepted per user (the replay rule). */
     lastSteps?: [string, number][];
-    /** Absent in a snapshot from a build before the TLS console. */
+    /** Optional: a snapshot saved without the TLS console's state lacks it. */
     tls?: TlsState;
 }
 

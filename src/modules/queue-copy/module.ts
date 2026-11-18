@@ -20,8 +20,7 @@
  * The modal Confirm Queue Copy verifies the source via SEMP v1 (with a
  * QueueBrowser-accumulate fallback) and then runs the copy/move engine.
  *
- * Priority 20: below queue-browser (30) so it appears beneath it in the
- * sidebar. Depends on the primary connection from the connections module.
+ * Depends on the primary connection from the connections module.
  */
 
 import {
@@ -64,6 +63,7 @@ import { errMessage, sempAccountError } from '../../core/utils';
 import { isSessionEnded } from '../../core/services/managed-profile';
 import { connectProvisioned, gatewayCodeOf, outcomeDetails, outcomeLines, type StepResult } from '../../core/services/provisioned-connect';
 import { managedErrorMessage } from '../../core/services/managed-api';
+import { DEFAULT_MAX_MESSAGES_PER_QUEUE, DESTINATION_SDK_CONNECT } from '../../core/connections/defaults';
 import type { AppContext, SempConfig, SempContext, SolaceConfig } from '../../core/types';
 
 export const QueueCopyModule = {
@@ -381,11 +381,8 @@ export const QueueCopyModule = {
                 vpn: f.solace.vpn,
                 user: f.solace.user,
                 authMode: 'basic',
-                connectRetries: 0,
-                connectTimeout: 3000,
-                reconnectRetries: 1,
-                reconnectWait: 3000,
-                maxMessagesPerQueue: 100,
+                ...DESTINATION_SDK_CONNECT,
+                maxMessagesPerQueue: DEFAULT_MAX_MESSAGES_PER_QUEUE,
                 hosted,
                 // Dest connect() takes its clientName as a separate 4th arg and
                 // never reads cfg.clientNameId, so this satisfies the required
@@ -636,11 +633,6 @@ export const QueueCopyModule = {
             refreshDestPickVisible();
         });
 
-        // After the connections module switches the primary VPN at queue-copy's
-        // request, navigate back here and write the picked source queue name
-        // into the input. The source picker emitted connection:check-connection
-        // with returnTo='queue-copy', and connections fired this event once
-        // the new VPN was UP.
         /**
          * Entitlements changed underneath us (login / Refresh / logout / the
          * Direct-connect interlock).
@@ -699,6 +691,11 @@ export const QueueCopyModule = {
             }
         });
 
+        // After the connections module switches the primary VPN at queue-copy's
+        // request, navigate back here and write the picked source queue name
+        // into the input. The source picker emitted connection:check-connection
+        // with returnTo='queue-copy', and connections fired this event once
+        // the new VPN was UP.
         eventBus.on('copy:vpn-switched', ({ queue }) => {
             if (loadSelf) loadSelf();
             state.sourceQueue = queue;

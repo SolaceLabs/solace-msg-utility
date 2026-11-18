@@ -476,7 +476,7 @@ describe('queue-browser/state', () => {
         });
 
         it('destination type filter rejects messages with unknown destination type', () => {
-            // Covers the falsy branch of `else if (t === QUEUE)` at state.js:157 —
+            // Covers the falsy branch of `else if (t === QUEUE)` in the destination-type filter --
             // for any DestinationType that's neither TOPIC nor QUEUE (e.g. a future
             // SDK enum value), msgDestType must stay '' rather than crash. A regression
             // that added `else throw new Error(...)` would break installs on newer

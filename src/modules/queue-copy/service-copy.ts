@@ -14,8 +14,8 @@ import type { SolacePublisher } from '../../core/services/solace-publisher';
 declare const solace: any;
 
 /**
- * Re-export from ./constants so test files importing these names from
- * `./service-copy` continue to work. The value definitions live in
+ * Re-exported for callers of the copy engine that size against its limits
+ * (the demo's copy-flow test). The value definitions live in
  * [`./constants.ts`](./constants.ts) — single source of truth, kept in sync
  * with the demo build. Full semantic docstrings (idle behavior, backpressure
  * hysteresis rationale, SDK publish-window context) stay below at the use
@@ -372,8 +372,8 @@ export function runCopyJob(
             }
 
             const msgId = msgIdToString(msg);
-            // Template-literal coercion renders a null msgId as 'null' — fine
-            // for a debug log; the `?? '(no-id)'` fallback was cosmetic.
+            // Template-literal coercion renders a null msgId as 'null', which
+            // is fine for a debug log.
             logger.debug(`[Copy] MESSAGE received id=${msgId} inFlight=${inFlight}`);
 
             // First-message drift check — strictly synchronous (before any
@@ -447,9 +447,8 @@ export function runCopyJob(
             if (!browserPaused && inFlight >= PUBLISH_CONCURRENCY_HIGH) {
                 browserPaused = true;
                 try { browser.stop(); } catch { /* swallow — best-effort */ }
-                // clearTimeout silently ignores null/undefined; the guard
-                // (idleTimer !== null) was purely cosmetic — every pause path
-                // is reached via a MESSAGE that already called resetIdleTimer.
+                // Every pause path is reached via a MESSAGE that already
+                // called resetIdleTimer, so the timer is set here.
                 clearTimeout(idleTimer!);
                 idleTimer = null;
                 logger.debug(`[Copy] backpressure: pausing source browser at inFlight=${inFlight} (idle timer suspended)`);

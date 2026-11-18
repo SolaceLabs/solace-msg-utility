@@ -66,8 +66,8 @@ export function initDetails(ctx: AppContext) {
             if (dest) {
                 fullObj.messageProperties.destination.name = dest.getName();
                 const dType = dest.getType();
-                if (dType === (window as any).solace.DestinationType.TOPIC) fullObj.messageProperties.destination.type = 'Topic';
-                else if (dType === (window as any).solace.DestinationType.QUEUE) fullObj.messageProperties.destination.type = 'Queue';
+                if (dType === window.solace.DestinationType.TOPIC) fullObj.messageProperties.destination.type = 'Topic';
+                else if (dType === window.solace.DestinationType.QUEUE) fullObj.messageProperties.destination.type = 'Queue';
                 else fullObj.messageProperties.destination.type = dType.toString();
             }
         } catch (e) { log.warn('Failed to extract destination details', e); }
@@ -184,7 +184,7 @@ export function initDetails(ctx: AppContext) {
         const els = ui.getElements();
 
         // Highlight row
-        els.msgList.querySelectorAll('tr').forEach((tr: any) => {
+        els.msgList.querySelectorAll('tr').forEach((tr: HTMLTableRowElement) => {
             if (tr.dataset.id === id) tr.classList.add('selected');
             else tr.classList.remove('selected');
         });
@@ -205,8 +205,8 @@ export function initDetails(ctx: AppContext) {
                 els.detailDest.textContent = destName;
                 const destType = dest.getType();
                 let typeLabel = destType.toString();
-                if (destType === (window as any).solace.DestinationType.TOPIC) typeLabel = 'Topic';
-                else if (destType === (window as any).solace.DestinationType.QUEUE) typeLabel = 'Queue';
+                if (destType === window.solace.DestinationType.TOPIC) typeLabel = 'Topic';
+                else if (destType === window.solace.DestinationType.QUEUE) typeLabel = 'Queue';
                 els.detailDestBadge.textContent = typeLabel;
             } else {
                 els.detailDest.textContent = 'N/A';
@@ -274,7 +274,7 @@ export function initDetails(ctx: AppContext) {
         els.detailTypeBadge.classList.add('hidden');
         els.detailDestBadge.classList.add('hidden');
 
-        els.msgList.querySelectorAll('tr.selected').forEach((tr: any) => tr.classList.remove('selected'));
+        els.msgList.querySelectorAll('tr.selected').forEach((tr: Element) => tr.classList.remove('selected'));
     };
 
     ui.createTag = function (container: HTMLElement, key: string, val: any) {
@@ -371,9 +371,9 @@ export function initDetails(ctx: AppContext) {
 
         const rows = container.querySelectorAll('.property-filter-row');
         const filters: { key: string; value: string }[] = [];
-        rows.forEach((row: any) => {
-            const key = row.querySelector('.prop-key').value.trim();
-            const value = row.querySelector('.prop-value').value.trim();
+        rows.forEach((row: Element) => {
+            const key = (row.querySelector('.prop-key') as HTMLInputElement).value.trim();
+            const value = (row.querySelector('.prop-value') as HTMLInputElement).value.trim();
             if (key) {
                 filters.push({ key, value });
             }

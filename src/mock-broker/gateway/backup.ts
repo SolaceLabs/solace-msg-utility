@@ -397,7 +397,7 @@ interface ScheduleState { schedule: BackupSchedule; keep: number; key: BackupKey
 export interface BackupsState {
     files: [string, string][];
     lastRun: { at: string; file: string; error: string } | null;
-    /** Absent in a snapshot from a build before the schedule had a version. */
+    /** Optional: a snapshot saved without a schedule version lacks it. */
     seq?: number;
 }
 

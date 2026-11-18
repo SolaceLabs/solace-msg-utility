@@ -7,9 +7,8 @@ import type { VerifyResult } from './state';
 
 declare const solace: any;
 
-// Re-export from ./constants so test files importing ACCUMULATE_IDLE_MS from
-// `./service-verify` continue to work. Value definition lives in
-// [`./constants.ts`](./constants.ts).
+// Re-exported beside verifySource, whose accumulate fallback it times. Value
+// definition lives in [`./constants.ts`](./constants.ts).
 export { ACCUMULATE_IDLE_MS };
 
 /** Solace SEMP `quota` is reported in megabytes; this converts to bytes. */

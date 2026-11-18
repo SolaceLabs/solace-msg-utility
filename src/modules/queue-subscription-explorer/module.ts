@@ -4,8 +4,7 @@
  * Lists every (vpn, queue, topic-subscription) triple visible to the SEMP
  * user. Three column-filter inputs combine with AND semantics. VPN/Queue use
  * substring + explicit-`*` matching; Subscription uses bidirectional Solace
- * topic intersection (* and > on either side). Priority is configured in
- * `src/registry.ts` alongside the other SEMP-only modules.
+ * topic intersection (* and > on either side).
  */
 
 import { createService, type SubscriptionRow } from './service';

@@ -45,7 +45,7 @@
  * a message and the reloaded list), see `src/core/admin-conflict.ts`.
  */
 import { required, setError } from '../../core/dom';
-import { createGate } from '../../core/components/module-gate';
+import { createGate, gateOnAdminSession } from '../../core/components/module-gate';
 import { createRowList, renderAdminRows } from '../../core/components/row-list';
 import { iconButton } from '../../core/icons';
 import { confirmDialog } from '../../core/components/confirm-dialog';
@@ -170,28 +170,16 @@ export const UserManagementModule = {
             });
         }
 
-        // The session as this module last applied it: signed-in user and admin
-        // flag, null when signed out. A replayed or unrelated rbac:changed (the
-        // kernel's held replay at start, a broker connect) leaves it equal.
-        const sessionKey = (): string | null => {
-            const m = appState.managed;
-            return m ? JSON.stringify([m.username, m.admin]) : null;
-        };
-        let appliedKey = sessionKey();
-
         // Gate the module on an admin session: non-admin (or not-logged-in) sees
         // the gate; an admin sees the list and it (re)loads. Called at install and
         // on an rbac:changed that changes the session (login / logout / self-demote).
-        function applyGate(): void {
-            appliedKey = sessionKey();
-            const m = appState.managed;
-            if (!m?.admin) {
-                showGate();
-                return;
-            }
-            showView('list');
-            void loadList();
-        }
+        const applyGate = gateOnAdminSession(app, {
+            onNoAdmin: showGate,
+            onAdmin: () => {
+                showView('list');
+                void loadList();
+            },
+        });
 
         async function loadList(): Promise<void> {
             setError(els.listError, null);
@@ -462,9 +450,6 @@ export const UserManagementModule = {
             if (e.key !== 'Escape') return;
             closeMenu();
             els.btnAddModule.focus();
-        });
-        eventBus.on('rbac:changed', () => {
-            if (sessionKey() !== appliedKey) applyGate();
         });
 
         applyGate(); // gate until an admin session exists; load the list when it does

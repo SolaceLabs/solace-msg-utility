@@ -1,8 +1,8 @@
 /**
- * No-Queue-Copy variant — every module except Queue Copy.
+ * No-Queue-Copy variant -- the `standard` modules except Queue Copy.
  *
  * Same as `standard`, with `queue-copy` omitted so the Copy/Move-between-queues
- * module is never installed. See architecture.md → "Module registration —
+ * module is never installed. See architecture.md -> "Module registration:
  * variant manifests".
  */
 export const ACTIVE_MODULES: Record<string, number> = {

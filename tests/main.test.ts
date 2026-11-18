@@ -1,27 +1,21 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 
 describe('main.ts entry point', () => {
-    let startSpy: MockInstance;
+    let startSpy: Mock<() => Promise<void>>;
+    let createKernel: Mock;
 
-    beforeEach(async () => {
+    beforeEach(() => {
         vi.resetModules();
-        // Provide minimal DOM for kernel
-        document.body.innerHTML = `
-            <nav id="sidebar-nav"></nav>
-            <div id="module-container"></div>
-            <h1 id="page-title"></h1>
-            <div id="status-indicator-client"></div>
-            <div id="status-indicator-semp"></div>
-        `;
         vi.doMock('../src/registry', () => ({ modules: [] }));
-        // Import the Kernel after the reset: main.ts then gets this same module
-        // instance, so a spy on its prototype sees the kernel main.ts builds.
-        const { Kernel } = await import('../src/core/kernel');
-        startSpy = vi.spyOn(Kernel.prototype, 'start').mockResolvedValue(undefined);
+        // main.ts gets this kernel from createKernel, so its start() is the spy.
+        startSpy = vi.fn(() => Promise.resolve());
+        createKernel = vi.fn(() => ({ start: startSpy, navigateTo: vi.fn() }));
+        vi.doMock('../src/core/kernel', () => ({ createKernel }));
     });
 
     afterEach(() => {
-        startSpy.mockRestore();
+        vi.doUnmock('../src/core/kernel');
+        vi.doUnmock('../src/registry');
         document.body.innerHTML = '';
     });
 
@@ -30,6 +24,7 @@ describe('main.ts entry point', () => {
 
         await import('../src/main');
 
+        expect(createKernel).toHaveBeenCalledWith([]);
         expect(startSpy).toHaveBeenCalledTimes(1);
     });
 

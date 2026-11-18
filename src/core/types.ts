@@ -23,6 +23,7 @@ export type {
 // carries the managed profile defined alongside the managed API client.
 import type { ManagedProfileStore } from './services/managed-profile';
 import type { NotificationCenter } from './components/notification-center';
+import type { QueuePicker } from './components/queue-picker';
 import type { DeploymentConfig } from './connections/conn-modes';
 
 /* ------------------------------------------------------------------ */
@@ -267,6 +268,12 @@ export interface AppContext {
      * names it). See src/core/components/notification-center/.
      */
     notifications: NotificationCenter;
+    /**
+     * The app's queue picker, one per kernel: `ctx.queuePicker.pick(source,
+     * opts?)` opens it against a `QueueSource`. Its cache is shared by every
+     * module that picks from the same source. See src/core/components/queue-picker/.
+     */
+    queuePicker: QueuePicker;
     /** Helper for clipboard copy with visual feedback */
     copyToClipboard: (text: string, btnElement?: HTMLElement) => Promise<void>;
     /**

@@ -2,7 +2,7 @@
  * Queue Browser Module
  *
  * Browse, filter, forward, and delete messages from Solace queues.
- * Priority 30: Depends on Solace session from Connections module.
+ * Depends on the Solace session from the Connections module.
  */
 
 // Import internal sub-modules
@@ -172,7 +172,7 @@ export const QueueBrowserModule = {
         // Check All Toggle
         els.checkAll.addEventListener('change', () => {
             const checked = els.checkAll.checked;
-            els.msgList.querySelectorAll('.msg-check').forEach((cb: any) => cb.checked = checked);
+            els.msgList.querySelectorAll('.msg-check').forEach((cb: HTMLInputElement) => cb.checked = checked);
             ui.updateCounts();
         });
 
@@ -260,7 +260,7 @@ export const QueueBrowserModule = {
                 els.btnBrowserDownloadContent.classList.remove('hidden');
                 els.btnBrowserDownloadFull.classList.remove('hidden');
             };
-            if ((window as any).jszipLoaded) {
+            if (window.jszipLoaded) {
                 showDownloadButtons();
             }
             eventBus.on('jszip:loaded', showDownloadButtons);

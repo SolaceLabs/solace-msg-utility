@@ -54,7 +54,7 @@ const SCHEMA: Schema = {
     audit: { stdout: 'bool', access: 'bool', onFailure: 'string' },
 };
 
-/** The tls keys earlier releases kept in config.yaml; the paths are environment variables now, so a file that holds one is read and the key dropped. */
+/** The tls path keys a config.yaml may hold. The paths come from environment variables, so a file that holds one is read and the key dropped. */
 const REMOVED_TLS_KEYS = ['certFile', 'keyFile', 'trustDir'];
 
 const clone = (s: GatewaySettings): GatewaySettings => JSON.parse(JSON.stringify(s));
@@ -126,8 +126,8 @@ const withoutRemovedTls = (v: unknown): unknown =>
  * A backup's settings as the gateway's strict decoder reads them: onto the
  * default file, unknown or mistyped keys refused (BadRequest). The file's own
  * `version`, the `appDir`, `usersFile` and `connectionsFile` keys and the
- * `tls.certFile`, `tls.keyFile` and `tls.trustDir` keys earlier releases
- * wrote, are not settings: accepted and ignored.
+ * `tls.certFile`, `tls.keyFile` and `tls.trustDir` keys a backup may hold
+ * are not settings: accepted and ignored.
  */
 export function settingsFromBackup(raw: unknown): GatewaySettings {
     const out = clone(DEFAULTS);

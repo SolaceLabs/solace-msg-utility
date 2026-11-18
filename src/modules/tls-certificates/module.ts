@@ -20,7 +20,7 @@
  * field is always what is sent.
  */
 import { required, setError } from '../../core/dom';
-import { createGate } from '../../core/components/module-gate';
+import { createGate, gateOnAdminSession } from '../../core/components/module-gate';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { logger } from '../../core/logger';
 import { showToast } from '../../core/toast';
@@ -110,7 +110,7 @@ export const TlsCertificatesModule = {
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>',
 
     async install(app: AppContext, opts: TlsCertificatesOptions = {}) {
-        const { container, appState, eventBus } = app;
+        const { container, eventBus } = app;
         const now = opts.now ?? Date.now;
         const q = <T extends HTMLElement>(sel: string) => required<T>(container, sel);
         const els = {
@@ -344,27 +344,19 @@ export const TlsCertificatesModule = {
             showToast(`Deleted ${name}`, 'ok');
         }
 
-        // The session as this module last applied it: signed-in user and admin
-        // flag, null when signed out. A replayed or unrelated rbac:changed leaves it equal.
-        const sessionKey = (): string | null => {
-            const m = appState.managed;
-            return m ? JSON.stringify([m.username, m.admin]) : null;
-        };
-        let appliedKey = sessionKey();
-
         // Admin sessions only, like the other admin modules. Called at install
         // and on an rbac:changed that changes the session.
-        function applyGate(): void {
-            appliedKey = sessionKey();
-            if (!appState.managed?.admin) {
+        const applyGate = gateOnAdminSession(app, {
+            onNoAdmin: () => {
                 els.view.classList.add('hidden');
                 gate.show();
-                return;
-            }
-            gate.hide();
-            els.view.classList.remove('hidden');
-            void load();
-        }
+            },
+            onAdmin: () => {
+                gate.hide();
+                els.view.classList.remove('hidden');
+                void load();
+            },
+        });
 
         els.btnReload.addEventListener('click', () => void load());
         els.certFile.addEventListener('change', () => void fillFromFile(els.certFile, els.certPem, els.certError));
@@ -372,9 +364,6 @@ export const TlsCertificatesModule = {
         els.caFile.addEventListener('change', () => void fillFromFile(els.caFile, els.caPem, els.caError));
         els.btnReplace.addEventListener('click', () => void replaceCertificate());
         els.btnAddCa.addEventListener('click', () => void addTrust());
-        eventBus.on('rbac:changed', () => {
-            if (sessionKey() !== appliedKey) applyGate();
-        });
 
         applyGate();
         logger.info('Certificates Module Setup Complete');

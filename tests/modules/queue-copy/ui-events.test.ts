@@ -8,11 +8,10 @@ import { createSessionMock, createBrowserMock } from '../../setup';
 import type { AppContext } from '../../../src/core/types';
 import { createManagedProfile } from '../../../src/core/services/managed-profile';
 
-vi.mock('../../../src/core/components/queue-picker', () => ({
-    pickQueue: vi.fn(async () => ({ vpn: 'default', queue: 'picked-q' })),
-}));
-import { pickQueue } from '../../../src/core/components/queue-picker';
 import { completeContext } from '../../helpers/appContext';
+
+/** The context's queue picker: `ctx.queuePicker.pick`. */
+const pickQueue = vi.fn(async (..._args: unknown[]): Promise<{ vpn: string; queue: string } | null> => ({ vpn: 'default', queue: 'picked-q' }));
 
 const PRIMARY: PrimarySnapshot = {
     host: 'broker.solace.com',
@@ -41,6 +40,7 @@ function makeCtx(overrides: Partial<AppContext['appState']> = {}): AppContext {
         sempFetch: vi.fn(),
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
+        queuePicker: { pick: pickQueue },
     });
 }
 

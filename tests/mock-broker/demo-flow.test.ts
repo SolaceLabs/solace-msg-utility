@@ -3,7 +3,7 @@ import { boot, type ManagedDemo } from '../../src/mock-broker/boot.managed';
 import { resetScenario, scenario, setBrokers } from '../../src/mock-broker/fixtures';
 import { setSocketGate } from '../../src/mock-broker/sdk/session';
 import { STEP_MS } from '../../src/mock-broker/gateway/authenticator';
-import { Kernel } from '../../src/core/kernel';
+import { createKernel } from '../../src/core/kernel';
 import { ACTIVE_MODULES, MODULE_ENTRIES } from '../../src/variants/managed-demo';
 import { ConnectionsModule } from '../../src/modules/connections/module.managed';
 import { QueueBrowserModule } from '../../src/modules/queue-browser/module';
@@ -118,7 +118,7 @@ async function openDemo(before: (first: ManagedDemo) => void | Promise<void> = (
         document.body.appendChild(tpl);
     }
     const registered = Object.entries(ACTIVE_MODULES).map(([id, priority]) => ({ module: MODULES[id], priority }));
-    await new Kernel([...registered, { module: probe, priority: 1 }]).start();
+    await createKernel([...registered, { module: probe, priority: 1 }]).start();
     return demo;
 }
 

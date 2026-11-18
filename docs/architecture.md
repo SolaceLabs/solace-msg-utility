@@ -174,7 +174,7 @@ There are no `*-mock` service siblings: the demo build (`vite build --mode demo`
 
 All module coordination goes through the EventBus -- every module publishes and subscribes through the single shared bus instance, with no direct module-to-module references.
 
-The kernel builds one `AppContext` for each module: its own `container` (an isolated DOM subtree) and `loadSelf` (bound to its id), plus the shared `appState`, `eventBus`, `setState`, `sempFetch` and helpers, all the same references for every module. How a module uses the context, and how a circular dependency inside a module is broken with late `wire()` binding (queue-browser's `service-events.ts` is the example), is in [developer-guide.md](developer-guide.md).
+The kernel builds one `AppContext` for each module: its own `container` (an isolated DOM subtree) and `loadSelf` (bound to its id), plus the shared `appState`, `eventBus`, `setState`, `sempFetch`, `managedProfile`, `notifications`, `queuePicker` and helpers, all the same references for every module. How a module uses the context, and how a circular dependency inside a module is broken with late `wire()` binding (queue-browser's `service-events.ts` is the example), is in [developer-guide.md](developer-guide.md).
 
 ### Install-phase buffering (`hold` / `release`)
 
@@ -201,9 +201,9 @@ A module that needs the primary connection on a specific VPN emits `connection:c
 | VPN switch, user confirms | yes -- *after* confirm |
 | VPN switch, user cancels | no -- caller stays put |
 
-The `returnTo` field only selects which finish event fires (`browser:browse-queue` for `'queue-browser'` and the default, `copy:vpn-switched` for `'queue-copy'`) -- it does **not** alter navigation. Future modules using this handshake inherit the policy automatically: pick a `returnTo`, add a finish-event branch in [connections/module.ts](../src/modules/connections/module.ts), don't reintroduce per-caller navigation differences. Tests in [tests/modules/connections/module.test.ts](../tests/modules/connections/module.test.ts) lock the four rows above in place.
+The `returnTo` field only selects which finish event fires (`browser:browse-queue` for `'queue-browser'` and the default, `copy:vpn-switched` for `'queue-copy'`) -- it does **not** alter navigation. Future modules using this handshake inherit the policy automatically: pick a `returnTo`, add a finish-event branch in `finish()` in [connections/vpn-switch.ts](../src/modules/connections/vpn-switch.ts), don't reintroduce per-caller navigation differences. Tests in [tests/modules/connections/module.test.ts](../tests/modules/connections/module.test.ts) lock the four rows above in place.
 
-**Why the picker does not own the confirm.** The reusable `pickQueue()` core component resolves a `{vpn, queue}` tuple and nothing more. Whether that VPN matches the consumer's "current" VPN (different concept across consumers -- primary for queue-browser, destination form for queue-copy's dest picker) and whether to disrupt the primary session are app-layer decisions. Keeping them in the consumer + connections module lets the picker stay generic across all current and future callers.
+**Why the picker does not own the confirm.** The reusable queue picker (`ctx.queuePicker.pick()`) resolves a `{vpn, queue}` tuple and nothing more. Whether that VPN matches the consumer's "current" VPN (different concept across consumers -- primary for queue-browser, destination form for queue-copy's dest picker) and whether to disrupt the primary session are app-layer decisions. Keeping them in the consumer + connections module lets the picker stay generic across all current and future callers.
 
 ```mermaid
 sequenceDiagram
@@ -259,7 +259,7 @@ log.error('failure', err);
 
 Levels (numeric severity, defined in [src/core/constants.ts](../src/core/constants.ts)): `DEBUG=0`, `INFO=1`, `WARN=2`, `ERROR=3`, `SILENT=4`. A call fires when the current level is `<=` the call's level; `SILENT` mutes everything.
 
-The current level is module-scoped state, set once at boot in `Kernel.start()` from the `?logLevel=<NAME>` URL parameter (case-insensitive). Invalid values fall back to `DEFAULT_LOG_LEVEL` (`INFO`). The logger is **not** routed through `AppContext` -- it's set-once boot configuration, not application state, and forcing every service factory to take a `logger` argument purely for delegation would be high churn for no reuse benefit.
+The current level is module-scoped state, set once at boot in the kernel's `start()` from the `?logLevel=<NAME>` URL parameter (case-insensitive). Invalid values fall back to `DEFAULT_LOG_LEVEL` (`INFO`). The logger is **not** routed through `AppContext` -- it's set-once boot configuration, not application state, and forcing every service factory to take a `logger` argument purely for delegation would be high churn for no reuse benefit.
 
 What a line says -- the level by meaning, the component tag, facts as attributes, no secrets -- follows the one standard for the web app and the gateway in [developer-guide.md -> Logging standard](developer-guide.md#logging-standard); [deployment.md -> Logs](deployment.md#logs) covers the gateway's side.
 
@@ -419,7 +419,7 @@ export function queueSourceFrom(ctx: AppContext, scope: Scope): QueueSource | nu
 - **Queues** -- always live SEMP (no provisioned queue inventory exists anywhere; RBAC specifies queue *globs*, applied by `filterSempFetch`). The asymmetry is in the *data*, not the handling -- both are `QueueSource` methods.
 - **`key`** -- managed folds in the provisioned set + entitlement rows, so a permission/provisioning change (e.g. via Refresh) flips it and the picker's cache (keyed by `key`, not `baseUrl`) misses -> re-reads. Standard uses the `baseUrl`.
 
-The reusable [`pickQueue(source, opts?)`](../src/core/components/queue-picker/index.ts) component consumes a `QueueSource` with `for await`, accumulating + sorting + re-rendering after every yielded page:
+The reusable queue picker, [`ctx.queuePicker.pick(source, opts?)`](../src/core/components/queue-picker/index.ts), consumes a `QueueSource` with `for await`, accumulating + sorting + re-rendering after every yielded page:
 
 ```ts
 for await (const page of source.listVpns()) {
@@ -1128,7 +1128,7 @@ Every bundle carries its policy in a `<meta http-equiv="Content-Security-Policy"
 | --- | --- | --- |
 | No framework | Vanilla TS/JS | Single-file output, no runtime overhead, full DOM control |
 | Single-file bundle | vite-plugin-singlefile | Easy deployment (one HTML file) |
-| Micro-kernel | Custom Kernel class | Modules can be added/removed without touching core |
+| Micro-kernel | `createKernel()` factory | Modules can be added/removed without touching core |
 | Typed EventBus | Map + Set with generics | Compile-time safety, zero dependencies |
 | Factory functions | Not classes | Closure-scoped state, no `this` binding issues |
 | jsdom for tests | Not Playwright/Cypress | Fast unit tests (run in seconds), no browser needed |

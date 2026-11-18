@@ -8,7 +8,7 @@ import { CONTRACT_DIR } from './helpers';
 /**
  * The sign-in throttle against go-web-proxy/throttle.go's rules, as the shared
  * vectors in go-web-proxy/testdata/contract/throttle.json state them (the Go
- * side runs the same file: go-web-proxy/throttle_test.go ›
+ * side runs the same file: go-web-proxy/throttle_test.go >
  * "TestThrottle_SharedVectors"): a count per user and one for the client, the
  * larger block wins, a success clears only the signing-in user, and a quiet
  * count starts again (the account limit, the client limit and the reset time

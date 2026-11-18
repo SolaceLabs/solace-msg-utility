@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Kernel } from '../../src/core/kernel';
+import { createKernel } from '../../src/core/kernel';
 import { getLogLevel, setLogLevel } from '../../src/core/logger';
 import { REQUEST_TIMEOUT_MS } from '../../src/core/timing';
 import { showToast } from '../../src/core/toast';
@@ -24,7 +24,7 @@ function createMockModule(overrides: Partial<PwaModule> = {}): PwaModule {
 }
 
 /**
- * Wrap a module in a {module, priority} tuple for the Kernel constructor.
+ * Wrap a module in a {module, priority} tuple for createKernel.
  * Priority defaults to 50 — tests that care about ordering pass an explicit
  * value (`reg(modA, 100)`).
  */
@@ -55,7 +55,7 @@ describe('Kernel', () => {
         it('installs modules and renders sidebar', async () => {
             const mod = createMockModule({ id: 'test-module', name: 'Test' });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
 
             await kernel.start();
 
@@ -68,7 +68,7 @@ describe('Kernel', () => {
             // The kernel parses `?logLevel=DEBUG` from window.location.search
             // at start time and calls setLogLevel(...) BEFORE the first
             // banner log fires. Without this test, the truthy branch of
-            // `if (fromUrl !== null) setLogLevel(fromUrl)` at kernel.ts:69
+            // `if (fromUrl !== null) setLogLevel(fromUrl)` in start()
             // is unexercised — regression would silently strand users at
             // INFO level even when they pass ?logLevel=DEBUG in the URL.
             const priorLevel = getLogLevel();
@@ -82,7 +82,7 @@ describe('Kernel', () => {
             try {
                 const mod = createMockModule({ id: 'test-module', name: 'Test' });
                 setupDOM(['test-module']);
-                const kernel = new Kernel([reg(mod)]);
+                const kernel = createKernel([reg(mod)]);
                 await kernel.start();
                 expect(getLogLevel()).toBe(LogLevel.DEBUG);
             } finally {
@@ -103,7 +103,7 @@ describe('Kernel', () => {
             try {
                 const mod = createMockModule({ id: 'test-module', name: 'Test' });
                 setupDOM(['test-module']);
-                const kernel = new Kernel([reg(mod)]);
+                const kernel = createKernel([reg(mod)]);
                 await kernel.start();
                 expect(getLogLevel()).toBe(DEFAULT_LOG_LEVEL);
             } finally {
@@ -123,7 +123,7 @@ describe('Kernel', () => {
             });
 
             setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 10), reg(modB, 100)]);
+            const kernel = createKernel([reg(modA, 10), reg(modB, 100)]);
             await kernel.start();
 
             expect(order).toEqual(['b', 'a']);
@@ -132,7 +132,7 @@ describe('Kernel', () => {
         it('activates the first module after install', async () => {
             const mod = createMockModule({ id: 'test-module', name: 'Test Module' });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const pageTitle = document.getElementById('page-title');
@@ -145,7 +145,7 @@ describe('Kernel', () => {
         it('sets up sidebar toggle', async () => {
             const mod = createMockModule({ id: 'test-module' });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const sidebar = document.getElementById('main-sidebar')!;
@@ -164,7 +164,7 @@ describe('Kernel', () => {
             });
             setupDOM(['test-module']);
             document.body.insertAdjacentHTML('beforeend', '<div id="sidebar-account"></div>');
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const first = document.createElement('span');
@@ -181,7 +181,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            await new Kernel([reg(mod)]).start();
+            await createKernel([reg(mod)]).start();
             const el = document.createElement('span');
             expect(() => capturedCtx!.mountSidebarAccount(el)).not.toThrow();
             expect(el.isConnected).toBe(false);
@@ -194,7 +194,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const handler = vi.fn();
@@ -213,7 +213,7 @@ describe('Kernel', () => {
             });
             setupDOM(['test-module']);
             (window as any).jszipLoaded = true;
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             expect(handler).toHaveBeenCalledTimes(1);
@@ -224,7 +224,7 @@ describe('Kernel', () => {
             setupDOM(['test-module']);
             document.getElementById('module-container')!.innerHTML = '<div id="pre-existing">old stuff</div>';
             const mod = createMockModule({ id: 'test-module' });
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const children = Array.from(document.getElementById('module-container')!.children).map(c => c.id);
@@ -247,7 +247,7 @@ describe('Kernel', () => {
                     install: vi.fn(async () => { presentDuringInstall = !!document.getElementById('app-loading'); }),
                 });
                 setupLoadingDOM(['test-module']);
-                await new Kernel([reg(mod)]).start();
+                await createKernel([reg(mod)]).start();
 
                 expect(presentDuringInstall).toBe(true);
                 expect(document.getElementById('app-loading')).toBeNull();
@@ -257,7 +257,7 @@ describe('Kernel', () => {
             it('starts and navigates normally when the shell has no placeholder', async () => {
                 const mod = createMockModule({ id: 'test-module', name: 'Test Module' });
                 setupDOM(['test-module']);
-                await new Kernel([reg(mod)]).start();
+                await createKernel([reg(mod)]).start();
 
                 expect(document.getElementById('page-title')!.textContent).toBe('Test Module');
                 expect(document.getElementById('module-container')!.children).toHaveLength(1);
@@ -265,7 +265,7 @@ describe('Kernel', () => {
 
             it('replaces the placeholder text with a message when no module is registered', async () => {
                 setupLoadingDOM([]);
-                await new Kernel([]).start();
+                await createKernel([]).start();
 
                 const loading = document.getElementById('app-loading')!;
                 expect(loading.textContent).toBe('No modules are available. Check the browser console.');
@@ -275,7 +275,7 @@ describe('Kernel', () => {
                 const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
                 setupLoadingDOM(['a']);
                 const failing = createMockModule({ id: 'a', name: 'A', install: vi.fn(async () => { throw new Error('boom'); }) });
-                await new Kernel([reg(failing)]).start();
+                await createKernel([reg(failing)]).start();
 
                 expect(document.getElementById('app-loading')!.textContent)
                     .toBe('No modules are available. Check the browser console.');
@@ -284,7 +284,7 @@ describe('Kernel', () => {
 
             it('shows no message and does not throw when nothing is installed and the shell has no container', async () => {
                 document.body.innerHTML = '<nav id="sidebar-nav"></nav>';
-                await expect(new Kernel([]).start()).resolves.toBeUndefined();
+                await expect(createKernel([]).start()).resolves.toBeUndefined();
                 expect(document.getElementById('app-loading')).toBeNull();
             });
 
@@ -296,7 +296,7 @@ describe('Kernel', () => {
                 });
                 const healthy = createMockModule({ id: 'b', name: 'Beta' });
                 setupLoadingDOM(['a', 'b']);
-                await new Kernel([reg(failing, 100), reg(healthy, 50)]).start();
+                await createKernel([reg(failing, 100), reg(healthy, 50)]).start();
 
                 const toasts = Array.from(document.querySelectorAll('#toast-container .toast--error'));
                 expect(toasts.map(t => t.textContent)).toEqual([
@@ -313,7 +313,7 @@ describe('Kernel', () => {
                     id, name, install: vi.fn(async () => { throw new Error('boom'); }),
                 });
                 setupLoadingDOM(['a', 'b']);
-                await new Kernel([reg(bad('a', 'Alpha'), 100), reg(bad('b', 'Beta'), 50)]).start();
+                await createKernel([reg(bad('a', 'Alpha'), 100), reg(bad('b', 'Beta'), 50)]).start();
 
                 const texts = Array.from(document.querySelectorAll('#toast-container .toast--error')).map(t => t.textContent);
                 expect(texts).toEqual([
@@ -344,7 +344,7 @@ describe('Kernel', () => {
                     return realImport(node, deep);
                 }) as typeof document.importNode);
                 try {
-                    await expect(new Kernel([reg(first, 100), reg(second, 50)]).start())
+                    await expect(createKernel([reg(first, 100), reg(second, 50)]).start())
                         .rejects.toThrow('importNode blew up');
                 } finally {
                     importSpy.mockRestore();
@@ -368,7 +368,7 @@ describe('Kernel', () => {
                     install: vi.fn(async (ctx: AppContext) => { ctx.eventBus.on('semp:connected', received); }),
                 });
                 setupDOM(['emitter', 'late']);
-                const kernel = new Kernel([reg(late, 70), reg(emitter, 100)]);
+                const kernel = createKernel([reg(late, 70), reg(emitter, 100)]);
 
                 await kernel.start();
 
@@ -380,7 +380,7 @@ describe('Kernel', () => {
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             const mod = createMockModule({ id: 'nonexistent' });
             setupDOM([]); // No templates
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Template for module'));
@@ -395,7 +395,7 @@ describe('Kernel', () => {
             });
             const good = createMockModule({ id: 'good', name: 'Good' });
             setupDOM(['failing', 'good']);
-            const kernel = new Kernel([reg(mod, 100), reg(good, 50)]);
+            const kernel = createKernel([reg(mod, 100), reg(good, 50)]);
             await kernel.start();
 
             expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to install'), expect.any(Error));
@@ -409,7 +409,7 @@ describe('Kernel', () => {
 
         it('works with no modules', async () => {
             setupDOM([]);
-            const kernel = new Kernel([]);
+            const kernel = createKernel([]);
             await kernel.start();
             const nav = document.getElementById('sidebar-nav');
             expect(nav?.innerHTML).toBe('');
@@ -426,7 +426,7 @@ describe('Kernel', () => {
             setupDOM(['b']);
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
+            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
             await kernel.start();
 
             // `a` never installed (no template). `b` should be active.
@@ -441,7 +441,7 @@ describe('Kernel', () => {
             setupDOM([]); // no templates at all → nothing installs
             const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-            const kernel = new Kernel([reg(modA)]);
+            const kernel = createKernel([reg(modA)]);
             await kernel.start();
 
             expect(errSpy).toHaveBeenCalledWith(
@@ -454,7 +454,7 @@ describe('Kernel', () => {
         it('is idempotent — second start() is a no-op that logs a warning', async () => {
             const mod = createMockModule({ id: 'test-module' });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
 
             await kernel.start();
             expect(mod.install).toHaveBeenCalledTimes(1);
@@ -471,7 +471,7 @@ describe('Kernel', () => {
             let ctx: AppContext | null = null;
             const mod = createMockModule({ id: 'test-module', install: vi.fn(async c => { ctx = c; }) });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -492,7 +492,7 @@ describe('Kernel', () => {
             const modA = createMockModule({ id: 'a', name: 'A' });
             const modB = createMockModule({ id: 'b', name: 'B' });
             setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
+            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
             await kernel.start();
 
             kernel.navigateTo('b');
@@ -504,7 +504,7 @@ describe('Kernel', () => {
         it('does nothing for unknown module id', async () => {
             const mod = createMockModule({ id: 'a', name: 'A' });
             setupDOM(['a']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             kernel.navigateTo('nonexistent');
@@ -516,7 +516,7 @@ describe('Kernel', () => {
             const modA = createMockModule({ id: 'a', name: 'A' });
             const modB = createMockModule({ id: 'b', name: 'B' });
             setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
+            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
             await kernel.start();
 
             kernel.navigateTo('b');
@@ -535,7 +535,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const handler = vi.fn();
@@ -553,7 +553,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const indClient = document.getElementById('status-indicator-client')!;
@@ -577,7 +577,7 @@ describe('Kernel', () => {
             });
             const modB = createMockModule({ id: 'b', name: 'B' });
             setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
+            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
             await kernel.start();
 
             kernel.navigateTo('b');
@@ -598,7 +598,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const mockResponse = { status: 200, ok: true };
@@ -632,7 +632,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
@@ -665,7 +665,7 @@ describe('Kernel', () => {
                     install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
                 });
                 setupDOM(['test-module']);
-                const kernel = new Kernel([reg(mod)]);
+                const kernel = createKernel([reg(mod)]);
                 await kernel.start();
 
                 (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
@@ -695,7 +695,7 @@ describe('Kernel', () => {
                     install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
                 });
                 setupDOM(['test-module']);
-                await new Kernel([reg(mod)]).start();
+                await createKernel([reg(mod)]).start();
                 capturedCtx!.setState('sempCredentials', {
                     user: 'admin', pass: 'admin', baseUrl: 'http://test:8080',
                     protocol: 'http', host: 'test', port: '8080', urlPath: '',
@@ -741,7 +741,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             capturedCtx!.setState('sempCredentials', {
@@ -776,7 +776,7 @@ describe('Kernel', () => {
                     install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
                 });
                 setupDOM(['test-module']);
-                await new Kernel([reg(mod)]).start();
+                await createKernel([reg(mod)]).start();
                 capturedCtx!.setState('sempCredentials', {
                     user: '', pass: '', baseUrl: '/managed/relay/b1', protocol: 'https', host: 'b1', port: '', urlPath: '',
                     relay: '/managed/relay/b1',
@@ -828,7 +828,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
@@ -853,7 +853,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             (globalThis.fetch as any).mockRejectedValue(new Error('Network error'));
@@ -870,7 +870,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             (globalThis.fetch as any).mockImplementation(() => {
@@ -886,7 +886,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             await capturedCtx!.copyToClipboard('test text');
@@ -901,7 +901,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const btn = document.createElement('button');
@@ -929,7 +929,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             await capturedCtx!.copyToClipboard('');
@@ -944,7 +944,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             (navigator.clipboard.writeText as any).mockRejectedValueOnce(new Error('denied'));
@@ -960,7 +960,7 @@ describe('Kernel', () => {
                 icon: '<svg class="custom-icon"></svg>'
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const nav = document.getElementById('sidebar-nav')!;
@@ -972,7 +972,7 @@ describe('Kernel', () => {
             // Explicitly no icon
             delete (mod as any).icon;
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const nav = document.getElementById('sidebar-nav')!;
@@ -983,7 +983,7 @@ describe('Kernel', () => {
             const modA = createMockModule({ id: 'a', name: 'A' });
             const modB = createMockModule({ id: 'b', name: 'B' });
             setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
+            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
             await kernel.start();
 
             const navItems = document.querySelectorAll('.nav-item');
@@ -1000,7 +1000,7 @@ describe('Kernel', () => {
                 <template data-module-id="test-module"><div>content</div></template>
             `;
             const mod = createMockModule({ id: 'test-module' });
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             // Despite the missing sidebar nav, the module pipeline must not
@@ -1026,7 +1026,7 @@ describe('Kernel', () => {
                 id: 'test-module',
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             // Should not throw even without status indicators, and state should still update
@@ -1045,7 +1045,7 @@ describe('Kernel', () => {
             `;
             const modA = createMockModule({ id: 'a', name: 'A' });
             const modB = createMockModule({ id: 'b', name: 'B' });
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
+            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
             await kernel.start();
 
             kernel.navigateTo('b');
@@ -1060,35 +1060,16 @@ describe('Kernel', () => {
                 <template data-module-id="a"><div>A</div></template>
             `;
             const mod = createMockModule({ id: 'a', name: 'A' });
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             kernel.navigateTo('a');
 
-            // installModule bails when moduleContainer is null (kernel.ts:119),
-            // so 'a' is never added to loadedModules — navigateTo must early-return
-            // at kernel.ts:157 WITHOUT mutating page title or DOM.
+            // installModule bails when the shell has no #module-container,
+            // so 'a' is never added to loadedModules -- navigateTo must return
+            // early WITHOUT mutating page title or DOM.
             expect(document.getElementById('page-title')?.textContent).toBe('');
             expect(document.getElementById('module-view-a')).toBeNull();
-        });
-
-        it('navigates when moduleContainer is removed after start', async () => {
-            const modA = createMockModule({ id: 'a', name: 'A' });
-            const modB = createMockModule({ id: 'b', name: 'B' });
-            setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
-            await kernel.start();
-
-            // Remove module-container from DOM after modules are loaded
-            const mc = document.getElementById('module-container')!;
-            mc.parentNode!.removeChild(mc);
-
-            // Forcibly null out the private moduleContainer reference
-            (kernel as any).moduleContainer = null;
-
-            // navigateTo should still work without throwing when moduleContainer is null
-            kernel.navigateTo('b');
-            expect(document.getElementById('page-title')?.textContent).toBe('B');
         });
     });
 
@@ -1101,7 +1082,7 @@ describe('Kernel', () => {
                 <template data-module-id="test-module"><div>content</div></template>
             `;
             const mod = createMockModule({ id: 'test-module' });
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
             // No toggle button: start() still installs and shows the module.
             expect(mod.install).toHaveBeenCalledTimes(1);
@@ -1117,7 +1098,7 @@ describe('Kernel', () => {
             const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
             const mgr = createMockModule({ id: 'user-management', name: 'Users' });
             setupDOM(['queue-browser', 'user-management']);
-            const kernel = new Kernel([reg(qb, 80), reg(mgr, 20)]);
+            const kernel = createKernel([reg(qb, 80), reg(mgr, 20)]);
             await kernel.start();
 
             // No managed session yet → both visible.
@@ -1135,7 +1116,7 @@ describe('Kernel', () => {
             const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
             const mgr = createMockModule({ id: 'user-management', name: 'Users' });
             setupDOM(['queue-browser', 'user-management']);
-            const kernel = new Kernel([reg(qb, 80), reg(mgr, 20)]);
+            const kernel = createKernel([reg(qb, 80), reg(mgr, 20)]);
             await kernel.start();
 
             ctx!.setState('managed', managedSession({ admin: true }));
@@ -1155,7 +1136,7 @@ describe('Kernel', () => {
             const login = createMockModule({ id: 'admin-login', name: 'Sign in', install: vi.fn(async c => { ctx = c; }) });
             const mgr = createMockModule({ id: 'user-management', name: 'Users' });
             setupDOM(['admin-login', 'user-management']);
-            const kernel = new Kernel([reg(login, 100), reg(mgr, 20)]);
+            const kernel = createKernel([reg(login, 100), reg(mgr, 20)]);
             await kernel.start();
             expect(document.getElementById('page-title')?.textContent).toBe('Sign in');
 
@@ -1175,7 +1156,7 @@ describe('Kernel', () => {
             const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
             const mgr = createMockModule({ id: 'user-management', name: 'Users' });
             setupDOM(['queue-browser', 'user-management']);
-            const kernel = new Kernel([reg(qb, 80), reg(mgr, 20)]);
+            const kernel = createKernel([reg(qb, 80), reg(mgr, 20)]);
             await kernel.start();
 
             kernel.navigateTo('user-management');
@@ -1200,7 +1181,7 @@ describe('Kernel', () => {
             });
             const qb = createMockModule({ id: 'queue-browser', name: 'Browser' });
             setupDOM(['user-management', 'queue-browser']);
-            const kernel = new Kernel([reg(mgr, 100), reg(qb, 80)]);
+            const kernel = createKernel([reg(mgr, 100), reg(qb, 80)]);
             await kernel.start();
 
             expect(document.getElementById('page-title')?.textContent).toBe('Browser');
@@ -1212,7 +1193,7 @@ describe('Kernel', () => {
             const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
             const qc = createMockModule({ id: 'queue-copy', name: 'Copy' });
             setupDOM(['queue-browser', 'queue-copy']);
-            const kernel = new Kernel([reg(qb, 80), reg(qc, 70)]);
+            const kernel = createKernel([reg(qb, 80), reg(qc, 70)]);
             await kernel.start();
             expect(nav().innerHTML).toContain('Copy');
 
@@ -1227,7 +1208,7 @@ describe('Kernel', () => {
             let ctx: AppContext | null = null;
             const mgr = createMockModule({ id: 'user-management', name: 'Users', install: vi.fn(async c => { ctx = c; }) });
             setupDOM(['user-management']);
-            const kernel = new Kernel([reg(mgr, 100)]);
+            const kernel = createKernel([reg(mgr, 100)]);
             await kernel.start();
             expect(document.getElementById('page-title')?.textContent).toBe('Users');
 
@@ -1245,6 +1226,20 @@ describe('Kernel', () => {
             } finally {
                 errSpy.mockRestore();
             }
+        });
+    });
+
+    // The queue picker every module opens (AppContext.queuePicker).
+    describe('queue picker', () => {
+        it('hands every module the same picker, so they share its cache', async () => {
+            const seen: AppContext[] = [];
+            const a = createMockModule({ id: 'a', name: 'A', install: vi.fn(async c => { seen.push(c); }) });
+            const b = createMockModule({ id: 'b', name: 'B', install: vi.fn(async c => { seen.push(c); }) });
+            setupDOM(['a', 'b']);
+            await createKernel([reg(a), reg(b)]).start();
+
+            expect(seen).toHaveLength(2);
+            expect(seen[0].queuePicker).toBe(seen[1].queuePicker);
         });
     });
 
@@ -1266,7 +1261,7 @@ describe('Kernel', () => {
             const a = createMockModule({ id: 'a', name: 'A', install: vi.fn(async c => { seen.push(c); }) });
             const b = createMockModule({ id: 'b', name: 'B', install: vi.fn(async c => { seen.push(c); }) });
             setupShell(['a', 'b']);
-            await new Kernel([reg(a), reg(b)]).start();
+            await createKernel([reg(a), reg(b)]).start();
 
             expect(document.querySelector('#notification-bell-slot .notif-bell')).not.toBeNull();
             expect(document.querySelector('dialog.notif-drawer')).not.toBeNull();
@@ -1277,7 +1272,7 @@ describe('Kernel', () => {
 
         it('mounts no bell when the shell has no slot', async () => {
             setupShell(['a'], false);
-            await new Kernel([reg(createMockModule({ id: 'a' }))]).start();
+            await createKernel([reg(createMockModule({ id: 'a' }))]).start();
             expect(document.querySelector('.notif-bell')).toBeNull();
             expect(document.querySelector('dialog.notif-drawer')).toBeNull();
         });
@@ -1289,7 +1284,7 @@ describe('Kernel', () => {
                 install: vi.fn(async c => { ctx = c; showToast('Saved scheme moved to wss', 'warn'); }),
             });
             setupShell(['queue-browser']);
-            await new Kernel([reg(mod)]).start();
+            await createKernel([reg(mod)]).start();
 
             showToast('Queue "orders" bound', 'ok');
             showToast('Loading saved config', 'info');
@@ -1306,7 +1301,7 @@ describe('Kernel', () => {
             let ctx: AppContext | null = null;
             const mod = createMockModule({ id: 'connections', install: vi.fn(async c => { ctx = c; }) });
             setupShell(['connections']);
-            await new Kernel([reg(mod)]).start();
+            await createKernel([reg(mod)]).start();
             const c = ctx!;
 
             // Events with no published identity still read sensibly. First, so
@@ -1336,7 +1331,7 @@ describe('Kernel', () => {
             let ctx: AppContext | null = null;
             const mod = createMockModule({ id: 'connections', install: vi.fn(async c => { ctx = c; }) });
             setupShell(['connections']);
-            await new Kernel([reg(mod)]).start();
+            await createKernel([reg(mod)]).start();
             const c = ctx!;
             const connect = (host: string) => {
                 c.setState('solaceConnection', { host, protocol: 'wss', port: '443', urlPath: '', vpn: 'v1', user: 'u', pass: '' });

@@ -283,18 +283,6 @@ export function evaluateStartGate(els: CopyUiElements, state: QueueCopyState, ac
 }
 
 /**
- * Modal Start (Copy/Move) click handler. Reuses the primary session when the
- * destination is same-broker + same-VPN; any other case publishes via the
- * destination session captured in `state.destSession` (set by the Connect
- * Client button's hook), and only while it was connected for the destination
- * the form names (`selectPublisher`).
- *
- * The engine reports a single `onComplete` whose `job.status` field carries
- * the final classification ('completed' / 'cancelled' / 'error'). The modal
- * renders the error pane only when status is 'error'; the title classifier
- * (`renderRunComplete`) handles the rest.
- */
-/**
  * DESTINATION GATE — the last check before any message is published.
  *
  * Applies only when the publish path uses PROVISIONED credentials — either the
@@ -326,6 +314,18 @@ export function destinationRefusal(state: QueueCopyState, access: SourceAccess):
     return null;
 }
 
+/**
+ * Modal Start (Copy/Move) click handler. Reuses the primary session when the
+ * destination is same-broker + same-VPN; any other case publishes via the
+ * destination session captured in `state.destSession` (set by the Connect
+ * Client button's hook), and only while it was connected for the destination
+ * the form names (`selectPublisher`).
+ *
+ * The engine reports a single `onComplete` whose `job.status` field carries
+ * the final classification ('completed' / 'cancelled' / 'error'). The modal
+ * renders the error pane only when status is 'error'; the title classifier
+ * (`renderRunComplete`) handles the rest.
+ */
 function handleModalStart(
     els: CopyUiElements,
     state: QueueCopyState,

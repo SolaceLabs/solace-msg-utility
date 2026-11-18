@@ -29,8 +29,9 @@ export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}
 
     ui.getSelectedMessageIds = function () {
         const els = ui.getElements();
-        const checkedBoxes = Array.from(els.msgList.querySelectorAll('.msg-check:checked'));
-        return checkedBoxes.map((cb: any) => cb.closest('tr').dataset.id);
+        const checkedBoxes = Array.from<Element>(els.msgList.querySelectorAll('.msg-check:checked'));
+        // Every checkbox sits in its message row.
+        return checkedBoxes.map((cb: Element) => cb.closest('tr')!.dataset.id);
     };
 
     ui.createRowHtml = function (msg: any) {
@@ -61,10 +62,13 @@ export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}
     };
 
     ui.attachRowListeners = function (tr: HTMLElement) {
+        // createRowHtml gives every row its message's data-id.
+        const id = tr.dataset.id!;
         // Row Click (Select)
-        tr.addEventListener('click', (e: any) => {
-            if (e.target.closest('input') || e.target.closest('button')) return;
-            ui.selectMessage((tr as HTMLElement & { dataset: DOMStringMap }).dataset.id);
+        tr.addEventListener('click', (e: MouseEvent) => {
+            const target = e.target as Element;
+            if (target.closest('input') || target.closest('button')) return;
+            ui.selectMessage(id);
         });
 
         // The four `if (msg)` guards below protect a state-find race: a click can land
@@ -76,18 +80,18 @@ export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}
         if (showPayload()) {
             required(tr, '.btn-download-content').addEventListener('click', (e) => {
                 e.stopPropagation();
-                const msg = state.displayedMessages.find((m: any) => m.id === (tr as any).dataset.id);
+                const msg = state.displayedMessages.find((m: any) => m.id === id);
                 if (msg) ui.downloadMessageContent(msg);
             });
             required(tr, '.btn-download-full').addEventListener('click', (e) => {
                 e.stopPropagation();
-                const msg = state.displayedMessages.find((m: any) => m.id === (tr as any).dataset.id);
+                const msg = state.displayedMessages.find((m: any) => m.id === id);
                 if (msg) ui.downloadMessageFull(msg);
             });
         }
         required(tr, '.btn-forward-row').addEventListener('click', (e) => {
             e.stopPropagation();
-            const msg = state.displayedMessages.find((m: any) => m.id === (tr as any).dataset.id);
+            const msg = state.displayedMessages.find((m: any) => m.id === id);
             if (msg) ui.showForwardModal(msg);
         });
         required(tr, '.msg-check').addEventListener('change', ui.updateCounts);
@@ -97,7 +101,7 @@ export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}
         if (btnDel) {
             btnDel.addEventListener('click', (e) => {
                 e.stopPropagation();
-                eventBus.emit('app:message-delete', { id: (tr as any).dataset.id! });
+                eventBus.emit('app:message-delete', { id });
             });
         }
     };
@@ -217,7 +221,7 @@ export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}
     };
 
     ui.downloadMessagesZip = async function (type: string) {
-        if (!(window as any).JSZip) {
+        if (!window.JSZip) {
             showToast('Cannot create the ZIP: the JSZip library is not loaded.', 'error', NOTICE_TOAST_MS);
             return;
         }

@@ -107,7 +107,7 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
 
     function init() {
         if (isInitialized) return;
-        if (!(window as any).solace) {
+        if (!window.solace) {
             log.warn('Solace API not loaded yet.');
             return;
         }
@@ -139,7 +139,7 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
         // The shell loader (src/index.html) is still downloading the SDK: wait
         // for its verdict (bounded), then run the normal connect, whose checks
         // proceed or refuse through the hooks. The wait counts as in flight.
-        if ((window as any).solaceLibState === 'loading') {
+        if (window.solaceLibState === 'loading') {
             log.info(`connect to VPN "${cfg.vpn}" waits for the Solace library to load.`);
             connecting = true;
             const proceed = () => {
@@ -174,7 +174,7 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
             }
         }
 
-        if (!(window as any).solace) {
+        if (!window.solace) {
             return refuse(new Error('Solace API not loaded.'));
         }
 
@@ -186,7 +186,7 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
         // Solace session in the app is created below, and the primary (Direct and
         // Managed) and secondary (queue-copy destination) callers all render
         // `onError` already.
-        if (!(window as any).solaceLibLoaded) {
+        if (!window.solaceLibLoaded) {
             return refuse(new Error(
                 'Solace Web Messaging SDK is below the required version (10.18.3) — see the banner at the top of the page.',
             ));

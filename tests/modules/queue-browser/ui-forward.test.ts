@@ -351,7 +351,7 @@ describe('queue-browser/ui-forward', () => {
 
         it('does nothing when forwardQueue is null — button untouched', () => {
             // Covers the truthy branch of `if (!state.forwardQueue || !els.btnForwardSend)
-            // return;` at ui-forward.js:194. forwardQueue is reset to null after
+            // return;` in checkForwardCompletion. forwardQueue is reset to null after
             // the forward modal closes; if checkForwardCompletion runs against
             // that state (e.g. late ACK arrival after close), the guard must
             // short-circuit before reading `.length` / `.filter` on null.
@@ -371,8 +371,8 @@ describe('queue-browser/ui-forward', () => {
 
     describe('updateForwardCount() null-forwardQueue guard', () => {
         it('does nothing when forwardQueue is null — count element untouched', () => {
-            // Covers the truthy branch of `if (!state.forwardQueue) return;` at
-            // ui-forward.js:179. Late status updates or test-isolation scenarios
+            // Covers the truthy branch of `if (!state.forwardQueue) return;` in
+            // updateForwardCount. Late status updates or test-isolation scenarios
             // can hit updateForwardCount after forwardQueue has been reset; the
             // guard prevents a throw on `state.forwardQueue.length`.
             const els = ui.getElements();

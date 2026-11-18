@@ -10,10 +10,6 @@ import { DEST_TARGET_LOCKED_TITLE } from '../../../src/modules/queue-copy/ui';
 import { DEFAULT_CONN_CONFIG } from '../../../src/core/connections/conn-modes';
 import { completeContext } from '../../helpers/appContext';
 
-vi.mock('../../../src/core/components/queue-picker', () => ({
-    pickQueue: vi.fn(async () => ({ vpn: 'default', queue: 'picked' })),
-}));
-
 // openCopyModal (triggered by clicking Next) calls verifySource. Stub it so
 // the module tests don't reach the real fetch / QueueBrowser code paths —
 // those have dedicated coverage in service-verify.test.ts. `vi.hoisted` is
@@ -95,6 +91,7 @@ function makeCtx(eventBus: EventBus, container: HTMLElement, overrides: Partial<
         sempFetch: vi.fn(),
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
+        queuePicker: { pick: vi.fn(async () => ({ vpn: 'default', queue: 'picked' })) },
     });
 }
 

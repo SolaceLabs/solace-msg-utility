@@ -24,7 +24,6 @@ import type { AppContext, AppState, EventBus, ManagedSession } from '../../../sr
 const { pickQueueMock } = vi.hoisted(() => ({
     pickQueueMock: vi.fn(async () => ({ vpn: 'v1', queue: 'ops.picked' })) as any,
 }));
-vi.mock('../../../src/core/components/queue-picker', () => ({ pickQueue: pickQueueMock }));
 
 // Capture what reaches the destination connection factories.
 const { destSempConnect, destSempDisconnect, destSolConnect, destSolDisconnect } = vi.hoisted(() => ({
@@ -150,6 +149,7 @@ async function setupProvisioned(over: Partial<AppState> = {}, signIn = true) {
         sempFetch: vi.fn(),
         managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
+        queuePicker: { pick: pickQueueMock },
     });
     ctx.managedProfile.attachDialer(DIALER);
     if (signIn) ctx.managedProfile.setProfile(PROFILE);

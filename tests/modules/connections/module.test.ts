@@ -100,7 +100,7 @@ describe('ConnectionsModule', () => {
         expect(host.value).toBe('saved.test');
     });
 
-    // applyConfig (module.ts:42, 44, 62) guards each top-level field individually
+    // applyConfig guards each top-level field individually
     // so a corrupted/partial localStorage blob — manual user edit, browser-extension
     // write, future cross-version migration — doesn't crash install with a TypeError
     // on `cfg.solace.protocol` etc. The two tests below exercise the falsy branches.
@@ -208,7 +208,7 @@ describe('ConnectionsModule', () => {
 
         it('clears the is-invalid class and error text eagerly on the first input event after a failure', async () => {
             // Covers the truthy branch of the `classList.contains('is-invalid')`
-            // guard at module.ts:275 — the user-facing "red border clears as
+            // guard in the field's input listener -- the user-facing "red border clears as
             // soon as I start correcting" behavior. The save-button >100-char
             // test above installs the invalid state; this test installs it
             // via blur (the second site that adds is-invalid) and then drives
@@ -347,8 +347,8 @@ describe('ConnectionsModule', () => {
 
         it('a second input event before the debounce window cancels the prior timer', async () => {
             // Covers the truthy branch of the input-listener's
-            // `if (validateTimer !== null) clearTimeout(validateTimer)` at
-            // module.ts:113. Without the cancel, every keystroke would queue
+            // `if (validateTimer !== null) clearTimeout(validateTimer)` in the
+            // Max Messages input listener. Without the cancel, every keystroke would queue
             // its own timer — N keystrokes → N validations, with intermediate
             // is-invalid flicker for stale values. The test types '10001' (invalid)
             // then '500' (valid) in quick succession; after the debounce window
@@ -730,7 +730,7 @@ describe('ConnectionsModule', () => {
         const { ctx, eventBus } = createTestContext(container);
         await ConnectionsModule.install(ctx);
 
-        // install() calls ui.updateInputState once at module.ts:284 — clear that
+        // install() calls ui.updateInputState once -- clear that
         // baseline so the assertion sees only the four event-driven invocations.
         const updateSpy = vi.spyOn(ui, 'updateInputState');
 
@@ -943,7 +943,7 @@ describe('ConnectionsModule', () => {
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
 
-        // Proves the `if (cfg)` guard at module.ts:71 short-circuited — input
+        // Proves install's `if (cfg)` guard short-circuited — input
         // values were never overwritten by a missing-config applyConfig call.
         expect(host.value).toBe(hostBefore);
         expect(port.value).toBe(portBefore);

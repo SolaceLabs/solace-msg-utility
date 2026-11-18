@@ -2,7 +2,6 @@ import { state, shouldShowMessage, defaultActiveFilters } from './state.js';
 import { ui, NOTICE_TOAST_MS } from './ui-core.js';
 import { showPayload } from './features.js';
 import type { createService, DeleteResult } from './service.js';
-import { pickQueue } from '../../core/components/queue-picker';
 import { queueSourceFrom } from '../../core/services/queue-source';
 import { showToast } from '../../core/toast';
 import { logger } from '../../core/logger';
@@ -74,7 +73,7 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
                     continue;
                 }
                 itemDestName = origDest.getName();
-                itemDestType = origDest.getType() === (window as any).solace.DestinationType.TOPIC ? 'Topic' : 'Queue';
+                itemDestType = origDest.getType() === window.solace.DestinationType.TOPIC ? 'Topic' : 'Queue';
             }
 
             ui.updateForwardItemStatus(item.correlationValue, 'SENDING');
@@ -118,7 +117,7 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         // Binding a queue is a READ — browse scope (operate ∪ read-only).
         const source = queueSourceFrom(ctx, 'browse');
         if (!source) return;
-        const picked = await pickQueue(source, {
+        const picked = await ctx.queuePicker.pick(source, {
             title: 'Pick a queue to bind',
             defaultVpn: ctx.appState.selectedVpn ?? undefined,
         });
@@ -182,7 +181,6 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         // onBrowserDown / onGmDisabled), and clearing on every dropdown change
         // discards diagnostic info the user needs while looking at that queue.
         // The banner is replaced by the next setError or when the user re-binds.
-        // (Improvement plan 4.4 — Option A.)
 
         if (qName) {
             ui.updatePermissionUI(qName);
@@ -207,7 +205,7 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         els.inputFilterType.value = 'ANY';
         els.inputFilterMsgType.value = 'ANY';
         // Reset Radio (Default OR) — NodeList from querySelectorAll, never null.
-        els.radFilterCriteria.forEach((r: any) => r.checked = (r.value === 'OR'));
+        els.radFilterCriteria.forEach((r: HTMLInputElement) => r.checked = (r.value === 'OR'));
 
         state.displayedMessages = state.allMessages;
 
@@ -232,7 +230,7 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         els.inputFilterMsgType.value = 'ANY';
         els.inputFilterNewerThan.value = '';
         els.inputFilterOlderThan.value = '';
-        els.radFilterCriteria.forEach((r: any) => r.checked = (r.value === 'OR'));
+        els.radFilterCriteria.forEach((r: HTMLInputElement) => r.checked = (r.value === 'OR'));
 
         // Clear Properties — installed by initDetails (which initElements depends on at install time).
         if (ui.clearPropertyFilters) ui.clearPropertyFilters();
@@ -274,7 +272,7 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         }
 
         // Logic
-        els.radFilterCriteria.forEach((r: any) => {
+        els.radFilterCriteria.forEach((r: HTMLInputElement) => {
             if (r.checked) state.activeFilters.criteria = r.value;
         });
 

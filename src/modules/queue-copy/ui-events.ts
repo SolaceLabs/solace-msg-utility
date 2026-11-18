@@ -1,6 +1,5 @@
 import type { AppContext } from '../../core/types';
 import { queueSourceFrom, sempQueueSource, type QueueSource } from '../../core/services/queue-source';
-import { pickQueue } from '../../core/components/queue-picker';
 import {
     createProvisionedConnectionCard,
     type ProvisionedConnectionCard,
@@ -74,7 +73,7 @@ export function wireUiEvents(
         // user (move's delete half is gated separately, at run start).
         const source = queueSourceFrom(ctx, 'browse');
         if (!source) return;
-        const picked = await pickQueue(source, {
+        const picked = await ctx.queuePicker.pick(source, {
             title: 'Pick source queue',
             defaultVpn: ctx.appState.selectedVpn ?? undefined,
         });
@@ -226,7 +225,7 @@ export function wireUiEvents(
         const defaultVpn = state.destForm.sameBroker && state.destForm.sameVpn
             ? (ctx.appState.selectedVpn ?? undefined)
             : (state.destForm.solace.vpn || undefined);
-        const picked = await pickQueue(source, { title: 'Pick destination queue', defaultVpn });
+        const picked = await ctx.queuePicker.pick(source, { title: 'Pick destination queue', defaultVpn });
         if (picked === null) return;
 
         // Picking from a different VPN updates the destination form's VPN

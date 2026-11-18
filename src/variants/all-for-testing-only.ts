@@ -1,5 +1,6 @@
 /**
- * Kitchen-sink variant — every module, for test/QA builds only.
+ * Kitchen-sink variant -- every module a variant can ship (all but
+ * queue-discovery, which no variant activates), for test/QA builds only.
  *
  * `connections` uses its managed entry (`MODULE_ENTRIES` below), so the build
  * carries both connection modes (Direct + Managed tabs), offered at runtime from

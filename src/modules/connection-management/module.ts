@@ -23,7 +23,7 @@
  * `src/core/admin-conflict.ts`.
  */
 import { required, setError } from '../../core/dom';
-import { createGate } from '../../core/components/module-gate';
+import { createGate, gateOnAdminSession } from '../../core/components/module-gate';
 import { createRowList, renderAdminRows } from '../../core/components/row-list';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
@@ -49,7 +49,7 @@ export const ConnectionManagementModule = {
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"></rect><rect x="2" y="14" width="20" height="8" rx="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>',
 
     async install(app: AppContext) {
-        const { container, appState, eventBus } = app;
+        const { container, eventBus } = app;
 
         const els = {
             listView: required<HTMLElement>(container, '#conn-mgmt-list-view'),
@@ -127,28 +127,16 @@ export const ConnectionManagementModule = {
             });
         }
 
-        // The session as this module last applied it: signed-in user and admin
-        // flag, null when signed out. A replayed or unrelated rbac:changed (the
-        // kernel's held replay at start, a broker connect) leaves it equal.
-        const sessionKey = (): string | null => {
-            const m = appState.managed;
-            return m ? JSON.stringify([m.username, m.admin]) : null;
-        };
-        let appliedKey = sessionKey();
-
         // Gate the module on an admin session: non-admin (or not-logged-in) sees
         // the gate; an admin sees the list and it (re)loads. Called at install and
         // on an rbac:changed that changes the session (login / logout / self-demote).
-        function applyGate(): void {
-            appliedKey = sessionKey();
-            const m = appState.managed;
-            if (!m?.admin) {
-                showGate();
-                return;
-            }
-            showView('list');
-            void loadList();
-        }
+        const applyGate = gateOnAdminSession(app, {
+            onNoAdmin: showGate,
+            onAdmin: () => {
+                showView('list');
+                void loadList();
+            },
+        });
 
         async function loadList(): Promise<void> {
             setError(els.listError, null);
@@ -279,9 +267,6 @@ export const ConnectionManagementModule = {
         els.btnSave.addEventListener('click', () => void saveForm());
         els.btnCancel.addEventListener('click', () => showView('list'));
         els.btnAddVpn.addEventListener('click', () => vpnList.addRow());
-        eventBus.on('rbac:changed', () => {
-            if (sessionKey() !== appliedKey) applyGate();
-        });
 
         applyGate(); // gate until an admin session exists; load the list when it does
         logger.info('Connection Management Module Setup Complete');

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { modules } from '../src/registry';
-import { Kernel } from '../src/core/kernel';
+import { createKernel } from '../src/core/kernel';
 import { ACTIVE_MODULES as STANDARD_MANIFEST } from '../src/variants/standard';
 import type { RegisteredModule } from '../src/core/types';
 
@@ -76,7 +76,7 @@ describe('registry', () => {
             const { spied, order } = spyRegistry();
             shellDOM(spied);
 
-            await new Kernel(spied).start();
+            await createKernel(spied).start();
 
             expect(order.length).toBe(spied.length);
             expect(new Set(order)).toEqual(new Set(spied.map(r => r.module.id)));

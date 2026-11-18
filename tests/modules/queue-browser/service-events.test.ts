@@ -573,7 +573,7 @@ describe('queue-browser/service-events', () => {
         });
 
         it('handles non-numeric timestamp by leaving dateMs null', () => {
-            // Defensive branch at service-events.ts:154 — if `ts` is a
+            // Defensive branch in onMessage's timestamp handling -- if `ts` is a
             // truthy non-number primitive (or `ts.toNumber()` returns a
             // non-number), the engine sets `dateMs = null` so downstream
             // age-filters can't compute against garbage. Reproduces the
@@ -853,11 +853,11 @@ describe('queue-browser/service-events', () => {
         });
 
         it('handles unknown message type by leaving typeStr at default "Message"', () => {
-            // The type-detection chain at service-events.ts:165-168 falls through
+            // The type-detection chain in onMessage falls through
             // when getType() returns something that's neither TEXT/BINARY/MAP/STREAM
-            // — typeStr is initialised to 'Message' on line 163 and nothing reassigns
+            // -- typeStr starts as 'Message' and nothing reassigns
             // it. This test documents that fall-through contract AND unambiguously
-            // exercises the falsy branches of the MAP and STREAM checks (lines 167-168),
+            // exercises the falsy branches of the MAP and STREAM checks,
             // which the chained else-if's basic-block layout otherwise leaves under-
             // reported in v8 coverage.
             const se = createServiceEvents();

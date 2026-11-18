@@ -177,11 +177,10 @@ function createBrowserMock() {
         }),
         connect: vi.fn(),
         disconnect: vi.fn(),
-        // start/stop are used by the copy engine for per-message backpressure:
-        // after each MESSAGE event we stop() the browser, process the message
-        // (clone + publish + await ACK), then start() to receive the next one.
-        // This bounds memory at one in-flight message rather than letting the
-        // SDK buffer accumulate during a slow publish path.
+        // start/stop are used by the copy engine for backpressure: it stop()s
+        // the browser while too many publishes await their ACK and start()s
+        // it again once they drain, so the SDK buffer cannot grow during a
+        // slow publish path.
         start: vi.fn(),
         stop: vi.fn(),
         removeMessageFromQueue: vi.fn(),
@@ -262,7 +261,7 @@ if (hasDom) {
     (window as any).solace = createSolaceMock();
     // The shell's vendor loader sets this in the browser; `connect()` refuses to
     // open a session without it (src/core/services/solace-client.ts). Default it
-    // true so suites exercise the normal path — the refusal branch is driven by the
+    // true so suites exercise the normal path -- the refusal branch is driven by the
     // one test that sets it false explicitly.
     (window as any).solaceLibLoaded = true;
 }

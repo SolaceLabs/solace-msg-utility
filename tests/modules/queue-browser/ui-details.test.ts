@@ -1025,10 +1025,10 @@ describe('queue-browser/ui-details', () => {
 
     describe('selectMessage destination label', () => {
         it('falls back to raw enum string when destType is neither TOPIC nor QUEUE', () => {
-            // Covers the falsy branch of `else if (destType === QUEUE)` at
-            // ui-details.ts:102 — when a future Solace SDK introduces a new
+            // Covers the falsy branch of `else if (destType === QUEUE)` in the
+            // details pane's destination badge -- when a future Solace SDK introduces a new
             // DestinationType (e.g. shared subscriptions), the badge keeps its
-            // `destType.toString()` initial value from line 100 rather than
+            // `destType.toString()` initial value rather than
             // crashing or guessing. A regression that added an `else throw` would
             // break installs on newer SDKs; this test surfaces the throw before
             // reaching the assertion.

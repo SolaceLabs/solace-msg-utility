@@ -2,7 +2,7 @@
  * Queue Discovery Module
  *
  * Discovers VPNs and Queues via SEMP API. Depends on the SEMP connection
- * from the Connections module — priority is configured in `src/registry.ts`.
+ * from the Connections module. No variant activates it.
  */
 
 import { createService } from './service.js';

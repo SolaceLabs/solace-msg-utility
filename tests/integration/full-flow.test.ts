@@ -6,7 +6,7 @@
  * behaviour is covered in core/kernel.test.ts.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Kernel } from '../../src/core/kernel';
+import { createKernel } from '../../src/core/kernel';
 import type { PwaModule, EventBus } from '../../src/core/types';
 
 // ---- Test helpers ----
@@ -55,7 +55,7 @@ describe('Integration: cross-module communication', () => {
         createModuleTemplate('mod-a', '<div>A</div>');
         createModuleTemplate('mod-b', '<div>B</div>');
 
-        const kernel = new Kernel([{ module: modA, priority: 10 }, { module: modB, priority: 5 }]);
+        const kernel = createKernel([{ module: modA, priority: 10 }, { module: modB, priority: 5 }]);
         await kernel.start();
 
         expect(busA).toBe(busB);
@@ -76,7 +76,7 @@ describe('Integration: cross-module communication', () => {
 
         createModuleTemplate('mod-a', '<div>A</div>');
 
-        const kernel = new Kernel([{ module: mod, priority: 10 }]);
+        const kernel = createKernel([{ module: mod, priority: 10 }]);
         await kernel.start();
 
         expect(received.length).toBe(1);

@@ -433,7 +433,7 @@ describe('QueueSubscriptionExplorerModule', () => {
     });
 
     it('toast uses singular "subscription" when exactly one row loaded', async () => {
-        // The `${allRows.length === 1 ? '' : 's'}` ternary at module.ts:143
+        // The `${allRows.length === 1 ? '' : 's'}` ternary in the loaded toast
         // — the truthy (singular) branch — is otherwise unexercised because
         // every fixture in this file loads 2+ rows.
         const container = createDOM();
@@ -491,7 +491,7 @@ describe('QueueSubscriptionExplorerModule', () => {
             // Drain microtasks so load() reaches the awaited sempFetch.
             for (let i = 0; i < 5; i++) await Promise.resolve();
 
-            // Disconnect mid-fetch -- per the fix, this bumps loadGen, resets
+            // Disconnect mid-fetch -- this bumps loadGen, resets
             // allRows to null, re-enables the button, clears the filters.
             eventBus.emit('app:state-change', { key: 'isSempConnected', value: false });
             expect(btn.textContent).toBe('Load');
@@ -499,7 +499,7 @@ describe('QueueSubscriptionExplorerModule', () => {
             expect(tbody.textContent).toMatch(/Click/);
 
             // Resolve the fetch with a valid page. The generator yields it;
-            // for-await body line 122 sees myGen=1 !== loadGen=2 and returns
+            // for-await body sees myGen=1 !== loadGen=2 and returns
             // BEFORE the `accumulated.push(page.data)` would have run.
             const late = { ...textRes(PAGE_OK), text: vi.fn(async () => PAGE_OK) };
             resolveFetch(late);

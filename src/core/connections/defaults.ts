@@ -27,3 +27,15 @@ export const PROVISIONED_SDK_CONNECT = {
     reconnectRetries: 1,
     reconnectWait: 3000,
 } as const;
+
+/**
+ * SDK connect and reconnect settings for Queue Copy's destination connection,
+ * which has no Advanced Settings form either: one connect attempt, so a wrong
+ * address is reported at once.
+ */
+export const DESTINATION_SDK_CONNECT = {
+    connectRetries: 0,
+    connectTimeout: 3000,
+    reconnectRetries: 1,
+    reconnectWait: 3000,
+} as const;

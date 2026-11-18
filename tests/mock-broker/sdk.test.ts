@@ -87,7 +87,7 @@ describe('mock-broker/sdk — session', () => {
         other.connect();
         await vi.waitFor(() => expect(failed).toHaveBeenCalled());
 
-        // The other shape: solace-client.ts:185 forwards sessionEvent.infoStr with
+        // The other shape: solace-client.ts's connect-failed handler forwards sessionEvent.infoStr with
         // no fallback, so a Session failure carries infoStr and NOT message.
         const event = failed.mock.calls[0][0];
         expect(event.infoStr).toBeTruthy();

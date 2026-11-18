@@ -90,7 +90,7 @@ describe('queue-browser/ui-table', () => {
         });
 
         it('renderList omits delete button on READ_ONLY queue but still wires the rest of the row', () => {
-            // Covers the falsy branch of `if (btnDel)` at ui-table.ts:73.
+            // Covers the falsy branch of `if (btnDel)` in attachRowListeners.
             // Read-only queue bindings must NOT show a delete button, AND the
             // rest of attachRowListeners must still wire the remaining actions
             // (download, forward, checkbox). A regression that skipped the full

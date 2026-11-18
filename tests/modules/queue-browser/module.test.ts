@@ -182,13 +182,13 @@ describe('queue-browser/module', () => {
             consoleSpy.mockRestore();
         });
 
-        it('btnBindPick click wires to handleBindPickClick (invokes pickQueue with the primary queue source)', async () => {
-            // Covers the Bind-pick click listener. Spy on `pickQueue` -- the distinguishing
-            // downstream effect of handleBindPickClick — so a regression that
+        it('btnBindPick click wires to handleBindPickClick (opens the context picker with the primary queue source)', async () => {
+            // Covers the Bind-pick click listener. Spy on `ctx.queuePicker.pick` -- the distinguishing
+            // downstream effect of handleBindPickClick -- so a regression that
             // re-wires this button to a different handler would fail.
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             // Set up enough state for queueSourceFrom to return a non-null
-            // QueueSource so handleBindPickClick reaches pickQueue.
+            // QueueSource so handleBindPickClick reaches the picker.
             ctx.appState.isSempConnected = true;
             ctx.appState.sempCredentials = {
                 user: 'u', pass: 'p', baseUrl: 'https://b:1943/SEMP/v2',
@@ -196,12 +196,11 @@ describe('queue-browser/module', () => {
             };
             ctx.appState.selectedVpn = 'vpn1';
 
-            const pickerMod = await import('../../../src/core/components/queue-picker/index');
-            const pickSpy = vi.spyOn(pickerMod, 'pickQueue').mockResolvedValue(null);
+            const pickSpy = vi.spyOn(ctx.queuePicker, 'pick').mockResolvedValue(null);
 
             await QueueBrowserModule.install(ctx);
             els.btnBindPick.click();
-            await Promise.resolve(); // let the async handler reach pickQueue
+            await Promise.resolve(); // let the async handler reach the picker
 
             expect(pickSpy).toHaveBeenCalledTimes(1);
             expect(pickSpy).toHaveBeenCalledWith(
@@ -383,7 +382,7 @@ describe('queue-browser/module', () => {
         });
 
         it('mousedown on filter date inputs runs the prefill wiring', async () => {
-            // Covers the two arrow wrappers at module.ts:125-126 that bridge
+            // Covers the two arrow wrappers in module.ts that bridge
             // the date inputs' mousedown/focus events to
             // `uiEvents.prefillDateInputMidnight`. The function itself is
             // covered by ui-events.test.ts; this test verifies the click
@@ -492,11 +491,11 @@ describe('queue-browser/module', () => {
         });
 
         it('forward send click invokes uiEvents.handleForwardSend (real listener body fires)', async () => {
-            // Covers the click listener body at queue-browser/module.ts:129 — i.e.
+            // Covers the click listener body in queue-browser/module.ts -- i.e.
             // the `() => uiEvents.handleForwardSend()` arrow attached via
             // addEventListener. Existing tests only `vi.spyOn(btnForwardSend, 'click')`
             // which intercepts the .click() *method* without firing addEventListener
-            // listeners, so the production handler at line 129 was never executed.
+            // listeners, so they never run the production handler.
             // Here we dispatch a real click event so the listener actually runs.
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             await QueueBrowserModule.install(ctx);
@@ -517,7 +516,7 @@ describe('queue-browser/module', () => {
         });
 
         it('forward dest-type change toggles inputForwardDestName.disabled', async () => {
-            // Covers the change-listener body at queue-browser/module.ts:133.
+            // Covers the dest-type change listener in queue-browser/module.ts.
             // The handler keeps the dest-name input synced with the dest-type
             // selection: "Original" → disabled (each message uses its own
             // destination); "Topic"/"Queue" → enabled. Without the handler,
@@ -607,8 +606,8 @@ describe('queue-browser/module', () => {
         });
 
         it('app:state-change with an unrelated key is a no-op', async () => {
-            // Covers the false branch of `else if (key === 'selectedVpn')` at
-            // queue-browser/module.ts:190 — for any key that's neither
+            // Covers the false branch of `else if (key === 'selectedVpn')` in
+            // queue-browser/module.ts's app:state-change listener -- for any key that's neither
             // 'isConnected' nor 'selectedVpn' (e.g. isSempConnected, future
             // activeModuleId), the listener body must do nothing. A regression
             // that mutated state for every key would slip through silently

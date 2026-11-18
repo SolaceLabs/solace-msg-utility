@@ -10,11 +10,10 @@ import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 import type { AppContext } from '../../../src/core/types';
 
-vi.mock('../../../src/core/components/queue-picker', () => ({
-    pickQueue: vi.fn(async () => ({ vpn: 'default', queue: 'picked-q' })),
-}));
-import { pickQueue } from '../../../src/core/components/queue-picker';
 import { completeContext } from '../../helpers/appContext';
+
+/** The context's queue picker: `ctx.queuePicker.pick`. */
+const pickQueue = vi.fn(async (..._args: unknown[]): Promise<{ vpn: string; queue: string } | null> => ({ vpn: 'default', queue: 'picked-q' }));
 
 function createBrowserDOM() {
     const container = loadModuleDOM('queue-browser');
@@ -59,6 +58,7 @@ describe('queue-browser/ui-events', () => {
             loadSelf: vi.fn(),
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
+            queuePicker: { pick: pickQueue },
         });
 
         initDetails(ctx);

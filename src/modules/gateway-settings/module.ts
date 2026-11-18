@@ -22,7 +22,7 @@
  * reloads the form (`src/core/admin-conflict.ts`).
  */
 import { required, setError as setErrorOn } from '../../core/dom';
-import { createGate } from '../../core/components/module-gate';
+import { createGate, gateOnAdminSession } from '../../core/components/module-gate';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
 import { moduleLabel } from '../../core/utils';
@@ -72,7 +72,7 @@ const MODULE_DESCRIPTIONS: Readonly<Record<string, string>> = {
     'queue-subscription-explorer': 'See which topics each queue subscribes to.',
 };
 
-/** Where the gateway's own sign-in page sends an administrator back to this app. */
+/** The question Restart gateway asks before it restarts. */
 const RESTART_QUESTION = 'Restart the gateway? Everyone is signed out and open broker connections close. It is back in a few seconds.';
 /** The first look at `/hosted` comes after the old process has had time to stop; later ones every second, for a minute. */
 const RESTART_FIRST_WAIT_MS = 2000;
@@ -104,7 +104,7 @@ export const GatewaySettingsModule = {
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>',
 
     async install(app: AppContext, opts: GatewaySettingsOptions = {}) {
-        const { container, appState, eventBus } = app;
+        const { container, eventBus } = app;
 
         const els = {
             view: required<HTMLElement>(container, '#gw-set-view'),
@@ -292,35 +292,23 @@ export const GatewaySettingsModule = {
             setRestartError('The gateway has not answered after a minute. Check it on its host, then reload this page.');
         }
 
-        // The session as this module last applied it: signed-in user and admin
-        // flag, null when signed out. A replayed or unrelated rbac:changed (the
-        // kernel's held replay at start, a broker connect) leaves it equal.
-        const sessionKey = (): string | null => {
-            const m = appState.managed;
-            return m ? JSON.stringify([m.username, m.admin]) : null;
-        };
-        let appliedKey = sessionKey();
-
         // Admin sessions only, like the other admin modules. Called at install
         // and on an rbac:changed that changes the session.
-        function applyGate(): void {
-            appliedKey = sessionKey();
-            if (!appState.managed?.admin) {
+        const applyGate = gateOnAdminSession(app, {
+            onNoAdmin: () => {
                 els.view.classList.add('hidden');
                 gate.show();
-                return;
-            }
-            gate.hide();
-            els.view.classList.remove('hidden');
-            void load();
-        }
+            },
+            onAdmin: () => {
+                gate.hide();
+                els.view.classList.remove('hidden');
+                void load();
+            },
+        });
 
         els.btnReload.addEventListener('click', () => void load());
         els.btnSave.addEventListener('click', () => void save());
         els.btnRestart.addEventListener('click', () => void restart());
-        eventBus.on('rbac:changed', () => {
-            if (sessionKey() !== appliedKey) applyGate();
-        });
 
         applyGate();
         logger.info('Gateway Settings Module Setup Complete');

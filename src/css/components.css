@@ -216,7 +216,7 @@ a.btn {
 .btn-icon:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-    background-color: transparent !important;
+    background-color: transparent;
     pointer-events: none;
     color: var(--text-muted);
 }

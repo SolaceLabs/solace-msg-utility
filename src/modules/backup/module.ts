@@ -20,7 +20,7 @@
  * import a message asking for a new preview, with the old one cleared.
  */
 import { required, setError } from '../../core/dom';
-import { createGate } from '../../core/components/module-gate';
+import { createGate, gateOnAdminSession } from '../../core/components/module-gate';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { downloadBlob } from '../../core/download';
 import { iconButton } from '../../core/icons';
@@ -82,7 +82,7 @@ export const BackupModule = {
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>',
 
     async install(app: AppContext) {
-        const { container, appState, eventBus } = app;
+        const { container, eventBus } = app;
         const q = <T extends HTMLElement>(sel: string) => required<T>(container, sel);
         const els = {
             view: q<HTMLElement>('#backup-view'),
@@ -455,32 +455,23 @@ export const BackupModule = {
             await load(false); // the last run, failed or not, and the files; the form keeps its edits
         }
 
-        // The session as this module last applied it: signed-in user and admin
-        // flag, null when signed out. A replayed or unrelated rbac:changed (the
-        // kernel's held replay at start, a broker connect) leaves it equal.
-        const sessionKey = (): string | null => {
-            const m = appState.managed;
-            return m ? JSON.stringify([m.username, m.admin]) : null;
-        };
-        let appliedKey = sessionKey();
-
         // Admin sessions only, like the other admin modules. Called at install
         // and on an rbac:changed that changes the session.
-        function applyGate(): void {
-            appliedKey = sessionKey();
-            if (!appState.managed?.admin) {
+        const applyGate = gateOnAdminSession(app, {
+            onNoAdmin: () => {
                 // Signed out or no longer an administrator: the hidden page keeps
                 // no passphrase and no loaded backup.
                 forgetImport();
                 for (const input of [els.exportPass, els.exportConfirm, els.schedPass, els.schedConfirm]) input.value = '';
                 els.view.classList.add('hidden');
                 gate.show();
-                return;
-            }
-            gate.hide();
-            els.view.classList.remove('hidden');
-            void load();
-        }
+            },
+            onAdmin: () => {
+                gate.hide();
+                els.view.classList.remove('hidden');
+                void load();
+            },
+        });
 
         els.btnReload.addEventListener('click', () => void load());
         els.btnExport.addEventListener('click', () => void exportFile());
@@ -492,9 +483,6 @@ export const BackupModule = {
         els.btnSaveSchedule.addEventListener('click', () => void saveSchedule());
         els.btnRemoveSchedule.addEventListener('click', () => void removeSchedule());
         els.btnRun.addEventListener('click', () => void runNow());
-        eventBus.on('rbac:changed', () => {
-            if (sessionKey() !== appliedKey) applyGate();
-        });
 
         showKindFields();
         applyGate();

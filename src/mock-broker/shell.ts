@@ -34,8 +34,8 @@ export function installSdk(): void {
         set: () => { /* ignore the vendor script -- the emulator owns this global */ },
     });
 
-    (window as any).solaceLibLoaded = true;
-    (window as any).solaceLibState = 'loaded';
+    window.solaceLibLoaded = true;
+    window.solaceLibState = 'loaded';
     window.dispatchEvent(new CustomEvent('Solclient:loaded'));
 }
 

@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { pickQueue, __resetForTest } from '../../../../src/core/components/queue-picker';
+import { createQueuePicker, type QueuePicker } from '../../../../src/core/components/queue-picker';
 import type { SempContext } from '../../../../src/core/connections/types';
 import { sempQueueSource } from '../../../../src/core/services/queue-source';
 import { INPUT_DEBOUNCE_MS } from '../../../../src/core/timing';
 
 /**
- * Picker tests. The picker is module-scoped (lazily-created dialog DOM, single
- * inflight invocation). `__resetForTest` clears the module state between tests
- * so each test exercises the lazy-create path. The picker consumes a
+ * Picker tests. A picker holds its lazily-created dialog DOM, its cache and
+ * one open invocation in its own closure. Each test gets a new picker, so
+ * each exercises the lazy-create path. The picker consumes a
  * `QueueSource`; here we drive it with the real SEMP-backed `sempQueueSource`
  * over a stubbed `SempContext.fetch` (so `.fetch` mock inspection still works
  * and the source's cache key is the broker `baseUrl`), then dispatch DOM events.
@@ -84,8 +84,10 @@ async function flushAsync(): Promise<void> {
 }
 
 describe('core/components/queue-picker', () => {
+    /** This test's picker's `pick`. */
+    let pickQueue: QueuePicker['pick'];
     beforeEach(() => {
-        __resetForTest();
+        pickQueue = createQueuePicker().pick;
     });
 
     describe('basic open / close', () => {
@@ -684,7 +686,7 @@ describe('core/components/queue-picker', () => {
         it('VPN option with empty textContent is hidden by any non-empty filter', async () => {
             // Sibling of the "queue option with empty textContent is hidden by any non-empty filter"
             // test below (this file) -- same `(opt.textContent || '').toLowerCase()` defensive
-            // fallback at applyVpnFilter (queue-picker/index.ts:297). Mirrors the queue-list test
+            // fallback in applyVpnFilter. Mirrors the queue-list test
             // exactly so a regression in either filter is caught.
             vi.useFakeTimers();
             const sempCtx = makeSempCtx();
@@ -714,8 +716,8 @@ describe('core/components/queue-picker', () => {
         });
 
         it('queue option with empty textContent is hidden by any non-empty filter', async () => {
-            // The `(opt.textContent || '').toLowerCase()` fallback at
-            // queue-picker/index.ts:297,307 collapses the spec-impossible
+            // The `(opt.textContent || '').toLowerCase()` fallback in
+            // applyVpnFilter and applyQueueFilter collapses the spec-impossible
             // null and the spec-allowed empty string into one observable
             // path. Force an empty-textContent option (broker quirk:
             // queue name with whitespace-only chars stripped) and verify
@@ -730,8 +732,8 @@ describe('core/components/queue-picker', () => {
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
             await flushAsync();
 
-            // Mutate one rendered option to have empty textContent — simulates
-            // the defensive case the `|| ''` fallback was added to absorb.
+            // Mutate one rendered option to have empty textContent -- the
+            // defensive case the `|| ''` fallback absorbs.
             const opts = document.querySelectorAll<HTMLDivElement>(
                 '.picker-queue-list .picker-dropdown-option:not(.picker-dropdown-empty)',
             );
@@ -804,6 +806,28 @@ describe('core/components/queue-picker', () => {
     });
 
     describe('persistent cache across pickQueue calls', () => {
+        it('a second picker has its own cache and its own dialog, and opens while the first is open', async () => {
+            const sempCtx = makeSempCtx();
+            stubVpnsAndQueues(sempCtx, ['vpn-a'], {});
+
+            // The first picker fills its cache and stays open.
+            const first = pickQueue(src(sempCtx));
+            await flushAsync();
+            const fetchCallsAfterFirst = (sempCtx.fetch as any).mock.calls.length;
+
+            // Another picker shares nothing with it: it opens, and lists the VPNs itself.
+            const second = createQueuePicker().pick(src(sempCtx));
+            await flushAsync();
+            expect((sempCtx.fetch as any).mock.calls.length).toBeGreaterThan(fetchCallsAfterFirst);
+            const dialogs = document.querySelectorAll<HTMLDialogElement>('dialog.picker-dialog');
+            expect(dialogs).toHaveLength(2);
+            expect([...dialogs].every(d => d.hasAttribute('open'))).toBe(true);
+
+            dialogs.forEach(d => d.querySelector<HTMLButtonElement>('.picker-cancel')!.click());
+            await expect(first).resolves.toBeNull();
+            await expect(second).resolves.toBeNull();
+        });
+
         it('second open against the same baseUrl uses cached VPNs (no new fetch)', async () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['vpn-a', 'vpn-b'], {});

@@ -849,7 +849,7 @@ describe('QueueDiscoveryModule', () => {
         const ev = new KeyboardEvent('keydown', { key: 'a', cancelable: true });
         vpnInput.dispatchEvent(ev);
 
-        // The `if (e.key === 'Enter')` guard at module.ts:251 must short-circuit
+        // The `if (e.key === 'Enter')` guard in the inputs' keydown listeners must short-circuit
         // — neither preventDefault nor click() should fire for non-Enter keys.
         expect(clickSpy).not.toHaveBeenCalled();
         expect(ev.defaultPrevented).toBe(false);
@@ -989,12 +989,12 @@ describe('QueueDiscoveryModule', () => {
         });
 
         it('older fetchQueues skips cache-write and UI-finalise when superseded after last page', async () => {
-            // Covers the truthy branch of `if (myGen !== fetchQueuesGen) return;` at
-            // queue-discovery/module.ts:153 — the post-loop generation check that
+            // Covers the truthy branch of `if (myGen !== fetchQueuesGen) return;` in
+            // fetchQueues (queue-discovery/module.ts) -- the post-loop generation check that
             // protects against an older fetch finalising stale UI/cache state when a
             // newer fetch has bumped the generation counter mid-stream.
             //
-            // The race window is narrow: line 153 only fires when the gen bump
+            // The race window is narrow: the post-loop check only fires when the gen bump
             // happens AFTER the loop's last successful iteration but BEFORE the
             // for-await's `{done: true}` resolves. The trick used here: spy
             // `ui.renderOptions` so the body's last render call synchronously
@@ -1065,8 +1065,8 @@ describe('QueueDiscoveryModule', () => {
                 expect(queueCalls).toBeGreaterThanOrEqual(3);
             }, { timeout: 2000 });
 
-            // ASSERTION: line 153 returned for call #1, so its cache write at
-            // line 155 was skipped. Re-trigger fetchQueues for vpn-a — since the
+            // ASSERTION: the post-loop check returned for call #1, so its cache
+            // write was skipped. Re-trigger fetchQueues for vpn-a -- since the
             // cache is empty, it must call sempFetch again (cache miss).
             const sempCallsBeforeReFetch = (ctx.sempFetch as any).mock.calls.length;
             (container.querySelector('#btn-refresh-queues') as HTMLButtonElement).click();

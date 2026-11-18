@@ -2,7 +2,7 @@
  * Connections Module -- Direct entry.
  *
  * Manages Solace broker and SEMP connections typed into the Direct form.
- * Priority 100: Must initialize first since other modules depend on connection state.
+ * The variants give it the highest priority: it installs first, since other modules depend on connection state.
  *
  * The broker-side service factories live in `src/core/services/` and are
  * pure (no AppContext, no UI). This file wires their lifecycle hooks
@@ -33,6 +33,12 @@ import { DEFAULT_CONN_CONFIG } from '../../core/connections/conn-modes';
 import { DEFAULT_MAX_MESSAGES_PER_QUEUE, MAX_MESSAGES_PER_QUEUE } from '../../core/connections/defaults';
 import { createVpnSwitch, type CheckConnectionRequest } from './vpn-switch';
 import type { AppContext, ConnectionConfig, SolaceConfig, SempConfig } from '../../core/types';
+
+/** A saved config as stored: any field may be missing (a user saved only some). */
+type SavedConfig = Partial<Pick<ConnectionConfig, 'host'>> & {
+    solace?: Partial<SolaceConfig>;
+    semp?: Partial<SempConfig>;
+};
 
 const log = logger.withTag('Connections');
 
@@ -228,7 +234,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
 
     // Helper: Apply Config to UI. Each field is guarded individually so a partial
     // saved config (e.g. a user only ever set host + vpn) doesn't blank the rest.
-    function applyConfig(cfg: any) {
+    function applyConfig(cfg: SavedConfig) {
         // A saved plain scheme this page cannot use moves to its TLS form, with a
         // warning: the saved port is most likely the plain one.
         const moved: string[] = [];
@@ -453,7 +459,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         syncUrlPaths();
 
         [els.elHost, els.elSolPort, els.elSolVpn, els.elSolUser, els.elSempPort, els.elSempUser, els.elSempPass]
-            .forEach((el: any) => ui.showError(el, false));
+            .forEach((el: HTMLElement) => ui.showError(el, false));
 
         showToast('Form reset', 'info');
     });
@@ -555,10 +561,10 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         if (e.key === 'Enter') { e.preventDefault(); btn.click(); }
     }
 
-    [els.elHost, els.elSolPort, els.elSolUrlPath, els.elSolVpn, els.elSolUser, els.elSolPass].forEach((input: any) => {
+    [els.elHost, els.elSolPort, els.elSolUrlPath, els.elSolVpn, els.elSolUser, els.elSolPass].forEach((input: HTMLElement) => {
         input.addEventListener('keydown', (e: KeyboardEvent) => onEnter(e, els.btnSolace));
     });
-    [els.elSempPort, els.elSempUrlPath, els.elSempUser, els.elSempPass].forEach((input: any) => {
+    [els.elSempPort, els.elSempUrlPath, els.elSempUser, els.elSempPass].forEach((input: HTMLElement) => {
         input.addEventListener('keydown', (e: KeyboardEvent) => onEnter(e, els.btnSemp));
     });
 
