@@ -37,8 +37,14 @@ import type { AppContext } from '../../core/types';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-/** A file larger than the gateway's import cap is not a backup; refused before it is sent. */
+/**
+ * The gateway's cap on one import body (8 MiB). The file travels in it as a
+ * JSON string, so it is measured that way, with room left for the passphrase,
+ * the choices and the preview's basis; one that cannot fit is refused before
+ * it is sent.
+ */
 export const MAX_IMPORT_BYTES = 8 << 20;
+const IMPORT_BODY_HEADROOM = 64 << 10;
 
 const DOWNLOAD_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
 const RESTORE_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>';
@@ -146,19 +152,27 @@ export const BackupModule = {
             });
         }
 
-        function renderStatus(st: BackupStatus): void {
+        /**
+         * Shows the status. `fillForm` also writes the saved schedule into the
+         * form, with the rev it came from; without it (Back up now) the admin's
+         * unsaved edits stay, and so does the rev they were made against, so a
+         * save still answers stale if the schedule changed meanwhile.
+         */
+        function renderStatus(st: BackupStatus, fillForm: boolean): void {
             const s = st.schedule;
-            scheduleRev = s ? s.rev : 0;
+            if (fillForm) scheduleRev = s ? s.rev : 0;
             const lines: string[] = [];
             if (s) {
                 lines.push(`${describeSchedule(s)}; keeps the last ${s.keep}.`);
                 lines.push(`Next backup: ${formatUtc(st.nextRun as string)}.`);
-                els.kind.value = s.kind;
-                els.weekday.value = String(s.weekday);
-                els.day.value = String(s.day || 1);
-                els.time.value = `${pad(s.hour)}:${pad(s.minute)}`;
-                els.minute.value = String(s.minute);
-                els.keep.value = String(s.keep);
+                if (fillForm) {
+                    els.kind.value = s.kind;
+                    els.weekday.value = String(s.weekday);
+                    els.day.value = String(s.day || 1);
+                    els.time.value = `${pad(s.hour)}:${pad(s.minute)}`;
+                    els.minute.value = String(s.minute);
+                    els.keep.value = String(s.keep);
+                }
             } else {
                 lines.push('No schedule: the gateway writes no backups until you save one.');
             }
@@ -208,14 +222,14 @@ export const BackupModule = {
             }
         }
 
-        async function load(): Promise<void> {
+        async function load(fillForm = true): Promise<void> {
             setError(els.error, null);
             const res = await service.status();
             if (!res.ok) {
                 reportManagedFailure(res, eventBus, fail(els.error));
                 return;
             }
-            renderStatus(res.data);
+            renderStatus(res.data, fillForm);
         }
 
         /** Saves a backup from the directory as it is: it opens with its schedule's passphrase. */
@@ -266,12 +280,19 @@ export const BackupModule = {
                 setSource(null, '');
                 return;
             }
+            const tooLarge = `${file.name} is larger than the 8 MiB the gateway accepts in one import.`;
             if (file.size > MAX_IMPORT_BYTES) {
                 setSource(null, '');
-                setError(els.importError, `${file.name} is larger than 8 MiB, so it is not a backup.`);
+                setError(els.importError, tooLarge);
                 return;
             }
-            setSource({ file: await file.text() }, `File: ${file.name}`);
+            const text = await file.text();
+            if (new TextEncoder().encode(JSON.stringify(text)).length > MAX_IMPORT_BYTES - IMPORT_BODY_HEADROOM) {
+                setSource(null, '');
+                setError(els.importError, tooLarge);
+                return;
+            }
+            setSource({ file: text }, `File: ${file.name}`);
         }
 
         function chooseSaved(name: string): void {
@@ -344,16 +365,21 @@ export const BackupModule = {
                 reportManagedFailure(res, eventBus, fail(els.importError));
                 return;
             }
+            forgetImport();
             if (res.data.signedOut) {
                 showToast('Imported. Your own account changed: sign in again.', 'ok', SIGNED_OUT_TOAST_MS);
                 eventBus.emit('rbac:sign-out-requested');
                 return;
             }
             showToast('Imported', 'ok');
+            await load();
+        }
+
+        /** Forgets the loaded backup and its passphrase. */
+        function forgetImport(): void {
             els.importFile.value = '';
             els.importPass.value = '';
             setSource(null, '');
-            await load();
         }
 
         // ---- schedule ----
@@ -426,7 +452,7 @@ export const BackupModule = {
             els.btnRun.disabled = false;
             if (res.ok) showToast(`Backup written: ${res.data.file}`, 'ok');
             else reportManagedFailure(res, eventBus, fail(els.scheduleError));
-            await load(); // the last run, failed or not, and the files
+            await load(false); // the last run, failed or not, and the files; the form keeps its edits
         }
 
         // The session as this module last applied it: signed-in user and admin
@@ -443,6 +469,10 @@ export const BackupModule = {
         function applyGate(): void {
             appliedKey = sessionKey();
             if (!appState.managed?.admin) {
+                // Signed out or no longer an administrator: the hidden page keeps
+                // no passphrase and no loaded backup.
+                forgetImport();
+                for (const input of [els.exportPass, els.exportConfirm, els.schedPass, els.schedConfirm]) input.value = '';
                 els.view.classList.add('hidden');
                 gate.show();
                 return;

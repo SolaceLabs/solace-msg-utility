@@ -52,6 +52,10 @@
     ["Order*", "Order-1", true],
     ["a*a", "a", false],
     ["a*a", "aa", true],
-    ["a*a", "aba", true]
+    ["a*a", "aba", true],
+    ["*", "a\nb", true],
+    ["a*b", "a\r\nb", true],
+    ["a*", "a\u2028", true],
+    ["a*b", "a\nc", false]
   ]
 }

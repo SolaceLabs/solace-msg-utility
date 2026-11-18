@@ -903,6 +903,31 @@ describe('queue-browser/service-events', () => {
             expect(state.allMessages.length).toBe(0);  // not updated for UI
         });
 
+        it('keeps a guaranteed id above 2^53 exactly: the SDK hands it back as a Long, read with toString()', () => {
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            se.onMessage('q1', createSolaceMessage({ gmid: { toString: () => '9007199254740993' } }));
+            expect(state.messageStore.get('q1')![0].id).toBe('9007199254740993');
+        });
+
+        it('a message re-delivered after the SDK re-binds the browser adds no second entry or row', () => {
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            state.currentQueue = 'q1';
+            state.allMessages = state.messageStore.get('q1')!;
+            state.displayedMessages = state.allMessages;
+            const addRow = vi.spyOn(ui, 'addMessageRow').mockImplementation(() => {});
+
+            se.onMessage('q1', createSolaceMessage({ gmid: 300 }));
+            // The re-bind: the browser starts again from the head of the queue.
+            se.onMessage('q1', createSolaceMessage({ gmid: 300 }));
+            se.onMessage('q1', createSolaceMessage({ gmid: 301 }));
+
+            expect(state.messageStore.get('q1')!.map((m: { id: string }) => m.id)).toEqual(['300', '301']);
+            expect(addRow.mock.calls.map(([m]) => (m as { id: string }).id)).toEqual(['300', '301']);
+            addRow.mockRestore();
+        });
+
         it('adds to displayed via addMessageRow when displayedMessages equals allMessages', () => {
             const se = createServiceEvents();
             state.messageStore.set('q1', []);

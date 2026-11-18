@@ -201,6 +201,7 @@ describe('core/services/provisioned-connect -- shortReason', () => {
         ['not_found', 'not available to your account'],
         ['rate_limited', 'too many attempts, wait a minute'],
         ['network', 'gateway not reachable'],
+        ['timeout', 'gateway did not answer in time'],
         ['server_error', 'the gateway could not complete it'],
         ['bad_response', 'the gateway could not complete it'],
     ])('the gateway code %s reads as "%s" for both halves, whatever the raw reason', (code, text) => {

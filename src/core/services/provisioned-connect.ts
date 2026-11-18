@@ -138,6 +138,7 @@ export function shortReason(part: ConnectPart, r: Pick<Extract<StepResult, { ok:
         case 'not_found': return 'not available to your account';
         case 'rate_limited': return 'too many attempts, wait a minute';
         case 'network': return 'gateway not reachable';
+        case 'timeout': return 'gateway did not answer in time';
         case 'server_error':
         case 'bad_response': return 'the gateway could not complete it';
     }

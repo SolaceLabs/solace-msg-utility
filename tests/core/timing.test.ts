@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { deadlineSignal, isTimeoutError, raceDeadline, REQUEST_TIMEOUT_MS } from '../../src/core/timing';
 
 describe('core/timing deadlineSignal', () => {
@@ -8,6 +8,18 @@ describe('core/timing deadlineSignal', () => {
         deadlineSignal();
         deadlineSignal(null, 5);
         expect(timeout.mock.calls).toEqual([[REQUEST_TIMEOUT_MS], [5]]);
+    });
+});
+
+// The same three behaviours where the engine has AbortSignal.any, and where it
+// does not (the joined controller).
+describe.each([['with AbortSignal.any', true], ['without AbortSignal.any', false]])('core/timing deadlineSignal %s', (_label, hasAny) => {
+    const any = AbortSignal.any;
+    beforeEach(() => {
+        if (!hasAny) Object.defineProperty(AbortSignal, 'any', { value: undefined, configurable: true, writable: true });
+    });
+    afterEach(() => {
+        Object.defineProperty(AbortSignal, 'any', { value: any, configurable: true, writable: true });
     });
 
     it("aborts with the caller's reason when the caller's signal aborts first", () => {
@@ -23,6 +35,12 @@ describe('core/timing deadlineSignal', () => {
         const signal = deadlineSignal(new AbortController().signal, 1);
         await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve()));
         expect(isTimeoutError(signal.reason)).toBe(true);
+    });
+
+    it("is aborted at once, with the caller's reason, when the caller's signal already was", () => {
+        const signal = deadlineSignal(AbortSignal.abort(new Error('cancelled before')));
+        expect(signal.aborted).toBe(true);
+        expect((signal.reason as Error).message).toBe('cancelled before');
     });
 });
 

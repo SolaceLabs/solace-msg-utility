@@ -136,7 +136,7 @@ describe('queue-browser/service', () => {
             expect(state.messageStore.has('test-queue')).toBe(true);
         });
 
-        it('enforces MAX_BROWSER_BINDINGS limit', () => {
+        it('refuses a binding past MAX_BROWSER_BINDINGS, leaves nothing behind, and binds once a slot is freed', () => {
             const service = createService(ctx, serviceEvents);
             const { session } = sessionWithBrowser();
             ctx.eventBus.emit('client:connected', { session });
@@ -146,8 +146,15 @@ describe('queue-browser/service', () => {
             service.createBrowser('q3');
             const result = service.createBrowser('q4');
 
-            expect(result.ok).toBe(false);
-            expect(result.error).toContain('Limit');
+            expect(result).toEqual({ ok: false, error: 'Connection Limit Reached: You can only bind to 3 queues at a time.' });
+            expect(session.createQueueBrowser).toHaveBeenCalledTimes(3);
+            expect(state.messageStore.has('q4')).toBe(false);
+            expect(state.browserInstances.has('q4')).toBe(false);
+
+            service.disconnectBrowser('q1');
+            expect(service.createBrowser('q4')).toEqual({ ok: true });
+            expect(session.createQueueBrowser).toHaveBeenCalledTimes(4);
+            expect([...state.browserInstances.keys()].sort()).toEqual(['q2', 'q3', 'q4']);
         });
 
         it('routes each QueueBrowser event to its serviceEvents handler with the queue name', () => {
@@ -368,7 +375,9 @@ describe('queue-browser/service', () => {
             const { session } = sessionWithBrowser();
             ctx.eventBus.emit('client:connected', { session });
 
-            const binary = new Uint8Array([1, 2, 3]);
+            // The real SDK hands a binary attachment back as a Latin-1 string,
+            // one char per byte: high bytes must reach the copy unchanged.
+            const binary = '\x89PNG\r\n\x1a\n\x00\xff\xfe';
             const original = makeOriginal({
                 // Force null on the higher-priority paths so the cloner
                 // falls all the way through to setBinaryAttachment.

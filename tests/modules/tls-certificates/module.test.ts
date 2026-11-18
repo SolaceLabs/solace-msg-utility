@@ -13,7 +13,7 @@ vi.mock('../../../src/core/toast', () => ({ showToast: toastMock.showToast }));
 vi.mock('../../../src/modules/tls-certificates/service', () => ({ createTlsService: () => svc }));
 
 import {
-    TlsCertificatesModule, expiryMark, formatUtc, MAX_PEM_BYTES, EXPIRY_WARN_DAYS,
+    TlsCertificatesModule, expiryMark, formatUtc, MAX_TLS_REQUEST_BYTES, EXPIRY_WARN_DAYS,
 } from '../../../src/modules/tls-certificates/module';
 import { completeContext } from '../../helpers/appContext';
 import { answerConfirm, confirmOpen } from '../../helpers/confirmDialog';
@@ -239,9 +239,9 @@ describe('tls-certificates -- gateway certificate card', () => {
         const { c } = await setup();
         type(c, '#tls-cert-pem', 'typed');
         const big = new File(['x'], 'huge.crt');
-        Object.defineProperty(big, 'size', { value: MAX_PEM_BYTES + 1 });
+        Object.defineProperty(big, 'size', { value: MAX_TLS_REQUEST_BYTES + 1 });
         await pick(c, '#tls-cert-file', big);
-        expect(text(c, '#tls-cert-error')).toBe('huge.crt is larger than 256 KiB, so it is not a certificate or a key.');
+        expect(text(c, '#tls-cert-error')).toBe('huge.crt is larger than 64 KiB, the most the gateway accepts in one request.');
         expect(value(c, '#tls-cert-pem')).toBe('typed');
         await pick(c, '#tls-cert-file', null);
         expect(hidden(c, '#tls-cert-error')).toBe(true);
@@ -275,6 +275,17 @@ describe('tls-certificates -- replace certificate', () => {
         expect(text(c, '#tls-cert-error')).toBe('Choose a key file or paste the private key (PEM).');
         expect(svc.check).not.toHaveBeenCalled();
         expect(value(c, '#tls-cert-pem')).toBe(CERT_PEM);
+    });
+
+    it('a pair larger than one gateway request, as the JSON it is sent in, is refused before it is sent', async () => {
+        const { c } = await setup();
+        // 44 000 bytes as typed, but each newline is two bytes in JSON: 66 000 on the wire.
+        type(c, '#tls-cert-pem', 'A\n'.repeat(22_000));
+        type(c, '#tls-key-pem', KEY);
+        await click(c, '#btn-tls-cert-replace');
+        expect(text(c, '#tls-cert-error')).toBe('The certificate and key together are larger than the 64 KiB the gateway accepts in one request. Leave out any certificate the chain does not need.');
+        expect(svc.check).not.toHaveBeenCalled();
+        expect(value(c, '#tls-key-pem')).toBe('');
     });
 
     it('a pair the gateway refuses shows its reason, installs nothing, empties the key, keeps the certificate', async () => {
@@ -428,6 +439,16 @@ describe('tls-certificates -- trusted CAs', () => {
         expect(el<HTMLButtonElement>(c, '#btn-tls-ca-add').disabled).toBe(false);
     });
 
+    it('a CA file larger than one gateway request is refused before it is sent, and kept as typed', async () => {
+        const { c } = await setup();
+        const pem = 'A'.repeat(MAX_TLS_REQUEST_BYTES);
+        type(c, '#tls-ca-pem', pem);
+        await click(c, '#btn-tls-ca-add');
+        expect(text(c, '#tls-ca-error')).toBe('This CA file is larger than the 64 KiB the gateway accepts in one request. Split it into smaller files and add each one.');
+        expect(svc.addTrust).not.toHaveBeenCalled();
+        expect(value(c, '#tls-ca-pem')).toBe(pem);
+    });
+
     it('adds a CA without a name: the gateway names it', async () => {
         const { c } = await setup();
         type(c, '#tls-ca-pem', CERT_PEM);
@@ -442,7 +463,7 @@ describe('tls-certificates -- trusted CAs', () => {
         type(c, '#tls-ca-name', 'dup.crt');
         svc.addTrust.mockResolvedValue(refused('exists', 409));
         await click(c, '#btn-tls-ca-add');
-        expect(text(c, '#tls-ca-error')).toBe('That name already exists. Use Edit to change it.');
+        expect(text(c, '#tls-ca-error')).toBe('A CA file with that name already exists. Delete it first, or choose another name.');
         expect(value(c, '#tls-ca-pem')).toBe(CERT_PEM);
         svc.addTrust.mockResolvedValue(refused('invalid', 422, { field: 'certificate', reason: 'A private key is not a CA certificate.' }));
         await click(c, '#btn-tls-ca-add');

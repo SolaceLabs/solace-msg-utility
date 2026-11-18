@@ -41,15 +41,16 @@ const MODULE_REQUIREMENTS: Record<string, 'admin' | 'unfiltered-semp'> = {
 
 /**
  * Case-sensitive glob match. `*` matches any run of characters (including
- * empty); all other characters are literal. Supports multiple/leading/middle/
- * trailing `*`. Anchored (full-string) match.
+ * empty, and line terminators, as the gateway's matcher does); all other
+ * characters are literal. Supports multiple/leading/middle/trailing `*`.
+ * Anchored (full-string) match.
  */
 export function matchGlob(pattern: string, value: string): boolean {
     // Split on '*', escape each literal segment, rejoin with '.*'. Splitting
     // first means '*' is never escaped; empty edge segments yield leading/
     // trailing '.*' naturally.
     const body = pattern.split('*').map(seg => seg.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*');
-    return new RegExp(`^${body}$`).test(value);
+    return new RegExp(`^${body}$`, 's').test(value);
 }
 
 function findQueueRow(rows: QGlob[], broker: string, vpn: string, queue: string): QGlob | undefined {

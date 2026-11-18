@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_MESSAGES_PER_QUEUE } from './constants.js';
+import { DEFAULT_MAX_MESSAGES_PER_QUEUE, MAX_STORED_BYTES_PER_QUEUE } from './constants.js';
 
 /**
  * A stored message as service-events.ts's ingest builds it: `id`, `content`
@@ -104,17 +104,26 @@ export function wireIngestUi(removeRow) {
  * in one synchronous pass so no intermediate state is observable between them.
  * Invoked from service-events.onMessage — must stay sync (no await) or the moving-
  * window invariant can interleave across arrivals.
+ *
+ * A browser the SDK re-binds starts again from the head of the queue, so the
+ * messages already shown arrive again with the same guaranteed id: one already
+ * in the window is kept once. A message with no id ('N/A') is always taken.
  * @param {string} queueName
  * @param {StoredMessage} message
+ * @returns {boolean} whether the message was taken (false: no such queue, or already held)
  */
 export function ingestMessage(queueName, message) {
-    const store = state.messageStore.get(queueName);
-    if (!store) return;
+    const store = /** @type {StoredMessage[] | undefined} */ (state.messageStore.get(queueName));
+    if (!store) return false;
+    if (message.id !== 'N/A' && store.some(m => m.id === message.id)) return false;
 
-    // Moving window: drop oldest when at cap. Cap is only changed between sessions
-    // (setting editable while disconnected), so a single shift per arrival is enough.
-    if (store.length >= state.maxMessagesPerQueue) {
-        const dropped = store.shift();
+    // Moving window: drop the oldest while the store is at the count cap, or the
+    // new message would take it past the byte cap. The newest is always kept,
+    // even one larger than the byte cap on its own.
+    let bytes = store.reduce((n, m) => n + (m.size || 0), 0);
+    while (store.length > 0 && (store.length >= state.maxMessagesPerQueue || bytes + (message.size || 0) > MAX_STORED_BYTES_PER_QUEUE)) {
+        const dropped = /** @type {StoredMessage} */ (store.shift()); // the loop runs only while the store holds one
+        bytes -= dropped.size || 0;
         if (state.currentQueue === queueName) {
             // state.allMessages points at `store` by reference — the shift() above
             // already dropped it there. Only displayedMessages (filtered view) and
@@ -127,6 +136,7 @@ export function ingestMessage(queueName, message) {
         }
     }
     store.push(message);
+    return true;
 }
 
 export function clearStore() {

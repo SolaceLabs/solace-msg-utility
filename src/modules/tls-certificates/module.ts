@@ -28,8 +28,16 @@ import { reportManagedFailure } from '../../core/services/managed-api';
 import { createTlsService, type CertInfo, type TlsView } from './service';
 import type { AppContext } from '../../core/types';
 
-/** A certificate or key file larger than this is not one; refused before it is read into the page. */
-export const MAX_PEM_BYTES = 256 * 1024;
+/**
+ * The most the gateway takes in one request body (its 64 KiB JSON cap). A file
+ * larger than this cannot be sent, so it is refused before it is read into the
+ * page; a pair, or a CA file, is measured as the JSON it travels in before it
+ * is sent.
+ */
+export const MAX_TLS_REQUEST_BYTES = 64 * 1024;
+
+/** Whether `body`, as the JSON it is sent as, fits one gateway request. */
+const fitsOneRequest = (body: object): boolean => new TextEncoder().encode(JSON.stringify(body)).length <= MAX_TLS_REQUEST_BYTES;
 
 /** A certificate that ends within this many days is marked. */
 export const EXPIRY_WARN_DAYS = 30;
@@ -226,9 +234,9 @@ export const TlsCertificatesModule = {
             setError(errorEl, null);
             const file = input.files?.[0];
             if (!file) return;
-            if (file.size > MAX_PEM_BYTES) {
+            if (file.size > MAX_TLS_REQUEST_BYTES) {
                 input.value = '';
-                setError(errorEl, `${file.name} is larger than 256 KiB, so it is not a certificate or a key.`);
+                setError(errorEl, `${file.name} is larger than 64 KiB, the most the gateway accepts in one request.`);
                 return;
             }
             pem.value = await file.text();
@@ -249,6 +257,10 @@ export const TlsCertificatesModule = {
                 }
                 if (!key) {
                     setError(els.certError, 'Choose a key file or paste the private key (PEM).');
+                    return;
+                }
+                if (!fitsOneRequest({ certificate, key })) {
+                    setError(els.certError, 'The certificate and key together are larger than the 64 KiB the gateway accepts in one request. Leave out any certificate the chain does not need.');
                     return;
                 }
                 const checked = await service.check({ certificate, key });
@@ -292,10 +304,19 @@ export const TlsCertificatesModule = {
                 return;
             }
             const name = els.caName.value.trim();
+            const body = name ? { name, certificate } : { certificate };
+            if (!fitsOneRequest(body)) {
+                setError(els.caError, 'This CA file is larger than the 64 KiB the gateway accepts in one request. Split it into smaller files and add each one.');
+                return;
+            }
             els.btnAddCa.disabled = true;
-            const res = await service.addTrust(name ? { name, certificate } : { certificate });
+            const res = await service.addTrust(body);
             els.btnAddCa.disabled = !trustWritable;
             if (!res.ok) {
+                if (res.code === 'exists') {
+                    setError(els.caError, 'A CA file with that name already exists. Delete it first, or choose another name.');
+                    return;
+                }
                 if (res.code === 'tls_read_only') await load();
                 reportManagedFailure(res, eventBus, fail(els.caError));
                 return;

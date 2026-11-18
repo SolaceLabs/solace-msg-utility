@@ -93,8 +93,9 @@ export function createServiceSemp(hooks: SempConnectionHooks): SempClient {
 
         try {
             // Built inside the try: btoa throws on a character above U+00FF,
-            // which reaches onError like any other failure. The connection
-            // forms reject non-ASCII credentials before this (sempAccountError).
+            // which reaches onError like any other failure. Both forms that
+            // connect a SEMP account (connections, queue-copy's destination)
+            // refuse a non-ASCII credential before this (sempAccountError).
             const authHeader = relay ? '' : basicAuthHeader(cfg.user, pass);
             // One request shape for the probe and every later call: the session
             // cookie for the relay, the Basic header for a broker.

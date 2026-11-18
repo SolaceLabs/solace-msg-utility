@@ -60,7 +60,7 @@ import type { ProvisionedStatus, ProvisionedTarget } from '../../core/components
 import { logger } from '../../core/logger';
 import { isHostedDeployment, limitSchemeOptions } from '../../core/hosted';
 import { isQueueVisible, canOperate } from '../../core/rbac';
-import { errMessage } from '../../core/utils';
+import { errMessage, sempAccountError } from '../../core/utils';
 import { isSessionEnded } from '../../core/services/managed-profile';
 import { connectProvisioned, gatewayCodeOf, outcomeDetails, outcomeLines, type StepResult } from '../../core/services/provisioned-connect';
 import { managedErrorMessage } from '../../core/services/managed-api';
@@ -346,6 +346,14 @@ export const QueueCopyModule = {
 
         function connectDestSemp(): void {
             const f = state.destForm;
+            // The Solace CLI account rules, as the connections form applies
+            // them: a credential outside them is refused here, before btoa
+            // sees it and before any request is sent.
+            const account = sempAccountError(f.semp.user, state.destSempPass);
+            if (account) {
+                setDestSempError(els, account.message);
+                return;
+            }
             setDestSempStatus(els, 'connecting');
             setDestSempError(els, null);
             const cfg: SempConfig = {

@@ -96,13 +96,20 @@ export const ConnectionManagementModule = {
 
         function showView(view: 'list' | 'form'): void {
             gate.hide();
+            if (view !== 'form') forgetPasswords();
             els.listView.classList.toggle('hidden', view !== 'list');
             els.formView.classList.toggle('hidden', view !== 'form');
         }
         function showGate(): void {
+            forgetPasswords();
             els.listView.classList.add('hidden');
             els.formView.classList.add('hidden');
             gate.show();
+        }
+        /** A hidden form keeps no typed password, SEMP or VPN: Cancel, a save, a sign-out or a 401. */
+        function forgetPasswords(): void {
+            els.sempPass.value = '';
+            vpnList.clear();
         }
 
         /** The loaded connections the search box matches (broker or hostname), or a row saying why there are none. */

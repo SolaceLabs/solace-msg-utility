@@ -318,9 +318,19 @@ describe('backup -- import', () => {
         const big = new File(['x'], 'big.json');
         Object.defineProperty(big, 'size', { value: MAX_IMPORT_BYTES + 1 });
         await pick(c, big);
-        expect(text(c, '#backup-import-error')).toBe('big.json is larger than 8 MiB, so it is not a backup.');
+        expect(text(c, '#backup-import-error')).toBe('big.json is larger than the 8 MiB the gateway accepts in one import.');
         expect(hidden(c, '#backup-import-source')).toBe(true);
         await pick(c, null);
+        await click(c, '#btn-backup-preview');
+        expect(svc.preview).not.toHaveBeenCalled();
+    });
+
+    it('measures a picked file as the JSON string it travels in: one under 8 MiB that escapes past it is refused', async () => {
+        const { c } = await setup();
+        // Every quote is sent as two bytes, so 5 MiB of them is 10 MiB on the wire.
+        await pick(c, new File(['"'.repeat(5 << 20)], 'quotes.json'));
+        await vi.waitFor(() => expect(text(c, '#backup-import-error')).toBe('quotes.json is larger than the 8 MiB the gateway accepts in one import.'));
+        expect(hidden(c, '#backup-import-source')).toBe(true);
         await click(c, '#btn-backup-preview');
         expect(svc.preview).not.toHaveBeenCalled();
     });
@@ -404,6 +414,22 @@ describe('backup -- import', () => {
         await answer(true);
         expect(signOut).toHaveBeenCalled();
         expect(toastMock.showToast).toHaveBeenCalledWith('Imported. Your own account changed: sign in again.', 'ok', expect.any(Number));
+        // The page keeps neither the passphrase nor the backup it read.
+        expect(el<HTMLInputElement>(c, '#backup-import-pass').value).toBe('');
+        expect(hidden(c, '#backup-import-source')).toBe(true);
+        svc.preview.mockClear();
+        await click(c, '#btn-backup-preview');
+        expect(svc.preview).not.toHaveBeenCalled();
+    });
+
+    it('a sign-out leaves no passphrase or loaded backup in the hidden page', async () => {
+        const { c, ctx } = await previewed(WEEKLY);
+        for (const sel of ['#backup-export-pass', '#backup-export-confirm', '#backup-sched-pass', '#backup-sched-confirm']) type(c, sel, 'typed');
+        ctx.appState.managed = null;
+        ctx.eventBus.emit('rbac:changed');
+        expect(['#backup-export-pass', '#backup-export-confirm', '#backup-sched-pass', '#backup-sched-confirm', '#backup-import-pass']
+            .map(sel => el<HTMLInputElement>(c, sel).value)).toEqual(['', '', '', '', '']);
+        expect(hidden(c, '#backup-import-source')).toBe(true);
     });
 
     it("shows the gateway's refusal of an import", async () => {
@@ -501,6 +527,34 @@ describe('backup -- schedule', () => {
         await click(c, '#btn-backup-run');
         expect(text(c, '#backup-schedule-error')).toBe('cannot write /backup/x');
         expect(svc.status).toHaveBeenCalledTimes(3);
+    });
+
+    it('Back up now refreshes the last run and the files but keeps unsaved schedule edits, and the rev they were made against', async () => {
+        const { c } = await setup(WEEKLY);
+        choose(c, '#backup-kind', 'daily');
+        type(c, '#backup-keep', '5');
+        // Meanwhile the run wrote a file and someone else saved the schedule.
+        const later = '2026-11-10T09:00:00Z';
+        svc.status.mockResolvedValue(ok({
+            ...WEEKLY,
+            schedule: { ...WEEKLY.schedule!, keep: 30, rev: 9 },
+            lastRun: { at: later, file: 'smu-backup-20261110T090000Z.json', error: '' },
+        }));
+        svc.runNow.mockResolvedValue(ok({ file: 'smu-backup-20261110T090000Z.json' }));
+        await click(c, '#btn-backup-run');
+        expect(text(c, '#backup-schedule-status')).toContain(`Last backup: smu-backup-20261110T090000Z.json, ${formatUtc(later)}.`);
+        expect([el<HTMLSelectElement>(c, '#backup-kind').value, el<HTMLInputElement>(c, '#backup-keep').value]).toEqual(['daily', '5']);
+        // A save of those edits still names the rev they were made against, so the gateway can answer stale.
+        svc.saveSchedule.mockResolvedValue(ok({ rev: 10 }));
+        await click(c, '#btn-backup-save-schedule');
+        expect(svc.saveSchedule.mock.calls[0][0]).toMatchObject({ kind: 'daily', keep: 5, rev: 4 });
+    });
+
+    it('Reload writes the saved schedule back into the form', async () => {
+        const { c } = await setup(WEEKLY);
+        type(c, '#backup-keep', '5');
+        await click(c, '#btn-backup-reload');
+        expect(el<HTMLInputElement>(c, '#backup-keep').value).toBe('14');
     });
 });
 

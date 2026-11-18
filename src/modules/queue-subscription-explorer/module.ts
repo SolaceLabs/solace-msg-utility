@@ -156,16 +156,10 @@ export const QueueSubscriptionExplorerModule = {
                         return;
                     }
                 }
-                /* v8 ignore start -- post-loop supersession check. The
-                 * in-loop supersession check above catches all naturally-emitted
-                 * disconnects (a disconnect bumps loadGen, then the next
-                 * yield's iteration returns). This line covers the
-                 * one-microtask window between the last yield being consumed
-                 * and the generator's `{done:true}` resolution — reachable
-                 * from real SDK callbacks but not robustly reproducible in
-                 * jsdom. */
+                // A disconnect after the last page was taken and before the
+                // stream ended: the in-loop check has passed, so this one stops
+                // the superseded load from writing its rows.
                 if (myGen !== loadGen) return;
-                /* v8 ignore stop */
                 allRows = accumulated;
                 isLoading = false;
                 btnLoad.disabled = false;

@@ -386,12 +386,24 @@ describe('user-management — create / edit form', () => {
         expect(el<HTMLInputElement>(container, '#user-mgmt-modules-default').checked).toBe(true);
     });
 
-    it('Cancel returns to the list', async () => {
+    it('Cancel returns to the list and forgets the typed password', async () => {
         const { container } = await setup();
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'typed-but-cancelled';
         el<HTMLButtonElement>(container, '#btn-user-mgmt-cancel').click();
         expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
         expect(hidden(container, '#user-mgmt-form-view')).toBe(true);
+        expect(el<HTMLInputElement>(container, '#user-mgmt-password').value).toBe('');
+    });
+
+    it('a sign-out in the middle of an edit leaves no typed password in the hidden form', async () => {
+        const { container, ctx } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'typed-then-signed-out';
+        ctx.setState('managed', null);
+        ctx.eventBus.emit('rbac:changed');
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(true);
+        expect(el<HTMLInputElement>(container, '#user-mgmt-password').value).toBe('');
     });
 
     it('says what each empty entitlement list means, and names the columns once a row is added', async () => {

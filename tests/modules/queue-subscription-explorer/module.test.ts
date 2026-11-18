@@ -8,6 +8,24 @@ import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import type { AppContext, AppState } from '../../../src/core/types';
 import { completeContext } from '../../helpers/appContext';
+import type { SubFetchPage } from '../../../src/modules/queue-subscription-explorer/service';
+
+/**
+ * The real service, unless a test scripts the page stream itself: a scripted
+ * generator can run code at a point no SEMP answer can reach, such as after
+ * the last page is taken and before the stream ends.
+ */
+const scripted = vi.hoisted(() => ({ pages: null as null | (() => AsyncGenerator<SubFetchPage>) }));
+vi.mock('../../../src/modules/queue-subscription-explorer/service', async (importOriginal) => {
+    const real = await importOriginal<typeof import('../../../src/modules/queue-subscription-explorer/service')>();
+    return {
+        ...real,
+        createService: (ctx: AppContext) => {
+            const service = real.createService(ctx);
+            return { fetchAllSubscriptions: () => (scripted.pages ? scripted.pages() : service.fetchAllSubscriptions()) };
+        },
+    };
+});
 
 function createDOM() {
     return loadModuleDOM('queue-subscription-explorer');
@@ -501,6 +519,36 @@ describe('QueueSubscriptionExplorerModule', () => {
             expect(tbody.textContent).toMatch(/Click/);
             expect(toasts.querySelector('.toast')).toBeNull();
         } finally {
+            toasts.remove();
+        }
+    });
+
+    it('a SEMP disconnect after the last page is taken, before the stream ends, still supersedes the load', async () => {
+        // The post-loop supersession check: the in-loop one has already passed
+        // for the last page, so only the check after the loop stops the
+        // superseded load from writing its rows and toasting.
+        const container = createDOM();
+        const toasts = document.createElement('div');
+        toasts.id = 'toast-container';
+        document.body.appendChild(toasts);
+        try {
+            const { ctx, eventBus } = createTestContext(container);
+            scripted.pages = async function* () {
+                yield { ok: true, data: [{ vpn: 'default', queue: 'late-queue', topic: 'late/topic' }] };
+                eventBus.emit('app:state-change', { key: 'isSempConnected', value: false });
+            };
+            await QueueSubscriptionExplorerModule.install(ctx);
+            const btn = container.querySelector('#btn-subexp-load') as HTMLButtonElement;
+            btn.click();
+            await new Promise(r => setTimeout(r, 0));
+
+            expect(btn.textContent).toBe('Load');
+            const tbody = container.querySelector('#subexp-tbody')!;
+            expect(tbody.textContent).not.toContain('late-queue');
+            expect(tbody.textContent).toMatch(/Click/);
+            expect(toasts.querySelector('.toast')).toBeNull();
+        } finally {
+            scripted.pages = null;
             toasts.remove();
         }
     });

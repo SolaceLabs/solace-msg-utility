@@ -996,45 +996,36 @@ describe('queue-copy/service-copy', () => {
     });
 
     describe('Move mode — per-message remove', () => {
-        it('calls browser.removeMessageFromQueue immediately after each ACK, in order', async () => {
+        it('removes each message from the source only once its publish is acknowledged, in order', async () => {
             const { state, session, browser, onComplete, fireUp, fireMessage, ackLast } = setup({ mode: 'move' });
             state.verify = {
                 inProgress: false, abort: null,
                 result: verifyResult({ messageCount: 2, oldestMsgId: '100', newestMsgId: '101' }),
             };
-
-            const sentBefore: number[] = [];
-            const removedAfter: number[] = [];
-            (browser.removeMessageFromQueue as any).mockImplementation(() => {
-                removedAfter.push(removedAfter.length + 1);
-            });
+            const remove = browser.removeMessageFromQueue;
 
             const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
             await flush();
             fireUp();
             await flush();
 
+            // While a publish is unacknowledged, its message stays on the source.
             const m1 = msg('100');
             fireMessage(m1);
             await flush();
-            sentBefore.push(1);
+            expect(remove).not.toHaveBeenCalled();
             ackLast();
             await flush();
+            expect(remove.mock.calls).toEqual([[m1]]);
 
             const m2 = msg('101');
             fireMessage(m2);
             await flush();
-            sentBefore.push(2);
+            expect(remove).toHaveBeenCalledTimes(1);
             ackLast();
             await flush();
             await job;
-
-            // Each ACK triggered a removeMessageFromQueue. Ordering: send #1
-            // resolved → remove #1; then send #2 resolved → remove #2.
-            expect(browser.removeMessageFromQueue).toHaveBeenCalledTimes(2);
-            expect(browser.removeMessageFromQueue).toHaveBeenNthCalledWith(1, m1);
-            expect(browser.removeMessageFromQueue).toHaveBeenNthCalledWith(2, m2);
-            expect(removedAfter).toEqual([1, 2]);
+            expect(remove.mock.calls).toEqual([[m1], [m2]]);
         });
     });
 

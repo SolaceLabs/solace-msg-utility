@@ -112,6 +112,13 @@ function makeSolaceConnection(overrides: Partial<NonNullable<AppState['solaceCon
     };
 }
 
+/** Type the destination SEMP password, as the user does before Connect. */
+function typeDestSempPass(container: HTMLElement, value: string): void {
+    const input = container.querySelector<HTMLInputElement>('#copy-dest-semp-pass')!;
+    input.value = value;
+    input.dispatchEvent(new Event('input'));
+}
+
 describe('queue-copy/module', () => {
     let container: HTMLElement;
     let eventBus: EventBus;
@@ -447,14 +454,46 @@ describe('queue-copy/module', () => {
 
             // Click Connect on the SEMP card. The factory mock captures the
             // host arg; without the state-sync fix this would be ''.
+            typeDestSempPass(container, 'p');
             const btnSemp = container.querySelector<HTMLButtonElement>('#copy-btn-dest-semp-connect')!;
             btnSemp.click();
             expect(destSempConnect).toHaveBeenCalledWith(
                 expect.objectContaining({ port: '1943', urlPath: '/SEMP/v2', hosted: false }),
                 'b1.example',
-                expect.any(String),
+                'p',
             );
             consoleSpy.mockRestore();
+        });
+
+        it('Connect SEMP refuses an account outside the CLI rules with the reason, and sends nothing', async () => {
+            const ctx = makeCtx(eventBus, container, {
+                isConnected: true,
+                selectedVpn: 'default',
+                solaceConnection: makeSolaceConnection({ host: 'b1.example' }),
+                sempCredentials: sempCreds('https://b1.example:1943/SEMP/v2'),
+            });
+            await QueueCopyModule.install(ctx);
+            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
+            toggle.checked = false;
+            toggle.dispatchEvent(new Event('change'));
+            const btnSemp = container.querySelector<HTMLButtonElement>('#copy-btn-dest-semp-connect')!;
+            const error = container.querySelector('#copy-dest-semp-error')!;
+
+            // A character above U+00FF would make btoa throw; it is refused by name.
+            typeDestSempPass(container, 'p\u20ac');
+            btnSemp.click();
+            expect(error.textContent).toBe('SEMP password may contain only printable ASCII characters: no spaces or accented letters.');
+            typeDestSempPass(container, '');
+            btnSemp.click();
+            expect(error.textContent).toBe('SEMP password is required.');
+            expect(destSempConnect).not.toHaveBeenCalled();
+            expect(btnSemp.textContent).toBe('Connect');
+
+            // A valid password clears the reason and connects.
+            typeDestSempPass(container, 'p');
+            btnSemp.click();
+            expect(error.classList.contains('hidden')).toBe(true);
+            expect(destSempConnect).toHaveBeenCalledTimes(1);
         });
 
         it('Connect Client after unchecking Same broker uses prefilled host', async () => {
@@ -502,6 +541,7 @@ describe('queue-copy/module', () => {
             toggle.checked = false;
             toggle.dispatchEvent(new Event('change'));
 
+            typeDestSempPass(container, 'p');
             container.querySelector<HTMLButtonElement>('#copy-btn-dest-semp-connect')!.click();
             container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!.click();
             expect(destSempConnect).toHaveBeenCalledWith(

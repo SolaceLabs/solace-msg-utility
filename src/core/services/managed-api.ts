@@ -14,7 +14,7 @@
  */
 import { showToast } from '../toast';
 import { logger } from '../logger';
-import { raceDeadline, REQUEST_TIMEOUT_MS } from '../timing';
+import { isTimeoutError, raceDeadline, REQUEST_TIMEOUT_MS } from '../timing';
 import type { EventBus } from '../types';
 
 const log = logger.withTag('managed-api');
@@ -74,16 +74,21 @@ async function exchange(method: Method, path: string, body?: unknown): Promise<E
 
 /**
  * One gateway call. A gateway that does not complete its answer (headers and
- * body, one deadline over both) within `REQUEST_TIMEOUT_MS` is reported like an
- * unreachable one (`network`), so a stalled `/managed/me` at startup ends in the
- * signed-out view with an error instead of a blank page.
+ * body, one deadline over both) within `REQUEST_TIMEOUT_MS` is reported as
+ * `timeout`, so a stalled `/managed/me` at startup ends in the signed-out view
+ * with an error instead of a blank page. It is not `network`: the request was
+ * sent and is left running, so a change may still be applied after it.
  */
 export async function managedRequest<T = void>(method: Method, path: string, body?: unknown): Promise<ManagedResult<T>> {
     let ans: Exchange;
     try {
         ans = await raceDeadline(exchange(method, path, body));
     } catch (e) {
-        log.warn(`${method} ${path} got no answer from the gateway (network error or ${REQUEST_TIMEOUT_MS / 1000} s timeout):`, e);
+        if (isTimeoutError(e)) {
+            log.warn(`${method} ${path} got no answer from the gateway within ${REQUEST_TIMEOUT_MS / 1000} s; a change may still be applied:`, e);
+            return { ok: false, status: 0, code: 'timeout' };
+        }
+        log.warn(`${method} ${path} could not reach the gateway:`, e);
         return { ok: false, status: 0, code: 'network' };
     }
     if (ans.ok) {
@@ -121,12 +126,13 @@ const MESSAGES: Record<string, string> = {
     upstream_auth: 'The broker refused the credential the gateway holds for it. Ask an administrator to check the connection.',
     upstream_unavailable: 'The gateway could not reach the broker, or the broker gave an answer it cannot pass on. Its log has the cause.',
     network: 'The gateway could not be reached.',
+    timeout: 'The gateway did not answer in time. If this was a change, it may still have been applied: reload to see where it stands before you try again.',
     bad_response: 'The gateway sent a response this page cannot read.',
 };
 
 /**
- * Every code with a stock message: the gateway's error codes plus `network`
- * and `bad_response`, which managedRequest makes itself.
+ * Every code with a stock message: the gateway's error codes plus `network`,
+ * `timeout` and `bad_response`, which managedRequest makes itself.
  * tests/mock-broker/gateway/error-codes.test.ts holds this list to the codes
  * the real gateway's handlers send (go-web-proxy/testdata/contract/error-codes.json),
  * and the managed demo to it: each code is sent by the fake gateway or named

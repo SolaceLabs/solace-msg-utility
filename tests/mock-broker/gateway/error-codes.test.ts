@@ -80,7 +80,7 @@ const FAULTS: Record<string, { status: number; ask: (gw: Gw) => ReturnType<Gw['h
 };
 
 /** Made by managedRequest itself: no gateway sends them. */
-const CLIENT = ['network', 'bad_response'];
+const CLIENT = ['network', 'timeout', 'bad_response'];
 
 /**
  * Sent by the real gateway, never by the demo's: a cross-site request and an

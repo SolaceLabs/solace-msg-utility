@@ -262,7 +262,8 @@ export function createServiceEvents() {
 
         // Store in State — atomic ingest enforces the moving-window cap and keeps
         // displayedMessages + DOM in sync with the store in one synchronous pass.
-        ingestMessage(queueName, m);
+        // A message it already holds (re-delivered after a re-bind) adds no row.
+        if (!ingestMessage(queueName, m)) return;
 
         // Check if this queue is currently active in UI
         if (state.currentQueue === queueName) {

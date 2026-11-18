@@ -53,6 +53,10 @@ export const QueueDiscoveryModule = {
         // and abandons its async generator. Protects against stale page data
         // merging into the new VPN's list.
         let fetchQueuesGen = 0;
+        // The same for fetchVpns: a Refresh (or Enter in the VPN box) while a
+        // fetch is in flight, or a SEMP disconnect, leaves the older loop to
+        // bail instead of merging its pages into the newer list and cache.
+        let fetchVpnsGen = 0;
 
         // --- Logic ---
 
@@ -74,6 +78,7 @@ export const QueueDiscoveryModule = {
         }
 
         async function fetchVpns() {
+            const myGen = ++fetchVpnsGen;
             if (vpnCache) {
                 log.debug('Using cached VPN list');
                 currentVpnList = [...vpnCache];
@@ -86,6 +91,7 @@ export const QueueDiscoveryModule = {
             currentVpnList = [];
 
             for await (const page of service.fetchVpns()) {
+                if (myGen !== fetchVpnsGen) return;
                 if (page.ok) {
                     currentVpnList = [...currentVpnList, ...page.data].sort();
                     ui.renderOptions(vpnList, currentVpnList, handleVpnSelect);
@@ -95,6 +101,8 @@ export const QueueDiscoveryModule = {
                     return;
                 }
             }
+            // A newer fetch started while the last page was read: it owns the cache.
+            if (myGen !== fetchVpnsGen) return;
             vpnCache = [...currentVpnList];
             vpnInput.placeholder = 'Select a Message VPN';
         }
@@ -271,7 +279,10 @@ export const QueueDiscoveryModule = {
                 } else {
                     // SEMP disconnect invalidates the discovery cache — on
                     // reconnect the user might point at a different broker, or
-                    // the same broker after a VPN/queue topology change.
+                    // the same broker after a VPN/queue topology change. A fetch
+                    // still in flight is the old broker's: it must not land.
+                    fetchVpnsGen++;
+                    fetchQueuesGen++;
                     vpnCache = null;
                     queueCache.clear();
                     selectedVpn = null;

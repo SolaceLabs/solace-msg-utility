@@ -81,37 +81,39 @@ describe('core/services/managed-api — managedRequest', () => {
         const cause = new TypeError('Failed to fetch');
         fetchMock().mockRejectedValue(cause);
         expect(await managedRequest('GET', '/managed/me')).toEqual({ ok: false, status: 0, code: 'network' });
-        expect(warn).toHaveBeenCalledWith(
-            `[managed-api] GET /managed/me got no answer from the gateway (network error or ${REQUEST_TIMEOUT_MS / 1000} s timeout):`, cause);
+        expect(warn).toHaveBeenCalledWith('[managed-api] GET /managed/me could not reach the gateway:', cause);
     });
 
-    it('resolves as code network when the gateway does not answer within REQUEST_TIMEOUT_MS', async () => {
-        vi.spyOn(console, 'warn').mockImplementation(() => { });
+    it('resolves as code timeout, not network, when the gateway does not answer within REQUEST_TIMEOUT_MS: a write may still land', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
         vi.useFakeTimers();
         fetchMock().mockImplementation(() => new Promise(() => { }));
-        const pending = managedRequest('GET', '/managed/me');
+        const pending = managedRequest('PUT', '/managed/users/alice', { rev: 1 });
         await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
-        expect(await pending).toEqual({ ok: false, status: 0, code: 'network' });
+        expect(await pending).toEqual({ ok: false, status: 0, code: 'timeout' });
+        expect(warn).toHaveBeenCalledWith(
+            `[managed-api] PUT /managed/users/alice got no answer from the gateway within ${REQUEST_TIMEOUT_MS / 1000} s; a change may still be applied:`,
+            expect.objectContaining({ name: 'TimeoutError' }));
     });
 });
 
 describe('core/services/managed-api -- managedRequest body deadline', () => {
-    it('headers arrive, body never does -> resolves as code network after REQUEST_TIMEOUT_MS', async () => {
+    it('headers arrive, body never does -> resolves as code timeout after REQUEST_TIMEOUT_MS', async () => {
         vi.spyOn(console, 'warn').mockImplementation(() => { });
         vi.useFakeTimers();
         fetchMock().mockResolvedValue({ ok: true, status: 200, json: () => new Promise(() => { }) });
         const pending = managedRequest('GET', '/managed/me');
         await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
-        expect(await pending).toEqual({ ok: false, status: 0, code: 'network' });
+        expect(await pending).toEqual({ ok: false, status: 0, code: 'timeout' });
     });
 
-    it('an error answer whose body never arrives also resolves as code network', async () => {
+    it('an error answer whose body never arrives also resolves as code timeout', async () => {
         vi.spyOn(console, 'warn').mockImplementation(() => { });
         vi.useFakeTimers();
         fetchMock().mockResolvedValue({ ok: false, status: 500, json: () => new Promise(() => { }) });
         const pending = managedRequest('GET', '/managed/me');
         await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
-        expect(await pending).toEqual({ ok: false, status: 0, code: 'network' });
+        expect(await pending).toEqual({ ok: false, status: 0, code: 'timeout' });
     });
 });
 
@@ -144,6 +146,7 @@ describe('core/services/managed-api — managedErrorMessage', () => {
         ['upstream_auth', 'The broker refused the credential the gateway holds for it. Ask an administrator to check the connection.'],
         ['upstream_unavailable', 'The gateway could not reach the broker, or the broker gave an answer it cannot pass on. Its log has the cause.'],
         ['network', 'The gateway could not be reached.'],
+        ['timeout', 'The gateway did not answer in time. If this was a change, it may still have been applied: reload to see where it stands before you try again.'],
         ['bad_response', 'The gateway sent a response this page cannot read.'],
     ])('maps %s', (code, text) => {
         expect(managedErrorMessage(err(code))).toBe(text);

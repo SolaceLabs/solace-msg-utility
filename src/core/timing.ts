@@ -41,10 +41,20 @@ export const SDK_LOAD_WAIT_MS = 30_000;
  * A signal that aborts after `ms`, or as soon as the caller's own signal does
  * (queue-copy's verify passes a Cancel signal). The timeout aborts with a
  * `TimeoutError` (`isTimeoutError`), the caller's signal with its own reason.
+ * An engine without `AbortSignal.any` (Chrome before 116, Firefox before 124,
+ * Safari before 17.4) gets the same signal from one controller that follows
+ * whichever of the two aborts first.
  */
 export function deadlineSignal(caller?: AbortSignal | null, ms: number = REQUEST_TIMEOUT_MS): AbortSignal {
     const timeout = AbortSignal.timeout(ms);
-    return caller ? AbortSignal.any([caller, timeout]) : timeout;
+    if (!caller) return timeout;
+    if (typeof AbortSignal.any === 'function') return AbortSignal.any([caller, timeout]);
+    const joined = new AbortController();
+    for (const s of [caller, timeout]) {
+        if (s.aborted) joined.abort(s.reason);
+        else s.addEventListener('abort', () => joined.abort(s.reason), { once: true });
+    }
+    return joined.signal;
 }
 
 /**

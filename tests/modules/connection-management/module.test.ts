@@ -374,11 +374,29 @@ describe('connection-management — create / edit form', () => {
             .toEqual(['Message VPN', 'Client username', 'Client password']);
     });
 
-    it('Cancel returns to the list', async () => {
+    it('Cancel returns to the list and forgets the typed SEMP and VPN passwords', async () => {
         const { container } = await setup();
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        el<HTMLInputElement>(container, '#conn-mgmt-semp-pass').value = 'semp-typed';
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn').click();
+        const vpnInputs = el(container, '#conn-mgmt-vpn-rows').querySelectorAll<HTMLInputElement>('input');
+        vpnInputs[vpnInputs.length - 1].value = 'vpn-typed';
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
         expect(hidden(container, '#conn-mgmt-list-view')).toBe(false);
+        expect(el<HTMLInputElement>(container, '#conn-mgmt-semp-pass').value).toBe('');
+        expect(el(container, '#conn-mgmt-vpn-rows').querySelectorAll('.row-list-row').length).toBe(0);
+    });
+
+    it('a sign-out in the middle of an edit leaves no typed password in the hidden form', async () => {
+        const { container, ctx } = await setup();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        el<HTMLInputElement>(container, '#conn-mgmt-semp-pass').value = 'semp-typed';
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn').click();
+        ctx.setState('managed', null);
+        ctx.eventBus.emit('rbac:changed');
+        expect(hidden(container, '#conn-mgmt-form-view')).toBe(true);
+        expect(el<HTMLInputElement>(container, '#conn-mgmt-semp-pass').value).toBe('');
+        expect(el(container, '#conn-mgmt-vpn-rows').querySelectorAll('.row-list-row').length).toBe(0);
     });
 
     it('Add refuses a broker that already exists', async () => {

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { state, getBrowser, setBrowser, deleteBrowser, getMessages, setMessages, addMessage, clearStore, shouldShowMessage, ingestMessage, wireIngestUi } from '../../../src/modules/queue-browser/state.js';
+import { MAX_STORED_BYTES_PER_QUEUE } from '../../../src/modules/queue-browser/constants.js';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 
 describe('queue-browser/state', () => {
@@ -62,9 +63,35 @@ describe('queue-browser/state', () => {
             expect(getMessages('q1')!.length).toBe(3);
         });
 
+        it('drops the oldest until a new message fits the byte cap, and keeps one larger than the cap on its own', () => {
+            const MiB = 1024 * 1024;
+            expect(MAX_STORED_BYTES_PER_QUEUE).toBe(32 * MiB);
+            setMessages('q1', [{ id: 'a', size: 20 * MiB }, { id: 'b', size: 10 * MiB }]);
+            state.maxMessagesPerQueue = 100;
+            ingestMessage('q1', { id: 'c', size: 10 * MiB });
+            expect(getMessages('q1')!.map((m: any) => m.id)).toEqual(['b', 'c']);
+            ingestMessage('q1', { id: 'd', size: 40 * MiB });
+            expect(getMessages('q1')!.map((m: any) => m.id)).toEqual(['d']);
+        });
+
         it('does nothing for nonexistent queue', () => {
-            ingestMessage('nonexistent', { id: '1' });
+            expect(ingestMessage('nonexistent', { id: '1' })).toBe(false);
             expect(getMessages('nonexistent')).toBeUndefined();
+        });
+
+        it('keeps a re-delivered message once (a re-bound browser starts again from the head), and takes every message with no id', () => {
+            setMessages('q1', []);
+            state.maxMessagesPerQueue = 5;
+            expect([ingestMessage('q1', { id: '7' }), ingestMessage('q1', { id: '8' }), ingestMessage('q1', { id: '7' })]).toEqual([true, true, false]);
+            expect([ingestMessage('q1', { id: 'N/A' }), ingestMessage('q1', { id: 'N/A' })]).toEqual([true, true]);
+            expect(getMessages('q1')!.map((m: any) => m.id)).toEqual(['7', '8', 'N/A', 'N/A']);
+        });
+
+        it('a re-delivery at the cap drops nothing from the window', () => {
+            setMessages('q1', [{ id: 'a' }, { id: 'b' }]);
+            state.maxMessagesPerQueue = 2;
+            expect(ingestMessage('q1', { id: 'a' })).toBe(false);
+            expect(getMessages('q1')!.map((m: any) => m.id)).toEqual(['a', 'b']);
         });
 
         it('calls wired removeRow with dropped id when current queue is active', () => {

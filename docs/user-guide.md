@@ -114,7 +114,7 @@ This connection uses the Solace Web Messaging protocol (WebSocket) for message o
 | Connect Timeout | 3000 ms | How long to wait for the connection |
 | Reconnect Retries | 1 | Retries after a disconnect (-1 = infinite) |
 | Reconnect Wait | 3000 ms | Delay between reconnect attempts |
-| Max Messages per Queue | 100 | Per-queue message cap (1 to 10 000). When a queue exceeds it, the oldest message is dropped from the in-memory store and the table as new ones arrive. A higher cap keeps more history at the cost of browser memory. The cap takes effect when you click **Connect**: the live input is read at connect time, with no Save needed. |
+| Max Messages per Queue | 100 | Per-queue message cap (1 to 10 000). When a queue exceeds it, the oldest message is dropped from the in-memory store and the table as new ones arrive. A queue also holds at most 32 MiB of messages (by the Size column); the oldest go at whichever limit is reached first. A higher cap keeps more history at the cost of browser memory. The cap takes effect when you click **Connect**: the live input is read at connect time, with no Save needed. |
 | Client Name Identifier | (auto-generated UUID) | Identifier embedded in the broker session's `clientName`. Any alphanumerics or `!@#$%^&*-=_+/.,` (max 100 characters). Surrounding whitespace is trimmed on blur; a blank field is filled with a fresh UUID. The full `clientName` is composed at Connect time as `SolMsgUtil/YYYYMMDDHHMMSS/{identifier}`, so each session is distinguishable in broker tooling. |
 
 **SSL/TLS certificate trust.** If you connect over `wss://` to a broker with a self-signed certificate, the browser blocks the connection. A helper dialog explains how to trust the certificate:
@@ -178,7 +178,7 @@ Requires an active **Solace Client connection**. If disconnected, a "Connection 
 2. Click **Bind** (or press Enter).
 3. A `Queue "<name>" bound` toast confirms the bind, the queue appears in the "Bound Queues" dropdown, and messages begin arriving in real time.
 
-You can bind up to **3 queues at once**. Switch between them with the dropdown. Each queue keeps its own message store. The per-queue moving-window cap is **Max Messages per Queue** in the Connections module's Advanced Settings.
+You can bind up to **3 queues at once**. Switch between them with the dropdown. Each queue keeps its own message store. The per-queue moving-window cap is **Max Messages per Queue** in the Connections module's Advanced Settings, and at most 32 MiB of messages: the oldest go at whichever limit is reached first.
 
 To stop receiving messages, select a queue and click **Unbind**.
 
@@ -428,7 +428,7 @@ This view lists every `(VPN, queue, topic-subscription)` triple visible to your 
 
 1. **Click Load** to fetch the full subscription list from the broker. The button label changes to **Refresh** once the load completes; click it again at any time to re-fetch.
 2. **Filter the table** by typing in one or more of the column-filter inputs under the column headers. Filters are AND-combined: a row must match every non-empty filter.
-3. With all three filters empty, the table prompts *"Type in any column above to start searching."* The filtered table is drawn only once you start typing, so the page never dumps thousands of rows by accident.
+3. With all three filters empty, the table prompts *"Type in any column above to start searching."* The filtered table is drawn only once you start typing, and it draws the first 500 matches: a last row says how many matched in all, and the counter counts every match. Narrow the filters to see the rest.
 
 ### Filter syntax
 
@@ -659,12 +659,12 @@ To replace it:
 2. Press **Replace certificate**. The gateway checks the pair first and the page shows what will be installed: subject, names, issuer, validity and fingerprint.
 3. It asks "Install this certificate?" with the subject, expiry and fingerprint. **Install** replaces the certificate, with the toast "Certificate replaced. New connections use it now."
 
-The key is sent once and never kept; its field and file choice are emptied after every attempt, whether it worked or not. A refused pair says why under the form, for example that the key does not match the certificate or that the certificate has expired.
+The key is sent once and never kept; its field and file choice are emptied after every attempt, whether it worked or not. A refused pair says why under the form, for example that the key does not match the certificate or that the certificate has expired. The gateway takes at most 64 KiB in one request, so the certificate and key together, and each CA file, must fit in that; the page says so before it sends anything larger.
 
 **Trusted broker CAs card.** It lists each file with its certificates' subject, expiry and SHA-256 fingerprint. A file with no certificate in it says "No certificate from this file:" and why; an empty folder says "No CA files in the trust directory."
 
 - **Delete** on a file asks "Delete "name" from the trusted CAs? Brokers that rely on it stop verifying for new connections at once." and, once confirmed, removes it (toast "Deleted name").
-- **Add CA certificate** takes a **CA certificate file** or pasted PEM and an optional **File name** (ends in `.crt` or `.pem`; left empty, the gateway names it after the certificate's subject). It ends with the toast "CA certificate added. New broker connections trust it now." Only certificates are accepted: a private key is refused.
+- **Add CA certificate** takes a **CA certificate file** or pasted PEM and an optional **File name** (ends in `.crt` or `.pem`; left empty, the gateway names it after the certificate's subject). It ends with the toast "CA certificate added. New broker connections trust it now." Only certificates are accepted: a private key is refused. A name already in the list is refused too: delete that file first, or choose another name.
 
 **Read-only host.** When the gateway cannot write the files (a read-only mount) the page says "The certificate files are read-only on the gateway host, so the certificate cannot be replaced here." and "The trust files are read-only on the gateway host, so CA certificates cannot be added or deleted here.", and the replace, add and delete controls are disabled. The administrator of the host decides this; see [Certificates from the console](provisioned-mode.md#certificates-from-the-console).
 
@@ -675,7 +675,7 @@ Copies of the users, connections and settings, each encrypted with a passphrase 
 **Configuration** moves the configuration in and out of the gateway:
 
 - **Export** downloads one.
-- **Import** takes a file, or a saved backup's restore icon, and its passphrase. **Preview** lists what each section would add, change and remove, and you choose per section: **Skip**, **Merge** (add and update, keep the rest) or **Replace** (settings: Skip or Replace). Every choice starts at Skip, and **Import** asks before it applies anything.
+- **Import** takes a file (at most 8 MiB, the most the gateway accepts in one import), or a saved backup's restore icon, and its passphrase. **Preview** lists what each section would add, change and remove, and you choose per section: **Skip**, **Merge** (add and update, keep the rest) or **Replace** (settings: Skip or Replace). Every choice starts at Skip, and **Import** asks before it applies anything.
 - If the users, connections or settings you are importing changed after the preview (anyone's save, a password change included), the import is refused with *The gateway's data changed since the preview. Run the preview again.* and the preview is cleared. Press **Preview** again, check the new result and choose again; the file and passphrase stay filled in.
 - A warning shows when the users choice would change your own account; the import then signs you out.
 

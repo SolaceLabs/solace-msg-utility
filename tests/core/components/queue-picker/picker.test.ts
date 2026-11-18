@@ -201,8 +201,9 @@ describe('core/components/queue-picker', () => {
 
         it('surfaces a thrown SempContext.fetch rejection in the status line', async () => {
             const sempCtx = makeSempCtx();
-            // Throw synchronously from the mock to bypass the async-generator
-            // try/catch in the discovery factory and hit the picker's outer catch.
+            // A synchronous throw from the fetch: the discovery factory's
+            // try/catch turns it into a failed page, which the picker's loop
+            // shows in its status line.
             (sempCtx.fetch as any).mockImplementation(() => {
                 throw new Error('boom');
             });
@@ -1371,7 +1372,7 @@ describe('core/components/queue-picker', () => {
             await pB2;
         });
 
-        it('VPN fetch that throws after close does not surface a status update', async () => {
+        it('a VPN listing that fails after close writes no status', async () => {
             const sempCtx = makeSempCtx();
             let rejectFetch: (e: any) => void = () => {};
             (sempCtx.fetch as any).mockImplementation(() => new Promise<any>((_resolve, reject) => { rejectFetch = reject; }));
@@ -1381,8 +1382,8 @@ describe('core/components/queue-picker', () => {
             $<HTMLButtonElement>('.picker-cancel').click();
             await p;
 
-            // Now reject — the catch's `if (state && state.vpnFetchGen === gen)` branch
-            // sees state===null and short-circuits without setting status.
+            // Now reject: the discovery factory turns it into a failed page, and
+            // the picker's loop, finding the picker closed, drops it unshown.
             rejectFetch(new Error('post-close throw'));
             await flushAsync();
             expect(getDialog().hasAttribute('open')).toBe(false);

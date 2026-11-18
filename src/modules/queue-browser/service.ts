@@ -54,15 +54,15 @@ export function createService(ctx: AppContext, serviceEvents: any) {
         try {
             log.info(`Creating browser for queue=${queueName}`);
 
-            // Init Store
-            if (!state.messageStore.has(queueName)) {
-                state.messageStore.set(queueName, []);
-            }
-
-            // Binding limit check
+            // Binding limit check, before anything is set up: a refusal leaves nothing behind.
             if (state.browserInstances.size >= MAX_BROWSER_BINDINGS) {
                 log.warn(`Max queue bindings reached (${MAX_BROWSER_BINDINGS}); not binding queue=${queueName}`);
                 return { ok: false, error: `Connection Limit Reached: You can only bind to ${MAX_BROWSER_BINDINGS} queues at a time.` };
+            }
+
+            // Init Store
+            if (!state.messageStore.has(queueName)) {
+                state.messageStore.set(queueName, []);
             }
 
             const browserProps = new solace.QueueBrowserProperties();
