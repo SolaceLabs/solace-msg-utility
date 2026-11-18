@@ -1536,9 +1536,9 @@
     "semantic_hash": ""
   },
   "scripts/e2e.mjs": {
-    "mtime": 1794880989.862197,
-    "seen": 1794882223.9069943,
-    "ast_hash": "b263d722bb14f65821a7d9a3e52a96e6",
+    "mtime": 1795020641.1047845,
+    "seen": 1795020949.1321573,
+    "ast_hash": "5e84beeb632082941d13a98f10a68d9d",
     "semantic_hash": ""
   },
   "docker/docker-compose.e2e.yaml": {
@@ -2268,9 +2268,9 @@
     "semantic_hash": ""
   },
   "docs/testing.md": {
-    "mtime": 1794994229.7050211,
-    "seen": 1794998660.129815,
-    "ast_hash": "04b8370f71ecee07530f9c949d337aaf",
+    "mtime": 1795020666.7325985,
+    "seen": 1795020949.1326041,
+    "ast_hash": "dd3e416b62137b601771645be43f148a",
     "semantic_hash": ""
   },
   "src/core/components/account-control/index.ts": {

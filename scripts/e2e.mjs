@@ -131,6 +131,9 @@ const secrets = {
     userPassword: token(),
     scratchPassword: token(),
     scratchNewPassword: token(),
+    // The passphrases checks 18 and 22 seal their backups with.
+    backupPassphrase: token(),
+    importPassphrase: token(),
 };
 // The broker's details (see BROKER_FIELDS in e2e-lib.mjs), and its two
 // passwords apart: those are masked at any length.
@@ -142,8 +145,8 @@ const cookies = {};
 // What checks 24-27 learn from the sign-in pages: the scratch user's TOTP
 // secret (as one text and as the page groups it) and their recovery codes (as
 // shown and without hyphens). Masked in all output and swept for in the
-// gateway log and the audit log (check 17), but not in the responses of check
-// 13, which runs earlier: the pages that show them are meant to.
+// gateway log and the audit log (check 17), but not in the responses (check
+// 13): the pages that show them are meant to.
 const twoFactor = {};
 // The private keys the run sends to /managed/tls/certificate, each as one line
 // of its base64 (a PEM key shows that line however it is wrapped or escaped):
@@ -326,12 +329,16 @@ function describeBroker(certs) {
 const insecure = () => broker.insecure === '1';
 const browserOn = () => broker.browser !== '0';
 
-function compose(args, { quiet = false } = {}) {
+// A first `up` may pull the Playwright image; every other command answers in
+// seconds. The bound ends the run when docker hangs, which no JS timer can do
+// while spawnSync blocks.
+function compose(args, { quiet = false, seconds = args[0] === 'up' ? 600 : 120 } = {}) {
     // Always set, so a value inherited from the shell never reaches the gateway.
     const env = { ...process.env, E2E_GATEWAY_SKIP_VERIFY: insecure() ? 'true' : '' };
     // The resolution override exists only from writeMaterial to teardown.
     const files = ['-f', COMPOSE, ...(fs.existsSync(OVERRIDE) ? ['-f', OVERRIDE] : [])];
-    const r = spawnSync('docker', ['compose', ...files, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+    const r = spawnSync('docker', ['compose', ...files, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env, timeout: seconds * 1000 });
+    if (r.error?.code === 'ETIMEDOUT') throw new Error(`docker compose ${args[0]} did not finish within ${seconds}s: check that Docker is running and answers`);
     if (r.error) throw new Error(`docker compose ${args[0]}: ${r.error.message}`);
     const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
     if (!quiet && out.trim()) say(out.trimEnd());
@@ -757,9 +764,17 @@ async function configureGateway() {
 
 const results = [];
 
+/** What a check returns when it proved less than its title says: it counts as skipped, not passed. */
+const skip = (reason) => ({ skipped: reason });
+
 async function check(n, title, fn) {
     try {
         const detail = await fn();
+        if (detail?.skipped) {
+            results.push({ n, ok: true, skipped: true });
+            say(`SKIP ${n}. ${title} (${detail.skipped})`);
+            return;
+        }
         results.push({ n, ok: true });
         say(`PASS ${n}. ${title}${detail ? ` (${detail})` : ''}`);
     } catch (e) {
@@ -982,16 +997,6 @@ async function runChecks(admin) {
         // and 17, which cover its responses and its log.
         await runDirectChecks();
 
-        await check(13, 'no response from either gateway carries a credential except the dial answer\'s body', async () => {
-            const sweep = sweepable();
-            // By value: a SEMP password equal to the client password rightly
-            // appears in the dial answer too.
-            const hits = sweepSecrets(records, sweep,
-                (r, name, where) => where === 'body' && r.label === 'POST /managed/dial -> 200' && sweep[name] === brokerSecrets.clientPassword);
-            expect(hits.length === 0, hits.join('; '));
-            return `${records.length} responses`;
-        });
-
         await check(14, 'both stores are sealed at rest (SMUS header, no plaintext)', async () => {
             // A short name could turn up in ciphertext by chance.
             const names = [broker.host, broker.clientUser, USER].filter((t) => t.length >= 4);
@@ -1010,7 +1015,7 @@ async function runChecks(admin) {
         // Numbered after the rest, run here: it needs the admin's session and a
         // running gateway, which the restart (15) and the stop (16) end.
         await check(18, 'Backup & Restore: an export opens and previews as no change, a scheduled run writes a sealed file into /backup that downloads as written, and a Merge import of it keeps the admin signed in', async () => {
-            const pass = 'e2e backup passphrase';
+            const pass = secrets.backupPassphrase;
             const api = (method, pathname, json) => request(method, pathname, { jar: admin, json });
             const status = async () => JSON.parse((await api('GET', '/managed/backup')).body);
             expect((await status()).dirProblem === '', `dirProblem: ${(await status()).dirProblem}`);
@@ -1103,7 +1108,7 @@ async function runChecks(admin) {
 
         await check(22, 'an import is refused as stale after another session changed the users since the preview, and applies after a new preview', async () => {
             const second = await adminSession();
-            const pass = 'e2e import passphrase';
+            const pass = secrets.importPassphrase;
             const api = (method, pathname, json) => request(method, pathname, { jar: admin, json });
             const sections = { users: 'merge', connections: 'skip', settings: 'skip' };
             try {
@@ -1438,7 +1443,7 @@ async function runChecks(admin) {
             });
 
             await check(30, "deleting the broker's CA file makes the relay fail to verify the broker, and adding it back makes it work, both with no restart", async () => {
-                if (insecure()) return 'skipped: E2E_INSECURE=1 turns broker verification off, so the CA file proves nothing';
+                if (insecure()) return skip('E2E_INSECURE=1 turns broker verification off, so the CA file proves nothing');
                 const jar = createCookieJar();
                 const signedIn = await signIn(jar, USER, secrets.userPassword);
                 expect(signedIn.status === 303, `the e2e user's sign-in: want 303, got ${signedIn.status}`);
@@ -1448,6 +1453,7 @@ async function runChecks(admin) {
                 const before = await relay();
                 expect(before.status === 200, `with the CA file in place: want 200, got ${before.status} ${before.body.slice(0, 200)}`);
                 let detail = '';
+                let halfOnly = false;
                 let restored = '';
                 try {
                     const deleted = await request('DELETE', `/managed/tls/trust/${TRUST_FILE}`, { jar: admin });
@@ -1456,7 +1462,7 @@ async function runChecks(admin) {
                     const without = await relay();
                     if (without.status === 200) {
                         // A broker whose certificate chains to a public root is trusted through the host roots too.
-                        detail = "failure half skipped: the broker's certificate also verifies against the host's standard roots";
+                        halfOnly = true;
                     } else {
                         expect(without.status === 502, `without the CA file: want 502, got ${without.status} ${without.body.slice(0, 200)}`);
                         detail = `${without.status} ${errorCode(without)} without the CA file`;
@@ -1477,7 +1483,9 @@ async function runChecks(admin) {
                     }
                 }
                 expect(restored === '', `adding ${TRUST_FILE} back: ${restored}`);
-                return detail;
+                return halfOnly
+                    ? skip("only adding the file back was proved: the broker's certificate also verifies against the host's standard roots, so deleting it changes nothing")
+                    : detail;
             });
 
             await check(31, 'POST /managed/restart is refused without a session and for a user who is not an administrator; for the administrator it answers 202 and the gateway starts again in place: the container keeps running, the old sessions are refused, and the administrator signs in again', async () => {
@@ -1569,6 +1577,18 @@ async function runChecks(admin) {
             expect(conns.status === 200 && conns.body.includes(`"${BROKER}"`), `connections: ${conns.status} ${conns.body.slice(0, 300)}`);
         });
 
+        // After check 15, the last check that sends a request, so the sweep
+        // covers every response of the run.
+        await check(13, 'no response from either gateway carries a credential except the dial answer\'s body', async () => {
+            const sweep = sweepable();
+            // By value: a SEMP password equal to the client password rightly
+            // appears in the dial answer too.
+            const hits = sweepSecrets(records, sweep,
+                (r, name, where) => where === 'body' && r.label === 'POST /managed/dial -> 200' && sweep[name] === brokerSecrets.clientPassword);
+            expect(hits.length === 0, hits.join('; '));
+            return `${records.length} responses`;
+        });
+
         await check(16, 'the gateway refuses to start when its key file is missing beside an existing store', async () => {
             compose(['stop', 'gateway'], { quiet: true });
             // The key's path is fixed (/data/store.key), so the refusal is
@@ -1588,7 +1608,7 @@ async function runChecks(admin) {
             return `exit ${run.code}`;
         });
 
-        await check(17, 'neither gateway log nor the audit log holds a password, store key, session cookie, two-factor secret, recovery code or the private key a check uploaded', async () => {
+        await check(17, 'neither gateway log nor the audit log holds a password, backup passphrase, store key, session cookie, two-factor secret, recovery code or the private key a check uploaded', async () => {
             const logs = compose(['logs', '--no-color', 'gateway', 'direct'], { quiet: true });
             const text = logs.out + runOutput;
             // The key the gateway made on its fresh volume (64 hex characters).
@@ -2104,9 +2124,58 @@ async function runDirectChecks() {
 
 // --- main ------------------------------------------------------------------------
 
+// True from writeMaterial on: from then the stack and WORK exist to tear down.
+let started = false;
+let tornDown = false;
+
 function teardown() {
+    if (tornDown) return;
+    tornDown = true;
     try { compose(['down', '-v', '--remove-orphans'], { quiet: true }); } catch { /* the dev task's down -v is the backstop */ }
     fs.rmSync(WORK, { recursive: true, force: true });
+}
+
+// One run at a time on this machine, whatever the checkout: the compose project
+// name and the host ports are fixed, so a second run's opening `down -v` would
+// remove the first run's stack under it.
+const LOCK = path.join(os.tmpdir(), 'smu-e2e.lock');
+
+/** True while process `pid` runs (EPERM: it runs as another user). */
+function alive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (e) {
+        return e.code === 'EPERM';
+    }
+}
+
+/** Takes the lock and returns null, or returns why another run holds it. A lock whose process has ended is taken over. */
+function takeLock() {
+    for (;;) {
+        try {
+            fs.writeFileSync(LOCK, `${process.pid} ${REPO}`, { flag: 'wx' });
+            return null;
+        } catch (e) {
+            if (e.code !== 'EEXIST') throw e;
+        }
+        let held;
+        try { held = fs.readFileSync(LOCK, 'utf8'); } catch { continue; /* removed meanwhile */ }
+        const [pid, ...where] = held.split(' ');
+        // An empty file is a lock being written: held.
+        if (!/^\d+$/.test(pid) || alive(Number(pid))) {
+            return `another e2e run (process ${pid || '?'}, in ${where.join(' ') || '?'}) is using the smu-e2e stack. `
+                + `Wait for it to end; if no run is going, delete ${LOCK}.`;
+        }
+        fs.rmSync(LOCK, { force: true });
+    }
+}
+
+/** Ends the run on a signal or an error nothing caught, tearing down what a normal end would. */
+function abort(message, code) {
+    say(message);
+    if (started) teardown();
+    process.exit(code);
 }
 
 async function main() {
@@ -2114,8 +2183,24 @@ async function main() {
         say(`error: ${SOLCLIENT} is missing. Run npm ci: package.json pins solclientjs.`);
         return 1;
     }
+    const held = takeLock();
+    if (held) {
+        say(`error: ${held}`);
+        return 1;
+    }
+    // Every way out ends in process.exit, the password prompt's Ctrl-C included.
+    process.on('exit', () => fs.rmSync(LOCK, { force: true }));
+    for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) {
+        process.on(signal, () => abort(`interrupted (${signal}); tearing the stack down`, code));
+    }
+    const crashed = (e) => abort(`error: ${e instanceof Error ? e.message : String(e)}; tearing the stack down`, 1);
+    process.on('uncaughtException', crashed);
+    process.on('unhandledRejection', crashed);
+    return run();
+}
+
+async function run() {
     let setupError = null;
-    let started = false;
     try {
         broker = await collectDetails();
         brokerSecrets.sempPassword = broker.sempPassword;
@@ -2127,7 +2212,6 @@ async function main() {
             try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
         }, tls.rootCertificates);
         say(`trusting ${roots.count} standard roots from ${roots.from}`);
-        process.on('SIGINT', () => { say('interrupted; tearing the stack down'); teardown(); process.exit(130); });
         started = true;
         writeMaterial(certs, roots);
         await stackUp();
@@ -2138,18 +2222,24 @@ async function main() {
         say(`error: setup failed: ${e.message}`);
     }
     const failed = results.filter((r) => !r.ok).map((r) => r.n);
+    const skipped = results.filter((r) => r.skipped).map((r) => r.n);
     if (started) {
         if (setupError || failed.length) {
-            say('--- gateway log (last 60 lines) ---');
-            compose(['logs', '--no-color', '--tail', '60', 'gateway']);
-            if (setupError || failed.some((n) => String(n).startsWith('D'))) {
-                say('--- direct log (last 60 lines) ---');
-                compose(['logs', '--no-color', '--tail', '60', 'direct']);
+            try {
+                say('--- gateway log (last 60 lines) ---');
+                compose(['logs', '--no-color', '--tail', '60', 'gateway']);
+                if (setupError || failed.some((n) => String(n).startsWith('D'))) {
+                    say('--- direct log (last 60 lines) ---');
+                    compose(['logs', '--no-color', '--tail', '60', 'direct']);
+                }
+            } catch (e) {
+                say(`error: reading the gateway logs: ${e.message}`);
             }
         }
         teardown();
     }
-    say(`e2e: ${results.length - failed.length} passed, ${failed.length} failed${failed.length ? ` (${failed.join(', ')})` : ''}${setupError ? ', setup failed' : ''}`
+    say(`e2e: ${results.length - failed.length - skipped.length} passed, ${failed.length} failed${failed.length ? ` (${failed.join(', ')})` : ''}`
+        + `${skipped.length ? `, ${skipped.length} skipped (${skipped.join(', ')})` : ''}${setupError ? ', setup failed' : ''}`
         + `${insecure() ? "; the broker's certificate was not verified (E2E_INSECURE=1)" : ''}`
         + `${broker.browser === '0' ? '; the browser checks were skipped (E2E_BROWSER=0)' : ''}`);
     return setupError || failed.length ? 1 : 0;
