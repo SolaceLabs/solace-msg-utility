@@ -708,9 +708,9 @@
     "semantic_hash": ""
   },
   "docs/deployment.md": {
-    "mtime": 1795045932.2106104,
-    "seen": 1795060395.7120676,
-    "ast_hash": "006a16f2b9e674dc0e996f34a5e0e8a1",
+    "mtime": 1795060790.6316,
+    "seen": 1795068159.5106819,
+    "ast_hash": "c04f5c2de143b425679c13e90bef27ca",
     "semantic_hash": ""
   },
   "docs/developer-guide.md": {
@@ -726,9 +726,9 @@
     "semantic_hash": ""
   },
   "docs/user-guide.md": {
-    "mtime": 1795045932.2125726,
-    "seen": 1795060395.7120736,
-    "ast_hash": "f0b34f7d3c5a1072534d0bd204fc4063",
+    "mtime": 1795068092.851006,
+    "seen": 1795068159.510688,
+    "ast_hash": "b96bbadbf73f1521f85441ee4659d193",
     "semantic_hash": ""
   },
   "src/index.html": {
@@ -948,9 +948,9 @@
     "semantic_hash": ""
   },
   "tests/modules/user-management/module.test.ts": {
-    "mtime": 1794983241.3338733,
-    "seen": 1794988359.277441,
-    "ast_hash": "c6ca9508c91d851bc58f950eac2f1bab",
+    "mtime": 1795068046.1865408,
+    "seen": 1795068159.5106454,
+    "ast_hash": "cb9539f3638ab6e7b5cd5b6b3f83afab",
     "semantic_hash": ""
   },
   "tests/modules/user-management/service.test.ts": {
@@ -966,9 +966,9 @@
     "semantic_hash": ""
   },
   "src/modules/user-management/index.html": {
-    "mtime": 1794880483.0883558,
-    "seen": 1794882223.907426,
-    "ast_hash": "65236ae81a650450d4f8c08afea00d84",
+    "mtime": 1795068046.1857474,
+    "seen": 1795068159.5107086,
+    "ast_hash": "4c0059819c6b82045500dd415dc9c954",
     "semantic_hash": ""
   },
   "src/variants/all-for-testing-only.ts": {
@@ -1800,9 +1800,9 @@
     "semantic_hash": ""
   },
   "docs/provisioned-mode.md": {
-    "mtime": 1795045932.2121851,
-    "seen": 1795060395.7120714,
-    "ast_hash": "9c02178c689f92607a3519082e6e9952",
+    "mtime": 1795068092.8515508,
+    "seen": 1795068159.5106854,
+    "ast_hash": "8ea84207c7a30b048592ae583dc97b54",
     "semantic_hash": ""
   },
   "src/core/icons.ts": {

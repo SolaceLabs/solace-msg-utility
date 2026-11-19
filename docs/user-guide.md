@@ -578,6 +578,8 @@ List, add, edit and delete users. Each row's pencil icon edits the user and the 
 
 An empty list says what it means: with no Operate rows the user changes no queue, and with no Read-only rows either, they can sign in but reach no broker.
 
+**Entitlements card notice.** The card opens with: "These entitlements cover queues only. Sending and forwarding messages depend on the broker: the ACL profile of the Message VPN's client username decides where messages may go, whatever the rows say. Give the gateway's broker accounts the least access they need, through their client profile and ACL profile on the broker." The rows decide which queues a user sees, binds to and deletes from. **Forward** is offered on read-only queues too, and publishes to any topic or queue the broker accepts from that client username. See [What it does not enforce](provisioned-mode.md#what-it-does-not-enforce).
+
 **Modules card.** **Deployment default:** (selected for new users), followed by the module names it gives, gives the user whatever the gateway settings give everyone; those modules show as pills with no remove button. Select **Choose for this user** to pick their own: each chosen module is a pill with a remove button (**Remove Queue Browser**, say), and **+ Add module** opens a menu of the offered modules not yet chosen (Escape closes it). With none chosen the card says "No modules." A pill marked *not offered* is a module the deployment does not offer in Gateway Settings: it has no effect until offered, and can be removed.
 
 **Rules the gateway enforces:**

@@ -64,6 +64,12 @@
 
     <div class="card user-mgmt-card">
         <h2 class="m-0 mb-4">Entitlements</h2>
+        <p id="user-mgmt-grants-notice" class="user-mgmt-notice" role="note">
+            These entitlements cover queues only. Sending and forwarding messages depend on the broker: the ACL
+            profile of the Message VPN's client username decides where messages may go, whatever the rows say.
+            Give the gateway's broker accounts the least access they need, through their client profile and
+            ACL profile on the broker.
+        </p>
         <div class="form-group">
             <div class="flex-row justify-between items-center mb-2">
                 <label class="m-0">Operate entitlements (read + write)</label>

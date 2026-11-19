@@ -1,7 +1,7 @@
 # Graph Report - smu-dirty  (2026-11-19)
 
 ## Corpus Check
-- 364 files · ~735,009 words
+- 364 files · ~735,763 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 33 file(s) not represented in the graph (top: .css 25, (none) 7, .dockerignore 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `77ac1172`
+- Built from commit: `f9c8b22e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -843,7 +843,7 @@ Nodes (7): Confirm Queue Copy modal, Destination connection (Provisioned session
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Writing to the store` connect `Writing to the store` to `store_test.go`, `.saveUser`, `managed.go`, `backupService`, `net/http.ResponseWriter`, `newStoreWithFixtures`, `log/slog.Logger`, `writer_test.go`, `managed-api.ts`, `store`, `newManagedEnv`?**
-  _High betweenness centrality (0.182) - this node is a cross-community bridge._
+  _High betweenness centrality (0.183) - this node is a cross-community bridge._
 - **Are the 125 inferred relationships involving `newManagedEnv()` (e.g. with `Writing to the store` and `TestBackupAPI_ActionsAreAudited()`) actually correct?**
   _`newManagedEnv()` has 125 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `managedEnv`, `github.com/solace/go-web-proxy`, `@types/node` to the rest of the system?**
@@ -851,7 +851,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `quietLogger` be split into smaller, more focused modules?**
   _Cohesion score 0.11153846153846154 - nodes in this community are weakly interconnected._
 - **Why does `handleConflict()` connect `managed-api.ts` to `Writing to the store`?**
-  _High betweenness centrality (0.160) - this node is a cross-community bridge._
+  _High betweenness centrality (0.162) - this node is a cross-community bridge._
 - **Are the 84 inferred relationships involving `quietLogger()` (e.g. with `TestClientACL_Allowed()` and `TestClientACL_EmptyAllowListAdmitsEveryClient()`) actually correct?**
   _`quietLogger()` has 84 INFERRED edges - model-reasoned connections that need verification._
 
