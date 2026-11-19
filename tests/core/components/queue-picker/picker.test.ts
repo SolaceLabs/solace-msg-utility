@@ -619,8 +619,12 @@ describe('core/components/queue-picker', () => {
 
             input.value = 'beta';
             input.dispatchEvent(new Event('input'));
-            await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS);
+            // Past the first timer's deadline: had it not been cancelled, it
+            // would have filtered the list by now.
+            await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS - 40);
+            expect(visibleOptions('.picker-vpn-list')).toEqual(['vpn-alpha', 'vpn-beta', 'vpn-gamma']);
 
+            await vi.advanceTimersByTimeAsync(40);
             expect(visibleOptions('.picker-vpn-list')).toEqual(['vpn-beta']);
 
             $<HTMLButtonElement>('.picker-cancel').click();
@@ -771,8 +775,12 @@ describe('core/components/queue-picker', () => {
             await vi.advanceTimersByTimeAsync(50);
             qInput.value = 'beta';
             qInput.dispatchEvent(new Event('input'));
-            await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS);
+            // Past the first timer's deadline: had it not been cancelled, it
+            // would have filtered the list by now.
+            await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS - 40);
+            expect(visibleOptions('.picker-queue-list')).toEqual(['q-alpha', 'q-beta']);
 
+            await vi.advanceTimersByTimeAsync(40);
             expect(visibleOptions('.picker-queue-list')).toEqual(['q-beta']);
 
             $<HTMLButtonElement>('.picker-cancel').click();
@@ -1277,12 +1285,20 @@ describe('core/components/queue-picker', () => {
             $<HTMLButtonElement>('.picker-cancel').click();
             expect(await p).toBeNull();
 
-            // Fetch resolves AFTER close — the for-await guard sees state===null and bails.
+            // The answer lands after close: it writes no list, no status and no cache.
             resolveFetch({ ok: true, json: async () => ({ data: [{ msgVpnName: 'late' }] }) });
             await flushAsync();
-            // No assertion on DOM — the picker is dismissed. We only care that
-            // nothing threw and no spurious state was written.
             expect(getDialog().hasAttribute('open')).toBe(false);
+            expect(visibleOptions('.picker-vpn-list')).toEqual([]);
+            expect($<HTMLDivElement>('.picker-status').textContent).toBe('Loading VPNs\u2026');
+
+            // Reopening asks the broker again: the late answer seeded no cache.
+            const callsBefore = (sempCtx.fetch as any).mock.calls.length;
+            const p2 = pickQueue(src(sempCtx));
+            await flushAsync();
+            expect((sempCtx.fetch as any).mock.calls.length).toBe(callsBefore + 1);
+            $<HTMLButtonElement>('.picker-cancel').click();
+            await p2;
         });
 
         it('VPN switch during queue fetch invalidates the original via queue gen counter', async () => {
@@ -1356,10 +1372,19 @@ describe('core/components/queue-picker', () => {
             $<HTMLButtonElement>('.picker-cancel').click();
             expect(await p).toBeNull();
 
-            // Queue fetch resolves after close — guard sees state===null and bails.
+            // The answer lands after close: it writes no list, no status and no cache.
             resolveQueues({ ok: true, json: async () => ({ data: [{ queueName: 'late-q' }] }) });
             await flushAsync();
             expect(getDialog().hasAttribute('open')).toBe(false);
+            expect(visibleOptions('.picker-queue-list')).toEqual([]);
+            expect($<HTMLDivElement>('.picker-status').textContent).toBe('Loading queues for v\u2026');
+
+            // Reopening on the same VPN asks for its queues again: no cache was seeded.
+            const p2 = pickQueue(src(sempCtx), { defaultVpn: 'v' });
+            await flushAsync();
+            expect((sempCtx.fetch as any).mock.calls.filter(([url]: [string]) => /\/queues/.test(url))).toHaveLength(2);
+            $<HTMLButtonElement>('.picker-cancel').click();
+            await p2;
         });
 
         it("a fetch left running by a closed picker is aborted and never writes into the next picker's list or cache", async () => {
@@ -1411,6 +1436,7 @@ describe('core/components/queue-picker', () => {
             rejectFetch(new Error('post-close throw'));
             await flushAsync();
             expect(getDialog().hasAttribute('open')).toBe(false);
+            expect($<HTMLDivElement>('.picker-status').textContent).toBe('Loading VPNs\u2026');
         });
     });
 

@@ -420,17 +420,25 @@ describe('queue-browser/module', () => {
             await QueueBrowserModule.install(ctx);
 
             const cached = ui.getElements();
-            state.displayedMessages = [{ id: '1', date: '', size: 0, type: 'Text', content: '' }];
+            state.displayedMessages = [
+                { id: '1', date: '', size: 0, type: 'Text', content: '' },
+                { id: '2', date: '', size: 0, type: 'Text', content: '' },
+            ];
             state.allMessages = state.displayedMessages;
             ui.renderList();
+            const checkedRows = () => cached.msgList.querySelectorAll('.msg-check:checked').length;
 
             cached.checkAll.checked = true;
             cached.checkAll.dispatchEvent(new Event('change'));
+            expect(checkedRows()).toBe(2);
+            expect(cached.countSelected.textContent).toBe('2');
+            expect(cached.btnBrowserForward.disabled).toBe(false);
 
-            if (cached.msgList) {
-                const checked = cached.msgList.querySelectorAll('.msg-check:checked');
-                expect(checked.length).toBe(1);
-            }
+            cached.checkAll.checked = false;
+            cached.checkAll.dispatchEvent(new Event('change'));
+            expect(checkedRows()).toBe(0);
+            expect(cached.countSelected.textContent).toBe('0');
+            expect(cached.btnBrowserForward.disabled).toBe(true);
             consoleSpy.mockRestore();
         });
 

@@ -1,7 +1,7 @@
 # Graph Report - smu-dirty  (2026-11-19)
 
 ## Corpus Check
-- 364 files · ~735,763 words
+- 364 files · ~736,839 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 33 file(s) not represented in the graph (top: .css 25, (none) 7, .dockerignore 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f9c8b22e`
+- Built from commit: `67698298`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 

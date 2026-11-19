@@ -171,17 +171,38 @@ describe('QueueDiscoveryModule', () => {
         });
     });
 
-    it('clears state when SEMP disconnects', async () => {
+    it('a SEMP disconnect clears the picks, disables Open in Browser, shows the warning and drops the cache', async () => {
         const container = createDiscoveryDOM();
         document.body.appendChild(container);
-        const { ctx, eventBus } = createTestContext(container);
-
+        const { ctx, eventBus, appState } = createTestContext(container);
+        appState.isSempConnected = true;
         await QueueDiscoveryModule.install(ctx);
 
+        const vpnInput = container.querySelector('#discovery-vpn-input') as HTMLInputElement;
+        const queueInput = container.querySelector('#discovery-queue-input') as HTMLInputElement;
+        const btnCopy = container.querySelector('#btn-copy-config') as HTMLButtonElement;
+        await vi.waitFor(() => expect(vpnInput.placeholder).toBe('Select a Message VPN'));
+        (container.querySelector('#discovery-vpn-list .dropdown-option') as HTMLElement).click();
+        await vi.waitFor(() => expect(queueInput.disabled).toBe(false));
+        (container.querySelector('#discovery-queue-list .dropdown-option') as HTMLElement).click();
+        expect([vpnInput.value, queueInput.value, btnCopy.disabled]).toEqual(['default', 'test-queue-1', false]);
+
+        appState.isSempConnected = false;
         eventBus.emit('app:state-change', { key: 'isSempConnected', value: false });
 
-        const vpnInput = container.querySelector('#discovery-vpn-input') as HTMLInputElement;
         expect(vpnInput.value).toBe('');
+        expect(queueInput.value).toBe('');
+        expect(queueInput.disabled).toBe(true);
+        expect(btnCopy.disabled).toBe(true);
+        expect(container.querySelector('#discovery-warning')!.classList.contains('hidden')).toBe(false);
+        expect(container.querySelector('#discovery-content')!.classList.contains('hidden')).toBe(true);
+
+        // A reconnect lists the VPNs again rather than reusing the old broker's list.
+        const vpnCalls = () => (ctx.sempFetch as any).mock.calls.filter(([url]: [string]) => !url.includes('/queues')).length;
+        expect(vpnCalls()).toBe(1);
+        appState.isSempConnected = true;
+        eventBus.emit('app:state-change', { key: 'isSempConnected', value: true });
+        await vi.waitFor(() => expect(vpnCalls()).toBe(2));
     });
 
     it('ignores non-isSempConnected state changes', async () => {
@@ -989,10 +1010,8 @@ describe('QueueDiscoveryModule', () => {
         });
 
         it('older fetchQueues skips cache-write and UI-finalise when superseded after last page', async () => {
-            // Covers the truthy branch of `if (myGen !== fetchQueuesGen) return;` in
-            // fetchQueues (queue-discovery/module.ts) -- the post-loop generation check that
-            // protects against an older fetch finalising stale UI/cache state when a
-            // newer fetch has bumped the generation counter mid-stream.
+            // The post-loop generation check in fetchQueues keeps an older fetch
+            // from writing its list into the cache once a newer fetch has started.
             //
             // The race window is narrow: the post-loop check only fires when the gen bump
             // happens AFTER the loop's last successful iteration but BEFORE the
@@ -1040,8 +1059,8 @@ describe('QueueDiscoveryModule', () => {
 
             // The trigger: when ui.renderOptions is invoked with both queues
             // (currentQueueList = ['q1','q2']), synchronously fire the refresh-queues
-            // click. That bumps fetchQueuesGen via fetchQueues()'s line-100 increment
-            // BEFORE call #1's for-await loop reaches its line-153 check.
+            // click. That bumps fetchQueuesGen in fetchQueues() BEFORE call #1's
+            // for-await loop reaches its post-loop check.
             const queueListEl = container.querySelector('#discovery-queue-list')!;
             const origRenderOptions = discoveryUi.renderOptions;
             let triggered = false;
@@ -1065,13 +1084,12 @@ describe('QueueDiscoveryModule', () => {
                 expect(queueCalls).toBeGreaterThanOrEqual(3);
             }, { timeout: 2000 });
 
-            // ASSERTION: the post-loop check returned for call #1, so its cache
-            // write was skipped. Re-trigger fetchQueues for vpn-a -- since the
-            // cache is empty, it must call sempFetch again (cache miss).
-            const sempCallsBeforeReFetch = (ctx.sempFetch as any).mock.calls.length;
-            (container.querySelector('#btn-refresh-queues') as HTMLButtonElement).click();
+            // Call #1 wrote no cache: selecting vpn-a again (which, unlike Refresh,
+            // reads the cache first) asks the broker for its queues once more.
+            const queueCallsBefore = queueCalls;
+            (container.querySelector('#discovery-vpn-list .dropdown-option') as HTMLElement).click();
             await vi.waitFor(() => {
-                expect((ctx.sempFetch as any).mock.calls.length).toBeGreaterThan(sempCallsBeforeReFetch);
+                expect(queueCalls).toBe(queueCallsBefore + 1);
             });
 
             renderSpy.mockRestore();

@@ -153,7 +153,7 @@ describe('queue-copy/service-copy', () => {
 
     describe('Phase 1 — stop reasons', () => {
         describe('reached-max', () => {
-            it('processes the maxMsgId message itself, disconnects the browser, then completes cleanly', async () => {
+            it('processes the maxMsgId message itself, disconnects the browser, then completes cleanly, leaving the source messages in copy mode', async () => {
                 const { state, session, browser, onComplete, onProgress, fireUp, fireMessage, ackLast } = setup();
                 state.verify = {
                     inProgress: false, abort: null,
@@ -174,7 +174,7 @@ describe('queue-copy/service-copy', () => {
                 await flush();
                 await job;
 
-                // triggerStop now goes straight to disconnect (not stop) so no
+                // triggerStop goes straight to disconnect (not stop) so no
                 // further MESSAGE events can race the in-flight ACK drain.
                 expect(browser.disconnect).toHaveBeenCalled();
                 expect(onProgress).toHaveBeenCalledTimes(2);
@@ -183,6 +183,8 @@ describe('queue-copy/service-copy', () => {
                 expect(final.status).toBe('completed');
                 expect(final.copied).toBe(2);
                 expect(final.lastError).toBeNull();
+                expect(session.send).toHaveBeenCalledTimes(2);
+                expect(browser.removeMessageFromQueue).not.toHaveBeenCalled();
             });
         });
 
@@ -472,6 +474,37 @@ describe('queue-copy/service-copy', () => {
 
                 const final = onComplete.mock.calls[0][0];
                 expect(final.status).toBe('error');
+                expect(final.lastError).toBe('broker rejected');
+            });
+
+            it('move mode removes only the messages the destination accepted: a rejected one stays on the source', async () => {
+                const { state, session, browser, onComplete, fireUp, fireMessage, ackLast, rejectLast } = setup({ mode: 'move' });
+                state.verify = {
+                    inProgress: false, abort: null,
+                    result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
+                };
+                const accepted = msg('100');
+                const rejected = msg('101');
+
+                const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+                await flush();
+                fireUp();
+                await flush();
+                fireMessage(accepted);
+                await flush();
+                ackLast();
+                await flush();
+                fireMessage(rejected);
+                await flush();
+                rejectLast('broker rejected');
+                await flush();
+                await job;
+
+                expect(browser.removeMessageFromQueue).toHaveBeenCalledTimes(1);
+                expect(browser.removeMessageFromQueue).toHaveBeenCalledWith(accepted);
+                const final = onComplete.mock.calls[0][0];
+                expect(final.status).toBe('error');
+                expect(final.copied).toBe(1);
                 expect(final.lastError).toBe('broker rejected');
             });
         });

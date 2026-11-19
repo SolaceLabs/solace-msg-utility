@@ -135,6 +135,25 @@ describe('queue-browser/ui-forward', () => {
             expect(list.innerHTML).toContain('Error reason');
         });
 
+        it('shows the message id, the content preview and the error as text, never as markup', () => {
+            state.forwardQueue = [{
+                originalMsg: { content: '<img src=x onerror=alert(1)>' },
+                id: '<b>id</b>',
+                correlationValue: 'cv-1',
+                status: 'FAILED',
+                error: '<script>bad()</script>',
+            }];
+
+            ui.renderForwardList();
+
+            const list = ui.getElements().listForwardMsgs;
+            expect(list.querySelector('img, b, script')).toBeNull();
+            const [idEl, contentEl] = list.querySelectorAll('.browser-forward-row span');
+            expect(idEl.textContent).toBe('<b>id</b>');
+            expect(contentEl.textContent).toBe('<img src=x onerror=alert(1)>');
+            expect(list.querySelector('.browser-forward-error')!.textContent!.trim()).toBe('<script>bad()</script>');
+        });
+
         it('truncates long content', () => {
             state.forwardQueue = [
                 { originalMsg: { content: 'A'.repeat(50) }, id: 'msg-1', correlationValue: 'cv-1', status: 'QUEUED', error: null }

@@ -89,9 +89,11 @@ export function createSempDiscovery(sempCtx: SempContext) {
         );
     }
 
+    // A Message VPN name may hold spaces and other characters a path does not
+    // carry as they are, so it is encoded as one path segment.
     async function* fetchQueues(vpnName: string, maxCount = 100): AsyncGenerator<FetchPage> {
         yield* fetchPaged(
-            `/SEMP/v2/monitor/msgVpns/${vpnName}/queues?count=${maxCount}`,
+            `/SEMP/v2/monitor/msgVpns/${encodeURIComponent(vpnName)}/queues?count=${maxCount}`,
             (q) => q.queueName as string,
             'Error fetching Queues'
         );

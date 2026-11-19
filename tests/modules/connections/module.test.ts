@@ -346,14 +346,10 @@ describe('ConnectionsModule', () => {
         });
 
         it('a second input event before the debounce window cancels the prior timer', async () => {
-            // Covers the truthy branch of the input-listener's
-            // `if (validateTimer !== null) clearTimeout(validateTimer)` in the
-            // Max Messages input listener. Without the cancel, every keystroke would queue
-            // its own timer — N keystrokes → N validations, with intermediate
-            // is-invalid flicker for stale values. The test types '10001' (invalid)
-            // then '500' (valid) in quick succession; after the debounce window
-            // only the second timer's validation must have run, leaving the
-            // input clean.
+            // The validation reads the field when its timer fires, so a timer
+            // that survived would validate the latest value early. Typing a valid
+            // value and then an invalid one shows it: no error may appear at the
+            // first timer's deadline, only one window after the second keystroke.
             vi.useFakeTimers();
             const { ctx } = createTestContext(container);
             await ConnectionsModule.install(ctx);
@@ -361,26 +357,20 @@ describe('ConnectionsModule', () => {
             const input = container.querySelector('#sol-max-messages') as HTMLInputElement;
             const errBox = container.querySelector('#sol-max-messages-error') as HTMLElement;
 
-            // First keystroke: schedules timer A for an invalid value.
+            input.value = '500';
+            input.dispatchEvent(new Event('input'));
+            vi.advanceTimersByTime(100);
             input.value = '10001';
             input.dispatchEvent(new Event('input'));
 
-            // Advance partway — not enough for timer A to fire.
-            vi.advanceTimersByTime(100);
-            expect(input.classList.contains('is-invalid')).toBe(false);
-
-            // Second keystroke before the debounce window expires: must clear
-            // timer A and schedule timer B for the valid value.
-            input.value = '500';
-            input.dispatchEvent(new Event('input'));
-
-            // Advance past the original debounce horizon. Only timer B's
-            // validation should have run.
-            vi.advanceTimersByTime(INPUT_DEBOUNCE_MS);
-            // If timer A had survived, the input would have been left invalid
-            // from validating '10001'. The clean state proves timer A was cancelled.
+            // Past the first timer's deadline, before the second's.
+            vi.advanceTimersByTime(INPUT_DEBOUNCE_MS - 50);
             expect(input.classList.contains('is-invalid')).toBe(false);
             expect(errBox.textContent).toBe('');
+
+            vi.advanceTimersByTime(50);
+            expect(input.classList.contains('is-invalid')).toBe(true);
+            expect(errBox.textContent).toBe(`Must not exceed ${MAX_MESSAGES_PER_QUEUE}.`);
 
             vi.useRealTimers();
         });
@@ -408,7 +398,7 @@ describe('ConnectionsModule', () => {
             expect(input.classList.contains('is-invalid')).toBe(false);
             expect(errBox.textContent).toBe('');
 
-            // Advance past the original debounce window — no double-fire side effect.
+            // The field stays valid once the debounce window has passed.
             vi.advanceTimersByTime(INPUT_DEBOUNCE_MS * 2);
             expect(input.classList.contains('is-invalid')).toBe(false);
 

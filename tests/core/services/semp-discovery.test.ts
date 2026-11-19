@@ -44,8 +44,7 @@ describe('core/services/semp-discovery', () => {
             });
             const page = await firstPage(createSempDiscovery(sempCtx).fetchVpns());
 
-            expect(page.ok).toBe(true);
-            if (page.ok) expect(page.data).toEqual(['vpn-b', 'vpn-a']);  // per-page order preserved; caller sorts on accumulate
+            expect(page).toEqual({ ok: true, data: ['vpn-b', 'vpn-a'] });  // per-page order preserved; caller sorts on accumulate
         });
 
         // Error paths use allPages() — pulling next() past the yielded error page
@@ -58,15 +57,14 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockResolvedValue({ ok: false, status: 500, statusText: 'Internal Server Error' });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
             expect(pages).toHaveLength(1);
-            expect(pages[0].ok).toBe(false);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching VPNs (HTTP 500 Internal Server Error)');
+            expect(pages[0]).toEqual({ ok: false, error: 'Error fetching VPNs (HTTP 500 Internal Server Error)' });
         });
 
         it("a relay refusal reads as the gateway code's sentence", async () => {
             const sempCtx = makeSempCtx();
             (sempCtx.fetch as any).mockResolvedValue({ ok: false, status: 502, statusText: '', json: async () => ({ error: 'upstream_auth' }) });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
-            if (!pages[0].ok) expect(pages[0].error).toBe(managedErrorMessage({ ok: false, status: 502, code: 'upstream_auth' }));
+            expect(pages[0]).toEqual({ ok: false, error: managedErrorMessage({ ok: false, status: 502, code: 'upstream_auth' }) });
         });
 
         it('a request that timed out names the deadline', async () => {
@@ -74,7 +72,7 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError'));
             const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
             expect(pages).toHaveLength(1);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching VPNs: no answer within 30 s.');
+            expect(pages[0]).toEqual({ ok: false, error: 'Error fetching VPNs: no answer within 30 s.' });
         });
 
         it('handles OK response with no data field', async () => {
@@ -90,8 +88,7 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockRejectedValue(new Error('Network error'));
             const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
             expect(pages).toHaveLength(1);
-            expect(pages[0].ok).toBe(false);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Network error');
+            expect(pages[0]).toEqual({ ok: false, error: 'Network error' });
         });
 
         it('handles SyntaxError when broker returns 200 with non-JSON body', async () => {
@@ -106,8 +103,7 @@ describe('core/services/semp-discovery', () => {
             });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
             expect(pages).toHaveLength(1);
-            expect(pages[0].ok).toBe(false);
-            if (!pages[0].ok) expect(pages[0].error).toContain('Unexpected token');
+            expect(pages[0]).toEqual({ ok: false, error: expect.stringContaining('Unexpected token') });
         });
 
         it('reads well over HTTP/2: the status alone when statusText is empty', async () => {
@@ -115,7 +111,7 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockResolvedValue({ ok: false, status: 403, statusText: '' });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
             expect(pages).toHaveLength(1);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching VPNs (HTTP 403)');
+            expect(pages[0]).toEqual({ ok: false, error: 'Error fetching VPNs (HTTP 403)' });
         });
 
         it('falls back to default error when thrown error has no message', async () => {
@@ -123,7 +119,7 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockRejectedValue(new Error(''));
             const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
             expect(pages).toHaveLength(1);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching VPNs');
+            expect(pages[0]).toEqual({ ok: false, error: 'Error fetching VPNs' });
         });
 
         it('uses custom maxCount in the path', async () => {
@@ -232,8 +228,7 @@ describe('core/services/semp-discovery', () => {
             });
             const page = await firstPage(createSempDiscovery(sempCtx).fetchQueues('default'));
 
-            expect(page.ok).toBe(true);
-            if (page.ok) expect(page.data).toEqual(['Q-B', 'Q-A']);
+            expect(page).toEqual({ ok: true, data: ['Q-B', 'Q-A'] });
         });
 
         // See fetchVpns block above for why these use allPages() — same single-
@@ -244,8 +239,7 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found' });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchQueues('default'));
             expect(pages).toHaveLength(1);
-            expect(pages[0].ok).toBe(false);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching Queues (HTTP 404 Not Found)');
+            expect(pages[0]).toEqual({ ok: false, error: 'Error fetching Queues (HTTP 404 Not Found)' });
         });
 
         it('handles OK response with no data field', async () => {
@@ -261,8 +255,7 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockRejectedValue(new Error('Timeout'));
             const pages = await allPages(createSempDiscovery(sempCtx).fetchQueues('default'));
             expect(pages).toHaveLength(1);
-            expect(pages[0].ok).toBe(false);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Timeout');
+            expect(pages[0]).toEqual({ ok: false, error: 'Timeout' });
         });
 
         it('reads well over HTTP/2: the status alone when statusText is empty', async () => {
@@ -270,7 +263,7 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockResolvedValue({ ok: false, status: 500, statusText: '' });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchQueues('default'));
             expect(pages).toHaveLength(1);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching Queues (HTTP 500)');
+            expect(pages[0]).toEqual({ ok: false, error: 'Error fetching Queues (HTTP 500)' });
         });
 
         it('falls back to default error when thrown error has no message', async () => {
@@ -278,7 +271,7 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockRejectedValue(new Error(''));
             const pages = await allPages(createSempDiscovery(sempCtx).fetchQueues('default'));
             expect(pages).toHaveLength(1);
-            if (!pages[0].ok) expect(pages[0].error).toBe('Error fetching Queues');
+            expect(pages[0]).toEqual({ ok: false, error: 'Error fetching Queues' });
         });
 
         it('includes VPN name in the path', async () => {
@@ -286,6 +279,13 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
             await allPages(createSempDiscovery(sempCtx).fetchQueues('my-vpn'));
             expect(sempCtx.fetch).toHaveBeenCalledWith(expect.stringContaining('/msgVpns/my-vpn/queues'));
+        });
+
+        it('encodes a VPN name that holds a space or a slash as one path segment', async () => {
+            const sempCtx = makeSempCtx();
+            (sempCtx.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
+            await allPages(createSempDiscovery(sempCtx).fetchQueues('team a/b'));
+            expect((sempCtx.fetch as any).mock.calls[0][0]).toBe('/SEMP/v2/monitor/msgVpns/team%20a%2Fb/queues?count=100');
         });
 
         it('passes a path-only string for the initial fetch', async () => {

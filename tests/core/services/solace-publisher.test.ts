@@ -248,16 +248,25 @@ describe('core/services/solace-publisher', () => {
     });
 
     describe('send() — sync send failure', () => {
-        it('resolves {ok:false} when session.send throws, with the thrown message', async () => {
-            (session.send as any).mockImplementation(() => { throw new Error('Send blew up'); });
-            const publisher = createSolacePublisher(session);
+        it('resolves {ok:false} when session.send throws, with the thrown message, and leaves no pending entry or timer', async () => {
+            vi.useFakeTimers();
+            const publisher = createSolacePublisher(session, { ackTimeoutMs: 100 });
+            let pendingDuringSend: boolean | undefined;
+            (session.send as any).mockImplementation(() => {
+                pendingDuringSend = publisher.isPending('k-sync');
+                throw new Error('Send blew up');
+            });
             const onReject = vi.fn();
+            const onTimeout = vi.fn();
 
-            const result = await publisher.send(createMessageMock(), queueDest, { onReject });
+            const result = await publisher.send(createMessageMock(), queueDest, { correlationKey: 'k-sync', onReject, onTimeout });
             expect(result).toEqual({ ok: false, error: 'Send blew up' });
             expect(onReject).toHaveBeenCalledWith('Send blew up');
-            // Pending map was cleaned up — no orphan timer entry.
-            expect(publisher.isPending('does-not-matter')).toBe(false);
+            expect(pendingDuringSend).toBe(true);
+            expect(publisher.isPending('k-sync')).toBe(false);
+            await vi.advanceTimersByTimeAsync(200);
+            expect(onTimeout).not.toHaveBeenCalled();
+            vi.useRealTimers();
         });
 
         it('falls back to a generic error when the thrown value has no message', async () => {

@@ -133,6 +133,22 @@ describe('queue-browser/ui-table', () => {
             expect(rows.length).toBe(2);
         });
 
+        it('shows a message id and date as text, never as markup', () => {
+            const id = '"><img src=x onerror="alert(1)">';
+            const date = '<b>2026</b>';
+            state.displayedMessages = [{ id, date, size: 0, type: 'Text', content: '' }];
+            state.allMessages = state.displayedMessages;
+
+            ui.renderList();
+
+            const row = ui.getElements().msgList.querySelector('tr') as HTMLElement;
+            expect(row.querySelector('img, b')).toBeNull();
+            expect(row.dataset.id).toBe(id);
+            const cells = row.querySelectorAll('td');
+            expect(cells[1].textContent).toBe(id);
+            expect(cells[2].textContent).toBe(date);
+        });
+
         it('resets check-all checkbox', () => {
             ui.getElements().checkAll.checked = true;
             state.displayedMessages = [];

@@ -52,6 +52,14 @@ describe('core/managed-semp-filter', () => {
         expect(json.data.map((q: any) => q.queueName)).toEqual(['orders.new']);
     });
 
+    it('matches the queue rules against the decoded VPN name, so a VPN with a space in its name keeps its queues', async () => {
+        const m = managed({ readOnly: [{ brokers: 'b1', msgVpns: 'team a', queues: 'orders.*' }] });
+        const raw = vi.fn(async () => jsonResponse({ data: [{ queueName: 'orders.new' }, { queueName: 'audit.x' }] }));
+        const res = await filterSempFetch(raw, m)('/SEMP/v2/monitor/msgVpns/team%20a/queues?count=100');
+        const json = await res.json();
+        expect(json.data.map((q: any) => q.queueName)).toEqual(['orders.new']);
+    });
+
     it('filters paginated queue pages (substring match, cursor preserved path)', async () => {
         const m = managed({ operate: [{ brokers: '*', msgVpns: '*', queues: 'keep*' }] });
         const raw = vi.fn(async () => jsonResponse({ data: [{ queueName: 'keep1' }, { queueName: 'drop1' }] }));

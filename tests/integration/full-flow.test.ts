@@ -40,16 +40,19 @@ describe('Integration: cross-module communication', () => {
     it('modules share a single EventBus instance through AppContext', async () => {
         createAppShell();
 
-        let busA: EventBus | null = null;
-        let busB: EventBus | null = null;
+        const buses: Record<string, EventBus> = {};
+        const heardByB: string[] = [];
 
         const modA: PwaModule = {
             name: 'A', id: 'mod-a',
-            async install(ctx) { busA = ctx.eventBus; }
+            async install(ctx) { buses.a = ctx.eventBus; }
         };
         const modB: PwaModule = {
             name: 'B', id: 'mod-b',
-            async install(ctx) { busB = ctx.eventBus; }
+            async install(ctx) {
+                buses.b = ctx.eventBus;
+                ctx.eventBus.on('connection:check-connection', ({ queue }) => heardByB.push(queue));
+            }
         };
 
         createModuleTemplate('mod-a', '<div>A</div>');
@@ -58,7 +61,11 @@ describe('Integration: cross-module communication', () => {
         const kernel = createKernel([{ module: modA, priority: 10 }, { module: modB, priority: 5 }]);
         await kernel.start();
 
-        expect(busA).toBe(busB);
+        expect(Object.keys(buses).sort()).toEqual(['a', 'b']);
+        expect(buses.a).toBe(buses.b);
+        // What one module emits, the other hears.
+        buses.a.emit('connection:check-connection', { vpn: 'v', queue: 'q1' });
+        expect(heardByB).toEqual(['q1']);
     });
 
     it('setState during install is visible to same-module EventBus subscriber', async () => {
