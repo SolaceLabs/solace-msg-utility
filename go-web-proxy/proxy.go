@@ -327,7 +327,7 @@ func newReverseProxy(transport http.RoundTripper, logger *slog.Logger) *reverseP
 			pr.Out.Host = target.Host
 			pr.Out.Header = pr.In.Header.Clone()
 			dropSessionCookie(pr.Out.Header)
-			// Intentionally NOT calling pr.SetXForwarded() — transparent passthrough.
+			setForwarded(pr.Out.Header, pr.In)
 		},
 		// Runs for a 101 upgrade answer too, before its headers are copied.
 		ModifyResponse: func(res *http.Response) error {
@@ -354,9 +354,10 @@ const sessionCookie = "__Host-smu-session"
 
 // dropSessionCookie removes the gateway's own sign-in cookies (the session and
 // the half-finished sign-in's ticket, session.go) from a request bound
-// upstream. The Direct relay forwards every other header unchanged, so
-// without this a Direct connection to any host would hand that host a live
-// gateway session. Every Cookie line is rebuilt; other cookies pass as sent.
+// upstream. The Direct relay forwards every other header unchanged, but for
+// the forwarding ones (setForwarded), so without this a Direct connection to
+// any host would hand that host a live gateway session. Every Cookie line is
+// rebuilt; other cookies pass as sent.
 func dropSessionCookie(h http.Header) {
 	lines := h.Values("Cookie")
 	if len(lines) == 0 {

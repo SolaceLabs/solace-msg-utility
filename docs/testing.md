@@ -112,7 +112,7 @@ The gateway lives in [go-web-proxy/](../go-web-proxy). It is one binary for ever
 | Proxy, relay and sockets | `main_test.go`, `proxy_test.go` (including which bundle `/` serves per mode), `relay_test.go`, `sockets_test.go`, `smf_test.go`, `dial_test.go` |
 | Configuration | `configfile_test.go` (`config.yaml` seeding, strict decoding, environment overrides), `live_test.go` (live settings and restart-only keys), `settings_test.go`, `logging_test.go` |
 | TLS and restart | `tls_test.go`, `tls_api_test.go`, `restart_test.go` and its platform variants |
-| Client access | `access_test.go` (access list, `X-Forwarded-For` trust, hijack pass-through) |
+| Client access | `access_test.go` (access list, `X-Forwarded-For` trust, the forwarding headers sent to brokers, hijack pass-through) |
 | Stores | `store_test.go`, `writer_test.go`, `storecrypt_test.go`, `keyfile_test.go`, `fileutil_test.go`, `backup_test.go`, `backup_api_test.go` |
 | Provisioned API and pages | `managed_test.go` (the `/managed/*` API behind its session gate: uniform 401, every error code, body cap, cross-origin refusal, no secret leak), `managed_routing_test.go`, `pages_test.go`, `audit_test.go` |
 | Sign-in | `password_test.go`, `session_test.go` (sessions and sign-in tickets), `throttle_test.go`, `totp_test.go` (RFC 6238 vectors, replay guard, recovery codes, QR drawing) |

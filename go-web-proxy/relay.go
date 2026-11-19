@@ -35,8 +35,10 @@ const (
 )
 
 // Request headers that reach the broker; everything else, the session cookie,
-// Authorization, Origin, Referer, Sec-Fetch-* and X-Forwarded-* included, is
-// dropped. Accept-Encoding is dropped too: the transport negotiates its own.
+// Authorization, Origin, Referer, Sec-Fetch-* and the client's own Forwarded
+// and X-Forwarded-* included, is dropped. The relay adds User-Agent and its
+// own Forwarded and X-Forwarded-For (setForwarded). Accept-Encoding is
+// dropped too: the transport negotiates its own.
 // Content-Type is not taken from the client: a v1 POST is sent as
 // relayV1ContentType, so no charset the client names can make the broker read
 // the body differently from isShowRPC. No conditional request header passes
@@ -109,6 +111,7 @@ func (rl *sempRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	header.Set("User-Agent", relayUserAgent)
+	setForwarded(header, r)
 	var body []byte
 	switch {
 	case p.v1 && r.Method == http.MethodPost:

@@ -217,6 +217,54 @@ func TestClientACL_XFFBelievedOnlyFromTrustedProxy(t *testing.T) {
 	}
 }
 
+// The forwarding headers a relay sends name the client withClient resolved,
+// in both forms, and replace whatever the client sent in any of the four.
+func TestSetForwarded(t *testing.T) {
+	lv := liveWith(func(c *config) { c.access.trustedProxies = prefixes(t, "10.0.0.0/8") })
+	forged := map[string]string{
+		"X-Forwarded-For": "198.51.100.7", "Forwarded": "for=198.51.100.7",
+		"X-Forwarded-Host": "forged.example", "X-Forwarded-Proto": "gopher",
+	}
+	for _, tc := range []struct {
+		name, remote, xff, wantXFF, wantForwarded string
+	}{
+		{"an IPv4 client", "192.0.2.1:4444", "", "192.0.2.1", "for=192.0.2.1"},
+		{"an IPv6 client is quoted in brackets", "[2001:db8::7]:4444", "", "2001:db8::7", `for="[2001:db8::7]"`},
+		{"an IPv4-mapped client is sent as IPv4", "[::ffff:192.0.2.1]:4444", "", "192.0.2.1", "for=192.0.2.1"},
+		{"a client behind a trusted proxy", "10.0.0.2:1", "203.0.113.9", "203.0.113.9", "for=203.0.113.9"},
+		{"a trusted proxy's header that does not parse", "10.0.0.2:1", "not-an-address", "", "for=unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out http.Header
+			h := withClient(lv, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				out = r.Header.Clone()
+				setForwarded(out, r)
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tc.remote
+			for k, v := range forged {
+				req.Header.Set(k, v)
+			}
+			if tc.xff != "" {
+				req.Header.Set("X-Forwarded-For", tc.xff)
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			// Joined, so a second line or a missing one shows as a mismatch.
+			if got := strings.Join(out.Values("X-Forwarded-For"), "|"); got != tc.wantXFF {
+				t.Errorf("X-Forwarded-For: got %q, want %q", got, tc.wantXFF)
+			}
+			if got := strings.Join(out.Values("Forwarded"), "|"); got != tc.wantForwarded {
+				t.Errorf("Forwarded: got %q, want %q", got, tc.wantForwarded)
+			}
+			for _, k := range []string{"X-Forwarded-Host", "X-Forwarded-Proto"} {
+				if v := out.Get(k); v != "" {
+					t.Errorf("the client's %s was kept: %q", k, v)
+				}
+			}
+		})
+	}
+}
+
 // Denials sit inside the access log: the request record shows the 403 and the
 // ACL adds the reason, so operators see both in one stream.
 func TestClientACL_InsideAccessLog(t *testing.T) {

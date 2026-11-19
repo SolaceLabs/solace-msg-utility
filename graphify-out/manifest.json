@@ -42,15 +42,15 @@
     "semantic_hash": ""
   },
   "go-web-proxy/proxy.go": {
-    "mtime": 1795045411.0913641,
-    "seen": 1795060395.711515,
-    "ast_hash": "b520ef858ecfd007ade82f12c9776fae",
+    "mtime": 1795100642.8136046,
+    "seen": 1795101330.0807776,
+    "ast_hash": "d353c3a39f7c3d11c0ff50947f6648a8",
     "semantic_hash": ""
   },
   "go-web-proxy/proxy_test.go": {
-    "mtime": 1794880825.0197127,
-    "seen": 1794882223.9069238,
-    "ast_hash": "d741662c4faf178918a2d0179efd0369",
+    "mtime": 1795100679.6100168,
+    "seen": 1795101330.0807798,
+    "ast_hash": "6020fc7ed74f6ce69f8359fcd9071920",
     "semantic_hash": ""
   },
   "go-web-proxy/tls.go": {
@@ -696,9 +696,9 @@
     "semantic_hash": ""
   },
   "docs/architecture.md": {
-    "mtime": 1795045932.2136881,
-    "seen": 1795060395.7120638,
-    "ast_hash": "2ab7bca499abb310e67ea9b781c580c7",
+    "mtime": 1795100721.9563723,
+    "seen": 1795101330.081304,
+    "ast_hash": "98dd3efae99d4945e42b2fd066990fa1",
     "semantic_hash": ""
   },
   "docs/contributing.md": {
@@ -708,9 +708,9 @@
     "semantic_hash": ""
   },
   "docs/deployment.md": {
-    "mtime": 1795060790.6316,
-    "seen": 1795068159.5106819,
-    "ast_hash": "c04f5c2de143b425679c13e90bef27ca",
+    "mtime": 1795100721.9573243,
+    "seen": 1795101330.081308,
+    "ast_hash": "54dfde3203df271f70581314ca5491d9",
     "semantic_hash": ""
   },
   "docs/developer-guide.md": {
@@ -1254,15 +1254,15 @@
     "semantic_hash": ""
   },
   "go-web-proxy/access.go": {
-    "mtime": 1794328596.896678,
-    "seen": 1794399758.17389,
-    "ast_hash": "c925d41b18fa6c9bfe0b0316d99c0aa6",
+    "mtime": 1795100626.220419,
+    "seen": 1795101330.0807147,
+    "ast_hash": "91b84f084eebb59c9b75bc04cfadeb54",
     "semantic_hash": ""
   },
   "go-web-proxy/access_test.go": {
-    "mtime": 1794328965.7254894,
-    "seen": 1794399758.1738925,
-    "ast_hash": "52e907e90687ec68a55fca73770ead06",
+    "mtime": 1795100655.8477507,
+    "seen": 1795101330.080718,
+    "ast_hash": "70d727e867b3f171c08243f0800ffdc2",
     "semantic_hash": ""
   },
   "go-web-proxy/configfile.go": {
@@ -1470,15 +1470,15 @@
     "semantic_hash": ""
   },
   "go-web-proxy/relay.go": {
-    "mtime": 1794934232.6592906,
-    "seen": 1794938845.106014,
-    "ast_hash": "22e26b5cfa86895e247b4b6f53491944",
+    "mtime": 1795100626.683424,
+    "seen": 1795101330.0807846,
+    "ast_hash": "cabcd3443d2c9ef0704379af5d667ecf",
     "semantic_hash": ""
   },
   "go-web-proxy/relay_test.go": {
-    "mtime": 1794934232.6603236,
-    "seen": 1794938845.1060162,
-    "ast_hash": "85cdf6bc75ec6335db40031719d8d7d5",
+    "mtime": 1795100656.2567554,
+    "seen": 1795101330.0807867,
+    "ast_hash": "79a3443a8fa12a79df1de81459a8cf7f",
     "semantic_hash": ""
   },
   "go-web-proxy/dial.go": {
@@ -1494,15 +1494,15 @@
     "semantic_hash": ""
   },
   "go-web-proxy/smf.go": {
-    "mtime": 1794934232.6582615,
-    "seen": 1794938845.106058,
-    "ast_hash": "ffb0145f4a45ec1136fac60c1e1e947a",
+    "mtime": 1795100627.0994287,
+    "seen": 1795101330.0808032,
+    "ast_hash": "3d04c854ec5b732dbeae9cfb317d97a0",
     "semantic_hash": ""
   },
   "go-web-proxy/smf_test.go": {
-    "mtime": 1794934232.6605692,
-    "seen": 1794938845.10606,
-    "ast_hash": "d0b1d9261d11ff7c77a64c8fc62bf16a",
+    "mtime": 1795100670.149911,
+    "seen": 1795101330.0808043,
+    "ast_hash": "0d884ee4692c2cb10f1052c43f2f86ca",
     "semantic_hash": ""
   },
   "go-web-proxy/sockets.go": {
@@ -1800,9 +1800,9 @@
     "semantic_hash": ""
   },
   "docs/provisioned-mode.md": {
-    "mtime": 1795068092.8515508,
-    "seen": 1795068159.5106854,
-    "ast_hash": "8ea84207c7a30b048592ae583dc97b54",
+    "mtime": 1795100721.9578311,
+    "seen": 1795101330.0813117,
+    "ast_hash": "ef2631e6b1fb6261525624b0c950afde",
     "semantic_hash": ""
   },
   "src/core/icons.ts": {
@@ -2268,9 +2268,9 @@
     "semantic_hash": ""
   },
   "docs/testing.md": {
-    "mtime": 1795045932.2143588,
-    "seen": 1795060395.7120726,
-    "ast_hash": "d87cb881b95988c31adad29b59ace566",
+    "mtime": 1795100733.6026986,
+    "seen": 1795101330.0813134,
+    "ast_hash": "15bddc4c75d92e0e861ccfae5188e4f3",
     "semantic_hash": ""
   },
   "src/core/components/account-control/index.ts": {

@@ -84,7 +84,8 @@ func TestRelay_AddsTheStoredCredentialAndDropsTheBrowsers(t *testing.T) {
 	path := "/managed/relay/b1/SEMP/v2/monitor/msgVpns/v1/queues/a%2Fb?count=10&where=x"
 	rec := e.do("GET", path, "", e.cookie("viewer", false),
 		"Authorization", "Basic Zm9yZ2VkOmZvcmdlZA==", "Origin", "https://gw.example", "Referer", "https://gw.example/",
-		"X-Forwarded-For", "203.0.113.9", "Accept", "application/json", "Sec-Fetch-Site", "same-origin",
+		"X-Forwarded-For", "203.0.113.9", "Forwarded", "for=203.0.113.9", "X-Forwarded-Host", "forged.example",
+		"Accept", "application/json", "Sec-Fetch-Site", "same-origin",
 		"If-None-Match", `"e0"`, "If-Match", `"e0"`)
 	expect(t, rec, http.StatusOK, "")
 	if rec.Body.String() != `{"data":[]}` {
@@ -100,10 +101,15 @@ func TestRelay_AddsTheStoredCredentialAndDropsTheBrowsers(t *testing.T) {
 	}
 	// No conditional request either: the relay would answer the broker's 304
 	// as a 502.
-	for _, k := range []string{"Cookie", "Origin", "Referer", "X-Forwarded-For", "Sec-Fetch-Site", "If-None-Match", "If-Match"} {
+	for _, k := range []string{"Cookie", "Origin", "Referer", "X-Forwarded-Host", "Sec-Fetch-Site", "If-None-Match", "If-Match"} {
 		if v := up.header.Get(k); v != "" {
 			t.Errorf("%s reached the broker: %q", k, v)
 		}
+	}
+	// The broker learns the client's real address, not the one it claimed.
+	if xff, fwd := up.header.Values("X-Forwarded-For"), up.header.Values("Forwarded"); len(xff) != 1 || xff[0] != "192.0.2.10" ||
+		len(fwd) != 1 || fwd[0] != "for=192.0.2.10" {
+		t.Errorf("upstream forwarding headers: X-Forwarded-For %q, Forwarded %q", xff, fwd)
 	}
 	if up.header.Get("Accept") != "application/json" || up.header.Get("User-Agent") != relayUserAgent {
 		t.Errorf("allowed headers: Accept %q, User-Agent %q", up.header.Get("Accept"), up.header.Get("User-Agent"))

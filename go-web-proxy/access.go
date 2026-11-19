@@ -45,6 +45,36 @@ func clientOf(r *http.Request) (netip.Addr, bool) {
 	return c.addr, c.ok
 }
 
+// forwardedHeaders are the request headers that say whom a proxied request is
+// for. A client can send any of them, so setForwarded drops them all.
+var forwardedHeaders = []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto"}
+
+// setForwarded tells the broker which client a relayed request is for, in
+// X-Forwarded-For and in the Forwarded header of RFC 7239. The address is the
+// one withClient resolved, which the access list, the throttle and the audit
+// trail use, so a trusted proxy's hops are already taken into account. What
+// the client sent in any of forwardedHeaders is dropped first: a client
+// cannot name another address to the broker. An address that did not resolve
+// (a trusted proxy sent an X-Forwarded-For that does not parse) is sent as
+// for=unknown, the RFC's word for it, with no X-Forwarded-For.
+func setForwarded(h http.Header, r *http.Request) {
+	for _, k := range forwardedHeaders {
+		h.Del(k)
+	}
+	ip, ok := clientOf(r)
+	switch {
+	case !ok:
+		h.Set("Forwarded", "for=unknown")
+	case ip.Is4():
+		h.Set("X-Forwarded-For", ip.String())
+		h.Set("Forwarded", "for="+ip.String())
+	default:
+		// An IPv6 address is a quoted string in brackets (RFC 7239 section 6).
+		h.Set("X-Forwarded-For", ip.String())
+		h.Set("Forwarded", `for="[`+ip.String()+`]"`)
+	}
+}
+
 // clientACL wraps next with the access list, read per request (a settings save
 // applies to the next request); withClient must run first. An empty allow list
 // admits every client. A denied client gets a bare 403 with no body: nothing

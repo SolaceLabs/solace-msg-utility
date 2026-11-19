@@ -25,8 +25,9 @@ import (
 const smfPrefix = "/managed/smf/"
 
 // Upgrade request headers that reach the broker, besides the fixed
-// Connection, Upgrade and User-Agent. Cookie, Authorization and Origin never
-// do.
+// Connection, Upgrade and User-Agent and the gate's own Forwarded and
+// X-Forwarded-For (setForwarded). Cookie, Authorization, Origin and the
+// client's own forwarding headers never do.
 var smfRequestHeaders = []string{"Sec-WebSocket-Key", "Sec-WebSocket-Version", "Sec-WebSocket-Protocol", "Sec-WebSocket-Extensions"}
 
 // The broker's 101 headers that reach the browser, besides Connection and
@@ -122,6 +123,7 @@ func (g *smfGate) connect(ctx context.Context, w http.ResponseWriter, r *http.Re
 	header.Set("Connection", "Upgrade")
 	header.Set("Upgrade", "websocket")
 	header.Set("User-Agent", relayUserAgent)
+	setForwarded(header, r)
 	u := &url.URL{
 		Scheme:   upgradeScheme(target.scheme),
 		Host:     net.JoinHostPort(target.host, target.port),

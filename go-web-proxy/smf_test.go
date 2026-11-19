@@ -220,7 +220,8 @@ func TestSMF_JoinsTheSocketToTheBroker(t *testing.T) {
 	s := newSMFEnv(t, fakeAnswer{})
 	c := s.cookie("viewer", false)
 	ws := s.mustOpen(t, "/managed/smf/b1/v1", c,
-		"Authorization", "Basic Zm9yZ2VkOmZvcmdlZA==", "Sec-WebSocket-Protocol", "binary", "Sec-WebSocket-Extensions", "permessage-deflate")
+		"Authorization", "Basic Zm9yZ2VkOmZvcmdlZA==", "Sec-WebSocket-Protocol", "binary", "Sec-WebSocket-Extensions", "permessage-deflate",
+		"X-Forwarded-For", "203.0.113.9", "Forwarded", "for=203.0.113.9")
 	for k, want := range map[string]string{
 		"Sec-WebSocket-Accept": wsAccept(wsKey), "Sec-WebSocket-Protocol": "binary", "Sec-WebSocket-Extensions": "permessage-deflate",
 	} {
@@ -251,6 +252,12 @@ func TestSMF_JoinsTheSocketToTheBroker(t *testing.T) {
 		if got := up.header.Get(k); got != want {
 			t.Errorf("upstream %s: got %q, want %q", k, got, want)
 		}
+	}
+	// The broker learns the browser's real address (the test's own socket),
+	// not the one it claimed.
+	client, _, _ := net.SplitHostPort(s.gw.Listener.Addr().String())
+	if xff, fwd := up.header.Get("X-Forwarded-For"), up.header.Get("Forwarded"); xff != client || !strings.Contains(fwd, client) {
+		t.Errorf("upstream forwarding headers: X-Forwarded-For %q, Forwarded %q, want the address %s", xff, fwd, client)
 	}
 
 	// A tail and a query are forwarded as sent; a lone trailing slash is none.

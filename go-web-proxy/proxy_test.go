@@ -513,11 +513,16 @@ func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
 	upURL, _ := url.Parse(upstream.URL)
 	rp := newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger())
 
-	// Build /http/{port}/{host}/some/path?x=1 against the test server.
-	gw := httptest.NewServer(rp)
+	// Build /http/{port}/{host}/some/path?x=1 against the test server, behind
+	// withClient as serve() mounts it.
+	gw := httptest.NewServer(withClient(liveWith(nil), rp))
 	defer gw.Close()
 	path := "/http/" + upURL.Port() + "/" + upURL.Hostname() + "/some/path"
-	resp, err := http.Get(gw.URL + path + "?x=1&y=2")
+	req, _ := http.NewRequest(http.MethodGet, gw.URL+path+"?x=1&y=2", nil)
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	req.Header.Set("Forwarded", "for=203.0.113.9")
+	req.Header.Set("X-Forwarded-Host", "forged.example")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -542,9 +547,14 @@ func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
 	if captured.URL.RawQuery != "x=1&y=2" {
 		t.Errorf("upstream query: want x=1&y=2, got %q", captured.URL.RawQuery)
 	}
-	// X-Forwarded-For must NOT be set — transparent passthrough.
-	if v := captured.Header.Get("X-Forwarded-For"); v != "" {
-		t.Errorf("X-Forwarded-For leaked: %q (must be empty per spec)", v)
+	// The upstream learns the client's real address (the test's own socket),
+	// not the one it claimed, and no forged forwarding header passes.
+	client, _, _ := net.SplitHostPort(gw.Listener.Addr().String())
+	if xff, fwd := captured.Header.Get("X-Forwarded-For"), captured.Header.Get("Forwarded"); xff != client || !strings.Contains(fwd, client) {
+		t.Errorf("upstream forwarding headers: X-Forwarded-For %q, Forwarded %q, want the address %s", xff, fwd, client)
+	}
+	if v := captured.Header.Get("X-Forwarded-Host"); v != "" {
+		t.Errorf("the client's X-Forwarded-Host reached the upstream: %q", v)
 	}
 }
 
