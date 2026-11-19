@@ -174,6 +174,24 @@ func TestLoadConfig_InsecureSkipVerifyIsStrict(t *testing.T) {
 	}
 }
 
+// SMU_SSL_STANDARD_ROOTS seeds tls.standardRoots, on when unset, and is as
+// strict as the other booleans.
+func TestLoadConfig_StandardRootsIsStrict(t *testing.T) {
+	for v, want := range map[string]bool{"": true, "false": false, "true": true} {
+		t.Setenv("SMU_SSL_STANDARD_ROOTS", v)
+		cfg, err := loadConfig()
+		if err != nil || cfg.standardRoots != want {
+			t.Errorf("SMU_SSL_STANDARD_ROOTS=%q: want %v, got %v (%v)", v, want, cfg.standardRoots, err)
+		}
+	}
+	for _, v := range []string{"TRUE", "0", "no"} {
+		t.Setenv("SMU_SSL_STANDARD_ROOTS", v)
+		if _, err := loadConfig(); err == nil || !strings.Contains(err.Error(), `SMU_SSL_STANDARD_ROOTS="`+v+`"`) || !strings.Contains(err.Error(), `"true" or "false"`) {
+			t.Errorf("SMU_SSL_STANDARD_ROOTS=%q: want an error naming the variable and the accepted values, got %v", v, err)
+		}
+	}
+}
+
 // SMU_SHOW_AUDIT seeds audit.stdout and is as strict as the other booleans:
 // the value is written into config.yaml on the first start. audit.access has
 // no variable.

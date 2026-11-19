@@ -12,6 +12,7 @@ import type { ManagedProfile as ServiceProfile } from '../../core/services/manag
 import type { ManagedUser } from '../../modules/user-management/service';
 import type { GatewaySettings as ServiceSettings } from '../../modules/gateway-settings/service';
 import type { TwoFactorMode } from './authenticator';
+import type { CertInfo } from './tls';
 
 export type { DialResponse } from '../../core/services/managed-service';
 export type { UserList } from '../../modules/user-management/service';
@@ -27,12 +28,12 @@ export type ManagedProfile = ServiceProfile & { twoFactor: TwoFactorState };
 /**
  * The settings file with `login.twoFactor` (the fake validates it, so it is the narrow type), the
  * sign-in and connect limits the fake reads (`LoginLimitKeys`, `session.connectsPerMinute`), and
- * `tls` holding only `insecureSkipVerify`: the three TLS paths are environment variables, not keys.
+ * `tls` holding only `insecureSkipVerify` and `standardRoots`: the three TLS paths are environment variables, not keys.
  */
 export type GatewaySettings = Omit<ServiceSettings, 'login' | 'session' | 'tls'> & {
     login: ServiceSettings['login'] & LoginLimitKeys & { twoFactor: TwoFactorMode };
     session: ServiceSettings['session'] & { connectsPerMinute: number };
-    tls: Pick<ServiceSettings['tls'], 'insecureSkipVerify'>;
+    tls: Pick<ServiceSettings['tls'], 'insecureSkipVerify' | 'standardRoots'>;
 };
 
 /** The `login` keys that bound the sign-in throttle, the password rule and the two-factor step. */
@@ -113,6 +114,8 @@ export interface GatewaySeed {
     settings: GatewaySettings;
     /** The browser's address, as the gateway would see it (for `would_lock_out`). */
     client: string;
+    /** The standard root CAs the image carries, as `GET /managed/tls` describes them; absent, the image holds none. */
+    standardRoots?: CertInfo[];
 }
 
 /** A request as the gateway's router sees it. */

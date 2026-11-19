@@ -627,6 +627,7 @@ The file is plain YAML, parsed strictly (`decodeConfigFile` in [configfile.go](.
 | `connModes` | `direct` | `SMU_CONN_MODES` | At once. The settings API and an import refuse `direct` |
 | `defaultConn` | `direct` | `SMU_DEFAULT_CONN` | At once |
 | `tls.insecureSkipVerify` | `false` | `SMU_SSL_SKIP_CERT_VERIFY` | At once |
+| `tls.standardRoots` | `true` | `SMU_SSL_STANDARD_ROOTS` | At once |
 | `logLevel` | `warn` | `LOG_LEVEL` | At once |
 | `access.allow`, `access.trustedProxies` | `[]` | none | At once, in every mode |
 | `session.idleMinutes`, `session.absoluteMinutes` | `10`, `30` | none | At once. Provisioned mode only |

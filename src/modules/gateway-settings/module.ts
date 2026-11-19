@@ -62,6 +62,7 @@ const FIELDS: ReadonlyArray<{ key: string; kind: Kind }> = [
     { key: 'audit.stdout', kind: 'bool' },
     { key: 'audit.access', kind: 'bool' },
     { key: 'audit.onFailure', kind: 'text' },
+    { key: 'tls.standardRoots', kind: 'bool' },
     { key: 'tls.insecureSkipVerify', kind: 'bool' },
 ];
 

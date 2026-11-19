@@ -10,7 +10,7 @@ export interface GatewaySettings {
     hosted: boolean;
     connModes: string;
     defaultConn: string;
-    tls: { insecureSkipVerify: boolean };
+    tls: { insecureSkipVerify: boolean; standardRoots: boolean };
     logLevel: string;
     access: { allow: string[]; trustedProxies: string[] };
     session: { idleMinutes: number; absoluteMinutes: number; connectsPerMinute: number };

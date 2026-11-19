@@ -4,7 +4,7 @@ import { createSettingsService, type GatewaySettings } from '../../../src/module
 
 const SETTINGS: GatewaySettings = {
     hosted: true, connModes: 'both', defaultConn: 'direct',
-    tls: { insecureSkipVerify: false },
+    tls: { insecureSkipVerify: false, standardRoots: true },
     logLevel: 'warn',
     access: { allow: [], trustedProxies: [] },
     session: { idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 },

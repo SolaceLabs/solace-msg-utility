@@ -61,7 +61,8 @@
     "connModes": "both",
     "defaultConn": "direct",
     "tls": {
-      "insecureSkipVerify": false
+      "insecureSkipVerify": false,
+      "standardRoots": true
     },
     "logLevel": "warn",
     "access": { "allow": [], "trustedProxies": [] },

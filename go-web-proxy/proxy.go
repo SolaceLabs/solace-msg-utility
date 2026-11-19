@@ -250,8 +250,9 @@ const upstreamDialTimeout = 10 * time.Second
 
 // newUpstreamTransport is the one transport for every broker-bound request:
 // the Direct relay, the SEMP relay and the SMF gate. It trusts what the trust
-// holder holds when each connection is made (the system roots plus the files
-// in the trust directory, and config.yaml's tls.insecureSkipVerify), so a
+// holder holds when each connection is made (the files in the trust
+// directory, the standard roots while config.yaml's tls.standardRoots is on,
+// and tls.insecureSkipVerify), so a
 // change reaches the next connection with no restart, and it never follows
 // redirects (the ReverseProxy calls RoundTrip directly). A change of trust
 // closes the idle connections, so the next request handshakes under it.

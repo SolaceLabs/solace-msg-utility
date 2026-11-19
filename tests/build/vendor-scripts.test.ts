@@ -87,6 +87,16 @@ describe('vendor scripts in the images', () => {
             /^COPY --chown=65532:65532 --from=gateway-builder \/staging\/licenses\/ \/SolaceMsgUtility\/licenses\/$/m);
     });
 
+    // The standard root CAs (go-web-proxy/tls.go): the bundle lands where the
+    // gateway reads it, from the pinned Go build stage, with its MPL-2.0 notice.
+    it('copies the standard root CA bundle to the path the gateway reads, with its notice', () => {
+        const file = read('go-web-proxy/tls.go').match(/^const standardRootsFile = "([^"]+)"$/m)?.[1];
+        expect(file).toBe('/etc/ssl/certs/ca-certificates.crt');
+        expect(dockerfile).toContain(`\nCOPY --from=gateway-builder ${file} ${file}\n`);
+        expect(dockerfile).toContain('\nCOPY docker/licenses/ca-certificates/NOTICE /staging/licenses/ca-certificates/NOTICE\n');
+        expect(read('docker/licenses/ca-certificates/NOTICE')).toContain('Mozilla Public License, version 2.0');
+    });
+
     it('compares versions part by part', () => {
         expect([atLeast('10.18.3', '10.18.3'), atLeast('10.18.10', '10.18.3'), atLeast('10.9.9', '10.18.3'), atLeast('3.10.2', '3.10.1')])
             .toEqual([true, true, false, true]);

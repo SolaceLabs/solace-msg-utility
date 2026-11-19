@@ -81,11 +81,10 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
-import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import {
     MIN_MASKED, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, basisMoved, certFingerprint, continueLinkFromPage, createCookieJar, detailsFileText,
-    dnsServers, findTokens, freshTotp, hostRootBundle, issueCert, issueExpiredCert, jsonFindings, hostAliasProblem, listedRev, listedRow, makeCA, maskSecrets,
+    dnsServers, findTokens, freshTotp, issueCert, issueExpiredCert, jsonFindings, hostAliasProblem, listedRev, listedRow, makeCA, maskSecrets,
     parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, recoveryCodeProblems, recoveryCodesFromPage, refusalProblem, resolutionOverride,
     resolveDetails, resolverLookup, sealedHeaderProblem, sessionCookieProblems, signinCookieProblems, sweepSecrets, tlsFingerprint, twoFactorSecretFromPage,
     wrongTotp,
@@ -352,7 +351,7 @@ let runCA = null;
 let gatewayPair = null;
 let brokerCaPem = '';
 
-function writeMaterial(brokerCerts, roots) {
+function writeMaterial(brokerCerts) {
     fs.rmSync(WORK, { recursive: true, force: true });
     fs.mkdirSync(path.join(WORK, 'tls', 'trust'), { recursive: true });
     const ca = makeCA('smu-e2e CA');
@@ -379,9 +378,6 @@ function writeMaterial(brokerCerts, roots) {
     // Only the certificates from the CA file, whatever else it holds.
     brokerCaPem = brokerCerts.map((c) => c.toString()).join('');
     put(`tls/trust/${TRUST_FILE}`, brokerCaPem);
-    // The host's standard roots, mounted where Go looks for the system bundle:
-    // the image ships none, and a broker port may present a public chain.
-    put('system-roots.crt', roots.text);
     put('tls/tls.crt', gateway.certPem);
     put('tls/tls.key', gateway.keyPem);
     put('admin-password', `${secrets.bootstrapPassword}\n`);
@@ -1344,7 +1340,7 @@ async function runChecks(admin) {
         // restart of 15, the browser's) expect the gateway as it was. The finally
         // looks again whatever a check found.
         try {
-            await check(28, "GET /managed/tls shows the gateway's certificate by its fingerprint, the one a new TLS connection is served, and the broker's CA file, with both changeable, no path or key in the answer, and the same gate as every admin route", async () => {
+            await check(28, "GET /managed/tls shows the gateway's certificate by its fingerprint, the one a new TLS connection is served, the broker's CA file and the image's standard root CAs, trusted, with both files changeable, no path or key in the answer, and the same gate as every admin route", async () => {
                 const res = await request('GET', '/managed/tls', { jar: admin });
                 expect(res.status === 200, `GET /managed/tls: want 200, got ${res.status} ${res.body.slice(0, 300)}`);
                 const view = JSON.parse(res.body);
@@ -1362,6 +1358,10 @@ async function runChecks(admin) {
                 const wantCerts = pemCertificates(brokerCaPem).map((c) => c.fingerprint256);
                 expect(JSON.stringify(file.certificates.map((c) => c.sha256)) === JSON.stringify(wantCerts),
                     `${TRUST_FILE} holds ${JSON.stringify(file.certificates.map((c) => c.sha256))}, want ${JSON.stringify(wantCerts)}`);
+                // The image's bundle (Mozilla's list, well over 100 roots), on by default.
+                const std = view.standard ?? {};
+                expect(std.trusted === true && std.problem === '' && Array.isArray(std.certificates) && std.certificates.length >= 100,
+                    `the standard root CAs: want the image's bundle, trusted, got trusted ${std.trusted}, ${std.certificates?.length} certificates, problem "${std.problem}"`);
                 expect(!/\/tls\/|tls\.key|PRIVATE KEY/.test(res.body), 'the answer names a path or holds key text');
                 const served = await servedFingerprint();
                 expect(served === want, `a new TLS connection is served ${served}, want ${want}`);
@@ -1461,7 +1461,7 @@ async function runChecks(admin) {
                         `deleting ${TRUST_FILE}: want 200 and a list without it, got ${deleted.status} ${deleted.body.slice(0, 300)}`);
                     const without = await relay();
                     if (without.status === 200) {
-                        // A broker whose certificate chains to a public root is trusted through the host roots too.
+                        // A broker whose certificate chains to a public root is trusted through the image's standard roots too.
                         halfOnly = true;
                     } else {
                         expect(without.status === 502, `without the CA file: want 502, got ${without.status} ${without.body.slice(0, 200)}`);
@@ -1484,7 +1484,7 @@ async function runChecks(admin) {
                 }
                 expect(restored === '', `adding ${TRUST_FILE} back: ${restored}`);
                 return halfOnly
-                    ? skip("only adding the file back was proved: the broker's certificate also verifies against the host's standard roots, so deleting it changes nothing")
+                    ? skip("only adding the file back was proved: the broker's certificate also verifies against the standard root CAs the image carries, so deleting it changes nothing")
                     : detail;
             });
 
@@ -2208,12 +2208,8 @@ async function run() {
         const certs = readBrokerCA(broker.caFile);
         describeBroker(certs);
         if (browserOn()) playwright = await loadPlaywright();
-        const roots = hostRootBundle((file) => {
-            try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
-        }, tls.rootCertificates);
-        say(`trusting ${roots.count} standard roots from ${roots.from}`);
         started = true;
-        writeMaterial(certs, roots);
+        writeMaterial(certs);
         await stackUp();
         const admin = await configureGateway();
         await runChecks(admin);

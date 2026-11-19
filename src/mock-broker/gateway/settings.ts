@@ -8,7 +8,7 @@
  * and shown only; the login keys at the next sign-in or password change,
  * login.twoFactorMinutes at the next ticket check and
  * login.unauthenticatedPerMinute at the next request without a session;
- * tls.insecureSkipVerify at once, as the gateway's trust holder takes it;
+ * tls.insecureSkipVerify and tls.standardRoots at once, as the gateway's trust holder takes them;
  * session.connectsPerMinute at the next dial or SMF socket). Nothing a save
  * writes waits for a restart. A seed, snapshot or backup without a key reads
  * it as its default. The TLS paths are environment variables, not keys: a
@@ -42,7 +42,7 @@ type Schema = { [key: string]: Kind | Schema };
 /** fileConfig's JSON fields and their types. */
 const SCHEMA: Schema = {
     hosted: 'bool', connModes: 'string', defaultConn: 'string',
-    tls: { insecureSkipVerify: 'bool' },
+    tls: { insecureSkipVerify: 'bool', standardRoots: 'bool' },
     logLevel: 'string',
     access: { allow: 'strings', trustedProxies: 'strings' },
     session: { idleMinutes: 'int', absoluteMinutes: 'int', connectsPerMinute: 'int' },
@@ -104,7 +104,7 @@ function merge(target: Record<string, any>, patch: unknown, schema: Schema): voi
 /** defaultFileConfig: the built-in defaults, what the gateway decodes a backup's settings onto (a key the backup lacks reads as its default). */
 const DEFAULTS: GatewaySettings = {
     hosted: true, connModes: 'direct', defaultConn: 'direct',
-    tls: { insecureSkipVerify: false },
+    tls: { insecureSkipVerify: false, standardRoots: true },
     logLevel: 'warn',
     access: { allow: [], trustedProxies: [] },
     session: { idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 },
@@ -349,7 +349,7 @@ const UNREADABLE_REASON = 'The gateway cannot read config.yaml (demo: the contro
 
 /**
  * A file's settings with the keys it may lack (an older seed, backup or snapshot):
- * the session, login and audit keys, the defaults'; and without the keys it may
+ * the session, login and audit keys and tls.standardRoots, the defaults'; and without the keys it may
  * still hold (the three TLS paths).
  */
 const fileDefaults = (s: GatewaySettings): GatewaySettings => {
@@ -357,7 +357,7 @@ const fileDefaults = (s: GatewaySettings): GatewaySettings => {
     c.session = { ...DEFAULTS.session, ...c.session };
     c.audit = { ...DEFAULTS.audit, ...c.audit };
     c.login = { ...DEFAULTS.login, ...c.login };
-    c.tls = { insecureSkipVerify: c.tls.insecureSkipVerify };
+    c.tls = { insecureSkipVerify: c.tls.insecureSkipVerify, standardRoots: c.tls.standardRoots ?? DEFAULTS.tls.standardRoots };
     return c;
 };
 

@@ -496,7 +496,7 @@
           "response": {
             "settings": {
               "hosted": true, "connModes": "both", "defaultConn": "direct",
-              "tls": { "insecureSkipVerify": false },
+              "tls": { "insecureSkipVerify": false, "standardRoots": true },
               "logLevel": "warn",
               "access": { "allow": [], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30, "connectsPerMinute": 20 },
@@ -621,7 +621,7 @@
           "response": {
             "settings": {
               "hosted": true, "connModes": "both", "defaultConn": "direct",
-              "tls": { "insecureSkipVerify": false },
+              "tls": { "insecureSkipVerify": false, "standardRoots": true },
               "logLevel": "warn",
               "access": { "allow": ["192.0.2.0/24", "2001:db8::/32", "2001:db8:abcd:1000::/52", "fe80::1:0:0:1/128"], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30, "connectsPerMinute": 20 },
@@ -675,7 +675,7 @@
           "response": {
             "settings": {
               "hosted": true, "connModes": "both", "defaultConn": "direct",
-              "tls": { "insecureSkipVerify": false },
+              "tls": { "insecureSkipVerify": false, "standardRoots": true },
               "logLevel": "warn",
               "access": { "allow": [], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30, "connectsPerMinute": 50 },
@@ -721,7 +721,7 @@
           "response": {
             "settings": {
               "hosted": true, "connModes": "both", "defaultConn": "direct",
-              "tls": { "insecureSkipVerify": true },
+              "tls": { "insecureSkipVerify": true, "standardRoots": true },
               "logLevel": "warn",
               "access": { "allow": [], "trustedProxies": [] },
               "session": { "idleMinutes": 10, "absoluteMinutes": 30, "connectsPerMinute": 20 },
@@ -1458,7 +1458,8 @@
               "connModes": "both",
               "defaultConn": "direct",
               "tls": {
-                "insecureSkipVerify": false
+                "insecureSkipVerify": false,
+                "standardRoots": true
               },
               "logLevel": "info",
               "access": {
@@ -2260,7 +2261,7 @@
     {
       "name": "tls: the certificate and the CA files, every certificate field normalised",
       "steps": [
-        { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": []} }
+        { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "standard": {"trusted": true, "certificates": [], "problem": "The gateway image holds no standard root CA bundle."}, "trust": []} }
       ]
     },
     {
@@ -2277,18 +2278,18 @@
     {
       "name": "tls: a CA file is added and listed, refused when taken, badly named or not a certificate, and deleted",
       "steps": [
-        { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "contract-ca.crt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": [{"name": "contract-ca.crt", "certificates": [{"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}], "problem": ""}]} },
+        { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "contract-ca.crt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "standard": {"trusted": true, "certificates": [], "problem": "The gateway image holds no standard root CA bundle."}, "trust": [{"name": "contract-ca.crt", "certificates": [{"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}], "problem": ""}]} },
         { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "contract-ca.crt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 409, "response": {"error": "exists"} },
-        { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": [{"name": "contract-ca.crt", "certificates": [{"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}], "problem": ""}]} },
+        { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "standard": {"trusted": true, "certificates": [], "problem": "The gateway image holds no standard root CA bundle."}, "trust": [{"name": "contract-ca.crt", "certificates": [{"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}], "problem": ""}]} },
         { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "notes.txt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 422, "response": {"error": "invalid", "field": "name", "reason": "Use letters, digits, dots, dashes and underscores, start with a letter or digit, end in .crt or .pem, and keep the name before the extension to 64 characters."} },
         { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "../up.crt", "certificate": "-----BEGIN CERTIFICATE-----\nMIIBnDCCAUKgAwIBAgITNpmADO8OYff6uPaCo1LSCDYoETAKBggqhkjOPQQDAjAb\nMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMCAXDTI2MTExNTA4NTkzOFoYDzIx\nMjYxMDIyMDg1OTM4WjAbMRkwFwYDVQQDDBBDb250cmFjdCBUZXN0IENBMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEItAWqdc8yVmhdheObSRawsVLzy4vy9hzu9AT\nvlu2fGmC9J3oeriJJEBrSgQEKUo1N1qngJ7XAvAkk5kgAB4GR6NjMGEwHQYDVR0O\nBBYEFC9pfsxLzu2QmXgpSz1Smc3BmJN5MB8GA1UdIwQYMBaAFC9pfsxLzu2QmXgp\nSz1Smc3BmJN5MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqG\nSM49BAMCA0gAMEUCIQDQx0gh+0hzWS6tJfcfOiqNVPm78hGQ4zwG+ZcOxD7DdgIg\nOk1tBoL1fTRQ+nFgRIKQMIMs4bRt/2cACyjVvdji1pU=\n-----END CERTIFICATE-----\n"}, "status": 422, "response": {"error": "invalid", "field": "name", "reason": "Use letters, digits, dots, dashes and underscores, start with a letter or digit, end in .crt or .pem, and keep the name before the extension to 64 characters."} },
         { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"certificate": "not a certificate"}, "status": 422, "response": {"error": "invalid", "field": "certificate", "reason": "No certificate was found. Send the PEM text, from -----BEGIN CERTIFICATE----- to -----END CERTIFICATE-----."} },
         { "as": "admin", "method": "POST", "path": "/managed/tls/trust", "body": {"name": "key.crt", "certificate": "-----BEGIN PRIVATE KEY-----\ndGhyb3dhd2F5\n-----END PRIVATE KEY-----\n"}, "status": 422, "response": {"error": "invalid", "field": "certificate", "reason": "A private key was found. A private key never belongs here: send only the certificate."} },
         { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/notes.txt", "status": 422, "response": {"error": "invalid", "field": "name", "reason": "Name one .crt or .pem file directly in the trust directory."} },
         { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/absent.crt", "status": 404, "response": {"error": "not_found"} },
-        { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/contract-ca.crt", "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": []} },
+        { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/contract-ca.crt", "status": 200, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "standard": {"trusted": true, "certificates": [], "problem": "The gateway image holds no standard root CA bundle."}, "trust": []} },
         { "as": "admin", "method": "DELETE", "path": "/managed/tls/trust/contract-ca.crt", "status": 404, "response": {"error": "not_found"} },
-        { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "trust": []} }
+        { "as": "admin", "method": "GET", "path": "/managed/tls", "status": 200, "response": {"certificate": {"subject": "<name>", "issuer": "<name>", "names": "<names>", "notBefore": "<time>", "notAfter": "<time>", "sha256": "<fingerprint>", "selfSigned": "<bool>", "expired": "<bool>"}, "certificateWritable": true, "trustWritable": true, "standard": {"trusted": true, "certificates": [], "problem": "The gateway image holds no standard root CA bundle."}, "trust": []} }
       ]
     },
     {

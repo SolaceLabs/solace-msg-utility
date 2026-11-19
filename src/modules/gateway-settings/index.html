@@ -188,8 +188,12 @@
     <div class="card gw-set-card">
         <h3 class="gw-set-section">Broker trust</h3>
         <p class="text-secondary gw-set-client">
-            Applies on Save. The trusted broker CAs are listed under Certificates.
+            Applies on Save. The standard root CAs are the public root CAs the gateway image carries (Mozilla's
+            list); with them off, only the CA files are trusted. Certificates lists both.
         </p>
+        <div class="form-group" data-key="tls.standardRoots">
+            <label class="flex-row items-center gap-2 m-0"><input type="checkbox" id="gw-set-tls-standardRoots"> Trust the standard root CAs</label>
+        </div>
         <div class="form-group" data-key="tls.insecureSkipVerify">
             <label class="flex-row items-center gap-2 m-0"><input type="checkbox" id="gw-set-tls-insecureSkipVerify"> Skip broker certificate checks (insecure)</label>
         </div>

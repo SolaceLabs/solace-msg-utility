@@ -20,7 +20,7 @@ const ADMIN: ManagedSession = {
 };
 const SETTINGS = {
     hosted: true, connModes: 'both', defaultConn: 'direct',
-    tls: { insecureSkipVerify: false },
+    tls: { insecureSkipVerify: false, standardRoots: true },
     logLevel: 'warn',
     access: { allow: ['10.0.0.0/8', '192.0.2.0/24'], trustedProxies: [] },
     session: { idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 },
@@ -126,7 +126,7 @@ describe('gateway-settings — load', () => {
     it('has no path fields, and offers neither hosted nor connModes "direct"', async () => {
         const { container } = await setup();
         // The TLS paths are environment variables: no field.
-        expect(container.querySelector('[id^="gw-set-tls-"]:not(#gw-set-tls-insecureSkipVerify)')).toBeNull();
+        expect(container.querySelector('[id^="gw-set-tls-"]:not(#gw-set-tls-insecureSkipVerify):not(#gw-set-tls-standardRoots)')).toBeNull();
         expect(container.querySelector('.gw-set-host')).toBeNull();
         expect(container.textContent).not.toContain('edit on host');
         // hosted must stay true while Provisioned mode serves this page, so the
@@ -317,7 +317,7 @@ describe('gateway-settings — save', () => {
         expect(svcMock.save).toHaveBeenCalledWith({
             ...SETTINGS,
             logLevel: 'debug',
-            tls: { insecureSkipVerify: true },
+            tls: { insecureSkipVerify: true, standardRoots: true },
             access: { allow: ['10.0.0.0/8', '192.0.2.7/32'], trustedProxies: [] },
             session: { idleMinutes: 5, absoluteMinutes: 30, connectsPerMinute: 8 },
             login: {
@@ -536,7 +536,20 @@ describe('gateway-settings -- broker trust', () => {
         svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
-        expect(svcMock.save.mock.calls[0][0].tls).toEqual({ insecureSkipVerify: true });
+        expect(svcMock.save.mock.calls[0][0].tls).toEqual({ insecureSkipVerify: true, standardRoots: true });
+    });
+
+    it('shows Trust the standard root CAs in the same card, on as loaded, and saves it off', async () => {
+        const { container } = await setup();
+        const box = el<HTMLInputElement>(container, '#gw-set-tls-standardRoots');
+        expect(box.closest('.card')?.querySelector('.gw-set-section')?.textContent).toBe('Broker trust');
+        expect(box.closest('label')?.textContent?.trim()).toBe('Trust the standard root CAs');
+        expect(box.checked).toBe(true);
+        box.checked = false;
+        svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
+        clickSave(container);
+        await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
+        expect(svcMock.save.mock.calls[0][0].tls).toEqual({ insecureSkipVerify: false, standardRoots: false });
     });
 });
 

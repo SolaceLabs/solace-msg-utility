@@ -14,6 +14,11 @@
  * PRIVATE KEY block and the pair is taken to match. The key is read to be
  * checked and never kept, echoed or named in an answer.
  *
+ * The standard root CAs are the seed's (`standardRoots`, the bundle the image
+ * carries; a seed without them, like the contract's, holds none), listed by
+ * subject with whether `tls.standardRoots` trusts them now. Like the trusted
+ * CA files, they decide nothing in the demo, which reaches no broker.
+ *
  * The files are writable unless the Demo controls say otherwise
  * (`tlsReadOnly`, a read-only mount of /tls): the writes then answer
  * `409 tls_read_only` and both `...Writable` flags are false. Checks run in
@@ -42,13 +47,20 @@ export interface CertInfo {
 /** A file in the trust directory; `problem` says why it gave no certificate ('' when it did). */
 export interface TrustFile { name: string; certificates: CertInfo[]; problem: string }
 
+/** The standard root CAs: whether they are trusted now, each one, and why there are none ('' when there are). */
+export interface StandardRoots { trusted: boolean; certificates: CertInfo[]; problem: string }
+
 /** `GET /managed/tls`, and the answer of the trust writes. */
 export interface TlsView {
     certificate: CertInfo;
     certificateWritable: boolean;
     trustWritable: boolean;
     trust: TrustFile[];
+    standard: StandardRoots;
 }
+
+/** The gateway's reason when the image holds no standard root CA bundle (go-web-proxy/tls.go). */
+export const STANDARD_ROOTS_MISSING = 'The gateway image holds no standard root CA bundle.';
 
 /** What a reload must carry. */
 export interface TlsState { certificate: CertInfo; trust: TrustFile[] }
@@ -173,8 +185,15 @@ async function certInfo(der: Uint8Array<ArrayBuffer>, at: Date): Promise<CertInf
 
 type Route = [string, string, (req: GatewayRequest, s: Session, sid: string, params: string[]) => GatewayResponse | Promise<GatewayResponse>];
 
-/** `now` stamps what is added; `readOnly` is the control panel's switch. */
-export function createTls({ now, readOnly }: { now: () => Date; readOnly: () => boolean }) {
+/**
+ * `now` stamps what is added; `readOnly` is the control panel's switch;
+ * `standard` is the image's standard root CAs and `standardTrusted` reads
+ * tls.standardRoots.
+ */
+export function createTls({ now, readOnly, standard, standardTrusted }: {
+    now: () => Date; readOnly: () => boolean; standard: CertInfo[]; standardTrusted: () => boolean;
+}) {
+    const roots = clone(standard).sort((a, c) => (a.subject < c.subject ? -1 : 1));
     const start = now();
     let certificate: CertInfo = {
         subject: DEMO_SUBJECT, issuer: DEMO_SUBJECT, names: [],
@@ -185,6 +204,7 @@ export function createTls({ now, readOnly }: { now: () => Date; readOnly: () => 
 
     const view = (): TlsView => ({
         certificate: clone(certificate), certificateWritable: !readOnly(), trustWritable: !readOnly(), trust: clone(trust),
+        standard: { trusted: standardTrusted(), certificates: clone(roots), problem: roots.length ? '' : STANDARD_ROOTS_MISSING },
     });
 
     /** The body of the check and the replace: the leaf's bytes, or the refusal. */

@@ -9,8 +9,9 @@
 #   Files only (opt-in,         serves the app; browsers connect to brokers
 #   SMU_HOSTED=false)               themselves, as with the Standalone HTML files.
 #
-# Final image is `FROM scratch` -- only the static Go binary and the PWA
-# bundles. No shell, no libc, no /etc/passwd. The gateway listens on :9443 (an
+# Final image is `FROM scratch` -- only the static Go binary, the PWA bundles
+# and the standard root CA bundle (Mozilla's list, from the Go build stage's
+# Alpine). No shell, no libc, no /etc/passwd. The gateway listens on :9443 (an
 # unprivileged port) and runs as a non-root UID, so it needs no special Linux
 # capability to bind.
 #
@@ -120,6 +121,9 @@ RUN mkdir -p /staging/tls/trust /staging/data /staging/backup \
 # licenses/ directory (the final COPY merges them in). A missing file fails the
 # build. tests/build/vendor-scripts.test.ts checks that every direct requirement
 # in go.mod has its licence copied here.
+# The standard root CA bundle's notice (MPL-2.0), from the repository; the
+# bundle itself is copied into the final image below.
+COPY docker/licenses/ca-certificates/NOTICE /staging/licenses/ca-certificates/NOTICE
 RUN mkdir -p /staging/licenses/go /staging/licenses/gopkg.in-yaml.v3 /staging/licenses/rsc.io-qr \
  && cp "$(go env GOROOT)/LICENSE" /staging/licenses/go/ \
  && cp "$(go list -m -f '{{.Dir}}' gopkg.in/yaml.v3)/LICENSE" "$(go list -m -f '{{.Dir}}' gopkg.in/yaml.v3)/NOTICE" /staging/licenses/gopkg.in-yaml.v3/ \
@@ -182,6 +186,11 @@ COPY --chown=65532:65532 --from=gateway-builder /staging/data /data
 COPY --chown=65532:65532 --from=gateway-builder /staging/backup /backup
 COPY --chown=65532:65532 --from=pwa-builder     /staging/app/ /SolaceMsgUtility/
 COPY --chown=65532:65532 --from=gateway-builder /staging/licenses/ /SolaceMsgUtility/licenses/
+# The standard root CAs the gateway trusts while tls.standardRoots is on
+# (go-web-proxy/tls.go, standardRootsFile): Alpine's ca-certificates-bundle in
+# the pinned Go build stage, so it moves with that stage's digest. Root-owned:
+# the gateway only reads it.
+COPY --from=gateway-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # 65532 is the conventional "nonroot" UID used by distroless. /tls is baked
 # into the image owned by this UID so self-signed cert generation works

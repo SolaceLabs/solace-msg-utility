@@ -98,6 +98,23 @@ func TestLive_ApplyCarriesSkipVerifyIntoTheTrustHolder(t *testing.T) {
 	}
 }
 
+// tls.standardRoots reaches the trust holder on apply, both ways.
+func TestLive_ApplyCarriesStandardRootsIntoTheTrustHolder(t *testing.T) {
+	holder := newTrustHolder(x509.NewCertPool(), false, quietLogger())
+	cfg := defaultConfig()
+	lv := newLive(cfg)
+	lv.bindTrust(holder)
+	lv.apply(cfg)
+	if !holder.get().standard {
+		t.Fatal("the default (on) must reach the holder")
+	}
+	cfg.standardRoots = false
+	lv.apply(cfg)
+	if holder.get().standard {
+		t.Error("a save with the key off must reach the holder")
+	}
+}
+
 // yamlLeaves lists the config.yaml keys of t at the granularity the lists use:
 // a struct field is walked into (tls.insecureSkipVerify), a list or scalar is a
 // key.
@@ -160,9 +177,10 @@ func TestFileConfig_EveryKeyIsClassifiedOnce(t *testing.T) {
 	leaves := yamlLeaves(t, reflect.TypeOf(fileConfig{}), "", map[string]bool{
 		"appDir": true, "usersFile": true, "connectionsFile": true, "certFile": true, "keyFile": true, "trustDir": true,
 	})
-	// tls.insecureSkipVerify is live through the trust holder: apply hands it
-	// to lv.trust (TestLive_ApplyCarriesSkipVerifyIntoTheTrustHolder), so it
-	// is not a liveSettings field.
+	// The tls keys are live through the trust holder: apply hands them to
+	// lv.trust (TestLive_ApplyCarriesSkipVerifyIntoTheTrustHolder and
+	// TestLive_ApplyCarriesStandardRootsIntoTheTrustHolder), so they are not
+	// liveSettings fields.
 	liveTops := map[string]bool{"connModes": true, "defaultConn": true, "logLevel": true, "access": true, "session": true, "login": true, "modules": true, "audit": true, "tls": true}
 	restartOnly := map[string]bool{}
 	for _, k := range restartOnlyKeys {

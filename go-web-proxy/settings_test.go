@@ -219,6 +219,31 @@ func TestSettings_SkipVerifyAppliesAtOnce(t *testing.T) {
 	}
 }
 
+// tls.standardRoots applies at once in the same way, and a body without it
+// keeps the saved value.
+func TestSettings_StandardRootsAppliesAtOnce(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	holder := newTrustHolder(x509.NewCertPool(), false, quietLogger())
+	holder.holdStandard(standardRoots{problem: standardRootsMissing}, true)
+	e.live.bindTrust(holder)
+
+	if !e.fileOnDisk(t).TLS.StandardRoots {
+		t.Fatal("a seeded file trusts the standard roots")
+	}
+	expect(t, e.saveSettings(t, `{"tls":{"standardRoots":false}}`), http.StatusOK, "")
+	if e.fileOnDisk(t).TLS.StandardRoots || holder.get().standard {
+		t.Errorf("the key is saved and live: disk %v, holder %v", e.fileOnDisk(t).TLS.StandardRoots, holder.get().standard)
+	}
+	expect(t, e.saveSettings(t, `{"tls":{"insecureSkipVerify":false}}`), http.StatusOK, "")
+	if e.fileOnDisk(t).TLS.StandardRoots {
+		t.Error("a body without the key keeps it off")
+	}
+	expect(t, e.saveSettings(t, `{"tls":{"standardRoots":true}}`), http.StatusOK, "")
+	if !holder.get().standard {
+		t.Error("turning it on applies at once too")
+	}
+}
+
 // The TLS paths are environment only: a body that names one is refused as an
 // unknown key and leaves the file alone, and the whole document the page holds
 // (which has none) saves.

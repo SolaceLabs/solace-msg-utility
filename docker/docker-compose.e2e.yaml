@@ -12,7 +12,8 @@
 # Playwright server, 127.0.0.1:39444, and the Gateway-mode gateway's,
 # 127.0.0.1:39445; all are bound to loopback. Both gateways reach the broker
 # over TLS only and verify it against the CA file the harness was given and
-# the host's standard roots; a broker on this machine is host.docker.internal.
+# the standard root CAs the image carries; a broker on this machine is
+# host.docker.internal.
 #
 # The Provisioned gateway's /tls is a writable mount of the one host directory
 # the harness fills (tls.crt, tls.key and trust/), so checks 28-31 can replace
@@ -41,9 +42,8 @@ services:
       LOG_LEVEL: debug
       SMU_ADMIN_PASSWORD_FILE: /run/secrets/admin-password
       # The broker's certificate is verified against the CA file given to the
-      # harness and the host's standard roots. The image ships no roots (trust
-      # stays explicit in production), so the harness copies the host's bundle
-      # in and it is mounted below where Go looks for the system bundle.
+      # harness and the standard root CAs the image carries (tls.standardRoots,
+      # on by default; check 28 proves the image holds them).
       SMU_SSL_TRUSTDIR: /tls/trust
       # Empty, so the broker is verified, unless the harness runs with
       # E2E_INSECURE=1 (then "true"). scripts/e2e.mjs always sets it from
@@ -57,7 +57,6 @@ services:
       - backup:/backup
       # Writable, so the console can change the certificate and the CA files.
       - ../scripts/logs/e2e/tls:/tls
-      - ../scripts/logs/e2e/system-roots.crt:/etc/ssl/certs/ca-certificates.crt:ro
       - ../scripts/logs/e2e/admin-password:/run/secrets/admin-password:ro
     ports:
       - "127.0.0.1:39443:9443"
@@ -81,7 +80,7 @@ services:
       - no-new-privileges=true
     environment:
       LOG_LEVEL: debug
-      # Verified as for the gateway: the same CA file and host roots, and
+      # Verified as for the gateway: the same CA file and standard roots, and
       # skipped only when the harness runs with E2E_INSECURE=1.
       SMU_SSL_TRUSTDIR: /tls/trust
       SMU_SSL_SKIP_CERT_VERIFY: ${E2E_GATEWAY_SKIP_VERIFY:-}
@@ -91,7 +90,6 @@ services:
     volumes:
       - direct-data:/data
       - ../scripts/logs/e2e/tls:/tls:ro
-      - ../scripts/logs/e2e/system-roots.crt:/etc/ssl/certs/ca-certificates.crt:ro
     ports:
       - "127.0.0.1:39445:9443"
     restart: "no"

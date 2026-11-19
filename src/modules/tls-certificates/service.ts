@@ -30,6 +30,17 @@ export interface TrustFile {
     problem: string;
 }
 
+/**
+ * The standard root CAs the gateway image carries: whether they are trusted now
+ * (the Gateway Settings key tls.standardRoots), each one sorted by subject, and
+ * why there are none ('' when there are).
+ */
+export interface StandardRoots {
+    trusted: boolean;
+    certificates: CertInfo[];
+    problem: string;
+}
+
 /** The GET /managed/tls body, and the answer of the trust writes. */
 export interface TlsView {
     certificate: CertInfo;
@@ -37,6 +48,7 @@ export interface TlsView {
     trustWritable: boolean;
     /** Sorted by file name. */
     trust: TrustFile[];
+    standard: StandardRoots;
 }
 
 /** A certificate (PEM, leaf first) and its private key (PEM). */

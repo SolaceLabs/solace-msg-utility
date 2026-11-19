@@ -28,7 +28,8 @@ const cert = (over: Partial<CertInfo> = {}): CertInfo => ({
     sha256: 'AB:CD:EF', selfSigned: false, expired: false, ...over,
 });
 const view = (over: Partial<TlsView> = {}): TlsView => ({
-    certificate: cert(), certificateWritable: true, trustWritable: true, trust: [], ...over,
+    certificate: cert(), certificateWritable: true, trustWritable: true, trust: [],
+    standard: { trusted: true, certificates: [], problem: '' }, ...over,
 });
 const CA = (name: string, over: Partial<CertInfo> = {}) => ({ name, certificates: [cert({ subject: 'CN=Broker CA', ...over })], problem: '' });
 
@@ -374,6 +375,37 @@ describe('tls-certificates -- replace certificate', () => {
         expect(el<HTMLInputElement>(c, '#tls-key-file').value).toBe('');
         expect(c.textContent).not.toContain('TEST-ONLY-NOT-A-REAL-KEY');
         expect(JSON.stringify(toastMock.showToast.mock.calls)).not.toContain('PRIVATE KEY');
+    });
+});
+
+describe('tls-certificates -- standard root CAs', () => {
+    const roots = [cert({ subject: 'CN=Alpha Root', sha256: '01:02' }), cert({ subject: 'CN=Zulu Root', sha256: '03:04', expired: true })];
+
+    it('says they are trusted and lists them behind a summary, each with its end date, mark and fingerprint', async () => {
+        const { c } = await setup(view({ standard: { trusted: true, certificates: roots, problem: '' } }));
+        expect(text(c, '#tls-standard-status')).toBe('Trusted: brokers whose certificates chain to one of these 2 certificates are accepted.');
+        expect(hidden(c, '#tls-standard-problem')).toBe(true);
+        expect(hidden(c, '#tls-standard-details')).toBe(false);
+        expect(text(c, '#tls-standard-summary')).toBe('Show the 2 certificates');
+        const lines = [...c.querySelectorAll('#tls-standard-list li')];
+        expect(lines.map(li => li.firstChild!.textContent)).toEqual([
+            'CN=Alpha Root: valid to 2027-06-01 00:00 UTC; SHA-256 01:02',
+            'CN=Zulu Root: valid to 2027-06-01 00:00 UTC; SHA-256 03:04',
+        ]);
+        expect(lines[1].querySelector('.tls-mark-expired')!.textContent).toBe('Expired');
+    });
+
+    it('says they are not trusted when Gateway Settings turned them off, and counts one in the singular', async () => {
+        const { c } = await setup(view({ standard: { trusted: false, certificates: roots.slice(0, 1), problem: '' } }));
+        expect(text(c, '#tls-standard-status')).toBe('Not trusted: turned off on Gateway Settings. Only the CA files above are trusted.');
+        expect(text(c, '#tls-standard-summary')).toBe('Show the 1 certificate');
+    });
+
+    it("shows the gateway's reason and no list when the image holds none", async () => {
+        const { c } = await setup(view({ standard: { trusted: true, certificates: [], problem: 'The gateway image holds no standard root CA bundle.' } }));
+        expect(hidden(c, '#tls-standard-problem')).toBe(false);
+        expect(text(c, '#tls-standard-problem')).toBe('The gateway image holds no standard root CA bundle.');
+        expect(hidden(c, '#tls-standard-details')).toBe(true);
     });
 });
 

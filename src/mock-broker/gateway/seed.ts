@@ -71,6 +71,22 @@ const connection = (broker: string, vpns: string[]) => ({
     client: { port: '1443', msgVpns: vpns.map(name => ({ name, username: `${name}-client`, password: `demo-${name}-password` })) },
 });
 
+/** A standard root CA as the demo describes it: fixed demo values, since the demo cannot read X.509. */
+const demoRoot = (subject: string, sha256: string) => ({
+    subject, issuer: subject, names: [], notBefore: '2015-01-01T00:00:00Z', notAfter: '2040-01-01T00:00:00Z',
+    sha256, selfSigned: true, expired: false,
+});
+
+/** The standard root CAs the demo gateway's image carries: a few stand-ins for Mozilla's list. */
+const DEMO_STANDARD_ROOTS = [
+    demoRoot('CN=Demo Root CA R1, O=Demo Trust Services, C=GB',
+        '3A:1F:7C:52:9E:04:B6:D1:88:2C:5F:E0:13:A7:6B:94:C2:0D:F8:31:5E:A9:72:46:BB:18:E3:0F:65:D7:9C:24'),
+    demoRoot('CN=Demo ECC Root, O=Demo Trust Services, C=GB',
+        'C7:52:0B:E9:34:6D:A1:F0:2E:98:47:BC:15:63:D2:8A:7F:06:E4:39:C1:5B:20:9D:F6:83:4A:17:E8:62:B0:5C'),
+    demoRoot('CN=Example Global Root, O=Example Certificate Authority, C=US',
+        '91:E4:26:7B:D3:08:5A:C2:6F:B1:40:9E:17:F5:83:2C:6A:D9:0E:B7:54:31:8C:F2:A6:1D:69:C0:3B:E5:72:08'),
+];
+
 export function demoSeed(): GatewaySeed {
     return {
         'msg-utility-users': [
@@ -97,7 +113,7 @@ export function demoSeed(): GatewaySeed {
             hosted: true,
             connModes: 'provisioned',
             defaultConn: 'provisioned',
-            tls: { insecureSkipVerify: false },
+            tls: { insecureSkipVerify: false, standardRoots: true },
             logLevel: 'warn',
             access: { allow: [], trustedProxies: [] },
             session: { idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 },
@@ -108,6 +124,7 @@ export function demoSeed(): GatewaySeed {
             modules: { offered: ['queue-browser', 'queue-copy', 'queue-subscription-explorer'], userDefault: 'all' },
             audit: { stdout: false, access: false, onFailure: 'continue' },
         },
+        standardRoots: DEMO_STANDARD_ROOTS,
         // TEST-NET-1: the address the fake gateway sees the browser at.
         client: '192.0.2.10',
     };

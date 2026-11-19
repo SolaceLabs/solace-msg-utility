@@ -57,7 +57,7 @@ docker run --rm -p 9443:9443 -v solace-tls:/tls \
   ghcr.io/solacelabs/solace-msg-utility:latest
 ```
 
-Open <https://localhost:9443/>. The container connects to your brokers for the app, so the browser needs to reach and trust only the container. The image holds no root CAs, so a broker reached over `wss://` or `https://` needs the CA its certificate chains to in `/tls/trust`: see [TLS and trusted CAs](docs/deployment.md#tls-and-trusted-cas). For production, pin a release and never use `latest`: run `SMU_VERSION=<release> docker compose -f docker/compose.gateway.yaml up -d` from a checkout of that release. Compose refuses to start without `SMU_VERSION`. See [deployment.md](docs/deployment.md#gateway-mode).
+Open <https://localhost:9443/>. The container connects to your brokers for the app, so the browser needs to reach and trust only the container. The image trusts the standard public root CAs, so a broker with a certificate from a public CA works as it is; for a broker whose certificate comes from a private CA, put that CA in `/tls/trust`: see [TLS and trusted CAs](docs/deployment.md#tls-and-trusted-cas). For production, pin a release and never use `latest`: run `SMU_VERSION=<release> docker compose -f docker/compose.gateway.yaml up -d` from a checkout of that release. Compose refuses to start without `SMU_VERSION`. See [deployment.md](docs/deployment.md#gateway-mode).
 
 ### Provisioned: sign-in and administration
 

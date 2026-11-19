@@ -7,9 +7,9 @@ import tls from 'node:tls';
 import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import {
-    BROKER_FIELDS, HOST_ROOT_FILES, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, base32Decode, basisMoved, certFingerprint, continueLinkFromPage,
+    BROKER_FIELDS, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, base32Decode, basisMoved, certFingerprint, continueLinkFromPage,
     createCookieJar, detailsFileText, dnsServers, findTokens, freshTotp,
-    hostAliasProblem, hostRootBundle,
+    hostAliasProblem,
     issueCert, issueExpiredCert, jsonFindings, listedRev, listedRow, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, recoveryCodeProblems,
     recoveryCodesFromPage, refusalProblem, resolutionOverride, resolveDetails, resolverLookup, sealedHeaderProblem, sessionCookieProblems, signinCookieProblems,
     sweepSecrets, tlsFingerprint, totpAt, totpCode, totpStep, twoFactorSecretFromPage, wrongTotp, wroteFile,
@@ -167,30 +167,6 @@ describe('e2e-lib -- TLS material', () => {
         expect(() => pemCertificates(leaf.keyPem)).toThrow('holds no PEM certificate');
         expect(() => pemCertificates('-----BEGIN CERTIFICATE-----\nbm90IGRlcg==\n-----END CERTIFICATE-----'))
             .toThrow(/^certificate 1 does not parse: /);
-    });
-});
-
-describe('e2e-lib -- host roots', () => {
-    const roots = tls.rootCertificates.slice(0, 3);
-
-    it('takes the first bundle Go would load on the host, verbatim, and counts its certificates', () => {
-        const rhel = `# RHEL's extracted bundle\n${roots.join('\n')}\n`;
-        const bundles: Record<string, string> = { [HOST_ROOT_FILES[1]]: rhel, [HOST_ROOT_FILES[5]]: roots[0] };
-        expect(hostRootBundle((file: string) => bundles[file] ?? null, tls.rootCertificates))
-            .toEqual({ from: '/etc/pki/tls/certs/ca-bundle.crt', text: rhel, count: 3 });
-    });
-
-    // Go loads an empty bundle file too, and then trusts no root from it.
-    it('takes a bundle file that holds no certificate, counting none', () => {
-        expect(hostRootBundle((file: string) => (file === HOST_ROOT_FILES[0] ? '' : null), roots))
-            .toEqual({ from: HOST_ROOT_FILES[0], text: '', count: 0 });
-    });
-
-    it("falls back to Node's bundled roots on a host with no bundle, as on Windows", () => {
-        const got = hostRootBundle(() => null, roots);
-        expect(got.from).toMatch(/^Node's bundled Mozilla roots/);
-        expect(pemCertificates(got.text).map((c) => c.subject)).toEqual(roots.map((r) => new X509Certificate(r).subject));
-        expect(got.count).toBe(3);
     });
 });
 

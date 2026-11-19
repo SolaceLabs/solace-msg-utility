@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 import { createGateway } from '../../../src/mock-broker/gateway';
-import { DEMO_SUBJECT, parsePem, START_CERTIFICATE_BYTES } from '../../../src/mock-broker/gateway/tls';
+import { DEMO_SUBJECT, parsePem, STANDARD_ROOTS_MISSING, START_CERTIFICATE_BYTES } from '../../../src/mock-broker/gateway/tls';
 import { contractSeed } from './helpers';
 
 /**
@@ -71,8 +71,15 @@ describe('mock-broker/gateway/tls -- GET /managed/tls', () => {
                 sha256: fp(START_CERTIFICATE_BYTES), selfSigned: true, expired: false,
             },
             certificateWritable: true, trustWritable: true, trust: [],
+            standard: { trusted: true, certificates: [], problem: STANDARD_ROOTS_MISSING },
         });
         expect(JSON.stringify(body)).not.toContain('/tls');   // paths are never in the answer
+    });
+
+    it('says the standard roots are not trusted once a settings save turns tls.standardRoots off', async () => {
+        const gw = gateway();
+        expect((await call(gw, 'PUT', '/managed/settings', { rev: gw.settings.rev(), tls: { standardRoots: false } })).status).toBe(200);
+        expect((await get(gw)).standard.trusted).toBe(false);
     });
 
     it('is for administrators: no session is 401 and a user without the flag is 403, on every TLS route', async () => {

@@ -53,7 +53,8 @@
     <div id="tls-trust-card" class="card tls-card">
         <h3 class="tls-section">Trusted broker CAs</h3>
         <p class="tls-hint">
-            Besides the system's roots, the gateway trusts the certificates in these files when it checks a broker.
+            The gateway trusts the certificates in these files when it checks a broker, and the standard root CAs
+            below while they are on.
         </p>
         <p id="tls-trust-readonly" class="tls-banner hidden">
             The trust files are read-only on the gateway host, so CA certificates cannot be added or deleted here.
@@ -75,5 +76,19 @@
         </div>
         <div id="tls-ca-error" class="text-error hidden" role="alert"></div>
         <button id="btn-tls-ca-add" type="button" class="btn btn-primary">Add CA certificate</button>
+    </div>
+
+    <div id="tls-standard-card" class="card tls-card">
+        <h3 class="tls-section">Standard root CAs</h3>
+        <p class="tls-hint">
+            The public root CAs the gateway image carries, from Mozilla's list. They come with the image and change
+            only with a new release. Turn them on or off on Gateway Settings.
+        </p>
+        <p id="tls-standard-status" class="tls-hint"></p>
+        <p id="tls-standard-problem" class="tls-trust-problem hidden"></p>
+        <details id="tls-standard-details" class="tls-standard-details hidden">
+            <summary id="tls-standard-summary"></summary>
+            <ul id="tls-standard-list" class="tls-trust-certs"></ul>
+        </details>
     </div>
 </div>

@@ -62,7 +62,10 @@ type config struct {
 	trustDir string
 	// insecureSkipVerify is live: the trust holder carries it (live.go).
 	insecureSkipVerify bool
-	logLevel           slog.Level
+	// standardRoots is live the same way: whether brokers are also verified
+	// against the standard root CAs the image carries (standardRootsFile).
+	standardRoots bool
+	logLevel      slog.Level
 	// Provisioned mode's stores, at fixed paths (the defaults below; serve
 	// moves them under process.dataDir for tests). Read only when connModes
 	// offers provisioned.
@@ -154,6 +157,7 @@ func defaultConfig() config {
 		certFile:        defaultCertFile,
 		keyFile:         defaultKeyFile,
 		trustDir:        defaultTrustDir,
+		standardRoots:   true,
 		logLevel:        slog.LevelWarn,
 		usersFile:       defaultUsersFile,
 		connectionsFile: defaultConnectionsFile,
@@ -198,6 +202,10 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, fmt.Errorf("SMU_SSL_SKIP_CERT_VERIFY=%q: %w", os.Getenv("SMU_SSL_SKIP_CERT_VERIFY"), err)
 	}
+	standard, err := parseStrictBool(os.Getenv("SMU_SSL_STANDARD_ROOTS"), d.standardRoots)
+	if err != nil {
+		return config{}, fmt.Errorf("SMU_SSL_STANDARD_ROOTS=%q: %w", os.Getenv("SMU_SSL_STANDARD_ROOTS"), err)
+	}
 	showAudit, err := parseStrictBool(os.Getenv("SMU_SHOW_AUDIT"), d.audit.stdout)
 	if err != nil {
 		return config{}, fmt.Errorf("SMU_SHOW_AUDIT=%q: %w", os.Getenv("SMU_SHOW_AUDIT"), err)
@@ -209,6 +217,7 @@ func loadConfig() (config, error) {
 		keyFile:            paths.keyFile,
 		trustDir:           paths.trustDir,
 		insecureSkipVerify: insecure,
+		standardRoots:      standard,
 		logLevel:           level,
 		usersFile:          d.usersFile,
 		connectionsFile:    d.connectionsFile,
@@ -336,6 +345,7 @@ func main() {
 	err := serve(process{
 		configFile: configFilePath,
 		appDir:     appRoot,
+		standard:   standardRootsFile,
 		log:        os.Stderr,
 		stdout:     os.Stdout,
 		listen:     func() (net.Listener, error) { return net.Listen("tcp", listenAddr) },
@@ -355,6 +365,7 @@ func main() {
 type process struct {
 	configFile string                       // config.yaml: configFilePath
 	appDir     string                       // the app's files: appRoot
+	standard   string                       // the standard root CA bundle: standardRootsFile; "" holds none
 	dataDir    string                       // holds the stores and the store key; "" keeps the fixed /data paths
 	log        io.Writer                    // every log line
 	stdout     io.Writer                    // the audit copy while audit.stdout is on: os.Stdout; nil discards
@@ -464,6 +475,7 @@ func serveUntilStopped(p process, restart *bool) error {
 	// change either with no restart (tls.go). The holder warns when skipping
 	// verification is on.
 	trust := newTrustHolder(trustPool, cfg.insecureSkipVerify, tlsLog)
+	trust.holdStandard(loadStandardRoots(p.standard), cfg.standardRoots)
 	lv.bindTrust(trust)
 	tm := newTLSManager(cfg.certFile, cfg.keyFile, cfg.trustDir, newCertHolder(serverCert), trust, tlsLog)
 	upstream := newUpstreamTransport(trust)

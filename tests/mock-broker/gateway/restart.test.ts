@@ -135,9 +135,9 @@ describe('mock-broker/gateway -- restart', () => {
 describe('mock-broker/gateway -- settings without the TLS paths', () => {
     const LEGACY = { certFile: '/old/tls.crt', keyFile: '/old/tls.key', trustDir: '/old/trust', insecureSkipVerify: true };
 
-    it('shows the one tls key, and neither a host-only nor a restart-only list', async () => {
+    it('shows the two tls keys, and neither a host-only nor a restart-only list', async () => {
         const v = await view();
-        expect(v.settings.tls).toEqual({ insecureSkipVerify: false });
+        expect(v.settings.tls).toEqual({ insecureSkipVerify: false, standardRoots: true });
         expect(Object.keys(v).sort()).toEqual(['catalog', 'changedOnDisk', 'rev', 'settings']);
     });
 
@@ -157,8 +157,8 @@ describe('mock-broker/gateway -- settings without the TLS paths', () => {
         const seed = contractSeed();
         (seed.settings as { tls: object }).tls = { ...LEGACY };
         const old = createGateway({ seed });
-        expect(old.settings.current().tls).toEqual({ insecureSkipVerify: true });
-        expect(old.settings.dump().tls).toEqual({ insecureSkipVerify: true });
+        expect(old.settings.current().tls).toEqual({ insecureSkipVerify: true, standardRoots: true });
+        expect(old.settings.dump().tls).toEqual({ insecureSkipVerify: true, standardRoots: true });
     });
 
     it('reads a snapshot from before the paths left and drops them', () => {
@@ -166,7 +166,7 @@ describe('mock-broker/gateway -- settings without the TLS paths', () => {
         snap.settings.tls = { ...LEGACY };
         const again = createGateway({ seed: contractSeed() });
         again.restore(snap);
-        expect(again.settings.current().tls).toEqual({ insecureSkipVerify: true });
-        expect(again.snapshot().settings.tls).toEqual({ insecureSkipVerify: true });
+        expect(again.settings.current().tls).toEqual({ insecureSkipVerify: true, standardRoots: true });
+        expect(again.snapshot().settings.tls).toEqual({ insecureSkipVerify: true, standardRoots: true });
     });
 });

@@ -136,6 +136,11 @@ export const TlsCertificatesModule = {
             caName: q<HTMLInputElement>('#tls-ca-name'),
             caError: q<HTMLElement>('#tls-ca-error'),
             btnAddCa: q<HTMLButtonElement>('#btn-tls-ca-add'),
+            standardStatus: q<HTMLElement>('#tls-standard-status'),
+            standardProblem: q<HTMLElement>('#tls-standard-problem'),
+            standardDetails: q<HTMLElement>('#tls-standard-details'),
+            standardSummary: q<HTMLElement>('#tls-standard-summary'),
+            standardList: q<HTMLElement>('#tls-standard-list'),
         };
 
         const service = createTlsService();
@@ -158,6 +163,15 @@ export const TlsCertificatesModule = {
             for (const f of [els.certFile, els.certPem, els.keyFile, els.keyPem, els.btnReplace]) f.disabled = !certWritable;
             els.trustReadonly.classList.toggle('hidden', trustWritable);
             for (const f of [els.caFile, els.caPem, els.caName, els.btnAddCa]) f.disabled = !trustWritable;
+        }
+
+        /** One certificate as a list line: subject, end of validity (with its mark) and fingerprint. */
+        function certLine(c: CertInfo): HTMLLIElement {
+            const li = document.createElement('li');
+            li.textContent = `${c.subject}: valid to ${formatUtc(c.notAfter)}; SHA-256 ${c.sha256}`;
+            const mark = markElement(c, now());
+            if (mark) li.appendChild(mark);
+            return li;
         }
 
         function renderTrust(view: TlsView): void {
@@ -189,13 +203,7 @@ export const TlsCertificatesModule = {
                 if (file.certificates.length) {
                     const ul = document.createElement('ul');
                     ul.className = 'tls-trust-certs';
-                    for (const c of file.certificates) {
-                        const li = document.createElement('li');
-                        li.textContent = `${c.subject}: valid to ${formatUtc(c.notAfter)}; SHA-256 ${c.sha256}`;
-                        const mark = markElement(c, now());
-                        if (mark) li.appendChild(mark);
-                        ul.appendChild(li);
-                    }
+                    for (const c of file.certificates) ul.appendChild(certLine(c));
                     box.appendChild(ul);
                 }
                 if (file.problem) {
@@ -208,12 +216,26 @@ export const TlsCertificatesModule = {
             }
         }
 
+        function renderStandard(view: TlsView): void {
+            const { trusted, certificates, problem } = view.standard;
+            const count = `${certificates.length} ${certificates.length === 1 ? 'certificate' : 'certificates'}`;
+            els.standardStatus.textContent = trusted
+                ? `Trusted: brokers whose certificates chain to one of these ${count} are accepted.`
+                : 'Not trusted: turned off on Gateway Settings. Only the CA files above are trusted.';
+            els.standardProblem.textContent = problem;
+            els.standardProblem.classList.toggle('hidden', !problem);
+            els.standardDetails.classList.toggle('hidden', !certificates.length);
+            els.standardSummary.textContent = `Show the ${count}`;
+            els.standardList.replaceChildren(...certificates.map(certLine));
+        }
+
         function renderView(view: TlsView): void {
             certWritable = view.certificateWritable;
             trustWritable = view.trustWritable;
             fillDetails(els.certDetails, view.certificate, now());
             els.certSelfSigned.classList.toggle('hidden', !view.certificate.selfSigned);
             renderTrust(view);
+            renderStandard(view);
             applyWritable();
         }
 

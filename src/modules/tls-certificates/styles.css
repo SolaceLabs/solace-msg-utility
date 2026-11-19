@@ -142,3 +142,8 @@
 .tls-name-field {
     max-width: 360px;
 }
+
+.tls-standard-details summary {
+    cursor: pointer;
+    font-size: 0.9rem;
+}

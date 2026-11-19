@@ -51,6 +51,7 @@ connModes: both
 defaultConn: provisioned
 tls:
   insecureSkipVerify: true
+  standardRoots: false
 logLevel: debug
 access:
   allow: [10.0.0.0/8, "2001:db8::/32"]
@@ -113,7 +114,9 @@ func TestDecodeConfigFile_MissingKeysKeepDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !fc.TLS.InsecureSkipVerify || fc.LogLevel != "info" || fc.ConnModes != connDirect {
+	// A tls block without standardRoots reads it as true, the default, so a
+	// file or backup that lacks the key trusts the standard roots.
+	if !fc.TLS.InsecureSkipVerify || !fc.TLS.StandardRoots || fc.LogLevel != "info" || fc.ConnModes != connDirect {
 		t.Errorf("partial file: got %+v", fc)
 	}
 }
@@ -814,7 +817,8 @@ func TestEnvOverrides_EveryVariableAndBoolParsing(t *testing.T) {
 
 	differing := map[string]string{
 		"SMU_HOSTED": "false", "SMU_CONN_MODES": "both", "SMU_DEFAULT_CONN": "provisioned",
-		"SMU_SSL_SKIP_CERT_VERIFY": "true", "LOG_LEVEL": "debug", "SMU_SHOW_AUDIT": "true",
+		"SMU_SSL_SKIP_CERT_VERIFY": "true", "SMU_SSL_STANDARD_ROOTS": "false", "LOG_LEVEL": "debug",
+		"SMU_SHOW_AUDIT": "true",
 	}
 	if len(differing) != len(seedVars) {
 		t.Fatalf("test table covers %d vars, seedVars has %d", len(differing), len(seedVars))

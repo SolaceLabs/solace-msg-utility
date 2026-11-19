@@ -267,7 +267,7 @@ The admin console is at `https://<host>:9443/solAdmin`, for administrator accoun
 - **Gateway Settings:** the settings above, one card each (the minimum password length, the time to finish two-factor and the two-factor mode share the **Passwords and two-factor sign-in** card; the offered modules are toggle tiles under **Modules**), **Skip broker certificate checks (insecure)** under **Broker trust**, the **Restart gateway** button in the **Gateway** card, and a line under Access, "Your address as the gateway sees it", saying whether the address is the TCP peer or came from `X-Forwarded-For` through a trusted proxy. If it shows your proxy's address rather than yours, see [Client addresses behind Docker and proxies](deployment.md#client-addresses-behind-docker-and-proxies).
 
 Every change to a user, a connection or the settings is also logged at `info` with the administrator's name and what changed (never a password), but the record to keep is the [audit trail](#audit-trail): it is always written, whatever `LOG_LEVEL` says.
-- **Certificates:** the gateway's own certificate and the CA certificates it trusts for brokers; replace the certificate, add and delete CA files. See [Certificates from the console](#certificates-from-the-console).
+- **Certificates:** the gateway's own certificate, the CA certificates it trusts for brokers and the standard root CAs the image carries; replace the certificate, add and delete CA files. See [Certificates from the console](#certificates-from-the-console).
 - **Backup & Restore:** export the configuration to a file, import one, and schedule backups. See [Back up and restore](#back-up-and-restore).
 
 Changes apply at once, certificates included. Revoking a user's access closes their broker connections. A restart signs everyone out.
@@ -288,7 +288,7 @@ A few details:
 
 ## Certificates from the console
 
-The admin console's **Certificates** page shows the gateway's own certificate (subject, names, issuer, validity, SHA-256 fingerprint) and every trusted broker CA file, and can replace the certificate and add or delete CA files. Whether it may is decided by the mount, not by a setting: the gateway can change these files only where it can write them.
+The admin console's **Certificates** page shows the gateway's own certificate (subject, names, issuer, validity, SHA-256 fingerprint), every trusted broker CA file and the standard root CAs the image carries, and can replace the certificate and add or delete CA files. Whether it may is decided by the mount, not by a setting: the gateway can change these files only where it can write them.
 
 ### Letting the console manage them
 
@@ -312,6 +312,7 @@ Every TLS change takes effect with no restart:
 
 - **A new certificate:** connections to the gateway made from then on present it; connections already open keep the old one until they close.
 - **CA changes:** the trust pool is rebuilt from the directory after every add or delete, and the next connection to a broker uses it. Idle connections to brokers are closed so the next request handshakes under the new pool; requests and sockets in use carry on. Deleting the CA a broker relies on therefore makes new connections to that broker fail to verify at once, and adding it back makes them work.
+- **Trust the standard root CAs** on Gateway Settings (`tls.standardRoots`, on by default) applies on Save and on a backup import, the same way: idle connections to brokers close, and the next one verifies with or without them. The standard roots themselves come with the image; the console lists them and cannot change them.
 - **Skip broker certificate checks (insecure)** on Gateway Settings (`tls.insecureSkipVerify`) applies on Save and on a backup import, and the gateway logs a warning whenever it turns on.
 
 A file you drop into the trust directory by hand is read at the next start, or at the next add or delete from the console. A restart is needed only for the three path variables.
@@ -452,7 +453,7 @@ This section says what the gateway checks and what it leaves to you, so you can 
 | Broker credentials | SEMP credentials stay on the gateway. The one credential the browser receives is the client password of a VPN the user is granted, from `dial`, and it is masked in every gateway log line. A Provisioned session holds no other. |
 | The Direct relay | Under `provisioned` it answers `404`. Under `both` it works, and it strips the gateway's own cookies from what it forwards, so a Direct connection to any host never carries a gateway session. |
 | Stored files | The users, connections and backup-schedule files are sealed whole with AES-256-GCM under the store key, with the file's role in the authenticated header, so one file cannot stand in for another. Backups use a key derived from their own passphrase (PBKDF2-SHA256, 600,000 iterations). See [Stored files and recovery](#stored-files-and-recovery). |
-| Transport | The gateway serves TLS 1.2 or later only. It reaches brokers over TLS unless a connection's scheme says `http` or `ws`; the trusted broker CAs and **Skip broker certificate checks (insecure)** are described in [Certificates from the console](#certificates-from-the-console). |
+| Transport | The gateway serves TLS 1.2 or later only. It reaches brokers over TLS unless a connection's scheme says `http` or `ws`; the trusted broker CAs, the standard root CAs and **Skip broker certificate checks (insecure)** are described in [Certificates from the console](#certificates-from-the-console). |
 | What is written down | Every administrator change and every sign-in is in the [audit trail](#audit-trail), never with a secret in it. |
 | Code that ships | The Release bundles carry no Provisioned UI and no gateway call; the build checks that on the built files. |
 
@@ -486,6 +487,7 @@ Provisioned mode is meant for **trusted internal** networks. Before exposing it:
 - **Keep the store key apart** from the stores where you can: its path is fixed at `/data/store.key`, so mount a volume or secret there. It is not what restores a lost deployment: the scheduled backups are.
 - **Keep backup passphrases secret, and apart from the backups.** A backup holds every broker credential, every password hash and every two-factor secret; anyone with a file and its passphrase has them. Make `/backup` readable by the gateway's UID only.
 - **Decide who may change certificates.** A writable `/tls` lets any administrator replace the gateway's certificate and trust a new CA for broker connections: a CA added there is trusted for every broker the gateway reaches. Mount `/tls` read-only (see [Locking them](#locking-them)) where certificate changes should stay with the host. The private key is never shown again once uploaded, but keep it out of chat and tickets like any key.
+- **Decide whether to trust the standard root CAs.** With them on (the default), any public CA on Mozilla's list can vouch for a broker's name. Where your brokers use a private CA, turn **Trust the standard root CAs** off on Gateway Settings so that only the CA files you add are trusted. To trust the CAs the host trusts instead of Mozilla's list, mount the host's CA bundle in the image's place: see [Trusting the host's CA store](deployment.md#trusting-the-hosts-ca-store).
 - **Restrict who can reach the gateway** with `access.allow`, and list your reverse proxy in `access.trustedProxies`.
 - **Treat administrator accounts as privileged.** They edit grants, the access list and sign-in itself.
 - **Turn on two-factor sign-in.** `optional` while people enrol, then `mandatory`; `admins` at the least (see [Two-factor sign-in](#two-factor-sign-in)). Keep the gateway's clock right and a second administrator.

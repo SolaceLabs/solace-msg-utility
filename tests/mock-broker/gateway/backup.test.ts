@@ -148,7 +148,7 @@ describe('mock-broker/gateway/backup -- the file format', () => {
 
     it('decodes settings onto the default file: a missing key reads as its default, mistyped ones are refused', () => {
         expect(settingsFromBackup(undefined).connModes).toBe('direct');
-        expect(settingsFromBackup({ tls: null }).tls).toEqual({ insecureSkipVerify: false });
+        expect(settingsFromBackup({ tls: null }).tls).toEqual({ insecureSkipVerify: false, standardRoots: true });
         expect(settingsFromBackup(null).session).toEqual({ idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 });
         expect(settingsFromBackup({ session: { idleMinutes: 5 } }).session).toEqual({ idleMinutes: 5, absoluteMinutes: 30, connectsPerMinute: 20 });
         expect(settingsFromBackup(null).modules).toEqual({ offered: ['queue-browser', 'queue-copy', 'queue-subscription-explorer'], userDefault: 'all' });
@@ -166,8 +166,8 @@ describe('mock-broker/gateway/backup -- the file format', () => {
 
     it('reads a backup from before the paths left the file, and drops the three TLS paths whatever their case', () => {
         const old = { ...settings(), tls: { certFile: '/old/tls.crt', KeyFile: '/old/tls.key', trustdir: '/old/trust', insecureSkipVerify: true } };
-        expect(settingsFromBackup(old).tls).toEqual({ insecureSkipVerify: true });
-        expect(settingsFromBackup({ TLS: { certFile: '/x' } }).tls).toEqual({ insecureSkipVerify: false });
+        expect(settingsFromBackup(old).tls).toEqual({ insecureSkipVerify: true, standardRoots: true });
+        expect(settingsFromBackup({ TLS: { certFile: '/x' } }).tls).toEqual({ insecureSkipVerify: false, standardRoots: true });
         expect(() => settingsFromBackup({ tls: { certfile2: '/x' } })).toThrow();
         expect(() => settingsFromBackup({ tls: 'file' })).toThrow();
         expect(() => settingsFromBackup({ tls: ['/x'] })).toThrow();
@@ -195,7 +195,7 @@ describe('mock-broker/gateway/backup -- import planning', () => {
 
     it('names the settings an import changes, dotted and sorted', () => {
         const cur = settings();
-        const next = { ...cur, logLevel: 'info', tls: { insecureSkipVerify: !cur.tls.insecureSkipVerify }, access: { allow: ['10.0.0.0/8'], trustedProxies: [] } };
+        const next = { ...cur, logLevel: 'info', tls: { ...cur.tls, insecureSkipVerify: !cur.tls.insecureSkipVerify }, access: { allow: ['10.0.0.0/8'], trustedProxies: [] } };
         expect(settingsChanges(cur, next)).toEqual(['access.allow', 'logLevel', 'tls.insecureSkipVerify']);
     });
 });
@@ -328,7 +328,7 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         expect(ex.json.filename).toBe('smu-backup-20261109T090000Z.json');
         const d = await openBackup(ex.json.content, PASS);
         expect([d.created, d.gateway, d.users.map(u => u.username), d.settings.tls])
-            .toEqual(['2026-11-09T09:00:00Z', 'demo', ['admin', 'viewer', 'operator'], { insecureSkipVerify: false }]);
+            .toEqual(['2026-11-09T09:00:00Z', 'demo', ['admin', 'viewer', 'operator'], { insecureSkipVerify: false, standardRoots: true }]);
         expect(d.settings.logLevel).toBe('warn');
     });
 

@@ -211,20 +211,64 @@ func formatFingerprint(b []byte) string {
 	return sb.String()
 }
 
-// buildTrustPool returns the CA pool used by the upstream Transport.
-// Starts with the system pool (or an empty pool if none) and appends every PEM
-// block found in *.crt / *.pem files under trustDir (non-recursive).
-func buildTrustPool(trustDir string, logger *slog.Logger) (*x509.CertPool, error) {
-	pool, err := x509.SystemCertPool()
-	if err != nil || pool == nil {
-		logger.Debug("system cert pool unavailable; starting empty", "err", err)
-		pool = x509.NewCertPool()
+// standardRootsFile is the standard root CA bundle the image carries: the
+// Mozilla list as Alpine's ca-certificates-bundle packages it, copied from the
+// gateway's build stage (docker/Dockerfile). The gateway reads this file
+// itself, never the host's or Go's system roots, so what it trusts is what the
+// image holds.
+const standardRootsFile = "/etc/ssl/certs/ca-certificates.crt"
+
+// The reasons the standard roots gave no certificate, as the console shows them.
+const (
+	standardRootsMissing    = "The gateway image holds no standard root CA bundle."
+	standardRootsUnreadable = "The standard root CA bundle cannot be read."
+	standardRootsEmpty      = "The standard root CA bundle holds no certificate."
+)
+
+// standardRoots is the standard root CA bundle as read at start. problem says
+// why it gave no certificate ("" when it did); pool is nil then.
+type standardRoots struct {
+	certs   []*x509.Certificate
+	pool    *x509.CertPool
+	problem string
+}
+
+// loadStandardRoots reads the bundle at path ("" is none). A bundle that is
+// missing, unreadable or empty leaves only the trust directory trusted; the
+// start goes on, and holdStandard warns when tls.standardRoots is on.
+func loadStandardRoots(path string) standardRoots {
+	if path == "" {
+		return standardRoots{problem: standardRootsMissing}
 	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return standardRoots{problem: standardRootsMissing}
+	}
+	if err != nil {
+		return standardRoots{problem: standardRootsUnreadable}
+	}
+	certs := pemCertificates(data)
+	if len(certs) == 0 {
+		return standardRoots{problem: standardRootsEmpty}
+	}
+	pool := x509.NewCertPool()
+	for _, c := range certs {
+		pool.AddCert(c)
+	}
+	return standardRoots{certs: certs, pool: pool}
+}
+
+// buildTrustPool returns the pool of the CAs in the trust directory: every
+// PEM certificate in its *.crt and *.pem files (non-recursive). The standard
+// roots are a pool of their own (standardRoots), which verify adds while
+// tls.standardRoots is on.
+func buildTrustPool(trustDir string, logger *slog.Logger) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
 
 	info, err := os.Stat(trustDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			logger.Info("trust dir not present; using system pool only", "trust_dir", trustDir)
+			logger.Info("trust dir not present; it adds no CAs", "trust_dir", trustDir)
 			return pool, nil
 		}
 		return nil, fmt.Errorf("stat trust dir %s: %w", trustDir, err)
@@ -321,11 +365,13 @@ func (h *certHolder) getCertificate(*tls.ClientHelloInfo) (*tls.Certificate, err
 }
 
 // trustState is what every outbound TLS connection verifies a broker with:
-// the CA pool (the system roots plus the trust directory) and whether to skip
-// the check (config.yaml's tls.insecureSkipVerify).
+// the trust directory's CA pool, whether the standard roots count as well
+// (config.yaml's tls.standardRoots) and whether to skip the check
+// (tls.insecureSkipVerify).
 type trustState struct {
-	pool *x509.CertPool
-	skip bool
+	pool     *x509.CertPool
+	standard bool
+	skip     bool
 }
 
 // trustHolder holds the current trustState. The upstream transport reads it
@@ -333,9 +379,12 @@ type trustState struct {
 // hooks, which close the transport's idle connections so the next request
 // handshakes under the new trust. Open connections and sockets carry on.
 type trustHolder struct {
-	cur    atomic.Pointer[trustState]
-	mu     sync.Mutex // writers; readers use cur
-	hooks  []func()
+	cur   atomic.Pointer[trustState]
+	mu    sync.Mutex // writers; readers use cur
+	hooks []func()
+	// roots is the standard root CA bundle, read once at start and set by
+	// holdStandard before the gateway serves; readers take it without a lock.
+	roots  standardRoots
 	logger *slog.Logger
 }
 
@@ -355,6 +404,21 @@ func (h *trustHolder) warnSkip() {
 }
 
 func (h *trustHolder) get() trustState { return *h.cur.Load() }
+
+// holdStandard takes the standard roots read at start and whether they count
+// (tls.standardRoots). Call it once, before the gateway serves. It logs how
+// many there are, and warns when they count but the bundle gave none.
+func (h *trustHolder) holdStandard(roots standardRoots, on bool) {
+	h.roots = roots
+	s := h.get()
+	s.standard = on
+	h.cur.Store(&s)
+	if on && roots.problem != "" {
+		h.logger.Warn("tls.standardRoots is true but no standard root CA was read; only the trust directory is trusted", "problem", roots.problem)
+		return
+	}
+	h.logger.Info("standard root CAs", "count", len(roots.certs), "trusted", on)
+}
 
 // onChange registers f to run after every change of the trust.
 func (h *trustHolder) onChange(f func()) {
@@ -402,11 +466,26 @@ func (h *trustHolder) setSkip(skip bool) {
 	})
 }
 
+// setStandard applies tls.standardRoots. Setting what is already held does
+// nothing.
+func (h *trustHolder) setStandard(on bool) {
+	h.change(func(s trustState) (trustState, bool) {
+		if s.standard == on {
+			return s, false
+		}
+		s.standard = on
+		h.logger.Info("standard root CAs", "count", len(h.roots.certs), "trusted", on)
+		return s, true
+	})
+}
+
 // verify is the upstream transport's certificate check (dialUpstreamTLS): it
-// verifies the broker's certificate chain against the pool held now, and the
-// name against host, the host the request asked for, or accepts the connection
-// when skip is on. host is passed in because ConnectionState.ServerName is
-// empty for an IP address, which would silently skip the name check.
+// verifies the broker's certificate chain against the trust directory's pool
+// held now, then, when that fails and the standard roots count, against them,
+// and the name against host, the host the request asked for; or it accepts the
+// connection when skip is on. The first failure is the one returned. host is
+// passed in because ConnectionState.ServerName is empty for an IP address,
+// which would silently skip the name check.
 func (h *trustHolder) verify(cs tls.ConnectionState, host string) error {
 	st := h.get()
 	if st.skip {
@@ -416,11 +495,14 @@ func (h *trustHolder) verify(cs tls.ConnectionState, host string) error {
 	for _, c := range cs.PeerCertificates[1:] {
 		intermediates.AddCert(c)
 	}
-	_, err := cs.PeerCertificates[0].Verify(x509.VerifyOptions{
-		DNSName:       host,
-		Roots:         st.pool,
-		Intermediates: intermediates,
-	})
+	opts := x509.VerifyOptions{DNSName: host, Roots: st.pool, Intermediates: intermediates}
+	_, err := cs.PeerCertificates[0].Verify(opts)
+	if err != nil && st.standard && h.roots.pool != nil {
+		opts.Roots = h.roots.pool
+		if _, serr := cs.PeerCertificates[0].Verify(opts); serr == nil {
+			return nil
+		}
+	}
 	return err
 }
 
@@ -448,12 +530,22 @@ type tlsTrustFileJSON struct {
 	Problem      string        `json:"problem"`
 }
 
+// tlsStandardJSON is the standard root CAs: whether they are trusted now
+// (tls.standardRoots), each one, sorted by subject, and why the bundle gave
+// none ("" when it did).
+type tlsStandardJSON struct {
+	Trusted      bool          `json:"trusted"`
+	Certificates []tlsCertJSON `json:"certificates"`
+	Problem      string        `json:"problem"`
+}
+
 // tlsStateJSON is the GET /managed/tls body.
 type tlsStateJSON struct {
 	Certificate         tlsCertJSON        `json:"certificate"`
 	CertificateWritable bool               `json:"certificateWritable"`
 	TrustWritable       bool               `json:"trustWritable"`
 	Trust               []tlsTrustFileJSON `json:"trust"`
+	Standard            tlsStandardJSON    `json:"standard"`
 }
 
 // tlsInvalidError is a certificate, key or file name the manager refused: the
@@ -689,7 +781,18 @@ func (m *tlsManager) state() tlsStateJSON {
 		CertificateWritable: m.certificateWritable(),
 		TrustWritable:       m.trustWritable(),
 		Trust:               m.trustFiles(),
+		Standard:            m.standard(),
 	}
+}
+
+// standard describes the standard roots for the console.
+func (m *tlsManager) standard() tlsStandardJSON {
+	out := tlsStandardJSON{Trusted: m.trust.get().standard, Certificates: []tlsCertJSON{}, Problem: m.trust.roots.problem}
+	for _, c := range m.trust.roots.certs {
+		out.Certificates = append(out.Certificates, m.describe(c))
+	}
+	slices.SortStableFunc(out.Certificates, func(a, b tlsCertJSON) int { return strings.Compare(a.Subject, b.Subject) })
+	return out
 }
 
 // trustFiles lists the trust directory as the pool reads it: every .crt and

@@ -51,12 +51,22 @@ describe('mock-broker/gateway/seed', () => {
     });
 
     it('holds no TLS path (the real gateway reads them from its environment) and starts with one certificate and no CA file', () => {
-        expect(seed.settings.tls).toEqual({ insecureSkipVerify: false });
-        expect(gw.settings.current().tls).toEqual({ insecureSkipVerify: false });
+        expect(seed.settings.tls).toEqual({ insecureSkipVerify: false, standardRoots: true });
+        expect(gw.settings.current().tls).toEqual({ insecureSkipVerify: false, standardRoots: true });
         expect(JSON.stringify(seed)).not.toMatch(/certFile|keyFile|trustDir/);
         const view = gw.tls.view();
         expect(view).toMatchObject({ certificateWritable: true, trustWritable: true, trust: [] });
         expect(view.certificate).toMatchObject({ subject: 'CN=demo certificate', selfSigned: true, expired: false });
+    });
+
+    it('carries three demo standard root CAs, trusted and listed by subject', () => {
+        const { standard } = gw.tls.view();
+        expect([standard.trusted, standard.problem]).toEqual([true, '']);
+        expect(standard.certificates.map(c => c.subject)).toEqual([
+            'CN=Demo ECC Root, O=Demo Trust Services, C=GB',
+            'CN=Demo Root CA R1, O=Demo Trust Services, C=GB',
+            'CN=Example Global Root, O=Example Certificate Authority, C=US',
+        ]);
     });
 
     it('shows the roles apart', () => {

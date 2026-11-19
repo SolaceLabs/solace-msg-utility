@@ -133,6 +133,7 @@ func logStartup(w io.Writer, cfg config, configFile, appDir string) {
 		"app_bundle", appIndexFile(cfg.provisioned()),
 		"log_level", levelName(cfg.logLevel),
 		"tls.insecureSkipVerify", cfg.insecureSkipVerify,
+		"tls.standardRoots", cfg.standardRoots,
 		"access.allow", prefixStrings(cfg.access.allow),
 		"access.trustedProxies", prefixStrings(cfg.access.trustedProxies),
 	}

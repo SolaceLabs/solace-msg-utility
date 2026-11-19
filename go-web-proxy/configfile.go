@@ -62,7 +62,9 @@ const configFileHeader = `# config.yaml -- AUTHORITATIVE gateway settings.
 # SMU_SSL_TRUSTDIR are read from the environment at every start. An old
 # tls.certFile, tls.keyFile or tls.trustDir key is ignored and dropped at the
 # next save. The certificate and the trusted CAs change live from the admin
-# console's Certificates page, and tls.insecureSkipVerify applies at once.
+# console's Certificates page. tls.standardRoots (trust the standard root CAs
+# the image carries, besides the trusted CA files) and tls.insecureSkipVerify
+# apply at once.
 `
 
 // fileConfig is the on-disk shape. Field order is the order yaml.Marshal writes.
@@ -97,6 +99,7 @@ type fileConfig struct {
 // (removedTLSPaths) and the next write of the file drops them.
 type fileTLS struct {
 	InsecureSkipVerify bool    `yaml:"insecureSkipVerify" json:"insecureSkipVerify"`
+	StandardRoots      bool    `yaml:"standardRoots" json:"standardRoots"`
 	RemovedCertFile    *string `yaml:"certFile,omitempty" json:"-"`
 	RemovedKeyFile     *string `yaml:"keyFile,omitempty" json:"-"`
 	RemovedTrustDir    *string `yaml:"trustDir,omitempty" json:"-"`
@@ -317,6 +320,7 @@ var seedVars = []seedVar{
 	{"SMU_CONN_MODES", "connModes", strings.ToLower, func(c config) string { return c.connModes }},
 	{"SMU_DEFAULT_CONN", "defaultConn", strings.ToLower, func(c config) string { return c.defaultConn }},
 	{"SMU_SSL_SKIP_CERT_VERIFY", "tls.insecureSkipVerify", boolEnv(defaultConfig().insecureSkipVerify), func(c config) string { return strconv.FormatBool(c.insecureSkipVerify) }},
+	{"SMU_SSL_STANDARD_ROOTS", "tls.standardRoots", boolEnv(defaultConfig().standardRoots), func(c config) string { return strconv.FormatBool(c.standardRoots) }},
 	{"LOG_LEVEL", "logLevel", strings.ToLower, func(c config) string { return levelName(c.logLevel) }},
 	{"SMU_SHOW_AUDIT", "audit.stdout", boolEnv(defaultConfig().audit.stdout), func(c config) string { return strconv.FormatBool(c.audit.stdout) }},
 }
@@ -391,7 +395,7 @@ func fileConfigFromConfig(c config) fileConfig {
 		Hosted:      c.hosted,
 		ConnModes:   c.connModes,
 		DefaultConn: c.defaultConn,
-		TLS:         fileTLS{InsecureSkipVerify: c.insecureSkipVerify},
+		TLS:         fileTLS{InsecureSkipVerify: c.insecureSkipVerify, StandardRoots: c.standardRoots},
 		LogLevel:    levelName(c.logLevel),
 		Access: fileAccess{
 			Allow:          prefixStrings(c.access.allow),
@@ -486,6 +490,7 @@ func (fc fileConfig) toConfig(secrets secretPaths) (config, error) {
 		keyFile:            secrets.tls.keyFile,
 		trustDir:           secrets.tls.trustDir,
 		insecureSkipVerify: fc.TLS.InsecureSkipVerify,
+		standardRoots:      fc.TLS.StandardRoots,
 		logLevel:           level,
 		usersFile:          defaultUsersFile,
 		connectionsFile:    defaultConnectionsFile,

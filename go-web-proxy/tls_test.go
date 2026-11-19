@@ -227,7 +227,7 @@ func TestWritePEM_PartialThenRename(t *testing.T) {
 }
 
 func TestBuildTrustPool_NoDir(t *testing.T) {
-	// Non-existent directory: must still return a usable pool (system pool fallback).
+	// Non-existent directory: an empty pool, not an error.
 	pool, err := buildTrustPool(filepath.Join(t.TempDir(), "absent"), quietLogger())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -587,7 +587,10 @@ func newTLSFix(t *testing.T) *tlsFix {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.m = newTLSManager(f.certFile, f.keyFile, f.trustDir, newCertHolder(pair), newTrustHolder(pool, false, quietLogger()), newCapturingLogger(f.log))
+	trust := newTrustHolder(pool, false, quietLogger())
+	// As serve() holds them with no bundle: on (the default), and none read.
+	trust.holdStandard(loadStandardRoots(""), true)
+	f.m = newTLSManager(f.certFile, f.keyFile, f.trustDir, newCertHolder(pair), trust, newCapturingLogger(f.log))
 	return f
 }
 
@@ -783,6 +786,95 @@ func TestTrustHolder_ChangesRunTheHooksOnlyWhenSomethingChanged(t *testing.T) {
 	newTrustHolder(pool, true, newCapturingLogger(&buf))
 	if !strings.Contains(buf.String(), "upstream certificates will NOT be validated") {
 		t.Errorf("a holder that starts with the check off warns at once: %q", buf.String())
+	}
+}
+
+// The standard root bundle: none, missing, unreadable and empty each give the
+// console's reason and no pool; a bundle gives its certificates in a pool.
+func TestLoadStandardRoots(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.crt")
+	writeFile(t, empty, "no certificate here\n")
+	a := newTestCert(t, testCertSpec{cn: "Root A", ca: true})
+	b := newTestCert(t, testCertSpec{cn: "Root B", ca: true})
+	bundle := filepath.Join(dir, "bundle.crt")
+	writeFile(t, bundle, pemOf("CERTIFICATE", string(b.cert.Raw))+pemOf("CERTIFICATE", string(a.cert.Raw)))
+
+	for path, want := range map[string]string{
+		"":                               standardRootsMissing,
+		filepath.Join(dir, "absent.crt"): standardRootsMissing,
+		dir:                              standardRootsUnreadable,
+		empty:                            standardRootsEmpty,
+	} {
+		if r := loadStandardRoots(path); r.problem != want || r.pool != nil || len(r.certs) != 0 {
+			t.Errorf("%q: want %q and no certificate, got %+v", path, want, r)
+		}
+	}
+	r := loadStandardRoots(bundle)
+	if r.problem != "" || r.pool == nil || len(r.certs) != 2 {
+		t.Fatalf("a bundle of two: got %+v", r)
+	}
+}
+
+// holdStandard logs the count, or warns when the roots count but the bundle
+// gave none; setStandard runs the hooks only on a change.
+func TestTrustHolder_StandardRoots(t *testing.T) {
+	var buf strings.Builder
+	h := newTrustHolder(x509.NewCertPool(), false, newCapturingLogger(&buf))
+	h.holdStandard(standardRoots{problem: standardRootsMissing}, true)
+	if !h.get().standard || !strings.Contains(buf.String(), "no standard root CA was read") {
+		t.Fatalf("on with no bundle: standard %v, log %q", h.get().standard, buf.String())
+	}
+	buf.Reset()
+	h.holdStandard(standardRoots{problem: standardRootsMissing}, false)
+	if h.get().standard || strings.Contains(buf.String(), "no standard root CA was read") || !strings.Contains(buf.String(), "count=0") {
+		t.Fatalf("off: no warning, the count logged; standard %v, log %q", h.get().standard, buf.String())
+	}
+	calls := 0
+	h.onChange(func() { calls++ })
+	h.setStandard(false)
+	if calls != 0 {
+		t.Fatalf("what it already is: %d calls", calls)
+	}
+	h.setStandard(true)
+	if calls != 1 || !h.get().standard {
+		t.Errorf("turning it on runs the hooks: %d calls, standard %v", calls, h.get().standard)
+	}
+}
+
+// A broker whose root is only among the standard roots is reached while they
+// count and refused once they do not; the trust directory's pool still counts
+// alone, and a failure against both reports the first.
+func TestUpstreamTransport_StandardRootsApplyLive(t *testing.T) {
+	root := newTestCert(t, testCertSpec{cn: "standard root", ca: true})
+	leaf := newTestCert(t, testCertSpec{cn: "leaf", ips: []net.IP{net.IPv4(127, 0, 0, 1)}, parent: &root})
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{loadPair(t, leaf)}}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	u, _ := url.Parse(srv.URL)
+	bundle := filepath.Join(t.TempDir(), "bundle.crt")
+	writeFile(t, bundle, pemOf("CERTIFICATE", string(root.cert.Raw)))
+
+	trust := testTrust(false)
+	trust.holdStandard(loadStandardRoots(bundle), true)
+	tr := newUpstreamTransport(trust)
+	t.Cleanup(tr.CloseIdleConnections)
+	if err := roundTrip(tr, "127.0.0.1", u.Port()); err != nil {
+		t.Fatalf("a root among the standard roots, which count: %v", err)
+	}
+	if err := roundTrip(tr, "localhost", u.Port()); err == nil || !strings.Contains(err.Error(), "valid for") {
+		t.Fatalf("the name is still checked, got %v", err)
+	}
+	trust.setStandard(false)
+	if err := roundTrip(tr, "127.0.0.1", u.Port()); err == nil || !strings.Contains(err.Error(), "unknown authority") {
+		t.Fatalf("with the standard roots off, the broker is refused, got %v", err)
+	}
+	dir := x509.NewCertPool()
+	dir.AddCert(root.cert)
+	trust.setPool(dir)
+	if err := roundTrip(tr, "127.0.0.1", u.Port()); err != nil {
+		t.Errorf("the trust directory's pool counts alone: %v", err)
 	}
 }
 
@@ -1004,6 +1096,35 @@ func TestTLSManager_StateHasTheShapeTheConsoleReads(t *testing.T) {
 		if strings.Contains(string(raw), leak) {
 			t.Errorf("the answer must carry no path and no key: %s", raw)
 		}
+	}
+}
+
+// The standard roots: whether they count now, each one sorted by subject, and
+// the bundle's problem; with no bundle, an empty list (not null) and its reason.
+func TestTLSManager_StateDescribesTheStandardRoots(t *testing.T) {
+	f := newTLSFix(t)
+	a := newTestCert(t, testCertSpec{cn: "Alpha Root", ca: true})
+	z := newTestCert(t, testCertSpec{cn: "Zulu Root", ca: true})
+	bundle := filepath.Join(f.dir, "bundle.crt")
+	writeFile(t, bundle, pemOf("CERTIFICATE", string(z.cert.Raw))+pemOf("CERTIFICATE", string(a.cert.Raw)))
+	f.m.trust.holdStandard(loadStandardRoots(bundle), true)
+	st := f.m.state().Standard
+	if !st.Trusted || st.Problem != "" || len(st.Certificates) != 2 ||
+		st.Certificates[0].SHA256 != fingerprintOf(a.cert) || st.Certificates[1].SHA256 != fingerprintOf(z.cert) {
+		t.Fatalf("two roots, sorted by subject: %+v", st)
+	}
+	f.m.trust.setStandard(false)
+	if f.m.state().Standard.Trusted {
+		t.Error("trusted follows tls.standardRoots")
+	}
+
+	f.m.trust.holdStandard(loadStandardRoots(""), true)
+	raw, err := json.Marshal(f.m.state())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"standard":{"trusted":true,"certificates":[],"problem":"`+standardRootsMissing+`"}`) {
+		t.Errorf("no bundle: %s", raw)
 	}
 }
 

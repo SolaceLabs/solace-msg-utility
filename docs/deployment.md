@@ -18,6 +18,7 @@ For operators who run the prebuilt app: on a web server, on GitHub Pages, or fro
   - [Image and tags](#image-and-tags)
   - [Mounts](#mounts)
   - [TLS and trusted CAs](#tls-and-trusted-cas)
+  - [Trusting the host's CA store](#trusting-the-hosts-ca-store)
   - [Settings](#settings)
   - [Variables and keys the gateway refuses or ignores](#variables-and-keys-the-gateway-refuses-or-ignores)
   - [In production](#in-production)
@@ -144,7 +145,7 @@ Then open <https://localhost:9443/>.
 
 `ghcr.io/solacelabs/solace-msg-utility` serves every container mode. Every release publishes `:<major>.<minor>.<patch>`, `:<major>.<minor>` and `:<major>`, for `linux/amd64` and `linux/arm64`; `:latest` moves only to the highest release, so a fix released for an older version leaves it. Pin a full version in production. The Release notes quote the image's digest, and a tag only ever moves to an image that passed the vulnerability scan.
 
-The image includes the two scripts the app loads, `solclient.js` (Solace's JavaScript messaging API) and `jszip.min.js`, with their licences. It also carries the licence notices of the Go code compiled into the gateway binary: Go's own (BSD-3-Clause), `gopkg.in/yaml.v3` (Apache-2.0 and MIT, with its `NOTICE`) and `rsc.io/qr` (BSD-3-Clause). All of them sit under `/SolaceMsgUtility/licenses/` (`solclientjs/`, `jszip/`, `go/`, `gopkg.in-yaml.v3/`, `rsc.io-qr/`); the build copies them from the toolchain's module cache and fails if one is missing, and `tests/build/vendor-scripts.test.ts` fails when a direct requirement in `go.mod` has no licence copied.
+The image includes the two scripts the app loads, `solclient.js` (Solace's JavaScript messaging API) and `jszip.min.js`, with their licences. It also carries the licence notices of the Go code compiled into the gateway binary: Go's own (BSD-3-Clause), `gopkg.in/yaml.v3` (Apache-2.0 and MIT, with its `NOTICE`) and `rsc.io/qr` (BSD-3-Clause), and the notice of the standard root CA list (MPL-2.0). All of them sit under `/SolaceMsgUtility/licenses/` (`solclientjs/`, `jszip/`, `go/`, `gopkg.in-yaml.v3/`, `rsc.io-qr/`, `ca-certificates/`); the build copies them from the toolchain's module cache and fails if one is missing, and `tests/build/vendor-scripts.test.ts` fails when a direct requirement in `go.mod` has no licence copied.
 
 The image is built `FROM scratch` and runs as UID `65532`. It holds:
 
@@ -154,6 +155,7 @@ The image is built `FROM scratch` and runs as UID `65532`. It holds:
 | `/tls` | The certificate, key and trusted CAs; see [Mounts](#mounts). |
 | `/data` | `config.yaml` in every mode. In Provisioned mode also the encrypted `users.yaml`, `connections.yaml` and `backup.yaml`, `store.key`, and the audit trail `audit.log` with its rotated `audit.log.1` to `.50`. The compose files mount a named volume here; a `docker run` without one keeps it inside the container, and the next container seeds `config.yaml` from the environment again. |
 | `/backup` | Provisioned mode: the scheduled backups. |
+| `/etc/ssl/certs/ca-certificates.crt` | The standard root CAs, read-only; see [TLS and trusted CAs](#tls-and-trusted-cas). |
 | `/SolaceMsgUtility` | The bundles the gateway serves (`index.html`, `provisioned.html`, `solAdmin.html`), `solclient.js`, `jszip.min.js` and the licences under `licenses/`. |
 
 Which bundle is served at `/`: `index.html` in Gateway mode, `provisioned.html` in Provisioned mode. `solAdmin.html` is reached only at `/solAdmin`, behind the admin gate; asking for `solAdmin.html` or `provisioned.html` by name answers `404`.
@@ -163,6 +165,7 @@ Which bundle is served at `/`: `index.html` in Gateway mode, `provisioned.html` 
 | Path | What |
 | --- | --- |
 | `/tls` | `tls.crt` and `tls.key`, the gateway's own certificate, and `trust/`, the CAs it trusts for broker connections. Mount it writable and an administrator can replace the certificate and add or delete CA files from the admin console (Provisioned mode); mount it read-only and the console only shows them. See [TLS and trusted CAs](#tls-and-trusted-cas). |
+| `/etc/ssl/certs/ca-certificates.crt` | Optional, read-only: the host's CA bundle, in place of the standard root CAs the image carries. See [Trusting the host's CA store](#trusting-the-hosts-ca-store). |
 | `/backup` | Provisioned mode only: the scheduled backups, each encrypted with its own passphrase. Mount a host directory owned by UID `65532` to keep them; see [Back up and restore](provisioned-mode.md#back-up-and-restore). |
 
 Use named volumes: they take the image's UID `65532` ownership. A bind-mounted directory must already be owned by UID `65532`, or hold its files ready so the gateway never needs to write.
@@ -170,9 +173,49 @@ Use named volumes: they take the image's UID `65532` ownership. A bind-mounted d
 ### TLS and trusted CAs
 
 - **The gateway's certificate:** put yours at `/tls/tls.crt` and `/tls/tls.key`. A pair that does not load stops the start, and so does half a pair (only the key, or only the certificate): the gateway never writes over a file it did not make. Add the missing file, or remove the one that is there. With neither, the gateway generates a self-signed **bootstrap** pair (`CN=localhost`, valid **7 days**) on its first start and logs its SHA-256 fingerprint. It is a convenience for the first sign-in only: it is never renewed, and once it expires browsers refuse it, so put your own certificate in place before then. Every start warns (at `warn`, with the date) about a certificate that has expired or expires within 30 days, the bootstrap pair included.
-- **Brokers' certificates:** the gateway verifies every broker it connects to, and the image ships no root CAs. Put each CA your brokers' certificates chain to, a public root included, in `/tls/trust/` as a `*.crt` or `*.pem` file (`SMU_SSL_TRUSTDIR`). The directory is read at start and again after every add or delete made from the admin console; a file you drop in by hand is picked up at the next start, or at the next add or delete. `SMU_SSL_SKIP_CERT_VERIFY=true` turns verification off: lab use only.
+- **Brokers' certificates:** the gateway verifies every broker it connects to. The image carries the standard root CAs (Mozilla's list, as Alpine packages it) at `/etc/ssl/certs/ca-certificates.crt`, and trusts them while `SMU_SSL_STANDARD_ROOTS` (the `tls.standardRoots` setting) is `true`, the default: a broker whose certificate comes from a public CA needs nothing more. The list is the one the release was built with and changes only with a new image, unless you mount the host's list in its place (see [Trusting the host's CA store](#trusting-the-hosts-ca-store)). Put every other CA your brokers' certificates chain to (a private CA, or a public root when the standard roots are off) in `/tls/trust/` as a `*.crt` or `*.pem` file (`SMU_SSL_TRUSTDIR`). The directory is read at start and again after every add or delete made from the admin console; a file you drop in by hand is picked up at the next start, or at the next add or delete. `SMU_SSL_SKIP_CERT_VERIFY=true` turns verification off: lab use only.
 - **The three paths are environment only.** `SMU_SSL_CERTFILE` (default `/tls/tls.crt`), `SMU_SSL_CERTKEYFILE` (default `/tls/tls.key`) and `SMU_SSL_TRUSTDIR` (default `/tls/trust`) are read at every start. They are not settings: `config.yaml` has no key for them, the admin console shows no field for them, and changing one takes a restart of the container. A `config.yaml` that holds `tls.certFile`, `tls.keyFile` or `tls.trustDir` still starts; see [Variables and keys the gateway refuses or ignores](#variables-and-keys-the-gateway-refuses-or-ignores).
 - **Managing them from the console (Provisioned mode).** The admin console's **Certificates** page shows the gateway's certificate and the trusted CA files, and can replace the certificate and add or delete CA files, if the gateway can write them: a writable `/tls`, the certificate and its key in one directory (a bind-mounted single file cannot be replaced, so mount the directory). A certificate and key are verified before anything is written. Every change applies at once with no restart: new connections to the gateway present the new certificate (open ones keep the old), and the next connection to a broker uses the new CA list. To lock it, mount `/tls` read-only (`:ro`): the page still shows everything and its actions are disabled. See [Certificates from the console](provisioned-mode.md#certificates-from-the-console).
+
+### Trusting the host's CA store
+
+To trust the CAs the host trusts, its distribution's list and any private CA its administrator added to it, mount the host's CA bundle read-only over the image's, at `/etc/ssl/certs/ca-certificates.crt`. The path is fixed; no variable moves it. The gateway then uses the host's list in place of the image's:
+
+- It is read at every start, the admin console's **Restart gateway** included. A change on the host (a new private CA, an updated list) applies at the next start.
+- It counts only while `SMU_SSL_STANDARD_ROOTS` (`tls.standardRoots`) is `true`, the default. The CA files in `/tls/trust/` are trusted as well.
+- In Provisioned mode the Certificates page lists what was read, in its **Standard root CAs** card. A file the gateway cannot read, or one with no certificate in it, does not stop the start: the card and the start log say so, and only `/tls/trust/` is trusted.
+- The file must be PEM certificates, readable by UID `65532`. The hosts' own bundles are both.
+
+Where the host keeps its bundle:
+
+| Host | Bundle |
+| --- | --- |
+| Debian, Ubuntu, Alpine | `/etc/ssl/certs/ca-certificates.crt` |
+| RHEL, Fedora, Rocky, AlmaLinux, Amazon Linux | `/etc/pki/tls/certs/ca-bundle.crt` |
+| openSUSE, SLES | `/etc/ssl/ca-bundle.pem` |
+| macOS, Windows (Docker Desktop) | No single file. Export the CAs you need into one PEM file and mount that. |
+
+With `docker run`, use `--mount`: it stops with an error when the host file does not exist, where `-v` creates a directory in its place.
+
+```bash
+docker run --rm -p 9443:9443 \
+  -v solace-tls:/tls \
+  --mount type=bind,src=/etc/ssl/certs/ca-certificates.crt,dst=/etc/ssl/certs/ca-certificates.crt,readonly \
+  ghcr.io/solacelabs/solace-msg-utility:3.6.0
+```
+
+With `compose.gateway.yaml` or `compose.provisioned.yaml`, add an entry to the gateway service's `volumes:`:
+
+```yaml
+      - type: bind
+        source: /etc/ssl/certs/ca-certificates.crt
+        target: /etc/ssl/certs/ca-certificates.crt
+        read_only: true
+        bind:
+          create_host_path: false
+```
+
+Use your host's path from the table as `src` or `source`.
 
 ### Settings
 
@@ -183,6 +226,7 @@ The gateway keeps its settings in `/data/config.yaml`, a file it writes itself: 
 | `SMU_HOSTED` | `true` | `true` sends the app's broker connections through the gateway (Gateway and Provisioned mode). `false` serves the files only, and browsers connect to brokers themselves, over `wss://` and `https://` only; the gateway refuses to relay (`403`). Any other value stops the start. |
 | `SMU_CONN_MODES` | `direct` | Which connection tabs the app offers: `direct` (Gateway mode), `provisioned` or `both` (Provisioned mode; see [provisioned-mode.md](provisioned-mode.md)). |
 | `SMU_DEFAULT_CONN` | `direct` | Which tab opens first under `both`: `direct` or `provisioned`. |
+| `SMU_SSL_STANDARD_ROOTS` | `true` | `true` also trusts the standard root CAs the image carries when it verifies a broker (the `tls.standardRoots` setting); `false` trusts only the CA files in `/tls/trust`. A live setting: in Provisioned mode it changes on Gateway Settings and applies at once, with no restart. Any value other than `true` or `false` stops the start. |
 | `SMU_SSL_SKIP_CERT_VERIFY` | `false` | `true` skips verifying brokers' certificates (the `tls.insecureSkipVerify` setting), with a warning whenever it becomes true. Lab use only. A live setting: in Provisioned mode it changes on Gateway Settings and applies at once, with no restart. Any value other than `true` or `false` stops the start. |
 | `SMU_SHOW_AUDIT` | `false` | Provisioned mode: `true` also copies each audit line to standard output (the `audit.stdout` setting). The audit trail itself is always written to `/data/audit.log` and never filtered by `LOG_LEVEL`; see [provisioned-mode.md](provisioned-mode.md#audit-trail). Any value other than `true` or `false` stops the start. |
 | `LOG_LEVEL` | `warn` | `debug`, `info`, `warn` or `error`. See [Logs](#logs). |

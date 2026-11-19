@@ -132,7 +132,10 @@ export function createGateway({ seed, backupIter = BACKUP_ITER, now = () => new 
     /** The last TOTP step accepted per user: a step at or below it is a replay. */
     const lastStep = new Map<string, number>();
     const backups = createBackups({ store, settings, sessions, iter: backupIter, now, forgetCodes: user => lastStep.delete(user) });
-    const tls = createTls({ now, readOnly: () => faults.tlsReadOnly });
+    const tls = createTls({
+        now, readOnly: () => faults.tlsReadOnly,
+        standard: seed.standardRoots ?? [], standardTrusted: () => settings.current().tls.standardRoots,
+    });
     const budget = createRequestBudget(() => settings.current().login.unauthenticatedPerMinute, () => now().getTime());
     const connects = createConnectWindow(() => settings.current().session.connectsPerMinute, () => now().getTime());
     const router = createRouter({
