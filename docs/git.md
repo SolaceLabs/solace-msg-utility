@@ -148,7 +148,7 @@ All of them point to the same digest: the one `image` pushed and Trivy scanned o
 
 ### Release assets
 
-- `index.html`, `min.html`, `demo.html`, `no-payload.html`, `no-queue-copy.html`, `provisioned-demo.html` (the `RELEASE_BUNDLES` list in the `release` step, kept equal to `scripts/check-bundles.mjs` by a test). `provisioned-demo.html` is the only one with Provisioned UI: it runs against an in-browser fake gateway and holds no gateway or broker address.
+- `index.html`, `min.html`, `demo.html`, `no-payload.html`, `no-queue-copy.html`, `provisioned-demo.html` (the `RELEASE_BUNDLES` list set once at the top of `tag.yml`, kept equal to `scripts/check-bundles.mjs` by a test). `provisioned-demo.html` is the only one with Provisioned UI: it runs against an in-browser fake gateway and holds no gateway or broker address.
 - `compose.gateway.yaml` and `compose.provisioned.yaml`, the ready-made deployments from `docker/` at the tag (`RELEASE_COMPOSE` in `tag.yml`), when the image shipped
 - `SHA256SUMS.txt` over all of the above
 

@@ -1723,10 +1723,17 @@ func TestStore_StageImport_MergeKeepsTheRestAndSkipLeavesAFileAlone(t *testing.T
 	}
 	// Merging users: a restored hash replaces the same name's, the others stay.
 	viewer := currentUser(t, s, "viewer")
-	viewer.Password = storedHash(s, "admin")
+	adminHash, viewerHash := storedHash(s, "admin"), storedHash(s, "viewer")
+	viewer.Password = adminHash
 	res, err = runImport(s, &sectionImport[userRec]{recs: []userRec{viewer}, merge: true}, nil)
 	if err != nil || res.usersSeq != 3 || !reflect.DeepEqual(res.drop, []string{"viewer"}) {
 		t.Fatalf("merge users: %+v %v", res, err)
+	}
+	if got := storedHash(s, "viewer"); got != adminHash || got == viewerHash {
+		t.Errorf("the restored hash replaces the same name's: got %q", got)
+	}
+	if got := storedHash(s, "admin"); got != adminHash {
+		t.Errorf("a user absent from the backup keeps its hash: got %q", got)
 	}
 	if u := currentUser(t, s, "admin"); u.Rev != 3 {
 		t.Errorf("the admin was not in the backup but its rev follows the file: %d", u.Rev)

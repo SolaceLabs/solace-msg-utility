@@ -585,6 +585,9 @@ func TestLogin_ParallelGuessesForOneAccountQueue(t *testing.T) {
 	if n := strings.Count(e.log.String(), "sign-in failed"); n != failed {
 		t.Errorf("each checked guess logs one failure: want %d, got %d", failed, n)
 	}
+	if f := e.pages.throttle.users["viewer"]; f == nil || f.count != testLoginLimits.maxFailures {
+		t.Errorf("only the checked guesses count against the account: want %d, got %+v", testLoginLimits.maxFailures, f)
+	}
 	if len(e.pages.throttle.turns) != 0 {
 		t.Error("every turn must be given back")
 	}
@@ -602,10 +605,18 @@ func TestLogin_QueuedRequestThatGoesAwayIs503(t *testing.T) {
 	defer release()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	expectPage(t, e.formFrom(ctx, "192.0.2.10:5000", "/login", signInForm("viewer", viewerPW, "/"), nil),
-		http.StatusServiceUnavailable, "could not be checked")
-	expectPage(t, e.formFrom(ctx, "192.0.2.10:5000", "/login/password", passwordForm(viewerPW, "viewer-new-pw-1", "viewer-new-pw-1"), e.cookie("viewer", false)),
-		http.StatusServiceUnavailable, "could not be checked")
+	signIn := e.formFrom(ctx, "192.0.2.10:5000", "/login", signInForm("viewer", viewerPW, "/"), nil)
+	expectPage(t, signIn, http.StatusServiceUnavailable, "could not be checked")
+	change := e.formFrom(ctx, "192.0.2.10:5000", "/login/password", passwordForm(viewerPW, "viewer-new-pw-1", "viewer-new-pw-1"), e.cookie("viewer", false))
+	expectPage(t, change, http.StatusServiceUnavailable, "could not be checked")
+	for _, rec := range []*httptest.ResponseRecorder{signIn, change} {
+		if len(rec.Result().Cookies()) != 0 {
+			t.Error("a refused check issues no cookie")
+		}
+	}
+	if f := e.pages.throttle.users["viewer"]; f != nil {
+		t.Errorf("a check that never ran counts no failure: %+v", f)
+	}
 	if !strings.Contains(e.log.String(), "sign-in check failed") || !strings.Contains(e.log.String(), "user=viewer") {
 		t.Errorf("the failure names the account: %s", e.log.String())
 	}

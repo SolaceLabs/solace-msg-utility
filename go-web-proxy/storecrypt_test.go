@@ -110,11 +110,15 @@ func TestSealer_ReadDoc(t *testing.T) {
 		t.Errorf("want the strict decode error, got %v", err)
 	}
 
-	if err := sl.readDoc(roleUsers, filepath.Join(dir, "missing.yaml"), &usersDoc{}); err == nil {
-		t.Error("a missing file must be an error")
+	missing := filepath.Join(dir, "missing.yaml")
+	if err := sl.readDoc(roleUsers, missing, &usersDoc{}); !errors.Is(err, os.ErrNotExist) || !namesPath(err.Error(), missing) {
+		t.Errorf("a missing file: want a does-not-exist error naming %s, got %v", missing, err)
 	}
-	if err := sl.readDoc(roleUsers, dir, &usersDoc{}); err == nil {
-		t.Error("a directory must be an error")
+	err := sl.readDoc(roleUsers, dir, &usersDoc{})
+	if err == nil || !namesPath(err.Error(), dir) {
+		t.Errorf("a directory: want an error naming %s, got %v", dir, err)
+	} else if runtime.GOOS != "windows" && !strings.Contains(err.Error(), "is a directory") {
+		t.Errorf("a directory: want the is-a-directory error, got %v", err)
 	}
 
 	// Oversized: refused before decrypting.

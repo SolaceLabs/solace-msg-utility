@@ -286,6 +286,14 @@ describe('check-bundles — findMarkers', () => {
     });
 });
 
+// A verdict of 0 goes with the success line and no error output; a verdict of
+// 1 goes with the FAILED header and no success line.
+function verdictAgreesWithReport(verdict: number, log: { mock: { calls: unknown[][] } }, err: { mock: { calls: unknown[][] } }): boolean {
+    const passed = log.mock.calls.some(([m]) => String(m).startsWith('Bundle check passed'));
+    const failed = err.mock.calls.some(([m]) => /^Bundle check FAILED: \d+ problem\(s\)\.$/.test(String(m)));
+    return verdict === 0 ? passed && !failed : verdict === 1 && failed && !passed;
+}
+
 describe('check-bundles — main', () => {
     it('returns 0 and says so for a clean build', () => {
         const log = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -305,9 +313,11 @@ describe('check-bundles — main', () => {
     });
 
     it("checks the repo's own dist/ when given no root, as npm run check:bundles does", () => {
-        vi.spyOn(console, 'log').mockImplementation(() => {});
-        vi.spyOn(console, 'error').mockImplementation(() => {});
-        expect(main()).toBe(checkBundles(path.join(repoRoot(), 'dist')).length ? 1 : 0);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+        // The verdict must agree with what main() itself reports, not with a
+        // second run of the checker over the same directory.
+        expect(verdictAgreesWithReport(main(), log, err)).toBe(true);
     });
 });
 
@@ -327,10 +337,11 @@ describe('check-bundles -- run as a script', () => {
     }
 
     it("checks the repo's dist/ and sets the exit code when node runs it, by any path", async () => {
-        vi.spyOn(console, 'log').mockImplementation(() => {});
-        vi.spyOn(console, 'error').mockImplementation(() => {});
-        const mod = await load(path.join('.', 'scripts', 'check-bundles.mjs'));
-        expect(process.exitCode).toBe(mod.checkBundles(path.join(repoRoot(), 'dist')).length ? 1 : 0);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+        await load(path.join('.', 'scripts', 'check-bundles.mjs'));
+        expect(typeof process.exitCode).toBe('number');
+        expect(verdictAgreesWithReport(process.exitCode as number, log, err)).toBe(true);
     });
 
     it('does nothing when imported, or when node runs another file', async () => {
@@ -360,11 +371,11 @@ describe('check-bundles -- the image', () => {
 
 describe('check-bundles — the Release upload list', () => {
     it('matches the RELEASE_BUNDLES list in tag.yml, so the check guards what is actually published', () => {
-        // tag.yml's release step uploads its own copy of the list; if the two
-        // drift, a bundle could ship unchecked or a checked one never ship.
+        // tag.yml's workflow-level env holds its own copy of the list; if the
+        // two drift, a bundle could ship unchecked or a checked one never ship.
         const yml = fs.readFileSync(path.join(repoRoot(), '.github/workflows/tag.yml'), 'utf-8');
         const m = yml.match(/RELEASE_BUNDLES:\s*"([^"]+)"/);
-        expect(m, 'tag.yml must set RELEASE_BUNDLES in its release step').not.toBeNull();
+        expect(m, 'tag.yml must set RELEASE_BUNDLES in its workflow-level env').not.toBeNull();
         expect(m![1].trim().split(/\s+/)).toEqual(RELEASE_BUNDLES);
     });
 

@@ -178,8 +178,8 @@ func TestFileConfig_EveryKeyIsClassifiedOnce(t *testing.T) {
 		"appDir": true, "usersFile": true, "connectionsFile": true, "certFile": true, "keyFile": true, "trustDir": true,
 	})
 	// The tls keys are live through the trust holder: apply hands them to
-	// lv.trust (TestLive_ApplyCarriesSkipVerifyIntoTheTrustHolder and
-	// TestLive_ApplyCarriesStandardRootsIntoTheTrustHolder), so they are not
+	// lv.trust (go-web-proxy/live_test.go > TestLive_ApplyCarriesSkipVerifyIntoTheTrustHolder
+	// and TestLive_ApplyCarriesStandardRootsIntoTheTrustHolder), so they are not
 	// liveSettings fields.
 	liveTops := map[string]bool{"connModes": true, "defaultConn": true, "logLevel": true, "access": true, "session": true, "login": true, "modules": true, "audit": true, "tls": true}
 	restartOnly := map[string]bool{}

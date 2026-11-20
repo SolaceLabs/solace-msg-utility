@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -836,20 +837,24 @@ func TestBackupService_LoadRefusesADamagedSchedule(t *testing.T) {
 	sched := daily2
 	good := fileOfSchedule(1, &scheduleDoc{Schedule: sched, Keep: 7, Iter: 1,
 		Salt: base64.StdEncoding.EncodeToString(make([]byte, 16)), Key: base64.StdEncoding.EncodeToString(make([]byte, 32))})
-	for name, f := range map[string]func(*scheduleFile){
-		"keep 0":                 func(f *scheduleFile) { f.Keep = 0 },
-		"a seq of 0":             func(f *scheduleFile) { f.Seq = 0 },
-		"a negative seq":         func(f *scheduleFile) { f.Seq = -1 },
-		"a key and no schedule":  func(f *scheduleFile) { f.Schedule = nil },
-		"a keep and no schedule": func(f *scheduleFile) { f.Schedule, f.Key, f.Salt, f.Iter = nil, "", "", 0 },
+	for _, c := range []struct {
+		name, problem string
+		edit          func(*scheduleFile)
+	}{
+		{"keep 0", fmt.Sprintf("keep must be 1 to %d", backupKeepMax), func(f *scheduleFile) { f.Keep = 0 }},
+		{"a seq of 0", "its seq must be at least 1 while there is a schedule", func(f *scheduleFile) { f.Seq = 0 }},
+		{"a negative seq", "its seq is negative", func(f *scheduleFile) { f.Seq = -1 }},
+		{"a key and no schedule", "it holds a key but no schedule", func(f *scheduleFile) { f.Schedule = nil }},
+		{"a keep and no schedule", "it holds a key but no schedule", func(f *scheduleFile) { f.Schedule, f.Key, f.Salt, f.Iter = nil, "", "", 0 }},
 	} {
 		doc := good
-		f(&doc)
+		c.edit(&doc)
 		if err := x.b.store.seal.writeDoc(roleSchedule, x.b.schedulePath, doc); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := newBackupService(x.dir, x.b.schedulePath, x.b.store, x.b.settings, x.f.h, x.clock.now, quietLogger()); err == nil || !strings.Contains(err.Error(), "delete it") {
-			t.Errorf("%s: want the problem and what to do, got %v", name, err)
+		want := fmt.Sprintf("backup schedule %q: %s; delete it and set the schedule again", x.b.schedulePath, c.problem)
+		if _, err := newBackupService(x.dir, x.b.schedulePath, x.b.store, x.b.settings, x.f.h, x.clock.now, quietLogger()); err == nil || err.Error() != want {
+			t.Errorf("%s: want %q, got %v", c.name, want, err)
 		}
 	}
 	// A counter with no schedule is what a delete leaves, and loads.
@@ -1090,7 +1095,7 @@ func TestBackupService_DirProblem(t *testing.T) {
 		t.Fatalf("a file: %q", p)
 	}
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
-		return
+		t.Skip("the read-only check needs POSIX permissions and a non-root user")
 	}
 	x.b.dir = filepath.Join(x.dir, "readonly")
 	if err := os.Mkdir(x.b.dir, 0o500); err != nil {

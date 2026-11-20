@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"net/http"
+	"unicode/utf8"
 )
 
 // The Certificates page's API (administrators only; tls.go holds the checks
@@ -84,12 +85,16 @@ func (h *managedHandler) tlsChangeAllowed(w http.ResponseWriter) bool {
 	return true
 }
 
-// clip cuts s to at most n bytes.
+// clip cuts s to at most n bytes, at a character boundary: a subject in UTF-8
+// is never cut inside a character.
 func clip(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
+	if len(s) <= n {
+		return s
 	}
-	return s
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 func (h *managedHandler) getTLS(w http.ResponseWriter, _ *http.Request) {

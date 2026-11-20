@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { REPO_ROOT } from '../helpers/sources';
 import { WIDENING, count, securityOpt, serviceBlock as service, writableMounts } from '../helpers/compose';
 
 /**
@@ -15,7 +15,6 @@ import { WIDENING, count, securityOpt, serviceBlock as service, writableMounts }
  * tests/build/e2e-lib.test.ts reads the rest of the e2e stack: there is no
  * YAML parser in the toolchain.
  */
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (rel: string) => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf-8');
 
 const POSTURE = [

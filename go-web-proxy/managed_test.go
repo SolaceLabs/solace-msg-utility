@@ -601,9 +601,15 @@ func TestManagedAPI_DeleteConnection(t *testing.T) {
 
 func TestWriteJSON_EncodeFailureKeepsStatus(t *testing.T) {
 	rec := httptest.NewRecorder()
-	writeJSON(rec, http.StatusOK, map[string]any{"bad": func() {}})
-	if rec.Code != http.StatusOK {
+	writeJSON(rec, http.StatusCreated, map[string]any{"bad": func() {}})
+	if rec.Code != http.StatusCreated {
 		t.Errorf("status already sent must stand, got %d", rec.Code)
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("a value that cannot be encoded writes no body, got %q", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: got %q", ct)
 	}
 }
 

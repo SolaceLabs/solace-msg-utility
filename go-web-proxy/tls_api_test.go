@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -89,6 +90,13 @@ func (e *managedEnv) putTrustDir(t *testing.T, files map[string]string) {
 	for name, content := range files {
 		writeFile(t, filepath.Join(e.tls.trustDir, name), content)
 	}
+}
+
+// trustsLeaf reports whether the live trust pool vouches for leaf, which a CA
+// signed: the check a broker's certificate meets.
+func (e *managedEnv) trustsLeaf(leaf testCertPair) bool {
+	_, err := leaf.cert.Verify(x509.VerifyOptions{Roots: e.tls.m.trust.get().pool, DNSName: "localhost"})
+	return err == nil
 }
 
 func decodeState(t *testing.T, rec *httptest.ResponseRecorder) tlsStateJSON {
@@ -401,7 +409,10 @@ func TestTLSAPI_AddTrustDerivesTheNameAndAudits(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	au := e.withAudit(t, auditSettings{})
 	ca := newTestCert(t, testCertSpec{cn: "My Root CA", ca: true})
-	before := e.tls.m.trust.get().pool
+	leaf := newTestCert(t, testCertSpec{cn: "broker", parent: &ca})
+	if e.trustsLeaf(leaf) {
+		t.Fatal("a certificate the CA signed is not trusted before the CA is added")
+	}
 	rec := e.do("POST", tlsTrustPath, tlsJSON(t, tlsTrustAddJSON{Certificate: ca.certPEM}), e.admin())
 	expect(t, rec, http.StatusOK, "")
 	got := decodeState(t, rec)
@@ -411,8 +422,8 @@ func TestTLSAPI_AddTrustDerivesTheNameAndAudits(t *testing.T) {
 	if !got.CertificateWritable || !got.TrustWritable {
 		t.Errorf("the answer is the page body: %+v", got)
 	}
-	if e.tls.m.trust.get().pool == before {
-		t.Error("the new CA is trusted at once")
+	if !e.trustsLeaf(leaf) {
+		t.Error("a certificate the new CA signed is trusted at once")
 	}
 	if data := mustRead(t, filepath.Join(e.tls.trustDir, "my-root-ca.crt")); !strings.Contains(string(data), "BEGIN CERTIFICATE") {
 		t.Error("the file holds the certificate")
@@ -519,7 +530,8 @@ func TestTLSAPI_RemoveTrustDeletesTheFileAndAudits(t *testing.T) {
 	a := newTestCert(t, testCertSpec{cn: "a", ca: true})
 	b := newTestCert(t, testCertSpec{cn: "b", ca: true})
 	e.putTrustDir(t, map[string]string{"a.crt": a.certPEM, "b.pem": b.certPEM})
-	before := e.tls.m.trust.get().pool
+	leafA := newTestCert(t, testCertSpec{cn: "broker-a", parent: &a})
+	leafB := newTestCert(t, testCertSpec{cn: "broker-b", parent: &b})
 	rec := e.do("DELETE", tlsTrustPath+"/a.crt", "", e.admin())
 	expect(t, rec, http.StatusOK, "")
 	if got := decodeState(t, rec); !slices.Equal(stateNames(got), []string{"b.pem"}) {
@@ -528,8 +540,11 @@ func TestTLSAPI_RemoveTrustDeletesTheFileAndAudits(t *testing.T) {
 	if got := trustDirNames(t, e.tls.trustDir); !slices.Equal(got, []string{"b.pem"}) {
 		t.Errorf("trust directory holds %v", got)
 	}
-	if e.tls.m.trust.get().pool == before {
-		t.Error("the CA is no longer trusted at once")
+	if e.trustsLeaf(leafA) {
+		t.Error("a certificate the removed CA signed is not trusted at once")
+	}
+	if !e.trustsLeaf(leafB) {
+		t.Error("a certificate the remaining CA signed stays trusted")
 	}
 	au.expect(t, auditEntry{
 		Actor: "admin", Action: "tls.trust.remove", Target: "a.crt", Outcome: auditOK,
@@ -549,12 +564,13 @@ func TestTLSAPI_RemoveTrustRefusals(t *testing.T) {
 		code       string
 		cause      string
 		field      string
+		want       []string // the trust directory afterwards; taken.crt when nil
 	}{
 		{name: "a name with a path", path: "..%2Ftls.crt", status: 422, code: "invalid", field: "name"},
 		{name: "a name with no extension", path: "taken", status: 422, code: "invalid", field: "name"},
 		{name: "a name with a backslash", path: "a%5Cb.crt", status: 422, code: "invalid", field: "name"},
 		{name: "no such file", path: "nothere.crt", status: 404, code: "not_found"},
-		{name: "a directory", path: "dir.crt", status: 404, code: "not_found", setup: func(t *testing.T, e *managedEnv) {
+		{name: "a directory", path: "dir.crt", status: 404, code: "not_found", want: []string{"dir.crt", "taken.crt"}, setup: func(t *testing.T, e *managedEnv) {
 			if err := os.Mkdir(filepath.Join(e.tls.trustDir, "dir.crt"), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -579,9 +595,9 @@ func TestTLSAPI_RemoveTrustRefusals(t *testing.T) {
 			if got := errorCode(t, rec); got.Field != c.field {
 				t.Errorf("field %q, want %q", got.Field, c.field)
 			}
-			want := []string{"taken.crt"}
-			if c.name == "a directory" {
-				want = []string{"dir.crt", "taken.crt"}
+			want := c.want
+			if want == nil {
+				want = []string{"taken.crt"}
 			}
 			e.wantTLSUntouched(t, want...)
 			if e.tls.m.trust.get().pool != before {
@@ -626,6 +642,13 @@ func TestClip(t *testing.T) {
 	}
 	if got := clip("abc", 3); got != "abc" {
 		t.Errorf("a text of the limit is kept: %q", got)
+	}
+	// "\u00e9" is two bytes: a limit that falls inside it cuts before it.
+	if got := clip("ab\u00e9cd", 3); got != "ab" {
+		t.Errorf("a character is not split: %q", got)
+	}
+	if got := clip("ab\u00e9cd", 4); got != "ab\u00e9" {
+		t.Errorf("a limit on a character boundary keeps the character: %q", got)
 	}
 }
 

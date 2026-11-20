@@ -77,7 +77,7 @@ func TestGenerateSelfSigned_CreatesValidKeypair(t *testing.T) {
 		t.Fatalf("generateSelfSigned: %v", err)
 	}
 
-	// Cert/key files must exist with the right permissions on the cert.
+	// Cert/key files must exist; their modes are checked below.
 	if !fileExists(certPath) || !fileExists(keyPath) {
 		t.Fatal("cert/key file not written")
 	}
@@ -104,6 +104,27 @@ func TestGenerateSelfSigned_CreatesValidKeypair(t *testing.T) {
 	}
 	if !hasV6 {
 		t.Errorf("IPAddresses missing ::1, got %v", parsed.IPAddresses)
+	}
+	hasV4 := false
+	for _, ip := range parsed.IPAddresses {
+		if ip.Equal(net.IPv4(127, 0, 0, 1)) {
+			hasV4 = true
+		}
+	}
+	if !hasV4 {
+		t.Errorf("IPAddresses missing 127.0.0.1, got %v", parsed.IPAddresses)
+	}
+	// The modes are asked for as 0644 and 0600; the umask may narrow them, never widen.
+	if runtime.GOOS != "windows" {
+		for path, allowed := range map[string]os.FileMode{certPath: 0o644, keyPath: 0o600} {
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := info.Mode().Perm(); got&^allowed != 0 {
+				t.Errorf("%s: mode %o, want no more than %o", path, got, allowed)
+			}
+		}
 	}
 	// A bootstrap pair: seven days (plus the minute of back-dating), never more.
 	if d := parsed.NotAfter.Sub(parsed.NotBefore); d < bootstrapCertValidity || d > bootstrapCertValidity+2*time.Minute {
@@ -152,10 +173,16 @@ func TestLoadOrGenerateServerCert_RefusesToOverwriteCorruptKeypair(t *testing.T)
 	if err == nil {
 		t.Fatal("expected error when both files exist but fail to parse")
 	}
-	// User material must still be on disk — verifies the no-silent-overwrite contract.
-	data, _ := os.ReadFile(certPath)
-	if string(data) != "not a real PEM" {
-		t.Fatal("corrupt cert file was overwritten — violates safety contract")
+	for _, want := range []string{certPath, keyPath, "refusing to overwrite user-supplied material"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error lacks %q: %v", want, err)
+		}
+	}
+	// User material must still be on disk -- verifies the no-silent-overwrite contract.
+	for path, want := range map[string]string{certPath: "not a real PEM", keyPath: "also not a PEM"} {
+		if data, _ := os.ReadFile(path); string(data) != want {
+			t.Errorf("%s was overwritten: %q", path, data)
+		}
 	}
 }
 
@@ -238,58 +265,33 @@ func TestBuildTrustPool_NoDir(t *testing.T) {
 }
 
 func TestBuildTrustPool_AddsCerts(t *testing.T) {
-	dir := t.TempDir()
-
-	// Generate one valid CA via the existing helper, then read the PEM back.
-	cp := filepath.Join(dir, "src.crt")
-	kp := filepath.Join(dir, "src.key")
-	if _, err := generateSelfSigned(cp, kp); err != nil {
-		t.Fatalf("seed cert: %v", err)
-	}
-	certPEM, err := os.ReadFile(cp)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	trustDir := filepath.Join(dir, "trust")
-	if err := os.MkdirAll(trustDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(trustDir, "ca.crt"), certPEM, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(trustDir, "ca.pem"), certPEM, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// .txt file MUST be ignored.
-	if err := os.WriteFile(filepath.Join(trustDir, "notes.txt"), []byte("not a cert"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Subdirectory MUST be ignored (non-recursive).
+	trustDir := filepath.Join(t.TempDir(), "trust")
 	if err := os.MkdirAll(filepath.Join(trustDir, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(trustDir, "sub", "deep.crt"), certPEM, 0o644); err != nil {
-		t.Fatal(err)
+	// Each file holds its own certificate, so the pool says which files it read.
+	files := map[string]testCertPair{
+		"ca.crt":       newTestCert(t, testCertSpec{cn: "crt-ca", ca: true}),
+		"ca.pem":       newTestCert(t, testCertSpec{cn: "pem-ca", ca: true}),
+		"notes.txt":    newTestCert(t, testCertSpec{cn: "txt-ca", ca: true}),
+		"sub/deep.crt": newTestCert(t, testCertSpec{cn: "deep-ca", ca: true}),
+	}
+	for name, pair := range files {
+		if err := os.WriteFile(filepath.Join(trustDir, filepath.FromSlash(name)), []byte(pair.certPEM), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	pool, err := buildTrustPool(trustDir, quietLogger())
 	if err != nil {
 		t.Fatalf("buildTrustPool: %v", err)
 	}
-	if pool == nil {
-		t.Fatal("nil pool")
-	}
-	// We can't easily count pool entries, but Subjects() works on system+added.
-	subjects := pool.Subjects() //nolint:staticcheck // x509.CertPool.Subjects is the only stdlib way to introspect added certs.
-	found := 0
-	for _, s := range subjects {
-		if strings.Contains(string(s), "localhost") {
-			found++
+	// A certificate verifies against the pool only when the pool holds it as a root.
+	for name, want := range map[string]bool{"ca.crt": true, "ca.pem": true, "notes.txt": false, "sub/deep.crt": false} {
+		_, err := files[name].cert.Verify(x509.VerifyOptions{Roots: pool})
+		if got := err == nil; got != want {
+			t.Errorf("%s trusted: got %v, want %v (%v)", name, got, want, err)
 		}
-	}
-	if found < 1 {
-		t.Errorf("expected at least one 'localhost' subject in pool, got %d", found)
 	}
 }
 
@@ -300,8 +302,8 @@ func TestBuildTrustPool_RejectsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := buildTrustPool(notADir, quietLogger())
-	if err == nil {
-		t.Fatal("expected error when trust dir is a regular file")
+	if err == nil || !strings.Contains(err.Error(), "trust dir "+notADir+" is not a directory") {
+		t.Fatalf("a trust dir that is a regular file: want an error naming it, got %v", err)
 	}
 }
 
@@ -983,8 +985,8 @@ func TestUpstreamTransport_SkipVerifyAppliesLive(t *testing.T) {
 		t.Fatalf("with the check off the broker is reached: %v", err)
 	}
 	trust.setSkip(false)
-	if err := roundTrip(tr, "127.0.0.1", port); err == nil {
-		t.Fatal("with the check back on, the idle connection made under the skip must not be reused")
+	if err := roundTrip(tr, "127.0.0.1", port); err == nil || !strings.Contains(err.Error(), "unknown authority") {
+		t.Fatalf("with the check back on, the idle connection made under the skip must not be reused: want the unknown-authority failure, got %v", err)
 	}
 }
 
@@ -1947,17 +1949,21 @@ func TestLoadOrGenerateServerCert_WarnsOfAKeyBrowsersCannotUse(t *testing.T) {
 
 // A pair placed on the host is served whatever its dates, but the start warns
 // when it has expired or expires within certExpiryWarning, at WARN so the
-// default level shows it. One that has longer says nothing.
+// default level shows it. A certificate with 29 days left warns; one with 31
+// days left, or longer, says nothing.
 func TestLoadOrGenerateServerCert_WarnsOfAnExpiredOrExpiringCertificate(t *testing.T) {
 	now := time.Now()
 	for _, c := range []struct {
 		name     string
 		notAfter time.Time
 		want     string // "" for no warning
+		daysLeft string // the days_left attribute, "" when the warning carries none
 	}{
-		{"expired", now.Add(-24 * time.Hour), "the TLS server certificate has expired"},
-		{"expires in 3 days", now.Add(3*24*time.Hour + time.Hour), "the TLS server certificate expires soon"},
-		{"a year left", now.Add(365 * 24 * time.Hour), ""},
+		{"expired", now.Add(-24 * time.Hour), "the TLS server certificate has expired", ""},
+		{"expires in 3 days", now.Add(3*24*time.Hour + time.Hour), "the TLS server certificate expires soon", "days_left=3"},
+		{"29 days left", now.Add(29*24*time.Hour + time.Hour), "the TLS server certificate expires soon", "days_left=29"},
+		{"31 days left", now.Add(31 * 24 * time.Hour), "", ""},
+		{"a year left", now.Add(365 * 24 * time.Hour), "", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -1972,15 +1978,15 @@ func TestLoadOrGenerateServerCert_WarnsOfAnExpiredOrExpiringCertificate(t *testi
 			got := log.String()
 			if c.want == "" {
 				if strings.Contains(got, "TLS server certificate has expired") || strings.Contains(got, "TLS server certificate expires soon") {
-					t.Errorf("no warning for a certificate with a year left:\n%s", got)
+					t.Errorf("no warning for a certificate beyond the 30-day threshold:\n%s", got)
 				}
 				return
 			}
 			if !strings.Contains(got, c.want) || !strings.Contains(got, "level=WARN") || !strings.Contains(got, "not_after="+c.notAfter.UTC().Format(time.RFC3339)) {
 				t.Errorf("want a WARN %q naming not_after:\n%s", c.want, got)
 			}
-			if c.name == "expires in 3 days" && !strings.Contains(got, "days_left=3") {
-				t.Errorf("want days_left=3:\n%s", got)
+			if c.daysLeft != "" && !strings.Contains(got, c.daysLeft) {
+				t.Errorf("want %s:\n%s", c.daysLeft, got)
 			}
 		})
 	}

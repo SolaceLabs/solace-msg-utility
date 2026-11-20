@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -174,6 +175,17 @@ func (e *managedEnv) importRaw(t *testing.T, fields map[string]any) *httptest.Re
 func (e *managedEnv) importWith(t *testing.T, file, users, conns, settings string) *httptest.ResponseRecorder {
 	t.Helper()
 	return e.importRaw(t, map[string]any{"file": file, "users": users, "connections": conns, "settings": settings})
+}
+
+// mustBody reads and closes a response body.
+func mustBody(t *testing.T, res *http.Response) []byte {
+	t.Helper()
+	defer res.Body.Close()
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 // diskBytes are the three files an import can write, as they are on disk.
@@ -487,8 +499,15 @@ func TestBackupAPI_PreviewSources(t *testing.T) {
 	// A backup in the directory, by name.
 	name := "smu-backup-20261030T090000Z.json"
 	writeFile(t, filepath.Join(e.cfg.backupDir, name), file)
-	if res := preview(map[string]string{"backup": name, "passphrase": testPassphrase}); res.StatusCode != http.StatusOK {
+	res := preview(map[string]string{"backup": name, "passphrase": testPassphrase})
+	if res.StatusCode != http.StatusOK {
 		t.Fatalf("by name: %d", res.StatusCode)
+	}
+	got := decodeTo[importPreviewJSON](t, mustBody(t, res))
+	none := nameDiff{Added: []string{}, Changed: []string{}, Removed: []string{}}
+	if got.Created != "2026-10-30T09:00:00Z" || got.Gateway != version || !reflect.DeepEqual(got.Users, none) ||
+		!reflect.DeepEqual(got.Connections, none) || len(got.Settings) != 0 {
+		t.Errorf("a backup of the current configuration previews as no change: %+v", got)
 	}
 }
 
@@ -525,6 +544,8 @@ func TestBackupAPI_PreviewSaysWhatWouldChange(t *testing.T) {
 func TestBackupAPI_ImportRefusals(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	file := e.exported(t, nil)
+	disk := e.diskBytes(t)
+	basis := e.api.currentBasis()
 	skipAll := map[string]any{"file": file, "users": "skip", "connections": "skip", "settings": "skip"}
 	with := func(kv ...any) map[string]any {
 		out := maps.Clone(skipAll)
@@ -569,6 +590,12 @@ func TestBackupAPI_ImportRefusals(t *testing.T) {
 	expect(t, e.importRaw(t, with("file", lockOut, "settings", "replace")), http.StatusConflict, "would_lock_out")
 
 	// Nothing above wrote anything.
+	if now := e.diskBytes(t); !reflect.DeepEqual(now, disk) {
+		t.Fatal("a refused import leaves every file as it was")
+	}
+	if got := e.api.currentBasis(); got != basis {
+		t.Fatalf("a refused import leaves every seq and rev: want %+v, got %+v", basis, got)
+	}
 	if got := userNames(e.api.store.listUsers()); !reflect.DeepEqual(got, []string{"admin", "viewer"}) {
 		t.Fatalf("users touched: %v", got)
 	}
@@ -845,7 +872,13 @@ func TestBackupAPI_ImportWriteFailures(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			e := newManagedEnv(t, nil)
 			e.noExit(t)
-			file := e.exported(t, nil)
+			file := e.exported(t, func(d *backupDoc) {
+				d.Users[1].Password = mustHash(t, e.f.h, "viewer password two")
+				d.Connections[0].Hostname = "host1-new"
+				d.Settings.Session.IdleMinutes = 5
+			})
+			disk := e.diskBytes(t)
+			basis := e.api.currentBasis()
 			p := c.breakPath(e)
 			if c.name == "settings" {
 				// The settings check reads the file first: break only the write.
@@ -862,6 +895,21 @@ func TestBackupAPI_ImportWriteFailures(t *testing.T) {
 			}
 			rec := e.importWith(t, file, c.users, c.conns, c.settings)
 			expect(t, rec, http.StatusInternalServerError, "store_write_failed")
+			if now := e.diskBytes(t); !reflect.DeepEqual(now, disk) {
+				t.Error("a failed import leaves every file as it was")
+			}
+			if got := e.api.currentBasis(); got != basis {
+				t.Errorf("a failed import leaves every seq and rev: want %+v, got %+v", basis, got)
+			}
+			if !signsIn(t, e.api.store, "viewer", viewerPW) {
+				t.Error("the viewer keeps the old password")
+			}
+			if h := currentConn(t, e.api.store, "b1").Hostname; h != "host1" {
+				t.Errorf("the connection keeps its host: %q", h)
+			}
+			if idle := e.live.get().session.idle; idle != 10*time.Minute {
+				t.Errorf("the live settings stay as they were: idle %v", idle)
+			}
 		})
 	}
 }

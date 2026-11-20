@@ -44,11 +44,30 @@ func TestHasher_CostIsReadFromStoredHash(t *testing.T) {
 // accepted, not even with the dummy's own password.
 func TestHasher_UnknownUserUsesDummy(t *testing.T) {
 	h := testHasher(t)
-	if _, _, _, err := parsePasswordHash(h.dummy); err != nil {
+	iter, _, _, err := parsePasswordHash(h.dummy)
+	if err != nil {
 		t.Fatalf("dummy must be a real hash: %v", err)
+	}
+	if iter != h.iter {
+		t.Errorf("dummy cost: want the hasher's %d, got %d", h.iter, iter)
 	}
 	if ok, err := h.verify(context.Background(), "", "anything at all"); ok || err != nil {
 		t.Errorf("empty stored value: want false/nil, got %v/%v", ok, err)
+	}
+	stored := mustHash(t, h, "known password")
+	if ok, err := h.verify(context.Background(), stored, "known password"); !ok || err != nil {
+		t.Errorf("known user, right password: want true/nil, got %v/%v", ok, err)
+	}
+	// With every hashing slot taken, a check that does the work of a hash
+	// comparison waits for a slot and gives up with the request; a refusal
+	// that skipped the work would return false/nil at once.
+	for range cap(h.slots) {
+		h.slots <- struct{}{}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if ok, err := h.verify(ctx, "", "anything at all"); ok || !errors.Is(err, context.Canceled) {
+		t.Errorf("unknown user with no free slot: want false/context.Canceled, got %v/%v", ok, err)
 	}
 }
 

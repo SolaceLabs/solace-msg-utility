@@ -104,19 +104,21 @@ func TestParseProxyPath_IPv6(t *testing.T) {
 }
 
 func TestParseProxyPath_BadInput(t *testing.T) {
-	bad := []string{
-		"/http/abc/host/x",   // port not numeric
-		"/http/0/host/x",     // port out of range
-		"/http/70000/host/x", // port out of range
-		"/http/-1/host/x",    // negative port
-		"/ftp/21/host/x",     // unknown scheme
-		"/http",              // missing port + host
-		"/http/8080",         // missing host
-		"/http/8080/",        // empty host segment
+	const shape = "path must be /{scheme}/{port}/{host}[/rest]"
+	bad := []struct{ in, want string }{
+		{"/http/abc/host/x", `invalid port "abc"`},     // port not numeric
+		{"/http/0/host/x", `invalid port "0"`},         // port out of range
+		{"/http/70000/host/x", `invalid port "70000"`}, // port out of range
+		{"/http/-1/host/x", `invalid port "-1"`},       // negative port
+		{"/ftp/21/host/x", `unknown scheme "ftp"`},     // unknown scheme
+		{"/http", shape},                           // missing port + host
+		{"/http/8080", shape},                      // missing host
+		{"/http/8080/", "host segment empty"},      // empty host segment
+		{"/http/8080/   /x", "host segment empty"}, // whitespace-only host segment
 	}
-	for _, in := range bad {
-		if _, err := parseProxyPath(in); err == nil {
-			t.Errorf("parseProxyPath(%q): want error, got nil", in)
+	for _, c := range bad {
+		if _, err := parseProxyPath(c.in); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("parseProxyPath(%q): want an error containing %q, got %v", c.in, c.want, err)
 		}
 	}
 }

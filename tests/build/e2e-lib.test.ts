@@ -319,9 +319,9 @@ describe('e2e-lib -- broker details', () => {
 
     it('refuses the old name E2E_BROKER_IP, in the file and in the environment, naming the new one', () => {
         expect(() => parseDetailsFile('E2E_BROKER_HOST=solxps.handy\nE2E_BROKER_IP=10.14.128.129\n', FILE))
-            .toThrow(`${FILE} line 2: E2E_BROKER_IP is now E2E_BROKER_ADDR; rename the key`);
+            .toThrow(`${FILE} line 2: E2E_BROKER_IP is renamed to E2E_BROKER_ADDR; rename the key`);
         expect(resolveDetails({ E2E_BROKER_IP: '10.14.128.129' }, undefined, FILE).errors)
-            .toEqual(['E2E_BROKER_IP (environment) is now E2E_BROKER_ADDR; set that instead']);
+            .toEqual(['E2E_BROKER_IP (environment) is renamed to E2E_BROKER_ADDR; set that instead']);
     });
 
     it('refuses a file line it cannot use, by line number and without its value', () => {
@@ -349,7 +349,7 @@ describe('e2e stack -- broker verification', () => {
         // One per gateway service: gateway (Provisioned mode) and direct (Gateway mode).
         expect(read('docker/docker-compose.e2e.yaml').match(/^[ \t]*SMU_SSL_SKIP_CERT_VERIFY:.*$/gm))
             .toEqual(Array(2).fill('      SMU_SSL_SKIP_CERT_VERIFY: ${E2E_GATEWAY_SKIP_VERIFY:-}'));
-        expect(read('scripts/e2e.mjs')).toContain("E2E_GATEWAY_SKIP_VERIFY: insecure() ? 'true' : ''");
+        expect(read('scripts/e2e.mjs')).toMatch(/E2E_GATEWAY_SKIP_VERIFY:\s*insecure\(\)\s*\?\s*'true'\s*:\s*''/);
     });
 
     it('has both gateway services the resolution override extends', () => {
@@ -389,7 +389,7 @@ describe('e2e stack -- browser', () => {
 
     // A bare `up` would start the browser even with E2E_BROWSER=0.
     it('is started by name, and only when the browser checks run', () => {
-        expect(read('scripts/e2e.mjs')).toContain("compose(['up', '-d', 'gateway', 'direct', ...(browserOn() ? ['browser'] : [])])");
+        expect(read('scripts/e2e.mjs')).toMatch(/compose\(\[\s*'up',\s*'-d',\s*'gateway',\s*'direct',\s*\.\.\.\(browserOn\(\)\s*\?\s*\['browser'\]\s*:\s*\[\]\)\s*\]\)/);
     });
 
     it('never reaches the app: nothing under src/ names playwright', () => {

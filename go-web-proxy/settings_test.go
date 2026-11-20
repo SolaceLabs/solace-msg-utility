@@ -377,6 +377,7 @@ func TestSettings_AFileThatIsGoneIsAChangeOnDisk(t *testing.T) {
 func TestSettings_UnreadableFileIsNotAHandEdit(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	rev := e.settings(t).Rev
+	orig := string(mustRead(t, e.cfgPath))
 	if err := os.Remove(e.cfgPath); err != nil {
 		t.Fatal(err)
 	}
@@ -391,6 +392,14 @@ func TestSettings_UnreadableFileIsNotAHandEdit(t *testing.T) {
 	expect(t, e.saveSettingsRev(t, rev, `{"logLevel":"info"}`), http.StatusInternalServerError, "store_write_failed")
 	if e.live.level.Level() != slog.LevelWarn || !strings.Contains(e.log.String(), "managed: cannot read config file") || !strings.Contains(e.log.String(), "gateway settings not saved") {
 		t.Errorf("nothing may apply, and the log names the cause: %s", e.log.String())
+	}
+	// The file is readable again, as it was: the failed reads left no mark.
+	if err := os.Remove(e.cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, e.cfgPath, orig)
+	if got := e.settings(t); got.ChangedOnDisk || got.Rev != rev {
+		t.Errorf("an unreadable file is not remembered as a change on disk: changedOnDisk %v, rev %q (want %q)", got.ChangedOnDisk, got.Rev, rev)
 	}
 }
 

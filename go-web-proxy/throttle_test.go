@@ -345,10 +345,23 @@ func TestThrottle_LoginTurnSerialisesAnAccount(t *testing.T) {
 		r, _, _ := th.loginTurn(context.Background(), "alice")
 		got <- r
 	}()
+	// The waiter has joined the account's turn once refs counts it beside the holder.
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		th.mu.Lock()
+		refs := th.turns[userKey("alice")].refs
+		th.mu.Unlock()
+		if refs == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the second sign-in never queued: refs %d", refs)
+		}
+		time.Sleep(time.Millisecond)
+	}
 	select {
 	case <-got:
 		t.Fatal("a second sign-in for the account must wait for the first")
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 	release()
 	select {

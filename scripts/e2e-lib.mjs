@@ -264,7 +264,7 @@ export function parseDetailsFile(text, name) {
         const eq = line.indexOf('=');
         if (eq < 1) throw new Error(`${where}: want KEY=value`);
         const key = line.slice(0, eq).trim();
-        if (key in RENAMED) throw new Error(`${where}: ${key} is now ${RENAMED[key]}; rename the key`);
+        if (key in RENAMED) throw new Error(`${where}: ${key} is renamed to ${RENAMED[key]}; rename the key`);
         if (!known.includes(key)) throw new Error(`${where}: unknown key ${key}; the keys are ${known.join(', ')}`);
         if (key in lines) throw new Error(`${where}: ${key} is already set on line ${lines[key]}`);
         lines[key] = i + 1;
@@ -300,7 +300,7 @@ export function resolveDetails(env, file = { values: {}, lines: {} }, fileName =
         else values[f.key] = raw;
     }
     for (const [old, now] of Object.entries(RENAMED)) {
-        if (env[old]) errors.push(`${old} (environment) is now ${now}; set that instead`);
+        if (env[old]) errors.push(`${old} (environment) is renamed to ${now}; set that instead`);
     }
     return { values, missing, errors };
 }

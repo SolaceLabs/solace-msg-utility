@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { REPO_ROOT } from '../helpers/sources';
 
 /**
  * The docs' internal links and tables of contents. A renamed heading changes
@@ -13,7 +13,6 @@ import { fileURLToPath } from 'node:url';
  * `##` and `###` headings. The docs are the ones git knows (tracked, or new and
  * not ignored), so a git-ignored local working file in docs/ is not checked.
  */
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DOCS = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '--', 'docs'], { cwd: REPO_ROOT, encoding: 'utf-8' })
     .split('\n')
     .filter(f => /^docs\/[^/]+\.md$/.test(f) && fs.existsSync(path.join(REPO_ROOT, f)))

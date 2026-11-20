@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { REPO_ROOT } from '../helpers/sources';
 import {
     extractModuleIds,
     extractModuleEntries,
@@ -14,7 +15,7 @@ import {
     MODULE_BASE_MARKER,
 } from '../../scripts/module-registry-plugin.mjs';
 
-const root = process.cwd();
+const root = REPO_ROOT;
 const byName = (a: string, b: string) => a.localeCompare(b);
 
 /** Throwaway project roots for the failure paths: `files` maps a root-relative path to its content. */

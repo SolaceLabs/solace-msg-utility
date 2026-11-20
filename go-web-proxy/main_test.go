@@ -587,6 +587,13 @@ func TestServe_ProvisionedModeStartsAndShutsDownOnASignal(t *testing.T) {
 		"administration app enabled",
 		"shutdown complete",
 	)
+	// The file's debug wins over LOG_LEVEL=error: the info lines are written.
+	// serve returns only after the backup loop closes its done channel, so the
+	// result above returning in time, with "shutdown complete" logged after it,
+	// is the proof the loop stopped.
+	if line := logLine(r.log.String(), "msg=listening"); !strings.Contains(line, "level=INFO") {
+		t.Errorf("want an info line at the file's debug level, got %q", line)
+	}
 }
 
 // A write the last process was cut short in is rolled back before config.yaml

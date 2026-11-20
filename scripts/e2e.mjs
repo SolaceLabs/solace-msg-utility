@@ -881,6 +881,8 @@ async function runChecks(admin) {
             expect(dialOther.status === 404 && dialOther.body === dialUnknown.body, `dial: got ${dialOther.status} ${dialOther.body}, unknown broker ${dialUnknown.status} ${dialUnknown.body}`);
             const socket = await upgrade(`/managed/smf/${OTHER}/${vpnPath}`, { cookie: user.header(), origin: ORIGIN });
             expect(socket.status === 404, `socket: want 404, got ${socket.status} ${socket.error}`);
+            const socketUnknown = await upgrade(`/managed/smf/no-such-broker/${vpnPath}`, { cookie: user.header(), origin: ORIGIN });
+            expect(socket.status === socketUnknown.status && socket.error === socketUnknown.error, `socket: got ${socket.status} ${socket.error}, unknown broker ${socketUnknown.status} ${socketUnknown.error}`);
         });
 
         await check(9, 'signing out closes the open SMF session', async () => {
@@ -1193,7 +1195,8 @@ async function runChecks(admin) {
                 expect(wrong.status === 401 && wrong.body.includes('The code is not correct.') && twoFactorSecretFromPage(wrong.body) === secret,
                     `a wrong code at the confirm step: want 401 with the same secret, got ${wrong.status}`);
                 const stillOff = await request('GET', '/managed/users', { jar: admin });
-                expect(listedRow(stillOff.body, 'users', 'username', SCRATCH)?.twoFactor === false, 'the user list shows two-factor On after a wrong code');
+                const offRow = listedRow(stillOff.body, 'users', 'username', SCRATCH);
+                expect(offRow?.twoFactor === false, `the user list after a wrong code: want two-factor Off, got ${JSON.stringify(offRow)}`);
                 const f = await freshCode(secret, -1);
                 const confirm = await request('POST', '/login/two-factor', { jar: here, form: { step: 'confirm', code: f.code, next: '/' } });
                 expect(confirm.status === 200, `the confirm step: want 200 with the recovery page, got ${confirm.status} ${confirm.body.slice(0, 200)}`);
@@ -1465,6 +1468,9 @@ async function runChecks(admin) {
                         halfOnly = true;
                     } else {
                         expect(without.status === 502, `without the CA file: want 502, got ${without.status} ${without.body.slice(0, 200)}`);
+                        // Any 502 would do for the status; the gateway's log names why this one failed.
+                        const relayLog = compose(['logs', '--no-color', '--tail', '50', 'gateway'], { quiet: true }).out;
+                        expect(/semp relay upstream failure.*x509/.test(relayLog), `the gateway log does not name an x509 failure for the relay: ${relayLog.trim().slice(-300)}`);
                         detail = `${without.status} ${errorCode(without)} without the CA file`;
                     }
                     const added = await request('POST', '/managed/tls/trust', { jar: admin, json: { name: TRUST_FILE, certificate: brokerCaPem } });
@@ -1619,8 +1625,12 @@ async function runChecks(admin) {
             expect(storeKey.length >= MIN_MASKED, 'the gateway made no store key');
             const found = Object.entries({ ...sweepable(), storeKey, ...cookies, ...twoFactor, ...tlsKeys }).filter(([, v]) => text.includes(v)).map(([name]) => name);
             expect(found.length === 0, `found ${found.join(', ')}`);
-            // The audit log, copied out by check 19, is swept the same way.
-            const auditText = fs.readFileSync(path.join(WORK, 'at-rest-audit.log'), 'utf8');
+            // The audit log is swept the same way, from a copy taken now, after
+            // the restart of 15 and the stop of 16, so it holds every line the run wrote.
+            const auditFile = path.join(WORK, 'at-rest-audit-final.log');
+            const cpAudit = compose(['cp', 'gateway:/data/audit.log', auditFile], { quiet: true });
+            expect(cpAudit.code === 0, `docker compose cp audit.log: ${cpAudit.out.trim()}`);
+            const auditText = fs.readFileSync(auditFile, 'utf8');
             const inAudit = Object.entries({ ...sweepable(), storeKey, ...cookies, ...twoFactor, ...tlsKeys }).filter(([, v]) => auditText.includes(v)).map(([name]) => name);
             expect(inAudit.length === 0, `audit.log holds ${inAudit.join(', ')}`);
             return `${text.split('\n').length} lines, ${auditText.split('\n').length} audit lines`;
