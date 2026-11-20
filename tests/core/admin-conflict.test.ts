@@ -69,6 +69,7 @@ describe('core/admin-conflict', () => {
     it('any other failure is not handled: no dialog, no toast, no reload', async () => {
         const reload = vi.fn();
         expect(await handleConflict(err(409, 'last_admin'), 'This user', reload)).toBe(false);
+        expect(document.querySelector('dialog.confirm-dialog')).toBeNull();
         expect(reload).not.toHaveBeenCalled();
         expect(toastMock.showToast).not.toHaveBeenCalled();
     });

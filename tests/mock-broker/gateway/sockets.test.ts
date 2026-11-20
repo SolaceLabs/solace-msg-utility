@@ -105,13 +105,17 @@ describe('mock-broker/gateway/sockets -- opening', () => {
     });
 
     it('publishes to the socket\'s broker only', async () => {
+        // A topic that queues on b1's v1 and on b2's v9 are all subscribed to: the publish reaches b1's.
+        getQueue('v1', 'q2')!.subscriptions.push('q1/>');
+        getQueue('v9', 'q9')!.subscriptions.push('q1/>');
         gw.setCookie(gw.openSession('viewer', false));
         const { session } = await open();
-        const before = getQueue('v1', 'q1')!.messages.length;
+        const count = () => [getQueue('v1', 'q1'), getQueue('v1', 'q2'), getQueue('v1', 'q3'), getQueue('v2', 'orders.new'), getQueue('v9', 'q9')].map(q => q!.messages.length);
+        const before = count();
         const msg = createMessage();
         msg.setDestination(createTopicDestination('q1/a'));
         session.send(msg);
-        expect(getQueue('v1', 'q1')!.messages).toHaveLength(before + 1);
+        expect(count()).toEqual(before.map((n, i) => (i < 2 ? n + 1 : n)));
     });
 });
 
@@ -155,7 +159,8 @@ describe('mock-broker/gateway/sockets -- revocation', () => {
 
     it('keeps it open across an edit that leaves the VPN reachable', async () => {
         const { events } = await open();
-        await admin('PUT', '/managed/users/viewer', { password: '', admin: false, operate: [], readOnly: [viewerRow, { brokers: 'b2', msgVpns: '*', queues: '*' }], modules: null, rev: 1 });
+        const saved = await admin('PUT', '/managed/users/viewer', { password: '', admin: false, operate: [], readOnly: [viewerRow, { brokers: 'b2', msgVpns: '*', queues: '*' }], modules: null, rev: 1 });
+        expect(saved.status).toBe(200);
         expect(codes(events)).toEqual([UP]);
     });
 
@@ -168,7 +173,8 @@ describe('mock-broker/gateway/sockets -- revocation', () => {
     it('still closes on a password change after the session expired', async () => {
         const { events } = await open();
         gw.sessions.expire(sid);
-        await admin('PUT', '/managed/users/viewer', { password: 'viewer-password-9', admin: false, operate: [], readOnly: [viewerRow], modules: null, rev: 1 });
+        const saved = await admin('PUT', '/managed/users/viewer', { password: 'viewer-password-9', admin: false, operate: [], readOnly: [viewerRow], modules: null, rev: 1 });
+        expect(saved.status).toBe(200);
         expect(codes(events)).toEqual([UP, DOWN]);
     });
 

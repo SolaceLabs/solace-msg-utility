@@ -63,25 +63,10 @@ describe('mock-broker/server — /hosted', () => {
         expect(delegated).toBe(0);
     });
 
-    it('routes independently of the page origin', async () => {
-        // Routing parses against a fixed base rather than window.location, so a
-        // file:// page origin (and its platform-specific quirks) cannot change
-        // which handler a request reaches.
-        const original = window.location.href;
-        const body = await (await fetch('/hosted')).json();
-
-        expect(body.hosted).toBe(true);
-        expect(window.location.href).toBe(original);   // nothing was resolved against it
-    });
-
     it('answers a Windows file:// URL, where the drive letter lands in the path', async () => {
-        // Opened from disk on Windows, `new URL('/hosted', 'file:///C:/…')`
-        // resolves to file:///C:/hosted, so pathname is '/C:/hosted'. Matching
-        // the pathname exactly meant the demo silently fell back to non-hosted
-        // URLs it does not answer. jsdom's http:// location hides this, so
-        // assert the resolved shape directly.
-        expect(new URL('/hosted', 'file:///C:/demo/demo.html').pathname).toBe('/C:/hosted');
-
+        // Opened from disk on Windows, a page URL resolves to file:///C:/hosted,
+        // so the pathname is '/C:/hosted'. The route must still answer it as
+        // /hosted; jsdom's http:// location hides this, so fetch the file:// URL.
         const body = await (await fetch('file:///C:/hosted')).json();
         expect(body.hosted).toBe(true);
     });

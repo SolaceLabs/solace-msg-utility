@@ -282,12 +282,13 @@ describe('connections/managed panel — restoring the gateway session', () => {
         expect(hidden(container, '#managed-connected-view')).toBe(false);
         expect(account().classList.contains('hidden')).toBe(false);
 
-        const before = [solaceMock.disconnect.mock.calls.length, sempMock.disconnect.mock.calls.length];
+        const seen: string[] = [];
+        solaceMock.disconnect.mockImplementationOnce(() => { seen.push('messaging disconnect'); return { ok: true }; });
+        sempMock.disconnect.mockImplementationOnce(async () => { seen.push('semp disconnect'); });
+        svcMock.logout.mockImplementationOnce(async () => { seen.push('logout'); return { ok: true }; });
         signOut();
-        // Signing out while connected disconnects first, then ends the session.
-        expect([solaceMock.disconnect.mock.calls.length, sempMock.disconnect.mock.calls.length])
-            .toEqual([before[0] + 1, before[1] + 1]);
-        expect(svcMock.logout).toHaveBeenCalledTimes(1);
+        // Signing out while connected ends the gateway session, then closes messaging, then SEMP.
+        expect(seen).toEqual(['logout', 'messaging disconnect', 'semp disconnect']);
         expect(account().classList.contains('hidden')).toBe(true);
     });
 
@@ -1082,24 +1083,6 @@ describe('managed-connections — connection:check-connection', () => {
         expect(hidden(container, '#managed-login-view')).toBe(false);
     });
 
-    it('finishes immediately when already on the target VPN (browse)', async () => {
-        const { container, ctx } = await signedIn();
-        await connectToB1Vpn1(container);
-        const browse = vi.fn();
-        ctx.eventBus.on('browser:browse-queue', browse);
-        ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn1', queue: 'qX' });
-        expect(browse).toHaveBeenCalledWith({ queue: 'qX' });
-    });
-
-    it('routes to copy:vpn-switched when returnTo is queue-copy', async () => {
-        const { container, ctx } = await signedIn();
-        await connectToB1Vpn1(container);
-        const copy = vi.fn();
-        ctx.eventBus.on('copy:vpn-switched', copy);
-        ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn1', queue: 'qX', returnTo: 'queue-copy' });
-        expect(copy).toHaveBeenCalledWith({ vpn: 'vpn1', queue: 'qX' });
-    });
-
     it('a VPN switch keeps SEMP while it reconnects messaging: disconnect -> dial again -> reconnect -> finish', async () => {
         const { container, ctx } = await signedIn();
         await connectToB1Vpn1(container);
@@ -1128,26 +1111,6 @@ describe('managed-connections — connection:check-connection', () => {
         expect(ctx.appState.selectedVpn).toBe('vpn2');
         expect(hidden(container, '#managed-connected-view')).toBe(false);
         expect(el(container, '#managed-connected-summary').textContent).toBe('Broker "b1", VPN "vpn2"');
-    });
-
-    it('does not switch when the user cancels the confirm', async () => {
-        const { container, ctx } = await signedIn();
-        await connectToB1Vpn1(container);
-        solaceMock.disconnect.mockClear();
-        ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
-        await answerSwitch(false);
-        expect(solaceMock.disconnect).not.toHaveBeenCalled();
-    });
-
-    it('ignores a duplicate request while a switch is in progress', async () => {
-        const { container, ctx } = await signedIn();
-        await connectToB1Vpn1(container);
-        ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
-        await answerSwitch(true);
-        solaceMock.disconnect.mockClear();
-        // Second request while opInProgress — must be ignored (no extra disconnect).
-        ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
-        expect(solaceMock.disconnect).not.toHaveBeenCalled();
     });
 
     it('errors when the target VPN is not on the connected broker', async () => {
@@ -1196,37 +1159,6 @@ describe('managed-connections — connection:check-connection', () => {
         ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
         await answerSwitch(true);
         expect(solaceMock.disconnect).toHaveBeenCalled();
-    });
-
-    it('ends the switch with the reason if the reconnect never completes (30s timeout), and the next request runs', async () => {
-        const toasts = document.createElement('div');
-        toasts.id = 'toast-container';
-        document.body.appendChild(toasts);
-        const { container, ctx } = await signedIn();
-        await connectToB1Vpn1(container);
-        vi.useFakeTimers();
-        try {
-            ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
-            await answerSwitch(true);
-            ctx.eventBus.emit('client:disconnected'); // triggers reconnect + waitForConnect
-            await Promise.resolve();
-            vi.advanceTimersByTime(30_000); // no client:connected -> the switch fails
-            const browse = vi.fn();
-            ctx.eventBus.on('browser:browse-queue', browse);
-            ctx.eventBus.emit('client:connected', { session: {} }); // listener already cleaned up
-            expect(browse).not.toHaveBeenCalled();
-            // The reason on the selection view and in a warning toast.
-            expect(el(container, '#managed-connect-error').textContent).toBe('VPN "vpn2" did not connect within 30 s.');
-            expect(hidden(container, '#managed-select-view')).toBe(false);
-            expect(toasts.querySelector('.toast--warn')!.textContent).toBe('Could not switch to VPN "vpn2": VPN "vpn2" did not connect within 30 s.');
-
-            solaceMock.disconnect.mockClear();
-            ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
-            await answerSwitch(true);
-            expect(solaceMock.disconnect).toHaveBeenCalled();
-        } finally {
-            vi.useRealTimers();
-        }
     });
 
     it('a reconnect the SDK refuses ends the switch at once, closes SEMP, and shows the reason on the selection view', async () => {
@@ -1328,22 +1260,6 @@ describe('managed-connections — connection:check-connection', () => {
         expect(ctx.loadSelf).not.toHaveBeenCalled();
     });
 
-    it('aborts the switch if the disconnect never arrives (10s timeout)', async () => {
-        const { container, ctx } = await signedIn();
-        await connectToB1Vpn1(container);
-        vi.useFakeTimers();
-        try {
-            ctx.eventBus.emit('connection:check-connection', { vpn: 'vpn2', queue: 'qZ' });
-            await answerSwitch(true);
-            solaceMock.connect.mockClear();
-            vi.advanceTimersByTime(10_000); // no client:disconnected → abort
-            ctx.eventBus.emit('client:disconnected'); // listener already removed
-            expect(solaceMock.connect).not.toHaveBeenCalled();
-            expect(el(container, '#managed-connect-error').textContent).toBe('the session on VPN "vpn1" did not close within 10 s.');
-        } finally {
-            vi.useRealTimers();
-        }
-    });
 });
 
 // The managed entry runs Direct and Managed side by side, so exactly one may be

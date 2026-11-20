@@ -104,6 +104,7 @@ describe('queue-browser/ui-events', () => {
             state.forwardQueue = [];
             await uiEvents.handleForwardSend();
             expect(els.elForwardError.textContent).toContain('No messages');
+            expect(service.forwardMessage).not.toHaveBeenCalled();
         });
 
         it('fails with empty destination name', async () => {
@@ -111,6 +112,7 @@ describe('queue-browser/ui-events', () => {
             els.inputForwardDestName.value = '';
             await uiEvents.handleForwardSend();
             expect(els.elForwardError.textContent).toContain('Destination Name');
+            expect(service.forwardMessage).not.toHaveBeenCalled();
         });
 
         it('sends messages successfully', async () => {
@@ -397,6 +399,7 @@ describe('queue-browser/ui-events', () => {
             els.inputBind.value = 'existing';
             uiEvents.handleBindClick();
             expect(els.elBindError.textContent).toContain('already bound');
+            expect(service.createBrowser).not.toHaveBeenCalled();
         });
 
         it('shows error on service failure', () => {
@@ -700,17 +703,21 @@ describe('queue-browser/ui-events', () => {
             const input = els.inputFilterNewerThan as HTMLInputElement;
             input.value = '';
 
-            uiEvents.prefillDateInputMidnight(input);
-
             // Assert today's date + zero time, tolerant of the
             // `<input type="datetime-local">` canonicalization quirk (jsdom
             // drops trailing `:00` seconds when reading back). Anchoring on
             // the date prefix + a `^...T00:00(:00)?$` pattern matches both
             // jsdom canonical forms and any real-browser output.
-            const now = new Date();
-            const pad = (n: number) => String(n).padStart(2, '0');
-            const datePrefix = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-            expect(input.value).toMatch(new RegExp(`^${datePrefix}T00:00(:00)?$`));
+            // The clock is pinned (local time, late in the day) so the date
+            // cannot change under the test.
+            vi.useFakeTimers();
+            try {
+                vi.setSystemTime(new Date(2026, 4, 17, 23, 59, 30));
+                uiEvents.prefillDateInputMidnight(input);
+            } finally {
+                vi.useRealTimers();
+            }
+            expect(input.value).toMatch(/^2026-05-17T00:00(:00)?$/);
         });
 
         it('leaves a non-empty input unchanged', () => {

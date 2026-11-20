@@ -529,11 +529,17 @@ describe('user-management — modules', () => {
         await vi.waitFor(() => expect(rowCount(container)).toBe(2));
         clickRow(container, 1, '.user-mgmt-edit');
         addBtn(container).click();
+        // Focus sits on an item in the open menu, not on the button.
+        const item = el<HTMLButtonElement>(container, '#user-mgmt-module-menu button');
+        item.focus();
+        expect(document.activeElement).toBe(item);
         el(container, '#user-mgmt-module-add').dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
         expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(false);
+        expect(document.activeElement).toBe(item);
         el(container, '#user-mgmt-module-add').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(true);
         expect(addBtn(container).getAttribute('aria-expanded')).toBe('false');
+        expect(document.activeElement).toBe(addBtn(container));
     });
 
     it('a remove button drops its pill, the module returns to the menu, and the save sends the shorter list', async () => {
@@ -703,6 +709,10 @@ describe('user-management — your own session', () => {
         expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
         // The emit changes no user or flag, so the save itself reloads the list, once.
         await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledTimes(1));
+        // Nothing later reloads it again: not the save's own follow-up, not a replayed rbac:changed.
+        ctx.eventBus.emit('rbac:changed');
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+        expect(svcMock.listUsers).toHaveBeenCalledTimes(1);
     });
 
     it("changing another user's password keeps you signed in", async () => {

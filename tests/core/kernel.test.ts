@@ -72,28 +72,23 @@ describe('Kernel', () => {
             // is unexercised — regression would silently strand users at
             // INFO level even when they pass ?logLevel=DEBUG in the URL.
             const priorLevel = getLogLevel();
-            const priorSearch = window.location.search;
-            // jsdom doesn't allow direct assignment to .search; redefine.
-            Object.defineProperty(window, 'location', {
-                value: { ...window.location, search: '?logLevel=DEBUG' },
-                writable: true,
-                configurable: true,
-            });
+            const priorUrl = window.location.href;
+            setLogLevel(DEFAULT_LOG_LEVEL);
+            // history.replaceState changes the real jsdom location in place, so
+            // the original URL is restored exactly.
+            window.history.replaceState(null, '', '?logLevel=DEBUG');
             try {
+                expect(window.location.search).toBe('?logLevel=DEBUG');
                 const mod = createMockModule({ id: 'test-module', name: 'Test' });
                 setupDOM(['test-module']);
                 const kernel = createKernel([reg(mod)]);
                 await kernel.start();
                 expect(getLogLevel()).toBe(LogLevel.DEBUG);
             } finally {
-                // Restore the original location.search + log level for test isolation.
-                Object.defineProperty(window, 'location', {
-                    value: { ...window.location, search: priorSearch },
-                    writable: true,
-                    configurable: true,
-                });
+                window.history.replaceState(null, '', priorUrl);
                 setLogLevel(priorLevel);
             }
+            expect(window.location.href).toBe(priorUrl);
         });
 
         it('does NOT change log level when ?logLevel= is absent', async () => {

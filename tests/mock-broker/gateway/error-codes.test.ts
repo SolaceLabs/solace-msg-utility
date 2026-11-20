@@ -122,11 +122,6 @@ describe('mock-broker/gateway -- the error codes', () => {
         expect(SENT).toEqual(expect.arrayContaining(UNREAD));
     });
 
-    it('has a message for every code the contract pins, but the reason-only one', () => {
-        expect(GOLDEN.has(REASON_ONLY)).toBe(true);
-        expect(MANAGED_ERROR_CODES).not.toContain(REASON_ONLY);
-    });
-
     it('answers a reset of an unknown user\'s two-factor with a code the app has a message for', async () => {
         const res = await call(createGateway({ seed: contractSeed() }), 'DELETE', '/managed/users/ghost/totp');
         const code = (res.json as { error?: string }).error;

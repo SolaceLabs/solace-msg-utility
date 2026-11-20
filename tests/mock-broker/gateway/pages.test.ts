@@ -112,7 +112,13 @@ describe('mock-broker/gateway/pages -- sign-in', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-11-05T10:00:00Z'));
         for (let i = 0; i < 6; i++) gw.throttle.failed('admin');
-        expect(gw.signIn('admin', 'demo-admin-0001')).toEqual({ ok: false, error: 'Too many attempts. Try again in 60 seconds.' });
+        const wait = () => gw.signIn('admin', 'demo-admin-0001');
+        const tooMany = (seconds: number) => ({ ok: false, error: `Too many attempts. Try again in ${seconds} seconds.` });
+        expect(wait()).toEqual(tooMany(60));
+        gw.throttle.failed('admin');
+        expect(wait()).toEqual(tooMany(120));
+        gw.throttle.failed('admin');
+        expect(wait()).toEqual(tooMany(240));
         gw.throttle.clear();
         expect(gw.signIn('admin', 'demo-admin-0001').ok).toBe(true);
     });

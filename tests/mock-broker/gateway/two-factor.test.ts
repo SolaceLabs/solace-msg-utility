@@ -527,8 +527,10 @@ describe('mock-broker/gateway two-factor -- the rev rule and the store', () => {
         dump.users.find(u => u.username === 'viewer')!.totp!.recovery.length = 0;
         expect(gw.store.totpOf('viewer')!.recovery).toHaveLength(10);
 
-        gw.store.load(gw.store.dump());
-        expect(gw.store.totpOf('viewer')).toBeDefined();
+        const loaded = gw.store.dump();
+        gw.store.load(loaded);
+        loaded.users.find(u => u.username === 'viewer')!.totp!.recovery.length = 0;
+        expect(gw.store.totpOf('viewer')!.recovery).toHaveLength(10);
 
         const users = gw.store.dump().users;
         gw.store.replaceUsers(users);

@@ -43,7 +43,8 @@ describe('mock-broker/gateway/throttle -- the shared vectors', () => {
                 if (s.fail !== undefined) fail(s.fail, s.times ?? 1);
                 else if (s.succeed !== undefined) th.succeeded(s.succeed);
                 else if (s.advance !== undefined) t += s.advance * 1000;
-                else expect({ step: i + 1, wait: th.wait(s.wait!) }).toEqual({ step: i + 1, wait: (s.want ?? 0) * 1000 });
+                else if (s.wait !== undefined) expect({ step: i + 1, wait: th.wait(s.wait) }).toEqual({ step: i + 1, wait: (s.want ?? 0) * 1000 });
+                else throw new Error(`${c.name}, step ${i + 1}: no step key it knows (${Object.keys(s).join(', ')})`);
             }
         });
     }

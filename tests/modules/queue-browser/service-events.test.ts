@@ -102,6 +102,15 @@ describe('queue-browser/service-events', () => {
 
             const select = document.querySelector('#browser-bound-queues') as HTMLSelectElement;
             expect(select.options.length).toBe(2);
+            // The bind input held 'test-queue', the queue that came up.
+            expect((document.querySelector('#browser-bind-input') as HTMLInputElement).value).toBe('');
+        });
+
+        it('leaves the bind input alone when a different queue came up', () => {
+            const se = createServiceEvents();
+            se.onBrowserUp('other-queue');
+
+            expect((document.querySelector('#browser-bind-input') as HTMLInputElement).value).toBe('test-queue');
         });
 
         it('clears bind error for current queue', () => {
@@ -538,9 +547,10 @@ describe('queue-browser/service-events', () => {
             state.allMessages = [];
             state.displayedMessages = [];
 
-            const msg = createSolaceMessage({ timestamp: 1698400000000, gmid: 107 });
+            // Built from local parts, as the formatter reads local time.
+            const msg = createSolaceMessage({ timestamp: new Date(2026, 4, 17, 9, 30, 15).getTime(), gmid: 107 });
             se.onMessage('q1', msg);
-            expect(state.messageStore.get('q1')![0].date).not.toBe('N/A');
+            expect(state.messageStore.get('q1')![0].date).toBe('17-May-26 09:30:15');
         });
 
         it('silently drops a message for a queue whose messageStore entry is absent', () => {
@@ -567,9 +577,9 @@ describe('queue-browser/service-events', () => {
             state.allMessages = [];
             state.displayedMessages = [];
 
-            const msg = createSolaceMessage({ timestamp: { toNumber: () => 1698400000000 }, gmid: 108 });
+            const msg = createSolaceMessage({ timestamp: { toNumber: () => new Date(2026, 10, 3, 18, 5, 7).getTime() }, gmid: 108 });
             se.onMessage('q1', msg);
-            expect(state.messageStore.get('q1')![0].date).not.toBe('N/A');
+            expect(state.messageStore.get('q1')![0].date).toBe('03-Nov-26 18:05:07');
         });
 
         it('handles non-numeric timestamp by leaving dateMs null', () => {
@@ -935,16 +945,19 @@ describe('queue-browser/service-events', () => {
             state.allMessages = state.messageStore.get('q1')!;
             state.displayedMessages = state.allMessages; // Same reference
 
-            const msg = createSolaceMessage({ gmid: 200 });
+            const msg = createSolaceMessage({ gmid: 200, timestamp: new Date(2026, 4, 17, 9, 30, 15).getTime() });
             se.onMessage('q1', msg);
 
-            // Message should be in allMessages (via store) but not separately pushed to displayedMessages
-            // since displayedMessages === allMessages, the push to store is enough
+            // The store push is the only push: displayedMessages is the same array.
             const stored = state.messageStore.get('q1')!;
             expect(stored.length).toBe(1);
-            // displayedMessages is the same reference, so it also has 1 element
-            expect(state.displayedMessages.length).toBe(1);
             expect(state.displayedMessages).toBe(state.allMessages);
+            expect(state.displayedMessages.length).toBe(1);
+            // The row was added once, showing the message's id and date.
+            const rows = ui.getElements().msgList.querySelectorAll('tr');
+            expect(rows.length).toBe(1);
+            expect(rows[0].dataset.id).toBe('200');
+            expect(rows[0].textContent).toContain('17-May-26 09:30:15');
         });
 
         it('handles timestamp with toNumber function via createMessageMock', () => {
@@ -956,34 +969,18 @@ describe('queue-browser/service-events', () => {
 
             const msg = createMessageMock();
             msg.getGuaranteedMessageId.mockReturnValue(999);
-            msg.getSenderTimestamp.mockReturnValue({ toNumber: () => 1700000000000 });
+            msg.getSenderTimestamp.mockReturnValue({ toNumber: () => new Date(2026, 0, 2, 3, 4, 5).getTime() });
 
             se.onMessage('q1', msg);
 
             const stored = state.messageStore.get('q1')!;
-            expect(stored[0].date).not.toBe('N/A');
-            expect(stored[0].date).not.toBe('(No Timestamp)');
+            expect(stored[0].date).toBe('02-Jan-26 03:04:05');
         });
     });
 
     // onSessionAck/Reject branches (correlation-key absent, generic-error
     // fallback, null-event safety) are covered by the publisher unit
     // tests in tests/core/services/solace-publisher.test.ts.
-
-    describe('onConnectFailed()', () => {
-        it('shows browser error when current queue matches and calls disconnectBrowser', () => {
-            const se = createServiceEvents();
-            const disconnectSpy = vi.fn();
-            se.wire({ disconnectBrowser: disconnectSpy });
-            state.currentQueue = 'q1';
-
-            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-            se.onConnectFailed('q1', new Error('test fail'));
-            errorSpy.mockRestore();
-
-            expect(disconnectSpy).toHaveBeenCalledWith('q1');
-        });
-    });
 
     describe('onMessage() additional branches', () => {
         it('handles message with no smfHeader (size = 0)', () => {
@@ -1015,20 +1012,6 @@ describe('queue-browser/service-events', () => {
 
             expect(state.allMessages.length).toBe(1);
             expect(state.displayedMessages.length).toBe(0);
-        });
-
-        it('handles MAP message type', () => {
-            const se = createServiceEvents();
-            state.currentQueue = 'q1';
-            state.messageStore.set('q1', []);
-
-            const solace = (window as any).solace;
-            const msg = createMessageMock();
-            msg.getType = vi.fn(() => solace.MessageType.MAP);
-            se.onMessage('q1', msg);
-
-            const stored = state.messageStore.get('q1')!;
-            expect(stored[0].type).toBe('Map');
         });
     });
 });

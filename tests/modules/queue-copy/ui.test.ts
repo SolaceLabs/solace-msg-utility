@@ -558,6 +558,8 @@ describe('queue-copy/ui', () => {
 
         it('failure: "Not Found" status, Start disabled, errors surfaced', () => {
             renderModalInitial(elsHolder.els, SRC, DST, 'copy');
+            // Enabled first, so the assertion below sees the failure disable it.
+            elsHolder.els.btnModalStart.disabled = false;
             renderVerifyResult(elsHolder.els, {
                 sourceOk: false, via: 'semp', errors: ['no perms'],
                 messageVpn: null, messageCount: null, spoolUsageBytes: null,

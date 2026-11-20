@@ -667,11 +667,14 @@ describe('core/services/solace-client', () => {
             service.connect(baseCfg(), 'broker.test', 'admin');
 
             const iframe = document.querySelector('iframe[src="https://broker.test:8080"]') as HTMLIFrameElement;
+            const removeSpy = vi.spyOn(iframe, 'remove');
             iframe.dispatchEvent(new Event('load'));
+            expect(removeSpy).toHaveBeenCalledTimes(1);
             expect(document.querySelector('iframe[src="https://broker.test:8080"]')).toBeNull();
-            // setTimeout fires cleanup a second time — guard should short-circuit
-            expect(() => vi.advanceTimersByTime(3000)).not.toThrow();
-            expect(document.querySelector('iframe[src="https://broker.test:8080"]')).toBeNull();
+            // The timeout would run cleanup a second time; the guard short-circuits it.
+            vi.advanceTimersByTime(3000);
+            iframe.dispatchEvent(new Event('error'));
+            expect(removeSpy).toHaveBeenCalledTimes(1);
             vi.useRealTimers();
         });
 

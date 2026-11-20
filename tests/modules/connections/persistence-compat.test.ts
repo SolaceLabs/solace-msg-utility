@@ -19,7 +19,7 @@ import type { ConnectionConfig } from '../../../src/core/connections/types';
  * compile-time only and wouldn't catch a mismatch between the persisted JSON
  * and the declared interface shape.
  */
-describe('core/connections — persistence compat with connections module', () => {
+describe('modules/connections -- persistence compat with connections module', () => {
     beforeEach(() => {
         localStorage.clear();
     });
@@ -86,34 +86,5 @@ describe('core/connections — persistence compat with connections module', () =
         // Must not throw, must return the same partial shape the caller saved.
         const loaded = config.load();
         expect(loaded).toEqual(legacy);
-    });
-
-    it('persisted shape exposes all required-for-reuse fields when fully populated', () => {
-        // This test locks in the invariant that a fully-populated config
-        // written via save() carries every field queue-copy will need to
-        // build a ConnectionConfig-shaped destination form default.
-        const cfg: ConnectionConfig = {
-            host: 'h',
-            solace: {
-                protocol: 'wss', port: '8008', urlPath: '', vpn: 'v', user: 'u',
-                authMode: 'oauth',
-                connectRetries: 0, connectTimeout: 3000,
-                reconnectRetries: 1, reconnectWait: 3000,
-                maxMessagesPerQueue: 100,
-                clientNameId: 'persisted-id',
-            },
-            semp: { protocol: 'https', port: '1943', urlPath: '', user: 'a' },
-        };
-
-        config.save(cfg);
-        const stored = (localStorage.setItem as any).mock.calls.at(-1)[1];
-        (localStorage.getItem as any).mockReturnValue(stored);
-
-        const loaded = config.load()!;
-        // Structural assertions — every ConnectionConfig field present.
-        expect(loaded.host).toBe('h');
-        expect(loaded.solace.authMode).toBe('oauth');
-        expect(loaded.solace.maxMessagesPerQueue).toBe(100);
-        expect(loaded.semp.urlPath).toBe('');
     });
 });

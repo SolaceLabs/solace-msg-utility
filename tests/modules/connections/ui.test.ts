@@ -31,7 +31,7 @@ describe('connections/ui', () => {
             // Rip the nodes out of the container so a re-query would fail.
             hostBefore.remove();
             btnBefore.remove();
-            expect(container.querySelector('#solace-host')).toBeNull();
+            expect(container.querySelector('#conn-host')).toBeNull();
             expect(container.querySelector('#btn-solace-connect')).toBeNull();
 
             // Cached references are still usable — identity-equal to the originals —

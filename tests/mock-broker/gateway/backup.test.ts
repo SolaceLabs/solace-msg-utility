@@ -375,6 +375,16 @@ describe('mock-broker/gateway/backup -- the routes', () => {
             const connsWith = async (edit: (d: BackupDoc) => void) => (await imp(gw, await file(gw, edit), 'skip', 'replace', 'skip')).json;
             expect((await connsWith(d => { d.connections[0].hostname = 'http://x'; })).reason).toMatch(/^The backup's connections cannot be imported: connection 1:/);
             expect((await connsWith(d => { d.connections[1].broker = 'b1'; })).reason).toContain('broker "b1" appears more than once');
+            // A merge checks the result of merging, so a file's bad connection or user is refused as a replace refuses it.
+            const mergedConns = async (edit: (d: BackupDoc) => void) => (await imp(gw, await file(gw, edit), 'skip', 'merge', 'skip')).json;
+            expect((await mergedConns(d => { d.connections[0].hostname = 'http://x'; })).reason).toMatch(/^The backup's connections cannot be imported: connection 1:/);
+            const mergedUsers = (await imp(gw, await file(gw, d => { d.users[1].username = 'not valid!'; }), 'merge', 'skip', 'skip')).json;
+            expect(mergedUsers.reason).toMatch(/^The backup's users cannot be imported: user \d+: username/);
+            // A section the import skips is not checked, and nothing it holds is written.
+            const skipped = await imp(gw, await file(gw, d => { d.users[1].username = 'not valid!'; d.connections[0].hostname = 'http://x'; }), 'skip', 'skip', 'replace');
+            expect(skipped.json).toEqual({ signedOut: false });
+            expect([gw.store.listUsers().map(u => u.username), gw.store.listConnections()[0].hostname])
+                .toEqual([['admin', 'viewer', 'operator'], 'host1']);
             // Settings are refused as a save is, and nothing else is written.
             const lockOut = await imp(gw, await file(gw, d => { d.settings.access.allow = ['10.0.0.0/8']; d.users = d.users.slice(0, 1); }), 'replace', 'skip', 'replace');
             expect(lockOut.json.error).toBe('would_lock_out');

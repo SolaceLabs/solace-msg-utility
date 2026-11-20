@@ -225,11 +225,16 @@ describe('core/services/solace-publisher', () => {
         it('honors per-publish ackTimeoutMs override', async () => {
             vi.useFakeTimers();
             const publisher = createSolacePublisher(session);
-            const promise = publisher.send(createMessageMock(), queueDest, { ackTimeoutMs: 500 });
-            // Advancing under the override does NOT yet time out.
-            await vi.advanceTimersByTimeAsync(400);
-            // Then crossing the override fires.
-            await vi.advanceTimersByTimeAsync(200);
+            const onTimeout = vi.fn();
+            const promise = publisher.send(createMessageMock(), queueDest, { ackTimeoutMs: 500, correlationKey: 'k-override', onTimeout });
+            // One millisecond before the override's deadline: still pending.
+            await vi.advanceTimersByTimeAsync(499);
+            expect(onTimeout).not.toHaveBeenCalled();
+            expect(publisher.isPending('k-override')).toBe(true);
+            // At the deadline it times out.
+            await vi.advanceTimersByTimeAsync(1);
+            expect(onTimeout).toHaveBeenCalledTimes(1);
+            expect(publisher.isPending('k-override')).toBe(false);
             await expect(promise).resolves.toEqual({
                 ok: false,
                 error: 'Timed out waiting for broker acknowledgement.',
@@ -469,6 +474,7 @@ describe('core/services/solace-publisher', () => {
             await expect(publisher.send(createMessageMock(), queueDest, { onReject })).resolves.toEqual({
                 ok: false, error: 'Publisher disposed',
             });
+            expect(session.send).not.toHaveBeenCalled();
             expect(onReject).toHaveBeenCalledWith('Publisher disposed');
         });
     });

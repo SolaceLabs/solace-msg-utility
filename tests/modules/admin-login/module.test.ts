@@ -137,18 +137,18 @@ describe('admin-login — restoring the gateway session', () => {
 });
 
 describe('admin-login — sign out', () => {
-    it('ends the gateway session, clears the session, hides the control, then emits', async () => {
+    it('ends the gateway session, clears the session, emits rbac:changed, shows the signed-out view, then navigates', async () => {
         const { el, hidden, account } = await install();
-        const rbac = vi.fn();
-        eventBus.on('rbac:changed', rbac);
+        const seen: string[] = [];
+        logout.mockImplementation(async () => { seen.push('logout'); return { ok: true }; });
+        eventBus.on('rbac:changed', () => seen.push(`rbac:changed (managed ${appState.managed === null ? 'cleared' : 'set'})`));
+        (ctx.loadSelf as any).mockImplementation(() => seen.push(`loadSelf (sign-in view ${hidden('#admin-login-view') ? 'hidden' : 'shown'})`));
         account()!.querySelector<HTMLButtonElement>('.account-control-signout')!.click();
+        expect(seen).toEqual(['logout', 'rbac:changed (managed cleared)', 'loadSelf (sign-in view shown)']);
         expect(logout).toHaveBeenCalledTimes(1);
         expect(appState.managed).toBeNull();
-        expect(rbac).toHaveBeenCalledTimes(1);
-        expect(hidden('#admin-login-view')).toBe(false);
         expect(account()!.classList.contains('hidden')).toBe(true);
         expect(el<HTMLAnchorElement>('#btn-admin-login').getAttribute('href')).toBe('/login?next=/solAdmin');
-        expect(ctx.loadSelf).toHaveBeenCalled();
     });
 });
 

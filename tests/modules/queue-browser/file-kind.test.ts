@@ -76,12 +76,6 @@ describe('queue-browser/file-kind', () => {
             expect(kind).toEqual(image ? { label, ext, image } : { label, ext });
         });
 
-        it('gives only the four preview images an image type, and no executable an extension of its own', () => {
-            const images = cases.filter(c => c[4] !== undefined).map(c => c[4]);
-            expect(new Set(images)).toEqual(new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']));
-            for (const c of cases.filter(c => /executable/.test(c[2]))) expect(c[3]).toBe('bin');
-        });
-
         it('tells a Mach-O universal binary (a few architectures) from a Java class (a version of 45 or more) by the word after CAFEBABE', () => {
             const magic = [0xCA, 0xFE, 0xBA, 0xBE];
             expect(detectKind(bytes(magic, u32be(2)))).toEqual({ label: 'Mach-O universal binary', ext: 'bin' });

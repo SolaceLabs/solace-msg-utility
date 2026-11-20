@@ -479,15 +479,15 @@ describe('mock-broker/gateway/versions -- the basis of an import', () => {
         expect((await call(gw, 'GET', '/managed/connections')).json.connections.map((c: any) => c.rev)).toEqual([2, 2, 2]);
     });
 
-    it('gives an older backup, written before audit.onFailure, the value continue', async () => {
+    it('imports a backup without audit.onFailure as continue, replacing the saved refuse', async () => {
         const gw = gateway();
         const doc: BackupDoc = await openBackup((await call(gw, 'POST', '/managed/backup/export', { passphrase: PASS })).json.content, PASS);
         delete (doc.settings.audit as Partial<typeof doc.settings.audit>).onFailure;
         // The gateway's strict reader puts a missing key at the zero value of the file: here the default.
         const sealed = await sealBackup(await newBackupKey(PASS, 1000), doc);
-        const opened = await openBackup(sealed, PASS);
-        expect(opened.settings.audit.onFailure).toBe('continue');
-        await call(gw, 'PUT', '/managed/settings', { audit: { onFailure: 'refuse' }, rev: gw.settings.rev() });
+        const put = await call(gw, 'PUT', '/managed/settings', { audit: { onFailure: 'refuse' }, rev: gw.settings.rev() });
+        expect(put.status).toBe(200);
+        expect(gw.settings.current().audit.onFailure).toBe('refuse');
         expect((await imp(gw, sealed, { settings: 'replace' }, { users: 1, connections: 1, settings: gw.settings.rev() })).status).toBe(200);
         expect(gw.settings.current().audit.onFailure).toBe('continue');
     });

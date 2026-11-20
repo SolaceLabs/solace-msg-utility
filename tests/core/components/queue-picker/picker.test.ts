@@ -119,12 +119,28 @@ describe('core/components/queue-picker', () => {
             $<HTMLButtonElement>('.picker-cancel').click();
             await p;
 
-            // Second invocation
+            // Second and third invocations
             p = pickQueue(src(sempCtx));
             await flushAsync();
             expect(getDialog()).toBe(firstDialog);
             $<HTMLButtonElement>('.picker-cancel').click();
             await p;
+            p = pickQueue(src(sempCtx));
+            await flushAsync();
+            expect(document.querySelectorAll('dialog.picker-dialog').length).toBe(1);
+
+            // One click on Refresh VPNs must start exactly one VPN listing: a
+            // handler attached once per open would start one per open.
+            const vpnListCalls = () => (sempCtx.fetch as any).mock.calls
+                .filter((c: any[]) => /\/msgVpns(\?|$)/.test(c[0])).length;
+            const before = vpnListCalls();
+            $<HTMLButtonElement>('.picker-vpn-refresh').click();
+            await flushAsync();
+            expect(vpnListCalls() - before).toBe(1);
+
+            // One click on Cancel resolves the open invocation once, with null.
+            $<HTMLButtonElement>('.picker-cancel').click();
+            expect(await p).toBeNull();
         });
 
         it('rejects a concurrent invocation while a picker is already open', async () => {
@@ -321,7 +337,7 @@ describe('core/components/queue-picker', () => {
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['empty-vpn'], { 'empty-vpn': [] });
 
-            pickQueue(src(sempCtx));
+            const p = pickQueue(src(sempCtx));
             await flushAsync();
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
@@ -329,10 +345,13 @@ describe('core/components/queue-picker', () => {
 
             expect($<HTMLDivElement>('.picker-status').textContent).toContain('No queues found');
             $<HTMLInputElement>('.picker-queue-input').dispatchEvent(new Event('focus'));
-            // Empty cache exists for this VPN; focus doesn't re-show because
-            // there are zero entries — but the renderQueueList path still has
-            // the empty-state placeholder when invoked from a focus.
-            // Drive an explicit render via the input event to populate.
+            // The VPN has a cache entry with zero queues, so focus opens the
+            // queue list and it holds only the empty-state placeholder.
+            expect($<HTMLDivElement>('.picker-queue-list').classList.contains('show')).toBe(true);
+            expect($<HTMLDivElement>('.picker-queue-list').textContent).toBe('No queues available');
+            getDialog().close();
+            await p;
+            expect(getDialog().hasAttribute('open')).toBe(false);
         });
 
         it('uses cached queues when re-selecting a previously-fetched VPN', async () => {
@@ -1689,14 +1708,17 @@ describe('core/components/queue-picker', () => {
             await flushAsync();
 
             const input = $<HTMLInputElement>('.picker-vpn-input');
-            input.value = 'a';
+            input.value = 'b';
             input.dispatchEvent(new Event('input'));
             // Timer scheduled but not yet fired.
+            expect(vi.getTimerCount()).toBe(1);
 
             $<HTMLButtonElement>('.picker-cancel').click();
-            // Advance past where the timer would have fired — must not throw and
-            // must not invoke renderVpnList against the now-cleared state.
+            // Cancel clears the timer; had it survived, it would fire after the
+            // close and hide 'vpn-a' (which does not match 'b').
+            expect(vi.getTimerCount()).toBe(0);
             await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS * 2);
+            expect(visibleOptions('.picker-vpn-list')).toEqual(['vpn-a', 'vpn-b']);
 
             expect(await p).toBeNull();
             vi.useRealTimers();
@@ -1714,12 +1736,17 @@ describe('core/components/queue-picker', () => {
             await flushAsync();
 
             const input = $<HTMLInputElement>('.picker-queue-input');
-            input.value = 'q';
+            input.value = '2';
             input.dispatchEvent(new Event('input'));
             // Timer scheduled but not yet fired.
+            expect(vi.getTimerCount()).toBe(1);
 
             $<HTMLButtonElement>('.picker-cancel').click();
+            // Cancel clears the timer; had it survived, it would fire after the
+            // close and hide 'q1' (which does not match '2').
+            expect(vi.getTimerCount()).toBe(0);
             await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS * 2);
+            expect(visibleOptions('.picker-queue-list')).toEqual(['q1', 'q2']);
 
             expect(await p).toBeNull();
             vi.useRealTimers();
@@ -1732,6 +1759,7 @@ describe('core/components/queue-picker', () => {
         // didn't get cleared, programmatic dispatch in a test) could still
         // reach a handler. Each handler's `!state` guard is the safety net.
         it('handlers gracefully no-op when dispatched after the picker closes', async () => {
+            vi.useFakeTimers();
             const sempCtx = makeSempCtx();
             stubVpnsAndQueues(sempCtx, ['v'], { v: ['q'] });
             const p = pickQueue(src(sempCtx));
@@ -1759,6 +1787,7 @@ describe('core/components/queue-picker', () => {
             // post-close — jsdom skips click handlers on disabled buttons, but
             // dispatchEvent fires regardless, exercising the handler's guard.
             const fetchCallsAtClose = (sempCtx.fetch as any).mock.calls.length;
+            const optionsAtClose = visibleOptions('.picker-vpn-list');
             const errors: ErrorEvent[] = [];
             const onError = (e: ErrorEvent) => { errors.push(e); e.preventDefault(); };
             window.addEventListener('error', onError);
@@ -1770,11 +1799,16 @@ describe('core/components/queue-picker', () => {
                 refs.queueInput.dispatchEvent(new Event('input'));
                 refs.queueRefresh.dispatchEvent(new MouseEvent('click', { bubbles: true }));
                 refs.confirm.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-                await new Promise(r => setTimeout(r, INPUT_DEBOUNCE_MS * 2));
+                // The guarded handlers start no debounce timer.
+                expect(vi.getTimerCount()).toBe(0);
+                await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS * 2);
                 await flushAsync();
             } finally {
                 window.removeEventListener('error', onError);
+                vi.useRealTimers();
             }
+            // The VPN list the user last saw is not emptied or filtered.
+            expect(visibleOptions('.picker-vpn-list')).toEqual(optionsAtClose);
             expect(errors.map(e => e.message)).toEqual([]);
             expect((sempCtx.fetch as any).mock.calls.length).toBe(fetchCallsAtClose);
 

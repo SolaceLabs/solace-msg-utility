@@ -159,12 +159,37 @@ describe('mock-broker/panel — levers', () => {
     });
 
     it('Reset restores every lever and rebuilds the data', () => {
-        scenario.latencyMs = 900;
-        scenario.queueState.set('default/test-queue-1', QUEUE_STATE.BIND_DENIED);
+        const queue = () => getQueue('vpn-prod', 'Q/ORDER/NEW')!;
+        const seeded = queue().messages.length;
+        expect(seeded).toBeGreaterThan(0);
+        const faultPick = selectWith(FAULT.SEMP_ERROR);
+        const volumePick = selectWith('5');
+        const statePick = selectWith(QUEUE_STATE.BIND_DENIED);
+        const latency = panel().querySelector<HTMLInputElement>('.mockctl-range')!;
+        const latencyLabel = panel().querySelector('.mockctl-value')!;
+
+        // Every lever moved through its own control, and the queue emptied.
+        latency.value = '900';
+        latency.dispatchEvent(new Event('input'));
+        faultPick.value = FAULT.SEMP_ERROR;
+        faultPick.dispatchEvent(new Event('change'));
+        volumePick.value = '5';
+        volumePick.dispatchEvent(new Event('change'));
+        const queuePick = selectWith('default/test-queue-1');
+        queuePick.value = 'default/test-queue-1';
+        queuePick.dispatchEvent(new Event('change'));
+        statePick.value = QUEUE_STATE.BIND_DENIED;
+        statePick.dispatchEvent(new Event('change'));
+        queue().messages.length = 0;
+        expect([scenario.latencyMs, scenario.fault, scenario.volume, scenario.queueState.get('default/test-queue-1')])
+            .toEqual([900, FAULT.SEMP_ERROR, 5, QUEUE_STATE.BIND_DENIED]);
 
         button('Reset demo data').click();
 
+        expect([scenario.latencyMs, scenario.fault, scenario.volume]).toEqual([120, FAULT.NONE, 1]);
         expect(scenario.queueState.get('default/test-queue-1')).toBe(QUEUE_STATE.NORMAL);
-        expect(scenario.latencyMs).toBe(120);
+        expect([latency.value, latencyLabel.textContent, faultPick.value, volumePick.value, statePick.value])
+            .toEqual(['120', '120 ms', FAULT.NONE, '1', QUEUE_STATE.NORMAL]);
+        expect(queue().messages).toHaveLength(seeded);
     });
 });

@@ -464,6 +464,16 @@
           "body": { "rev": 0, "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "scheme": "https", "port": "1443", "msgVpns": [] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": client.scheme \"https\" must be \"wss\" or \"ws\"" }
         },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "", "msgVpns": [] }, "extra": 1 },
+          "status": 400, "response": { "error": "bad_request" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "", "user": "", "pass": "", "extra": 1 }, "client": { "port": "", "msgVpns": [] } },
+          "status": 400, "response": { "error": "bad_request" }
+        },
         { "as": "admin", "method": "DELETE", "path": "/managed/connections/ghost?rev=1", "status": 404, "response": { "error": "not_found" } }
       ]
     },

@@ -148,9 +148,10 @@ describe('mock-broker/gateway -- the gateway contract', () => {
         expect(unknown).toEqual([]);
     });
 
-    it('names a field it does not know, with where it is', () => {
-        const step = { method: 'GET', path: '/managed/me', status: 200, response: null, clock: '+30s' };
-        expect(unknownKeys('a case, step 1', step, KNOWN.step)).toEqual(['a case, step 1: clock']);
+    it('holds unique case names and a step in every case, as the Go runner requires', () => {
+        const names = cases.map(c => c.name);
+        expect(names.filter((n, i) => names.indexOf(n) !== i)).toEqual([]);
+        expect(cases.filter(c => c.steps.length === 0).map(c => c.name)).toEqual([]);
     });
 
     for (const c of cases) {

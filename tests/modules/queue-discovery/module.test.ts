@@ -618,32 +618,6 @@ describe('QueueDiscoveryModule', () => {
         vi.useRealTimers();
     });
 
-    it('handles fetchQueues error path', async () => {
-        const container = createDiscoveryDOM();
-        document.body.appendChild(container);
-        const { ctx, appState } = createTestContext(container);
-        appState.isSempConnected = true;
-
-        // VPNs succeed, queues fail
-        (ctx.sempFetch as any)
-            .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ msgVpnName: 'test' }] }) })
-            .mockResolvedValueOnce({ ok: false, statusText: 'Error', json: async () => ({}) });
-
-        await QueueDiscoveryModule.install(ctx);
-
-        await vi.waitFor(() => {
-            expect(container.querySelector('#discovery-vpn-list')!.querySelectorAll('.dropdown-option').length).toBe(1);
-        });
-
-        // Select VPN to trigger fetchQueues
-        const vpnOption = container.querySelector('#discovery-vpn-list .dropdown-option') as HTMLElement;
-        vpnOption.click();
-
-        await new Promise(r => setTimeout(r, 100));
-        const queueInput = container.querySelector('#discovery-queue-input') as HTMLInputElement;
-        expect(queueInput.placeholder).toContain('Error');
-    });
-
     it('handles fetchQueues with error that has custom message', async () => {
         const container = createDiscoveryDOM();
         document.body.appendChild(container);
@@ -652,7 +626,7 @@ describe('QueueDiscoveryModule', () => {
 
         (ctx.sempFetch as any)
             .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ msgVpnName: 'test' }] }) })
-            .mockResolvedValueOnce({ ok: false, statusText: 'Custom Error' });
+            .mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Custom Error' });
 
         await QueueDiscoveryModule.install(ctx);
 
@@ -665,9 +639,8 @@ describe('QueueDiscoveryModule', () => {
 
         const queueInput = container.querySelector('#discovery-queue-input') as HTMLInputElement;
         await vi.waitFor(() => {
-            expect(queueInput.placeholder).toContain('Error fetching Queues');
+            expect(queueInput.placeholder).toBe('Error fetching Queues (HTTP 500 Custom Error)');
         });
-        expect(queueInput.placeholder).toContain('Custom Error');
     });
 
     it('copy button stays hidden when browser:available is never emitted', async () => {

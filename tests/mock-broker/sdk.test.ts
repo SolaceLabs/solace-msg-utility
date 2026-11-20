@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from '../helpers/sources';
@@ -20,6 +20,10 @@ beforeEach(() => {
     resetScenario();
     scenario.latencyMs = 0;   // keep the suite fast; timing is asserted by ordering, not clocks
     seed();
+});
+
+afterEach(() => {
+    vi.useRealTimers();
 });
 
 describe('mock-broker/emitter — dispatch order', () => {
@@ -90,7 +94,7 @@ describe('mock-broker/sdk — session', () => {
         // The other shape: solace-client.ts's connect-failed handler forwards sessionEvent.infoStr with
         // no fallback, so a Session failure carries infoStr and NOT message.
         const event = failed.mock.calls[0][0];
-        expect(event.infoStr).toBeTruthy();
+        expect(event.infoStr).toBe('Connection error: Unable to connect to wss://nope.example.com');
         expect(event.message).toBeUndefined();
     });
 
@@ -174,10 +178,16 @@ describe('mock-broker/sdk — publish acknowledgement', () => {
         expect(after.messages[after.messages.length - 1].msg.getBinaryAttachment()).toBe('payload-under-test');
     });
 
-    it('fans a topic publish out to every subscribed queue', async () => {
+    it('fans a topic publish out to every subscribed queue, and to no other', async () => {
         const sdk = buildSolaceSdk();
         const session = sdk.SolclientFactory.createSession({ url: 'wss://broker.solace.com', vpnName: 'vpn-prod' });
-        const before = getQueue('vpn-prod', 'Q/ORDER/NEW')!.messages.length;
+        // Two queues in the session's VPN subscribe to orders/new/>; Q/ORDER/PROCESS
+        // (orders/process/*) does not match.
+        getQueue('vpn-prod', 'Q/ORDER/ARCHIVE')!.subscriptions.push('orders/new/>');
+        const counts = () => [
+            getQueue('vpn-prod', 'Q/ORDER/NEW'), getQueue('vpn-prod', 'Q/ORDER/ARCHIVE'), getQueue('vpn-prod', 'Q/ORDER/PROCESS'),
+        ].map(q => q!.messages.length);
+        const before = counts();
 
         const msg = sdk.SolclientFactory.createMessage();
         msg.setDestination(sdk.SolclientFactory.createTopicDestination('orders/new/uk'));
@@ -185,8 +195,10 @@ describe('mock-broker/sdk — publish acknowledgement', () => {
         msg.setCorrelationKey({ Solace_Msg_Utility_Seq_Num: 't' });
         session.send(msg);
 
-        // Q/ORDER/NEW subscribes to orders/new/> so it must receive it.
-        expect(getQueue('vpn-prod', 'Q/ORDER/NEW')!.messages).toHaveLength(before + 1);
+        expect(counts()).toEqual([before[0] + 1, before[1] + 1, before[2]]);
+        for (const q of [getQueue('vpn-prod', 'Q/ORDER/NEW')!, getQueue('vpn-prod', 'Q/ORDER/ARCHIVE')!]) {
+            expect(q.messages[q.messages.length - 1].msg.getBinaryAttachment()).toBe('fanned-out');
+        }
     });
 });
 
@@ -226,6 +238,7 @@ describe('mock-broker/sdk — queue browser', () => {
     it('stop() suspends delivery and start() resumes it', async () => {
         // These are the copy engine's backpressure control; no-ops here would
         // let the publish queue grow without bound on the bulk queue.
+        vi.useFakeTimers();
         const { sdk, browser } = browserFor('vpn-dev', 'Q/BULK');
         let count = 0;
         browser.on(sdk.QueueBrowserEventName.MESSAGE, () => {
@@ -234,13 +247,14 @@ describe('mock-broker/sdk — queue browser', () => {
         });
         browser.connect();
 
-        await vi.waitFor(() => expect(count).toBe(3));
-        const settled = count;
-        await new Promise(r => setTimeout(r, 30));
-        expect(count).toBe(settled);          // genuinely suspended
+        await vi.advanceTimersByTimeAsync(30);
+        expect(count).toBe(3);                // genuinely suspended, however long it waits
+        await vi.advanceTimersByTimeAsync(30);
+        expect(count).toBe(3);
 
         browser.start();
-        await vi.waitFor(() => expect(count).toBeGreaterThan(settled));
+        await vi.advanceTimersByTimeAsync(30);
+        expect(count).toBeGreaterThan(3);
     });
 
     it('refuses to bind a denied queue through CONNECT_FAILED_ERROR', async () => {
@@ -319,6 +333,7 @@ describe('mock-broker/sdk — queue browser', () => {
     });
 
     it('reports an empty queue as bindable with nothing to deliver', async () => {
+        vi.useFakeTimers();
         const { sdk, browser } = browserFor('default', 'Q/EMPTY');
         const up = vi.fn();
         const message = vi.fn();
@@ -326,8 +341,8 @@ describe('mock-broker/sdk — queue browser', () => {
         browser.on(sdk.QueueBrowserEventName.MESSAGE, message);
         browser.connect();
 
-        await vi.waitFor(() => expect(up).toHaveBeenCalled());
-        await new Promise(r => setTimeout(r, 20));
+        await vi.advanceTimersByTimeAsync(20);
+        expect(up).toHaveBeenCalledTimes(1);
         expect(message).not.toHaveBeenCalled();
     });
 });

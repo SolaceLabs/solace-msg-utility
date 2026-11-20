@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createVpnSwitch, type VpnSwitchMode } from '../../../src/modules/connections/vpn-switch';
+import { createVpnSwitch, SWITCH_CONNECT_TIMEOUT_MS, SWITCH_DISCONNECT_TIMEOUT_MS, type VpnSwitchMode } from '../../../src/modules/connections/vpn-switch';
 import { createEventBus } from '../../../src/core/event-bus';
 import { logger } from '../../../src/core/logger';
 
@@ -51,14 +51,19 @@ describe('connections/vpn-switch -- navigation contract', () => {
     });
 
     it('already on the target VPN: finishes at once, without navigating', () => {
-        const { loadSelf, vpnSwitch, copied } = setup();
+        const { loadSelf, vpnSwitch, copied, browse } = setup();
         vpnSwitch.request({ vpn: 'old', queue: 'q', returnTo: 'queue-copy' });
         expect(loadSelf).not.toHaveBeenCalled();
         expect(copied).toHaveBeenCalledWith({ vpn: 'old', queue: 'q' });
+        expect(browse).not.toHaveBeenCalled();
+
+        vpnSwitch.request({ vpn: 'old', queue: 'q2' });
+        expect(loadSelf).not.toHaveBeenCalled();
+        expect(browse).toHaveBeenCalledWith({ queue: 'q2' });
     });
 
     it('VPN switch, user confirms: navigates after the confirm, closes, connects, finishes', async () => {
-        const { eventBus, loadSelf, mode, vpnSwitch, copied } = setup();
+        const { eventBus, loadSelf, mode, vpnSwitch, copied, browse } = setup();
         vpnSwitch.request({ vpn: 'v2', queue: 'q', returnTo: 'queue-copy' });
         expect(loadSelf).not.toHaveBeenCalled();   // nothing happens while the question is open
         expect(await answer(true)).toBe('Current VPN is "old". Switch to "v2"?');
@@ -66,18 +71,25 @@ describe('connections/vpn-switch -- navigation contract', () => {
         expect(mode.disconnect).toHaveBeenCalled();
         expect(mode.connect).not.toHaveBeenCalled();
 
+        // Until the old session has closed, a session coming up is not the new one.
+        eventBus.emit('client:connected', { session: {} });
+        expect(copied).not.toHaveBeenCalled();
+
         eventBus.emit('client:disconnected');
         expect(mode.connect).toHaveBeenCalledWith('v2');
         eventBus.emit('client:connected', { session: {} });
         expect(copied).toHaveBeenCalledWith({ vpn: 'v2', queue: 'q' });
+        expect(browse).not.toHaveBeenCalled();
     });
 
     it('VPN switch, user cancels: no navigation, nothing closed, and the next request is asked again', async () => {
-        const { loadSelf, mode, vpnSwitch } = setup();
-        vpnSwitch.request({ vpn: 'v2', queue: 'q' });
+        const { loadSelf, mode, vpnSwitch, copied, browse } = setup();
+        vpnSwitch.request({ vpn: 'v2', queue: 'q', returnTo: 'queue-copy' });
         await answer(false);
         expect(loadSelf).not.toHaveBeenCalled();
         expect(mode.disconnect).not.toHaveBeenCalled();
+        expect(copied).not.toHaveBeenCalled();
+        expect(browse).not.toHaveBeenCalled();
         vpnSwitch.request({ vpn: 'v2', queue: 'q' });
         expect(document.querySelector('dialog.confirm-dialog')).not.toBeNull();
     });
@@ -135,5 +147,59 @@ describe('connections/vpn-switch -- failures end the switch', () => {
         busy.vpnSwitch.request({ vpn: 'v2', queue: 'q' });
         expect(busy.loadSelf).not.toHaveBeenCalled();
         expect(busy.mode.disconnect).not.toHaveBeenCalled();
+    });
+});
+
+describe('connections/vpn-switch -- timeouts and a dropped session', () => {
+    it('the old session never closes: the switch gives up after SWITCH_DISCONNECT_TIMEOUT_MS with the reason, and the next request runs', async () => {
+        vi.useFakeTimers();
+        try {
+            const { eventBus, loadSelf, mode, vpnSwitch } = setup();
+            vpnSwitch.request({ vpn: 'v2', queue: 'q' });
+            await answer(true);
+            vi.advanceTimersByTime(SWITCH_DISCONNECT_TIMEOUT_MS);
+            expect(mode.showError).toHaveBeenCalledWith('the session on VPN "old" did not close within 10 s.');
+
+            // A late close is not the abandoned switch: nothing connects.
+            eventBus.emit('client:disconnected');
+            expect(mode.connect).not.toHaveBeenCalled();
+
+            vpnSwitch.request({ vpn: 'v3', queue: 'q' });
+            await answer(true);
+            expect(loadSelf).toHaveBeenCalledTimes(2);
+            expect(mode.disconnect).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('the new session never comes up: the switch gives up after SWITCH_CONNECT_TIMEOUT_MS with the reason, and a late session does not finish it', async () => {
+        vi.useFakeTimers();
+        try {
+            const { eventBus, mode, vpnSwitch, browse } = setup();
+            vpnSwitch.request({ vpn: 'v2', queue: 'q' });
+            await answer(true);
+            eventBus.emit('client:disconnected');
+            expect(mode.connect).toHaveBeenCalledWith('v2');
+            vi.advanceTimersByTime(SWITCH_CONNECT_TIMEOUT_MS);
+            expect(mode.showError).toHaveBeenCalledWith('VPN "v2" did not connect within 30 s.');
+
+            eventBus.emit('client:connected', { session: {} });
+            expect(browse).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('the new session closes before it is up: the switch ends with the reason and a later session does not finish it', async () => {
+        const { eventBus, mode, vpnSwitch, browse } = setup();
+        vpnSwitch.request({ vpn: 'v2', queue: 'q' });
+        await answer(true);
+        eventBus.emit('client:disconnected');   // the old session closes; the connect starts
+        eventBus.emit('client:disconnected');   // the new one drops before it is up
+        expect(mode.showError).toHaveBeenCalledWith('the connection to VPN "v2" closed before it came up.');
+
+        eventBus.emit('client:connected', { session: {} });
+        expect(browse).not.toHaveBeenCalled();
     });
 });
