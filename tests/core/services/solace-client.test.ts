@@ -245,22 +245,6 @@ describe('core/services/solace-client', () => {
             expect(hooks.onDisconnected).toHaveBeenCalled();
         });
 
-        it('MESSAGE handler is a true no-op (no hooks fire)', () => {
-            const hooks = makeHooks();
-            const service = createServiceSolace(hooks);
-            service.init();
-            service.connect(baseCfg(), 'broker.test', 'admin');
-
-            const sessionMock = solaceMock.SolclientFactory.createSession.mock.results[0].value;
-            const msgHandler = sessionMock.on.mock.calls.find((c: any[]) => c[0] === 'MESSAGE')[1];
-            (hooks.onConnected as any).mockClear();
-            (hooks.onDisconnected as any).mockClear();
-
-            expect(() => msgHandler()).not.toThrow();
-            expect(hooks.onConnected).not.toHaveBeenCalled();
-            expect(hooks.onDisconnected).not.toHaveBeenCalled();
-        });
-
         it('disconnects existing session before connecting new one', () => {
             const hooks = makeHooks();
             const service = createServiceSolace(hooks);

@@ -76,7 +76,7 @@ export function openCopyModal(
     // queue without closing the modal. Each click aborts any still-pending
     // verify (handles double-click) before firing a fresh probe.
     els.btnModalSourceRefresh.onclick = () => {
-        state.verify?.abort?.abort();
+        state.verify?.abort.abort();
         ui.resetVerifyDisplay(els);
         runVerify(els, state, sempCtx, getPrimarySession(), selectedVpn, clientUser, access);
     };
@@ -136,7 +136,7 @@ function runVerify(
         primarySession,
         vpn: selectedVpn,
         queue: state.sourceQueue,
-        signal: state.verify.abort!.signal,
+        signal: state.verify.abort.signal,
         onProgress: (count, sizeBytes) => {
             if (!state.verify) return;
             ui.renderVerifyProgress(els, count, sizeBytes);
@@ -160,9 +160,9 @@ function runVerify(
         // `result.owner !== null` distinguishes "SEMP path extracted owner
         // (possibly empty string for a server-created queue)" from "owner
         // unavailable" (QB-fallback path, or SEMP `<owner>` element missing).
-        // Empty owner + empty clientUser is a legitimate match if the user
-        // explicitly authenticated as the empty username — strict equals.
-        if (result.owner !== null && result.owner === clientUser) {
+        // An empty client user never matches: an ownerless queue reports
+        // owner '' and its others-permission decides.
+        if (result.owner !== null && clientUser !== '' && result.owner === clientUser) {
             const prior = result.accessType;
             result.accessType = 'read-write';
             logger.info(
@@ -434,7 +434,7 @@ function handleModalStart(
 export function cancelCopyModal(els: CopyUiElements, state: QueueCopyState): void {
     if (state.verify?.inProgress) {
         logger.info('[CopyModal] cancel during verify — aborting verify, closing modal');
-        state.verify.abort?.abort();
+        state.verify.abort.abort();
         state.verify = null;
         els.modal.close();
         return;

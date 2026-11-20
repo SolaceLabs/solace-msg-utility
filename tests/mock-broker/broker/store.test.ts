@@ -13,7 +13,7 @@ import { DestinationType } from '../../../src/mock-broker/sdk/enums';
  * The store holds every broker the demo knows: Direct (demo.html's only one)
  * and the managed demo's. A broker argument scopes what a listing, a by-name
  * lookup or a publish sees, so a managed session on one broker never reaches
- * another broker's queues.
+ * another broker's queues; a publish reaches the session's Message VPN only.
  */
 const EAST = [
     {
@@ -21,6 +21,7 @@ const EAST = [
         queues: [
             { name: 'orders.new', seed: 3, subscriptions: ['orders/>'], state: QUEUE_STATE.NORMAL },
             { name: 'audit', seed: 1, subscriptions: [], state: QUEUE_STATE.READ_ONLY },
+            { name: 'orders.eu', seed: 0, subscriptions: ['orders/*/eu'], state: QUEUE_STATE.NORMAL },
         ],
     },
 ];
@@ -48,7 +49,7 @@ describe('mock-broker/store -- brokers', () => {
 
     it('lists, finds and seeds each broker on its own', () => {
         expect(listVpns('east')).toEqual(['orders']);
-        expect(listQueues('orders', 'east')).toEqual(['orders.new', 'audit']);
+        expect(listQueues('orders', 'east')).toEqual(['orders.new', 'audit', 'orders.eu']);
         expect(listQueues('orders', 'west')).toEqual([]);
         expect(listVpns('nope')).toEqual([]);
 
@@ -68,22 +69,35 @@ describe('mock-broker/store -- brokers', () => {
         const before = getQueue('orders-dr', 'orders.new')!.messages.length;
         const msg = createMessage({ payload: 'hello' });
 
-        expect(publish('orders/created', DestinationType.TOPIC, msg, 'east')).toBe(1);
+        expect(publish('orders/created', DestinationType.TOPIC, msg, 'orders', 'east')).toBe(1);
         expect(getQueue('orders', 'orders.new')!.messages).toHaveLength(4);
         expect(getQueue('orders-dr', 'orders.new')!.messages).toHaveLength(before);
         // Direct's queues subscribe to orders/new/> only; this topic reaches none.
-        expect(publish('orders/created', DestinationType.TOPIC, createMessage({ payload: 'x' }))).toBe(0);
+        expect(publish('orders/created', DestinationType.TOPIC, createMessage({ payload: 'x' }), 'default')).toBe(0);
+        // A VPN of another broker is not the session's to publish into.
+        expect(publish('orders/created', DestinationType.TOPIC, createMessage({ payload: 'x' }), 'orders')).toBe(0);
+        expect(getQueue('orders', 'orders.new')!.messages).toHaveLength(4);
+    });
+
+    it('publishes only into the session\'s Message VPN', () => {
+        // default/test-queue-1 and vpn-prod/Q/ORDER/NEW both subscribe to orders/new/>.
+        const sizes = () => [getQueue('default', 'test-queue-1')!, getQueue('vpn-prod', 'Q/ORDER/NEW')!].map(q => q.messages.length);
+        const before = sizes();
+
+        expect(publish('orders/new/eu', DestinationType.TOPIC, createMessage({ payload: 'prod' }), 'vpn-prod')).toBe(1);
+        expect(sizes()).toEqual([before[0], before[1] + 1]);
+        // A queue name is looked up in the session's VPN too.
+        expect(publish('test-queue-1', DestinationType.QUEUE, createMessage({ payload: 'q' }), 'vpn-prod')).toBe(0);
+        expect(publish('test-queue-1', DestinationType.QUEUE, createMessage({ payload: 'q' }), 'default')).toBe(1);
+        expect(sizes()).toEqual([before[0] + 1, before[1] + 1]);
     });
 
     it('spools its own copy, with its own id, in every queue a topic reaches', () => {
-        // Direct's default/test-queue-1 and vpn-prod/Q/ORDER/NEW both subscribe to orders/new/>.
+        // east's orders.new (orders/>) and orders.eu (orders/*/eu) both match.
         const msg = createMessage({ payload: 'fan-out' });
-        expect(publish('orders/new/eu', DestinationType.TOPIC, msg)).toBe(2);
+        expect(publish('orders/new/eu', DestinationType.TOPIC, msg, 'orders', 'east')).toBe(2);
 
-        const spooled = ['default/test-queue-1', 'vpn-prod/Q/ORDER/NEW'].map(path => {
-            const [vpn, ...name] = path.split('/');
-            return { vpn, name: name.join('/'), entry: getQueue(vpn, name.join('/'))!.messages.at(-1)! };
-        });
+        const spooled = ['orders.new', 'orders.eu'].map(name => ({ vpn: 'orders', name, entry: getQueue('orders', name)!.messages.at(-1)! }));
         expect(spooled[0].entry.msg).not.toBe(spooled[1].entry.msg);
         for (const { vpn, name, entry } of spooled) {
             // The SDK hands the id back as a Long; the app reads it with toString().
@@ -111,7 +125,7 @@ describe('mock-broker/store -- brokers', () => {
     it('round-trips through a snapshot, destinations and ids included', () => {
         const msg = createMessage({ payload: 'kept' });
         msg.setDestination(createTopicDestination('orders/created'));
-        publish('orders/created', DestinationType.TOPIC, msg, 'east');
+        publish('orders/created', DestinationType.TOPIC, msg, 'orders', 'east');
         const snap = JSON.parse(JSON.stringify(dumpStore()));
 
         seed();   // anything else in between
@@ -124,7 +138,7 @@ describe('mock-broker/store -- brokers', () => {
         expect(last.msg._fields.destination!.getName()).toBe('orders/created');
         expect(last.msg._fields.destination!.getType()).toBe(DestinationType.TOPIC);
         // The next id continues past the restored ones.
-        publish('orders/created', DestinationType.TOPIC, createMessage({ payload: 'next' }), 'east');
+        publish('orders/created', DestinationType.TOPIC, createMessage({ payload: 'next' }), 'orders', 'east');
         expect(q.messages[q.messages.length - 1].id).toBe(last.id + 1);
     });
 
@@ -163,11 +177,13 @@ describe('mock-broker/broker/store -- payload bytes and refused publishes', () =
     });
 
     it('names the refusing queue for a publish to a PUBLISH_REJECTED queue, and nothing otherwise', () => {
-        expect(publishRejection('Q/ORDER/ARCHIVE', DestinationType.QUEUE)).toBeNull();
+        expect(publishRejection('Q/ORDER/ARCHIVE', DestinationType.QUEUE, 'vpn-prod')).toBeNull();
         scenario.queueState.set('vpn-prod/Q/ORDER/ARCHIVE', QUEUE_STATE.PUBLISH_REJECTED);
-        expect(publishRejection('Q/ORDER/ARCHIVE', DestinationType.QUEUE)).toContain('Q/ORDER/ARCHIVE');
+        expect(publishRejection('Q/ORDER/ARCHIVE', DestinationType.QUEUE, 'vpn-prod')).toContain('Q/ORDER/ARCHIVE');
+        // A session on another VPN does not reach that queue, so it is not asked.
+        expect(publishRejection('Q/ORDER/ARCHIVE', DestinationType.QUEUE, 'default')).toBeNull();
         // A queue the destination does not reach is not asked.
-        expect(publishRejection('Q/ORDER/PROCESS', DestinationType.QUEUE)).toBeNull();
-        expect(publishRejection('nowhere/>', DestinationType.TOPIC)).toBeNull();
+        expect(publishRejection('Q/ORDER/PROCESS', DestinationType.QUEUE, 'vpn-prod')).toBeNull();
+        expect(publishRejection('nowhere/>', DestinationType.TOPIC, 'vpn-prod')).toBeNull();
     });
 });

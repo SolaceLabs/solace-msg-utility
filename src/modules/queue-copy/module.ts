@@ -697,7 +697,7 @@ export const QueueCopyModule = {
         // with returnTo='queue-copy', and connections fired this event once
         // the new VPN was UP.
         eventBus.on('copy:vpn-switched', ({ queue }) => {
-            if (loadSelf) loadSelf();
+            loadSelf();
             state.sourceQueue = queue;
             els.sourceInput.value = queue;
             refreshStartEnabled();

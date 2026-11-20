@@ -115,6 +115,11 @@ func TestParseProxyPath_BadInput(t *testing.T) {
 		{"/http/8080", shape},                      // missing host
 		{"/http/8080/", "host segment empty"},      // empty host segment
 		{"/http/8080/   /x", "host segment empty"}, // whitespace-only host segment
+		{"/http/8080/user@evil.example/x", `invalid host "user@evil.example"`},
+		{"/http/8080/a b/x", `invalid host "a b"`},
+		{"/http/8080/host:9/x", `invalid host "host:9"`},
+		{"/http/8080/[example.com]/x", "brackets hold an IPv6 address only"},
+		{"/http/8080/[::1/x", `invalid host "[::1"`},
 	}
 	for _, c := range bad {
 		if _, err := parseProxyPath(c.in); err == nil || !strings.Contains(err.Error(), c.want) {

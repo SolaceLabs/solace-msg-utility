@@ -188,11 +188,15 @@ export function removeMessage(vpn: string, queue: string, id: string): boolean {
     return true;
 }
 
-/** The queues a publish to `destName` reaches: the named queue, or every queue subscribed to the topic. */
-function publishTargets(destName: string, destType: number, broker: string): MockQueue[] {
+/**
+ * The queues a publish to `destName` from a session on `vpn` reaches: the named
+ * queue, or every queue subscribed to the topic, in that Message VPN only.
+ */
+function publishTargets(destName: string, destType: number, vpn: string, broker: string): MockQueue[] {
+    const inVpn = allQueues(broker).filter(q => q.vpn === vpn);
     return destType === DestinationType.QUEUE
-        ? allQueues(broker).filter(q => q.name === destName)
-        : allQueues(broker).filter(q => q.subscriptions.some(sub => topicMatches(sub, destName)));
+        ? inVpn.filter(q => q.name === destName)
+        : inVpn.filter(q => q.subscriptions.some(sub => topicMatches(sub, destName)));
 }
 
 /**
@@ -200,19 +204,20 @@ function publishTargets(destName: string, destType: number, broker: string): Moc
  * the first reached queue set to PUBLISH_REJECTED. All or nothing, as a real
  * broker rejects the message rather than spooling it to some queues only.
  */
-export function publishRejection(destName: string, destType: number, broker: string = DIRECT_BROKER): string | null {
-    const refusing = publishTargets(destName, destType, broker)
+export function publishRejection(destName: string, destType: number, vpn: string, broker: string = DIRECT_BROKER): string | null {
+    const refusing = publishTargets(destName, destType, vpn, broker)
         .find(q => queueStateOf(q.vpn, q.name) === QUEUE_STATE.PUBLISH_REJECTED);
     return refusing ? `Message rejected: ingress of queue ${refusing.name} is shut down (demo fault)` : null;
 }
 
 /**
  * Publish into a queue (direct enqueue) or to a topic (fan out to every queue
- * on the broker whose subscriptions match). Returns the number of queues that accepted it,
- * so the publisher can report a topic with no subscribers honestly.
+ * in the session's Message VPN whose subscriptions match). Returns the number of
+ * queues that accepted it, so the publisher can report a topic with no
+ * subscribers honestly.
  */
-export function publish(destName: string, destType: number, msg: MockMessage, broker: string = DIRECT_BROKER): number {
-    const targets = publishTargets(destName, destType, broker);
+export function publish(destName: string, destType: number, msg: MockMessage, vpn: string, broker: string = DIRECT_BROKER): number {
+    const targets = publishTargets(destName, destType, vpn, broker);
 
     for (const q of targets) {
         const id = nextId++;

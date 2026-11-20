@@ -29,6 +29,9 @@ describe('queue-browser/ui-core', () => {
         ui.initElements(container);
         gateStub = { show: vi.fn(), hide: vi.fn() };
         ui.setGate(gateStub);
+        // Installed by initTable / initDetails at module install; stubbed here.
+        ui.renderList = vi.fn();
+        ui.clearDetails = vi.fn();
 
         resetQueueBrowserState();
     });
@@ -144,14 +147,6 @@ describe('queue-browser/ui-core', () => {
             state.allMessages = [{ id: '1' }];
             state.displayedMessages = [{ id: '1' }];
 
-            // Need renderList and clearDetails to be defined; put them back after.
-            const savedRender = ui.renderList;
-            const savedClear = ui.clearDetails;
-            ui.renderList = vi.fn();
-            ui.clearDetails = vi.fn();
-            const renderSpy = ui.renderList;
-            const clearSpy = ui.clearDetails;
-
             ui.resetQueueSelection();
 
             expect(state.currentQueue).toBe('');
@@ -159,11 +154,8 @@ describe('queue-browser/ui-core', () => {
             expect(state.displayedMessages).toEqual([]);
             expect(state.currentQueuePermissions).toBeNull();
             expect(els.btnFilter.disabled).toBe(true);
-            expect(renderSpy).toHaveBeenCalledTimes(1);
-            expect(clearSpy).toHaveBeenCalledTimes(1);
-
-            ui.renderList = savedRender;
-            ui.clearDetails = savedClear;
+            expect(ui.renderList).toHaveBeenCalledTimes(1);
+            expect(ui.clearDetails).toHaveBeenCalledTimes(1);
         });
     });
 
@@ -227,28 +219,6 @@ describe('queue-browser/ui-core', () => {
             expect(values()).toEqual(['', 'q1']);
             expect([els.selectBound.value, state.currentQueue]).toEqual(['q1', 'q1']);
             expect(onChange).not.toHaveBeenCalled();
-        });
-    });
-
-    describe('resetQueueSelection edge cases', () => {
-        // There is no "missing filter elements" test: hdrQueueName / hdrPermissions /
-        // filter inputs / btnFilter are required elements (see the
-        // queue-browser/module.ts required() list), so there is no guard to exercise.
-
-        it('handles missing renderList and clearDetails — state still reset', () => {
-            const savedRender = ui.renderList;
-            const savedClear = ui.clearDetails;
-            ui.renderList = null;
-            ui.clearDetails = null;
-
-            state.currentQueue = 'q1';
-            state.allMessages = [{ id: 'm1' } as any];
-            expect(() => ui.resetQueueSelection()).not.toThrow();
-            expect(state.currentQueue).toBe('');
-            expect(state.allMessages).toEqual([]);
-
-            ui.renderList = savedRender;
-            ui.clearDetails = savedClear;
         });
     });
 });

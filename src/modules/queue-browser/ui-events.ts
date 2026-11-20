@@ -233,7 +233,7 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         els.radFilterCriteria.forEach((r: HTMLInputElement) => r.checked = (r.value === 'OR'));
 
         // Clear Properties — installed by initDetails (which initElements depends on at install time).
-        if (ui.clearPropertyFilters) ui.clearPropertyFilters();
+        ui.clearPropertyFilters();
 
         // Reset State
         state.activeFilters = defaultActiveFilters();
@@ -267,9 +267,7 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         state.activeFilters.olderThanMs = Number.isFinite(olderMs) ? olderMs : null;
 
         // Properties — installed by initDetails (initElements has already run at this point).
-        if (ui.getPropertyFilters) {
-            state.activeFilters.properties = ui.getPropertyFilters();
-        }
+        state.activeFilters.properties = ui.getPropertyFilters();
 
         // Logic
         els.radFilterCriteria.forEach((r: HTMLInputElement) => {

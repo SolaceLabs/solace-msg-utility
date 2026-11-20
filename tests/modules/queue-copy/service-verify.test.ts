@@ -798,21 +798,6 @@ describe('queue-copy/service-verify', () => {
             expect(result.errors[0]).toBe('Failed to start verification probe.');
         });
 
-        it('GM_DISABLED during accumulation is a no-op', async () => {
-            vi.useFakeTimers();
-            const promise = verifySource({
-                sempCtx: null, primarySession: session,
-                vpn: '', queue: 'q', signal: new AbortController().signal,
-            });
-            await Promise.resolve();
-            (browser as any)._handlers.UP();
-            (browser as any)._handlers.GM_DISABLED();
-            await vi.advanceTimersByTimeAsync(ACCUMULATE_IDLE_MS);
-            const result = await promise;
-            expect(result.sourceOk).toBe(true);
-            vi.useRealTimers();
-        });
-
         it('disconnect during cleanup is swallowed when it throws', async () => {
             (browser.disconnect as any).mockImplementation(() => { throw new Error('cleanup fail'); });
             vi.useFakeTimers();

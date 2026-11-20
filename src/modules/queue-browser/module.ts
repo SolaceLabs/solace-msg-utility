@@ -245,7 +245,7 @@ export const QueueBrowserModule = {
             log.info(`Received browse request for queue=${targetQueue}`);
 
             // Switch view to Browser
-            if (loadSelf) loadSelf();
+            loadSelf();
 
             setTimeout(() => {
                 els.inputBind.value = targetQueue;

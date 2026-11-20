@@ -153,8 +153,8 @@ export function createSession(props: any, hooks: SessionHooks = {}): MockSession
             const dest = msg?._fields?.destination;
             if (!dest) throw new Error('Message has no destination (mock broker)');
 
-            const rejection = publishRejection(dest.getName(), dest.getType(), broker);
-            if (!rejection) publish(dest.getName(), dest.getType(), msg, broker);
+            const rejection = publishRejection(dest.getName(), dest.getType(), vpn, broker);
+            if (!rejection) publish(dest.getName(), dest.getType(), msg, vpn, broker);
             setTimeout(() => {
                 // A refusal is a session event too, carrying the correlation key and the reason on `infoStr`.
                 if (rejection) emitter.emit(SessionEventCode.REJECTED_MESSAGE_ERROR, { ...sessionError(rejection), correlationKey: key });

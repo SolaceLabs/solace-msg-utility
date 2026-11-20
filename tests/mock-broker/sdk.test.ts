@@ -182,10 +182,12 @@ describe('mock-broker/sdk — publish acknowledgement', () => {
         const sdk = buildSolaceSdk();
         const session = sdk.SolclientFactory.createSession({ url: 'wss://broker.solace.com', vpnName: 'vpn-prod' });
         // Two queues in the session's VPN subscribe to orders/new/>; Q/ORDER/PROCESS
-        // (orders/process/*) does not match.
+        // (orders/process/*) does not match, and default/test-queue-1 (orders/new/>)
+        // is in another VPN.
         getQueue('vpn-prod', 'Q/ORDER/ARCHIVE')!.subscriptions.push('orders/new/>');
         const counts = () => [
             getQueue('vpn-prod', 'Q/ORDER/NEW'), getQueue('vpn-prod', 'Q/ORDER/ARCHIVE'), getQueue('vpn-prod', 'Q/ORDER/PROCESS'),
+            getQueue('default', 'test-queue-1'),
         ].map(q => q!.messages.length);
         const before = counts();
 
@@ -195,7 +197,7 @@ describe('mock-broker/sdk — publish acknowledgement', () => {
         msg.setCorrelationKey({ Solace_Msg_Utility_Seq_Num: 't' });
         session.send(msg);
 
-        expect(counts()).toEqual([before[0] + 1, before[1] + 1, before[2]]);
+        expect(counts()).toEqual([before[0] + 1, before[1] + 1, before[2], before[3]]);
         for (const q of [getQueue('vpn-prod', 'Q/ORDER/NEW')!, getQueue('vpn-prod', 'Q/ORDER/ARCHIVE')!]) {
             expect(q.messages[q.messages.length - 1].msg.getBinaryAttachment()).toBe('fanned-out');
         }

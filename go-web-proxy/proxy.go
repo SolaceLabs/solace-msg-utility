@@ -485,6 +485,18 @@ func parseProxyPath(p string) (*url.URL, error) {
 	if host == "" {
 		return nil, errors.New("host segment empty")
 	}
+	// The host is held to the rule broker connections follow (validHost): a
+	// host with user info, spaces or other characters never reaches the URL.
+	bare := host
+	if strings.HasPrefix(bare, "[") && strings.HasSuffix(bare, "]") {
+		bare = bare[1 : len(bare)-1]
+		if net.ParseIP(bare) == nil {
+			return nil, fmt.Errorf("invalid host %q: brackets hold an IPv6 address only", host)
+		}
+	}
+	if !validHost(bare) {
+		return nil, fmt.Errorf("invalid host %q: %s", host, hostRule)
+	}
 	hostPort := joinHostPort(host, port)
 
 	upath := "/" + tail

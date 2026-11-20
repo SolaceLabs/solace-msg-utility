@@ -105,7 +105,8 @@ async function openDemo(before: (first: ManagedDemo) => void | Promise<void> = (
         <div id="main-sidebar"><nav id="sidebar-nav"></nav><div id="sidebar-account"></div></div>
         <button id="btn-sidebar-toggle"></button><span id="page-title"></span>
         <span id="status-indicator-client"></span><span id="status-indicator-semp"></span>
-        <div id="module-container"></div>`;
+        <div id="module-container"><div id="app-loading"></div></div>
+        <div id="notification-bell-slot"></div><div id="toast-container"></div>`;
     document.body.appendChild(shell);
     for (const id of [...Object.keys(MODULES), PROBE]) {
         const tpl = document.createElement('template');

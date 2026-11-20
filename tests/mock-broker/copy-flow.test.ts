@@ -74,7 +74,7 @@ async function run(session: any, opts: { vpn: string; from: string; to: string; 
     const result = await verifySource({
         sempCtx, primarySession: session, vpn: opts.vpn, queue: opts.from, signal: new AbortController().signal,
     });
-    state.verify = { inProgress: false, abort: null, result };
+    state.verify = { inProgress: false, abort: new AbortController(), result };
 
     const completed: CopyJob[] = [];
     const onProgress = vi.fn();

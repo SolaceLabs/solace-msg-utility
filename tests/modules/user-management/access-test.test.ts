@@ -104,15 +104,6 @@ describe('user-management access-test -- verdict', () => {
         expect(lines().some(l => l?.startsWith('Matching row'))).toBe(false);
     });
 
-    it('a record the gateway sent without row lists or modules has no access and the default modules', () => {
-        const legacy = { username: 'legacy', admin: false } as ManagedUser;
-        const { pick, type, badge, lines } = setup([legacy]);
-        pick('legacy');
-        type('prod', 'vpn-a', 'q');
-        expect(badge()?.textContent).toBe('No access');
-        expect(lines()).toContain('Modules: Queue Browser');
-    });
-
     it('writes the rows as text, never markup', () => {
         const odd: ManagedUser = { ...OPS, username: 'odd', operate: [{ brokers: '*', msgVpns: '*', queues: '<img src=x>*' }] };
         const { result, pick, type, lines } = setup([odd]);

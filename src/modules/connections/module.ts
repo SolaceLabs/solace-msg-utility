@@ -636,7 +636,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
     // Direct form's own connect. A form that does not validate fails the
     // switch at once with the reason, rather than waiting out the timeout.
     const vpnSwitch = createVpnSwitch({
-        eventBus, loadSelf: () => loadSelf?.(), log,
+        eventBus, loadSelf, log,
         mode: {
             isConnected: () => appState.isConnected,
             currentVpn: () => els.elSolVpn.value,
@@ -709,9 +709,7 @@ export const ConnectionsModule = {
 
         // Cross-module routers: "Edit in Connections" navigates here; an "open
         // this queue" request runs the Direct connect / VPN-switch dance.
-        eventBus.on('connection:edit-requested', () => {
-            if (loadSelf) loadSelf();
-        });
+        eventBus.on('connection:edit-requested', () => loadSelf());
         eventBus.on('connection:check-connection', direct.checkConnection);
 
         logger.info('Connections Module Setup Complete');

@@ -1028,33 +1028,6 @@ describe('ConnectionsModule', () => {
         expect(ctx.loadSelf).toHaveBeenCalledTimes(1);
     });
 
-    it('connection:edit-requested with loadSelf undefined is a no-op AND leaves the bus functional for downstream emits', async () => {
-        const { ctx, eventBus } = createTestContext(container);
-        (ctx as any).loadSelf = undefined;
-        await ConnectionsModule.install(ctx);
-
-        // Probe listener registered BEFORE the suspect emit. If the listener
-        // body throws and pollutes the bus's dispatch loop, the probe won't
-        // fire on the follow-up emit.
-        const probe = vi.fn();
-        eventBus.on('client:disconnected', probe);
-        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-        eventBus.emit('connection:edit-requested');
-        // The bus catches and logs a throwing handler, so the missing loadSelf
-        // must be guarded in the module: no handler error was logged.
-        const handlerErrors = errSpy.mock.calls.filter(c => String(c[0]).includes('Error in handler'));
-        errSpy.mockRestore();
-        expect(handlerErrors).toEqual([]);
-
-        // The event bus is still capable of dispatching — proves the prior
-        // emit didn't poison its internal listener registry. A bare
-        // .not.toThrow() would also pass even if the bus had silently
-        // captured the throw and corrupted state for subsequent emits.
-        eventBus.emit('client:disconnected');
-        expect(probe).toHaveBeenCalledTimes(1);
-    });
-
     // ====================================================================
     // Bridging: factory hooks → UI updates + AppState writes + bus emits.
     // The broker-side factories live in
@@ -1626,25 +1599,6 @@ describe('ConnectionsModule', () => {
             expect(input.classList.contains('is-invalid')).toBe(false);
             expect(errBox.textContent).toBe('');
         });
-    });
-
-    it('connection:check-connection with null loadSelf does not throw', async () => {
-        // Auto-connect path navigates — exercises the `if (loadSelf)` falsy branch
-        // in navigateToConnections without throwing.
-        const { ctx, eventBus, appState } = createTestContext(container);
-        ctx.loadSelf = null as any;
-        await ConnectionsModule.install(ctx);
-
-        appState.isConnected = false;
-
-        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-        eventBus.emit('connection:check-connection', { vpn: 'target-vpn', queue: 'q1' });
-        // The bus catches and logs a throwing handler, so assert the effect:
-        // no handler error was logged and the connect to the target VPN started.
-        const handlerErrors = errSpy.mock.calls.filter(c => String(c[0]).includes('Error in handler'));
-        errSpy.mockRestore();
-        expect(handlerErrors).toEqual([]);
-        expect((container.querySelector('#solace-vpn') as HTMLInputElement).value).toBe('target-vpn');
     });
 
     // The connections module probes `/hosted` once at install and publishes the

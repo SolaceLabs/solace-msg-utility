@@ -1041,33 +1041,6 @@ describe('queue-browser/ui-events', () => {
         });
     });
 
-    describe('clearFilters with missing clearPropertyFilters', () => {
-        it('handles null clearPropertyFilters — state still fully reset', () => {
-            const saved = ui.clearPropertyFilters;
-            ui.clearPropertyFilters = null;
-            state.allMessages = [];
-            state.activeFilters = { content: 'abc', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'AND', properties: [] } as any;
-            expect(() => uiEvents.clearFilters()).not.toThrow();
-            // Missing helper must not prevent core state reset.
-            expect(state.activeFilters.content).toBe('');
-            expect(state.activeFilters.criteria).toBe('OR');
-            ui.clearPropertyFilters = saved;
-        });
-    });
-
-    describe('applyFilters with missing getPropertyFilters', () => {
-        it('handles null getPropertyFilters — properties left intact', () => {
-            const saved = ui.getPropertyFilters;
-            ui.getPropertyFilters = null;
-            state.allMessages = [];
-            state.activeFilters.properties = [{ key: 'preserved', value: 'v' }] as any;
-            expect(() => uiEvents.applyFilters()).not.toThrow();
-            // Missing helper must leave existing properties untouched rather than clobbering them.
-            expect(state.activeFilters.properties).toEqual([{ key: 'preserved', value: 'v' }]);
-            ui.getPropertyFilters = saved;
-        });
-    });
-
     describe('handleBulkForward() edge cases', () => {
         it('does not show modal when selected IDs have no matching messages', () => {
             state.displayedMessages = [{ id: 'msg-1', content: 'test' }];

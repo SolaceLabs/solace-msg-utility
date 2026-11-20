@@ -16,8 +16,11 @@ function createAppShell() {
         <div id="sidebar-nav"></div>
         <button id="btn-sidebar-toggle"></button>
         <div id="main-sidebar"></div>
-        <div id="module-container"></div>
+        <div id="sidebar-account"></div>
+        <div id="module-container"><div id="app-loading"></div></div>
         <span id="page-title"></span>
+        <div id="notification-bell-slot"></div>
+        <div id="toast-container"></div>
         <span id="status-indicator-client"></span>
         <span id="status-indicator-semp"></span>
     `;

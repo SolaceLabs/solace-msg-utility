@@ -346,21 +346,6 @@ describe('connection-management — create / edit form', () => {
         expect(vpnInputs[0].value).toBe('v1');
     });
 
-    it('edit tolerates a connection with no msgVpns array (?? [] fallback)', async () => {
-        const container = loadModuleDOM('connection-management');
-        const ctx = makeCtx(container, ADMIN);
-        // msgVpns omitted → undefined at runtime
-        svcMock.listConnections.mockResolvedValue({ ok: true, data: [
-            { broker: 'b3', hostname: 'h3', semp: { port: '', user: '', pass: '' }, client: { port: '' } },
-        ] });
-        await ConnectionManagementModule.install(ctx);
-        await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').children.length).toBeGreaterThan(0));
-        el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
-        expect(hidden(container, '#conn-mgmt-form-view')).toBe(false);
-        expect(el(container, '#conn-mgmt-vpn-rows').querySelectorAll('.row-list-row').length).toBe(0);
-    });
-
     it('says what an empty VPN list means, and names the columns once a VPN is added', async () => {
         const { container } = await setup();
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();

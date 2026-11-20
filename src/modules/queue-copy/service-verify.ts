@@ -449,8 +449,6 @@ function verifyViaQueueBrowserAccumulate(
             }
         });
 
-        browser.on(solace.QueueBrowserEventName.GM_DISABLED, () => { /* not a verification result */ });
-
         browser.on(solace.QueueBrowserEventName.MESSAGE, (msg: any) => {
             count++;
             const len = msg?.smfHeader?.messageLength;

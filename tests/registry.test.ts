@@ -62,10 +62,12 @@ describe('registry', () => {
 
         function shellDOM(entries: RegisteredModule[]): void {
             document.body.innerHTML = `
-                <div id="main-sidebar"><button id="btn-sidebar-toggle"></button></div>
+                <div id="main-sidebar"><button id="btn-sidebar-toggle"></button><div id="sidebar-account"></div></div>
                 <nav id="sidebar-nav"></nav>
-                <div id="module-container"></div>
+                <div id="module-container"><div id="app-loading"></div></div>
                 <h1 id="page-title"></h1>
+                <div id="notification-bell-slot"></div>
+                <div id="toast-container"></div>
                 <div id="status-indicator-client"></div>
                 <div id="status-indicator-semp"></div>
                 ${entries.map(r => `<template data-module-id="${r.module.id}"><div></div></template>`).join('')}

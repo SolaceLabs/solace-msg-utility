@@ -46,7 +46,7 @@ export const SessionEventCode = {
     SUBSCRIPTION_ERROR: 'SUBSCRIPTION_ERROR',
     SUBSCRIPTION_OK: 'SUBSCRIPTION_OK',
     VIRTUALROUTER_NAME_CHANGED: 'VIRTUALROUTER_NAME_CHANGED',
-    MESSAGE: 'MESSAGE',                                 // handled (no-op)
+    MESSAGE: 'MESSAGE',
     ACKNOWLEDGED_MESSAGE: 'ACKNOWLEDGED_MESSAGE',       // handled (publisher)
     DISCONNECTED: 'DISCONNECTED',                       // handled
     CAN_ACCEPT_DATA: 'CAN_ACCEPT_DATA',

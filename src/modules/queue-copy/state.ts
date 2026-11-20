@@ -164,7 +164,7 @@ export interface QueueCopyState {
     primaryPublisher: SolacePublisher | null;
 
     /** Active verification phase, or null when idle. */
-    verify: { inProgress: boolean; abort: AbortController | null; result: VerifyResult | null } | null;
+    verify: { inProgress: boolean; abort: AbortController; result: VerifyResult | null } | null;
     /** Active copy run, or null when idle. */
     job: CopyJob | null;
 }

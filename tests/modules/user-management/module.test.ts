@@ -371,21 +371,6 @@ describe('user-management — create / edit form', () => {
         expect(svcMock.saveUser.mock.calls[0][0].password).toBe('');
     });
 
-    it('edit tolerates a user with no operate/readOnly arrays (?? [] fallback)', async () => {
-        const container = loadModuleDOM('user-management');
-        const ctx = makeCtx(container, ADMIN);
-        // a legacy record missing both glob arrays → they arrive as undefined
-        svcMock.listUsers.mockResolvedValue(listed([{ username: 'legacy', admin: false }]));
-        await UserManagementModule.install(ctx);
-        await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').children.length).toBeGreaterThan(0));
-        el(container, '#user-mgmt-rows').querySelectorAll('tr')[0]
-            .querySelector<HTMLButtonElement>('.user-mgmt-edit')!.click();
-        expect(el(container, '#user-mgmt-operate-rows').querySelectorAll('.row-list-row').length).toBe(0);
-        expect(el(container, '#user-mgmt-readonly-rows').querySelectorAll('.row-list-row').length).toBe(0);
-        // No modules field either: the deployment default.
-        expect(el<HTMLInputElement>(container, '#user-mgmt-modules-default').checked).toBe(true);
-    });
-
     it('Cancel returns to the list and forgets the typed password', async () => {
         const { container } = await setup();
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();

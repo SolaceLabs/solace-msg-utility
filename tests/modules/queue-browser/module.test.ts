@@ -673,20 +673,6 @@ describe('queue-browser/module', () => {
             consoleSpy.mockRestore();
             vi.useRealTimers();
         });
-
-        it('browser:browse-queue handles missing loadSelf', async () => {
-            vi.useFakeTimers();
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-            ctx.loadSelf = null as any;
-            await QueueBrowserModule.install(ctx);
-
-            eventBus.emit('browser:browse-queue', { queue: 'my-queue' });
-            vi.advanceTimersByTime(250);
-
-            expect(els.inputBind.value).toBe('my-queue');
-            consoleSpy.mockRestore();
-            vi.useRealTimers();
-        });
     });
 
     describe('install() with minimal DOM', () => {

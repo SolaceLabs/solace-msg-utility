@@ -82,8 +82,10 @@ Six of those are shaped to exercise a specific path rather than to look realisti
 
 Two messages in `test-queue-1` and in `Q/ORDER/PROCESS` (the 5th and 6th) exercise payload handling. The 5th is UTF-8 text with non-ASCII characters and shows decoded in the details pane. The 6th is a 12-byte binary payload that is not valid UTF-8, so the details pane shows the size-only placeholder `[Binary payload: 12 bytes]` with the binary type badge. The demo SDK hands payloads back the way the real SDK does under its version10 profile (a Latin-1 string, one character per byte) and a copy or move stores them byte for byte, so the binary message arrives in the destination unchanged. At Small volume (a quarter of the seed) `test-queue-1` keeps both messages, but `Q/ORDER/PROCESS` holds only 4 messages, so it loses both; use Normal volume or larger to see them there.
 
-Queues carry topic subscriptions, so a forward to a topic really fans out: publishing to `orders/new/uk` lands in
-`Q/ORDER/NEW`, because that queue subscribes to `orders/new/>`.
+Queues carry topic subscriptions, so a forward to a topic really fans out to the subscribed queues of the
+connected Message VPN, as on a real broker: connected to `vpn-prod`, publishing to `orders/new/uk` lands in
+`Q/ORDER/NEW`, because that queue subscribes to `orders/new/>`; `test-queue-1` in `default` subscribes to it too,
+and stays as it was.
 
 ### The payload samples queue
 

@@ -172,7 +172,7 @@ export const ConnectionManagementModule = {
         function openEdit(c: ManagedConnRecord): void {
             editing = c.broker;
             editingRev = c.rev;
-            storedVpns = new Set((c.client.msgVpns ?? []).map(v => v.name));
+            storedVpns = new Set(c.client.msgVpns.map(v => v.name));
             els.formTitle.textContent = `Edit connection "${c.broker}"`;
             els.broker.value = c.broker;
             els.broker.disabled = true; // broker is the key; rename = delete + recreate
@@ -185,7 +185,7 @@ export const ConnectionManagementModule = {
             els.clientScheme.value = c.client.scheme === 'ws' ? 'ws' : 'wss';
             els.clientPort.value = c.client.port;
             vpnList.clear();
-            (c.client.msgVpns ?? []).forEach(v =>
+            c.client.msgVpns.forEach(v =>
                 vpnList.addRow({ name: v.name, user: v.user, pass: '' }),
             );
             setError(els.formError, null);

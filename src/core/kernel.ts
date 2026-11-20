@@ -10,6 +10,13 @@ import { LogLevel } from './constants';
 import { TOAST_EVENT, showToast, type ToastEventDetail } from './toast';
 import { createNotificationCenter, mountNotificationBell, type NotificationCenter } from './components/notification-center';
 import { createQueuePicker } from './components/queue-picker';
+import { required } from './dom';
+
+/** The elements of the shell (src/index.html) the kernel wires; start() requires every one. */
+const SHELL_IDS = [
+    'main-sidebar', 'btn-sidebar-toggle', 'sidebar-account', 'sidebar-nav', 'page-title', 'module-container',
+    'app-loading', 'toast-container', 'notification-bell-slot', 'status-indicator-client', 'status-indicator-semp',
+] as const;
 
 /** The kernel `createKernel` returns: `start()` boots the app, `navigateTo()` shows one module's view. */
 export interface Kernel {
@@ -59,11 +66,6 @@ export function createKernel(registered: RegisteredModule[]): Kernel {
     const notifications: NotificationCenter = createNotificationCenter();
     /** The queue picker every module opens (AppContext.queuePicker), so its cache is shared. */
     const queuePicker = createQueuePicker();
-    let moduleContainer: HTMLElement | null = null;
-    let sidebarNav: HTMLElement | null = null;
-    let pageTitle: HTMLElement | null = null;
-    /** The shell's "Loading..." placeholder in #module-container, until the first view is shown. */
-    let loading: Element | null | undefined = null;
     // One start per kernel: a second would add the window listeners and
     // install every module again. Enforcing it here keeps modules simple:
     // none has to defend against being installed twice.
@@ -92,28 +94,24 @@ export function createKernel(registered: RegisteredModule[]): Kernel {
         logger.info(`[Kernel] ${modules.length} module(s) registered, sorted by priority:`);
         modules.forEach(m => logger.info(`  -> ${m.name} (priority: ${priorities.get(m.id)})`));
 
-        // Cache DOM references
-        sidebarNav = document.getElementById('sidebar-nav');
-        moduleContainer = document.getElementById('module-container');
-        pageTitle = document.getElementById('page-title');
+        // The shell (src/index.html) always holds these elements; a missing one
+        // fails the start here, not in a half-wired page.
+        SHELL_IDS.forEach(id => required(document, `#${id}`));
 
         // #module-container's only initial child is the shell's #app-loading
         // placeholder. It stays until the first module view is shown
         // (navigateTo) or is replaced by the no-modules message below.
-        loading = moduleContainer?.querySelector('#app-loading');
+        const loading = required(document, '#app-loading');
 
         // Before any module installs, so a toast or a connection event raised
         // during install is recorded too.
         wireNotifications();
 
         // Sidebar toggle
-        const mainSidebar = document.getElementById('main-sidebar');
-        const btnToggle = document.getElementById('btn-sidebar-toggle');
-        if (btnToggle && mainSidebar) {
-            btnToggle.addEventListener('click', () => {
-                mainSidebar.classList.toggle('collapsed');
-            });
-        }
+        const mainSidebar = required(document, '#main-sidebar');
+        required(document, '#btn-sidebar-toggle').addEventListener('click', () => {
+            mainSidebar.classList.toggle('collapsed');
+        });
 
         // Install all modules in priority order. Hold the EventBus during install
         // so any module that emits in its install() (e.g. Connections seeding the
@@ -159,7 +157,7 @@ export function createKernel(registered: RegisteredModule[]): Kernel {
                 logger.error('[Kernel] No modules installed successfully -- nothing to navigate to.');
             }
             // Replace the shell's "Loading..." with a visible reason.
-            if (loading) loading.textContent = 'No modules are available. Check the browser console.';
+            loading.textContent = 'No modules are available. Check the browser console.';
         }
 
         logger.info('[Kernel] All modules installed. Application ready.');
@@ -173,7 +171,7 @@ export function createKernel(registered: RegisteredModule[]): Kernel {
 
         // Find the module's HTML template
         const tpl = document.querySelector(`template[data-module-id="${mod.id}"]`) as HTMLTemplateElement | null;
-        if (!tpl || !moduleContainer) {
+        if (!tpl) {
             logger.error(
                 `[Kernel] Template for module "${mod.name}" (data-module-id="${mod.id}") not found. ` +
                 `Make sure src/modules/${mod.id}/index.html exists if "${mod.id}" is in the active variant manifest (src/variants/).`
@@ -186,7 +184,7 @@ export function createKernel(registered: RegisteredModule[]): Kernel {
         wrapper.id = `module-view-${mod.id}`;
         wrapper.className = 'module-view hidden';
         wrapper.appendChild(document.importNode(tpl.content, true));
-        moduleContainer.appendChild(wrapper);
+        required(document, '#module-container').appendChild(wrapper);
 
         // Build the AppContext for this module
         const appContext: AppContext = {
@@ -222,18 +220,16 @@ export function createKernel(registered: RegisteredModule[]): Kernel {
      * lifecycle comes from the bus: the connections module sets
      * `solaceConnection` before it emits `client:connected`, and clears it
      * before `client:disconnected`, so the identity is remembered at connect.
-     * Both shell elements are optional (the kernel owns the shell).
      */
     function wireNotifications(): void {
         const center = notifications;
-        document.getElementById('toast-container')?.addEventListener(TOAST_EVENT, (e) => {
+        required(document, '#toast-container').addEventListener(TOAST_EVENT, (e) => {
             const { message, type } = (e as CustomEvent<ToastEventDetail>).detail;
             if (type === 'info') return;
             const active = loadedModules.get(state.activeModuleId ?? '');
             center.add(type, active?.mod.name ?? 'App', message);
         });
-        const slot = document.getElementById('notification-bell-slot');
-        if (slot) mountNotificationBell(slot, center);
+        mountNotificationBell(required(document, '#notification-bell-slot'), center);
 
         let last = { host: '', vpn: '' };
         eventBus.on('client:connected', () => {
@@ -268,7 +264,7 @@ export function createKernel(registered: RegisteredModule[]): Kernel {
         });
 
         // Update page title
-        if (pageTitle) pageTitle.textContent = entry.mod.name;
+        required(document, '#page-title').textContent = entry.mod.name;
 
         // Show this view and hide the others. A view whose install failed was
         // created hidden and stays so. The shell's "Loading..." placeholder
@@ -276,16 +272,14 @@ export function createKernel(registered: RegisteredModule[]): Kernel {
         for (const { container } of loadedModules.values()) {
             container.classList.toggle('hidden', container !== entry.container);
         }
-        loading?.remove();
-        loading = null;
+        document.getElementById('app-loading')?.remove();
     }
 
     /**
      * Render sidebar navigation items from loaded modules.
      */
     function renderSidebar(): void {
-        const nav = sidebarNav;
-        if (!nav) return;
+        const nav = required(document, '#sidebar-nav');
         nav.innerHTML = '';
 
         // Default icon for modules without a custom one
@@ -440,22 +434,15 @@ export function createKernel(registered: RegisteredModule[]): Kernel {
 
     /** The shell's account slot at the top of the sidebar, above the page items (AppContext.mountSidebarAccount). */
     function mountSidebarAccount(el: HTMLElement): void {
-        document.getElementById('sidebar-account')?.replaceChildren(el);
+        required(document, '#sidebar-account').replaceChildren(el);
     }
 
     /**
      * Update global status indicators in the sidebar footer.
      */
     function updateGlobalUI(): void {
-        const indClient = document.getElementById('status-indicator-client');
-        const indSemp = document.getElementById('status-indicator-semp');
-
-        if (indClient) {
-            indClient.classList.toggle('status-connected', !!state.isConnected);
-        }
-        if (indSemp) {
-            indSemp.classList.toggle('status-connected', !!state.isSempConnected);
-        }
+        required(document, '#status-indicator-client').classList.toggle('status-connected', !!state.isConnected);
+        required(document, '#status-indicator-semp').classList.toggle('status-connected', !!state.isSempConnected);
     }
 
     return { start, navigateTo };

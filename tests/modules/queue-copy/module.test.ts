@@ -837,17 +837,6 @@ describe('queue-copy/module', () => {
             consoleSpy.mockRestore();
         });
 
-        it('with loadSelf undefined, still writes source queue without crashing', async () => {
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-            const ctx = makeCtx(eventBus, container, { isConnected: true });
-            (ctx as any).loadSelf = undefined;
-            await QueueCopyModule.install(ctx);
-            eventBus.emit('copy:vpn-switched', { vpn: 'v', queue: 'q-no-loadself' });
-            const sourceInput = container.querySelector<HTMLInputElement>('#copy-source-input')!;
-            expect(sourceInput.value).toBe('q-no-loadself');
-            consoleSpy.mockRestore();
-        });
-
         it('writes source queue and re-enables Next when destination is also set', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const ctx = makeCtx(eventBus, container, { isConnected: true });

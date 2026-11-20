@@ -90,9 +90,7 @@ export function createAccessTest(container: HTMLElement): AccessTest {
             els.result.replaceChildren(note(ACCESS_PROMPT));
             return;
         }
-        // A record the gateway sent without its row lists has none.
-        const { level, row } = explainAccess(
-            { operate: user.operate ?? [], readOnly: user.readOnly ?? [] }, broker, vpn, queue);
+        const { level, row } = explainAccess(user, broker, vpn, queue);
         const cfg = LEVELS[level];
         const verdict = document.createElement('p');
         const badge = document.createElement('span');
@@ -101,7 +99,7 @@ export function createAccessTest(container: HTMLElement): AccessTest {
         verdict.append(badge, ` ${cfg.text}`);
         const out = [verdict];
         if (row) out.push(note(`Matching row: ${row.brokers} / ${row.msgVpns} / ${row.queues}`));
-        const modules = grantedModules(user.modules ?? null, choices).map(moduleLabel);
+        const modules = grantedModules(user.modules, choices).map(moduleLabel);
         out.push(note(`Modules: ${modules.length ? modules.join(', ') : 'none'}`));
         els.result.replaceChildren(...out);
     }

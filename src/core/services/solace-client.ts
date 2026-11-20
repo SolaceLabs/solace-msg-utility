@@ -287,10 +287,6 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
                 hooks.onDisconnected();
             });
 
-            s.on(solace.SessionEventCode.MESSAGE, () => {
-                // Generic handler (no-op)
-            });
-
             // Debug-log every session event so the full SDK flow is visible
             // with `?logLevel=DEBUG`. Registered AFTER the typed handlers so
             // EventEmitter semantics deliver to both — the typed handler keeps

@@ -36,10 +36,13 @@ function setupDOM(moduleIds: string[]) {
     document.body.innerHTML = `
         <div id="main-sidebar">
             <button id="btn-sidebar-toggle"></button>
+            <div id="sidebar-account"></div>
+            <nav id="sidebar-nav"></nav>
         </div>
-        <nav id="sidebar-nav"></nav>
-        <div id="module-container"></div>
+        <div id="module-container"><div id="app-loading" role="status">Loading...</div></div>
         <h1 id="page-title"></h1>
+        <div id="notification-bell-slot"></div>
+        <div id="toast-container"></div>
         <div id="status-indicator-client"></div>
         <div id="status-indicator-semp"></div>
         ${moduleIds.map(id => `
@@ -158,7 +161,6 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            document.body.insertAdjacentHTML('beforeend', '<div id="sidebar-account"></div>');
             const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
@@ -167,19 +169,6 @@ describe('Kernel', () => {
             capturedCtx!.mountSidebarAccount(first);
             capturedCtx!.mountSidebarAccount(second);
             expect(Array.from(document.getElementById('sidebar-account')!.children)).toEqual([second]);
-        });
-
-        it('leaves an account control unplaced when the shell has no slot', async () => {
-            let capturedCtx: AppContext | null = null;
-            const mod = createMockModule({
-                id: 'test-module',
-                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
-            });
-            setupDOM(['test-module']);
-            await createKernel([reg(mod)]).start();
-            const el = document.createElement('span');
-            expect(() => capturedCtx!.mountSidebarAccount(el)).not.toThrow();
-            expect(el.isConnected).toBe(false);
         });
 
         it('bridges jszip:loaded window event to EventBus', async () => {
@@ -217,7 +206,7 @@ describe('Kernel', () => {
 
         it('does not empty the module container at start: content already there stays, module views are appended', async () => {
             setupDOM(['test-module']);
-            document.getElementById('module-container')!.innerHTML = '<div id="pre-existing">old stuff</div>';
+            document.getElementById('module-container')!.insertAdjacentHTML('afterbegin', '<div id="pre-existing">old stuff</div>');
             const mod = createMockModule({ id: 'test-module' });
             const kernel = createKernel([reg(mod)]);
             await kernel.start();
@@ -227,13 +216,15 @@ describe('Kernel', () => {
         });
 
         describe('loading placeholder and start-up failures', () => {
-            const LOADING = '<div id="app-loading" class="app-loading" role="status">Loading...</div>';
+            it.each(['sidebar-account', 'toast-container', 'status-indicator-semp'])(
+                'refuses to start over a shell without #%s, before any module installs', async (id) => {
+                    const mod = createMockModule({ id: 'test-module' });
+                    setupDOM(['test-module']);
+                    document.getElementById(id)!.remove();
 
-            function setupLoadingDOM(moduleIds: string[]) {
-                setupDOM(moduleIds);
-                document.getElementById('module-container')!.innerHTML = LOADING;
-                document.body.insertAdjacentHTML('beforeend', '<div id="toast-container"></div>');
-            }
+                    await expect(createKernel([reg(mod)]).start()).rejects.toThrow(`Required element missing: #${id}`);
+                    expect(mod.install).not.toHaveBeenCalled();
+                });
 
             it('keeps the placeholder while modules install and removes it when the first view is shown', async () => {
                 let presentDuringInstall = false;
@@ -241,7 +232,7 @@ describe('Kernel', () => {
                     id: 'test-module',
                     install: vi.fn(async () => { presentDuringInstall = !!document.getElementById('app-loading'); }),
                 });
-                setupLoadingDOM(['test-module']);
+                setupDOM(['test-module']);
                 await createKernel([reg(mod)]).start();
 
                 expect(presentDuringInstall).toBe(true);
@@ -249,17 +240,8 @@ describe('Kernel', () => {
                 expect(document.getElementById('module-view-test-module')!.classList.contains('hidden')).toBe(false);
             });
 
-            it('starts and navigates normally when the shell has no placeholder', async () => {
-                const mod = createMockModule({ id: 'test-module', name: 'Test Module' });
-                setupDOM(['test-module']);
-                await createKernel([reg(mod)]).start();
-
-                expect(document.getElementById('page-title')!.textContent).toBe('Test Module');
-                expect(document.getElementById('module-container')!.children).toHaveLength(1);
-            });
-
             it('replaces the placeholder text with a message when no module is registered', async () => {
-                setupLoadingDOM([]);
+                setupDOM([]);
                 await createKernel([]).start();
 
                 const loading = document.getElementById('app-loading')!;
@@ -268,19 +250,13 @@ describe('Kernel', () => {
 
             it('replaces the placeholder text with a message when every module fails to install', async () => {
                 const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-                setupLoadingDOM(['a']);
+                setupDOM(['a']);
                 const failing = createMockModule({ id: 'a', name: 'A', install: vi.fn(async () => { throw new Error('boom'); }) });
                 await createKernel([reg(failing)]).start();
 
                 expect(document.getElementById('app-loading')!.textContent)
                     .toBe('No modules are available. Check the browser console.');
                 errSpy.mockRestore();
-            });
-
-            it('shows no message and does not throw when nothing is installed and the shell has no container', async () => {
-                document.body.innerHTML = '<nav id="sidebar-nav"></nav>';
-                await expect(createKernel([]).start()).resolves.toBeUndefined();
-                expect(document.getElementById('app-loading')).toBeNull();
             });
 
             it('shows one error toast naming a module whose install throws, and still installs the others', async () => {
@@ -290,7 +266,7 @@ describe('Kernel', () => {
                     install: vi.fn(async () => { throw new Error('boom'); }),
                 });
                 const healthy = createMockModule({ id: 'b', name: 'Beta' });
-                setupLoadingDOM(['a', 'b']);
+                setupDOM(['a', 'b']);
                 await createKernel([reg(failing, 100), reg(healthy, 50)]).start();
 
                 const toasts = Array.from(document.querySelectorAll('#toast-container .toast--error'));
@@ -307,7 +283,7 @@ describe('Kernel', () => {
                 const bad = (id: string, name: string) => createMockModule({
                     id, name, install: vi.fn(async () => { throw new Error('boom'); }),
                 });
-                setupLoadingDOM(['a', 'b']);
+                setupDOM(['a', 'b']);
                 await createKernel([reg(bad('a', 'Alpha'), 100), reg(bad('b', 'Beta'), 50)]).start();
 
                 const texts = Array.from(document.querySelectorAll('#toast-container .toast--error')).map(t => t.textContent);
@@ -330,7 +306,7 @@ describe('Kernel', () => {
                     }),
                 });
                 const second = createMockModule({ id: 'b', name: 'B' });
-                setupLoadingDOM(['a', 'b']);
+                setupDOM(['a', 'b']);
 
                 const realImport = document.importNode.bind(document);
                 let calls = 0;
@@ -987,102 +963,6 @@ describe('Kernel', () => {
 
             expect(document.getElementById('page-title')?.textContent).toBe('B');
         });
-
-        it('does nothing if sidebarNav is missing', async () => {
-            document.body.innerHTML = `
-                <div id="module-container"></div>
-                <h1 id="page-title"></h1>
-                <template data-module-id="test-module"><div>content</div></template>
-            `;
-            const mod = createMockModule({ id: 'test-module' });
-            const kernel = createKernel([reg(mod)]);
-            await kernel.start();
-
-            // Despite the missing sidebar nav, the module pipeline must not
-            // short-circuit: install() runs, the wrapper is mounted, and the
-            // first module is activated by navigateTo (hidden class removed).
-            expect(mod.install).toHaveBeenCalled();
-            const wrapper = document.getElementById('module-view-test-module');
-            expect(wrapper).not.toBeNull();
-            expect(wrapper?.classList.contains('hidden')).toBe(false);
-        });
-    });
-
-    describe('updateGlobalUI', () => {
-        it('handles missing status indicators gracefully', async () => {
-            document.body.innerHTML = `
-                <nav id="sidebar-nav"></nav>
-                <div id="module-container"></div>
-                <h1 id="page-title"></h1>
-                <template data-module-id="test-module"><div>content</div></template>
-            `;
-            let capturedCtx: AppContext | null = null;
-            const mod = createMockModule({
-                id: 'test-module',
-                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
-            });
-            const kernel = createKernel([reg(mod)]);
-            await kernel.start();
-
-            // Should not throw even without status indicators, and state should still update
-            expect(() => capturedCtx!.setState('isConnected', true)).not.toThrow();
-            expect(capturedCtx!.appState.isConnected).toBe(true);
-        });
-    });
-
-    describe('navigateTo edge cases', () => {
-        it('navigates when pageTitle is missing', async () => {
-            document.body.innerHTML = `
-                <nav id="sidebar-nav"></nav>
-                <div id="module-container"></div>
-                <template data-module-id="a"><div>A</div></template>
-                <template data-module-id="b"><div>B</div></template>
-            `;
-            const modA = createMockModule({ id: 'a', name: 'A' });
-            const modB = createMockModule({ id: 'b', name: 'B' });
-            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
-            await kernel.start();
-
-            kernel.navigateTo('b');
-            expect(document.getElementById('module-view-a')?.classList.contains('hidden')).toBe(true);
-            expect(document.getElementById('module-view-b')?.classList.contains('hidden')).toBe(false);
-        });
-
-        it('navigates when moduleContainer is missing', async () => {
-            document.body.innerHTML = `
-                <nav id="sidebar-nav"></nav>
-                <h1 id="page-title"></h1>
-                <template data-module-id="a"><div>A</div></template>
-            `;
-            const mod = createMockModule({ id: 'a', name: 'A' });
-            const kernel = createKernel([reg(mod)]);
-            await kernel.start();
-
-            kernel.navigateTo('a');
-
-            // installModule bails when the shell has no #module-container,
-            // so 'a' is never added to loadedModules -- navigateTo must return
-            // early WITHOUT mutating page title or DOM.
-            expect(document.getElementById('page-title')?.textContent).toBe('');
-            expect(document.getElementById('module-view-a')).toBeNull();
-        });
-    });
-
-    describe('start() edge cases', () => {
-        it('starts with no sidebar toggle', async () => {
-            document.body.innerHTML = `
-                <nav id="sidebar-nav"></nav>
-                <div id="module-container"></div>
-                <h1 id="page-title"></h1>
-                <template data-module-id="test-module"><div>content</div></template>
-            `;
-            const mod = createMockModule({ id: 'test-module' });
-            const kernel = createKernel([reg(mod)]);
-            await kernel.start();
-            // No toggle button: start() still installs and shows the module.
-            expect(mod.install).toHaveBeenCalledTimes(1);
-            expect(document.getElementById('module-view-test-module')!.classList.contains('hidden')).toBe(false);
-        });
     });
 
     describe('managed RBAC visibility', () => {
@@ -1244,18 +1124,11 @@ describe('Kernel', () => {
             sessionStorage.clear();
         });
 
-        /** setupDOM plus the shell's toast container and, optionally, the bell slot. */
-        function setupShell(moduleIds: string[], withSlot = true) {
-            setupDOM(moduleIds);
-            document.body.insertAdjacentHTML('beforeend',
-                `${withSlot ? '<div id="notification-bell-slot"></div>' : ''}<div id="toast-container"></div>`);
-        }
-
         it('mounts the bell into #notification-bell-slot and hands every module the same center', async () => {
             const seen: AppContext[] = [];
             const a = createMockModule({ id: 'a', name: 'A', install: vi.fn(async c => { seen.push(c); }) });
             const b = createMockModule({ id: 'b', name: 'B', install: vi.fn(async c => { seen.push(c); }) });
-            setupShell(['a', 'b']);
+            setupDOM(['a', 'b']);
             await createKernel([reg(a), reg(b)]).start();
 
             expect(document.querySelector('#notification-bell-slot .notif-bell')).not.toBeNull();
@@ -1265,20 +1138,13 @@ describe('Kernel', () => {
             expect(document.querySelector('.notif-badge')!.textContent).toBe('1');
         });
 
-        it('mounts no bell when the shell has no slot', async () => {
-            setupShell(['a'], false);
-            await createKernel([reg(createMockModule({ id: 'a' }))]).start();
-            expect(document.querySelector('.notif-bell')).toBeNull();
-            expect(document.querySelector('dialog.notif-drawer')).toBeNull();
-        });
-
         it('records ok/warn/error toasts tagged with the module the user is on (App during install), and skips info toasts', async () => {
             let ctx: AppContext | null = null;
             const mod = createMockModule({
                 id: 'queue-browser', name: 'Queue Browser',
                 install: vi.fn(async c => { ctx = c; showToast('Saved scheme moved to wss', 'warn'); }),
             });
-            setupShell(['queue-browser']);
+            setupDOM(['queue-browser']);
             await createKernel([reg(mod)]).start();
 
             showToast('Queue "orders" bound', 'ok');
@@ -1295,7 +1161,7 @@ describe('Kernel', () => {
         it('records the connection lifecycle from the bus, naming broker and VPN', async () => {
             let ctx: AppContext | null = null;
             const mod = createMockModule({ id: 'connections', install: vi.fn(async c => { ctx = c; }) });
-            setupShell(['connections']);
+            setupDOM(['connections']);
             await createKernel([reg(mod)]).start();
             const c = ctx!;
 
@@ -1325,7 +1191,7 @@ describe('Kernel', () => {
         it('a Direct connect to a new broker starts a fresh list; a Provisioned session keeps it', async () => {
             let ctx: AppContext | null = null;
             const mod = createMockModule({ id: 'connections', install: vi.fn(async c => { ctx = c; }) });
-            setupShell(['connections']);
+            setupDOM(['connections']);
             await createKernel([reg(mod)]).start();
             const c = ctx!;
             const connect = (host: string) => {

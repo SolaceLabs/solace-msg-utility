@@ -304,11 +304,11 @@ export const UserManagementModule = {
             els.password.value = '';
             els.passwordHint.textContent = '(leave blank to keep current)';
             els.admin.checked = u.admin;
-            setModules(u.modules ?? null);
+            setModules(u.modules);
             operateList.clear();
-            (u.operate ?? []).forEach(r => operateList.addRow(r as unknown as Record<string, string>));
+            u.operate.forEach(r => operateList.addRow(r as unknown as Record<string, string>));
             readonlyList.clear();
-            (u.readOnly ?? []).forEach(r => readonlyList.addRow(r as unknown as Record<string, string>));
+            u.readOnly.forEach(r => readonlyList.addRow(r as unknown as Record<string, string>));
             setError(els.formError, null);
             showView('form');
         }

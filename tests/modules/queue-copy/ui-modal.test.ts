@@ -298,7 +298,7 @@ describe('queue-copy/ui-modal', () => {
         it('verify failure → Start disabled, both banners hidden', () => {
             const state = createInitialState();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ sourceOk: false, errors: ['no perms'] }),
             };
             els.btnModalStart.disabled = false;
@@ -311,7 +311,7 @@ describe('queue-copy/ui-modal', () => {
         it('empty queue → Start disabled, empty-queue banner shown', () => {
             const state = createInitialState();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 0 }),
             };
             evaluateStartGate(els, state, DIRECT);
@@ -324,7 +324,7 @@ describe('queue-copy/ui-modal', () => {
             const state = createInitialState();
             state.mode = 'move';
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 5, accessType: 'read-only' }),
             };
             evaluateStartGate(els, state, DIRECT);
@@ -337,7 +337,7 @@ describe('queue-copy/ui-modal', () => {
             const state = createInitialState();
             state.mode = 'copy';
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 5, accessType: 'read-only' }),
             };
             evaluateStartGate(els, state, DIRECT);
@@ -350,7 +350,7 @@ describe('queue-copy/ui-modal', () => {
             const state = createInitialState();
             state.mode = 'copy';
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 5, accessType: 'read-only' }),
             };
             evaluateStartGate(els, state, DIRECT);
@@ -370,7 +370,7 @@ describe('queue-copy/ui-modal', () => {
         it('null accessType is permissive — Start enabled for both modes', () => {
             const state = createInitialState();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 5, accessType: null }),
             };
             state.mode = 'copy';
@@ -394,7 +394,7 @@ describe('queue-copy/ui-modal', () => {
         it('no-access blocks BOTH copy and move → Start disabled, no-access banner shown', () => {
             const state = createInitialState();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 5, accessType: 'no-access' }),
             };
             state.mode = 'copy';
@@ -413,7 +413,7 @@ describe('queue-copy/ui-modal', () => {
         it('toggling from no-access to read-write (e.g. user re-verifies after permission change) clears no-access banner', () => {
             const state = createInitialState();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 5, accessType: 'no-access' }),
             };
             evaluateStartGate(els, state, DIRECT);
@@ -547,12 +547,10 @@ describe('queue-copy/ui-modal', () => {
             verifySpy.mockRestore();
         });
 
-        it('empty owner + empty client user → override fires (strict equals, both empty)', async () => {
-            // Edge case: an unauthenticated client (empty username) against
-            // a server-created queue (empty owner). Strict equals says they
-            // match; the override fires. Whether this scenario is reachable
-            // in practice depends on broker configuration — the engine just
-            // applies the rule as specified.
+        it('empty owner + empty client user: no override, others-permission decides', async () => {
+            // No Solace connection recorded: clientUser is ''. An ownerless
+            // queue reports owner ''. The two never match, so the queue keeps
+            // the access SEMP reported.
             const verifyMod = await import('../../../src/modules/queue-copy/service-verify');
             const verifySpy = vi.spyOn(verifyMod, 'verifySource')
                 .mockResolvedValue(verifyResult({
@@ -578,10 +576,9 @@ describe('queue-copy/ui-modal', () => {
             openCopyModal(ctx, els, state, () => session);
             for (let i = 0; i < 10; i++) await Promise.resolve();
 
-            // '' === '' → override fires; no-access lifted to read-write.
-            expect(state.verify!.result!.accessType).toBe('read-write');
-            expect(els.btnModalStart.disabled).toBe(false);
-            expect(els.modalSourceNoAccess.classList.contains('hidden')).toBe(true);
+            expect(state.verify!.result!.accessType).toBe('no-access');
+            expect(els.btnModalStart.disabled).toBe(true);
+            expect(els.modalSourceNoAccess.classList.contains('hidden')).toBe(false);
 
             verifySpy.mockRestore();
         });
@@ -1148,15 +1145,6 @@ describe('queue-copy/ui-modal', () => {
             expect(els.modal.hasAttribute('open')).toBe(false);
         });
 
-        it('verifying with null abort is safe', () => {
-            const state = createInitialState();
-            state.verify = { inProgress: true, abort: null, result: null };
-            els.modal.showModal();
-            cancelCopyModal(els, state);
-            expect(state.verify).toBeNull();
-            expect(els.modal.hasAttribute('open')).toBe(false);
-        });
-
         it('running: sets cancelRequested, leaves modal open', () => {
             const state = createInitialState();
             state.job = job({ total: 5, copied: 2, status: 'running' });
@@ -1233,7 +1221,7 @@ describe('queue-copy/ui-modal — entitlement gates', () => {
         const state = createInitialState();
         state.sourceQueue = sourceQueue;
         state.mode = mode;
-        state.verify = { inProgress: false, abort: null, result: verifyResult({ accessType }) };
+        state.verify = { inProgress: false, abort: new AbortController(), result: verifyResult({ accessType }) };
         return state;
     }
     const startEnabled = () => !els.btnModalStart.disabled;

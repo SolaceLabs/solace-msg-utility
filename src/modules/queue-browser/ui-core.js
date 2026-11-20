@@ -213,10 +213,9 @@ ui.resetQueueSelection = function () {
     els.btnFilter.classList.remove('filter-active');
     els.btnFilter.disabled = true;
 
-    // ui.renderList / ui.clearDetails are installed by initTable / initDetails respectively.
-    // Some unit tests import ui-core.js standalone without those installers, hence the guards.
-    if (ui.renderList) ui.renderList();
-    if (ui.clearDetails) ui.clearDetails();
+    // ui.renderList / ui.clearDetails are installed by initTable / initDetails at module install.
+    ui.renderList();
+    ui.clearDetails();
 };
 
 // Drop a bound queue from the dropdown (Unbind, or the broker ending the binding).

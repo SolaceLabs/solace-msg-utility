@@ -332,7 +332,7 @@ export function createQueuePicker(): QueuePicker {
         const term = r.vpnInput.value.toLowerCase();
         const opts = r.vpnList.querySelectorAll<HTMLElement>('.picker-dropdown-option:not(.picker-dropdown-empty)');
         opts.forEach((opt) => {
-            const text = (opt.textContent || '').toLowerCase();
+            const text = opt.textContent.toLowerCase();
             opt.style.display = text.includes(term) ? '' : 'none';
         });
     }
@@ -342,7 +342,7 @@ export function createQueuePicker(): QueuePicker {
         const term = r.queueInput.value.toLowerCase();
         const opts = r.queueList.querySelectorAll<HTMLElement>('.picker-dropdown-option:not(.picker-dropdown-empty)');
         opts.forEach((opt) => {
-            const text = (opt.textContent || '').toLowerCase();
+            const text = opt.textContent.toLowerCase();
             opt.style.display = text.includes(term) ? '' : 'none';
         });
     }

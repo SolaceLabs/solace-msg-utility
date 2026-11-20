@@ -354,12 +354,6 @@ export function runCopyJob(
             logger.error(`[Copy] Source QueueBrowser DOWN_ERROR: ${solaceErrorText(e, 'Browser disconnected')}`);
             triggerStop('browser-error');
         });
-        // GM_DISABLED registered for SDK-event-code-validation parity
-        // (createBrowserMock in tests/setup.ts throws on unknown event codes).
-        // No-op — any actual failure surfaces via DOWN_ERROR or the next
-        // publish failure. Covered by the `GM_DISABLED is a no-op` test.
-        browser.on(solace.QueueBrowserEventName.GM_DISABLED, () => { /* no-op */ });
-
         browser.on(solace.QueueBrowserEventName.MESSAGE, async (msg: any) => {
             if (stopReason !== null) {
                 logger.debug(`[Copy] MESSAGE arrived after stop (${stopReason}) — ignored`);
