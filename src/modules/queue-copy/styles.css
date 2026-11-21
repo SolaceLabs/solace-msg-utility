@@ -2,6 +2,15 @@
    (.btn, .form-control, .card, .form-group, .invalid-feedback, etc.);
    only copy-specific layout + the verify+run modal live here. */
 
+/* The page's fieldset (see index.html) groups the controls for the run
+   lock; it draws nothing of its own. */
+.copy-content {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+}
+
 /* Two-column layout: source on the left, destination on the right. Cards
    are direct children laid out row-by-row so each Source / Destination
    pair sits in the same grid row. Default `align-items: stretch` makes

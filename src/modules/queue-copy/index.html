@@ -1,7 +1,11 @@
 <!-- The connection-required gate is created at install by createGate() (see module.ts). -->
 
-<!-- Active View (Visible when primary Solace is connected) -->
-<div id="copy-content" class="hidden">
+<!--
+  Active View (Visible when primary Solace is connected). One fieldset holds
+  every control on the page, so a running copy disables them all at once
+  (setFormDisabled) without touching their own disabled state.
+-->
+<fieldset id="copy-content" class="copy-content hidden">
 
     <!--
       Two-column grid laid out row-by-row so each Source / Destination pair
@@ -311,7 +315,7 @@
     <div class="actions-footer mt-6 flex-row justify-end p-6 gap-4">
         <button id="copy-btn-start" class="btn btn-primary" disabled>Next</button>
     </div>
-</div>
+</fieldset>
 
 <!-- Confirm Queue Copy modal -->
 <dialog id="copy-modal" aria-labelledby="copy-modal-title">

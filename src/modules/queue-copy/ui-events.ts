@@ -257,7 +257,6 @@ export function wireUiEvents(
 
     // ===== Footer: Next =====
     els.btnStart.addEventListener('click', () => {
-        if (!state.sourceQueue || !state.dest.name) return;
         openCopyModal(ctx, els, state, services.getPrimarySession);
     });
 

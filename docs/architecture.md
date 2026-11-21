@@ -867,10 +867,12 @@ The provisioned connection card -- [src/core/components/provisioned-connection/]
 
 Queue Copy's destination is a *secondary* connection: its hooks write only module-local state, never AppState and never the bus. It is opened one of two ways, which follows the primary connection (`deriveDestMode` in `ui-events.ts`):
 
-- **Typed** (Direct primary: Standalone or Gateway mode) -- the user types host + credentials in the Destination cards, as before.
+- **Typed** (Direct primary: Standalone or Gateway mode) -- the user types host + credentials in the Destination cards.
 - **Provisioned** (Provisioned primary) -- the shared connection card replaces the typed cards: the user picks a broker and VPN from `managedProfile.brokers()` / `vpnsFor(broker)`; there are no password fields. `module.ts` runs the [connect sequence](#provisioned-connect-sequence), whose steps call `managedProfile.dial(target, { connect })` and open the module's own factory pair inside the callback: SEMP through the gateway's relay, SMF with the dialled credential, which goes straight to the SDK. A relay `401` or a dial refused because the session ended asks the session owner to sign out (`rbac:sign-out-requested`); the connection's lifecycle stays entirely in the module.
 
 A destination Client connect is guarded three ways: the engine publishes through the session the form names (`selectPublisher`), a late session whose target differs from the connect generation (`destSolPending` vs `destTargetKey`) is discarded in `onConnected`, and the controls that choose the target stay locked while it is in flight (the Same-broker / Same-VPN toggles via `setDestTargetLocked`, the provisioned card via `card.lock` and its own Connecting state). The `rbac:changed` teardown applies only to a live or connecting provisioned secondary (`destLive` in `module.ts`), never to a destination that was not connected.
+
+While a run is in flight the whole page is locked. Every control on it sits in one fieldset (`#copy-content`), and `setFormDisabled` disables the fieldset, not each control, so when the run ends each control is back under its own rule (the Same-broker lock, a connected destination, the Next gate). A control added inside `#copy-content` is locked with the rest.
 
 This is the payoff of the dial interface: a second module opens a provisioned connection **without importing the connections module** and **without credential-bearing state**.
 

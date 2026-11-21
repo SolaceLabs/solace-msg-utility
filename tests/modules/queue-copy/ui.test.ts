@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { formatBytes } from '../../../src/core/utils';
 import {
     cacheElements,
@@ -60,7 +60,6 @@ describe('queue-copy/ui', () => {
         it('caches every required element including the source-side mirror', () => {
             const els = elsHolder.els;
             expect(els.modal.tagName.toLowerCase()).toBe('dialog');
-            expect(els.btnStart.disabled).toBe(true);
             expect(els.modeRadios.length).toBe(2);
             // Source-side read-only mirror (presence is enforced by required()).
             expect(els.sourceEditButtons.length).toBe(3);
@@ -422,26 +421,38 @@ describe('queue-copy/ui', () => {
     });
 
     describe('setFormDisabled', () => {
-        it('disables every form control + toggle + radios + source-edit buttons', () => {
-            setFormDisabled(elsHolder.els, true);
-            expect(elsHolder.els.sourceInput.disabled).toBe(true);
-            expect(elsHolder.els.destSempPort.disabled).toBe(true);
-            expect(elsHolder.els.destSolPort.disabled).toBe(true);
-            expect(elsHolder.els.btnStart.disabled).toBe(true);
-            expect(elsHolder.els.destTypeToggle.disabled).toBe(true);
-            elsHolder.els.modeRadios.forEach(r => expect(r.disabled).toBe(true));
-            elsHolder.els.sourceEditButtons.forEach(b => expect(b.disabled).toBe(true));
-        });
+        it('locks every control on the page through its fieldset and leaves each control its own state', () => {
+            const { els } = elsHolder;
+            const controls = [
+                els.sourceInput, els.btnSourcePick, els.toggleSameBroker, els.toggleSameVpn, els.destHost,
+                els.destSempPort, els.destSolPort, els.destSolVpn, els.destTypeToggle, els.destInput,
+                els.btnDestPick, els.btnStart, ...els.modeRadios, ...els.sourceEditButtons,
+            ];
+            controls.forEach(c => expect(els.content.contains(c)).toBe(true));
+            // The modal's own buttons stay usable while the page is locked.
+            expect(els.content.contains(els.modal)).toBe(false);
+            els.destHost.disabled = true;       // the Same broker lock
+            els.btnStart.disabled = false;      // the Next gate allows a run
+            const nextClicked = vi.fn();
+            els.btnStart.addEventListener('click', nextClicked);
 
-        it('re-enables when false', () => {
-            setFormDisabled(elsHolder.els, true);
-            setFormDisabled(elsHolder.els, false);
-            expect(elsHolder.els.sourceInput.disabled).toBe(false);
+            setFormDisabled(els, true);
+            expect(els.content.disabled).toBe(true);
+            els.btnStart.click();
+            expect(nextClicked).not.toHaveBeenCalled();
+
+            setFormDisabled(els, false);
+            expect(els.content.disabled).toBe(false);
+            expect(els.destHost.disabled).toBe(true);
+            els.btnStart.click();
+            expect(nextClicked).toHaveBeenCalledTimes(1);
         });
     });
 
     describe('renderModalInitial', () => {
-        it('populates source + dest summaries and sets Copy/Move button text from mode', () => {
+        it('populates source + dest summaries, sets Copy/Move button text from mode, and holds Start until the check ends', () => {
+            // Start left on by the previous open.
+            elsHolder.els.btnModalStart.disabled = false;
             renderModalInitial(elsHolder.els, SRC, DST, 'copy');
             expect(elsHolder.els.modalTitle.textContent).toBe('Confirm Queue Copy');
             expect(elsHolder.els.modalSourceBroker.textContent).toBe('broker.example:1943');

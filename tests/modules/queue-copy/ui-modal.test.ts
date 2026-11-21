@@ -810,7 +810,7 @@ describe('queue-copy/ui-modal', () => {
     });
 
     describe('modal Start (Copy/Move)', () => {
-        it('clicking Start drives the run phase; onComplete re-enables the form', async () => {
+        it('clicking Start drives the run phase; onComplete unlocks the page', async () => {
             const ctx = makeCtx();
             const state = createInitialState();
             state.sourceQueue = 'q';
@@ -833,15 +833,42 @@ describe('queue-copy/ui-modal', () => {
             els.btnModalStart.disabled = false;
             els.btnModalStart.click();
 
-            expect(els.sourceInput.disabled).toBe(true);
+            expect(els.content.disabled).toBe(true);
             expect(els.modalTitle.textContent).toBe('Copying…');
 
             for (let i = 0; i < 10; i++) await Promise.resolve();
             // total=0 fast-path completes cleanly.
-            expect(els.sourceInput.disabled).toBe(false);
+            expect(els.content.disabled).toBe(false);
             expect(els.modalTitle.textContent).toBe('Completed');
             // Finished: the job no longer reads as a run in flight.
             expect(state.job).toBeNull();
+        });
+
+        it('a finished run leaves each control as its own rule set it: a locked field stays locked, Next stays off', async () => {
+            const ctx = makeCtx();
+            const state = createInitialState();
+            state.sourceQueue = 'q';
+            state.dest = { type: 'queue', name: 'd' };
+            const session = createSessionMock();
+            (session.createQueueBrowser as any).mockReturnValue(createBrowserMock());
+            state.primaryPublisher = createSolacePublisher(session);
+            els.destHost.disabled = true;       // the Same broker lock
+            els.btnStart.disabled = false;      // Next opened this modal
+
+            openCopyModal(ctx, els, state, () => session);
+            for (let i = 0; i < 5; i++) await Promise.resolve();
+            state.verify!.result = verifyResult({ messageCount: 0 });
+            state.verify!.inProgress = false;
+            els.btnModalStart.disabled = false;
+            els.btnModalStart.click();
+            // During the run the destination is cleared and the Next gate turns Next off.
+            els.btnStart.disabled = true;
+
+            for (let i = 0; i < 10; i++) await Promise.resolve();
+            expect(els.modalTitle.textContent).toBe('Completed');
+            expect(els.content.disabled).toBe(false);
+            expect(els.destHost.disabled).toBe(true);
+            expect(els.btnStart.disabled).toBe(true);
         });
 
         it('Start does nothing when primary session is null', async () => {
@@ -858,8 +885,8 @@ describe('queue-copy/ui-modal', () => {
             session2 = null;
             els.btnModalStart.disabled = false;
             els.btnModalStart.click();
-            // No throw; setFormDisabled(true) was never called.
-            expect(els.sourceInput.disabled).toBe(false);
+            // No throw, and the page was never locked.
+            expect(els.content.disabled).toBe(false);
         });
 
         it('source-drift surfaces via renderRunError (engine reports status=error)', async () => {
@@ -1053,7 +1080,7 @@ describe('queue-copy/ui-modal', () => {
 
             expect(els.modalRunError.textContent).toMatch(/does not match the destination selected/);
             expect(state.job).toBeNull();
-            expect(els.sourceInput.disabled).toBe(false);
+            expect(els.content.disabled).toBe(false);
         });
 
         it('a verify that rejects shows as a failed verify, not a modal stuck on "Checking..."', async () => {
@@ -1098,7 +1125,7 @@ describe('queue-copy/ui-modal', () => {
             expect(els.modalRunError.textContent).toBe('Error: engine blew up');
             expect(els.modalTitle.textContent).toBe('Failed');
             expect(els.btnModalCancel.textContent).toBe('Close');
-            expect(els.sourceInput.disabled).toBe(false);
+            expect(els.content.disabled).toBe(false);
             expect(state.job).toBeNull();
             copySpy.mockRestore();
         });
@@ -1382,7 +1409,7 @@ describe('queue-copy/ui-modal — entitlement gates', () => {
                 expect(els.modalRunError.textContent).toMatch(/Topic destinations/);
                 expect(copySpy).not.toHaveBeenCalled();
                 expect(state.job).toBeNull();
-                expect(els.sourceInput.disabled).toBe(false);
+                expect(els.content.disabled).toBe(false);
             } finally {
                 copySpy.mockRestore();
             }

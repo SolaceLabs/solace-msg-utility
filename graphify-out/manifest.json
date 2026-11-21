@@ -312,9 +312,9 @@
     "semantic_hash": ""
   },
   "src/modules/queue-copy/ui-events.ts": {
-    "mtime": 1794994131.6102006,
-    "seen": 1794998660.1295633,
-    "ast_hash": "bbdd7dea9d53cac308ba15f8262f70cb",
+    "mtime": 1795224222.3004835,
+    "seen": 1795225299.002878,
+    "ast_hash": "76bf8ea358b95493b47f9a8b78b38252",
     "semantic_hash": ""
   },
   "src/modules/queue-copy/ui-modal.ts": {
@@ -324,9 +324,9 @@
     "semantic_hash": ""
   },
   "src/modules/queue-copy/ui.ts": {
-    "mtime": 1794794134.659627,
-    "seen": 1794800927.3182218,
-    "ast_hash": "eca5bed17d9579b175d593f00b6a1265",
+    "mtime": 1795224222.300173,
+    "seen": 1795225299.0028822,
+    "ast_hash": "a941030b3c5aa7752063c76acd8f729f",
     "semantic_hash": ""
   },
   "src/modules/queue-discovery/module.ts": {
@@ -618,21 +618,21 @@
     "semantic_hash": ""
   },
   "tests/modules/queue-copy/ui-events.test.ts": {
-    "mtime": 1794994176.8238974,
-    "seen": 1794998660.129761,
-    "ast_hash": "8ba869392adc3cfb9cc7844187087069",
+    "mtime": 1795224247.0293424,
+    "seen": 1795225299.003093,
+    "ast_hash": "63adf878fbaa3c81a11390bef6805367",
     "semantic_hash": ""
   },
   "tests/modules/queue-copy/ui-modal.test.ts": {
-    "mtime": 1795196896.3122888,
-    "seen": 1795210659.5996957,
-    "ast_hash": "78d9dc896590a520dcabdb4f35abc905",
+    "mtime": 1795224247.0338619,
+    "seen": 1795225299.0030942,
+    "ast_hash": "951a2fca4e3c16e729954e8c68510acb",
     "semantic_hash": ""
   },
   "tests/modules/queue-copy/ui.test.ts": {
-    "mtime": 1795102001.9916704,
-    "seen": 1795177579.482236,
-    "ast_hash": "a8dadbddc2385bb631c2de11e8f3f068",
+    "mtime": 1795224247.0284197,
+    "seen": 1795225299.003096,
+    "ast_hash": "9558be08e227c3174cfb0dace212e97d",
     "semantic_hash": ""
   },
   "tests/modules/queue-discovery/module.test.ts": {
@@ -690,9 +690,9 @@
     "semantic_hash": ""
   },
   "docs/architecture.md": {
-    "mtime": 1795196576.0170012,
-    "seen": 1795210659.5997493,
-    "ast_hash": "6302995bc8fce286fb3d7bdc078bf0fb",
+    "mtime": 1795224265.8358276,
+    "seen": 1795225299.0031397,
+    "ast_hash": "ac2150fbc7df62861441bb87efe39c66",
     "semantic_hash": ""
   },
   "docs/contributing.md": {
@@ -744,9 +744,9 @@
     "semantic_hash": ""
   },
   "src/modules/queue-copy/index.html": {
-    "mtime": 1794880488.3708637,
-    "seen": 1794882223.9074209,
-    "ast_hash": "a50c12e4823ac575780f962d4bae4223",
+    "mtime": 1795224222.2968502,
+    "seen": 1795225299.0031648,
+    "ast_hash": "aa0cc73223296269982932dd31f9e718",
     "semantic_hash": ""
   },
   "src/modules/queue-discovery/index.html": {

@@ -5,8 +5,9 @@ import type { CopyJob, VerifyResult, DestType, CopyMode } from './state';
 export interface CopyUiElements {
     container: HTMLElement;
 
-    // Top-level visibility (the gate is owned by the module-gate component)
-    content: HTMLElement;
+    // Top-level visibility (the gate is owned by the module-gate component);
+    // the fieldset that holds every control on the page
+    content: HTMLFieldSetElement;
 
     // Source read-only connection mirror (populated from AppState.solaceConnection
     // + AppState.sempCredentials via applySourceReadonly)
@@ -139,7 +140,7 @@ export interface CopyUiElements {
 export function cacheElements(container: HTMLElement): CopyUiElements {
     return {
         container,
-        content: required(container, '#copy-content'),
+        content: required<HTMLFieldSetElement>(container, '#copy-content'),
 
         sourceHost: required<HTMLInputElement>(container, '#copy-source-host'),
         sourceSempProtocol: required<HTMLSelectElement>(container, '#copy-source-semp-protocol'),
@@ -568,24 +569,15 @@ export function setStartEnabled(els: CopyUiElements, enabled: boolean): void {
     els.btnStart.disabled = !enabled;
 }
 
-/** Disable form inputs while a copy is running so the user can't change settings mid-flight.
- *  Source-side connection fields are always disabled (they mirror connections);
- *  this function only toggles user-editable controls. */
+/**
+ * Lock the page while a copy runs, so no setting changes mid-flight. Every
+ * control sits in one fieldset (`els.content`): disabling it disables them all
+ * without touching their own disabled state, so when the run ends each control
+ * is back under its own rule (the Same broker lock, a connected destination,
+ * the Next gate), including any change those rules made during the run.
+ */
 export function setFormDisabled(els: CopyUiElements, disabled: boolean): void {
-    const inputs: (HTMLInputElement | HTMLSelectElement | HTMLButtonElement)[] = [
-        els.sourceInput, els.btnSourcePick,
-        els.toggleSameBroker, els.toggleSameVpn,
-        els.destHost,
-        els.destSempProtocol, els.destSempPort, els.destSempUrlPath, els.destSempUser, els.destSempPass,
-        els.destSolProtocol, els.destSolPort, els.destSolUrlPath,
-        els.destSolVpn, els.destSolUser, els.destSolPass,
-        els.destTypeToggle,
-        els.destInput, els.btnDestPick,
-        els.btnStart,
-    ];
-    for (const el of inputs) el.disabled = disabled;
-    els.modeRadios.forEach(r => r.disabled = disabled);
-    els.sourceEditButtons.forEach(b => b.disabled = disabled);
+    els.content.disabled = disabled;
 }
 
 /**

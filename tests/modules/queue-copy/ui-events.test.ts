@@ -96,11 +96,6 @@ describe('queue-copy/ui-events', () => {
             expect(els.destHost.value).toBe('broker.solace.com');
         });
 
-        it('Start button starts disabled (no source/dest yet)', () => {
-            const { els } = setup();
-            expect(els.btnStart.disabled).toBe(true);
-        });
-
         it('initial-prefill with null primary snapshot leaves fields blank but disabled', () => {
             const { els } = setup({ primarySnap: null });
             expect(els.destHost.value).toBe('');
@@ -447,22 +442,6 @@ describe('queue-copy/ui-events', () => {
             expect(els.btnStart.disabled).toBe(false);
             els.btnStart.click();
             expect(els.modal.hasAttribute('open')).toBe(true);
-        });
-
-        it('does nothing when source is empty (button is disabled, but defensive)', () => {
-            const { els, state } = setup();
-            state.dest.name = 'd';
-            els.btnStart.disabled = false;
-            els.btnStart.click();
-            expect(els.modal.hasAttribute('open')).toBe(false);
-        });
-
-        it('does nothing when dest is empty', () => {
-            const { els, state } = setup();
-            state.sourceQueue = 's';
-            els.btnStart.disabled = false;
-            els.btnStart.click();
-            expect(els.modal.hasAttribute('open')).toBe(false);
         });
     });
 
