@@ -469,6 +469,50 @@ func validateConn(c connRec) error {
 	return nil
 }
 
+// The usernames a broker accepts. A SEMP (management) username is up to 32
+// characters from A-Z a-z 0-9 _ -; a client username is up to 189 printable
+// ASCII characters without ? or *, which the broker's CLI reads as wildcards.
+// A blank name passes either check (no credential). The app's forms apply the
+// same rules (sempUsernameOk and clientUsernameError in src/core/utils.ts).
+var sempUserPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{0,32}$`)
+
+const (
+	sempUserRule   = "must be up to 32 characters from A-Z a-z 0-9 _ -"
+	clientUserRule = "must be up to 189 printable ASCII characters, without ? or *"
+)
+
+func validSempUser(s string) bool {
+	return sempUserPattern.MatchString(s)
+}
+
+func validClientUser(s string) bool {
+	if len(s) > 189 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c > 0x7e || c == '?' || c == '*' {
+			return false
+		}
+	}
+	return true
+}
+
+// checkBrokerUsernames holds a connection an administrator saves to the
+// usernames a broker accepts. Only a save checks them: a stored connection or
+// a restored backup that holds another name loads as it is, and its next save
+// asks for a valid one. Like validateConn, the error never echoes a credential.
+func checkBrokerUsernames(c connRec) error {
+	if !validSempUser(c.Semp.Username) {
+		return fmt.Errorf("broker %q: the SEMP username %s", c.Broker, sempUserRule)
+	}
+	for _, v := range c.Client.MsgVpns {
+		if !validClientUser(v.Username) {
+			return fmt.Errorf("broker %q: message VPN %q: the client username %s", c.Broker, v.Name, clientUserRule)
+		}
+	}
+	return nil
+}
+
 // hostPattern is a DNS-style host name; validHost also takes IP literals
 // (IPv6 without brackets). No scheme, port, path, user info or spaces.
 var hostPattern = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_.-]{0,251}[A-Za-z0-9_])?$`)

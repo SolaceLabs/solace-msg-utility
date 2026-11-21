@@ -7,6 +7,7 @@ import {
     CLIENT_SCHEMES, moduleIdsProblem, passwordOk, portProblem, schemeOk, SEMP_SCHEMES, validBroker, validHost, validUsername,
 } from '../../../src/mock-broker/gateway/validate';
 import { matchGlob } from '../../../src/core/rbac';
+import { clientUsernameOk, sempUsernameOk } from '../../../src/core/utils';
 import type { UpstreamAnswer } from '../../../src/mock-broker/gateway/relay';
 import { scenario } from '../../../src/mock-broker/fixtures';
 import type { GatewaySeed } from '../../../src/mock-broker/gateway/types';
@@ -216,6 +217,9 @@ describe('mock-broker/gateway -- the validation vectors', () => {
         ['host', validHost],
         ['port', s => portProblem(s) === null],
         ['password', passwordOk],
+        // The app's own rules, which the forms and the fake's connection save share.
+        ['sempUsername', sempUsernameOk],
+        ['clientUsername', clientUsernameOk],
     ];
 
     for (const [name, okFn] of checks) {

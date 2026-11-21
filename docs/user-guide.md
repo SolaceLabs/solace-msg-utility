@@ -98,13 +98,13 @@ This connection uses the Solace Web Messaging protocol (WebSocket) for message o
 | Port | WebSocket port | `8008` (ws) or `1443` (wss) |
 | URL Path | Optional path appended after the port (for example when the broker sits behind a reverse proxy). Hidden until you click **+ URL path**; the **x** in the field clears it and hides it again. A saved or loaded path always shows the field. Leave it out for a direct broker URL. | `/solace`, `/ws` |
 | Message VPN | The Solace VPN to connect to | `default` |
-| Username | Client username | `default` |
+| Username | Client username: up to 189 printable ASCII characters, without `?` or `*`. Case counts. | `default` |
 | Password | Client password or OAuth2 token | |
 
 **Auth modes:**
 
 - **Basic** -- username and password
-- **OAuth2** -- token-based; the Username field becomes "Client ID" and Password becomes "Access Token"
+- **OAuth2** -- token-based; the Username field becomes "Access Token" and Password becomes "ID Token". The client username rule does not apply to the token.
 
 **Advanced Settings** (gear icon):
 
@@ -140,7 +140,7 @@ This connection uses the SEMP v2 REST API for management operations: discovering
 | Protocol | `http://` or `https://`. As for Messaging, a page served over `https://` without the gateway offers only `https://`. | `https://` |
 | Port | SEMP port | `8080` (http) or `1943` (https) |
 | URL Path | Optional path appended after the port and before `/SEMP/v2/...` (for example when SEMP is exposed behind a reverse proxy). Hidden until you click **+ URL path**, as in the Messaging card. Leave it out for a direct SEMP URL. | `/api`, `/management` |
-| Username | SEMP admin username | `admin` |
+| Username | SEMP admin username: up to 32 characters from `A-Z a-z 0-9 _ -` | `admin` |
 | Password | SEMP admin password | |
 
 The SEMP connection shares the Broker Host with the Solace client connection.
@@ -344,6 +344,8 @@ The form is split into Source (left, a read-only mirror of the primary connectio
 - **Destination** cards take the broker host, SEMP credentials, Solace client credentials and the destination target. As in the Connections form, a page served over `https://` without the gateway offers only `wss://` and `https://` there. Two shortcuts sit at the top of the Destination Broker card:
   - **Same Solace Broker as source** -- the destination reuses the primary host and SEMP credentials.
   - **Same Message VPN as source** -- the destination reuses the primary VPN and Solace credentials (this implies Same Broker).
+
+  The destination usernames follow the Connections form's rules; **Connect** refuses one that breaks them and says why.
 
 When Same VPN is on, the destination uses the primary Solace session directly and no second connection is made.
 
@@ -612,15 +614,16 @@ List, add, edit and delete broker connections, with the same pencil and bin icon
 | --- | --- |
 | Broker name | **Add connection** refuses a name that already exists |
 | Hostname | A bare host name or IP address: no `https://`, port or path |
-| **SEMP** account | **Scheme** (`https` is the default and uses TLS; `http` is plain, for a broker whose SEMP port is not TLS), port, username, password. The port is required once a SEMP username is set |
+| **SEMP** account | **Scheme** (`https` is the default and uses TLS; `http` is plain, for a broker whose SEMP port is not TLS), port, username, password. The username is up to 32 characters from `A-Z a-z 0-9 _ -`. The port is required once a SEMP username is set |
 | **Client** (messaging) | **Scheme** (`wss` is the default and uses TLS; `ws` is plain) and port, chosen to match the broker's messaging port. The port is required once a Message VPN is listed |
-| **Message VPNs** | Columns **Message VPN**, **Client username**, **Client password**. A broker with none is reachable by no one |
+| **Message VPNs** | Columns **Message VPN**, **Client username**, **Client password**. A client username is up to 189 printable ASCII characters, without `?` or `*`. A broker with none is reachable by no one |
 
 - Use a **read-only or least-privilege SEMP account**.
 - Passwords travel to the gateway over TLS and are kept in its encrypted store; they are never shown again. Leave a password field blank when editing to keep the stored one.
 - A Message VPN's stored password is matched by its name, so a VPN you add or rename needs its password typed in.
 - A connection with no scheme stored shows `https` and `wss`.
 - The gateway refuses a save that breaks these rules, or any other scheme value, and the editor shows its reason under the form.
+- A stored connection, or one from a restored backup, whose username breaks these rules loads as it is; saving it asks for a valid one.
 
 ### Gateway Settings
 

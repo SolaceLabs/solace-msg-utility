@@ -446,6 +446,16 @@
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "1943", "user": "ops.admin", "pass": "p" }, "client": { "port": "", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": the SEMP username must be up to 32 characters from A-Z a-z 0-9 _ -" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "1943", "user": "ops-admin_2", "pass": "p" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "app user", "pass": "p" }, { "name": "v2", "user": "app*", "pass": "p" }] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": message VPN \"v2\": the client username must be up to 189 printable ASCII characters, without ? or *" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
           "body": { "rev": 0, "hostname": "host4", "semp": { "port": "", "user": "", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u", "pass": "p" }, { "name": "v1", "user": "u", "pass": "p" }] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": message VPN \"v1\" appears more than once" }
         },

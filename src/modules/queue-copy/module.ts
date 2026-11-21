@@ -59,7 +59,7 @@ import type { ProvisionedStatus, ProvisionedTarget } from '../../core/components
 import { logger } from '../../core/logger';
 import { isHostedDeployment, limitSchemeOptions } from '../../core/hosted';
 import { isQueueVisible, canOperate } from '../../core/rbac';
-import { errMessage, sempAccountError } from '../../core/utils';
+import { errMessage, sempAccountError, clientUsernameError } from '../../core/utils';
 import { isSessionEnded } from '../../core/services/managed-profile';
 import { connectProvisioned, gatewayCodeOf, outcomeDetails, outcomeLines, type StepResult } from '../../core/services/provisioned-connect';
 import { managedErrorMessage } from '../../core/services/managed-api';
@@ -346,7 +346,7 @@ export const QueueCopyModule = {
 
         function connectDestSemp(): void {
             const f = state.destForm;
-            // The Solace CLI account rules, as the connections form applies
+            // The broker's SEMP account rules, as the connections form applies
             // them: a credential outside them is refused here, before btoa
             // sees it and before any request is sent.
             const account = sempAccountError(f.semp.user, state.destSempPass);
@@ -368,6 +368,13 @@ export const QueueCopyModule = {
 
         function connectDestSol(): void {
             const f = state.destForm;
+            // A client username the broker refuses, as the connections form
+            // refuses it: here, with the reason, before any connect.
+            const userProblem = clientUsernameError(f.solace.user);
+            if (userProblem) {
+                setDestSolError(els, userProblem);
+                return;
+            }
             // The destination this connect is for: onConnected installs the
             // session only if the form still names it, and the controls that
             // choose it stay locked until the connect ends.

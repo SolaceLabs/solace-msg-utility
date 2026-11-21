@@ -715,6 +715,25 @@ func TestValidateConn_HostPortsAndCredentials(t *testing.T) {
 	}
 }
 
+// A stored connection or a restored backup is held to validateConn only: a
+// username a broker refuses loads as it is, and a save refuses it
+// (checkBrokerUsernames; the refusals themselves are contract steps in
+// testdata/contract/cases.json).
+func TestValidateConn_LeavesBrokerUsernamesToTheSave(t *testing.T) {
+	c := connRec{
+		Broker: "b1", Hostname: "h",
+		Semp:   sempRec{Port: "1943", Username: "ops.admin"},
+		Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v1", Username: "who?"}}},
+	}
+	if err := validateConns([]connRec{c}); err != nil {
+		t.Fatalf("a stored connection with such names must load: %v", err)
+	}
+	err := checkBrokerUsernames(c)
+	if err == nil || err.Error() != `broker "b1": the SEMP username must be up to 32 characters from A-Z a-z 0-9 _ -` {
+		t.Fatalf("a save refuses the SEMP username first, got %v", err)
+	}
+}
+
 // ----- queries ------------------------------------------------------------------------
 
 func TestStore_ProfileAndEntitlement(t *testing.T) {

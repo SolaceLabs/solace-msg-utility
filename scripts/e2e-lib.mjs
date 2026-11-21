@@ -203,7 +203,13 @@ const hostRule = (v) => plain(v)
 const ipRule = (v) => (net.isIP(v) && !v.includes('%') ? '' : `is not an IP address: ${v}`);
 const dnsRule = (v) => (dnsServers(v).every((s) => !ipRule(s)) ? '' : `is not a list of IP addresses separated by commas: ${v}`);
 const portRule = (v) => (/^\d{1,5}$/.test(v) && Number(v) >= 1 && Number(v) <= 65535 ? '' : `is not a port number (1-65535): ${v}`);
-const sempUserRule = (v) => plain(v) || (v.includes(':') ? 'holds a ":", which a SEMP username cannot' : '');
+// The usernames the gateway's connection save accepts (checkBrokerUsernames
+// in go-web-proxy/store.go): the harness saves both on the e2e connection.
+const sempUserRule = (v) => plain(v)
+    || (/^[A-Za-z0-9_-]{1,32}$/.test(v) ? '' : `is not a SEMP username (up to 32 characters from A-Z a-z 0-9 _ -): ${v}`);
+const clientUserRule = (v) => plain(v)
+    || (v.length <= 189 && /^[\x20-\x7e]*$/.test(v) && !/[?*]/.test(v)
+        ? '' : `is not a client username (up to 189 printable ASCII characters, without ? or *): ${v}`);
 // A VPN or queue name travels as one relay path segment, so it must pass the
 // relay's own rule (safeSegment in go-web-proxy/relay.go), or check 3 would
 // report the relay's designed refusal as a failure.
@@ -232,7 +238,7 @@ export const BROKER_FIELDS = [
     { key: 'sempPassword', env: 'E2E_SEMP_PASSWORD', secret: true, check: plain, label: 'SEMP password' },
     { key: 'smfPort', env: 'E2E_SMF_PORT', fallback: '1443', check: portRule, label: 'secured web transport (wss) port' },
     { key: 'vpn', env: 'E2E_VPN', fallback: 'default', check: segmentRule, label: 'message VPN' },
-    { key: 'clientUser', env: 'E2E_CLIENT_USER', check: plain, label: 'client username in that VPN' },
+    { key: 'clientUser', env: 'E2E_CLIENT_USER', check: clientUserRule, label: 'client username in that VPN' },
     { key: 'clientPassword', env: 'E2E_CLIENT_PASSWORD', secret: true, check: plain, label: 'client password' },
     { key: 'queue', env: 'E2E_QUEUE', check: segmentRule,
         label: 'existing queue in that VPN the client username may browse (nothing is consumed)' },

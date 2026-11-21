@@ -27,7 +27,7 @@ import { createGate, gateOnAdminSession } from '../../core/components/module-gat
 import { createRowList, renderAdminRows } from '../../core/components/row-list';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
-import { escapeHtml, matchContains } from '../../core/utils';
+import { escapeHtml, matchContains, sempUsernameOk, clientUsernameError } from '../../core/utils';
 import { logger } from '../../core/logger';
 import { handleConflict } from '../../core/admin-conflict';
 import { reportManagedFailure } from '../../core/services/managed-api';
@@ -39,6 +39,9 @@ const VPN_FIELDS = [
     { key: 'user', placeholder: 'username', label: 'Client username' },
     { key: 'pass', placeholder: 'password (blank = keep)', type: 'password' as const, label: 'Client password' },
 ];
+
+/** Why the form refuses a SEMP username (sempUsernameOk). */
+const SEMP_USERNAME_RULE = 'SEMP username may be up to 32 characters: letters, digits, - and _.';
 
 /** What an empty VPN list means, shown in its place. */
 export const NO_VPNS = 'None: no user can reach this broker until it lists a Message VPN.';
@@ -211,6 +214,19 @@ export const ConnectionManagementModule = {
                 setError(els.formError, `VPN "${unkept.name}" has no stored password to keep. Enter its password.`);
                 return;
             }
+            // Usernames a broker refuses; the gateway refuses them too.
+            const sempUser = els.sempUser.value.trim();
+            if (!sempUsernameOk(sempUser)) {
+                setError(els.formError, SEMP_USERNAME_RULE);
+                return;
+            }
+            for (const r of rows) {
+                const problem = clientUsernameError(r.user);
+                if (problem) {
+                    setError(els.formError, `VPN "${r.name}": ${problem}`);
+                    return;
+                }
+            }
             els.btnSave.disabled = true;
             setError(els.formError, null);
             try {
@@ -222,7 +238,7 @@ export const ConnectionManagementModule = {
                     semp: {
                         scheme: els.sempScheme.value === 'http' ? 'http' : 'https',
                         port: els.sempPort.value.trim(),
-                        user: els.sempUser.value.trim(),
+                        user: sempUser,
                         pass: els.sempPass.value,
                     },
                     client: {

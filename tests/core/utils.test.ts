@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { formatBytes, generateUuid, matchString, matchContains, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText, moduleLabel, errMessage, basicAuthHeader, sempAccountError } from '../../src/core/utils';
+import { formatBytes, generateUuid, matchString, matchContains, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText, moduleLabel, errMessage, basicAuthHeader, sempAccountError, sempUsernameOk, clientUsernameError, clientUsernameOk } from '../../src/core/utils';
 
 describe('core/utils', () => {
 
@@ -473,16 +473,21 @@ describe('core/utils basicAuthHeader', () => {
 });
 
 describe('core/utils sempAccountError', () => {
-    it('accepts the CLI rules at their limits', () => {
+    it('accepts the rules at their limits', () => {
         expect(sempAccountError('a'.repeat(32), 'x'.repeat(128))).toBeNull();
         expect(sempAccountError('Admin01', '!#$%+-./09=?@AZ[]^_az{}~')).toBeNull();
+        expect(sempAccountError('ops-admin_2', 'secret')).toBeNull();
     });
 
+    const CHARS = 'SEMP username may contain only letters, digits, - and _ (A-Z, a-z, 0-9, -, _).';
     it.each([
         ['', 'SEMP username is required.'],
         ['a'.repeat(33), 'SEMP username must not exceed 32 characters.'],
-        ['admin_1', 'SEMP username may contain only letters and digits (A-Z, a-z, 0-9).'],
-        ['adm\u00efn', 'SEMP username may contain only letters and digits (A-Z, a-z, 0-9).'],
+        ['ops.admin', CHARS],
+        ['user@corp', CHARS],
+        ['two words', CHARS],
+        ['mon:itor', CHARS],
+        ['adm\u00efn', CHARS],
     ])('rejects the username %j', (user, message) => {
         expect(sempAccountError(user, 'secret')).toEqual({ field: 'user', message });
     });
@@ -502,5 +507,36 @@ describe('core/utils sempAccountError', () => {
             field: 'pass',
             message: 'SEMP password must not contain any of : ( ) " ; \' < > , ` \\ * & |',
         });
+    });
+});
+
+describe('core/utils sempUsernameOk', () => {
+    it('takes a blank name (no SEMP account) and the rule at its limit', () => {
+        expect(['', 'admin', 'ops-admin_2', 'A'.repeat(32)].map(sempUsernameOk)).toEqual([true, true, true, true]);
+    });
+
+    it('refuses a long name or a character outside A-Z a-z 0-9 _ -', () => {
+        expect(['A'.repeat(33), 'ops.admin', 'a b', 'mon:itor', 'caf\u00e9'].map(sempUsernameOk))
+            .toEqual([false, false, false, false, false]);
+    });
+});
+
+describe('core/utils clientUsernameError', () => {
+    it('takes a blank name and any printable ASCII up to 189 characters, case and spaces kept', () => {
+        for (const user of ['', 'default', 'Default', 'app user', 'a:b@c.d/e#f', '~!'.repeat(94) + 'x']) {
+            expect({ user, error: clientUsernameError(user), ok: clientUsernameOk(user) }).toEqual({ user, error: null, ok: true });
+        }
+    });
+
+    it.each([
+        ['x'.repeat(190), 'Client username must not exceed 189 characters.'],
+        ['caf\u00e9', 'Client username may contain only printable ASCII characters: no accented letters or control characters.'],
+        ['tab\there', 'Client username may contain only printable ASCII characters: no accented letters or control characters.'],
+        ['del\u007f', 'Client username may contain only printable ASCII characters: no accented letters or control characters.'],
+        ['who?', 'Client username must not contain ? or *.'],
+        ['app*', 'Client username must not contain ? or *.'],
+    ])('refuses %j', (user, message) => {
+        expect(clientUsernameError(user)).toBe(message);
+        expect(clientUsernameOk(user)).toBe(false);
     });
 });

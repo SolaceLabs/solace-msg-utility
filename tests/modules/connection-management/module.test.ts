@@ -428,6 +428,31 @@ describe('connection-management — create / edit form', () => {
         expect(svcMock.saveConnection.mock.calls[0][0].client.msgVpns).toEqual([{ name: '', user: 'u1', pass: '' }]);
     });
 
+    it('refuses a SEMP or client username a broker refuses, before anything is sent', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue(saved());
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'b9';
+        el<HTMLInputElement>(container, '#conn-mgmt-semp-user').value = 'ops.admin';
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn').click();
+        const vpnInputs = el(container, '#conn-mgmt-vpn-rows').querySelectorAll<HTMLInputElement>('input');
+        vpnInputs[0].value = 'v1'; vpnInputs[1].value = 'app*'; vpnInputs[2].value = 'vpnpw';
+        const formError = () => el(container, '#conn-mgmt-form-error').textContent;
+
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
+        await vi.waitFor(() => expect(formError()).toBe('SEMP username may be up to 32 characters: letters, digits, - and _.'));
+        el<HTMLInputElement>(container, '#conn-mgmt-semp-user').value = 'ops-admin_2';
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
+        await vi.waitFor(() => expect(formError()).toBe('VPN "v1": Client username must not contain ? or *.'));
+        expect(svcMock.saveConnection).not.toHaveBeenCalled();
+
+        vpnInputs[1].value = 'app user';
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
+        expect(svcMock.saveConnection.mock.calls[0][0].semp.user).toBe('ops-admin_2');
+        expect(svcMock.saveConnection.mock.calls[0][0].client.msgVpns).toEqual([{ name: 'v1', user: 'app user', pass: 'vpnpw' }]);
+    });
+
     it('Add VPN row button appends a row', async () => {
         const { container } = await setup();
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();

@@ -6,6 +6,7 @@
  *
  * Mock-only.
  */
+import { clientUsernameOk, sempUsernameOk } from '../../core/utils';
 import type { ConnRec } from './types';
 
 /** moduleCatalog() in configfile.go. */
@@ -138,6 +139,26 @@ export function connectionProblem(c: ConnRec): string | null {
     for (const v of c.client.msgVpns) {
         if (hasControl(v.name) || hasControl(v.username) || hasControl(v.password)) {
             return `broker ${b}: message VPN ${quote(v.name)}: the name, username and password must not contain control characters`;
+        }
+    }
+    return null;
+}
+
+const SEMP_USER_RULE = 'must be up to 32 characters from A-Z a-z 0-9 _ -';
+const CLIENT_USER_RULE = 'must be up to 189 printable ASCII characters, without ? or *';
+
+/**
+ * checkBrokerUsernames: a save only. A stored or restored connection that
+ * holds another name loads as it is, and its next save asks for a valid one.
+ * The rules are the app's own (src/core/utils.ts), which the vectors hold to
+ * the gateway's.
+ */
+export function brokerUsernamesProblem(c: ConnRec): string | null {
+    const b = quote(c.broker);
+    if (!sempUsernameOk(c.semp.username)) return `broker ${b}: the SEMP username ${SEMP_USER_RULE}`;
+    for (const v of c.client.msgVpns) {
+        if (!clientUsernameOk(v.username)) {
+            return `broker ${b}: message VPN ${quote(v.name)}: the client username ${CLIENT_USER_RULE}`;
         }
     }
     return null;

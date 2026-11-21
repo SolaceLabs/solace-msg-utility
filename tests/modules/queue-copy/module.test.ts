@@ -516,6 +516,30 @@ describe('queue-copy/module', () => {
             );
             consoleSpy.mockRestore();
         });
+
+        it('Connect Client refuses a client username the broker refuses, with the reason, before any connect', async () => {
+            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            const ctx = makeCtx(eventBus, container, {
+                isConnected: true,
+                selectedVpn: 'default',
+                solaceConnection: makeSolaceConnection({ host: 'b2.example' }),
+                sempCredentials: sempCreds('https://b2.example:1943/SEMP/v2'),
+            });
+            await QueueCopyModule.install(ctx);
+            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
+            toggle.checked = false;
+            toggle.dispatchEvent(new Event('change'));
+            const user = container.querySelector<HTMLInputElement>('#copy-dest-sol-user')!;
+            user.value = 'who?';
+            user.dispatchEvent(new Event('input'));
+
+            container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!.click();
+            expect(destSolConnect).not.toHaveBeenCalled();
+            const errPane = container.querySelector('#copy-dest-sol-error')!;
+            expect(errPane.textContent).toBe('Client username must not contain ? or *.');
+            expect(errPane.classList.contains('hidden')).toBe(false);
+            consoleSpy.mockRestore();
+        });
     });
 
     describe('hosted deployment: the /hosted verdict reaches the destination configs', () => {

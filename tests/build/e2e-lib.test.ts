@@ -227,7 +227,7 @@ describe('e2e-lib -- broker details', () => {
         expect(resolveDetails(env, file, FILE).errors).toEqual([
             `E2E_BROKER_HOST (${FILE} line 4) is not a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port: https://broker:943`,
             `E2E_SEMP_PORT (${FILE} line 3) is not a port number (1-65535): 99999`,
-            'E2E_SEMP_USER (environment) holds a ":", which a SEMP username cannot',
+            'E2E_SEMP_USER (environment) is not a SEMP username (up to 32 characters from A-Z a-z 0-9 _ -): mon:itor',
             'E2E_VPN (environment) holds a control character',
             'E2E_CLIENT_PASSWORD (environment) holds a control character',
         ]);
@@ -245,6 +245,10 @@ describe('e2e-lib -- broker details', () => {
         for (const ok of ['1', '943', '65535']) expect(check('E2E_SEMP_PORT', ok)).toBe('');
         for (const bad of ['0', '65536', '+943', '9 43', '']) expect(check('E2E_SMF_PORT', bad)).not.toBe('');
         expect(check('E2E_SEMP_PASSWORD', '')).toBe('is empty');
+        for (const ok of ['admin', 'ops-monitor_2']) expect(check('E2E_SEMP_USER', ok)).toBe('');
+        for (const bad of ['ops.monitor', 'a'.repeat(33)]) expect(check('E2E_SEMP_USER', bad)).toMatch(/^is not a SEMP username /);
+        for (const ok of ['default', 'app user:1']) expect(check('E2E_CLIENT_USER', ok)).toBe('');
+        for (const bad of ['app*', 'who?', 'caf\u00e9', 'a'.repeat(190)]) expect(check('E2E_CLIENT_USER', bad)).toMatch(/^is not a client username /);
         for (const ok of ['10.14.128.129', 'fd00::5', 'broker.lab.example.net']) expect(check('E2E_BROKER_ADDR', ok)).toBe('');
         for (const bad of ['https://broker.example.net', 'broker.example.net:943', 'fe80::1%eth0']) {
             expect(check('E2E_BROKER_ADDR', bad)).toBe(`is not a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port: ${bad}`);

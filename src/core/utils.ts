@@ -288,19 +288,59 @@ export function basicAuthHeader(user: string, pass: string): string {
 /** Symbols a Solace CLI password may not contain. */
 const SEMP_PASSWORD_FORBIDDEN = /[:()";'<>,`\\*&|]/;
 
+/** The longest SEMP (management) username a broker accepts, and its characters. */
+const SEMP_USERNAME_MAX = 32;
+const SEMP_USERNAME_CHARS = /^[A-Za-z0-9_-]*$/;
+
 /**
- * Why a SEMP username/password pair breaks the Solace CLI user-account rules
- * (docs.solace.com, Configuring Internal CLI User Accounts), or `null` when it
- * is valid. Username: 1-32 letters and digits. Password: 1-128 printable ASCII
- * characters (no spaces), none of `: ( ) " ; ' < > , \` \\ * & |`. The page
- * states no encoding, so ASCII is the rule: it is also what `basicAuthHeader`
- * encodes exactly. `field` names the input to mark.
+ * Whether a SEMP (management) username is one a broker accepts: up to 32
+ * characters from A-Z a-z 0-9 _ -. A blank name passes; the caller decides
+ * whether one is required. The gateway holds stored connections to the same
+ * rule (`validSempUser` in go-web-proxy/store.go).
+ */
+export function sempUsernameOk(user: string): boolean {
+    return user.length <= SEMP_USERNAME_MAX && SEMP_USERNAME_CHARS.test(user);
+}
+
+/** The longest client username a broker accepts. */
+const CLIENT_USERNAME_MAX = 189;
+
+/**
+ * Why a client (messaging) username is one a broker refuses, or `null` when
+ * it accepts it: up to 189 printable ASCII characters (0x20 to 0x7e), without
+ * `?` or `*`, which the broker's CLI reads as wildcards. Case counts. A blank
+ * name passes; the caller decides whether one is required. The gateway holds
+ * stored connections to the same rule (`validClientUser` in
+ * go-web-proxy/store.go).
+ */
+export function clientUsernameError(user: string): string | null {
+    if (user.length > CLIENT_USERNAME_MAX) return `Client username must not exceed ${CLIENT_USERNAME_MAX} characters.`;
+    if (!/^[\x20-\x7e]*$/.test(user)) {
+        return 'Client username may contain only printable ASCII characters: no accented letters or control characters.';
+    }
+    if (/[?*]/.test(user)) return 'Client username must not contain ? or *.';
+    return null;
+}
+
+/** `clientUsernameError` as a yes or no. */
+export function clientUsernameOk(user: string): boolean {
+    return clientUsernameError(user) === null;
+}
+
+/**
+ * Why a SEMP username/password pair is one a broker refuses, or `null` when it
+ * is valid. Username: 1 to 32 characters from A-Z a-z 0-9 _ - (`sempUsernameOk`).
+ * Password: the Solace CLI user-account rules (docs.solace.com, Configuring
+ * Internal CLI User Accounts), 1-128 printable ASCII characters (no spaces),
+ * none of `: ( ) " ; ' < > , \` \\ * & |`. The page states no encoding, so
+ * ASCII is the rule: it is also what `basicAuthHeader` encodes exactly.
+ * `field` names the input to mark.
  */
 export function sempAccountError(user: string, pass: string): { field: 'user' | 'pass'; message: string } | null {
     if (!user) return { field: 'user', message: 'SEMP username is required.' };
-    if (user.length > 32) return { field: 'user', message: 'SEMP username must not exceed 32 characters.' };
-    if (!/^[A-Za-z0-9]+$/.test(user)) {
-        return { field: 'user', message: 'SEMP username may contain only letters and digits (A-Z, a-z, 0-9).' };
+    if (user.length > SEMP_USERNAME_MAX) return { field: 'user', message: `SEMP username must not exceed ${SEMP_USERNAME_MAX} characters.` };
+    if (!SEMP_USERNAME_CHARS.test(user)) {
+        return { field: 'user', message: 'SEMP username may contain only letters, digits, - and _ (A-Z, a-z, 0-9, -, _).' };
     }
     if (!pass) return { field: 'pass', message: 'SEMP password is required.' };
     if (pass.length > 128) return { field: 'pass', message: 'SEMP password must not exceed 128 characters.' };

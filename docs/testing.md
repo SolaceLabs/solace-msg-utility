@@ -405,11 +405,11 @@ It never writes a password there. Add `E2E_SEMP_PASSWORD` and `E2E_CLIENT_PASSWO
 | `E2E_DNS` | | Optional DNS servers: one or more IP addresses, separated by commas. Both containers resolve through them (compose `dns`, in the same override as the alias), so `E2E_BROKER_HOST` can be a name only those servers know, with no alias; the harness also asks them, not this machine's resolver, for an `E2E_BROKER_ADDR` name. The run prints the servers. Never asked for. |
 | `E2E_BROKER_CA` | | A PEM file with the CA that signed the broker's certificate, or that certificate itself. Required; only its certificates are used. The gateways also trust the standard root CAs the image carries, so a port that presents a public chain, such as SEMP behind a proxy, needs nothing in this file. |
 | `E2E_SEMP_PORT` | `1943` | SEMP over TLS. |
-| `E2E_SEMP_USER` | `admin` | Read-only access is enough. |
+| `E2E_SEMP_USER` | `admin` | Read-only access is enough. Up to 32 characters from `A-Z a-z 0-9 _ -`. |
 | `E2E_SEMP_PASSWORD` | | Asked without echo. |
 | `E2E_SMF_PORT` | `1443` | Secured web transport. |
 | `E2E_VPN` | `default` | Like the queue name, it must pass the relay's path-segment rule: no `\`, `%` or `;`. |
-| `E2E_CLIENT_USER` | | A client username in that VPN. |
+| `E2E_CLIENT_USER` | | A client username in that VPN: up to 189 printable ASCII characters, without `?` or `*`. |
 | `E2E_CLIENT_PASSWORD` | | Asked without echo. |
 | `E2E_QUEUE` | | An existing queue in that VPN the client username may browse. A `/` is fine; `\`, `%`, `;` and an empty, `.` or `..` part between slashes are not, since the relay refuses them. |
 | `E2E_INSECURE` | `0` | `1` starts both e2e gateways with `SMU_SSL_SKIP_CERT_VERIFY=true`, for a broker whose certificate does not name the host it is dialled by. Never asked for; any value but `0` or `1` fails the run. The run warns at the start and its summary says the broker's certificate was not verified: checks 3, 4, 6, 11, 12 and `D2` to `D4` then pass without proving that the broker's TLS is trusted, and check 30 is skipped, so do not rely on such a run before a tag. |

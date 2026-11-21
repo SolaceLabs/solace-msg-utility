@@ -845,6 +845,10 @@ func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request, 
 		writeInvalid(w, "connection", err.Error())
 		return
 	}
+	if err := checkBrokerUsernames(rec); err != nil {
+		writeInvalid(w, "connection", err.Error())
+		return
+	}
 	if !body.Rev.ok {
 		_, _ = writeStoreError(w, errRevRequired)
 		return

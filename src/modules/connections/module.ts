@@ -26,7 +26,7 @@ import { showToast } from '../../core/toast';
 import { INPUT_DEBOUNCE_MS } from '../../core/timing';
 import { logger } from '../../core/logger';
 import { required } from '../../core/dom';
-import { normalizeUrlPath, generateUuid, sdkClientName, sempAccountError } from '../../core/utils';
+import { normalizeUrlPath, generateUuid, sdkClientName, sempAccountError, clientUsernameError } from '../../core/utils';
 import { createOptionalField } from './optional-field';
 import { isHostedDeployment, limitSchemeOptions, probeDeployment, usableScheme } from '../../core/hosted';
 import { DEFAULT_CONN_CONFIG } from '../../core/connections/conn-modes';
@@ -470,12 +470,17 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         if (!ui.isValidHost(els.elHost.value)) { ui.showError(els.elHost, true); valid = false; } else ui.showError(els.elHost, false);
         if (!ui.isValidPort(els.elSolPort.value)) { ui.showError(els.elSolPort, true); valid = false; } else ui.showError(els.elSolPort, false);
         if (!els.elSolVpn.value.trim()) { ui.showError(els.elSolVpn, true); valid = false; } else ui.showError(els.elSolVpn, false);
-        if (!els.elSolUser.value.trim()) { ui.showError(els.elSolUser, true); valid = false; } else ui.showError(els.elSolUser, false);
+        // A client username the broker refuses (clientUsernameError) is
+        // refused here with the reason. In OAuth2 mode the field holds the
+        // access token, which that rule does not govern.
+        const userProblem = ui.getAuthMode() === 'basic' ? clientUsernameError(els.elSolUser.value) : null;
+        if (!els.elSolUser.value.trim() || userProblem) { ui.showError(els.elSolUser, true); valid = false; } else ui.showError(els.elSolUser, false);
+        ui.showConnectError(els.elSolError, userProblem);
         if (validateClientNameId() === null) valid = false;
         return valid;
     }
 
-    // The SEMP account must meet the Solace CLI user-account rules
+    // The SEMP account must meet the broker's account rules
     // (sempAccountError): the Basic header is plain ASCII btoa, built the same
     // way for the probe and every later request, and a credential outside the
     // rules is refused here with the reason, before any request is sent.

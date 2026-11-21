@@ -40,7 +40,7 @@
  * Mock-only.
  */
 import { BadRequest, boolean, list, nullableList, object, parseBody, string } from './strict';
-import { canonScheme, CATALOG, connectionProblem, moduleIdsProblem, passwordOk, PASSWORD_MAX, USERNAME_RULE, validUsername } from './validate';
+import { brokerUsernamesProblem, canonScheme, CATALOG, connectionProblem, moduleIdsProblem, passwordOk, PASSWORD_MAX, USERNAME_RULE, validUsername } from './validate';
 import { relay, RELAY_PREFIX, type Upstream } from './relay';
 import type { GatewayStore } from './store';
 import type { GatewaySessions, Session } from './sessions';
@@ -213,7 +213,7 @@ export function createRouter({ store, sessions, settings, faults, anonymous, con
                 }),
             },
         };
-        const problem = connectionProblem(rec);
+        const problem = connectionProblem(rec) ?? brokerUsernamesProblem(rec);
         if (problem) return invalid('connection', problem);
         const rev = bodyRev(b.rev);
         if (rev === null) return revRequired;

@@ -826,6 +826,8 @@ msg-utility-connections:
 
 A blank `scheme` on `semp` or `client` means TLS (https and wss); an administrator may choose `http` or `ws` per connection. How `seq` and `rev` work is in [The single writer](#the-single-writer).
 
+A save (`PUT /managed/connections/{broker}`) also holds the usernames to what a broker accepts (`checkBrokerUsernames` in [store.go](../go-web-proxy/store.go)): `semp.username` up to 32 characters from `A-Z a-z 0-9 _ -`, and each VPN's `username` up to 189 printable ASCII characters without `?` or `*`. Load and import check `validateConn` only, so a stored or restored record with another name loads as it is, and its next save asks for a valid one. The app's forms apply the same rules (`sempUsernameOk` and `clientUsernameError` in [src/core/utils.ts](../src/core/utils.ts)), and `validation.json` holds both sides to them.
+
 ### Enforcement points
 
 Five seams do the work. Everything else in the app calls the ordinary APIs and inherits the filtering.

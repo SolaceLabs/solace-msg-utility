@@ -875,6 +875,47 @@ describe('ConnectionsModule', () => {
         expect((window as any).solace.SolclientFactory.createSession).not.toHaveBeenCalled();
     });
 
+    it('refuses a client username the broker refuses, with the reason, before any connect', async () => {
+        const { ctx } = createTestContext(container);
+        await ConnectionsModule.install(ctx);
+        fillSolaceForm(container);
+        const createSession = (window as any).solace.SolclientFactory.createSession;
+        createSession.mockClear();
+        const user = container.querySelector('#solace-username') as HTMLInputElement;
+        const btnSolace = container.querySelector('#btn-solace-connect') as HTMLButtonElement;
+        const errorText = () => (container.querySelector('#solace-connect-error') as HTMLElement).textContent;
+
+        user.value = 'app*';
+        btnSolace.click();
+        expect(user.classList.contains('is-invalid')).toBe(true);
+        expect(errorText()).toBe('Client username must not contain ? or *.');
+        expect(createSession).not.toHaveBeenCalled();
+
+        // Spaces and any other printable ASCII are a broker's to accept.
+        user.value = 'app user';
+        btnSolace.click();
+        expect(user.classList.contains('is-invalid')).toBe(false);
+        expect(errorText()).toBe('');
+        expect(createSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('holds an OAuth2 access token in the username field to no client username rule', async () => {
+        const { ctx } = createTestContext(container);
+        await ConnectionsModule.install(ctx);
+        fillSolaceForm(container);
+        const createSession = (window as any).solace.SolclientFactory.createSession;
+        createSession.mockClear();
+        const oauth = container.querySelector('input[name="solace-auth-mode"][value="oauth"]') as HTMLInputElement;
+        oauth.checked = true;
+        oauth.dispatchEvent(new Event('change'));
+        const user = container.querySelector('#solace-username') as HTMLInputElement;
+        user.value = 'eyJ' + 'a'.repeat(300) + '*';
+
+        (container.querySelector('#btn-solace-connect') as HTMLButtonElement).click();
+        expect(user.classList.contains('is-invalid')).toBe(false);
+        expect(createSession).toHaveBeenCalledTimes(1);
+    });
+
     it('semp validation fails with invalid port', async () => {
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
@@ -1320,7 +1361,7 @@ describe('ConnectionsModule', () => {
         });
     });
 
-    // The SEMP account must meet the Solace CLI user-account rules before any
+    // The SEMP account must meet the broker's account rules before any
     // request: the Basic header is plain ASCII, built one way for the probe and
     // for every later request (core/utils.ts basicAuthHeader).
     describe('SEMP account rules', () => {
@@ -1345,11 +1386,19 @@ describe('ConnectionsModule', () => {
             expect([invalid('#semp-password'), invalid('#semp-username')]).toEqual([true, false]);
         });
 
-        it('rejects a SEMP username outside the CLI rules inline before any request', async () => {
-            await fillSemp('admin_ops', 'secret');
+        it('rejects a SEMP username outside the rules inline before any request', async () => {
+            await fillSemp('ops.admin', 'secret');
             expect(globalThis.fetch).not.toHaveBeenCalled();
-            expect(sempError()).toBe('SEMP username may contain only letters and digits (A-Z, a-z, 0-9).');
+            expect(sempError()).toBe('SEMP username may contain only letters, digits, - and _ (A-Z, a-z, 0-9, -, _).');
             expect([invalid('#semp-username'), invalid('#semp-password')]).toEqual([true, false]);
+        });
+
+        it('takes a SEMP username with - and _', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            await fillSemp('ops-admin_2', 'secret');
+            expect(invalid('#semp-username')).toBe(false);
+            const btnSemp = container.querySelector('#btn-semp-connect') as HTMLButtonElement;
+            await vi.waitFor(() => expect(btnSemp.innerHTML).toBe('Disconnect'));
         });
 
         it('resets the SEMP button when the kernel tears SEMP down on a 401', async () => {

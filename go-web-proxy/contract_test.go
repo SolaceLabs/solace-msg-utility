@@ -470,7 +470,10 @@ type contractVectors struct {
 	Host     contractVectorList `json:"host"`
 	Port     contractVectorList `json:"port"`
 	Password contractVectorList `json:"password"`
-	Scheme   struct {
+	// The broker usernames a connection save accepts (checkBrokerUsernames).
+	SempUsername   contractVectorList `json:"sempUsername"`
+	ClientUsername contractVectorList `json:"clientUsername"`
+	Scheme         struct {
 		Semp   contractVectorList `json:"semp"`
 		Client contractVectorList `json:"client"`
 	} `json:"scheme"`
@@ -511,6 +514,8 @@ func TestContract_Validation(t *testing.T) {
 		{"host", v.Host, validHost},
 		{"port", v.Port, func(s string) bool { return validatePort(s) == nil }},
 		{"password", v.Password, func(s string) bool { return checkPasswordPolicy(s, passwordMinLen) == nil }},
+		{"sempUsername", v.SempUsername, validSempUser},
+		{"clientUsername", v.ClientUsername, validClientUser},
 		{"scheme.semp", v.Scheme.Semp, func(s string) bool { return schemeOK(s, sempTLS, sempPlain) }},
 		{"scheme.client", v.Scheme.Client, func(s string) bool { return schemeOK(s, clientTLS, clientPlain) }},
 	}
