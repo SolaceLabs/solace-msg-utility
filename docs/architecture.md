@@ -319,11 +319,11 @@ queue-browser/
        |
        +--- ui-details.ts        Detail panel
        |      showDetails()         Render message details
-       |      showBinary()          A binary payload's kind, preview or hex view
+       |      showBinary()          An image payload's Show content, or why not
        |      addPropertyFilterRow() Dynamic filter rows
        |
        +--- payload.ts           Attachment bytes, text vs binary, download names
-       +--- file-kind.ts         Kind from the first bytes, image size, hex dump
+       +--- file-kind.ts         Kind from the first bytes, image size
        +--- sdt.ts               Map and stream bodies decoded, as YAML and JSON
        |
        +--- ui-forward.js        Forward modal
@@ -339,7 +339,7 @@ queue-browser/
 - A binary attachment keeps its bytes, and `classifyAttachment` (`payload.ts`) decides whether they are text. UTF-8 with no stray control characters is text; anything else is `binary`, shown as a size placeholder.
 - A map or stream (an SDT container) keeps its wire bytes, which the SDK still holds as the attachment. `decodeSdt` (`sdt.ts`) turns the container into a typed tree that the pane shows as YAML (`toYaml`, also what Copy Content copies and the body filter matches) and that Download Full adds as `payloadDecoded` (`toJsonValue`). A container the SDK cannot parse falls back to its bytes, with a warning.
 
-`file-kind.ts` reads a binary payload's first bytes against a list of signatures. The result gives the pane's "Looks like" label, and, for PNG, JPEG, GIF and WebP, a preview. The preview starts only on request, after `imageSize` has read the header and refused anything above 40 megapixels or with no size. It loads from a `blob:` URL, which the bundle's policy allows (`img-src data: blob:`) and which is revoked when the pane moves on. Every other binary payload gets a hex view of its first 512 bytes. An executable is only named: its download suggests `.bin`. `contentFileName` (`payload.ts`) names a download, single or in the content ZIP, `solace-message-<id>.<ext>`. `saveBlob` ([src/core/download.ts](../src/core/download.ts)) opens the browser's save dialog where there is one and falls back to a plain download. The blob is always `application/octet-stream`, so the browser never renders it.
+`file-kind.ts` reads a binary payload's first bytes against a list of signatures. The result names the kind in the payload's placeholder (`classifyAttachment` in `payload.ts`, at ingest), and, for PNG, JPEG, GIF and WebP, decides **Show content**: `imageSize` reads the header when the message is selected, and an image above 40 megapixels or with no size gets a note instead of the button. The image is decoded only on request, in place of the Content Preview box, from a `blob:` URL, which the bundle's policy allows (`img-src data: blob:`) and which is revoked when the pane moves on. The hex of any payload is in **Show Raw Content**, the SDK's `message.dump()`; the demo SDK's `dump()` keeps the SDK's layout (`dumpBytes` in [src/mock-broker/sdk/message.ts](../src/mock-broker/sdk/message.ts)). An executable is only named: its download suggests `.bin`. `contentFileName` (`payload.ts`) names a download, single or in the content ZIP, `solace-message-<id>.<ext>`. `saveBlob` ([src/core/download.ts](../src/core/download.ts)) opens the browser's save dialog where there is one and falls back to a plain download. The blob is always `application/octet-stream`, so the browser never renders it.
 
 Queue-browser's production `service.ts` runs unmodified in both real and demo builds. In the demo, its SDK calls reach the `window.solace` emulation installed by the demo broker, and publish-with-ACK (delegated to the core `solace-publisher`) round-trips through the broker's acknowledgement events -- see [The demo broker](#the-demo-broker-demohtml-provisioned-demohtml).
 

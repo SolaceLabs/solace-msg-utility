@@ -232,14 +232,14 @@ src/
       service.ts       # Browser create, forward, delete
       features.ts      # Build-time flavor flag -- showPayload() reads VITE_SHOW_PAYLOAD
       payload.ts       # Payload helpers: attachmentBytes, classifyAttachment (text vs size-only placeholder), contentFileName
-      file-kind.ts     # A binary payload's kind from its first bytes, image size, hex dump
+      file-kind.ts     # A binary payload's kind from its first bytes, image size
       sdt.ts           # Map and stream bodies decoded: YAML for the pane, JSON for Download Full
       service-events.ts # onMessage, onBrowserUp/Down, ACK/REJECT
       state.js         # Message store, filter logic
       ui-core.js       # Element cache, visibility, counts
       ui-events.ts     # User action handlers
       ui-table.ts      # Table rendering, ZIP download
-      ui-details.ts    # Detail panel, property display, a binary payload's preview and hex view
+      ui-details.ts    # Detail panel, property display, an image payload's Show content
       ui-forward.js    # Forward modal + ACK tracking
       constants.js     # SVG icon strings used in rendered rows
       styles.css       # Module-scoped styles

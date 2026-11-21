@@ -1,7 +1,8 @@
 /**
  * The payload samples queue: one message of each kind Queue Browser's details
- * pane tells apart, so a visitor can try Show preview, Show hex, the map and
- * stream YAML and Download Content's suggested names without a broker.
+ * pane tells apart, so a visitor can try Show content, Show Raw Content's hex,
+ * the map and stream YAML and Download Content's suggested names without a
+ * broker.
  *
  * The binary bytes were generated with python3 (struct, zlib, gzip, zipfile)
  * and embedded as base64; each note says what it is and how it was made. They
@@ -38,7 +39,7 @@ export const PAYLOAD_SAMPLES: PayloadSample[] = [
     { name: 'gif-1x1', fields: { httpContentType: 'image/gif', payloadBytes: bytes('R0lGODlhAQABAIAAAP9mAAAAACwAAAAAAQABAAACAkQBADs=') } },
     // WebP, 16x16 solid orange: lossless (VP8L), every prefix code a single symbol, so no pixel data follows the header. Hand-assembled; 34 bytes.
     { name: 'webp-16x16', fields: { httpContentType: 'image/webp', payloadBytes: bytes('UklGRhoAAABXRUJQVlA4TA0AAAAvD8ADAChk4QvS/wIAAA==') } },
-    // PNG whose IHDR declares 10000 x 10000 (100 megapixels): signature and IHDR only, cut short. Show preview refuses it. 33 bytes.
+    // PNG whose IHDR declares 10000 x 10000 (100 megapixels): signature and IHDR only, cut short. The pane says why it is not shown. 33 bytes.
     { name: 'png-too-large', fields: { httpContentType: 'image/png', payloadBytes: bytes('iVBORw0KGgoAAAANSUhEUgAAJxAAACcQCAIAAAA1LPVw') } },
     // PDF 1.4, one 200x100 page with the text "Demo PDF": built by hand with a correct xref table and a binary comment line (so it reads as binary, as real PDFs do). 588 bytes.
     { name: 'pdf', fields: { httpContentType: 'application/pdf', payloadBytes: bytes(

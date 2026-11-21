@@ -5,7 +5,7 @@ import { logger } from '../../core/logger';
 import { showToast } from '../../core/toast';
 import { showPayload } from './features.js';
 import { bytesToBase64, contentFileName } from './payload.js';
-import { detectKind, hexDump, imageSize, MAX_PREVIEW_PIXELS, type FileKind } from './file-kind.js';
+import { detectKind, imageSize, MAX_PREVIEW_PIXELS, type PreviewImage } from './file-kind.js';
 import { toJsonValue } from './sdt.js';
 import { downloadBlob, saveBlob } from '../../core/download';
 import type { AppContext } from '../../core/types';
@@ -81,23 +81,28 @@ export function initDetails(ctx: AppContext) {
         ui.triggerDownload(filename, JSON.stringify(fullObj, null, 2), 'application/json');
     };
 
-    // The preview's object URL, revoked when the pane moves on.
+    // The shown image's object URL, revoked when the pane moves on.
     let previewUrl: string | null = null;
 
-    /** Hide the binary payload's kind, preview, hex view and note, and let the preview's bytes go. */
-    function resetBinary(): void {
+    /** Put the Content Preview box back in place of the image, and let the image's bytes go. */
+    function hideContent(): void {
         const els = ui.getElements();
         if (previewUrl) URL.revokeObjectURL(previewUrl);
         previewUrl = null;
         els.detailPreview.onerror = null;
-        for (const el of [els.detailBinary, els.btnShowPreview, els.btnShowHex, els.detailBinaryNote, els.detailPreview, els.detailHex]) {
-            el.classList.add('hidden');
-        }
         els.detailPreview.removeAttribute('src');
-        els.detailHex.textContent = '';
+        els.detailPreview.classList.add('hidden');
+        els.detailContent.classList.remove('hidden');
+        els.btnShowContent.textContent = 'Show content';
+    }
+
+    /** Back to the box alone: no Show content button and no note. */
+    function resetBinary(): void {
+        const els = ui.getElements();
+        hideContent();
+        els.btnShowContent.classList.add('hidden');
+        els.detailBinaryNote.classList.add('hidden');
         els.detailBinaryNote.textContent = '';
-        els.btnShowPreview.textContent = 'Show preview';
-        els.btnShowHex.textContent = 'Show hex';
     }
 
     function note(text: string): void {
@@ -107,77 +112,53 @@ export function initDetails(ctx: AppContext) {
     }
 
     /**
-     * Show or hide an image payload. Nothing decodes it until the user asks,
-     * and an image whose header declares more than MAX_PREVIEW_PIXELS, or no
-     * size at all, is refused before it is decoded. The bytes are
-     * attachmentBytes()'s own copy, so an ArrayBuffer backs them (a Blob
-     * takes no shared memory).
+     * Swap the Content Preview box for the image, or back. Nothing decodes
+     * the image until the user asks. The bytes are attachmentBytes()'s own
+     * copy, so an ArrayBuffer backs them (a Blob takes no shared memory).
      */
-    function togglePreview(bytes: Uint8Array<ArrayBuffer>, image: NonNullable<FileKind['image']>): void {
+    function toggleContent(bytes: Uint8Array<ArrayBuffer>, image: PreviewImage): void {
         const els = ui.getElements();
         if (previewUrl) {
-            URL.revokeObjectURL(previewUrl);
-            previewUrl = null;
-            els.detailPreview.onerror = null;
-            els.detailPreview.removeAttribute('src');
-            els.detailPreview.classList.add('hidden');
-            els.detailBinaryNote.classList.add('hidden');
-            els.btnShowPreview.textContent = 'Show preview';
+            hideContent();
             return;
         }
-        const size = imageSize(bytes, image);
+        previewUrl = URL.createObjectURL(new Blob([bytes], { type: image }));
+        // Undecodable after all: back to the box, without the button, and say
+        // why. Cleared whenever the image goes, so a late event cannot reach
+        // the next message's box.
+        els.detailPreview.onerror = () => {
+            resetBinary();
+            note('The image could not be decoded.');
+        };
+        els.detailPreview.src = previewUrl;
+        els.detailPreview.classList.remove('hidden');
+        els.detailContent.classList.add('hidden');
+        els.btnShowContent.textContent = 'Hide content';
+    }
+
+    /**
+     * Offer Show content for a binary payload that is an image of the four
+     * kinds the pane may show, when its header declares a size within
+     * MAX_PREVIEW_PIXELS (read from the header; nothing is decoded). Another
+     * image says why it is not shown; any other payload has no button.
+     */
+    function showBinary(msg: any): void {
+        const els = ui.getElements();
+        resetBinary();
+        if (!msg.binary) return;
+        const image = detectKind(msg.bytes)?.image;
+        if (!image) return;
+        const size = imageSize(msg.bytes, image);
         if (!size) {
             note('Not shown: the image\'s header does not say how large it is.');
             return;
         }
         if (size.width * size.height > MAX_PREVIEW_PIXELS) {
-            note(`Not shown: ${size.width} x ${size.height} pixels is more than the ${MAX_PREVIEW_PIXELS / 1_000_000}-megapixel limit.`);
+            note(`Not shown: the image's header says it is ${size.width} x ${size.height} pixels, more than the ${MAX_PREVIEW_PIXELS / 1_000_000}-megapixel limit.`);
             return;
         }
-        const url = URL.createObjectURL(new Blob([bytes], { type: image }));
-        previewUrl = url;
-        // Undecodable after all: let its bytes go, and offer Show preview again.
-        // Cleared whenever the preview goes, so a late event cannot reach the
-        // next message's tools.
-        els.detailPreview.onerror = () => {
-            URL.revokeObjectURL(url);
-            previewUrl = null;
-            els.detailPreview.onerror = null;
-            els.detailPreview.removeAttribute('src');
-            els.detailPreview.classList.add('hidden');
-            els.btnShowPreview.textContent = 'Show preview';
-            note('The image could not be decoded.');
-        };
-        els.detailPreview.src = url;
-        els.detailPreview.classList.remove('hidden');
-        note(`${size.width} x ${size.height} pixels`);
-        els.btnShowPreview.textContent = 'Hide preview';
-    }
-
-    function toggleHex(bytes: Uint8Array): void {
-        const els = ui.getElements();
-        const show = els.detailHex.classList.contains('hidden');
-        els.detailHex.textContent = show ? hexDump(bytes) : '';
-        els.detailHex.classList.toggle('hidden', !show);
-        els.btnShowHex.textContent = show ? 'Hide hex' : 'Show hex';
-    }
-
-    /** Under a binary payload's placeholder: what its bytes look like, and its preview or hex button. */
-    function showBinary(msg: any): void {
-        const els = ui.getElements();
-        resetBinary();
-        if (!msg.binary) return;
-        const kind = detectKind(msg.bytes);
-        els.detailBinaryKind.textContent = kind ? `Looks like: ${kind.label}` : 'Kind not recognised';
-        els.detailBinary.classList.remove('hidden');
-        const image = kind?.image;
-        if (image) {
-            els.btnShowPreview.classList.remove('hidden');
-            els.btnShowPreview.onclick = () => togglePreview(msg.bytes, image);
-        } else {
-            els.btnShowHex.classList.remove('hidden');
-            els.btnShowHex.onclick = () => toggleHex(msg.bytes);
-        }
+        els.btnShowContent.classList.remove('hidden');
+        els.btnShowContent.onclick = () => toggleContent(msg.bytes, image);
     }
 
     ui.selectMessage = function (id: string) {
@@ -232,7 +213,7 @@ export function initDetails(ctx: AppContext) {
 
             // Payload preview + raw/copy-content actions exist only in the show-payload
             // flavor; their elements were removed in the no-payload flavor.
-            // A true binary payload shows its size placeholder; there is no text to copy.
+            // A true binary payload shows its placeholder (its kind and size); there is no text to copy.
             if (showPayload()) {
                 els.detailContent.textContent = msg.content;
                 els.btnShowRaw.disabled = false;

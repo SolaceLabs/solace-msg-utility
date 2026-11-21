@@ -10,7 +10,7 @@
  * shown.
  */
 
-/** The image kinds the details pane may preview, behind its Show preview button. */
+/** The image kinds the details pane may show, behind its Show content button. */
 export type PreviewImage = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
 
 export interface FileKind {
@@ -24,9 +24,6 @@ export interface FileKind {
 
 /** The largest image the pane decodes: width times height, in pixels. */
 export const MAX_PREVIEW_PIXELS = 40_000_000;
-
-/** How many bytes the hex view shows. */
-export const HEX_VIEW_BYTES = 512;
 
 /** `sig` at `at`, byte for byte. */
 function has(b: Uint8Array, sig: number[], at = 0): boolean {
@@ -158,26 +155,4 @@ export function imageSize(b: Uint8Array, image: PreviewImage): { width: number; 
         size = webpSize(b);
     }
     return size && size.width > 0 && size.height > 0 ? size : null;
-}
-
-/**
- * The first `limit` bytes as a hex dump, sixteen to a line: the offset, the
- * bytes in two groups of eight, and the printable ASCII between bars
- * (`hexdump -C`'s layout). A longer payload ends with how many bytes are not
- * shown.
- */
-export function hexDump(b: Uint8Array, limit = HEX_VIEW_BYTES): string {
-    const shown = b.subarray(0, limit);
-    const lines: string[] = [];
-    for (let at = 0; at < shown.length; at += 16) {
-        const row = [...shown.subarray(at, at + 16)];
-        const hex = row.map(v => v.toString(16).padStart(2, '0'));
-        const left = hex.slice(0, 8).join(' ').padEnd(23);
-        const right = hex.slice(8).join(' ').padEnd(23);
-        const ascii = row.map(v => (v >= 0x20 && v < 0x7F ? String.fromCharCode(v) : '.')).join('');
-        lines.push(`${at.toString(16).padStart(8, '0')}  ${left}  ${right}  |${ascii}|`);
-    }
-    const rest = b.length - shown.length;
-    if (rest > 0) lines.push(`... ${rest.toLocaleString('en-US')} more byte${rest === 1 ? '' : 's'}`);
-    return lines.join('\n');
 }

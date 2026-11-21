@@ -458,7 +458,7 @@ describe('queue-browser/service-events', () => {
             ui.selectMessage('400');
             expect(ui.getElements().detailContent.textContent).toBe('name: bob\nage: 42\nactive: true');
             expect(ui.getElements().btnCopyContent.disabled).toBe(false);
-            expect(ui.getElements().detailBinary.classList.contains('hidden')).toBe(true);
+            expect(ui.getElements().btnShowContent.classList.contains('hidden')).toBe(true);
 
             // Download Content saves the wire bytes, not the YAML.
             ui.downloadMessageContent(stored);

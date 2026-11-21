@@ -194,18 +194,13 @@
                                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                             </svg>
                         </button>
+                        <!-- An image payload of the four kinds the pane may show: swaps the
+                             box below for the image, on request. -->
+                        <button id="btn-show-content" type="button" class="btn btn-secondary btn-sm hidden">Show content</button>
                     </div>
                     <div id="detail-content" class="display-output multi-line"></div>
-                    <!-- A binary payload: what its first bytes say it is, then a preview
-                         (four image kinds, on request) or the first bytes in hex. -->
-                    <div id="detail-binary" class="detail-binary hidden">
-                        <span id="detail-binary-kind" class="detail-binary-kind text-secondary"></span>
-                        <button id="btn-show-preview" type="button" class="btn btn-secondary btn-sm hidden">Show preview</button>
-                        <button id="btn-show-hex" type="button" class="btn btn-secondary btn-sm hidden">Show hex</button>
-                    </div>
+                    <img id="detail-preview" class="detail-preview hidden" alt="The message payload as an image">
                     <p id="detail-binary-note" class="detail-binary-note text-secondary hidden"></p>
-                    <img id="detail-preview" class="detail-preview hidden" alt="Preview of the message payload">
-                    <pre id="detail-hex" class="detail-hex display-output hidden"></pre>
                 </div>
             </div>
         </div>

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { detectKind, imageSize, hexDump, HEX_VIEW_BYTES } from '../../../src/modules/queue-browser/file-kind';
+import { detectKind, imageSize } from '../../../src/modules/queue-browser/file-kind';
 
 type Part = number | string | number[];
 
@@ -192,55 +192,6 @@ describe('queue-browser/file-kind', () => {
             expect(imageSize(bytes([0xFF, 0xD8], sof(0xC0, 0, 600)), 'image/jpeg')).toBeNull();
             const lossy = bytes('RIFF', zeros(4), 'WEBP', 'VP8 ', u32be(10), [0, 0, 0], [0x9D, 0x01, 0x2A], [0x00, 0x00], [0xE0, 0x01]);
             expect(imageSize(lossy, 'image/webp')).toBeNull();
-        });
-    });
-
-    describe('hexDump()', () => {
-        it('lays out a full line as offset, two groups of eight bytes, and the printable ASCII between bars', () => {
-            expect(hexDump(bytes('ABCDEFGHIJKLMNOP')))
-                .toBe('00000000  41 42 43 44 45 46 47 48  49 4a 4b 4c 4d 4e 4f 50  |ABCDEFGHIJKLMNOP|');
-        });
-
-        it('pads a short last line so the ASCII column lines up, and shows unprintable bytes as dots', () => {
-            const dump = hexDump(bytes('ABCDEFGHIJKLMNOP', [0x00, 0x7F, 0x20, 0x7E]));
-            expect(dump.split('\n')).toEqual([
-                '00000000  41 42 43 44 45 46 47 48  49 4a 4b 4c 4d 4e 4f 50  |ABCDEFGHIJKLMNOP|',
-                '00000010  00 7f 20 7e                                       |.. ~|',
-            ]);
-        });
-
-        it('pads a line that ends inside the first group', () => {
-            expect(hexDump(bytes('Hello')))
-                .toBe('00000000  48 65 6c 6c 6f                                    |Hello|');
-        });
-
-        it('pads a line that ends inside the second group', () => {
-            const dump = hexDump(bytes([0xDE, 0xAD, 0xBE, 0xEF, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
-            expect(dump.split('\n')[1]).toBe('00000010  0c                                                |.|');
-        });
-
-        it('gives no lines for no bytes', () => {
-            expect(hexDump(new Uint8Array(0))).toBe('');
-        });
-
-        it('stops at the default limit and says how many bytes it left out, grouped as en-US', () => {
-            const lines = hexDump(new Uint8Array(HEX_VIEW_BYTES + 1234)).split('\n');
-            expect(lines).toHaveLength(HEX_VIEW_BYTES / 16 + 1);
-            expect(lines[HEX_VIEW_BYTES / 16 - 1].slice(0, 8)).toBe('000001f0');
-            expect(lines[HEX_VIEW_BYTES / 16]).toBe('... 1,234 more bytes');
-        });
-
-        it('says "1 more byte" in the singular, and adds nothing at exactly the limit', () => {
-            const one = hexDump(new Uint8Array(HEX_VIEW_BYTES + 1)).split('\n');
-            expect(one[one.length - 1]).toBe('... 1 more byte');
-            expect(hexDump(new Uint8Array(HEX_VIEW_BYTES)).split('\n')).toHaveLength(HEX_VIEW_BYTES / 16);
-        });
-
-        it('honours a limit given by the caller', () => {
-            expect(hexDump(bytes('ABCDEFGHIJKLMNOPQ'), 16).split('\n')).toEqual([
-                '00000000  41 42 43 44 45 46 47 48  49 4a 4b 4c 4d 4e 4f 50  |ABCDEFGHIJKLMNOP|',
-                '... 1 more byte',
-            ]);
         });
     });
 });

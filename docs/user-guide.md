@@ -210,11 +210,10 @@ Click any row to see its details in the panel below:
 - **Message Properties** -- standard Solace properties (Delivery Mode, TTL, Priority, Correlation ID, and so on)
 - **Application Properties** -- user-defined key/value properties set by the publisher
 - **Content Preview** -- the payload as text: TEXT messages, XML content, and binary attachments that hold UTF-8 text. A map or stream message shows its fields as YAML: strings, numbers, true and false, `null`, nested maps and lists, bytes as `!!binary` followed by base64, and a destination as `{ topic: name }` or `{ queue: name }`. Its Copy button copies that YAML.
-  - A binary attachment that is not text shows its size, for example `[Binary payload: 1,234 bytes]`, next to the **Binary** type badge, and its Copy button stays disabled. Under it, **Looks like:** names what its first bytes say it is (for example *PNG image*, *gzip-compressed data*, *PDF document*, *ELF executable or library*), or says the kind is not recognised.
-  - A PNG, JPEG, GIF or WebP image has a **Show preview** button. Nothing is decoded until you press it. An image whose header declares more than 40 megapixels, or no size at all, is not shown, and a line says why. **Hide preview** removes it.
-  - Any other binary payload, PDF included, has a **Show hex** button: the first 512 bytes as offset, hex and ASCII columns, and how many bytes follow. Nothing is ever opened or run, and an SVG or HTML payload is only ever shown as text.
-  - Use **Download Content** to get the bytes.
-- **Show Raw Content** -- opens a modal with the full raw message dump
+  - A binary attachment that is not text shows what its first bytes say it is and its size, for example `[Binary payload, looks like PNG image: 1,234 bytes]` (other kinds include *gzip-compressed data*, *PDF document* and *ELF executable or library*), or only its size, `[Binary payload: 1,234 bytes]`, when they match no known kind. The **Binary** type badge sits beside it, and its Copy button stays disabled.
+  - A PNG, JPEG, GIF or WebP image has a **Show content** button beside the Copy button. It replaces the Content Preview box with the image; **Hide content** puts the box back. Nothing is decoded until you press it. An image whose header declares more than 40 megapixels, or no size at all, has no button, and a line under the box says why. The header can declare a size its bytes do not hold, so a small file can still be refused.
+  - Nothing is ever opened or run, and an SVG or HTML payload is only ever shown as text. Use **Download Content** to get the bytes, and **Show Raw Content** to see them in hex.
+- **Show Raw Content** -- opens a modal with the message as the Solace SDK dumps it: its header fields, then the attachment's bytes in hex, sixteen to a line, with the printable ones beside them
 
 Copy buttons next to Destination, Repl Grp Msg Id and Content copy to the clipboard in one click.
 

@@ -5,7 +5,8 @@
  * getBinaryAttachment() returns a Latin-1 string: one character per byte.
  * attachmentBytes() turns that back into the original bytes once, at ingest;
  * classifyAttachment() then decides whether those bytes are text to show or a
- * true binary payload that the details pane shows as a size-only placeholder.
+ * true binary payload that the details pane shows as a placeholder naming its
+ * kind and size.
  * Downloads always write the original bytes, under the name contentFileName()
  * suggests.
  */
@@ -18,7 +19,7 @@ const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
 const TEXT_CONTENT_TYPE = /^\s*(?:text\/|application\/(?:json|xml)\s*(?:;|$))/i;
 
 export interface AttachmentPayload {
-    /** What the details pane shows: the decoded text, or `[Binary payload: N bytes]`. */
+    /** What the details pane shows: the decoded text, or `[Binary payload, looks like <kind>: N bytes]`. */
     content: string;
     /** The attachment's original bytes, for Download Content, the ZIP and Download Full. */
     bytes: Uint8Array;
@@ -57,10 +58,13 @@ export function classifyAttachment(bytes: Uint8Array, contentType?: string): Att
     return { content: text, bytes, binary: false };
 }
 
+/** The placeholder names the kind its first bytes say it is (file-kind.ts), when they say one. */
 function binaryPayload(bytes: Uint8Array): AttachmentPayload {
     const n = bytes.length;
+    const kind = detectKind(bytes);
+    const looks = kind ? `, looks like ${kind.label}` : '';
     return {
-        content: `[Binary payload: ${n.toLocaleString('en-US')} byte${n === 1 ? '' : 's'}]`,
+        content: `[Binary payload${looks}: ${n.toLocaleString('en-US')} byte${n === 1 ? '' : 's'}]`,
         bytes,
         binary: true,
     };

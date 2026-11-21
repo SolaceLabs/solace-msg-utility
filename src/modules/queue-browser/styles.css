@@ -111,34 +111,19 @@
     border-color: var(--border-color);
 }
 
-/* A binary payload's kind, its Show preview / Show hex button, and what they show. */
-.detail-binary {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-    font-size: 0.85rem;
-}
-
+/* Why an image payload is not shown, under the Content Preview box. */
 .detail-binary-note {
     margin: 0.5rem 0 0;
     font-size: 0.85rem;
 }
 
+/* The image a binary payload holds, shown in place of the Content Preview box. */
 .detail-preview {
     display: block;
     max-width: 100%;
     max-height: 400px;
-    margin-top: 0.5rem;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-}
-
-.detail-hex {
-    margin: 0.5rem 0 0;
-    font-size: 0.8rem;
-    white-space: pre;
-    overflow-x: auto;
 }
 
 /* ---------- Info bar ---------- */

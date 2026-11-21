@@ -66,13 +66,9 @@ ui.initElements = function (container) {
     els.appPropertiesContainer = container.querySelector('#detail-app-properties-container');
     els.detailContent = container.querySelector('#detail-content');
     els.btnCopyContent = container.querySelector('#btn-copy-content');
-    els.detailBinary = container.querySelector('#detail-binary');
-    els.detailBinaryKind = container.querySelector('#detail-binary-kind');
-    els.btnShowPreview = container.querySelector('#btn-show-preview');
-    els.btnShowHex = container.querySelector('#btn-show-hex');
+    els.btnShowContent = container.querySelector('#btn-show-content');
     els.detailBinaryNote = container.querySelector('#detail-binary-note');
     els.detailPreview = container.querySelector('#detail-preview');
-    els.detailHex = container.querySelector('#detail-hex');
 
     // Raw Content
     els.btnShowRaw = container.querySelector('#btn-show-raw');

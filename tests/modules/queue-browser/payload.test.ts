@@ -50,6 +50,11 @@ describe('queue-browser/payload', () => {
             expect(classifyAttachment(bytes, 'application/xml').binary).toBe(false);
         });
 
+        it('names the kind the first bytes say the payload is, when they say one', () => {
+            const pdf = Uint8Array.from([...new TextEncoder().encode('%PDF-1.7'), 0x00]);
+            expect(classifyAttachment(pdf).content).toBe('[Binary payload, looks like PDF document: 9 bytes]');
+        });
+
         it('formats a large size with thousands separators', () => {
             const bytes = new Uint8Array(1234).fill(0xFF);
             expect(classifyAttachment(bytes).content).toBe('[Binary payload: 1,234 bytes]');

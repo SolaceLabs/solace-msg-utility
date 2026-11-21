@@ -80,7 +80,7 @@ describe('mock-broker/broker/samples -- binary samples', () => {
         expect(classifyAttachment(bytesOf(name), sample(name).getHttpContentType()!).binary).toBe(true);
     });
 
-    it('png-too-large declares more than the pane decodes, so Show preview refuses it', () => {
+    it('png-too-large declares more than the pane decodes, so the pane offers no Show content for it', () => {
         const size = imageSize(bytesOf('png-too-large'), 'image/png')!;
 
         expect(detectKind(bytesOf('png-too-large'))!.image).toBe('image/png');

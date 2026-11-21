@@ -204,6 +204,32 @@ function attachmentOf(f: MessageFields): string | null {
     return f.payload === undefined ? null : textToLatin1(f.payload);
 }
 
+/** One key of the SDK's message dump: `key:` padded to 40 columns, then the value. */
+function dumpLine(key: string, value: string): string {
+    return `${key}:`.padEnd(40) + value;
+}
+
+/**
+ * Bytes as the SDK's message dump shows them (formatDumpBytes in solclientjs):
+ * sixteen to a line, indented two spaces, two lower-case hex digits and a
+ * space each with three more after the eighth, padded to 54 columns, then
+ * the bytes 33 to 126 as characters and any other as `.`.
+ */
+function dumpBytes(latin1: string): string {
+    let out = '';
+    for (let at = 0; at < latin1.length; at += 16) {
+        let hex = '';
+        let text = '';
+        for (let i = at; i < Math.min(at + 16, latin1.length); i++) {
+            const c = latin1.charCodeAt(i);
+            hex += `${c.toString(16).padStart(2, '0')} ${i - at === 7 ? '   ' : ''}`;
+            text += c < 33 || c > 126 ? '.' : latin1[i];
+        }
+        out += `  ${hex.padEnd(54)}${text}\n`;
+    }
+    return out;
+}
+
 /** Attachment size in bytes, as the broker counts it. */
 export function payloadByteLength(f: MessageFields): number {
     return (attachmentOf(f) ?? '').length;
@@ -281,17 +307,21 @@ export function createMessage(fields: MessageFields = {}): MockMessage {
         isRedelivered: () => !!f.redelivered,
         isReplyMessage: () => !!f.replyMessage,
 
-        /** Raw dump for the Show-Raw modal. */
-        dump: () => [
-            `Destination:            ${f.destination ? f.destination.getName() : '(none)'}`,
-            `AppMessageID:           ${f.applicationMessageId ?? '(null)'}`,
-            `SenderId:               ${f.senderId ?? '(null)'}`,
-            `Class Of Service:       ${f.userCos ?? 0}`,
-            `DeliveryMode:           ${f.deliveryMode === MessageDeliveryModeType.DIRECT ? 'DIRECT' : 'PERSISTENT'}`,
-            `Message Id:             ${f.guaranteedMessageId ?? '(null)'}`,
-            `Binary Attachment:      len=${payloadByteLength(f)}`,
-            attachmentOf(f) ?? '',
-        ].join('\n'),
+        /** The Show Raw view, in the SDK's layout: each key padded to 40 columns, and the attachment's bytes in hex. */
+        dump: () => {
+            const lines = [
+                dumpLine('Destination', f.destination ? f.destination.getName() : '(none)'),
+                dumpLine('AppMessageID', f.applicationMessageId ?? '(null)'),
+                dumpLine('SenderId', f.senderId ?? '(null)'),
+                dumpLine('Class Of Service', String(f.userCos ?? 0)),
+                dumpLine('DeliveryMode', f.deliveryMode === MessageDeliveryModeType.DIRECT ? 'DIRECT' : 'PERSISTENT'),
+                dumpLine('Message Id', f.guaranteedMessageId ?? '(null)'),
+            ];
+            // The SDK leaves out an empty attachment.
+            const attachment = attachmentOf(f) ?? '';
+            if (attachment) lines.push(`${dumpLine('Binary Attachment', `len=${attachment.length}`)}\n${dumpBytes(attachment)}`);
+            return lines.join('\n');
+        },
     };
 
     // ---- setters -----------------------------------------------------

@@ -167,3 +167,31 @@ describe('mock-broker/sdk/message -- setSdtContainer', () => {
         expect(msg.smfHeader.messageLength).toBe(5 + 120);
     });
 });
+
+describe('mock-broker/sdk/message -- dump', () => {
+    // The lines below are what the SDK's own formatDumpBytes gives for these bytes.
+    const key = (k: string, v: string) => `${k}:`.padEnd(40) + v;
+
+    it('lays the message out as the SDK does: keys padded to 40 columns, then the attachment in hex with its printable bytes', () => {
+        const dump = createMessage({ payloadBytes: '\x89PNG\r\n\x1a\nABCDEFGHIJ', guaranteedMessageId: '7' }).dump();
+
+        expect(dump.split('\n')).toEqual([
+            key('Destination', '(none)'),
+            key('AppMessageID', '(null)'),
+            key('SenderId', '(null)'),
+            key('Class Of Service', '0'),
+            key('DeliveryMode', 'PERSISTENT'),
+            key('Message Id', '7'),
+            key('Binary Attachment', 'len=18'),
+            '  89 50 4e 47 0d 0a 1a 0a    41 42 43 44 45 46 47 48    .PNG....ABCDEFGH',
+            '  49 4a                                                 IJ',
+            '',
+        ]);
+    });
+
+    it('leaves out an empty attachment, as the SDK does', () => {
+        const dump = createMessage({ guaranteedMessageId: '8' }).dump();
+        expect(dump).not.toContain('Binary Attachment');
+        expect(dump.split('\n').at(-1)).toBe(key('Message Id', '8'));
+    });
+});

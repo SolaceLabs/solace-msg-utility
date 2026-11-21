@@ -453,7 +453,7 @@ describe('queue-browser/ui-table', () => {
             });
             const bytes = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
             state.displayedMessages = [
-                { id: '7', content: '[Binary payload: 8 bytes]', bytes, binary: true, date: '', size: 0, type: 'Binary' }
+                { id: '7', content: '[Binary payload, looks like PNG image: 8 bytes]', bytes, binary: true, date: '', size: 0, type: 'Binary' }
             ];
             state.allMessages = state.displayedMessages;
             ui.renderList();
