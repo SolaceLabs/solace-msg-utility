@@ -21,7 +21,7 @@ let scrolledTo: Element[];
  */
 class ReadingLine {
     readonly watched: Element[] = [];
-    constructor(private readonly report: IntersectionObserverCallback) { readingLines.push(this); }
+    constructor(private readonly report: IntersectionObserverCallback, readonly box: IntersectionObserverInit) { readingLines.push(this); }
     observe(el: Element): void { this.watched.push(el); }
     /** Headings that went past the line (true) or came back below it (false), as one report. */
     cross(...changes: [Element, boolean][]): void {
@@ -41,8 +41,10 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-async function install(build: { variant?: string; demo?: boolean } = {}): Promise<void> {
+/** Install the page; `pane` puts it inside an element first, as the shell puts a page inside the pane that scrolls it. */
+async function install(build: { variant?: string; demo?: boolean } = {}, pane?: HTMLElement): Promise<void> {
     container = loadModuleDOM('about', undefined, build);
+    pane?.appendChild(container);
     const appState: AppState = {
         activeModuleId: null, isConnected: false, isSempConnected: false,
         selectedVpn: null, solaceConnection: null, sempCredentials: null, managed: null,
@@ -159,6 +161,25 @@ describe('About module', () => {
 
         line.cross([headings[0], false], [headings[1], false]);
         expect(reading()).toEqual([]);
+    });
+
+    // A heading scrolled away above is still past the line only when the line is
+    // the scrolling pane's: against the window, the pane hides the heading.
+    it('measures the reading line against the pane that scrolls the page: the nearest ancestor that scrolls', async () => {
+        const pane = document.createElement('div');
+        pane.style.overflowY = 'auto';
+        const shell = document.createElement('div');
+        shell.style.overflowY = 'scroll';
+        shell.appendChild(pane);
+        document.body.appendChild(shell);
+        await install({}, pane);
+        expect(readingLines[0].box.root).toBe(pane);
+        expect(readingLines[0].box.rootMargin).toBe('100000px 0px -60% 0px');
+    });
+
+    it('measures the reading line against the window when no ancestor scrolls', async () => {
+        await install();
+        expect(readingLines[0].box.root).toBeNull();
     });
 
     it('opens a link out of a chapter in a tab of its own, which cannot reach back into the app', async () => {

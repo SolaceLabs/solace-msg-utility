@@ -30,21 +30,36 @@ function contentsButton(label: string, className: string, onClick: () => void): 
 }
 
 /**
- * How far down the window the reading line sits, as the share of the window
- * below it: a section counts as being read once its heading is above the line.
+ * How far down the pane the reading line sits, as the share of the pane below
+ * it: a section counts as being read once its heading is above the line.
  */
 const BELOW_READING_LINE = '60%';
 
 /**
+ * The pane an element is read in: its nearest ancestor that scrolls its
+ * content, or null where the window itself scrolls.
+ */
+function scrollPaneOf(el: Element): Element | null {
+    for (let pane = el.parentElement; pane; pane = pane.parentElement) {
+        if (/auto|scroll/.test(getComputedStyle(pane).overflowY)) return pane;
+    }
+    return null;
+}
+
+/**
  * Mark, in Contents, the section being read: the last heading the reader has
- * scrolled past. The observer's box is everything above the reading line, so
- * a heading is in it exactly while it is past the line, whichever way the page
- * moves and whatever scrolls it. A heading of a chapter that is not on show,
- * or of a page that is not, is never in the box, so nothing is marked for it.
+ * scrolled past. The observer's box is the pane the sheet scrolls in, stretched
+ * far above it and cut off at the reading line, so a heading is in the box
+ * exactly while it is past the line, on screen or scrolled away above. The box
+ * has to be that pane's: measured against the window, a pane hides a heading
+ * it has scrolled away, and the mark would last only while the heading shows.
+ * A heading of a chapter that is not on show, or of a page that is not, is
+ * never in the box, so nothing is marked for it.
  *
+ * @param sheet   the sheet the chapters are on
  * @param entries each section heading, with its entry in Contents
  */
-function followReading(entries: Map<Element, HTMLElement>): void {
+function followReading(sheet: HTMLElement, entries: Map<Element, HTMLElement>): void {
     const headings = Array.from(entries.keys());
     const passed = new Set<Element>();
     const observer = new IntersectionObserver((changes) => {
@@ -54,7 +69,7 @@ function followReading(entries: Map<Element, HTMLElement>): void {
         }
         const reading = headings.filter(heading => passed.has(heading)).at(-1);
         entries.forEach((entry, heading) => entry.classList.toggle('is-reading', heading === reading));
-    }, { rootMargin: `100000px 0px -${BELOW_READING_LINE} 0px` });
+    }, { root: scrollPaneOf(sheet), rootMargin: `100000px 0px -${BELOW_READING_LINE} 0px` });
     headings.forEach(heading => observer.observe(heading));
 }
 
@@ -129,7 +144,7 @@ function installManual(container: HTMLElement): void {
 
     // Opened at the first chapter without scrolling: the page is not on screen yet.
     show(0);
-    followReading(sectionEntries);
+    followReading(sheet, sectionEntries);
 }
 
 export const AboutModule = {

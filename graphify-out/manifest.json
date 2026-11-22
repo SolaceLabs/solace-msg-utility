@@ -2358,15 +2358,15 @@
     "semantic_hash": ""
   },
   "src/modules/about/module.ts": {
-    "mtime": 1795327810.0558326,
-    "seen": 1795329410.7906816,
-    "ast_hash": "3a60a90c3572d13dd886c451e000a996",
+    "mtime": 1795338157.2897658,
+    "seen": 1795340780.6661084,
+    "ast_hash": "d397f24ed4367582db6e4f80f347aa26",
     "semantic_hash": ""
   },
   "tests/modules/about/module.test.ts": {
-    "mtime": 1795327810.0563762,
-    "seen": 1795329410.7908738,
-    "ast_hash": "17e76b8aafa7be7ec4ad653b0db75c63",
+    "mtime": 1795340356.2615051,
+    "seen": 1795340780.6663222,
+    "ast_hash": "71c66a8c38506fdc60beeb4cb95143db",
     "semantic_hash": ""
   },
   "src/modules/about/index.html": {
