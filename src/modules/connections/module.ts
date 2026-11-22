@@ -373,10 +373,8 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
     els.elSolClientNameId.addEventListener('input', () => {
         // Clear stale error eagerly while the user is correcting; full
         // validation runs on blur to avoid red-flashing mid-edit.
-        if (els.elSolClientNameId.classList.contains('is-invalid')) {
-            els.elSolClientNameId.classList.remove('is-invalid');
-            els.elSolClientNameIdError.textContent = '';
-        }
+        els.elSolClientNameId.classList.remove('is-invalid');
+        els.elSolClientNameIdError.textContent = '';
     });
 
     // Save

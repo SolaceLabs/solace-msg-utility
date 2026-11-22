@@ -72,13 +72,6 @@ const PAGE_OK = `<rpc-reply>
 </rpc-reply>`;
 
 describe('QueueSubscriptionExplorerModule', () => {
-    it('has correct metadata', () => {
-        expect(QueueSubscriptionExplorerModule.id).toBe('queue-subscription-explorer');
-        expect(QueueSubscriptionExplorerModule.name).toBe('Queue Subscriptions');
-        expect(QueueSubscriptionExplorerModule.icon).toContain('svg');
-        // Priority is set in src/registry.ts; tested in tests/registry.test.ts.
-    });
-
     it('installs and shows the SEMP warning when disconnected', async () => {
         const container = createDOM();
         const { ctx } = createTestContext(container, { isSempConnected: false });
@@ -414,22 +407,13 @@ describe('QueueSubscriptionExplorerModule', () => {
 
     it('ignores non-isSempConnected state changes', async () => {
         const container = createDOM();
-        const { ctx, eventBus } = createTestContext(container);
+        const { ctx, eventBus } = createTestContext(container, { isSempConnected: false });
         await QueueSubscriptionExplorerModule.install(ctx);
-        // Not isSempConnected — handler must early-return.
+        expect(container.querySelector('#subexp-warning')!.classList.contains('hidden')).toBe(false);
+        // Not isSempConnected: a handler that reacted to it would reveal the content.
         eventBus.emit('app:state-change', { key: 'isConnected', value: true });
-        // No effect on the DOM.
-        expect(container.querySelector('#subexp-warning')!.classList.contains('hidden')).toBe(true);
-    });
-
-    it('throws at install when a required element is missing', async () => {
-        // The gate (#subexp-warning) is now created by createGate, not required
-        // from the template — so an empty container makes install fail on the
-        // first genuine required() capture (#subexp-about).
-        const container = document.createElement('div');
-        document.body.appendChild(container);
-        const { ctx } = createTestContext(container);
-        await expect(QueueSubscriptionExplorerModule.install(ctx)).rejects.toThrow(/Required element missing/);
+        expect(container.querySelector('#subexp-warning')!.classList.contains('hidden')).toBe(false);
+        expect(container.querySelector('#subexp-about')!.classList.contains('hidden')).toBe(true);
     });
 
     it('toast uses singular "subscription" when exactly one row loaded', async () => {

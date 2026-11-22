@@ -153,7 +153,7 @@ const ROWS: { key: string; route: string; call: () => Promise<Outcome> }[] = [
         route: 'PUT /managed/connections/{broker}, blank passwords kept',
         call: async () => {
             const list = await conns.listConnections();
-            return list.ok ? conns.saveConnection(list.data.find(c => c.broker === 'b2')!) : list;
+            return list.ok ? conns.saveConnection(list.data.connections.find(c => c.broker === 'b2')!) : list;
         },
     },
     {
@@ -161,7 +161,7 @@ const ROWS: { key: string; route: string; call: () => Promise<Outcome> }[] = [
         route: 'DELETE /managed/connections/{broker}, with the rev the list gave',
         call: async () => {
             const list = await conns.listConnections();
-            return list.ok ? conns.deleteConnection('b3', list.data.find(c => c.broker === 'b3')!.rev) : list;
+            return list.ok ? conns.deleteConnection('b3', list.data.connections.find(c => c.broker === 'b3')!.rev) : list;
         },
     },
     { key: 'GET /managed/settings', route: 'GET /managed/settings', call: () => settings.load() },

@@ -513,23 +513,6 @@ describe('core/services/solace-client', () => {
             expect(service.connect(baseCfg(), 'broker.test', 'admin')).toEqual({ ok: true });
             expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
         });
-
-        it('cleanup() during the wait cancels it', () => {
-            vi.useFakeTimers();
-            const service = createServiceSolace(makeHooks());
-            service.connect(baseCfg(), 'broker.test', 'admin');
-
-            service.cleanup();
-            vi.advanceTimersByTime(30_000);
-            settle('loaded');
-            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
-        });
-
-        it('cleanup() with no wait pending does nothing', () => {
-            const service = createServiceSolace(makeHooks());
-            service.cleanup();
-            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
-        });
     });
 
     describe('disconnect()', () => {
@@ -644,6 +627,16 @@ describe('core/services/solace-client', () => {
             vi.useRealTimers();
         });
 
+        it('removes the probe iframe when it errors', () => {
+            const service = createServiceSolace(makeHooks());
+            service.init();
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            const iframe = document.querySelector('iframe[src="https://broker.test:8080"]') as HTMLIFrameElement;
+            iframe.dispatchEvent(new Event('error'));
+            expect(document.querySelector('iframe[src="https://broker.test:8080"]')).toBeNull();
+        });
+
         it('ignores later triggers once cleanup has run', () => {
             vi.useFakeTimers();
             const service = createServiceSolace(makeHooks());
@@ -696,24 +689,6 @@ describe('core/services/solace-client', () => {
 
             const propsObj = solaceMock.SessionProperties.mock.results[0].value;
             expect(propsObj.url).toBe('wss://broker.test:8080/solace');
-        });
-
-        it('normalises a path missing its leading slash', () => {
-            const service = createServiceSolace(makeHooks());
-            service.init();
-            service.connect(baseCfg({ urlPath: 'solace' }), 'broker.test', 'admin');
-
-            const propsObj = solaceMock.SessionProperties.mock.results[0].value;
-            expect(propsObj.url).toBe('wss://broker.test:8080/solace');
-        });
-
-        it('omits the path entirely when blank or whitespace', () => {
-            const service = createServiceSolace(makeHooks());
-            service.init();
-            service.connect(baseCfg({ urlPath: '   ' }), 'broker.test', 'admin');
-
-            const propsObj = solaceMock.SessionProperties.mock.results[0].value;
-            expect(propsObj.url).toBe('wss://broker.test:8080');
         });
 
         it('routes the TLS handshake probe to the same path as the session URL', () => {

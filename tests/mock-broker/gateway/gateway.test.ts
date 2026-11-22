@@ -206,7 +206,7 @@ describe('mock-broker/gateway -- settings', () => {
         expect(gw.settings.rev()).toBe('1');
     });
 
-    it('reads a seed or a snapshot without the newer login and session keys as their defaults', () => {
+    it('gives the login and session keys a seed or a snapshot leaves out their defaults', () => {
         const strip = (s: ReturnType<typeof contractSeed>['settings']) => {
             const login = s.login as Partial<typeof s.login>;
             for (const k of ['perClient', 'clientMaxFailures', 'resetMinutes', 'passwordMinLength', 'twoFactorMinutes'] as const) delete login[k];

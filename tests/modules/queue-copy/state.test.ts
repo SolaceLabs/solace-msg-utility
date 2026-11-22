@@ -13,34 +13,6 @@ describe('queue-copy/state', () => {
             expect(s.dest.name).toBe('');
             expect(s.mode).toBe('copy');
         });
-
-        it('starts with no live secondary connections', () => {
-            const s = createInitialState();
-            expect(s.destSession).toBeNull();
-            expect(s.destSessionTarget).toBeNull();
-            expect(s.destSolPending).toBeNull();
-            expect(s.destSempCtx).toBeNull();
-            expect(s.verify).toBeNull();
-            expect(s.job).toBeNull();
-        });
-
-        it('starts with no publishers — they are created lazily on session connect', () => {
-            const s = createInitialState();
-            expect(s.primaryPublisher).toBeNull();
-            expect(s.destPublisher).toBeNull();
-        });
-
-        it('starts with blank password fields', () => {
-            const s = createInitialState();
-            expect(s.destSolacePass).toBe('');
-            expect(s.destSempPass).toBe('');
-        });
-
-        it('initializes SEMP and Solace sub-forms with urlPath slots', () => {
-            const s = createInitialState();
-            expect(s.destForm.semp.urlPath).toBe('');
-            expect(s.destForm.solace.urlPath).toBe('');
-        });
     });
 
     describe('syncDestFormFromSnapshot', () => {

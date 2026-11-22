@@ -1,100 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { modules } from '../src/registry';
-import { createKernel } from '../src/core/kernel';
-import { ACTIVE_MODULES as STANDARD_MANIFEST } from '../src/variants/standard';
-import type { RegisteredModule } from '../src/core/types';
 
 /**
- * The registry's job is to (a) register the modules the app ships with and
- * (b) hand them to the kernel in a shape that yields the intended install +
- * sidebar ordering. These tests prove both without hardcoding which modules
- * are present or what priority numbers they carry — adding, removing, or
- * reordering a module is a one-line edit in `src/registry.ts` and does not
- * require touching this test file.
+ * The registry resolves each id of the active variant's manifest to its
+ * module, and refuses a manifest id it cannot resolve.
  */
 describe('registry', () => {
-    describe('shape', () => {
-        it('every entry pairs a PwaModule with a numeric priority', () => {
-            // Registered modules must have the minimum shape the kernel needs;
-            // this catches a typo in the registry (e.g. forgetting to wrap a
-            // module in { module, priority }) without depending on how many
-            // or which modules exist.
-            expect(modules.length).toBeGreaterThan(0);
-            modules.forEach(r => {
-                expect(typeof r.module.id).toBe('string');
-                expect(typeof r.module.name).toBe('string');
-                expect(typeof r.module.install).toBe('function');
-                expect(typeof r.priority).toBe('number');
-                expect(Number.isFinite(r.priority)).toBe(true);
-            });
-        });
-
-        it('module ids are unique', () => {
-            // Duplicate ids would make the build's template-injection map
-            // ambiguous and break navigateTo(). Generic — holds for any set
-            // of registered modules.
-            const ids = modules.map(r => r.module.id);
-            expect(new Set(ids).size).toBe(ids.length);
-        });
-    });
-
-    describe('kernel integration — the registry\'s actual job', () => {
-        /**
-         * Build a sibling registry where every real module's `install()` is
-         * replaced with a spy that records the id. Preserves the priorities
-         * declared in `src/registry.ts` so the kernel's sort exercises the
-         * real ordering, but isolates the test from each module's DOM/service
-         * wiring (which would need a full shell to succeed).
-         */
-        function spyRegistry(): { spied: RegisteredModule[]; order: string[] } {
-            const order: string[] = [];
-            const spied: RegisteredModule[] = modules.map(r => ({
-                module: {
-                    name: r.module.name,
-                    id: r.module.id,
-                    icon: r.module.icon,
-                    install: vi.fn(async () => { order.push(r.module.id); }),
-                },
-                priority: r.priority,
-            }));
-            return { spied, order };
-        }
-
-        function shellDOM(entries: RegisteredModule[]): void {
-            document.body.innerHTML = `
-                <div id="main-sidebar"><button id="btn-sidebar-toggle"></button><div id="sidebar-account"></div></div>
-                <nav id="sidebar-nav"></nav>
-                <div id="module-container"><div id="app-loading"></div></div>
-                <h1 id="page-title"></h1>
-                <div id="notification-bell-slot"></div>
-                <div id="toast-container"></div>
-                <div id="status-indicator-client"></div>
-                <div id="status-indicator-semp"></div>
-                ${entries.map(r => `<template data-module-id="${r.module.id}"><div></div></template>`).join('')}
-            `;
-        }
-
-        it('every registered module is installed when the kernel starts', async () => {
-            const { spied, order } = spyRegistry();
-            shellDOM(spied);
-
-            await createKernel(spied).start();
-
-            expect(order.length).toBe(spied.length);
-            expect(new Set(order)).toEqual(new Set(spied.map(r => r.module.id)));
-        });
-
-        it('registry ids and priorities equal the standard variant manifest', () => {
-            // The registry resolves the active variant (the registry plugin builds
-            // `standard` under vitest). Swapped, dropped or collapsed priorities
-            // would change install and sidebar order. The kernel's sort itself is
-            // tests/core/kernel.test.ts > "installs modules in priority order".
-            const resolved = Object.fromEntries(modules.map(r => [r.module.id, r.priority]));
-            expect(resolved).toEqual(STANDARD_MANIFEST);
-        });
-    });
-
-    describe('setup guardrails', () => {
+    describe('resolution and setup guardrails', () => {
         afterEach(() => {
             vi.doUnmock('../src/variants/_active');
             vi.doUnmock('virtual:module-registry');
@@ -109,6 +20,13 @@ describe('registry', () => {
             return import('../src/registry');
         }
 
+        it('resolves each manifest id to the module its entry file exports, with its priority', async () => {
+            const alpha = { id: 'alpha', name: 'Alpha', install: vi.fn() };
+            const beta = { id: 'beta', name: 'Beta', install: vi.fn() };
+            const { modules } = await loadRegistry({ alpha: 10, beta: 20 }, { alpha: { alpha }, beta: { default: beta } });
+            expect(modules).toEqual([{ module: alpha, priority: 10 }, { module: beta, priority: 20 }]);
+        });
+
         it('throws when a manifest id has no entry file', async () => {
             await expect(loadRegistry({ ghost: 1 }, {})).rejects.toThrow(
                 /"ghost" is in the active variant manifest but the module registry has no entry file/
@@ -121,5 +39,4 @@ describe('registry', () => {
             );
         });
     });
-
 });

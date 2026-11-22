@@ -178,20 +178,6 @@ func TestHostedHandler_Enabled(t *testing.T) {
 	}
 }
 
-func TestHostedHandler_EnabledDirectOnlyDefault(t *testing.T) {
-	rec := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(true, liveWith(nil), bundleReady).ServeHTTP(rec, r)
-
-	var got hostedInfo
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("body is not JSON: %v", err)
-	}
-	if got.ConnModes != connDirect || got.DefaultConn != connDirect {
-		t.Errorf("want direct-only, got %+v", got)
-	}
-}
-
 func TestHostedHandler_Disabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
@@ -291,9 +277,6 @@ func TestLoadConfig_ConnModeDefaults(t *testing.T) {
 	if cfg.connModes != connDirect || cfg.defaultConn != connDirect {
 		t.Fatalf("want direct/direct, got %q/%q", cfg.connModes, cfg.defaultConn)
 	}
-	if err := validateConnModes(cfg); err != nil {
-		t.Errorf("the defaults must validate, got %v", err)
-	}
 }
 
 // Env values are case-insensitive so "Provisioned"/"BOTH" don't fail the enum check.
@@ -352,23 +335,6 @@ func TestPWAHandler_UnusableBundleStopsTheStart(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestPWAHandler_ServesIndex(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>hi</html>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	h := mustPWA(t, dir, directIndexFile)
-
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("root: want 200, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "hi") {
-		t.Errorf("root body: want index content, got %q", rec.Body.String())
 	}
 }
 
@@ -489,21 +455,6 @@ func TestPWAHandler_BundleGoneAtRequestTimeIsLogged(t *testing.T) {
 	}
 }
 
-func TestPWAHandler_MissingAsset_404(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html></html>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	h := mustPWA(t, dir, directIndexFile)
-
-	// Anything with a file extension should NOT fall back — it's an asset request.
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/missing.js", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("missing asset: want 404, got %d", rec.Code)
-	}
-}
-
 // ----- reverse proxy round-trip -----------------------------------------------
 
 func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
@@ -567,16 +518,12 @@ func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
 
 // One transport serves the Direct relay, the SEMP relay and the SMF gate: it
 // makes its own TLS connections, verified through the trust holder when each
-// is made, closes its idle connections when the trust changes, and a connect
-// has its own bound.
-func TestNewUpstreamTransport(t *testing.T) {
+// is made, and closes its idle connections when the trust changes.
+func TestNewUpstreamTransport_VerifiesThroughTheTrustHolder(t *testing.T) {
 	trust := testTrust(false)
 	tr := newUpstreamTransport(trust)
 	if tr.DialTLSContext == nil || tr.TLSClientConfig != nil {
 		t.Errorf("verification belongs to dialUpstreamTLS, reading the holder: %+v", tr.TLSClientConfig)
-	}
-	if tr.DialContext == nil || tr.ResponseHeaderTimeout != 30*time.Second {
-		t.Error("the transport must bound the connect and the wait for headers")
 	}
 	if len(trust.hooks) != 1 {
 		t.Errorf("the transport must close its idle connections on a trust change: %d hooks", len(trust.hooks))
@@ -870,21 +817,6 @@ func TestAccessLog_SkipsHosted(t *testing.T) {
 	}
 }
 
-func TestRecordingResponseWriter_DefaultStatus(t *testing.T) {
-	// Writing without explicit WriteHeader: status should remain the default 200.
-	rec := httptest.NewRecorder()
-	rrw := &recordingResponseWriter{ResponseWriter: rec, status: 200}
-	if _, err := rrw.Write([]byte("xy")); err != nil {
-		t.Fatal(err)
-	}
-	if rrw.status != 200 {
-		t.Errorf("status: want 200, got %d", rrw.status)
-	}
-	if rrw.bytes != 2 {
-		t.Errorf("bytes: want 2, got %d", rrw.bytes)
-	}
-}
-
 func newCapturingLogger(w io.Writer) *slog.Logger {
 	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
@@ -949,28 +881,17 @@ func TestAdminHandler_TrailingSlashRedirects(t *testing.T) {
 	}
 }
 
+// Route on, bundle missing: a packaging error, still a 404 to the caller. The
+// app's index.html in the directory is never the answer: no history-mode
+// fallback answers /solAdmin with the ordinary app.
 func TestAdminHandler_EnabledButNotDeployed(t *testing.T) {
-	// Route on, bundle missing — a packaging error, still a 404 to the caller.
-	h := newAdminHandler(t.TempDir(), true, quietLogger())
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath, nil))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("missing bundle: want 404, got %d", rec.Code)
-	}
-}
-
-func TestAdminHandler_DoesNotFallBackToTheSPA(t *testing.T) {
-	// The whole point of a dedicated route: the SPA's history-mode fallback
-	// would otherwise answer /solAdmin with the ordinary app.
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>SPA</html>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeFile(t, filepath.Join(dir, "index.html"), "<html>SPA</html>")
 	h := newAdminHandler(dir, true, quietLogger())
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath, nil))
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("want 404, got %d", rec.Code)
+		t.Errorf("missing bundle: want 404, got %d", rec.Code)
 	}
 	if strings.Contains(rec.Body.String(), "SPA") {
 		t.Errorf("served the SPA at %s: %q", adminPath, rec.Body.String())
@@ -993,9 +914,10 @@ func TestPWAHandler_FilesAndDirectories(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "guide", "index.html"), "<html>guide</html>")
 	h := mustPWA(t, dir, directIndexFile)
 
-	cases := []struct{ path, want, never string }{
-		{"/solclient.js", "// solclient", ""},
-		{"/guide/", "<html>guide</html>", ""},
+	cases := []struct{ path, want string }{
+		{"/solclient.js", "// solclient"},
+		{"/guide/", "<html>guide</html>"},
+		{"/licenses/jszip/LICENSE.markdown", "jszip licence"},
 	}
 	for _, c := range cases {
 		rec := httptest.NewRecorder()
@@ -1004,8 +926,8 @@ func TestPWAHandler_FilesAndDirectories(t *testing.T) {
 		if rec.Code != http.StatusOK || !strings.Contains(body, c.want) {
 			t.Errorf("%s: want 200 with %q, got %d %q", c.path, c.want, rec.Code, body)
 		}
-		if c.never != "" && strings.Contains(body, c.never) {
-			t.Errorf("%s: a directory must never be listed, got %q", c.path, body)
+		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s: want nosniff, got %v", c.path, rec.Header())
 		}
 	}
 	rec := httptest.NewRecorder()

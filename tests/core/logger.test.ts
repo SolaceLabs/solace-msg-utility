@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
     logger,
     setLogLevel,
-    getLogLevel,
     parseLogLevel,
     readLogLevelFromUrl,
 } from '../../src/core/logger';
@@ -25,19 +24,6 @@ describe('logger', () => {
     afterEach(() => {
         setLogLevel(DEFAULT_LOG_LEVEL);
         vi.restoreAllMocks();
-    });
-
-    describe('constants & round-trip', () => {
-        it('defaults to INFO', () => {
-            expect(DEFAULT_LOG_LEVEL).toBe(LogLevel.INFO);
-        });
-
-        it('setLogLevel/getLogLevel round-trip for every level', () => {
-            for (const level of [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR, LogLevel.SILENT]) {
-                setLogLevel(level);
-                expect(getLogLevel()).toBe(level);
-            }
-        });
     });
 
     describe('delegation to console.*', () => {

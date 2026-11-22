@@ -186,6 +186,13 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         return true;
     }
 
+    /** The SDK refused or failed the session: settle a waiting Connect, end a VPN switch, or log it. */
+    function messagingFailed(reason: string): void {
+        if (settleMessaging({ ok: false, reason })) return;
+        if (switching) switchFailed(`${PART_LABEL.messaging}: ${reason}`);
+        else log.warn(`messaging failed with no connect waiting for it: ${reason}`);
+    }
+
     const solaceHooks: SolaceConnectionHooks = {
         onConnected: (session, vpn) => {
             if (messagingStep?.started) {
@@ -217,16 +224,8 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             }
             if (signedIn()) showView('select');
         },
-        onConnectFailed: ({ infoStr }) => {
-            if (settleMessaging({ ok: false, reason: `Connection failed: ${infoStr}` })) return;
-            if (switching) switchFailed(`${PART_LABEL.messaging}: connection failed: ${infoStr}`);
-            else log.warn(`messaging connect failed with no connect waiting for it: ${infoStr}`);
-        },
-        onError: (err) => {
-            if (settleMessaging({ ok: false, reason: err.message })) return;
-            if (switching) switchFailed(`${PART_LABEL.messaging}: ${err.message}`);
-            else log.warn(`messaging error with no connect waiting for it: ${err.message}`);
-        },
+        onConnectFailed: ({ infoStr }) => messagingFailed(`Connection failed: ${infoStr}`),
+        onError: (err) => messagingFailed(err.message),
     };
 
     /** Publish the held SEMP context: AppState, semp:connected. */

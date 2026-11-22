@@ -180,11 +180,3 @@ func TestSocketRegistry_CeilingsRefuseAndRegisterNothing(t *testing.T) {
 		t.Error("alice is back at the total ceiling, not below it")
 	}
 }
-
-// The ceilings are the documented ones until a test lowers them.
-func TestNewSocketRegistry_StartsAtTheCeilings(t *testing.T) {
-	sr := newSocketRegistry(func(string, string, string) bool { return true }, quietLogger())
-	if sr.perUser != 20 || sr.total != 1000 {
-		t.Errorf("want 20 per user and 1000 in all, got %d and %d", sr.perUser, sr.total)
-	}
-}

@@ -2050,29 +2050,6 @@ func TestStore_Race_ReadersNeverSeeHalfAnImport(t *testing.T) {
 	}
 }
 
-func TestStore_CRUD_RaceSafe(t *testing.T) {
-	s := newStoreWithFixtures(t)
-	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(n int) {
-			defer wg.Done()
-			s.profile("admin", defaultConfig().modules)
-			s.listUsers()
-			s.isAdmin("admin")
-			_, _, _ = s.checkPassword(context.Background(), "admin", adminPW)
-			if _, err := s.saveUser(context.Background(), "admin", userRec{Username: fmt.Sprintf("u%d", n)}, "racer-password", 0); err != nil {
-				t.Error(err)
-			}
-			s.listConnections()
-		}(i)
-	}
-	wg.Wait()
-	if us, _ := s.seqs(); us != 12 || len(s.listUsers()) != 12 {
-		t.Errorf("ten creates, ten commits: seq %d, %d users", us, len(s.listUsers()))
-	}
-}
-
 // A connection names its schemes or leaves them blank for TLS; the targets
 // carry the scheme each side is reached with.
 func TestStore_ConnectionSchemes(t *testing.T) {

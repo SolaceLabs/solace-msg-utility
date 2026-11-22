@@ -68,7 +68,7 @@ describe('queue-browser/ui-events', () => {
             createBrowser: vi.fn(() => ({ ok: true })),
             disconnectBrowser: vi.fn(),
             // Default to a SUCCESS settle so the .then() in handleForwardSend
-            // updates status to SUCCESS, matching the prior end-to-end shape.
+            // updates status to SUCCESS.
             forwardMessage: vi.fn().mockResolvedValue({ ok: true }),
             hasInFlightForward: vi.fn(() => false),
             deleteMessages: vi.fn(() => ({ ok: true, requested: 1, failed: 0 }))
@@ -795,6 +795,8 @@ describe('queue-browser/ui-events', () => {
 
             uiEvents.applyFilters();
             expect(state.activeFilters.properties).toEqual([{ key: 'key', value: 'val' }]);
+            // A property filter alone marks the Filter button active.
+            expect(els.btnFilter.classList.contains('filter-active')).toBe(true);
         });
 
         it('reads criteria from radio buttons', () => {
@@ -812,14 +814,6 @@ describe('queue-browser/ui-events', () => {
             state.allMessages = [];
             uiEvents.applyFilters();
             expect(els.modalFilter.open).toBe(false);
-        });
-
-        it('detects active filter from properties', () => {
-            state.allMessages = [];
-            ui.getPropertyFilters = () => [{ key: 'k', value: 'v' }];
-
-            uiEvents.applyFilters();
-            expect(els.btnFilter.classList.contains('filter-active')).toBe(true);
         });
 
         it('reads newer-than datetime input as epoch ms', () => {

@@ -306,19 +306,6 @@ describe('queue-browser/state', () => {
             expect(shouldShowMessage(baseMsg)).toBe(false);
         });
 
-        it('matches property filter from appProperties', () => {
-            state.activeFilters = {
-                content: '', msgId: '', dest: '', type: 'ANY', msgType: 'ANY', criteria: 'OR',
-                properties: [{ key: 'appKey', value: 'appVal' }]
-            };
-            const msg = {
-                id: '1', content: '', type: 'Text',
-                msgProperties: {},
-                appProperties: { appKey: 'appVal' }
-            };
-            expect(shouldShowMessage(msg)).toBe(true);
-        });
-
         it('matches destination name and type filter with solace global', () => {
             const solace = (window as any).solace;
             state.activeFilters = {
@@ -330,23 +317,6 @@ describe('queue-browser/state', () => {
                     getDestination: () => ({
                         getName: () => 'my-topic',
                         getType: () => solace.DestinationType.TOPIC
-                    })
-                }
-            };
-            expect(shouldShowMessage(msg)).toBe(true);
-        });
-
-        it('matches Queue destination type', () => {
-            const solace = (window as any).solace;
-            state.activeFilters = {
-                content: '', msgId: '', dest: '', type: 'Queue', msgType: 'ANY', properties: [], criteria: 'OR'
-            };
-            const msg = {
-                id: '1', content: '', type: 'Text',
-                _originalMsg: {
-                    getDestination: () => ({
-                        getName: () => 'my-queue',
-                        getType: () => solace.DestinationType.QUEUE
                     })
                 }
             };

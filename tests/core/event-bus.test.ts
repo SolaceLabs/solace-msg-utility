@@ -84,17 +84,6 @@ describe('EventBus', () => {
         );
     });
 
-    it('re-subscribing after off() delivers exactly once (empty listener Set cleaned up)', () => {
-        const bus = createEventBus();
-        const handler = vi.fn();
-        bus.on('client:disconnected', handler);
-        bus.off('client:disconnected', handler);
-        // The listener Set is gone after off(); a fresh subscribe must create a new one.
-        bus.on('client:disconnected', handler);
-        bus.emit('client:disconnected');
-        expect(handler).toHaveBeenCalledTimes(1);
-    });
-
     describe('hold() / release() buffering', () => {
         it('buffers emits between hold() and release(), delivers on release()', () => {
             const bus = createEventBus();

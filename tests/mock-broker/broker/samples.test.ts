@@ -103,10 +103,6 @@ describe('mock-broker/broker/samples -- binary samples', () => {
         expect(contentFileName({ id: '1', content: payload.content, bytes: payload.bytes, binary: true, msgProperties: {} })).toBe(`solace-message-1.${ext}`);
     });
 
-    it('elf-header is exactly the 64-byte header', () => {
-        expect(bytesOf('elf-header')).toHaveLength(64);
-    });
-
     it('unknown-bytes matches no signature and is not text, so the pane offers hex and the download is .bin', () => {
         const bytes = bytesOf('unknown-bytes');
 
@@ -122,11 +118,6 @@ describe('mock-broker/broker/samples -- text samples', () => {
 
         expect(payload.binary).toBe(false);
         expect(textExtension(payload.content, msg.getHttpContentType() ?? undefined)).toBe(ext);
-    });
-
-    it('json-text carries the Content-Type that names it, xml-text has none so the text decides', () => {
-        expect(sample('json-text').getHttpContentType()).toBe('application/json');
-        expect(sample('xml-text').getHttpContentType()).toBeNull();
     });
 });
 

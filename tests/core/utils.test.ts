@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { formatBytes, generateUuid, matchString, matchContains, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText, moduleLabel, errMessage, basicAuthHeader, sempAccountError, sempUsernameOk, clientUsernameError, clientUsernameOk } from '../../src/core/utils';
+import { formatBytes, formatUtc, generateUuid, matchString, matchContains, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText, moduleLabel, errMessage, basicAuthHeader, sempAccountError, sempUsernameOk, clientUsernameError, clientUsernameOk } from '../../src/core/utils';
 
 describe('core/utils', () => {
 
@@ -21,6 +21,12 @@ describe('core/utils', () => {
 
         it('respects decimals parameter', () => {
             expect(formatBytes(1536, 1)).toBe('1.5 KB');
+        });
+    });
+
+    describe('formatUtc()', () => {
+        it('shows a gateway time without seconds, marked UTC', () => {
+            expect(formatUtc('2026-11-09T02:15:00Z')).toBe('2026-11-09 02:15 UTC');
         });
     });
 
@@ -240,15 +246,6 @@ describe('core/utils', () => {
             expect(topicsIntersect('a/b/c', 'a/b')).toBe(false);
         });
 
-        it('empty input is treated as a single empty level (split semantics)', () => {
-            // The module-level filter callers short-circuit on empty filter input
-            // before reaching topicsIntersect; this case documents the helper's
-            // behaviour for completeness.
-            expect(topicsIntersect('', '')).toBe(true);
-            expect(topicsIntersect('', '*')).toBe(true); // * matches one level (incl. empty)
-            expect(topicsIntersect('', 'a')).toBe(false);
-        });
-
         it('combines * and > correctly', () => {
             expect(topicsIntersect('orders/*/v1', 'orders/new/v1')).toBe(true);
             expect(topicsIntersect('orders/*/v1', 'orders/new/v2')).toBe(false);
@@ -276,20 +273,12 @@ describe('core/utils', () => {
             expect(topicsIntersect('B*', 'X*')).toBe(false); // can't start with both B and X
         });
 
-        it('memoizes recursion when both sides have multiple `*`s', () => {
-            // levelsIntersect uses an O(|a|·|b|) memoized two-pointer match.
-            // The memo cache-hit branch (`if (cached !== undefined) return
-            // cached`) only fires when a FALSE result is computed first and
-            // then revisited via a different recursion path — TRUE results
-            // short-circuit the OR before re-entry. Pattern below is
-            // levelsIntersect('a*x', 'a*y'): the literal 'x' vs 'y' diverges,
-            // forcing rec(2,2) to compute false, store it, then rec(1,2)'s
-            // first OR branch revisits rec(2,2) and hits the cache.
+        it('patterns with several * on each side intersect only when their literals can share a string', () => {
             expect(topicsIntersect('a*x', 'a*y')).toBe(false);
-            // Companion success cases (no cache hit but exercise the matcher
-            // on multi-* patterns; also serves as the perf canary).
             expect(topicsIntersect('**', '**')).toBe(true);
             expect(topicsIntersect('a*b*c', 'a*b*c')).toBe(true);
+            // Both need a literal the other allows between its wildcards (e.g. "XY").
+            expect(topicsIntersect('*'.repeat(10) + 'X' + '*'.repeat(10), '*'.repeat(10) + 'Y' + '*'.repeat(10))).toBe(true);
         });
 
         it('within-level * matches an empty suffix (zero chars)', () => {
@@ -297,11 +286,6 @@ describe('core/utils', () => {
             expect(topicsIntersect('B*', 'B')).toBe(true);
             // `*B` matches `B` for the same reason.
             expect(topicsIntersect('*B', 'B')).toBe(true);
-            // `*` alone matches the empty string... but in Solace topics,
-            // levels can't actually be empty (the broker would reject it).
-            // The helper still returns true on an empty level since the
-            // language theoretically intersects.
-            expect(topicsIntersect('*', '')).toBe(true);
         });
 
         it('within-level wildcards combine with > terminal wildcard', () => {
@@ -324,17 +308,6 @@ describe('core/utils', () => {
             expect(topicsIntersect('B*', 'bulkq')).toBe(false);
             expect(topicsIntersect('b*', 'BULKQ')).toBe(false);
             expect(topicsIntersect('B*Q', 'BulkQ')).toBe(true); // exact-case literal segments still match
-        });
-
-        it('handles many wildcards without exponential blowup (memoized matcher)', () => {
-            // 10 wildcards per side. A naive recursion would be O(2^20);
-            // memoization keeps it O(|a|·|b|). Run it to prove no perceptible
-            // delay — pass condition is "test completes" + correct boolean.
-            const a = '*'.repeat(10) + 'X' + '*'.repeat(10);
-            const b = '*'.repeat(10) + 'Y' + '*'.repeat(10);
-            // Both patterns require an X and a Y respectively — any string
-            // containing both intersects (e.g. "XY"), so they overlap.
-            expect(topicsIntersect(a, b)).toBe(true);
         });
     });
 
@@ -467,8 +440,7 @@ describe('core/utils solaceErrorText', () => {
 
 describe('core/utils basicAuthHeader', () => {
     it('base64-encodes user:pass as the Basic value', () => {
-        expect(basicAuthHeader('admin', 'p@ss#1')).toBe(`Basic ${btoa('admin:p@ss#1')}`);
-        expect(atob(basicAuthHeader('admin', 'p@ss#1').slice(6))).toBe('admin:p@ss#1');
+        expect(basicAuthHeader('admin', 'p@ss#1')).toBe('Basic YWRtaW46cEBzcyMx');
     });
 });
 

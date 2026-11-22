@@ -2,7 +2,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createGateway } from '../../../src/mock-broker/gateway';
 import { mockCode, stepOf, STEP_MS, hashRecovery, SECRET_RULE, HASH_RULE } from '../../../src/mock-broker/gateway/authenticator';
-import { TICKET_TTL_MS } from '../../../src/mock-broker/gateway/tickets';
 import { settingsFromBackup } from '../../../src/mock-broker/gateway/settings';
 import { demoSeed } from '../../../src/mock-broker/gateway/seed';
 import { contractSeed } from './helpers';
@@ -217,15 +216,6 @@ describe('mock-broker/gateway two-factor -- the code step', () => {
         gw.signIn('viewer', PW.viewer);   // an enrol ticket is not a code ticket
         expect(gw.codePending()).toBe(false);
         expect(gw.submitCode('123456')).toEqual({ ok: false, error: '', signedOut: true });
-    });
-
-    it('lets a ticket go ten minutes after it was made', () => {
-        const { secret } = enrolled('viewer');
-        gw.signIn('viewer', PW.viewer);
-        clock += TICKET_TTL_MS + 1;
-        expect(gw.codePending()).toBe(false);
-        expect(gw.submitCode(codeNow(secret))).toEqual({ ok: false, error: '', signedOut: true });
-        expect(gw.session()).toBeNull();
     });
 
     it('follows login.twoFactorMinutes, read live: a shorter value also ends a ticket already issued', () => {

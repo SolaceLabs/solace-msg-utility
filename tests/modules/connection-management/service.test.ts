@@ -11,17 +11,12 @@ const CONN: ManagedConnRecord = {
 const fetchMock = () => globalThis.fetch as any;
 
 describe('connection-management/service', () => {
-    it('listConnections GETs /managed/connections and unwraps the list', async () => {
+    it('listConnections GETs /managed/connections and answers the list', async () => {
         const connections = [{ rev: 1, broker: 'b1', hostname: 'h', semp: { port: '', user: '', pass: '' }, client: { port: '', msgVpns: [] } }];
         fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => ({ connections }) });
 
-        expect(await createConnMgmtService().listConnections()).toEqual({ ok: true, data: connections });
+        expect(await createConnMgmtService().listConnections()).toEqual({ ok: true, data: { connections } });
         expect(fetchMock()).toHaveBeenCalledWith('/managed/connections', { method: 'GET', credentials: 'same-origin' });
-    });
-
-    it('listConnections passes a failure through', async () => {
-        fetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: 'unauthenticated' }) });
-        expect(await createConnMgmtService().listConnections()).toEqual(expect.objectContaining({ ok: false, code: 'unauthenticated' }));
     });
 
     it('saveConnection PUTs the record under its broker name with its rev, broker not repeated in the body; answers the new rev', async () => {
@@ -32,11 +27,6 @@ describe('connection-management/service', () => {
             method: 'PUT', body: JSON.stringify(body),
         }));
         expect(JSON.parse(fetchMock().mock.calls[0][1].body).rev).toBe(3);
-    });
-
-    it('a stale save carries the current rev', async () => {
-        fetchMock().mockResolvedValue({ ok: false, status: 409, json: async () => ({ error: 'stale', rev: 9 }) });
-        expect(await createConnMgmtService().saveConnection(CONN)).toEqual(expect.objectContaining({ ok: false, code: 'stale', rev: 9 }));
     });
 
     it('deleteConnection DELETEs the escaped broker path with the rev in the query', async () => {

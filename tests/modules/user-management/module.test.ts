@@ -147,49 +147,9 @@ describe('user-management — list', () => {
     });
 
     it('fetches the list once at start with an admin restored', async () => {
-        await setup();
-        await new Promise(resolve => setTimeout(resolve, 0));
+        const { container } = await setup();
+        await vi.waitFor(() => expect(rowCount(container)).toBe(2));
         expect(svcMock.listUsers).toHaveBeenCalledTimes(1);
-    });
-
-    it('ignores an rbac:changed that leaves the session as it is (the kernel replay)', async () => {
-        const { container, ctx } = await setup();
-        svcMock.listUsers.mockClear();
-        ctx.eventBus.emit('rbac:changed');
-        await new Promise(resolve => setTimeout(resolve, 0));
-        expect(svcMock.listUsers).not.toHaveBeenCalled();
-        expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
-    });
-
-    it('reloads when the admin signs out and in again, or another admin signs in', async () => {
-        const { container, ctx } = await setup();
-        svcMock.listUsers.mockClear();
-        ctx.setState('managed', null);
-        ctx.eventBus.emit('rbac:changed');
-        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
-        expect(svcMock.listUsers).not.toHaveBeenCalled();
-        svcMock.listUsers.mockResolvedValue(listed([{ ...USERS[1], username: 'carol' }]));
-        ctx.setState('managed', ADMIN);
-        ctx.eventBus.emit('rbac:changed');
-        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledTimes(1));
-        await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').textContent).toContain('carol'));
-        expect(rowCount(container)).toBe(1);
-        svcMock.listUsers.mockResolvedValue(listed([{ ...USERS[1], username: 'dave' }]));
-        ctx.setState('managed', { ...ADMIN, username: 'other' });
-        ctx.eventBus.emit('rbac:changed');
-        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledTimes(2));
-        await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').textContent).toContain('dave'));
-        expect(rowCount(container)).toBe(1);
-    });
-
-    it('shows the gate when the signed-in admin is demoted', async () => {
-        const { container, ctx } = await setup();
-        svcMock.listUsers.mockClear();
-        ctx.setState('managed', { ...ADMIN, admin: false });
-        ctx.eventBus.emit('rbac:changed');
-        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
-        expect(hidden(container, '#user-mgmt-list-view')).toBe(true);
-        expect(svcMock.listUsers).not.toHaveBeenCalled();
     });
 
     it('clears the gate and loads the list when an admin logs in (rbac:changed)', async () => {

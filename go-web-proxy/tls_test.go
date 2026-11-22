@@ -45,20 +45,7 @@ func namesPath(msg, path string) bool {
 	return strings.Contains(msg, path) || strings.Contains(msg, strconv.Quote(path))
 }
 
-func TestFileExists(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "exists")
-	if fileExists(p) {
-		t.Fatal("non-existent file reported as existing")
-	}
-	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !fileExists(p) {
-		t.Fatal("existing file not detected")
-	}
-}
-
+// The fingerprint format the Certificates page and the audit trail show.
 func TestFormatFingerprint(t *testing.T) {
 	got := formatFingerprint([]byte{0xab, 0xcd, 0x01, 0x23})
 	const want = "AB:CD:01:23"
@@ -1591,18 +1578,6 @@ func TestTLSManager_AddTrustDerivesTheNameAndAppliesAtOnce(t *testing.T) {
 	}
 	if !strings.Contains(f.log.String(), "trusted CA file added") {
 		t.Errorf("the add is logged: %s", f.log.String())
-	}
-}
-
-func TestTLSManager_AddTrustWithAGivenNameAndABundle(t *testing.T) {
-	f := newTLSFix(t)
-	a, b := newTestCert(t, testCertSpec{cn: "a", ca: true}), newTestCert(t, testCertSpec{cn: "b", ca: true})
-	name, err := f.m.addTrust("bundle.pem", a.certPEM+b.certPEM)
-	if err != nil || name != "bundle.pem" {
-		t.Fatalf("name %q (%v)", name, err)
-	}
-	if st := f.m.state(); len(st.Trust) != 1 || len(st.Trust[0].Certificates) != 2 {
-		t.Errorf("a bundle keeps both certificates: %+v", st.Trust)
 	}
 }
 

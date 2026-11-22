@@ -36,15 +36,6 @@ describe('queue-browser/module', () => {
         resetQueueBrowserState();
     });
 
-    describe('metadata', () => {
-        it('has correct module properties', () => {
-            expect(QueueBrowserModule.name).toBe('Queue Browser');
-            expect(QueueBrowserModule.id).toBe('queue-browser');
-            expect(QueueBrowserModule.icon).toContain('svg');
-            // Priority is set in src/registry.ts; tested in tests/registry.test.ts.
-        });
-    });
-
     describe('install()', () => {
         it('announces browser:available so feature-gated UI in other modules can reveal itself', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -673,49 +664,5 @@ describe('queue-browser/module', () => {
             consoleSpy.mockRestore();
             vi.useRealTimers();
         });
-    });
-
-    describe('install() with minimal DOM', () => {
-        it('throws at install when required elements are missing', async () => {
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-            const minContainer = document.createElement('div');
-            minContainer.innerHTML = `
-                <table><tbody id="browser-msg-list"></tbody></table>
-                <span id="count-total">0</span>
-                <span id="count-displayed">0</span>
-                <span id="count-selected">0</span>
-                <div id="detail-msg-id"></div>
-                <div id="detail-destination"></div>
-                <span id="detail-type-badge" class="hidden"></span>
-                <span id="detail-dest-badge" class="hidden"></span>
-                <div id="detail-content"></div>
-                <button id="btn-show-raw" disabled></button>
-                <div id="browser-active-view" class="hidden"></div>
-                <span id="browser-queue-name"></span>
-                <span id="browser-permissions" class="hidden"></span>
-            `;
-            document.body.appendChild(minContainer);
-
-            const minCtx: AppContext = completeContext({
-                container: minContainer,
-                appState: { activeModuleId: null, isConnected: false, selectedVpn: null, solaceConnection: null, sempCredentials: null, isSempConnected: false },
-                eventBus,
-                setState: vi.fn(),
-                loadSelf: vi.fn(),
-                sempFetch: vi.fn(),
-                copyToClipboard: vi.fn(),
-            });
-
-            await expect(QueueBrowserModule.install(minCtx)).rejects.toThrow(/Required element missing/);
-            consoleSpy.mockRestore();
-        });
-
-        // Note: there are no null-guard tests for `msgList` and `btnForwardSend`
-        // -- both are asserted via `required()` in module.install(),
-        // so "does not throw when null" tests would target a state that cannot
-        // occur in production. Per the required-element rule in CLAUDE.md: if
-        // the element is required, assert it; don't add nullable guards to the
-        // handlers. The missing-element path IS tested via the `install()
-        // rejects with "Required element missing"` case above.
     });
 });

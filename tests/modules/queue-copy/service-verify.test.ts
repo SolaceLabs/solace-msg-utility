@@ -270,7 +270,10 @@ describe('queue-copy/service-verify', () => {
                 sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
                 vpn: 'v', queue: 'q', signal: ctrl.signal,
             });
+            // The post-fetch abort check cancels verify before the supplementary call.
+            expect(result.sourceOk).toBe(false);
             expect(result.errors).toContain('Verification cancelled.');
+            expect(fetchImpl).toHaveBeenCalledTimes(1);
         });
 
         it('catches AbortError thrown by fetch', async () => {
@@ -481,25 +484,6 @@ describe('queue-copy/service-verify', () => {
             });
             expect(result.sourceOk).toBe(true);
             expect(result.newestMsgId).toBeNull();
-        });
-
-        it('signal aborted between the two calls → supplementary not issued, cancelled', async () => {
-            const ctrl = new AbortController();
-            // Abort INSIDE the first fetch's resolver so the post-detail
-            // signal.aborted check fires before the supplementary call.
-            const fetchImpl = vi.fn(async () => {
-                ctrl.abort();
-                return textRes(SAMPLE_RESPONSE);
-            });
-            const result = await verifySource({
-                sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
-                vpn: 'v', queue: 'q', signal: ctrl.signal,
-            });
-            // The first-call's post-fetch abort check fires first, so verify
-            // is cancelled there — supplementary never runs.
-            expect(result.sourceOk).toBe(false);
-            expect(result.errors).toContain('Verification cancelled.');
-            expect(fetchImpl).toHaveBeenCalledTimes(1);
         });
 
         it('signal aborted between detail-parse and supplementary call', async () => {
@@ -887,9 +871,9 @@ describe('queue-copy/service-verify', () => {
             await Promise.resolve();
             (browser as any)._handlers.UP();
             // Fire MESSAGEs with IDs out-of-order to prove min/max tracking
-            // (vs trusting browse order). Includes a non-numeric ID for the
-            // lexicographic fallback path. smfHeader.messageLength contributes
-            // to size accumulation.
+            // (vs trusting browse order). A message with no ID counts toward
+            // messageCount but not toward min/max. smfHeader.messageLength
+            // contributes to size accumulation.
             const m = (id: any, len = 100) => ({
                 getGuaranteedMessageId: () => id,
                 smfHeader: { messageLength: len },

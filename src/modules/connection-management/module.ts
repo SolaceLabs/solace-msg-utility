@@ -148,7 +148,7 @@ export const ConnectionManagementModule = {
                 reportManagedFailure(res, eventBus, msg => setError(els.listError, msg));
                 return;
             }
-            conns = res.data;
+            conns = res.data.connections;
             renderList();
         }
 

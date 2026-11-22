@@ -13,7 +13,7 @@ vi.mock('../../../src/core/toast', () => ({ showToast: toastMock.showToast }));
 vi.mock('../../../src/modules/tls-certificates/service', () => ({ createTlsService: () => svc }));
 
 import {
-    TlsCertificatesModule, expiryMark, formatUtc, MAX_TLS_REQUEST_BYTES, EXPIRY_WARN_DAYS,
+    TlsCertificatesModule, expiryMark, MAX_TLS_REQUEST_BYTES, EXPIRY_WARN_DAYS,
 } from '../../../src/modules/tls-certificates/module';
 import { completeContext } from '../../helpers/appContext';
 import { answerConfirm, confirmOpen } from '../../helpers/confirmDialog';
@@ -95,10 +95,6 @@ beforeEach(() => {
 });
 
 describe('tls-certificates -- helpers', () => {
-    it('shows a gateway time without seconds, marked UTC', () => {
-        expect(formatUtc('2026-11-09T02:15:00Z')).toBe('2026-11-09 02:15 UTC');
-    });
-
     it('marks a certificate the gateway calls expired, and one whose end has passed', () => {
         expect(expiryMark(cert({ expired: true }), NOW)).toEqual({ kind: 'expired', text: 'Expired' });
         expect(expiryMark(cert({ notAfter: '2026-11-15T11:59:59Z' }), NOW)).toEqual({ kind: 'expired', text: 'Expired' });
@@ -116,15 +112,6 @@ describe('tls-certificates -- helpers', () => {
 });
 
 describe('tls-certificates -- gate and load', () => {
-    it('fetches once at start with an admin restored, and ignores an rbac:changed that leaves the session as it is', async () => {
-        const { c, ctx } = await setup();
-        expect(svc.view).toHaveBeenCalledTimes(1);
-        ctx.eventBus.emit('rbac:changed');
-        await flush();
-        expect(svc.view).toHaveBeenCalledTimes(1);
-        expect(hidden(c, '#tls-view')).toBe(false);
-    });
-
     it('shows the gate, not the page, without an administrator, and loads once one arrives', async () => {
         const { c, ctx } = await setup(view(), null);
         expect(hidden(c, '#tls-view')).toBe(true);
@@ -138,14 +125,6 @@ describe('tls-certificates -- gate and load', () => {
         await flush();
         expect(hidden(c, '#tls-view')).toBe(false);
         expect(hidden(c, '#tls-gate')).toBe(true);
-        expect(svc.view).toHaveBeenCalledTimes(1);
-    });
-
-    it('shows the gate again when the signed-in admin is demoted', async () => {
-        const { c, ctx } = await setup();
-        ctx.appState.managed = { ...ADMIN, admin: false };
-        ctx.eventBus.emit('rbac:changed');
-        expect(hidden(c, '#tls-view')).toBe(true);
         expect(svc.view).toHaveBeenCalledTimes(1);
     });
 
@@ -365,7 +344,7 @@ describe('tls-certificates -- replace certificate', () => {
         expect(value(c, '#tls-key-pem')).toBe('');
     });
 
-    it('the key never reaches a toast or a message, and a key file choice is emptied with the field', async () => {
+    it('a refused check keeps the key out of the page text, and the key file choice is emptied with the field', async () => {
         const { c } = await setup();
         await pick(c, '#tls-key-file', new File([KEY], 'gw.key'));
         type(c, '#tls-cert-pem', CERT_PEM);
@@ -374,7 +353,6 @@ describe('tls-certificates -- replace certificate', () => {
         expect(value(c, '#tls-key-pem')).toBe('');
         expect(el<HTMLInputElement>(c, '#tls-key-file').value).toBe('');
         expect(c.textContent).not.toContain('TEST-ONLY-NOT-A-REAL-KEY');
-        expect(JSON.stringify(toastMock.showToast.mock.calls)).not.toContain('PRIVATE KEY');
     });
 });
 

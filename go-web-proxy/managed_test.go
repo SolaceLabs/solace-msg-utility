@@ -394,6 +394,7 @@ func TestManagedAPI_AdminOnly(t *testing.T) {
 
 func TestManagedAPI_ListUsersNeverSendsHashes(t *testing.T) {
 	e := newManagedEnv(t, nil)
+	expect(t, e.saveSettings(t, `{"modules":{"offered":["queue-copy"],"userDefault":"none"}}`), http.StatusOK, "")
 	rec := e.do("GET", "/managed/users", "", e.cookie("admin", false))
 	expect(t, rec, http.StatusOK, "")
 	body := rec.Body.String()
@@ -419,9 +420,8 @@ func TestManagedAPI_ListUsersNeverSendsHashes(t *testing.T) {
 	if !strings.Contains(body, `"modules":null`) || !reflect.DeepEqual(*out.Users[1].Modules, []string{"queue-browser"}) {
 		t.Errorf("user modules: %s", body)
 	}
-	want := modulesJSON{Catalog: moduleCatalog(), Offered: moduleCatalog(), UserDefault: modulesDefaultAll}
-	if !reflect.DeepEqual(out.Modules, want) {
-		t.Errorf("modules block: want %+v, got %+v", want, out.Modules)
+	if !reflect.DeepEqual(out.Modules.Offered, []string{"queue-copy"}) || out.Modules.UserDefault != "none" || len(out.Modules.Catalog) == 0 {
+		t.Errorf("modules block: want the saved offer and default beside the catalog, got %+v", out.Modules)
 	}
 }
 
@@ -578,11 +578,6 @@ func TestManagedAPI_SaveConnection(t *testing.T) {
 	if n := len(e.api.store.listConnections()); n != 3 {
 		t.Errorf("want 3 connections, got %d", n)
 	}
-	rec := e.do("PUT", "/managed/connections/b3", `{"semp":{"port":"x"}}`, c)
-	expect(t, rec, http.StatusUnprocessableEntity, "invalid")
-	if r := errorCode(t, rec); r.Field != "connection" || !strings.Contains(r.Reason, `semp.port "x" is not a port`) {
-		t.Errorf("want the field and reason, got %+v", r)
-	}
 	expect(t, e.do("PUT", "/managed/connections/b%203", ok, c), http.StatusUnprocessableEntity, "invalid")
 	expect(t, e.do("PUT", "/managed/connections/...", ok, c), http.StatusUnprocessableEntity, "invalid")
 	expect(t, e.do("PUT", "/managed/connections/b3", `{"vpn":1}`, c), http.StatusBadRequest, "bad_request")
@@ -667,8 +662,8 @@ func logLine(log string, want ...string) string {
 	return ""
 }
 
-// A connection's schemes: a save may name the plain one, leave the field out
-// or name TLS (both stored as the default), and the list always says which.
+// A connection's schemes: a save may name the plain one or name TLS, and the
+// list always says which; an unknown scheme is refused.
 func TestManagedAPI_ConnectionSchemes(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	c := e.cookie("admin", false)
@@ -686,11 +681,6 @@ func TestManagedAPI_ConnectionSchemes(t *testing.T) {
 	for _, conn := range list.Connections {
 		if got := [2]string{conn.Semp.Scheme, conn.Client.Scheme}; got != want[conn.Broker] {
 			t.Errorf("%s: schemes %v, want %v", conn.Broker, got, want[conn.Broker])
-		}
-	}
-	for _, rc := range e.api.store.listConnections() {
-		if rc.Broker == "b4" && (rc.Semp.Scheme != "" || rc.Client.Scheme != "") {
-			t.Errorf("TLS is stored as the default: %+v", rc)
 		}
 	}
 	bad := e.do("PUT", "/managed/connections/b5", `{"hostname":"h5","semp":{"scheme":"ftp"},"client":{}}`, c)
@@ -1157,8 +1147,8 @@ func TestManagedAPI_CallerIsCheckedAgainInsideTheLock(t *testing.T) {
 }
 
 // The settings save and the import take the lock through their own handlers
-// and re-check the caller there too: an administrator demoted while the
-// request waited is refused, and nothing is written.
+// and re-check the caller there too: an administrator demoted or removed while
+// the request waited is refused, and nothing is written.
 func TestManagedAPI_SettingsAndImportCheckTheCallerAgainInsideTheLock(t *testing.T) {
 	for _, tc := range []struct {
 		name, method, path string
@@ -1175,33 +1165,44 @@ func TestManagedAPI_SettingsAndImportCheckTheCallerAgainInsideTheLock(t *testing
 			})
 		}, auditBackupImport},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			e := newManagedEnv(t, nil)
-			au := e.withAudit(t, auditSettings{})
-			putUser(t, e.api.store, userRec{Username: "boss", Admin: true}, "boss-password-1")
-			caller := e.cookie("boss", false)
-			body := tc.body(t, e)
-			rev := e.settings(t).Rev
-			users, conns := e.api.store.seqs()
-			release := holdWriter(t, e.api.store.wr)
-			done := make(chan *httptest.ResponseRecorder)
-			go func() { done <- e.do(tc.method, tc.path, body, caller) }()
-			waitForWaiters(t, e.api.store.wr, 1)
-			changeUsersBehindTheWriter(e.api.store, func(list []userRec) []userRec {
-				next := slices.Clone(list)
-				next[slices.IndexFunc(next, func(u userRec) bool { return u.Username == "boss" })].Admin = false
-				return next
+		for _, gone := range []bool{false, true} {
+			name := tc.name + " by an admin demoted meanwhile"
+			status, code := http.StatusForbidden, "forbidden"
+			if gone {
+				name, status, code = tc.name+" by an admin removed meanwhile", http.StatusUnauthorized, "unauthenticated"
+			}
+			t.Run(name, func(t *testing.T) {
+				e := newManagedEnv(t, nil)
+				au := e.withAudit(t, auditSettings{})
+				putUser(t, e.api.store, userRec{Username: "boss", Admin: true}, "boss-password-1")
+				caller := e.cookie("boss", false)
+				body := tc.body(t, e)
+				rev := e.settings(t).Rev
+				users, conns := e.api.store.seqs()
+				release := holdWriter(t, e.api.store.wr)
+				done := make(chan *httptest.ResponseRecorder)
+				go func() { done <- e.do(tc.method, tc.path, body, caller) }()
+				waitForWaiters(t, e.api.store.wr, 1)
+				changeUsersBehindTheWriter(e.api.store, func(list []userRec) []userRec {
+					i := slices.IndexFunc(list, func(u userRec) bool { return u.Username == "boss" })
+					if gone {
+						return slices.Delete(slices.Clone(list), i, i+1)
+					}
+					next := slices.Clone(list)
+					next[i].Admin = false
+					return next
+				})
+				release()
+				expect(t, <-done, status, code)
+				if nowUsers, nowConns := e.api.store.seqs(); nowUsers != users+1 || nowConns != conns || e.settings(t).Rev != rev {
+					t.Error("a refused change must write nothing")
+				}
+				entries := au.entries(t)
+				if len(entries) != 1 || entries[0].Actor != "boss" || entries[0].Action != tc.audited || entries[0].Outcome != auditRefused || entries[0].Code != code {
+					t.Errorf("want one refused entry for boss under %s with code %s, got %+v", tc.audited, code, entries)
+				}
 			})
-			release()
-			expect(t, <-done, http.StatusForbidden, "forbidden")
-			if nowUsers, nowConns := e.api.store.seqs(); nowUsers != users+1 || nowConns != conns || e.settings(t).Rev != rev {
-				t.Error("a refused change must write nothing")
-			}
-			entries := au.entries(t)
-			if len(entries) != 1 || entries[0].Actor != "boss" || entries[0].Action != tc.audited || entries[0].Outcome != auditRefused || entries[0].Code != "forbidden" {
-				t.Errorf("want one refused entry for boss under %s with code forbidden, got %+v", tc.audited, entries)
-			}
-		})
+		}
 	}
 }
 

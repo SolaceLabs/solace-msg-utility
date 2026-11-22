@@ -123,25 +123,6 @@ describe('mock-broker/gateway/tls -- the certificate', () => {
         expect((await get(gw)).certificate).toEqual((res.json as any).certificate);
     });
 
-    it.each([
-        ['a certificate that is not PEM', { certificate: 'nope', key: KEY }, 'certificate'],
-        ['no certificate', { key: KEY }, 'certificate'],
-        ['a private key where the certificate goes', { certificate: KEY, key: KEY }, 'certificate'],
-        ['a private key after the certificates', { certificate: LEAF + KEY, key: KEY }, 'certificate'],
-        ['no key', { certificate: LEAF }, 'key'],
-        ['a key that is not PEM', { certificate: LEAF, key: 'nope' }, 'key'],
-        ['a certificate where the key goes', { certificate: LEAF, key: LEAF }, 'key'],
-        ['two keys', { certificate: LEAF, key: KEY + KEY }, 'key'],
-    ])('refuses %s, and neither checks nor swaps anything', async (_what, body, field) => {
-        const gw = gateway();
-        for (const [method, path] of [['POST', '/managed/tls/certificate/check'], ['PUT', '/managed/tls/certificate']]) {
-            const res = await call(gw, method, path, body);
-            expect(res).toEqual(INVALID(field));
-            expect(JSON.stringify(res.json)).not.toContain(btoa(KEY_BYTES));
-        }
-        expect((await get(gw)).certificate.sha256).toBe(fp(START_CERTIFICATE_BYTES));
-    });
-
     it('takes any kind of private key block that is not encrypted, and passes over the EC PARAMETERS block beside an EC key', async () => {
         const gw = gateway();
         for (const key of [pem('RSA PRIVATE KEY', 'k'), pem('EC PRIVATE KEY', 'k'), pem('EC PARAMETERS', 'p') + pem('EC PRIVATE KEY', 'k')]) {
@@ -153,6 +134,7 @@ describe('mock-broker/gateway/tls -- the certificate', () => {
     // The reasons are the gateway's own (go-web-proxy/tls.go parseCertificatePEM
     // and parseKeyPEM): the contract goldens hold them.
     it.each([
+        ['no certificate', { key: KEY }, 'certificate', 'No certificate was found. Send the PEM text, from -----BEGIN CERTIFICATE----- to -----END CERTIFICATE-----.'],
         ['nothing that is PEM', { certificate: 'nope', key: KEY }, 'certificate', 'No certificate was found. Send the PEM text, from -----BEGIN CERTIFICATE----- to -----END CERTIFICATE-----.'],
         ['a key among the certificates', { certificate: LEAF + KEY, key: KEY }, 'certificate', 'A private key was found. A private key never belongs here: send only the certificate.'],
         ['another kind of block', { certificate: LEAF + pem('PUBLIC KEY', 'p'), key: KEY }, 'certificate', 'A "PUBLIC KEY" block was found. Only CERTIFICATE blocks are accepted.'],
@@ -162,8 +144,14 @@ describe('mock-broker/gateway/tls -- the certificate', () => {
         ['two keys', { certificate: LEAF, key: KEY + KEY }, 'key', 'More than one private key was found. Send exactly one.'],
         ['no key', { certificate: LEAF, key: 'nope' }, 'key', 'No private key was found. Send the PEM text, from -----BEGIN PRIVATE KEY----- to -----END PRIVATE KEY-----.'],
         ['text after the key', { certificate: LEAF, key: `${KEY}junk` }, 'key', 'There is text after the key block. Send only the key.'],
-    ])('refuses %s in the gateway\'s words', async (_what, body, field, reason) => {
-        expect(await call(gateway(), 'POST', '/managed/tls/certificate/check', body)).toEqual({ status: 422, json: { error: 'invalid', field, reason } });
+    ])('refuses %s in the gateway\'s words, on the check and the replace, and swaps nothing', async (_what, body, field, reason) => {
+        const gw = gateway();
+        for (const [method, path] of [['POST', '/managed/tls/certificate/check'], ['PUT', '/managed/tls/certificate']]) {
+            const res = await call(gw, method, path, body);
+            expect(res).toEqual({ status: 422, json: { error: 'invalid', field, reason } });
+            expect(JSON.stringify(res.json)).not.toContain(btoa(KEY_BYTES));
+        }
+        expect((await get(gw)).certificate.sha256).toBe(fp(START_CERTIFICATE_BYTES));
     });
 
     it('never answers with the key, on success or refusal', async () => {
@@ -296,7 +284,7 @@ describe('mock-broker/gateway/tls -- read-only files', () => {
         expect(body.trust.map((f: any) => f.name)).toEqual(['a.crt']);
     });
 
-    it('still checks a pair (nothing is written) and still refuses bad input as invalid before it refuses the write', async () => {
+    it('checks a pair (nothing is written) and refuses bad input as invalid before it refuses the write', async () => {
         const gw = await readOnlyGateway();
         expect((await call(gw, 'POST', '/managed/tls/certificate/check', PAIR)).status).toBe(200);
         expect(await call(gw, 'PUT', '/managed/tls/certificate', { certificate: 'nope', key: KEY })).toEqual(INVALID('certificate'));
@@ -325,7 +313,7 @@ describe('mock-broker/gateway/tls -- across a reload', () => {
         expect((await get(again)).certificateWritable).toBe(false);
     });
 
-    it('keeps what it has when the snapshot is from a build before the TLS console', async () => {
+    it('keeps what it has when the snapshot has no TLS section', async () => {
         const gw = gateway();
         await call(gw, 'PUT', '/managed/tls/certificate', PAIR);
         const old = JSON.parse(JSON.stringify(gw.snapshot()));

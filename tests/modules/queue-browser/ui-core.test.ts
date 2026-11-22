@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ui, els } from '../../../src/modules/queue-browser/ui-core.js';
 import { state } from '../../../src/modules/queue-browser/state.js';
-import { formatBytes, generateUuid } from '../../../src/core/utils';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 
@@ -36,20 +35,6 @@ describe('queue-browser/ui-core', () => {
         resetQueueBrowserState();
     });
 
-    describe('initElements()', () => {
-        it('caches all elements', () => {
-            const cached = ui.getElements();
-            expect(cached.container).toBe(container);
-            expect(cached.inputBind).toBe(container.querySelector('#browser-bind-input'));
-            expect(cached.btnBind).toBe(container.querySelector('#btn-browser-bind'));
-            expect(cached.selectBound).toBe(container.querySelector('#browser-bound-queues'));
-            expect(cached.msgList).toBe(container.querySelector('#browser-msg-list'));
-            expect(cached.detailId).toBe(container.querySelector('#detail-msg-id'));
-            expect(cached.modalForward).toBe(container.querySelector('#browser-forward-modal'));
-            expect(cached.btnFilter).toBe(container.querySelector('#btn-browser-filter'));
-        });
-    });
-
     describe('showBrowserError()', () => {
         it('shows error message', () => {
             ui.showBrowserError('Test error');
@@ -77,14 +62,6 @@ describe('queue-browser/ui-core', () => {
             ui.showBindError(null);
             expect(els.elBindError.style.display).toBe('none');
             expect(els.inputBind.classList.contains('is-invalid')).toBe(false);
-        });
-    });
-
-    describe('core aliases', () => {
-        // The formatting itself is pinned in tests/core/utils.test.ts.
-        it('ui.formatBytes and ui.generateUuid are the core/utils functions', () => {
-            expect(ui.formatBytes).toBe(formatBytes);
-            expect(ui.generateUuid).toBe(generateUuid);
         });
     });
 

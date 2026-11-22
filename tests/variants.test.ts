@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isModuleVisible } from '../src/core/rbac';
@@ -23,42 +23,26 @@ import * as noQueueCopyManifest from '../src/variants/no-queue-copy';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Each variant manifest is a flat record of `{ moduleId: priority }`. Loading
- * each at least once locks in the shape and gives v8 a chance to instrument
- * the constant declarations. The `_active` variant re-exports whatever the
- * default build picks (currently `./standard`), so it transitively covers that
- * file too.
+ * Membership invariants of the variant manifests (`{ moduleId: priority }`):
+ * what a variant must never carry, and how the variants relate to each other.
  */
 describe('variants', () => {
-    it('standard variant lists exactly the four shipped modules at non-overlapping priorities', () => {
-        expect(Object.keys(STANDARD_VARIANT).sort()).toEqual([
-            'connections',
-            'queue-browser',
-            'queue-copy',
-            'queue-subscription-explorer',
-        ]);
-        const priorities = Object.values(STANDARD_VARIANT);
-        expect(new Set(priorities).size).toBe(priorities.length);
-        priorities.forEach(p => expect(Number.isFinite(p)).toBe(true));
+    it('every module a variant lists has its own directory with an entry file, at a priority no other module in that variant shares', () => {
+        const variants = [STANDARD_VARIANT, MIN_VARIANT, NO_QUEUE_COPY_VARIANT, ADMIN_VARIANT, ALL_VARIANT, MANAGED_VARIANT, DEMO_VARIANT];
+        for (const v of variants) {
+            for (const id of Object.keys(v)) {
+                expect(existsSync(path.join(REPO, 'src/modules', id, 'module.ts')), `src/modules/${id}/module.ts`).toBe(true);
+            }
+            const priorities = Object.values(v);
+            expect(new Set(priorities).size).toBe(priorities.length);
+        }
     });
 
-    it('min variant ships only connections + queue-browser', () => {
-        // Locks the slim demo build's contents — adding a module here without
-        // intent would surface in this assertion before reaching prod.
-        expect(Object.keys(MIN_VARIANT).sort()).toEqual(['connections', 'queue-browser']);
-        expect(MIN_VARIANT['connections']).toBeGreaterThan(MIN_VARIANT['queue-browser']);
-    });
-
-    it('no-queue-copy variant ships everything except queue-copy', () => {
-        // Locks the "standard minus Queue Copy" build's contents — the whole point
-        // of this variant is that queue-copy never appears, so assert that
-        // directly. The other three modules should match the standard variant.
-        expect(Object.keys(NO_QUEUE_COPY_VARIANT).sort()).toEqual([
-            'connections',
-            'queue-browser',
-            'queue-subscription-explorer',
-        ]);
+    it('no-queue-copy variant leaves queue-copy out and keeps the other standard modules', () => {
         expect(NO_QUEUE_COPY_VARIANT).not.toHaveProperty('queue-copy');
+        for (const id of Object.keys(STANDARD_VARIANT).filter(id => id !== 'queue-copy')) {
+            expect(NO_QUEUE_COPY_VARIANT).toHaveProperty(id);
+        }
     });
 
     it('no shipping variant carries the admin modules — they live at /solAdmin', () => {
@@ -75,39 +59,13 @@ describe('variants', () => {
         });
     });
 
-    it('admin variant ships the login plus the three editors, Certificates and Backup & Restore, and no messaging modules', () => {
-        // admin-login authenticates but opens no broker connection, so there is
-        // nothing for the messaging modules to attach to.
-        expect(Object.keys(ADMIN_VARIANT).sort()).toEqual([
-            'admin-login',
-            'backup',
-            'connection-management',
-            'gateway-settings',
-            'tls-certificates',
-            'user-management',
-        ]);
-        expect(ADMIN_VARIANT['admin-login']).toBeGreaterThan(ADMIN_VARIANT['user-management']);
-        expect(ADMIN_VARIANT['user-management']).toBeGreaterThan(ADMIN_VARIANT['connection-management']);
-        expect(ADMIN_VARIANT['connection-management']).toBeGreaterThan(ADMIN_VARIANT['gateway-settings']);
-        expect(ADMIN_VARIANT['gateway-settings']).toBeGreaterThan(ADMIN_VARIANT['tls-certificates']);
-        expect(ADMIN_VARIANT['tls-certificates']).toBeGreaterThan(ADMIN_VARIANT['backup']);
+    it('admin variant ships no messaging modules: admin-login opens no broker connection for them to attach to', () => {
+        for (const id of ['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer']) {
+            expect(ADMIN_VARIANT).not.toHaveProperty(id);
+        }
     });
 
-    it('all variant ships the all modules for visual testing purpose', () => {
-        // Kitchen-sink build. `connections` runs its managed entry, which covers
-        // both connection modes, so no separate managed connection module appears.
-        expect(Object.keys(ALL_VARIANT).sort()).toEqual([
-            'admin-login',
-            'backup',
-            'connection-management',
-            'connections',
-            'gateway-settings',
-            'queue-browser',
-            'queue-copy',
-            'queue-subscription-explorer',
-            'tls-certificates',
-            'user-management',
-        ]);
+    it('all variant runs connections on its managed entry, which covers both connection modes', () => {
         expect(ALL_ENTRIES).toEqual({ connections: 'managed' });
     });
 

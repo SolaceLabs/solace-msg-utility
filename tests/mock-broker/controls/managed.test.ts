@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mountControlPanel } from '../../../src/mock-broker/controls/panel';
 import { managedSections, TLS_READ_ONLY_ID } from '../../../src/mock-broker/controls/managed';
 import { createGateway } from '../../../src/mock-broker/gateway';
-import { DEMO_TOPOLOGY, demoSeed } from '../../../src/mock-broker/gateway/seed';
+import { DEMO_ACCOUNTS, DEMO_TOPOLOGY, demoSeed } from '../../../src/mock-broker/gateway/seed';
 import { seed } from '../../../src/mock-broker/broker/store';
 import { resetScenario, scenario, setBrokers } from '../../../src/mock-broker/fixtures';
 import { mockCode, stepOf } from '../../../src/mock-broker/gateway/authenticator';
@@ -33,21 +33,13 @@ afterEach(() => {
 });
 
 const panel = () => document.getElementById('mock-controls')!;
-const titles = () => Array.from(panel().querySelectorAll('.mockctl-title'), n => n.textContent);
 const btn = (label: string) => Array.from(panel().querySelectorAll<HTMLButtonElement>('.mockctl-btn')).find(b => b.textContent === label)!;
 const who = () => panel().querySelector('.mockctl-section .mockctl-hint')!.textContent;
 
 describe('mock-broker/controls/managed -- accounts', () => {
-    it('replaces the Direct connection reference with the demo\'s sections', () => {
-        expect(titles()).toEqual(['Demo accounts', 'Authenticator', 'Gateway events', 'Queue state', 'Connection faults', 'Latency and volume']);
-    });
-
     it('lists every account and its password, click to copy', () => {
         const codes = Array.from(panel().querySelectorAll('.mockctl-account .mockctl-copy'), n => n.textContent);
-        expect(codes).toEqual([
-            'admin', 'demo-admin-0001', 'operator', 'demo-operator-01',
-            'viewer', 'demo-viewer-0001', 'newadmin', 'demo-change-me-01',
-        ]);
+        expect(codes).toEqual(DEMO_ACCOUNTS.flatMap(a => [a.username, a.password]));
     });
 
     it('signs in as an account and lands where the gateway would', () => {

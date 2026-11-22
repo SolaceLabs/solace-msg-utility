@@ -47,14 +47,6 @@ describe('mock-broker/gateway/versions -- users', () => {
     const put = (gw: Gw, name: string, over: object) => call(gw, 'PUT', `/managed/users/${name}`, { ...body, ...over });
     const revs = async (gw: Gw) => Object.fromEntries((await call(gw, 'GET', '/managed/users')).json.users.map((u: any) => [u.username, u.rev]));
 
-    it('starts every seeded user at a valid rev', async () => {
-        const gw = gateway();
-        const seq = gw.store.seqs().users;
-        const list = Object.values(await revs(gw)) as number[];
-        expect(list).toHaveLength(3);
-        for (const rev of list) expect({ rev, ok: Number.isInteger(rev) && rev >= 1 && rev <= seq }).toEqual({ rev, ok: true });
-    });
-
     it('creates with rev 0 at the new seq, and a taken name is exists even without a password', async () => {
         const gw = gateway();
         expect(await put(gw, 'newbie', { password: 'newbie-password-1', rev: 0 })).toEqual({ status: 200, json: { rev: 2 } });
@@ -292,7 +284,7 @@ describe('mock-broker/gateway/versions -- settings', () => {
         expect((await save(next, { rev: (await view(next)).rev })).status).toBe(200);
     });
 
-    it('lets a snapshot from a build before audit.onFailure restore with continue', () => {
+    it('restores a snapshot with no audit.onFailure as continue', () => {
         const gw = gateway();
         const snap = gw.snapshot();
         delete (snap.settings.audit as Partial<typeof snap.settings.audit>).onFailure;

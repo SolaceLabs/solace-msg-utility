@@ -811,29 +811,6 @@ describe('core/components/queue-picker', () => {
             await p;
         });
 
-        it('second open against a DIFFERENT baseUrl invalidates the cache and fetches fresh', async () => {
-            const sempA = makeSempCtx({ baseUrl: 'http://broker-a:8080' });
-            stubVpnsAndQueues(sempA, ['vpn-a-only'], {});
-            let p = pickQueue(src(sempA));
-            await flushAsync();
-            $<HTMLButtonElement>('.picker-cancel').click();
-            await p;
-
-            const sempB = makeSempCtx({ baseUrl: 'http://broker-b:8080' });
-            stubVpnsAndQueues(sempB, ['vpn-b-only'], {});
-            const fetchCallsBefore = (sempB.fetch as any).mock.calls.length;
-            p = pickQueue(src(sempB));
-            await flushAsync();
-
-            // Different broker → cache replaced → must fetch.
-            expect((sempB.fetch as any).mock.calls.length).toBeGreaterThan(fetchCallsBefore);
-            $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
-            expect(visibleOptions('.picker-vpn-list')).toEqual(['vpn-b-only']);
-
-            $<HTMLButtonElement>('.picker-cancel').click();
-            await p;
-        });
-
         it('refresh fetches new data and the next open reflects the refreshed cache', async () => {
             // Verifies the full refresh → cache-update loop: initial fetch
             // yields ['vpn-a'], then Refresh forces a second fetch (mocked to
@@ -963,24 +940,6 @@ describe('core/components/queue-picker', () => {
         });
     });
 
-    describe('chevron icon', () => {
-        it('renders a chevron-down svg inside each input wrap', async () => {
-            const sempCtx = makeSempCtx();
-            stubVpnsAndQueues(sempCtx, [], {});
-
-            const p = pickQueue(src(sempCtx));
-            await flushAsync();
-
-            const vpnIcon = document.querySelector('.picker-input-wrap .picker-select-icon svg');
-            const queueIcon = document.querySelectorAll('.picker-input-wrap .picker-select-icon svg');
-            expect(vpnIcon).not.toBeNull();
-            expect(queueIcon.length).toBe(2);
-
-            $<HTMLButtonElement>('.picker-cancel').click();
-            await p;
-        });
-    });
-
     describe('focus on previously-selected input resets the filter to show all', () => {
         it('VPN input: re-focusing after selection shows the full list again', async () => {
             const sempCtx = makeSempCtx();
@@ -998,26 +957,6 @@ describe('core/components/queue-picker', () => {
             // to see every VPN, not just "vpn-alpha". Filter is reset.
             $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
             expect(visibleOptions('.picker-vpn-list')).toEqual(['vpn-alpha', 'vpn-beta']);
-
-            $<HTMLButtonElement>('.picker-cancel').click();
-            await p;
-        });
-
-        it('queue input: re-focusing after selection shows the full list again', async () => {
-            const sempCtx = makeSempCtx();
-            stubVpnsAndQueues(sempCtx, ['v'], { v: ['q-1', 'q-2'] });
-
-            const p = pickQueue(src(sempCtx));
-            await flushAsync();
-            $<HTMLInputElement>('.picker-vpn-input').dispatchEvent(new Event('focus'));
-            $<HTMLDivElement>('.picker-vpn-list .picker-dropdown-option').click();
-            await flushAsync();
-            $<HTMLInputElement>('.picker-queue-input').dispatchEvent(new Event('focus'));
-            $<HTMLDivElement>('.picker-queue-list .picker-dropdown-option').click();
-            // Queue input value is now "q-1".
-
-            $<HTMLInputElement>('.picker-queue-input').dispatchEvent(new Event('focus'));
-            expect(visibleOptions('.picker-queue-list')).toEqual(['q-1', 'q-2']);
 
             $<HTMLButtonElement>('.picker-cancel').click();
             await p;

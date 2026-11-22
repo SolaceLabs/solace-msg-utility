@@ -62,8 +62,6 @@ export interface SolaceClient {
     connect(cfg: SolaceConfig, host: string, pass: string, clientName?: string): ConnectStart;
     /** Close the session if connected; no-op otherwise. */
     disconnect(): void;
-    /** Dispose the session and reset internal state. */
-    cleanup(): void;
 }
 
 /**
@@ -354,11 +352,5 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
         connecting = false;
     }
 
-    /** The public cleanup also abandons a connect still waiting for the library. */
-    function cleanupAll() {
-        if (cancelLibraryWait) cancelLibraryWait();
-        cleanup();
-    }
-
-    return { init, connect, disconnect, cleanup: cleanupAll };
+    return { init, connect, disconnect };
 }

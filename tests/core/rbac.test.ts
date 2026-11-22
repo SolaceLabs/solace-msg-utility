@@ -75,6 +75,8 @@ describe('core/rbac — isModuleVisible', () => {
         const s = session({ modules: ['queue-browser'] });
         expect(isModuleVisible(s, 'queue-browser')).toBe(true);
         expect(isModuleVisible(s, 'queue-copy')).toBe(false);
+        // The explorer filters its own rows (visibleQueueRows), so it is granted like any module.
+        expect(isModuleVisible(session({ modules: ['queue-subscription-explorer'] }), 'queue-subscription-explorer')).toBe(true);
         // The admin flag does not widen module control.
         expect(isModuleVisible(session({ admin: true }), 'queue-browser')).toBe(false);
     });
@@ -99,27 +101,6 @@ describe('core/rbac — isModuleVisible', () => {
                 expect(isModuleVisible(session({ admin: true, modules: [id] }), id)).toBe(false);
             }
         });
-    });
-
-    // Full matrix: requirement × session shape.
-    it('resolves the whole requirement matrix', () => {
-        const cases: ReadonlyArray<[id: string, sess: ManagedSession | null, expected: boolean]> = [
-            ['user-management', null, true],
-            ['user-management', session({ admin: true }), true],
-            ['user-management', session({ admin: false }), false],
-            ['queue-discovery', null, true],
-            ['queue-discovery', session({ admin: true, modules: ['queue-discovery'] }), false],
-            // Filters its own rows (visibleQueueRows), so it is granted like any module.
-            ['queue-subscription-explorer', session({ modules: ['queue-subscription-explorer'] }), true],
-            ['queue-subscription-explorer', session({ admin: true }), false],
-            ['queue-browser', null, true],
-            ['queue-browser', session({ modules: ['queue-browser'] }), true],
-            ['queue-browser', session({ admin: true }), false],
-            ['connections', session({ admin: false }), true],
-        ];
-        for (const [id, sess, expected] of cases) {
-            expect(isModuleVisible(sess, id), `${id} / session=${sess ? 'yes' : 'no'}`).toBe(expected);
-        }
     });
 });
 

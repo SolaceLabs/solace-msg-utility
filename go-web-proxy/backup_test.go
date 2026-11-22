@@ -17,8 +17,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 const testPassphrase = "correct horse battery"
@@ -1191,19 +1189,6 @@ func TestBackupService_LoopRunsOnScheduleAndStops(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the loop must stop when its context ends")
-	}
-}
-
-// The schedule file round-trips through YAML with every field.
-func TestBackup_ScheduleDocYAML(t *testing.T) {
-	in := scheduleDoc{Schedule: backupSchedule{Kind: scheduleMonthly, Minute: 5, Hour: 4, Day: 31}, Keep: 9, Iter: 2, Salt: "c2FsdA==", Key: "a2V5"}
-	data, err := yaml.Marshal(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out scheduleDoc
-	if err := yaml.Unmarshal(data, &out); err != nil || out != in {
-		t.Fatalf("round trip: %+v %v", out, err)
 	}
 }
 

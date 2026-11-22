@@ -30,7 +30,8 @@ export interface ManagedConnRecord {
 }
 
 export interface ConnMgmtService {
-    listConnections(): Promise<ManagedResult<ManagedConnRecord[]>>;
+    /** GET /managed/connections: the gateway's list, as it sends it. */
+    listConnections(): Promise<ManagedResult<{ connections: ManagedConnRecord[] }>>;
     /** PUT /managed/connections/{broker}: create (rev 0), or edit an existing broker. Answers the new rev. */
     saveConnection(connection: ManagedConnRecord): Promise<ManagedResult<{ rev: number }>>;
     /** DELETE /managed/connections/{broker}?rev=N. */
@@ -41,10 +42,7 @@ const connPath = (broker: string) => `/managed/connections/${encodeURIComponent(
 
 export function createConnMgmtService(): ConnMgmtService {
     return {
-        async listConnections() {
-            const res = await managedRequest<{ connections: ManagedConnRecord[] }>('GET', '/managed/connections');
-            return res.ok ? { ok: true, data: res.data.connections } : res;
-        },
+        listConnections: () => managedRequest<{ connections: ManagedConnRecord[] }>('GET', '/managed/connections'),
         saveConnection: ({ broker, ...body }) => managedRequest<{ rev: number }>('PUT', connPath(broker), body),
         deleteConnection: (broker, rev) => managedRequest('DELETE', `${connPath(broker)}?rev=${rev}`),
     };

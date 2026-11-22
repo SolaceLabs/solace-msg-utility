@@ -157,6 +157,9 @@ func TestBuildManagedRoutes_GatesByMode(t *testing.T) {
 		if got := rec.Code == http.StatusSeeOther; got != gated {
 			t.Errorf("%s: app gated=%v, want %v", mode, got, gated)
 		}
+		if !gated && rec.Body.String() != "app" {
+			t.Errorf("%s: want the app without a session, got %d %q", mode, rec.Code, rec.Body.String())
+		}
 		if rec := e.do("GET", "/solAdmin", "", nil); rec.Code != http.StatusSeeOther {
 			t.Errorf("%s: /solAdmin must need a session, got %d", mode, rec.Code)
 		}
@@ -183,7 +186,15 @@ func TestBuildManagedRoutes_GatesByMode(t *testing.T) {
 // API forgets steps the pages recorded.
 func TestBuildManagedRoutes_PagesAndAPIShareTheReplayGuard(t *testing.T) {
 	e := newManagedEnv(t, nil)
-	if e.api.totp == nil || e.api.totp != e.pages.totp {
-		t.Fatalf("one guard for both: api %p, pages %p", e.api.totp, e.pages.totp)
+	now := time.Now()
+	code, err := totpCode(storeTOTPSecret, totpStepAt(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.pages.totp.check("viewer", storeTOTPSecret, code, now) {
+		t.Fatal("the pages accept the code once")
+	}
+	if e.api.totp.check("viewer", storeTOTPSecret, code, now) {
+		t.Error("the API refuses a code the pages already took: one replay guard for both")
 	}
 }

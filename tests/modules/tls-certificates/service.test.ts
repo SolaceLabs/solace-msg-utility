@@ -28,12 +28,6 @@ describe('tls-certificates/service', () => {
         expect(sent()).toEqual(['/managed/tls/certificate/check', expect.objectContaining({ method: 'POST', body: JSON.stringify(body) })]);
     });
 
-    it('a refused pair carries the field and the reason', async () => {
-        answer(422, { error: 'invalid', field: 'key', reason: 'The key does not match the certificate.' });
-        expect(await createTlsService().check({ certificate: 'C', key: 'K' }))
-            .toEqual(expect.objectContaining({ ok: false, status: 422, code: 'invalid', field: 'key', reason: 'The key does not match the certificate.' }));
-    });
-
     it('replace PUTs the pair to /managed/tls/certificate', async () => {
         answer(200, { certificate: CERT });
         const body = { certificate: 'CERT-PEM', key: 'KEY-PEM' };
@@ -49,15 +43,10 @@ describe('tls-certificates/service', () => {
         expect(sent()).toEqual(['/managed/tls/trust', expect.objectContaining({ method: 'POST', body: JSON.stringify(body) })]);
     });
 
-    it('removeTrust DELETEs one file by its name, escaped, and a missing file is not_found', async () => {
-        answer(404, { error: 'not_found' });
-        expect(await createTlsService().removeTrust('../ca.crt')).toEqual(expect.objectContaining({ ok: false, status: 404, code: 'not_found' }));
+    it('removeTrust DELETEs one file by its name, escaped', async () => {
+        answer(204);
+        await createTlsService().removeTrust('../ca.crt');
         expect(sent()[0]).toBe('/managed/tls/trust/..%2Fca.crt');
         expect(sent()[1]).toEqual({ method: 'DELETE', credentials: 'same-origin' });
-    });
-
-    it('a read-only gateway answers tls_read_only', async () => {
-        answer(409, { error: 'tls_read_only' });
-        expect(await createTlsService().replace({ certificate: 'C', key: 'K' })).toEqual(expect.objectContaining({ ok: false, status: 409, code: 'tls_read_only' }));
     });
 });

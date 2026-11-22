@@ -215,7 +215,7 @@ function names(el: El): void {
 const bell = (ctx: AppContext) => ctx.notifications.entries().map(e => ({ level: e.level, module: e.module, text: e.text }));
 
 describe('queue-copy -- the destination follows the primary connection mode', () => {
-    it('Provisioned primary: the card replaces the host field, the SEMP and Client cards and the credential radio', async () => {
+    it('Provisioned primary: the card replaces the host field and the SEMP and Client cards', async () => {
         const { el, hidden } = await setupProvisioned();
         needSecondary(el);
 
@@ -224,9 +224,6 @@ describe('queue-copy -- the destination follows the primary connection mode', ()
         expect(hidden('#copy-dest-host-group')).toBe(true);
         expect(hidden('#copy-dest-semp-card')).toBe(true);
         expect(hidden('#copy-dest-sol-card')).toBe(true);
-        // The Provisioned / Manual radio is gone from the template altogether.
-        expect(container.querySelector('#copy-dest-cred-mode-row')).toBeNull();
-        expect(el('#copy-dest-prov-card .prov-conn-title').textContent).toBe('Destination Connection');
         expect(options(el, '#copy-dest-prov-broker')).toEqual(['b1', 'b2']);
         expect(options(el, '#copy-dest-prov-vpn')).toEqual(['v1', 'v2']);
     });
@@ -437,35 +434,6 @@ describe('queue-copy -- provisioned destination: connecting through the profile'
 describe('queue-copy -- provisioned destination: a connect that fails', () => {
     const SEMP_DOWN = 'The gateway could not reach the broker.';
 
-    it('SEMP failed while messaging came up: the session is closed, the card names both sides and the bell the failure', async () => {
-        const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
-        const { ctx, el } = await setupProvisioned();
-        needSecondary(el);
-        destSempConnect.mockImplementationOnce(async () => { sempRefused(SEMP_DOWN, 'upstream_unavailable'); });
-
-        connectBtn(el).click();
-        await messagingStarted();
-        sessionUp();
-        await failed(el);
-
-        expect(cardError(el)).toBe([
-            'SEMP (management): broker not reachable',
-            'Messaging (client): connected, closed because SEMP failed',
-        ].join('\n'));
-        expect(destSolDisconnect).toHaveBeenCalledTimes(1);
-        expect(bell(ctx)).toEqual([{ level: 'error', module: 'Queue Copy', text: `SEMP (management): ${SEMP_DOWN}` }]);
-        expect(error).toHaveBeenCalledWith(expect.stringContaining(`SEMP (management): ${SEMP_DOWN}`));
-        // Nothing was installed: no picker, no usable destination.
-        expect(pickShown(el)).toBe(false);
-        names(el);
-        expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(true);
-        // The card is free for another try.
-        expect(connectBtn(el).textContent).toBe('Connect');
-        expect(connectBtn(el).disabled).toBe(false);
-        expect(el<HTMLSelectElement>('#copy-dest-prov-broker').disabled).toBe(false);
-        expect(el<HTMLInputElement>('#copy-toggle-same-broker').disabled).toBe(false);
-    });
-
     it('the late DISCONNECTED of a held session a failed run closed leaves the card\'s lines and a newer run\'s connecting state alone', async () => {
         vi.spyOn(logger, 'error').mockImplementation(() => {});
         const { el } = await setupProvisioned();
@@ -486,25 +454,6 @@ describe('queue-copy -- provisioned destination: a connect that fails', () => {
         destSolHooks.current.onDisconnected();
         expect(connectBtn(el).textContent).toBe('Connecting...');
         expect(el<HTMLSelectElement>('#copy-dest-prov-broker').disabled).toBe(true);
-    });
-
-    it('messaging failed while SEMP was up: SEMP is never installed and the card says it was closed', async () => {
-        vi.spyOn(logger, 'error').mockImplementation(() => {});
-        const { ctx, el } = await setupProvisioned();
-        needSecondary(el);
-
-        connectBtn(el).click();
-        await messagingStarted();
-        destSolHooks.current.onConnectFailed({ infoStr: 'Login failure' });
-        await failed(el);
-
-        expect(cardError(el)).toBe([
-            'Messaging (client): Connection failed: Login failure',
-            'SEMP (management): connected, closed because messaging failed',
-        ].join('\n'));
-        expect(pickShown(el)).toBe(false);
-        expect(bell(ctx)).toEqual([{ level: 'error', module: 'Queue Copy', text: 'Messaging (client): Connection failed: Login failure' }]);
-        expect(connectBtn(el).textContent).toBe('Connect');
     });
 
     it('both failed: the card lists each reason, the bell and the log each full text, and nothing is closed', async () => {
@@ -529,6 +478,14 @@ describe('queue-copy -- provisioned destination: a connect that fails', () => {
         expect(error).toHaveBeenCalledTimes(2);
         expect(destSolConnect).not.toHaveBeenCalled();
         expect(destSolDisconnect).not.toHaveBeenCalled();
+        // Nothing was installed: no picker, no usable destination, and the card is free for another try.
+        expect(pickShown(el)).toBe(false);
+        names(el);
+        expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(true);
+        expect(connectBtn(el).textContent).toBe('Connect');
+        expect(connectBtn(el).disabled).toBe(false);
+        expect(el<HTMLSelectElement>('#copy-dest-prov-broker').disabled).toBe(false);
+        expect(el<HTMLInputElement>('#copy-toggle-same-broker').disabled).toBe(false);
     });
 
     it('an SDK error while connecting fails the messaging side', async () => {

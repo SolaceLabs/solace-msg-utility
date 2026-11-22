@@ -16,12 +16,13 @@ import { createManagedProfile } from '../../src/core/services/managed-profile';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
 import type { AppContext, AppState } from '../../src/core/types';
 
-const { me, logout, umSvc, connSvc, settingsSvc, backupSvc, showToast } = vi.hoisted(() => ({
+const { me, logout, umSvc, connSvc, settingsSvc, tlsSvc, backupSvc, showToast } = vi.hoisted(() => ({
     me: vi.fn(),
     logout: vi.fn(),
     umSvc: { listUsers: vi.fn(), saveUser: vi.fn(), deleteUser: vi.fn() },
     connSvc: { listConnections: vi.fn() },
     settingsSvc: { load: vi.fn() },
+    tlsSvc: { view: vi.fn() },
     backupSvc: { status: vi.fn() },
     showToast: vi.fn(),
 }));
@@ -37,6 +38,9 @@ vi.mock('../../src/modules/connection-management/service', () => ({
 vi.mock('../../src/modules/gateway-settings/service', () => ({
     createSettingsService: () => settingsSvc,
 }));
+vi.mock('../../src/modules/tls-certificates/service', () => ({
+    createTlsService: () => tlsSvc,
+}));
 vi.mock('../../src/modules/backup/service', () => ({
     createBackupService: () => backupSvc,
 }));
@@ -47,6 +51,7 @@ import { AdminLoginModule } from '../../src/modules/admin-login/module';
 import { UserManagementModule } from '../../src/modules/user-management/module';
 import { ConnectionManagementModule } from '../../src/modules/connection-management/module';
 import { GatewaySettingsModule } from '../../src/modules/gateway-settings/module';
+import { TlsCertificatesModule } from '../../src/modules/tls-certificates/module';
 import { BackupModule } from '../../src/modules/backup/module';
 import { completeContext } from '../helpers/appContext';
 import { answerConfirm } from '../helpers/confirmDialog';
@@ -72,9 +77,10 @@ async function installAdminApp(list: unknown = { ok: true, data: { users: USERS,
         operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], brokers: [], modules: [],
     } });
     umSvc.listUsers.mockResolvedValue(list);
-    connSvc.listConnections.mockResolvedValue({ ok: true, data: [] });
+    connSvc.listConnections.mockResolvedValue({ ok: true, data: { connections: [] } });
     // A refused load still counts as the one request; it needs no view to render.
     settingsSvc.load.mockResolvedValue({ ok: false, status: 0, code: 'network' });
+    tlsSvc.view.mockResolvedValue({ ok: false, status: 0, code: 'network' });
     backupSvc.status.mockResolvedValue({ ok: false, status: 0, code: 'network' });
     const eventBus = createEventBus();
     const appState: AppState = {
@@ -94,6 +100,7 @@ async function installAdminApp(list: unknown = { ok: true, data: { users: USERS,
     await UserManagementModule.install(ctxFor(users));
     await ConnectionManagementModule.install(ctxFor(loadModuleDOM('connection-management')));
     await GatewaySettingsModule.install(ctxFor(loadModuleDOM('gateway-settings')));
+    await TlsCertificatesModule.install(ctxFor(loadModuleDOM('tls-certificates')));
     await BackupModule.install(ctxFor(loadModuleDOM('backup')));
     return { appState, login, users, loginCtx };
 }
@@ -126,6 +133,7 @@ beforeEach(() => {
     umSvc.deleteUser.mockReset();
     connSvc.listConnections.mockReset();
     settingsSvc.load.mockReset();
+    tlsSvc.view.mockReset();
     backupSvc.status.mockReset();
     showToast.mockReset();
 });
@@ -140,6 +148,7 @@ describe('integration — admin app session lifecycle', () => {
         expect(umSvc.listUsers).toHaveBeenCalledTimes(1);
         expect(connSvc.listConnections).toHaveBeenCalledTimes(1);
         expect(settingsSvc.load).toHaveBeenCalledTimes(1);
+        expect(tlsSvc.view).toHaveBeenCalledTimes(1);
         expect(backupSvc.status).toHaveBeenCalledTimes(1);
     });
 

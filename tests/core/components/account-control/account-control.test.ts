@@ -30,21 +30,17 @@ describe('account-control', () => {
         expect([c.element.classList.contains('hidden'), name.textContent, name.title]).toEqual([true, '', '']);
     });
 
-    it('links Change password to the gateway\'s page and labels both actions', () => {
-        const { element } = createAccountControl(vi.fn());
-        const password = element.querySelector('a.account-control-password')!;
-        expect(password.getAttribute('href')).toBe('/login/password');
-        expect(password.getAttribute('aria-label')).toBe('Change password');
-        expect(element.querySelector('.account-control-signout')!.getAttribute('aria-label')).toBe('Sign out');
-    });
-
-    it('links Two-factor sign-in to the gateway\'s page, for every signed-in user', () => {
+    it('gives each action its gateway page, an accessible name and a title, so the icons read without text', () => {
         const c = createAccountControl(vi.fn());
-        const link = c.element.querySelector<HTMLAnchorElement>('a.account-control-twofactor')!;
-        expect(link.getAttribute('href')).toBe('/login/two-factor');
-        expect(link.getAttribute('aria-label')).toBe('Two-factor sign-in');
+        const actions = [...c.element.querySelectorAll('.account-control-actions > *')];
+        expect(actions.map(a => [a.getAttribute('href'), a.getAttribute('aria-label'), a.getAttribute('title')])).toEqual([
+            ['/login/password', 'Change password', 'Change password'],
+            ['/login/two-factor', 'Two-factor sign-in', 'Two-factor sign-in'],
+            [null, 'Sign out', 'Sign out'],
+        ]);
+        // Two-factor sign-in is offered to every signed-in user, not only administrators.
         c.show({ username: 'operator', admin: false });
-        expect([c.element.classList.contains('hidden'), link.classList.contains('hidden')]).toEqual([false, false]);
+        expect(c.element.querySelector('.account-control-twofactor')!.classList.contains('hidden')).toBe(false);
     });
 
     it('returns the gateway\'s password and two-factor pages to the path it is given', () => {
@@ -55,12 +51,6 @@ describe('account-control', () => {
 
     it.each(['https://evil.example', '/a?b', 'solAdmin', '//x.y'])('refuses a return path that is not a plain path: %s', (next) => {
         expect(() => createAccountControl(vi.fn(), { next })).toThrow(/next must be a path/);
-    });
-
-    it('titles every action, so the icons read without text', () => {
-        const { element } = createAccountControl(vi.fn());
-        const titles = [...element.querySelectorAll('.account-control-actions > *')].map(a => a.getAttribute('title'));
-        expect(titles).toEqual(['Change password', 'Two-factor sign-in', 'Sign out']);
     });
 
     it('signs out through the panel\'s own sign-out', () => {

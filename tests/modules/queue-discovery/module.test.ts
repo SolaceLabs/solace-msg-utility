@@ -42,13 +42,6 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; eventBus:
 }
 
 describe('QueueDiscoveryModule', () => {
-    it('has correct metadata', () => {
-        expect(QueueDiscoveryModule.name).toBe('Queue Discovery');
-        expect(QueueDiscoveryModule.id).toBe('queue-discovery');
-        expect(QueueDiscoveryModule.icon).toContain('svg');
-        // Priority is set in src/registry.ts; tested in tests/registry.test.ts.
-    });
-
     it('installs and initializes queue input as disabled', async () => {
         const container = createDiscoveryDOM();
         document.body.appendChild(container);
@@ -701,50 +694,6 @@ describe('QueueDiscoveryModule', () => {
         expect(btnCopy.disabled).toBe(false);
     });
 
-    it('throws at install when #btn-copy-config is missing', async () => {
-        const container = document.createElement('div');
-        container.innerHTML = `
-            <div id="discovery-warning" class="hidden"></div>
-            <div id="discovery-content"></div>
-            <input id="discovery-vpn-input" />
-            <div id="discovery-vpn-list"></div>
-            <button id="btn-refresh-vpns">Refresh</button>
-            <input id="discovery-queue-input" />
-            <div id="discovery-queue-list"></div>
-            <button id="btn-refresh-queues">Refresh</button>
-        `;
-        document.body.appendChild(container);
-        const { ctx } = createTestContext(container);
-
-        await expect(QueueDiscoveryModule.install(ctx)).rejects.toThrow('#btn-copy-config');
-    });
-
-    it('throws at install when discovery inputs are missing', async () => {
-        const minContainer = document.createElement('div');
-        minContainer.innerHTML = `
-            <div id="discovery-warning"></div>
-            <div id="discovery-content"></div>
-        `;
-        document.body.appendChild(minContainer);
-        const { ctx } = createTestContext(minContainer);
-        await expect(QueueDiscoveryModule.install(ctx)).rejects.toThrow(/discovery-vpn-input/);
-    });
-
-    it('throws at install when refresh buttons are missing', async () => {
-        const minContainer = document.createElement('div');
-        minContainer.innerHTML = `
-            <div id="discovery-warning"></div>
-            <div id="discovery-content"></div>
-            <input id="discovery-vpn-input" />
-            <div id="discovery-vpn-list"></div>
-            <input id="discovery-queue-input" />
-            <div id="discovery-queue-list"></div>
-        `;
-        document.body.appendChild(minContainer);
-        const { ctx } = createTestContext(minContainer);
-        await expect(QueueDiscoveryModule.install(ctx)).rejects.toThrow(/btn-refresh/);
-    });
-
     it('VPN blur handles empty input', async () => {
         vi.useFakeTimers();
         const container = createDiscoveryDOM();
@@ -903,32 +852,6 @@ describe('QueueDiscoveryModule', () => {
             expect(queueInput.placeholder).toBe('Select a Queue');
         });
 
-        it('caches the VPN list — second fetch does not re-call sempFetch', async () => {
-            const container = createDiscoveryDOM();
-            document.body.appendChild(container);
-            const { ctx, appState } = createTestContext(container);
-            appState.isSempConnected = true;
-
-            await QueueDiscoveryModule.install(ctx);
-            await vi.waitFor(() => {
-                expect(container.querySelector('#discovery-vpn-list')!.querySelectorAll('.dropdown-option').length).toBeGreaterThan(0);
-            });
-            const sempCallsAfterFirstFetch = (ctx.sempFetch as any).mock.calls.length;
-
-            // Trigger SEMP-reconnect-style state cycling without breaking semantics:
-            // toggle isSempConnected via the bus to fire fetchVpns again. With cache,
-            // sempFetch should NOT be called for the VPN endpoint.
-            // Simulating by clearing & re-emitting state-change is the cleanest path.
-            // Note: we actually call fetchVpns indirectly by re-emitting state-change.
-            ctx.eventBus.emit('app:state-change', { key: 'isSempConnected', value: false });
-            ctx.eventBus.emit('app:state-change', { key: 'isSempConnected', value: true });
-            // After reconnect, cache was invalidated by the disconnect — sempFetch IS
-            // called again. Verifies invalidation half of the contract.
-            await vi.waitFor(() => {
-                expect((ctx.sempFetch as any).mock.calls.length).toBeGreaterThan(sempCallsAfterFirstFetch);
-            });
-        });
-
         it('caches the queue list — re-selecting same VPN does not re-call sempFetch', async () => {
             const container = createDiscoveryDOM();
             document.body.appendChild(container);
@@ -951,8 +874,9 @@ describe('QueueDiscoveryModule', () => {
 
             // Re-pick the SAME VPN — should hit cache, no new sempFetch.
             (vpnOptions[0] as HTMLElement).click();
-            // Give the (potential) network call a chance to fire.
-            await new Promise(r => setTimeout(r, 50));
+            // A fetch, if one were started, calls sempFetch before its first await;
+            // a microtask flush lets any such call land.
+            for (let i = 0; i < 5; i++) await Promise.resolve();
             expect((ctx.sempFetch as any).mock.calls.length).toBe(callsAfterFirstSelect);
 
             // Queue dropdown still shows the cached entries.

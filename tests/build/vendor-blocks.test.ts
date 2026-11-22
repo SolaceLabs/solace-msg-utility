@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { variantNeedsVendorScripts, stripVendorBlocks } from '../../scripts/module-registry-plugin.mjs';
 import { VENDOR_MARKERS } from '../../scripts/check-bundles.mjs';
-import { REPO_ROOT, readSource } from '../helpers/sources';
+import { readSource } from '../helpers/sources';
 
 /**
  * The shell's `@vendor:start` / `@vendor:end` blocks (src/index.html) hold the
@@ -39,12 +39,6 @@ describe('variantNeedsVendorScripts', () => {
     it('ignores the flag in a comment', () => {
         const src = `${MODULES}// export const NEEDS_VENDOR_SCRIPTS = false;\n/* NEEDS_VENDOR_SCRIPTS = false */\n`;
         expect(variantNeedsVendorScripts(fakeRoot(src), 'v')).toBe(true);
-    });
-
-    it('is false for the admin variant and true for every Direct and Provisioned one', () => {
-        const needs = (v: string) => variantNeedsVendorScripts(REPO_ROOT, v);
-        expect(needs('admin')).toBe(false);
-        expect(['standard', 'min', 'no-queue-copy', 'all-for-testing-only', 'managed', 'managed-demo'].filter((v) => !needs(v))).toEqual([]);
     });
 });
 

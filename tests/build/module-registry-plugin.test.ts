@@ -92,13 +92,7 @@ describe('moduleRegistryPlugin — extractModuleEntries', () => {
 });
 
 describe('moduleRegistryPlugin — activeModuleIds', () => {
-    it('reads the standard variant manifest', () => {
-        expect(activeModuleIds(root, 'standard').sort(byName)).toEqual([
-            'connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer',
-        ]);
-    });
-
-    it('reads the min variant manifest', () => {
+    it('reads the min variant manifest: connections and the Queue Browser only', () => {
         expect(activeModuleIds(root, 'min').sort(byName)).toEqual(['connections', 'queue-browser']);
     });
 
@@ -112,20 +106,6 @@ describe('moduleRegistryPlugin — activeModuleIds', () => {
 });
 
 describe('moduleRegistryPlugin — activeModuleEntries', () => {
-    it('reads the managed variant override', () => {
-        expect(activeModuleEntries(root, 'managed')).toEqual({ connections: 'managed' });
-    });
-
-    it('reads the managed demo\'s override, the same as provisioned.html\'s', () => {
-        expect(activeModuleEntries(root, 'managed-demo')).toEqual({ connections: 'managed' });
-    });
-
-    it('overrides nothing for the Direct variants a Release ships', () => {
-        for (const variant of ['standard', 'min', 'no-queue-copy']) {
-            expect(activeModuleEntries(root, variant)).toEqual({});
-        }
-    });
-
     it('rejects an override for a module the variant does not list', () => {
         const fake = fakeRoot({
             'src/variants/typo.ts': `export const ACTIVE_MODULES = { 'connections': 100 };
@@ -242,7 +222,6 @@ describe('moduleRegistryPlugin — virtual module', () => {
         const p = moduleRegistryPlugin();
         const code = p.load(p.resolveId('virtual:module-registry')!);
         expect(code).toBe(moduleRegistryPlugin({ root: process.cwd(), variant: 'standard' }).load('\0virtual:module-registry'));
-        expect(code).toContain('"queue-copy": m2');
     });
 });
 

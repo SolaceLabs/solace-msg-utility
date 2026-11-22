@@ -96,13 +96,6 @@ describe('admin-login — restoring the gateway session', () => {
         expect(appState.sempCredentials).toBeNull();
     });
 
-    it('has only the signed-out screen in its page: no title repeated, no session card', async () => {
-        const { el } = await install();
-        expect(container.querySelector('h1')).toBeNull();
-        expect(container.querySelector('#admin-session-view')).toBeNull();
-        expect(el('h2').textContent).toBe('Not signed in');
-    });
-
     it('without a session shows the sign-in link, quietly, and mounts no account control', async () => {
         const { el, hidden, account } = await install({ ok: false, status: 401, code: 'unauthenticated' });
         expect(hidden('#admin-login-view')).toBe(false);

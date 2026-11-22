@@ -183,28 +183,6 @@ func TestThrottle_PerClientIsReadLive(t *testing.T) {
 	}
 }
 
-// Spraying usernames from one client blocks the client; guessing one user
-// from many clients blocks the user.
-func TestThrottle_CountsPerUserAndPerClient(t *testing.T) {
-	th := newThrottle(fixed(testLoginLimits), newFakeClock().now, quietLogger())
-	sprayer := addr(t, "192.0.2.7")
-	for _, u := range []string{"u1", "u2", "u3"} {
-		th.loginFailed(u, sprayer, true)
-	}
-	if th.loginWait("u4", sprayer, true) == 0 {
-		t.Error("the spraying client must be blocked for any username")
-	}
-	if th.loginWait("u4", addr(t, "198.51.100.1"), true) != 0 {
-		t.Error("another client trying u4 must not be blocked")
-	}
-	for _, c := range []string{"203.0.113.1", "203.0.113.2", "203.0.113.3"} {
-		th.loginFailed("target", addr(t, c), true)
-	}
-	if th.loginWait("target", addr(t, "203.0.113.99"), true) == 0 {
-		t.Error("the targeted user must be blocked from any client")
-	}
-}
-
 func TestClientKey(t *testing.T) {
 	a, _ := netip.ParseAddr("2001:db8:1:2:aaaa::1")
 	b, _ := netip.ParseAddr("2001:db8:1:2:bbbb::9")

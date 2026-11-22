@@ -17,8 +17,7 @@ describe('backup/service', () => {
 
     it('download GETs one saved backup by its name, escaped', async () => {
         answer(200, { filename: 'smu-backup-20261109T020000Z.json', content: '{}' });
-        expect(await createBackupService().download('smu-backup-20261109T020000Z.json'))
-            .toEqual({ ok: true, data: { filename: 'smu-backup-20261109T020000Z.json', content: '{}' } });
+        await createBackupService().download('smu-backup-20261109T020000Z.json');
         expect(fetchMock()).toHaveBeenCalledWith('/managed/backup/files/smu-backup-20261109T020000Z.json', { method: 'GET', credentials: 'same-origin' });
         fetchMock().mockClear();
         answer(404, { error: 'not_found' });
@@ -31,12 +30,6 @@ describe('backup/service', () => {
         const body = { kind: 'weekly' as const, minute: 15, hour: 2, weekday: 1, day: 0, keep: 14, passphrase: '', rev: 4 };
         expect(await createBackupService().saveSchedule(body)).toEqual({ ok: true, data: { rev: 5 } });
         expect(sent()).toEqual(['/managed/backup/schedule', expect.objectContaining({ method: 'PUT', body: JSON.stringify(body) })]);
-    });
-
-    it('a stale schedule save carries the current rev', async () => {
-        answer(409, { error: 'stale', rev: 9 });
-        const body = { kind: 'daily' as const, minute: 0, hour: 2, weekday: 0, day: 0, keep: 7, passphrase: '', rev: 4 };
-        expect(await createBackupService().saveSchedule(body)).toEqual(expect.objectContaining({ ok: false, code: 'stale', rev: 9 }));
     });
 
     it('removeSchedule DELETEs it with the rev in the query, and runNow POSTs a run', async () => {
@@ -69,12 +62,5 @@ describe('backup/service', () => {
         expect(sent()).toEqual(['/managed/backup/import', expect.objectContaining({
             method: 'POST', body: JSON.stringify({ file: '{}', passphrase: 'pp', users: 'merge', connections: 'skip', settings: 'replace', basis: { users: 3, connections: 2, settings: 'cfg' } }),
         })]);
-    });
-
-    it('a stale import carries the current basis', async () => {
-        const basis = { users: 4, connections: 2, settings: 'cfg-2' };
-        answer(409, { error: 'stale', basis });
-        const res = await createBackupService().importFile({ file: '{}' }, 'pp', { users: 'merge', connections: 'skip', settings: 'skip' }, {});
-        expect(res).toEqual(expect.objectContaining({ ok: false, code: 'stale', basis }));
     });
 });

@@ -164,7 +164,7 @@ describe('mock-broker/gateway/backup -- the file format', () => {
         expect(from.session).toEqual(session);
     });
 
-    it('reads a backup from before the paths left the file, and drops the three TLS paths whatever their case', () => {
+    it('drops the three TLS paths a backup holds, whatever their case', () => {
         const old = { ...settings(), tls: { certFile: '/old/tls.crt', KeyFile: '/old/tls.key', trustdir: '/old/trust', insecureSkipVerify: true } };
         expect(settingsFromBackup(old).tls).toEqual({ insecureSkipVerify: true, standardRoots: true });
         expect(settingsFromBackup({ TLS: { certFile: '/x' } }).tls).toEqual({ insecureSkipVerify: false, standardRoots: true });
@@ -173,7 +173,7 @@ describe('mock-broker/gateway/backup -- the file format', () => {
         expect(() => settingsFromBackup({ tls: ['/x'] })).toThrow();
     });
 
-    it('opens a backup from before the audit section, with both audit keys off and onFailure continue', () => {
+    it('opens a backup with no audit section, with both audit keys off and onFailure continue', () => {
         const { audit, ...old } = settings();
         expect(audit).toEqual({ stdout: false, access: false, onFailure: 'continue' });
         expect(settingsFromBackup(old).audit).toEqual({ stdout: false, access: false, onFailure: 'continue' });
@@ -315,12 +315,6 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         expect((await put({ ...daily, keep: 1, extra: 1 })).status).toBe(400);
     });
 
-    it('lets a crypto failure through: it is no refusal of the request', async () => {
-        const gw = gateway();
-        vi.spyOn(crypto.subtle, 'deriveKey').mockRejectedValueOnce(new Error('no crypto'));
-        await expect(call(gw, 'PUT', '/managed/backup/schedule', { ...daily, keep: 1, passphrase: PASS, rev: 0 })).rejects.toThrow('no crypto');
-    });
-
     it('exports a file the next import opens, and refuses a short passphrase', async () => {
         const gw = gateway();
         expect((await call(gw, 'POST', '/managed/backup/export', { passphrase: 'short' })).json.reason).toBe(RULE[1]);
@@ -438,7 +432,7 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         next.restore(snap);
         const st = (await call(next, 'GET', '/managed/backup')).json;
         expect([st.files.length, st.lastRun.file, st.schedule]).toEqual([1, 'smu-backup-20261109T090000Z.json', null]);
-        // A snapshot from a build before backups restores the rest.
+        // A snapshot with no backups section restores the rest.
         const old = { ...snap };
         delete old.backups;
         const third = gateway();

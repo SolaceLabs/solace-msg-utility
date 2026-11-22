@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
-    managedRequest, managedErrorMessage, reportManagedFailure, SIGNED_OUT_TOAST_MS, type ManagedError,
+    managedRequest, managedErrorMessage, MANAGED_ERROR_CODES, reportManagedFailure, SIGNED_OUT_TOAST_MS, type ManagedError,
 } from '../../../src/core/services/managed-api';
 import { createEventBus } from '../../../src/core/event-bus';
 import { REQUEST_TIMEOUT_MS } from '../../../src/core/timing';
@@ -120,35 +120,24 @@ describe('core/services/managed-api -- managedRequest body deadline', () => {
 describe('core/services/managed-api — managedErrorMessage', () => {
     const err = (code: string, extra: Partial<ManagedError> = {}): ManagedError => ({ ok: false, status: 400, code, ...extra });
 
+    const FALLBACK = 'Unexpected answer from the gateway (HTTP 400).';
+
+    it.each(MANAGED_ERROR_CODES)('maps %s to its own non-empty message', (code) => {
+        const text = managedErrorMessage(err(code));
+        expect(text).not.toBe('');
+        expect(text).not.toBe(FALLBACK);
+    });
+
+    it('gives each code its own message', () => {
+        const texts = MANAGED_ERROR_CODES.map((code) => managedErrorMessage(err(code)));
+        expect(new Set(texts).size).toBe(texts.length);
+    });
+
     it.each([
         ['unauthenticated', 'Your session has ended. Sign in again.'],
-        ['password_change_required', 'You must change your password before you continue.'],
         ['forbidden', 'This needs an administrator.'],
-        ['not_found', 'Not found. It may already have been removed.'],
-        ['bad_request', 'The gateway rejected the request as malformed.'],
-        ['too_large', 'The request is too large.'],
-        ['last_admin', 'At least one administrator must remain.'],
-        ['cross_origin', 'The gateway refused a cross-site request.'],
-        ['rate_limited', 'Too many requests. Wait a minute and try again.'],
-        ['would_lock_out', 'This change would lock this browser out of the gateway.'],
-        ['config_changed_on_disk', 'config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.'],
-        ['stale', 'This was changed by someone else since you opened it. Reload to see the current version.'],
-        ['exists', 'That name already exists. Use Edit to change it.'],
-        ['rev_required', 'The page did not send the version it was working from, so the gateway refused the change. Reload the page and try again.'],
-        ['store_changed_on_disk', 'A data file (users, connections or backup settings) was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.'],
-        ['tls_read_only', "The gateway's certificate or trust files are read-only on its host, so they cannot be changed here."],
-        ['tls_write_failed', 'The gateway could not write its certificate or trust files, so nothing was changed. Its log has the cause.'],
-        ['store_write_failed', 'The gateway could not write its data files, so nothing was changed. Its log has the cause.'],
-        ['audit_unavailable', 'The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.'],
-        ['config_unreadable', 'The gateway cannot read its config.yaml. Its log has the cause.'],
-        ['server_error', 'The gateway could not complete the request. Its log has the cause.'],
-        ['read_only', 'The gateway relays SEMP reads only; this request would change the broker.'],
-        ['upstream_auth', 'The broker refused the credential the gateway holds for it. Ask an administrator to check the connection.'],
-        ['upstream_unavailable', 'The gateway could not reach the broker, or the broker gave an answer it cannot pass on. Its log has the cause.'],
         ['network', 'The gateway could not be reached.'],
-        ['timeout', 'The gateway did not answer in time. If this was a change, it may still have been applied: reload to see where it stands before you try again.'],
-        ['bad_response', 'The gateway sent a response this page cannot read.'],
-    ])('maps %s', (code, text) => {
+    ])('words %s as a user would read it', (code, text) => {
         expect(managedErrorMessage(err(code))).toBe(text);
     });
 

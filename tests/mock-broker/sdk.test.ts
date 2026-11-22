@@ -14,7 +14,7 @@ import { MOCK_SUBCODE } from '../../src/mock-broker/sdk/errors';
  * The demo broker is excluded from the coverage percentage like every other
  * mock, but it is NOT untested: these cover the specific ways a plausible-looking
  * fake breaks the real app silently rather than loudly. Each describe maps to one
- * hazard identified when the emulator was designed.
+ * such hazard.
  */
 beforeEach(() => {
     resetScenario();
@@ -259,33 +259,24 @@ describe('mock-broker/sdk — queue browser', () => {
         expect(count).toBeGreaterThan(3);
     });
 
-    it('refuses to bind a denied queue through CONNECT_FAILED_ERROR', async () => {
-        const { sdk, browser } = browserFor('vpn-prod', 'Q/DENIED');
-        const failed = vi.fn();
-        const up = vi.fn();
-        browser.on(sdk.QueueBrowserEventName.CONNECT_FAILED_ERROR, failed);
-        browser.on(sdk.QueueBrowserEventName.UP, up);
-        browser.connect();
-
-        await vi.waitFor(() => expect(failed).toHaveBeenCalled());
-        expect(up).not.toHaveBeenCalled();
-    });
-
     it('fails with an OperationError shape — message, no infoStr', async () => {
         // Verified against dist/solclient.js: the consumer FSM asserts
         // `instanceof OperationError` before emitting CONNECT_FAILED_ERROR, and
         // QueueBrowser forwards it verbatim. OperationError extends Error, so the
         // reason is on `.message`; it has no infoStr at all.
         //
-        // The emulator must NOT also set infoStr. It used to, and that hid a real
-        // defect: queue-copy read infoStr here and silently showed generic text
-        // against a live broker while the demo looked correct.
+        // The emulator must NOT also set infoStr: a consumer reading infoStr
+        // would show generic text against a live broker while the demo looked
+        // correct.
         const { sdk, browser } = browserFor('vpn-prod', 'Q/DENIED');
         let event: any;
+        const up = vi.fn();
         browser.on(sdk.QueueBrowserEventName.CONNECT_FAILED_ERROR, (e: any) => { event = e; });
+        browser.on(sdk.QueueBrowserEventName.UP, up);
         browser.connect();
         await vi.waitFor(() => expect(event).toBeDefined());
 
+        expect(up).not.toHaveBeenCalled();
         expect(event).toBeInstanceOf(Error);
         expect(event.message).toMatch(/Permission Denied/);
         expect(event.infoStr).toBeUndefined();
@@ -356,14 +347,11 @@ describe('mock-broker/sdk — enums', () => {
         const sdk = buildSolaceSdk();
         const entries = Object.entries(sdk.SessionEventCode);
         expect(entries.length).toBeGreaterThan(6);
-        expect(sdk.SessionEventCode.UP_NOTICE).toBe('UP_NOTICE');
-        expect(sdk.MessageDeliveryModeType.PERSISTENT).toBe(1);
-        expect(sdk.QueueBrowserEventName.MESSAGE).toBe('MESSAGE');
     });
 
     it('reports a version above the shell floor', () => {
         // The floor is the shell's own MIN_VERSION for solclientjs (src/index.html);
-        // a raised floor the mock no longer meets must fail here, not in the demo.
+        // a raised floor the mock does not meet must fail here, not in the demo.
         const shell = fs.readFileSync(path.join(REPO_ROOT, 'src/index.html'), 'utf-8');
         const m = shell.match(/Version Check \(>= [\d.]+\)\. solaceLibLoaded[\s\S]*?const MIN_VERSION = '([\d.]+)'/);
         expect(m, "src/index.html's MIN_VERSION check for solclientjs").not.toBeNull();
@@ -375,22 +363,11 @@ describe('mock-broker/sdk — enums', () => {
 });
 
 describe('mock-broker/sdk — message', () => {
-    it('round-trips values a forwarded message carries', () => {
-        const sdk = buildSolaceSdk();
-        const msg = sdk.SolclientFactory.createMessage();
-        msg.setBinaryAttachment('body').setApplicationMessageId('app-1').setPriority(4);
+    it('sizes a message above 0 bytes, as the UI reads smfHeader.messageLength as a raw property', () => {
+        const msg = buildSolaceSdk().SolclientFactory.createMessage();
+        msg.setBinaryAttachment('body');
 
-        expect(msg.getBinaryAttachment()).toBe('body');
-        expect(msg.getApplicationMessageId()).toBe('app-1');
-        expect(msg.getPriority()).toBe(4);
-        // smfHeader.messageLength is read as a raw property; without it every
-        // message sizes as 0 bytes in the UI.
         expect(msg.smfHeader.messageLength).toBeGreaterThan(0);
-    });
-
-    it('leaves getSdtContainer null for a message with no SDT body, so the publisher falls through to the binary attachment', () => {
-        const sdk = buildSolaceSdk();
-        expect(sdk.SolclientFactory.createMessage().getSdtContainer()).toBeNull();
     });
 });
 

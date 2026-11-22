@@ -24,6 +24,7 @@ import { createGate, gateOnAdminSession } from '../../core/components/module-gat
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { logger } from '../../core/logger';
 import { showToast } from '../../core/toast';
+import { formatUtc } from '../../core/utils';
 import { reportManagedFailure } from '../../core/services/managed-api';
 import { createTlsService, type CertInfo, type TlsView } from './service';
 import type { AppContext } from '../../core/types';
@@ -47,11 +48,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Options for tests: the clock the expiry marks read. */
 export interface TlsCertificatesOptions {
     now?(): number;
-}
-
-/** An RFC 3339 UTC time as the page shows it: "2026-11-09 02:00 UTC". */
-export function formatUtc(iso: string): string {
-    return iso.replace('T', ' ').replace(/:\d{2}Z$/, ' UTC');
 }
 
 /** The mark a certificate's expiry earns: expired, or ending within EXPIRY_WARN_DAYS; null when neither. */

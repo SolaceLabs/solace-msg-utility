@@ -25,7 +25,6 @@ const mockFetchQueues = vi.fn();
 const mockSolaceInit = vi.fn();
 const mockSolaceConnect = vi.fn();
 const mockSolaceDisconnect = vi.fn();
-const mockSolaceCleanup = vi.fn();
 
 const mockSempConnect = vi.fn();
 const mockSempDisconnect = vi.fn();
@@ -58,7 +57,6 @@ vi.mock('../../src/core/services/solace-client', () => ({
         init: mockSolaceInit,
         connect: mockSolaceConnect,
         disconnect: mockSolaceDisconnect,
-        cleanup: mockSolaceCleanup,
     })
 }));
 
@@ -118,7 +116,6 @@ describe('Integration: module cross-talk', () => {
         mockSolaceInit.mockReset();
         mockSolaceConnect.mockReset();
         mockSolaceDisconnect.mockReset();
-        mockSolaceCleanup.mockReset();
         mockSempConnect.mockReset();
         mockSempDisconnect.mockReset();
 

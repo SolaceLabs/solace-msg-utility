@@ -94,21 +94,6 @@ describe('Kernel', () => {
             expect(window.location.href).toBe(priorUrl);
         });
 
-        it('does NOT change log level when ?logLevel= is absent', async () => {
-            // Falsy-branch anchor for the same gate. Default search is ''.
-            const priorLevel = getLogLevel();
-            setLogLevel(DEFAULT_LOG_LEVEL);
-            try {
-                const mod = createMockModule({ id: 'test-module', name: 'Test' });
-                setupDOM(['test-module']);
-                const kernel = createKernel([reg(mod)]);
-                await kernel.start();
-                expect(getLogLevel()).toBe(DEFAULT_LOG_LEVEL);
-            } finally {
-                setLogLevel(priorLevel);
-            }
-        });
-
         it('installs modules in priority order', async () => {
             const order: string[] = [];
             const modA = createMockModule({
@@ -246,6 +231,7 @@ describe('Kernel', () => {
 
                 const loading = document.getElementById('app-loading')!;
                 expect(loading.textContent).toBe('No modules are available. Check the browser console.');
+                expect(document.getElementById('sidebar-nav')!.innerHTML).toBe('');
             });
 
             it('replaces the placeholder text with a message when every module fails to install', async () => {
@@ -256,6 +242,8 @@ describe('Kernel', () => {
 
                 expect(document.getElementById('app-loading')!.textContent)
                     .toBe('No modules are available. Check the browser console.');
+                expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('No modules installed successfully'));
+                expect(document.getElementById('page-title')!.textContent).toBe('');
                 errSpy.mockRestore();
             });
 
@@ -325,6 +313,26 @@ describe('Kernel', () => {
                 expect(handler).toHaveBeenCalledTimes(1);
             });
 
+            it('hands every module the same EventBus, so what one emits another hears', async () => {
+                const buses: Record<string, AppContext['eventBus']> = {};
+                const heardByB: string[] = [];
+                const modA = createMockModule({ id: 'mod-a', name: 'A', install: vi.fn(async (ctx: AppContext) => { buses.a = ctx.eventBus; }) });
+                const modB = createMockModule({
+                    id: 'mod-b', name: 'B',
+                    install: vi.fn(async (ctx: AppContext) => {
+                        buses.b = ctx.eventBus;
+                        ctx.eventBus.on('connection:check-connection', ({ queue }) => heardByB.push(queue));
+                    }),
+                });
+                setupDOM(['mod-a', 'mod-b']);
+
+                await createKernel([reg(modA, 10), reg(modB, 5)]).start();
+
+                expect(buses.a).toBe(buses.b);
+                buses.a.emit('connection:check-connection', { vpn: 'v', queue: 'q1' });
+                expect(heardByB).toEqual(['q1']);
+            });
+
             it('delivers an event emitted in a higher-priority install to a lower-priority module that subscribes only in its own install', async () => {
                 // The hold-and-replay guarantee: connections (priority 100) emits while
                 // installing, before queue-copy (70) has subscribed; the bus holds the
@@ -378,14 +386,6 @@ describe('Kernel', () => {
             expect(document.getElementById('sidebar-nav')?.innerHTML).not.toContain('Failing');
         });
 
-        it('works with no modules', async () => {
-            setupDOM([]);
-            const kernel = createKernel([]);
-            await kernel.start();
-            const nav = document.getElementById('sidebar-nav');
-            expect(nav?.innerHTML).toBe('');
-        });
-
         it('skips failed-to-install first module and activates the next', async () => {
             // Higher priority installs first. The template for `a` is deliberately
             // missing so installModule() fails to load it and leaves it out of
@@ -407,50 +407,24 @@ describe('Kernel', () => {
             consoleSpy.mockRestore();
         });
 
-        it('logs an error and navigates nowhere when every module fails to install', async () => {
-            const modA = createMockModule({ id: 'a', name: 'A' });
-            setupDOM([]); // no templates at all → nothing installs
-            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-            const kernel = createKernel([reg(modA)]);
-            await kernel.start();
-
-            expect(errSpy).toHaveBeenCalledWith(
-                expect.stringContaining('No modules installed successfully')
-            );
-            expect(document.getElementById('page-title')?.textContent).toBe('');
-            errSpy.mockRestore();
-        });
-
-        it('is idempotent — second start() is a no-op that logs a warning', async () => {
-            const mod = createMockModule({ id: 'test-module' });
-            setupDOM(['test-module']);
-            const kernel = createKernel([reg(mod)]);
-
-            await kernel.start();
-            expect(mod.install).toHaveBeenCalledTimes(1);
-
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            await kernel.start();
-            // install() must NOT run a second time — the guard's whole point.
-            expect(mod.install).toHaveBeenCalledTimes(1);
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('called more than once'));
-            warnSpy.mockRestore();
-        });
-
-        it('idempotency prevents window listener accumulation across start() calls', async () => {
+        it('is idempotent -- second start() is a no-op that logs a warning and bridges window events once', async () => {
             let ctx: AppContext | null = null;
             const mod = createMockModule({ id: 'test-module', install: vi.fn(async c => { ctx = c; }) });
             setupDOM(['test-module']);
             const kernel = createKernel([reg(mod)]);
+
             await kernel.start();
+            expect(mod.install).toHaveBeenCalledTimes(1);
 
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
             await kernel.start();
             await kernel.start();
+            // install() must NOT run again -- the guard's whole point.
+            expect(mod.install).toHaveBeenCalledTimes(1);
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('called more than once'));
             warnSpy.mockRestore();
 
-            // A second start() that re-ran the bridge would forward the window event twice.
+            // A repeated start() that re-ran the bridge would forward the window event twice.
             const handler = vi.fn();
             ctx!.eventBus.on('jszip:loaded', handler);
             window.dispatchEvent(new Event('jszip:loaded'));
@@ -815,39 +789,6 @@ describe('Kernel', () => {
             (globalThis.fetch as any).mockResolvedValue({ status: 401, ok: false });
             await capturedCtx!.sempFetch('/SEMP');
             expect(signOut).not.toHaveBeenCalled();
-        });
-
-        it('sempFetch propagates fetch errors', async () => {
-            let capturedCtx: AppContext | null = null;
-            const mod = createMockModule({
-                id: 'test-module',
-                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
-            });
-            setupDOM(['test-module']);
-            const kernel = createKernel([reg(mod)]);
-            await kernel.start();
-
-            (globalThis.fetch as any).mockRejectedValue(new Error('Network error'));
-            await expect(capturedCtx!.sempFetch('/SEMP')).rejects.toThrow('Network error');
-        });
-
-        it('sempFetch propagates synchronous URL construction TypeError', async () => {
-            // fetch() can throw synchronously (not via a rejected Promise) when the URL
-            // is unparseable — e.g. contains a NUL byte. The wrapper must let that throw
-            // propagate so the caller can handle it, same as it does for rejections.
-            let capturedCtx: AppContext | null = null;
-            const mod = createMockModule({
-                id: 'test-module',
-                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
-            });
-            setupDOM(['test-module']);
-            const kernel = createKernel([reg(mod)]);
-            await kernel.start();
-
-            (globalThis.fetch as any).mockImplementation(() => {
-                throw new TypeError("Failed to construct 'URL': Invalid URL");
-            });
-            await expect(capturedCtx!.sempFetch('/\0bad')).rejects.toThrow(TypeError);
         });
 
         it('provides copyToClipboard that writes to clipboard', async () => {

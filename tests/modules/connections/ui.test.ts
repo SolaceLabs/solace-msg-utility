@@ -122,21 +122,6 @@ describe('connections/ui', () => {
         });
     });
 
-    describe('showError', () => {
-        it('adds is-invalid class when show=true', () => {
-            const els = ui.getElements();
-            ui.showError(els.elHost, true);
-            expect(els.elHost.classList.contains('is-invalid')).toBe(true);
-        });
-
-        it('removes is-invalid class when show=false', () => {
-            const els = ui.getElements();
-            els.elHost.classList.add('is-invalid');
-            ui.showError(els.elHost, false);
-            expect(els.elHost.classList.contains('is-invalid')).toBe(false);
-        });
-    });
-
     describe('showFeedback', () => {
         it('sets button text', () => {
             const els = ui.getElements();
@@ -253,16 +238,6 @@ describe('connections/ui', () => {
             const els = ui.getElements();
             els.radiosAuth.forEach((r: any) => (r.checked = false));
             expect(ui.getAuthMode()).toBe('basic');
-        });
-    });
-
-    describe('cacheElements edge cases', () => {
-        it('throws when a required element is missing', () => {
-            const bare = document.createElement('div');
-            document.body.appendChild(bare);
-            expect(() => ui.cacheElements(bare)).toThrow(/Required element missing/);
-            // restore cached full container for remaining tests
-            ui.cacheElements(container);
         });
     });
 

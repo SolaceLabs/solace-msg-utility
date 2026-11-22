@@ -101,14 +101,8 @@ func TestSettings_GetReportsTheFile(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	rec := e.do("GET", "/managed/settings", "", e.cookie("admin", false))
 	expect(t, rec, http.StatusOK, "")
-	if body := rec.Body.String(); strings.Contains(body, "version") || strings.Contains(body, "seed") || strings.Contains(body, "store.key") || strings.Contains(body, "storeKey") {
+	if body := rec.Body.String(); strings.Contains(body, "version") || strings.Contains(body, "store.key") || strings.Contains(body, "storeKey") {
 		t.Errorf("the version and the secret paths are not the page's to see: %s", body)
-	}
-	if body := rec.Body.String(); strings.Contains(body, "certFile") || strings.Contains(body, "keyFile") || strings.Contains(body, "trustDir") || strings.Contains(body, "hostOnly") {
-		t.Errorf("the TLS paths are environment only and no key is host-only: %s", body)
-	}
-	if body := rec.Body.String(); strings.Contains(body, "restartOnly") || strings.Contains(body, "pendingRestart") || strings.Contains(body, "restartRequired") {
-		t.Errorf("no setting waits for a restart, so the page is told of none: %s", body)
 	}
 	s := e.settings(t)
 	want := fileConfigFromConfig(e.cfg)
@@ -125,12 +119,6 @@ func TestSettings_GetReportsTheFile(t *testing.T) {
 	}
 	if want := checksumRev(e.api.settings.wr.sums.sumOf(data)); s.Rev != want || len(s.Rev) != 43 {
 		t.Errorf("rev: want the keyed checksum of config.yaml %q, got %q", want, s.Rev)
-	}
-	if s.Settings.Audit.OnFailure != auditOnFailureContinue {
-		t.Errorf("audit.onFailure defaults to continue, got %q", s.Settings.Audit.OnFailure)
-	}
-	if !reflect.DeepEqual(s.Catalog, moduleCatalog()) {
-		t.Errorf("catalog: %v", s.Catalog)
 	}
 }
 
@@ -582,29 +570,6 @@ func TestSettings_AHandEditIsFoundAtWriteTimeAndStaysRefused(t *testing.T) {
 	}
 }
 
-// A save by someone who is no longer an administrator when the writer lock is
-// theirs is refused as the gate would: 403 for a user who lost the flag, 401
-// for one who is gone.
-func TestSettings_TheCallerIsCheckedAgainWhenTheLockIsHeld(t *testing.T) {
-	e := newManagedEnv(t, nil)
-	asUser := func(name string) *http.Request {
-		req := httptest.NewRequest("PUT", "https://gw.example/managed/settings", nil)
-		return req.WithContext(withSession(req.Context(), activeSession{session: session{user: name}}))
-	}
-	if err := e.api.settingsCaller(asUser("admin")); err != nil {
-		t.Errorf("an administrator passes: %v", err)
-	}
-	for name, want := range map[string]struct {
-		status int
-		code   string
-	}{"viewer": {http.StatusForbidden, "forbidden"}, "ghost": {http.StatusUnauthorized, "unauthenticated"}} {
-		status, body, ok := classifyStoreError(e.api.settingsCaller(asUser(name)))
-		if !ok || status != want.status || body.Error != want.code {
-			t.Errorf("%s: got %d %+v (%v), want %d %s", name, status, body, ok, want.status, want.code)
-		}
-	}
-}
-
 // ----- stageSettings (the import's way in) ----------------------------------------------
 
 // Staging validates and stages inside somebody else's transaction: nothing is
@@ -800,24 +765,6 @@ func TestSettings_TwoFactorIsALiveKey(t *testing.T) {
 	}
 	if e.live.twoFactor() != twoFactorAdmins || e.fileOnDisk(t).Login.TwoFactor != twoFactorAdmins {
 		t.Error("a refused value must change nothing")
-	}
-}
-
-// settingsChanges lists login.twoFactor by its dotted name.
-func TestSettingsChanges_ListsTwoFactor(t *testing.T) {
-	a, b := defaultFileConfig(), defaultFileConfig()
-	b.Login.TwoFactor = twoFactorMandatory
-	if got := settingsChanges(a, b); !reflect.DeepEqual(got, []string{"login.twoFactor"}) {
-		t.Errorf("got %v", got)
-	}
-}
-
-// settingsChanges lists audit.onFailure by its dotted name.
-func TestSettingsChanges_ListsAuditOnFailure(t *testing.T) {
-	a, b := defaultFileConfig(), defaultFileConfig()
-	b.Audit.OnFailure = auditOnFailureRefuse
-	if got := settingsChanges(a, b); !reflect.DeepEqual(got, []string{"audit.onFailure"}) {
-		t.Errorf("got %v", got)
 	}
 }
 

@@ -47,10 +47,9 @@ function enrolViewer(): string {
 }
 
 describe('mock-broker/controls/authenticator', () => {
-    it('is titled Authenticator and says how to get a secret while nobody has one', () => {
-        expect(box.querySelector('.mockctl-title')!.textContent).toBe('Authenticator');
+    it('lists no account while nobody has a secret', () => {
         expect(rows()).toEqual([]);
-        expect(box.textContent).toContain('No account has two-factor yet. Open Two-factor sign-in from the account controls to set it up.');
+        expect(box.textContent).toContain('No account has two-factor yet');
     });
 
     it('lists an enrolled account with the code for this step and the seconds left', () => {

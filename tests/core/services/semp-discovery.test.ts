@@ -80,7 +80,7 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockResolvedValue({ ok: true, json: async () => ({}) });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchVpns());
             expect(pages).toHaveLength(1);
-            expect(pages[0].ok).toBe(false);
+            expect(pages[0]).toEqual({ ok: false, error: 'Error fetching VPNs' });
         });
 
         it('handles network error', async () => {
@@ -231,8 +231,8 @@ describe('core/services/semp-discovery', () => {
             expect(page).toEqual({ ok: true, data: ['Q-B', 'Q-A'] });
         });
 
-        // See fetchVpns block above for why these use allPages() — same single-
-        // page-then-stop contract being locked in.
+        // Paging is shared with fetchVpns and tested there; these cover what
+        // fetchQueues adds: its path, VPN encoding and error label.
 
         it('handles API error', async () => {
             const sempCtx = makeSempCtx();
@@ -247,7 +247,7 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockResolvedValue({ ok: true, json: async () => ({}) });
             const pages = await allPages(createSempDiscovery(sempCtx).fetchQueues('default'));
             expect(pages).toHaveLength(1);
-            expect(pages[0].ok).toBe(false);
+            expect(pages[0]).toEqual({ ok: false, error: 'Error fetching Queues' });
         });
 
         it('handles network error', async () => {
@@ -286,41 +286,6 @@ describe('core/services/semp-discovery', () => {
             (sempCtx.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
             await allPages(createSempDiscovery(sempCtx).fetchQueues('team a/b'));
             expect((sempCtx.fetch as any).mock.calls[0][0]).toBe('/SEMP/v2/monitor/msgVpns/team%20a%2Fb/queues?count=100');
-        });
-
-        it('passes a path-only string for the initial fetch', async () => {
-            const sempCtx = makeSempCtx();
-            (sempCtx.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
-            await allPages(createSempDiscovery(sempCtx).fetchQueues('default'));
-            const calledWith = (sempCtx.fetch as any).mock.calls[0][0];
-            expect(calledWith).toBe('/SEMP/v2/monitor/msgVpns/default/queues?count=100');
-        });
-
-        it('follows meta.paging.nextPageUri across multiple pages, passing only the extracted path', async () => {
-            vi.useFakeTimers();
-            const sempCtx = makeSempCtx();
-            (sempCtx.fetch as any)
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({
-                        data: [{ queueName: 'Q-1' }, { queueName: 'Q-2' }],
-                        meta: { paging: { nextPageUri: 'http://broker-internal:943/SEMP/v2/monitor/msgVpns/default/queues?cursor=p2' } }
-                    })
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ data: [{ queueName: 'Q-3' }] })
-                });
-
-            const pagesPromise = allPages(createSempDiscovery(sempCtx).fetchQueues('default'));
-            await vi.advanceTimersByTimeAsync(PAGE_DELAY_MS);
-            const pages = await pagesPromise;
-
-            expect(pages).toHaveLength(2);
-            expect(pages[0]).toEqual({ ok: true, data: ['Q-1', 'Q-2'] });
-            expect(pages[1]).toEqual({ ok: true, data: ['Q-3'] });
-            expect((sempCtx.fetch as any).mock.calls[1][0]).toBe('/SEMP/v2/monitor/msgVpns/default/queues?cursor=p2');
-            vi.useRealTimers();
         });
     });
 });

@@ -164,18 +164,6 @@ func TestSessionCookie_FlagsAndRequestLookup(t *testing.T) {
 	}
 }
 
-func TestSessionOf_ContextRoundTrip(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	if as := sessionOf(req); as.user != "" {
-		t.Errorf("no session on the context: got %+v", as)
-	}
-	want := activeSession{id: "x", session: session{user: "alice"}}
-	req = req.WithContext(withSession(req.Context(), want))
-	if got := sessionOf(req); got.id != "x" || got.user != "alice" {
-		t.Errorf("got %+v", got)
-	}
-}
-
 // Ending a session on purpose fires a revocation hook (open SMF sockets
 // close, sockets.go); expiry does not, by design: a socket outlives its
 // session's limits. has never marks a session used.
@@ -266,24 +254,6 @@ func TestTickets_CreateReplacesNothing(t *testing.T) {
 	tk.drop("unknown") // not an error
 }
 
-// A ticket lives its lifetime (ten minutes unless login.twoFactorMinutes says
-// otherwise) from create; using it does not extend it.
-func TestTickets_ExpireTenMinutesAfterCreate(t *testing.T) {
-	tk, clock := newTestTickets()
-	id := tk.create(ticket{user: "alice", stage: stageCode})
-	clock.advance(defaultTicketTTL - time.Second)
-	if _, ok := tk.lookup(id); !ok {
-		t.Fatal("a ticket must be live just before its time is up")
-	}
-	clock.advance(time.Second)
-	if _, ok := tk.lookup(id); ok {
-		t.Fatal("a ticket must end defaultTicketTTL after it was made, however often it was used")
-	}
-	if len(tk.byID) != 0 {
-		t.Error("an expired ticket must be removed when seen")
-	}
-}
-
 // A session store whose limits carry login.twoFactorMinutes gives its tickets
 // that lifetime, and a limits value without one gives the ten-minute default.
 func TestSessions_TicketLifetimeFollowsTwoFactorMinutes(t *testing.T) {
@@ -298,6 +268,9 @@ func TestSessions_TicketLifetimeFollowsTwoFactorMinutes(t *testing.T) {
 	clock.advance(time.Second)
 	if _, ok := s.tickets.lookup(id); ok {
 		t.Fatal("no setting: the ticket ends after ten minutes")
+	}
+	if len(s.tickets.byID) != 0 {
+		t.Error("an expired ticket must be removed when seen")
 	}
 	lim.ticket = 3 * time.Minute
 	id = s.tickets.create(ticket{user: "alice", stage: stageCode})

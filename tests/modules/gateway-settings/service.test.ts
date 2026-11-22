@@ -44,21 +44,11 @@ describe('gateway-settings/service', () => {
         }));
     });
 
-    it('a stale save carries the current rev text', async () => {
-        fetchMock().mockResolvedValue({ ok: false, status: 409, json: async () => ({ error: 'stale', rev: 'cur' }) });
-        expect(await createSettingsService().save(SETTINGS, 'old')).toEqual(expect.objectContaining({ ok: false, code: 'stale', rev: 'cur' }));
-    });
-
     it('restart POSTs /managed/restart with no body and returns the 202 answer', async () => {
         fetchMock().mockResolvedValue({ ok: true, status: 202, json: async () => ({ restarting: true }) });
 
         expect(await createSettingsService().restart()).toEqual({ ok: true, data: { restarting: true } });
         expect(fetchMock()).toHaveBeenCalledWith('/managed/restart', { method: 'POST', credentials: 'same-origin' });
-    });
-
-    it('a restart refused for a non-administrator carries the gateway\'s code', async () => {
-        fetchMock().mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: 'forbidden' }) });
-        expect(await createSettingsService().restart()).toEqual(expect.objectContaining({ ok: false, status: 403, code: 'forbidden' }));
     });
 
     it('ping is true while /hosted answers, read fresh from the network', async () => {

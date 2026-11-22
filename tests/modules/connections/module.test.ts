@@ -15,7 +15,7 @@ import { completeContext } from '../../helpers/appContext';
 import { answerConfirm } from '../../helpers/confirmDialog';
 import type { ConnectionConfig } from '../../../src/core/connections/types';
 
-/** A saved config as an earlier version wrote it: fields may be missing, which applyConfig tolerates. */
+/** A saved config with fields missing, which applyConfig tolerates. */
 const asConfig = (c: object) => c as ConnectionConfig;
 
 function createConnectionsDOM() {
@@ -75,13 +75,6 @@ describe('ConnectionsModule', () => {
         (window as any).solace = solaceMock;
         container = createConnectionsDOM();
         document.body.appendChild(container);
-    });
-
-    it('has correct metadata', () => {
-        expect(ConnectionsModule.name).toBe('Connections');
-        expect(ConnectionsModule.id).toBe('connections');
-        expect(ConnectionsModule.icon).toContain('svg');
-        // Priority is set in src/registry.ts; tested in tests/registry.test.ts.
     });
 
     it('loads saved config on install', async () => {
@@ -182,9 +175,8 @@ describe('ConnectionsModule', () => {
 
     describe('client name identifier validation', () => {
         // Covers the >100-char branch and the save-button early-return
-        // on invalid clientNameId, which are otherwise unexercised. A regression that
-        // dropped either check would silently forward an over-length or
-        // invalid identifier to the SDK, where it would fail late at connect
+        // on invalid clientNameId. Without either check an over-length or
+        // invalid identifier would reach the SDK and fail late at connect
         // time with a generic broker error instead of the inline UI message.
         it('blocks save and shows inline error when clientNameId exceeds 100 characters', async () => {
             const { ctx } = createTestContext(container);
@@ -232,13 +224,6 @@ describe('ConnectionsModule', () => {
             input.dispatchEvent(new Event('input'));
             expect(input.classList.contains('is-invalid')).toBe(false);
             expect(errEl.textContent).toBe('');
-
-            // Falsy-branch anchor: a second input event with no error
-            // present is a no-op (the `if` short-circuits without writing
-            // textContent — anything we put there stays).
-            errEl.textContent = 'sentinel';
-            input.dispatchEvent(new Event('input'));
-            expect(errEl.textContent).toBe('sentinel');
         });
     });
 
@@ -674,10 +659,6 @@ describe('ConnectionsModule', () => {
         expect([btnSolace.disabled, btnSolace.textContent]).toEqual([false, 'Connect']);
     });
 
-    it("the Max Messages input's max attribute equals MAX_MESSAGES_PER_QUEUE", () => {
-        expect((container.querySelector('#sol-max-messages') as HTMLInputElement).max).toBe(String(MAX_MESSAGES_PER_QUEUE));
-    });
-
     it('solace connect fails validation with empty host', async () => {
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
@@ -788,7 +769,7 @@ describe('ConnectionsModule', () => {
         expect(await answerSwitch(true)).toBe('Current VPN is "old-vpn". Switch to "new-vpn"?');
         // Event-driven handoff: simulate the SDK's teardown signal.
         eventBus.emit('client:disconnected');
-        // VPN input should now reflect the requested target.
+        // The VPN input reflects the requested target.
         expect(vpnInput.value).toBe('new-vpn');
     });
 
@@ -1415,7 +1396,7 @@ describe('ConnectionsModule', () => {
             expect(btnSemp.textContent).toBe('Connect');
             expect(btnSemp.classList.contains('btn-primary')).toBe(true);
             expect(btnSemp.classList.contains('btn-danger')).toBe(false);
-            // A click now connects again (it is not taken as a disconnect).
+            // A click connects again (it is not taken as a disconnect).
             (globalThis.fetch as any).mockClear();
             btnSemp.click();
             await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -1466,7 +1447,7 @@ describe('ConnectionsModule', () => {
             expect((window as any).solace.SolclientFactory.createSession).not.toHaveBeenCalled();
         });
 
-        it('rejects disallowed characters (e.g. spaces) and blocks the SDK call', async () => {
+        it('rejects disallowed characters (e.g. spaces) and blocks the SDK call; typing a correction clears the error', async () => {
             const { ctx } = createTestContext(container);
             await ConnectionsModule.install(ctx);
 
@@ -1483,8 +1464,15 @@ describe('ConnectionsModule', () => {
 
             const errBox = container.querySelector('#solace-client-name-id-error') as HTMLElement;
             expect(input.classList.contains('is-invalid')).toBe(true);
-            expect(errBox.textContent).toMatch(/allowed/i);
+            expect(errBox.textContent).toBe('Allowed: letters, digits, and !@#$%^&*-=_+/.,');
             expect((window as any).solace.SolclientFactory.createSession).not.toHaveBeenCalled();
+
+            // The first keystroke of a correction clears the error; full
+            // validation waits for the next blur.
+            input.value = 'has';
+            input.dispatchEvent(new Event('input'));
+            expect(input.classList.contains('is-invalid')).toBe(false);
+            expect(errBox.textContent).toBe('');
         });
 
         it('accepts the full allowed symbol set without flagging an error', async () => {
@@ -1626,27 +1614,6 @@ describe('ConnectionsModule', () => {
             expect(propsObj.clientName).toBe('SolMsgUtil/20260517143025/trim-me');
 
             vi.useRealTimers();
-        });
-
-        it('clears a stale invalid state eagerly while the user types a correction', async () => {
-            const { ctx } = createTestContext(container);
-            await ConnectionsModule.install(ctx);
-
-            const input = container.querySelector('#solace-client-name-id') as HTMLInputElement;
-            const errBox = container.querySelector('#solace-client-name-id-error') as HTMLElement;
-
-            // Force invalid state via blur on disallowed value.
-            input.value = 'has space';
-            input.dispatchEvent(new Event('blur'));
-            expect(input.classList.contains('is-invalid')).toBe(true);
-            expect(errBox.textContent).not.toBe('');
-
-            // First input event with a non-empty corrective value clears the
-            // red flag eagerly so the user isn't stared at while editing.
-            input.value = 'fixed';
-            input.dispatchEvent(new Event('input'));
-            expect(input.classList.contains('is-invalid')).toBe(false);
-            expect(errBox.textContent).toBe('');
         });
     });
 

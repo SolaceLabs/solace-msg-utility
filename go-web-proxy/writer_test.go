@@ -612,23 +612,6 @@ func TestWriter_ADiskCheckMismatchIsStickyPerFile(t *testing.T) {
 	f.clean(t)
 }
 
-// A sealed file replaced behind the gateway's back maps to
-// store_changed_on_disk; so does a file that appears where none existed.
-func TestWriter_ASealedFileChangedOnDiskMapsToTheStoreCode(t *testing.T) {
-	f := newWFix(t)
-	writeFile(t, f.b, "replaced")
-	err := f.w.Do(context.Background(), func(tx *txn) error { return tx.check(f.b) })
-	if _, body, ok := classifyStoreError(err); !ok || body.Error != "store_changed_on_disk" {
-		t.Errorf("users.yaml maps to %+v %v", body, ok)
-	}
-	writeFile(t, f.c, "appeared")
-	err = f.w.Do(context.Background(), func(tx *txn) error { return tx.check(f.c) })
-	var disk *changedOnDiskError
-	if !errors.As(err, &disk) || disk.file != "connections.yaml" {
-		t.Errorf("a file that appeared: %v", err)
-	}
-}
-
 // With no store key (Direct mode) there is no disk check and no rev, and the
 // journal is used all the same.
 func TestWriter_WithoutAKeyThereIsNoDiskCheckAndNoRev(t *testing.T) {

@@ -26,7 +26,7 @@ import { downloadBlob } from '../../core/download';
 import { iconButton } from '../../core/icons';
 import { logger } from '../../core/logger';
 import { showToast } from '../../core/toast';
-import { formatBytes } from '../../core/utils';
+import { formatBytes, formatUtc } from '../../core/utils';
 import { reportManagedFailure, SIGNED_OUT_TOAST_MS } from '../../core/services/managed-api';
 import { handleConflict, STALE_IMPORT_MESSAGE } from '../../core/admin-conflict';
 import {
@@ -60,11 +60,6 @@ export function describeSchedule(s: BackupSchedule): string {
         case 'weekly': return `Weekly on ${WEEKDAYS[s.weekday]} at ${at}`;
         default: return `Monthly on day ${s.day} at ${at}`;
     }
-}
-
-/** An RFC 3339 UTC time as the page shows it: "2026-11-09 02:00 UTC". */
-export function formatUtc(iso: string): string {
-    return iso.replace('T', ' ').replace(/:\d{2}Z$/, ' UTC');
 }
 
 /** One section's preview: what it adds, changes and, under Replace, removes. */

@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { CSP_KINDS, inlineBlocks, hashSource, buildPolicy, policyFor, applyCsp, cspProblems } from '../../scripts/csp.mjs';
 import { variantGatewayOnly } from '../../scripts/module-registry-plugin.mjs';
-import { REPO_ROOT } from '../helpers/sources';
 
 /** SHA-256 of `alert(1)`, as a CSP hash source (computed independently of the code under test). */
 const ALERT_HASH = "'sha256-bhHHL3z2vDgxUt0W3dWQOrprscmda2Y5pLsLg4GF+pI='";
@@ -166,11 +165,5 @@ describe('csp -- variantGatewayOnly', () => {
         expect(variantGatewayOnly(fakeRoot(`${MODULES}export const GATEWAY_ONLY = false;\n`), 'v')).toBe(false);
         expect(variantGatewayOnly(fakeRoot(MODULES), 'v')).toBe(false);
         expect(variantGatewayOnly(fakeRoot(`${MODULES}// export const GATEWAY_ONLY = true;\n`), 'v')).toBe(false);
-    });
-
-    it('marks the two bundles only the gateway serves, and no bundle that may run anywhere', () => {
-        const only = (v: string) => variantGatewayOnly(REPO_ROOT, v);
-        expect(['managed', 'admin'].filter(only)).toEqual(['managed', 'admin']);
-        expect(['standard', 'min', 'no-queue-copy', 'all-for-testing-only', 'managed-demo'].filter(only)).toEqual([]);
     });
 });

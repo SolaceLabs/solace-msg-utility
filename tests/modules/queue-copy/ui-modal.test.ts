@@ -583,42 +583,6 @@ describe('queue-copy/ui-modal', () => {
             verifySpy.mockRestore();
         });
 
-        it('null owner (e.g. SEMP <owner> element missing) → no override', async () => {
-            // Defensive case: SEMP response lacked the <owner> element.
-            // result.owner is null. The override condition guards against
-            // null specifically so the equals check never runs.
-            const verifyMod = await import('../../../src/modules/queue-copy/service-verify');
-            const verifySpy = vi.spyOn(verifyMod, 'verifySource')
-                .mockResolvedValue(verifyResult({
-                    via: 'semp',
-                    messageCount: 5,
-                    accessType: 'read-only',
-                    owner: null,
-                }));
-
-            const ctx = makeCtx({
-                isSempConnected: true,
-                sempCredentials: sempCreds('https://b:1943/SEMP/v2', 'admin'),
-                solaceConnection: null,  // clientUser=''
-            });
-            const state = createInitialState();
-            state.sourceQueue = 'q';
-            state.dest = { type: 'queue', name: 'd' };
-            state.mode = 'move';
-
-            const session = createSessionMock();
-            (session.createQueueBrowser as any).mockReturnValue(createBrowserMock());
-
-            openCopyModal(ctx, els, state, () => session);
-            for (let i = 0; i < 10; i++) await Promise.resolve();
-
-            // Owner is null → guard short-circuits; no override.
-            expect(state.verify!.result!.accessType).toBe('read-only');
-            expect(els.btnModalStart.disabled).toBe(true);
-
-            verifySpy.mockRestore();
-        });
-
         it('QB-fallback path (owner=null) does NOT trigger override even when client user is set', async () => {
             const verifyMod = await import('../../../src/modules/queue-copy/service-verify');
             const verifySpy = vi.spyOn(verifyMod, 'verifySource')

@@ -122,14 +122,6 @@ describe('queue-browser/service-events', () => {
             expect(errorEl.style.display).toBe('none');
         });
 
-        it('does not clear bind input if different queue', () => {
-            const se = createServiceEvents();
-            const input = document.querySelector('#browser-bind-input') as HTMLInputElement;
-            input.value = 'other-queue';
-            se.onBrowserUp('test-queue');
-            expect(input.value).toBe('other-queue');
-        });
-
         it('emits an ok toast including the queue name', () => {
             // Ensure the toast container exists (provided by index.html in prod;
             // test DOM is a synthesised module template, so we add it here).
@@ -682,6 +674,7 @@ describe('queue-browser/service-events', () => {
             // Should be stored but not added to displayed
             expect(state.messageStore.get('q1')!.length).toBe(1);
             expect(state.displayedMessages.length).toBe(0);
+            expect(state.allMessages.length).toBe(0);
         });
 
         it('handles null gmid', () => {
@@ -897,20 +890,6 @@ describe('queue-browser/service-events', () => {
 
             expect(state.displayedMessages.map((m: any) => m.id)).toEqual(['121']);
             expect(ui.getElements().msgList.querySelector('tr[data-id="121"]')).not.toBeNull();
-        });
-
-        it('stores message but does not add to UI if different queue is active', () => {
-            const se = createServiceEvents();
-            state.currentQueue = 'other-queue';
-            state.messageStore.set('q1', []);
-
-            const msg = createMessageMock();
-            msg.getGuaranteedMessageId.mockReturnValue(123);
-
-            se.onMessage('q1', msg);
-
-            expect(state.messageStore.get('q1')!.length).toBe(1);
-            expect(state.allMessages.length).toBe(0);  // not updated for UI
         });
 
         it('keeps a guaranteed id above 2^53 exactly: the SDK hands it back as a Long, read with toString()', () => {

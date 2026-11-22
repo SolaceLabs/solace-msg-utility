@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { BLOB_URL_REVOKE_DELAY_MS, downloadBlob, saveBlob } from '../../src/core/download';
+import { stubSavePicker, type SavePickerStub } from '../helpers/savePicker';
+
+let picker: SavePickerStub | null = null;
 
 afterEach(() => {
     vi.useRealTimers();
     // A test that installed a save dialog must not leave it for the next one.
-    delete (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+    picker?.restore();
+    picker = null;
 });
 
 describe('core/download -- downloadBlob', () => {
@@ -39,12 +43,6 @@ describe('core/download -- downloadBlob', () => {
 });
 
 describe('core/download -- saveBlob', () => {
-    type Writable = { write(b: Blob): Promise<void>; close(): Promise<void> };
-    const installPicker = (impl: (opts: { suggestedName: string }) => Promise<{ createWritable(): Promise<Writable> }>) => {
-        const picker = vi.fn(impl);
-        (window as unknown as { showSaveFilePicker: unknown }).showSaveFilePicker = picker;
-        return picker;
-    };
     const blob = () => new Blob(['payload'], { type: 'application/octet-stream' });
 
     it('downloads under the suggested name when the browser has no save dialog', async () => {
@@ -61,29 +59,17 @@ describe('core/download -- saveBlob', () => {
     });
 
     it('opens the save dialog on the suggested name, writes the blob to the chosen file and closes it, without a download link', async () => {
-        const order: string[] = [];
-        const written: Blob[] = [];
-        let pickedOn: unknown;
         const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-        const picker = vi.fn(function (this: unknown, _opts: { suggestedName: string }) {
-            pickedOn = this;
-            return Promise.resolve({
-                createWritable: async (): Promise<Writable> => ({
-                    write: async (b: Blob) => { order.push('write'); written.push(b); },
-                    close: async () => { order.push('close'); },
-                }),
-            });
-        });
-        (window as unknown as { showSaveFilePicker: unknown }).showSaveFilePicker = picker;
+        picker = stubSavePicker();
         const b = blob();
 
         await saveBlob(b, 'solace-message-7.json');
 
-        expect(picker).toHaveBeenCalledWith({ suggestedName: 'solace-message-7.json' });
-        expect(pickedOn).toBe(window);
-        expect(written).toHaveLength(1);
-        expect(written[0]).toBe(b);
-        expect(order).toEqual(['write', 'close']);
+        expect(picker.names).toEqual(['solace-message-7.json']);
+        expect(picker.receivers).toHaveLength(1);
+        expect(picker.receivers[0]).toBe(window);
+        expect(picker.blobs).toEqual([b]);
+        expect(picker.closes).toBe(1);
         expect(URL.createObjectURL).not.toHaveBeenCalled();
         expect(click).not.toHaveBeenCalled();
         click.mockRestore();
@@ -91,7 +77,7 @@ describe('core/download -- saveBlob', () => {
 
     it('saves nothing when the user cancels the dialog, and says nothing', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        installPicker(() => Promise.reject(new DOMException('The user aborted a request.', 'AbortError')));
+        picker = stubSavePicker({ cancel: true });
 
         await expect(saveBlob(blob(), 'a.bin')).resolves.toBeUndefined();
 
@@ -106,7 +92,7 @@ describe('core/download -- saveBlob', () => {
         const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
             clicked.push(this.download);
         });
-        installPicker(() => Promise.reject(new DOMException('Must be handling a user gesture to show a file picker.', 'SecurityError')));
+        picker = stubSavePicker({ refuse: new DOMException('Must be handling a user gesture to show a file picker.', 'SecurityError') });
         const b = blob();
 
         await saveBlob(b, 'a.bin');
@@ -120,12 +106,7 @@ describe('core/download -- saveBlob', () => {
     });
 
     it('rejects, naming the cause, when writing to the chosen file fails', async () => {
-        installPicker(() => Promise.resolve({
-            createWritable: async (): Promise<Writable> => ({
-                write: async () => { throw new Error('disk full'); },
-                close: async () => {},
-            }),
-        }));
+        picker = stubSavePicker({ writeError: new Error('disk full') });
 
         await expect(saveBlob(blob(), 'a.bin')).rejects.toThrow('disk full');
         expect(URL.createObjectURL).not.toHaveBeenCalled();

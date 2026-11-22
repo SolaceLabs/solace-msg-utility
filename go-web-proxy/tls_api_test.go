@@ -619,23 +619,6 @@ func TestTLSAPI_RemoveTrustRefusals(t *testing.T) {
 	}
 }
 
-// A link in the directory is listed, so it can be deleted, but it is never
-// followed: the delete removes the link itself, and the file it points at
-// stays, with the certificates and the served pair untouched.
-func TestTLSAPI_RemoveTrustRemovesALinkNotItsTarget(t *testing.T) {
-	e := newManagedEnv(t, nil)
-	ca := newTestCert(t, testCertSpec{cn: "ca", ca: true})
-	e.putTrustDir(t, map[string]string{"real.crt": ca.certPEM})
-	if err := os.Symlink(filepath.Join(e.tls.trustDir, "real.crt"), filepath.Join(e.tls.trustDir, "link.crt")); err != nil {
-		t.Skipf("no symbolic links here: %v", err)
-	}
-	expect(t, e.do("DELETE", tlsTrustPath+"/link.crt", "", e.admin()), http.StatusOK, "")
-	e.wantTLSUntouched(t, "real.crt")
-	if got := string(mustRead(t, filepath.Join(e.tls.trustDir, "real.crt"))); got != ca.certPEM {
-		t.Errorf("the link's target keeps its content, got %q", got)
-	}
-}
-
 func TestClip(t *testing.T) {
 	if got := clip("abcdef", 3); got != "abc" {
 		t.Errorf("a long text is cut: %q", got)

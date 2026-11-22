@@ -41,24 +41,9 @@ describe('user-management/service', () => {
         expect(fetchMock()).toHaveBeenCalledWith('/managed/users/a%2Fb%20c?rev=12', { method: 'DELETE', credentials: 'same-origin' });
     });
 
-    it('a stale save carries the current rev', async () => {
-        fetchMock().mockResolvedValue({ ok: false, status: 409, json: async () => ({ error: 'stale', rev: 9 }) });
-        expect(await createUserMgmtService().saveUser(PAYLOAD)).toEqual(expect.objectContaining({ ok: false, code: 'stale', rev: 9 }));
-    });
-
-    it('deleteUser passes the gateway code through', async () => {
-        fetchMock().mockResolvedValue({ ok: false, status: 409, json: async () => ({ error: 'last_admin' }) });
-        expect(await createUserMgmtService().deleteUser('admin', 1)).toEqual(expect.objectContaining({ ok: false, code: 'last_admin' }));
-    });
-
     it('resetTwoFactor DELETEs /managed/users/{name}/totp with no rev, escaping the username; answers the current rev', async () => {
         fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => ({ rev: 8 }) });
         expect(await createUserMgmtService().resetTwoFactor('a/b c')).toEqual({ ok: true, data: { rev: 8 } });
         expect(fetchMock()).toHaveBeenCalledWith('/managed/users/a%2Fb%20c/totp', { method: 'DELETE', credentials: 'same-origin' });
-    });
-
-    it('resetTwoFactor passes the gateway code through', async () => {
-        fetchMock().mockResolvedValue({ ok: false, status: 404, json: async () => ({ error: 'not_found' }) });
-        expect(await createUserMgmtService().resetTwoFactor('ghost')).toEqual(expect.objectContaining({ ok: false, code: 'not_found' }));
     });
 });

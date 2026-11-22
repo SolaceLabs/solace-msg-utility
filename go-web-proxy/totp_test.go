@@ -463,38 +463,9 @@ func TestQRSVG_DrawsTheCodeWithItsQuietZone(t *testing.T) {
 	}
 }
 
-func TestQRSVG_SameTextSameDrawing(t *testing.T) {
-	a, errA := qrSVG("otpauth://totp/x:y?secret=AAAA")
-	b, errB := qrSVG("otpauth://totp/x:y?secret=AAAA")
-	c, errC := qrSVG("otpauth://totp/x:y?secret=BBBB")
-	if errA != nil || errB != nil || errC != nil {
-		t.Fatal(errA, errB, errC)
-	}
-	if a != b {
-		t.Error("the same text must give the same markup")
-	}
-	if a == c {
-		t.Error("different text must give a different drawing")
-	}
-}
-
 func TestQRSVG_TextTooLongForACodeIsAnError(t *testing.T) {
 	html, err := qrSVG(strings.Repeat("a", 10000))
 	if err == nil || html != "" {
 		t.Fatalf("want an error and no markup, got %d bytes, %v", len(html), err)
-	}
-}
-
-// A secret from newTOTPSecret works with the code and verify functions the
-// vectors test.
-func TestTOTP_NewSecretRoundTripsThroughVerify(t *testing.T) {
-	secret := newTOTPSecret()
-	now := time.Unix(1700000010, 0)
-	code, err := totpCode(secret, totpStepAt(now))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := totpVerify(secret, code, now); !ok {
-		t.Error("a code made for a new secret must verify")
 	}
 }

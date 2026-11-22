@@ -129,15 +129,6 @@ describe('queue-copy/module', () => {
         verifySourceMock.mockClear();
     });
 
-    describe('metadata', () => {
-        it('has correct module properties', () => {
-            expect(QueueCopyModule.name).toBe('Queue Copy');
-            expect(QueueCopyModule.id).toBe('queue-copy');
-            expect(QueueCopyModule.icon).toContain('svg');
-            // Priority is set in src/registry.ts; tested in tests/registry.test.ts.
-        });
-    });
-
     describe('install + initial state', () => {
         it('installs without primary connection: warning visible, content hidden', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -152,14 +143,6 @@ describe('queue-copy/module', () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             await QueueCopyModule.install(makeCtx(eventBus, container, { isConnected: true }));
             expect(container.querySelector('#copy-content')!.classList.contains('hidden')).toBe(false);
-            consoleSpy.mockRestore();
-        });
-
-        it('Next button disabled at install (no source/dest yet)', async () => {
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-            await QueueCopyModule.install(makeCtx(eventBus, container, { isConnected: true }));
-            const btn = container.querySelector<HTMLButtonElement>('#copy-btn-start')!;
-            expect(btn.disabled).toBe(true);
             consoleSpy.mockRestore();
         });
 

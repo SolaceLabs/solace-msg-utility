@@ -56,16 +56,6 @@ describe('queue-copy/ui', () => {
         elsHolder = setup();
     });
 
-    describe('cacheElements', () => {
-        it('caches every required element including the source-side mirror', () => {
-            const els = elsHolder.els;
-            expect(els.modal.tagName.toLowerCase()).toBe('dialog');
-            expect(els.modeRadios.length).toBe(2);
-            // Source-side read-only mirror (presence is enforced by required()).
-            expect(els.sourceEditButtons.length).toBe(3);
-        });
-    });
-
     describe('applySourceReadonly', () => {
         it('populates every source field from the snapshot, including passwords', () => {
             applySourceReadonly(elsHolder.els, PRIMARY);
@@ -99,11 +89,12 @@ describe('queue-copy/ui', () => {
         });
     });
 
-    // The connection gate (#copy-warning) is now created + toggled via the
+    // The connection gate (#copy-warning) is created and toggled by the
     // shared module-gate component inside install; its show/hide-vs-content
     // behaviour is covered by module.test.ts ("installs without primary
-    // connection…" / "installs with primary connected…"), and the component's
-    // own show()/hide() in tests/core/components/module-gate.
+    // connection: warning visible, content hidden" / "installs with primary
+    // connected: content visible"), and the component's own show()/hide() in
+    // tests/core/components/module-gate.
 
     describe('applyDestPrefill', () => {
         it('sameBroker=true & sameVpn=true: disables every dest field, prefills with primary values', () => {

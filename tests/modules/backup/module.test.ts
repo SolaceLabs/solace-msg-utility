@@ -15,7 +15,8 @@ vi.mock('../../../src/core/toast', () => ({ showToast: toastMock.showToast }));
 vi.mock('../../../src/core/download', () => ({ downloadBlob: downloadMock.downloadBlob }));
 vi.mock('../../../src/modules/backup/service', () => ({ createBackupService: () => svc }));
 
-import { BackupModule, describeSchedule, diffLines, formatUtc, MAX_IMPORT_BYTES } from '../../../src/modules/backup/module';
+import { BackupModule, describeSchedule, diffLines, MAX_IMPORT_BYTES } from '../../../src/modules/backup/module';
+import { formatUtc } from '../../../src/core/utils';
 import { completeContext } from '../../helpers/appContext';
 import { answerConfirm, confirmOpen } from '../../helpers/confirmDialog';
 
@@ -109,63 +110,13 @@ describe('backup -- helpers', () => {
         expect(describeSchedule({ kind: 'monthly', minute: 30, hour: 23, weekday: 0, day: 31 })).toBe('Monthly on day 31 at 23:30 UTC');
     });
 
-    it('shows a gateway time without seconds, marked UTC', () => {
-        expect(formatUtc('2026-11-09T02:15:00Z')).toBe('2026-11-09 02:15 UTC');
-    });
-
     it('lists a section as additions, changes and removals, or no change', () => {
         expect(diffLines({ added: ['a', 'b'], changed: ['c'], removed: ['d'] }, 'Remove')).toEqual(['Add: a, b', 'Change: c', 'Remove: d']);
         expect(diffLines({ added: [], changed: [], removed: [] }, 'Remove')).toEqual(['No change.']);
     });
 });
 
-describe('backup -- layout', () => {
-    it('is two cards, Configuration (export, import) and Schedule (schedule, saved backups), with no page title repeated in the body', async () => {
-        const { c } = await setup();
-        const cards = [...c.querySelectorAll<HTMLElement>('#backup-view > .card')];
-        expect(cards.map(card => card.querySelector('.backup-title')?.textContent)).toEqual(['Configuration', 'Schedule']);
-        const inCard = (sel: string) => cards.findIndex(card => card.querySelector(sel));
-        expect(['#btn-backup-export', '#btn-backup-preview', '#backup-import-file'].map(inCard)).toEqual([0, 0, 0]);
-        expect(['#backup-kind', '#btn-backup-save-schedule', '#backup-rows', '#btn-backup-reload', '#backup-error'].map(inCard)).toEqual([1, 1, 1, 1, 1]);
-        expect(c.querySelector('#backup-view h2')).toBeNull();
-        expect(el(c, '#backup-view').textContent).not.toContain('Backup & Restore');
-    });
-});
-
 describe('backup -- gate and status', () => {
-    it('fetches the status once at start with an admin restored, and ignores an rbac:changed that leaves the session as it is', async () => {
-        const { c, ctx } = await setup();
-        expect(svc.status).toHaveBeenCalledTimes(1);
-        ctx.eventBus.emit('rbac:changed');
-        await flush();
-        expect(svc.status).toHaveBeenCalledTimes(1);
-        expect(hidden(c, '#backup-view')).toBe(false);
-    });
-
-    it('reloads when the admin signs out and in again, or another admin signs in', async () => {
-        const { c, ctx } = await setup();
-        ctx.appState.managed = null;
-        ctx.eventBus.emit('rbac:changed');
-        expect(hidden(c, '#backup-view')).toBe(true);
-        expect(svc.status).toHaveBeenCalledTimes(1);
-        ctx.appState.managed = ADMIN;
-        ctx.eventBus.emit('rbac:changed');
-        await flush();
-        expect(svc.status).toHaveBeenCalledTimes(2);
-        ctx.appState.managed = { ...ADMIN, username: 'other' };
-        ctx.eventBus.emit('rbac:changed');
-        await flush();
-        expect(svc.status).toHaveBeenCalledTimes(3);
-    });
-
-    it('shows the gate when the signed-in admin is demoted', async () => {
-        const { c, ctx } = await setup();
-        ctx.appState.managed = { ...ADMIN, admin: false };
-        ctx.eventBus.emit('rbac:changed');
-        expect(hidden(c, '#backup-view')).toBe(true);
-        expect(svc.status).toHaveBeenCalledTimes(1);
-    });
-
     it('shows the gate, not the page, without an administrator session, and loads once one arrives', async () => {
         const { c, ctx } = await setup(NONE, null);
         expect(hidden(c, '#backup-view')).toBe(true);

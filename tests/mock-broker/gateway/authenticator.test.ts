@@ -4,17 +4,17 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
     acceptedStep, base32, groupSecret, hashRecovery, isTwoFactorMode, mockCode, newRecoveryCodes, newSecret, normalizeRecovery,
-    HASH_RULE, RECOVERY_COUNT, SECRET_RULE, sha256Hex, STEP_MS, stepOf, TWO_FACTOR_MODES, twoFactorNeed,
+    HASH_RULE, RECOVERY_COUNT, SECRET_RULE, sha256Hex, STEP_MS, stepOf, twoFactorNeed,
 } from '../../../src/mock-broker/gateway/authenticator';
 import { CONTRACT_DIR } from './helpers';
 
 /**
  * The demo's two-factor primitives (src/mock-broker/gateway/authenticator.ts):
- * the one requirement rule both gateways share, the mock codes and the replay
+ * the requirement rule (the Go gateway's need, in go-web-proxy/totp.go), the mock codes and the replay
  * window, and the secret and recovery-code formats the store holds.
  */
 describe('mock-broker/gateway/authenticator -- the requirement rule', () => {
-    // mode, admin, enrolled -> need (go-web-proxy/totp.go need).
+    // mode, admin, enrolled -> need. Copied by hand from go-web-proxy/totp.go need; no shared vector file holds it.
     const TABLE: [string, boolean, boolean, string][] = [
         ['optional', true, true, 'code'], ['optional', true, false, 'none'], ['optional', false, true, 'code'], ['optional', false, false, 'none'],
         ['admins', true, true, 'code'], ['admins', true, false, 'enrol'], ['admins', false, true, 'code'], ['admins', false, false, 'none'],
@@ -25,10 +25,8 @@ describe('mock-broker/gateway/authenticator -- the requirement rule', () => {
         expect(twoFactorNeed(mode, admin, enrolled)).toBe(need);
     });
 
-    it('reads a value that is not a mode as nobody being asked, and knows exactly the three modes', () => {
+    it('reads a value that is not a mode as nobody being asked', () => {
         expect(twoFactorNeed('', true, true)).toBe('none');
-        expect(TWO_FACTOR_MODES).toEqual(['optional', 'admins', 'mandatory']);
-        expect(TWO_FACTOR_MODES.every(isTwoFactorMode)).toBe(true);
         expect(['', 'off', 'Optional', 'on', 'both'].some(isTwoFactorMode)).toBe(false);
     });
 });

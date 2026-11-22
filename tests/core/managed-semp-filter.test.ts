@@ -60,7 +60,7 @@ describe('core/managed-semp-filter', () => {
         expect(json.data.map((q: any) => q.queueName)).toEqual(['orders.new']);
     });
 
-    it('filters paginated queue pages (substring match, cursor preserved path)', async () => {
+    it('filters a queue page requested with count and cursor parameters, keeping the queues the operate glob matches', async () => {
         const m = managed({ operate: [{ brokers: '*', msgVpns: '*', queues: 'keep*' }] });
         const raw = vi.fn(async () => jsonResponse({ data: [{ queueName: 'keep1' }, { queueName: 'drop1' }] }));
         const res = await filterSempFetch(raw, m)('/SEMP/v2/monitor/msgVpns/myvpn/queues?count=100&cursor=abc');

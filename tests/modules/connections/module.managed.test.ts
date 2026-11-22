@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ConnectionsModule } from '../../../src/modules/connections/module.managed';
-import { ConnectionsModule as ReleaseEntry } from '../../../src/modules/connections/module';
 import { createEventBus } from '../../../src/core/event-bus';
 import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import { createSolaceMock } from '../../setup';
@@ -57,15 +56,7 @@ beforeEach(() => {
     container = loadModuleDOM('connections', 'managed');
 });
 
-describe('connections/module.managed — identity', () => {
-    it('is the same sidebar entry as the Release entry', () => {
-        // One module id, one sidebar entry: the variant picks the file, the user
-        // sees "Connections" either way.
-        expect(ConnectionsModule.id).toBe(ReleaseEntry.id);
-        expect(ConnectionsModule.name).toBe(ReleaseEntry.name);
-        expect(ConnectionsModule.icon).toBe(ReleaseEntry.icon);
-    });
-
+describe('connections/module.managed -- connection config', () => {
     it("publishes the gateway's connection config as advertised", async () => {
         // Unlike the Release entry, this one can back a managed session, so
         // queue-copy may offer provisioned destinations.

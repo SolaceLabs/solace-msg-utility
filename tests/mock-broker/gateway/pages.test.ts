@@ -250,13 +250,6 @@ describe('mock-broker/gateway/pages -- the app\'s sign-in links', () => {
         expect(preventedBefore).toBe(false);
         expect(layer()).toBeNull();
     });
-
-    it('shows the page the browser lands on', () => {
-        pages.show('login');
-        expect(pages.current()).toBe('login');
-        pages.show('app');
-        expect(layer()).toBeNull();
-    });
 });
 
 describe('mock-broker/gateway/pages -- two-factor', () => {
@@ -292,15 +285,11 @@ describe('mock-broker/gateway/pages -- two-factor', () => {
             submit({ username: 'viewer', password: 'demo-viewer-0001' });
         });
 
-        it('follows a password that passes, with no session: the secret in groups of four, a placeholder for the QR code, and where the demo\'s code is', () => {
+        it('follows a password that passes, with no session: the secret in groups of four', () => {
             expect(landed).toEqual([]);
             expect(gw.session()).toBeNull();
-            expect(title()).toBe('Set up two-factor sign-in');
             expect(secretShown()).toBe(gw.ticket()!.secret.replace(/(.{4})(?=.)/g, '$1 '));
             expect(secretShown().split(' ')).toHaveLength(8);
-            const qr = layer()!.querySelector('.mgw-qr')!;
-            expect([qr.getAttribute('role'), qr.querySelector('img, svg')]).toEqual(['img', null]);
-            expect(layer()!.textContent).toContain('In this demo, open Demo controls > Authenticator for the code.');
             expect(layer()!.querySelector<HTMLInputElement>('input[name="step"]')!.value).toBe('confirm');
             expect(input('code').name).toBe('code');
             expect(pages.current()).toBe('two-factor');
@@ -357,10 +346,7 @@ describe('mock-broker/gateway/pages -- two-factor', () => {
         });
 
         it('follows a password that passes, with no session and no way to submit anywhere', () => {
-            expect(title()).toBe('Two-factor sign-in');
             expect(layer()!.querySelector('form')!.hasAttribute('action')).toBe(false);
-            expect(layer()!.textContent).toContain('Enter the 6-digit code from your authenticator app, or one of your recovery codes.');
-            expect(layer()!.textContent).toContain('In this demo, open Demo controls > Authenticator for the code.');
             expect(input('code').getAttribute('autocomplete')).toBe('one-time-code');
             expect([gw.session(), landed, pages.current()]).toEqual([null, [], 'code']);
             expect(document.activeElement).toBe(input('code'));

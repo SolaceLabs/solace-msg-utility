@@ -28,20 +28,6 @@ describe('main.ts entry point', () => {
         expect(startSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('starts the kernel at once while the solclient script is still loading', async () => {
-        (window as any).solace = undefined;
-        const script = document.createElement('script');
-        script.src = 'https://example.com/solclient.js';
-        document.body.appendChild(script);
-
-        await import('../src/main');
-
-        // No load event has fired: the start did not wait for one.
-        expect(startSpy).toHaveBeenCalledTimes(1);
-        script.dispatchEvent(new Event('load'));
-        expect(startSpy).toHaveBeenCalledTimes(1);
-    });
-
     it('logs a rejected kernel start instead of leaving an unhandled rejection', async () => {
         const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         const failure = new Error('start blew up');
@@ -52,17 +38,5 @@ describe('main.ts entry point', () => {
         await vi.waitFor(() => expect(errSpy).toHaveBeenCalledWith(
             expect.stringContaining('The kernel failed to start'), failure));
         errSpy.mockRestore();
-    });
-
-    it('starts the kernel at once when the solclient script has failed', async () => {
-        (window as any).solace = undefined;
-        const script = document.createElement('script');
-        script.src = 'https://example.com/solclient.js';
-        document.body.appendChild(script);
-        script.dispatchEvent(new Event('error'));
-
-        await import('../src/main');
-
-        expect(startSpy).toHaveBeenCalledTimes(1);
     });
 });

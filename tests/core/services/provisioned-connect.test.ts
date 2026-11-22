@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
 import {
-    connectProvisioned, gatewayCodeOf, outcomeDetails, outcomeLines, PART_LABEL, shortReason, SHORT_REASON_MAX,
+    connectProvisioned, gatewayCodeOf, outcomeDetails, outcomeLines, shortReason, SHORT_REASON_MAX,
     type ConnectOutcome, type ConnectPart, type ProvisionedSteps, type StepResult,
 } from '../../../src/core/services/provisioned-connect';
 
@@ -225,7 +225,6 @@ describe('core/services/provisioned-connect -- shortReason', () => {
 
     it('a raw reason up to the limit is shown as it is, one character over is left to the log', () => {
         const edge = 'a'.repeat(SHORT_REASON_MAX);
-        expect(SHORT_REASON_MAX).toBe(60);
         expect(shortReason('messaging', { reason: edge })).toBe(edge);
         expect(shortReason('messaging', { reason: '' })).toBe('failed, details in the log');
         expect(shortReason('messaging', { reason: edge + 'a' })).toBe('failed, details in the log');
@@ -234,10 +233,6 @@ describe('core/services/provisioned-connect -- shortReason', () => {
 });
 
 describe('core/services/provisioned-connect -- outcomeLines and outcomeDetails', () => {
-    it('names the halves as the Direct form does', () => {
-        expect(PART_LABEL).toEqual({ semp: 'SEMP (management)', messaging: 'Messaging (client)' });
-    });
-
     it('lists one line per failure, short reasons on the card and full texts for the log', () => {
         const outcome: Failed = {
             ok: false, sessionEnded: false, closed: [],

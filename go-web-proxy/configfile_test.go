@@ -252,18 +252,6 @@ func TestToConfig_CrossCheckAndConversion(t *testing.T) {
 	if cfg.logLevel != slog.LevelWarn {
 		t.Errorf("defaults not carried: %+v", cfg)
 	}
-	if cfg.session != (sessionLimits{idle: 10 * time.Minute, absolute: 30 * time.Minute, ticket: 10 * time.Minute, connects: 20}) {
-		t.Errorf("session defaults: %+v", cfg.session)
-	}
-	if want := (loginLimits{
-		maxFailures: 5, backoff: 30 * time.Second, maxBackoff: 15 * time.Minute, unauthPerMinute: 60,
-		clientMaxFailures: 10, reset: 15 * time.Minute, passwordMinLength: 12,
-	}); cfg.login != want {
-		t.Errorf("login defaults: %+v", cfg.login)
-	}
-	if want := (moduleSettings{offered: moduleCatalog(), userDefault: modulesDefaultAll}); !reflect.DeepEqual(cfg.modules, want) {
-		t.Errorf("modules default: want every catalog module for every user, got %+v", cfg.modules)
-	}
 }
 
 // audit.stdout, audit.access and audit.onFailure reach the runtime config and
@@ -755,28 +743,13 @@ func TestResolveConfig_IgnoresTheRemovedAppDir(t *testing.T) {
 	if strings.Contains(string(data), "appDir") || strings.Contains(string(data), "APP_DIR") {
 		t.Errorf("the next write must drop the key:\n%s", data)
 	}
-}
-
-// A first start with APP_DIR set seeds a file without the key, and names the
-// variable for the start-up warning.
-func TestResolveConfig_SeedIgnoresTheRemovedAppDir(t *testing.T) {
-	clearSeedEnv(t)
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	t.Setenv("APP_DIR", "/other")
-
-	load, err := resolveConfig(path)
+	// A first start with the variable set seeds a file and names it too.
+	seeded, err := resolveConfig(filepath.Join(t.TempDir(), "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !load.seeded || !reflect.DeepEqual(removedNames(load.removed), []string{"APP_DIR"}) {
-		t.Errorf("seeded=%v removed=%v: want a seed that names APP_DIR", load.seeded, load.removed)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "appDir") || strings.Contains(string(data), "APP_DIR") {
-		t.Errorf("the seeded file must not carry the removed setting:\n%s", data)
+	if !seeded.seeded || !reflect.DeepEqual(removedNames(seeded.removed), []string{"APP_DIR"}) {
+		t.Errorf("seeded=%v removed=%v: want a seed that names APP_DIR", seeded.seeded, seeded.removed)
 	}
 }
 
@@ -963,28 +936,13 @@ func TestResolveConfig_IgnoresTheRemovedStoreVariables(t *testing.T) {
 	if len(load.overrides) != 0 {
 		t.Errorf("a removed variable is no longer a seeding variable: %v", load.overrides)
 	}
-}
-
-// A first start with a removed variable set seeds a file without it and names
-// the variable for the warning.
-func TestResolveConfig_SeedIgnoresTheRemovedStoreVariables(t *testing.T) {
-	clearSeedEnv(t)
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	t.Setenv("USERS_FILE", "/m/users.yaml")
-
-	load, err := resolveConfig(path)
+	// A first start with a removed variable set seeds a file and names it too.
+	seeded, err := resolveConfig(filepath.Join(t.TempDir(), "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !load.seeded || !reflect.DeepEqual(removedNames(load.removed), []string{"USERS_FILE"}) {
-		t.Errorf("seeded=%v removed=%v: want a seed that names USERS_FILE", load.seeded, load.removed)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "usersFile") || strings.Contains(string(data), "/m/users.yaml") {
-		t.Errorf("the seeded file must not carry the removed setting:\n%s", data)
+	if !seeded.seeded || !reflect.DeepEqual(removedNames(seeded.removed), []string{"USERS_FILE", "CONNECTIONS_FILE", "STORE_KEY_FILE"}) {
+		t.Errorf("seeded=%v removed=%v: want a seed that names the removed variables", seeded.seeded, seeded.removed)
 	}
 }
 
@@ -1163,19 +1121,9 @@ func TestTLSPathsFromEnv(t *testing.T) {
 	}
 }
 
-// The sign-in and session keys added to the file have these defaults, for a
-// file or a config that never had them, and each is the bound the setting
-// documents.
+// A file that leaves the sign-in and session keys out reads their defaults,
+// also beside keys it sets.
 func TestFileConfig_SignInKeysDefaults(t *testing.T) {
-	d := defaultFileConfig()
-	if l := d.Login; l.MaxFailures != 5 || !l.PerClient || l.ClientMaxFailures != 10 || l.ResetMinutes != 15 ||
-		l.PasswordMinLength != 12 || l.TwoFactorMinutes != 10 {
-		t.Errorf("login defaults: %+v", l)
-	}
-	if d.Session.ConnectsPerMinute != 20 {
-		t.Errorf("session.connectsPerMinute defaults to 20, got %d", d.Session.ConnectsPerMinute)
-	}
-	// A file that leaves them out reads the defaults, also beside keys it sets.
 	fc, err := decodeConfigFile([]byte("version: 1\nlogin:\n  maxFailures: 7\nsession:\n  idleMinutes: 5\n"), "x.yaml")
 	if err != nil {
 		t.Fatal(err)

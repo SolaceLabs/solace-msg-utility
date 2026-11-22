@@ -460,16 +460,13 @@ func TestPasswordChange_ClientGoneIsNotAudited(t *testing.T) {
 }
 
 // A browser that already holds a session still draws every sign-in attempt from
-// its client's budget: the 61st POST /login in a minute (the default
-// login.unauthenticatedPerMinute) is refused, while pages that need a session
-// and carry one stay unmetered.
+// its client's budget: the attempt after the budget (login.unauthenticatedPerMinute)
+// is refused, while pages that need a session and carry one stay unmetered.
 func TestLogin_SignInWithASessionDrawsFromTheBudget(t *testing.T) {
-	e := newManagedEnv(t, func(c *config) { c.login.unauthPerMinute = defaultConfig().login.unauthPerMinute })
-	if e.cfg.login.unauthPerMinute != 60 {
-		t.Fatalf("the default budget is 60 a minute, got %d", e.cfg.login.unauthPerMinute)
-	}
+	const budget = 3
+	e := newManagedEnv(t, func(c *config) { c.login.unauthPerMinute = budget })
 	c := e.cookie("viewer", false)
-	for i := range 60 {
+	for i := range budget {
 		rec := e.form("/login", signInForm("viewer", viewerPW, "/"), c)
 		if rec.Code != http.StatusSeeOther {
 			t.Fatalf("attempt %d: want a sign-in, got %d %s", i+1, rec.Code, rec.Body.String())
@@ -502,13 +499,6 @@ func TestGateApp_ManagedModeNeedsASession(t *testing.T) {
 	}
 	if rec := e.do("GET", "/", "", e.cookie("viewer", false)); rec.Body.String() != "app" {
 		t.Errorf("a session reaches the app, got %q", rec.Body.String())
-	}
-}
-
-func TestGateApp_OtherModesServeTheBundleWithoutSession(t *testing.T) {
-	e := newManagedEnv(t, nil) // connModes both: the Direct tab needs no sign-in
-	if rec := e.do("GET", "/", "", nil); rec.Body.String() != "app" {
-		t.Errorf("want the app without a session, got %d %q", rec.Code, rec.Body.String())
 	}
 }
 

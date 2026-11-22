@@ -161,7 +161,7 @@ describe('mock-broker/gateway -- settings without the TLS paths', () => {
         expect(old.settings.dump().tls).toEqual({ insecureSkipVerify: true, standardRoots: true });
     });
 
-    it('reads a snapshot from before the paths left and drops them', () => {
+    it('drops the TLS paths a restored snapshot holds', () => {
         const snap = JSON.parse(JSON.stringify(gw.snapshot()));
         snap.settings.tls = { ...LEGACY };
         const again = createGateway({ seed: contractSeed() });

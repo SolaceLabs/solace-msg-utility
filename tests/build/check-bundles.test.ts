@@ -238,14 +238,6 @@ describe('check-bundles -- the Content-Security-Policy', () => {
         expect(Object.keys(BUNDLE_CSP).sort()).toEqual([...RELEASE_BUNDLES, PROVISIONED_BUNDLE, ADMIN_BUNDLE].sort());
     });
 
-    it('gives the demos no network, the gateway-only bundles their own origin, and lets only the admin app go without the vendor loader', () => {
-        expect(BUNDLE_CSP[DEMO_BUNDLE].kind).toBe('demo');
-        expect(BUNDLE_CSP[PROVISIONED_DEMO_BUNDLE].kind).toBe('demo');
-        expect(BUNDLE_CSP[PROVISIONED_BUNDLE].kind).toBe('gateway');
-        expect(BUNDLE_CSP[ADMIN_BUNDLE]).toEqual({ kind: 'gateway', vendor: false });
-        expect(Object.entries(BUNDLE_CSP).filter(([, p]) => !p.vendor).map(([n]) => n)).toEqual([ADMIN_BUNDLE]);
-    });
-
     it.each(Object.keys(BUNDLE_CSP))('fails %s without a policy, pointing at the build step', (name: string) => {
         const problems = checkBundles(path.join(fakeBuild({}, [name]), 'dist'));
         expect(problems).toEqual([expect.stringMatching(new RegExp(`^${name.replace('.', '\\.')}: carries no Content-Security-Policy tag.*content-security-policy plugin`))]);
@@ -306,10 +298,6 @@ describe('check-bundles — main', () => {
         expect(main(fakeBuild({ 'index.html': `btn-managed-login ${VENDOR}`, [PROVISIONED_BUNDLE]: null }))).toBe(1);
         expect(err).toHaveBeenCalledWith('Bundle check FAILED: 2 problem(s).');
         expect(err).toHaveBeenCalledWith(expect.stringContaining('index.html: contains the managed marker'));
-    });
-
-    it('resolves the repo root from its own location', () => {
-        expect(fs.existsSync(path.join(repoRoot(), 'scripts', 'check-bundles.mjs'))).toBe(true);
     });
 
     it("checks the repo's own dist/ when given no root, as npm run check:bundles does", () => {
@@ -382,10 +370,6 @@ describe('check-bundles — the Release upload list', () => {
     it('never lists the image-only bundles', () => {
         expect(RELEASE_BUNDLES).not.toContain(PROVISIONED_BUNDLE);
         expect(RELEASE_BUNDLES).not.toContain('solAdmin.html');
-    });
-
-    it('is the Direct bundles plus the Provisioned demo', () => {
-        expect(RELEASE_BUNDLES).toEqual([...DIRECT_BUNDLES, PROVISIONED_DEMO_BUNDLE]);
     });
 
     // The gateway ships only inside the images. On a public repo a workflow

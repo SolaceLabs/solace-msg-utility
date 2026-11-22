@@ -19,6 +19,11 @@ export function formatBytes(bytes: number | string, decimals = 2): string {
     return parseFloat(b.toFixed(decimals)) + ' ' + sizes[i];
 }
 
+/** An RFC 3339 UTC time as a page shows it: "2026-11-09 02:00 UTC". */
+export function formatUtc(iso: string): string {
+    return iso.replace('T', ' ').replace(/:\d{2}Z$/, ' UTC');
+}
+
 /**
  * Generate a v4-style UUID string.
  */

@@ -101,26 +101,6 @@ describe('queue-copy/service-copy', () => {
         (window as any).solace.SolclientFactory.createMessage.mockImplementation(() => createMessageMock());
     });
 
-    describe('configuration constants', () => {
-        // Source of truth lives in [src/modules/queue-copy/constants.ts](../../../src/modules/queue-copy/constants.ts).
-        // Pinning the exact value here just duplicates the constant — sanity-
-        // check the shape instead: a positive integer in a reasonable range
-        // for an "idle queue → declare done" timeout. Any value outside this
-        // range would indicate a typo (a sub-second timeout would fire during
-        // normal SDK transport-window pauses; a multi-hour timeout would
-        // hang the modal on a drained queue).
-        it('IDLE_TIMEOUT_MS is a positive integer in a sane range (1s..10min)', () => {
-            expect(Number.isInteger(IDLE_TIMEOUT_MS)).toBe(true);
-            expect(IDLE_TIMEOUT_MS).toBeGreaterThanOrEqual(1_000);
-            expect(IDLE_TIMEOUT_MS).toBeLessThanOrEqual(600_000);
-        });
-
-        it('PUBLISH_CONCURRENCY_HIGH > PUBLISH_CONCURRENCY_LOW (hysteresis invariant)', () => {
-            expect(PUBLISH_CONCURRENCY_HIGH).toBeGreaterThan(PUBLISH_CONCURRENCY_LOW);
-            expect(PUBLISH_CONCURRENCY_LOW).toBeGreaterThan(0);
-        });
-    });
-
     describe('engine entry fast-paths', () => {
         it('null publisher → onComplete with status=error and "Publisher unavailable"', async () => {
             const { state, session, onComplete } = setup();

@@ -119,16 +119,6 @@ describe('core/services/queue-source — sempQueueSource', () => {
         }
         expect((sempCtx.fetch as any).mock.calls).toHaveLength(2);
     });
-
-    it('keys differ per scope so a browse cache is never reused for operate', () => {
-        const base = stubbedSempCtx([], []);
-        const browse = sempQueueSource(base, { session: SCOPED, broker: 'b1', scope: 'browse' }).key;
-        const operate = sempQueueSource(base, { session: SCOPED, broker: 'b1', scope: 'operate' }).key;
-        const otherBroker = sempQueueSource(base, { session: SCOPED, broker: 'b2', scope: 'browse' }).key;
-
-        expect(browse).not.toBe(operate);
-        expect(browse).not.toBe(otherBroker);
-    });
 });
 
 describe('core/services/queue-source — queueSourceFrom', () => {

@@ -123,11 +123,10 @@ The store tests include concurrent readers and writers that only the race detect
 
 ### Integration tests
 
-`tests/integration/` exercises events and data flow that cross module boundaries, where a bug only shows if two modules disagree on an event name or payload shape, or where a pipeline runs end to end. Four files, each with its own scope:
+`tests/integration/` exercises events and data flow that cross module boundaries, where a bug only shows if two modules disagree on an event name or payload shape, or where a pipeline runs end to end. Three files, each with its own scope:
 
 | File | Scope |
 |---|---|
-| `full-flow.test.ts` | Kernel mechanics with stub modules: two modules installed by one kernel share the same `EventBus`, a `setState` during `install()` reaches a subscriber, an event on one module's bus reaches a handler on another's. |
 | `module-events.test.ts` | The real Connections and Queue Browser modules on one shared bus, with service factories mocked via `vi.mock`: the VPN-switch handoff, `config:max-messages-changed` propagation, and `client:disconnected` cleanup of in-flight forward items. |
 | `message-pipeline.test.ts` | Broker-shaped messages through `service-events.onMessage`, ingest, filtering and DOM rendering with no module mocked: a content filter gates rows, a filter cleared mid-stream does not re-render, messages for a non-current queue ingest without touching the DOM, the destination-type filter reads `window.solace.DestinationType`. |
 | `admin-session.test.ts` | The `/solAdmin` session lifecycle with the real admin-login and user-management modules: changing or deleting your own account signs the admin app out, an edit without a password keeps the session. |

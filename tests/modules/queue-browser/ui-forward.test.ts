@@ -24,25 +24,17 @@ describe('queue-browser/ui-forward', () => {
     });
 
     describe('getStatusIcon()', () => {
-        it('returns gray circle for QUEUED', () => {
-            expect(ui.getStatusIcon('QUEUED')).toContain('svg');
-            expect(ui.getStatusIcon('QUEUED')).toContain('circle');
-        });
+        it('shows no icon for a status the row does not know', () => {
+            state.forwardQueue = [{ correlationValue: 'cv-1', status: 'SENDING', originalMsg: { content: '' }, id: '1' }];
+            const statusEl = document.createElement('div');
+            statusEl.className = 'forward-item-status';
+            statusEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(statusEl);
 
-        it('returns spinner for SENDING', () => {
-            expect(ui.getStatusIcon('SENDING')).toContain('icon-spin');
-        });
-
-        it('returns checkmark for SUCCESS', () => {
-            expect(ui.getStatusIcon('SUCCESS')).toContain('polyline');
-        });
-
-        it('returns red circle for FAILED', () => {
-            expect(ui.getStatusIcon('FAILED')).toContain('disconnected');
-        });
-
-        it('returns empty for unknown status', () => {
-            expect(ui.getStatusIcon('UNKNOWN')).toBe('');
+            ui.updateForwardItemStatus('cv-1', 'SENDING');
+            expect(statusEl.innerHTML).not.toBe('');
+            ui.updateForwardItemStatus('cv-1', 'UNKNOWN');
+            expect(statusEl.innerHTML).toBe('');
         });
     });
 

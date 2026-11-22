@@ -110,15 +110,15 @@ describe('mock-broker/panel -- guidance', () => {
 });
 
 describe('mock-broker/panel — levers', () => {
-    it('switches a queue to read-only through the state lever', () => {
+    it.each([QUEUE_STATE.READ_ONLY, QUEUE_STATE.PUBLISH_REJECTED])('applies the %s queue state to the selected queue', (state) => {
         const queuePick = selectWith('vpn-prod/Q/ORDER/NEW');
-        const statePick = selectWith(QUEUE_STATE.READ_ONLY);
+        const statePick = selectWith(state);
         queuePick.value = 'vpn-prod/Q/ORDER/NEW';
         queuePick.dispatchEvent(new Event('change'));
-        statePick.value = QUEUE_STATE.READ_ONLY;
+        statePick.value = state;
         statePick.dispatchEvent(new Event('change'));
 
-        expect(scenario.queueState.get('vpn-prod/Q/ORDER/NEW')).toBe(QUEUE_STATE.READ_ONLY);
+        expect(scenario.queueState.get('vpn-prod/Q/ORDER/NEW')).toBe(state);
     });
 
     it('reseeds the store when the volume changes', () => {
@@ -144,18 +144,6 @@ describe('mock-broker/panel — levers', () => {
         faultPick.value = FAULT.NONE;
         faultPick.dispatchEvent(new Event('change'));
         expect(scenario.fault).toBe(FAULT.NONE);
-    });
-
-    it('offers Publish rejected as a queue state and applies it to the selected queue', () => {
-        const statePick = selectWith(QUEUE_STATE.PUBLISH_REJECTED);
-        const queuePick = selectWith('default/test-queue-1');
-        queuePick.value = 'default/test-queue-1';
-        queuePick.dispatchEvent(new Event('change'));
-
-        statePick.value = QUEUE_STATE.PUBLISH_REJECTED;
-        statePick.dispatchEvent(new Event('change'));
-
-        expect(scenario.queueState.get('default/test-queue-1')).toBe(QUEUE_STATE.PUBLISH_REJECTED);
     });
 
     it('Reset restores every lever and rebuilds the data', () => {

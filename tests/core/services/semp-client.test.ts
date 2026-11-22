@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createServiceSemp, type SempConnectionHooks } from '../../../src/core/services/semp-client';
 import { managedErrorMessage } from '../../../src/core/services/managed-api';
 import { basicAuthHeader } from '../../../src/core/utils';
 import { REQUEST_TIMEOUT_MS } from '../../../src/core/timing';
+import { SEMP_PROBE_TIMEOUT_MS } from '../../../src/core/connections/defaults';
 import type { SempConfig } from '../../../src/core/connections/types';
 
 /**
@@ -32,10 +33,6 @@ function baseCfg(overrides: Partial<SempConfig> = {}): SempConfig {
 }
 
 describe('core/services/semp-client', () => {
-    beforeEach(() => {
-        // Default fetch mock — individual tests override per-call.
-    });
-
     describe('connect()', () => {
         it('fires onConnected with a SempContext + creds on 200', async () => {
             (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
@@ -259,16 +256,6 @@ describe('core/services/semp-client', () => {
                 expect(calledUrl).toBe('https://broker.test:8080/api/SEMP/v2/monitor/msgVpns?count=1');
             });
 
-            it('normalises a path missing its leading slash', async () => {
-                (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
-
-                const service = createServiceSemp(makeHooks());
-                await service.connect(baseCfg({ urlPath: 'api' }), 'broker.test', 'pw');
-
-                const calledUrl = (globalThis.fetch as any).mock.calls.at(-1)[0];
-                expect(calledUrl).toBe('https://broker.test:8080/api/SEMP/v2/monitor/msgVpns?count=1');
-            });
-
             it('omits the path entirely when blank, leaving the original URL shape', async () => {
                 (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
 
@@ -293,7 +280,7 @@ describe('core/services/semp-client', () => {
             });
         });
 
-        it('aborts the in-flight fetch on 15s timeout and reports isTimeout=true', async () => {
+        it('aborts the in-flight fetch on the probe timeout and reports isTimeout=true', async () => {
             vi.useFakeTimers();
             // fetch stays pending until the abort signal fires
             (globalThis.fetch as any).mockImplementation((_url: string, init: any) => {
@@ -308,12 +295,12 @@ describe('core/services/semp-client', () => {
             const service = createServiceSemp(hooks);
             const connectPromise = service.connect(baseCfg(), 'broker.test', 'pw');
 
-            // Advance past the 15s timeout — the setTimeout callback fires controller.abort()
-            await vi.advanceTimersByTimeAsync(15000);
+            // Advance to the probe timeout -- the setTimeout callback fires controller.abort()
+            await vi.advanceTimersByTimeAsync(SEMP_PROBE_TIMEOUT_MS);
             await connectPromise;
 
             expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({
-                message: 'Connection timed out (15s). Check host and port.',
+                message: `Connection timed out (${SEMP_PROBE_TIMEOUT_MS / 1000}s). Check host and port.`,
                 isTimeout: true,
             }));
             vi.useRealTimers();

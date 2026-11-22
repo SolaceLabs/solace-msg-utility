@@ -79,9 +79,6 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.hosted {
-		t.Errorf("hosted: want true, Gateway mode is the default")
-	}
 	if cfg.connModes != connDirect || cfg.provisioned() {
 		t.Errorf("connModes: want direct, Provisioned mode off; got %q", cfg.connModes)
 	}
@@ -103,31 +100,20 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.trustDir != "/tls/trust" {
 		t.Errorf("trustDir: want /tls/trust, got %q", cfg.trustDir)
 	}
-	if cfg.insecureSkipVerify {
-		t.Errorf("insecureSkipVerify: want false")
-	}
 	if cfg.logLevel != slog.LevelWarn {
 		t.Errorf("logLevel: want warn, got %v", cfg.logLevel)
 	}
 }
 
 func TestLoadConfig_FromEnv(t *testing.T) {
-	t.Setenv("SMU_HOSTED", "true")
 	t.Setenv("SMU_SSL_CERTFILE", "/x/cert")
 	t.Setenv("SMU_SSL_CERTKEYFILE", "/x/key")
 	t.Setenv("SMU_SSL_TRUSTDIR", "/x/trust")
-	t.Setenv("SMU_SSL_SKIP_CERT_VERIFY", "true")
 	t.Setenv("LOG_LEVEL", "debug")
 
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !cfg.hosted {
-		t.Errorf("hosted: want true")
-	}
-	if !cfg.insecureSkipVerify {
-		t.Errorf("insecureSkipVerify: want true")
 	}
 	if cfg.certFile != "/x/cert" || cfg.keyFile != "/x/key" || cfg.trustDir != "/x/trust" {
 		t.Errorf("the TLS paths come from the environment: got %q %q %q", cfg.certFile, cfg.keyFile, cfg.trustDir)

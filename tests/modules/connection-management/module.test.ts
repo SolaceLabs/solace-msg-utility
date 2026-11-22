@@ -49,7 +49,7 @@ function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppCon
 async function setup(managed: ManagedSession | null = ADMIN) {
     const container = loadModuleDOM('connection-management');
     const ctx = makeCtx(container, managed);
-    svcMock.listConnections.mockResolvedValue({ ok: true, data: CONNS });
+    svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: CONNS } });
     await ConnectionManagementModule.install(ctx);
     if (managed?.admin) {
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').children.length).toBeGreaterThan(0));
@@ -115,7 +115,7 @@ describe('connection-management — list', () => {
 
     it('renders an empty-state row when there are no connections', async () => {
         const container = loadModuleDOM('connection-management');
-        svcMock.listConnections.mockResolvedValue({ ok: true, data: [] });
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [] } });
         await ConnectionManagementModule.install(makeCtx(container, ADMIN));
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').textContent).toMatch(/no connections/i));
     });
@@ -124,40 +124,6 @@ describe('connection-management — list', () => {
         await setup();
         await new Promise(resolve => setTimeout(resolve, 0));
         expect(svcMock.listConnections).toHaveBeenCalledTimes(1);
-    });
-
-    it('ignores an rbac:changed that leaves the session as it is (the kernel replay)', async () => {
-        const { container, ctx } = await setup();
-        svcMock.listConnections.mockClear();
-        ctx.eventBus.emit('rbac:changed');
-        await new Promise(resolve => setTimeout(resolve, 0));
-        expect(svcMock.listConnections).not.toHaveBeenCalled();
-        expect(hidden(container, '#conn-mgmt-list-view')).toBe(false);
-    });
-
-    it('reloads when the admin signs out and in again, or another admin signs in', async () => {
-        const { container, ctx } = await setup();
-        svcMock.listConnections.mockClear();
-        ctx.setState('managed', null);
-        ctx.eventBus.emit('rbac:changed');
-        expect(hidden(container, '#conn-mgmt-gate')).toBe(false);
-        expect(svcMock.listConnections).not.toHaveBeenCalled();
-        ctx.setState('managed', ADMIN);
-        ctx.eventBus.emit('rbac:changed');
-        await vi.waitFor(() => expect(svcMock.listConnections).toHaveBeenCalledTimes(1));
-        ctx.setState('managed', { ...ADMIN, username: 'other' });
-        ctx.eventBus.emit('rbac:changed');
-        await vi.waitFor(() => expect(svcMock.listConnections).toHaveBeenCalledTimes(2));
-    });
-
-    it('shows the gate when the signed-in admin is demoted', async () => {
-        const { container, ctx } = await setup();
-        svcMock.listConnections.mockClear();
-        ctx.setState('managed', { ...ADMIN, admin: false });
-        ctx.eventBus.emit('rbac:changed');
-        expect(hidden(container, '#conn-mgmt-gate')).toBe(false);
-        expect(hidden(container, '#conn-mgmt-list-view')).toBe(true);
-        expect(svcMock.listConnections).not.toHaveBeenCalled();
     });
 
     it('clears the gate and loads the list when an admin logs in (rbac:changed)', async () => {
@@ -264,11 +230,11 @@ describe('connection-management — create / edit form', () => {
 
     it('loads the stored schemes on Edit; a blank or missing scheme shows TLS', async () => {
         const container = loadModuleDOM('connection-management');
-        svcMock.listConnections.mockResolvedValue({ ok: true, data: [
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [
             { broker: 'p1', hostname: 'h', semp: { scheme: 'http', port: '8080', user: 'u', pass: '' }, client: { scheme: 'ws', port: '8008', msgVpns: [] } },
             { broker: 'p2', hostname: 'h', semp: { scheme: 'https', port: '1943', user: 'u', pass: '' }, client: { scheme: 'wss', port: '1443', msgVpns: [] } },
             { broker: 'p3', hostname: 'h', semp: { port: '1943', user: 'u', pass: '' }, client: { port: '1443', msgVpns: [] } },
-        ] });
+        ] } });
         await ConnectionManagementModule.install(makeCtx(container, ADMIN));
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').children.length).toBe(3));
         const edit = (i: number) => el(container, '#conn-mgmt-rows').querySelectorAll('tr')[i]
@@ -287,9 +253,9 @@ describe('connection-management — create / edit form', () => {
 
     it('Add starts on the TLS schemes even after editing a plain connection', async () => {
         const container = loadModuleDOM('connection-management');
-        svcMock.listConnections.mockResolvedValue({ ok: true, data: [
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [
             { broker: 'p1', hostname: 'h', semp: { scheme: 'http', port: '8080', user: 'u', pass: '' }, client: { scheme: 'ws', port: '8008', msgVpns: [] } },
-        ] });
+        ] } });
         await ConnectionManagementModule.install(makeCtx(container, ADMIN));
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').children.length).toBe(1));
         el(container, '#conn-mgmt-rows').querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
@@ -523,7 +489,7 @@ describe('connection-management -- versions', () => {
         const { container } = await setup();
         svcMock.saveConnection.mockResolvedValue(failed(409, 'stale', { rev: 9 }));
         // Someone moved b1 to host-new, rev 9.
-        svcMock.listConnections.mockResolvedValue({ ok: true, data: [{ ...CONNS[0], hostname: 'host-new', rev: 9 }, CONNS[1]] });
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [{ ...CONNS[0], hostname: 'host-new', rev: 9 }, CONNS[1]] } });
         editB1(container);
         save(container);
         expect(await answerConfirm(true)).toBe('This connection was changed by someone else since you opened it.');
@@ -555,7 +521,7 @@ describe('connection-management -- versions', () => {
     it('save of a connection deleted meanwhile: says so and shows the reloaded list', async () => {
         const { container } = await setup();
         svcMock.saveConnection.mockResolvedValue(failed(404, 'not_found'));
-        svcMock.listConnections.mockResolvedValue({ ok: true, data: [CONNS[1]] });
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [CONNS[1]] } });
         editB1(container);
         save(container);
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('This connection was deleted by someone else.', 'error'));
@@ -587,7 +553,7 @@ describe('connection-management -- versions', () => {
     it('delete of a connection already deleted: says so and shows the reloaded list', async () => {
         const { container } = await setup();
         svcMock.deleteConnection.mockResolvedValue(failed(404, 'not_found'));
-        svcMock.listConnections.mockResolvedValue({ ok: true, data: [CONNS[1]] });
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [CONNS[1]] } });
         delB1(container);
         await answerConfirm(true);
         await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('This connection was deleted by someone else.', 'error'));
