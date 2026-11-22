@@ -24,6 +24,7 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'gateway-settings': 10,        // admin-only
     'tls-certificates': 8,         // admin-only
     'backup': 5,                   // admin-only
+    'about': 1,
 };
 
 /** Module id -> entry name: the connections module's managed entry. */

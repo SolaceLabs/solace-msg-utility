@@ -18,10 +18,11 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'gateway-settings': 10,        // admin-only: config.yaml
     'tls-certificates': 8,         // admin-only: gateway certificate, trusted broker CAs
     'backup': 5,                   // admin-only: export, import, scheduled backups
+    'about': 1,
 };
 
 /**
- * None of the six modules uses the Solace SDK or JSZip, so solAdmin.html ships
+ * None of its modules uses the Solace SDK or JSZip, so solAdmin.html ships
  * without the shell's loader scripts and the library banner (the blocks the
  * shell marks `@vendor`). A variant that omits this export keeps them.
  */

@@ -14,6 +14,7 @@ import { ConnectionManagementModule } from '../../src/modules/connection-managem
 import { GatewaySettingsModule } from '../../src/modules/gateway-settings/module';
 import { TlsCertificatesModule } from '../../src/modules/tls-certificates/module';
 import { BackupModule } from '../../src/modules/backup/module';
+import { AboutModule } from '../../src/modules/about/module';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
 import { answerConfirm } from '../helpers/confirmDialog';
 import type { AppContext, PwaModule } from '../../src/core/types';
@@ -38,6 +39,7 @@ const MODULES: Record<string, PwaModule> = {
     'gateway-settings': GatewaySettingsModule,
     'tls-certificates': TlsCertificatesModule,
     'backup': BackupModule,
+    'about': AboutModule,
 };
 
 /** A module that only keeps the AppContext, so the test can read AppState. */
@@ -112,14 +114,14 @@ async function openDemo(before: (first: ManagedDemo) => void | Promise<void> = (
         const tpl = document.createElement('template');
         tpl.dataset.moduleId = id;
         if (id !== PROBE) {
-            const c = loadModuleDOM(id, MODULE_ENTRIES[id]);
+            const c = loadModuleDOM(id, MODULE_ENTRIES[id], { variant: 'managed-demo', demo: true });
             c.remove();
             tpl.innerHTML = c.innerHTML;
         }
         document.body.appendChild(tpl);
     }
     const registered = Object.entries(ACTIVE_MODULES).map(([id, priority]) => ({ module: MODULES[id], priority }));
-    await createKernel([...registered, { module: probe, priority: 1 }]).start();
+    await createKernel([...registered, { module: probe, priority: 0 }]).start();
     return demo;
 }
 
@@ -166,7 +168,7 @@ describe('managed demo end to end', () => {
         await openDemo(signInAs('operator'));
 
         await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
-        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer']);
+        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer', 'about']);
         expect(Array.from(q<HTMLSelectElement>('#managed-broker-select').options, o => o.value)).toEqual(['east-prod', 'lab']);
         expect(q('#sidebar-account').textContent).toContain('operator');
 
@@ -333,7 +335,7 @@ describe('managed demo end to end', () => {
     async function openOwnRow(): Promise<HTMLTableRowElement> {
         await openDemo(signInAs('admin'));
         await vi.waitFor(() => expect(ctx.appState.managed?.admin).toBe(true));
-        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer', 'user-management', 'connection-management', 'gateway-settings', 'tls-certificates', 'backup']);
+        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer', 'user-management', 'connection-management', 'gateway-settings', 'tls-certificates', 'backup', 'about']);
         q('#sidebar-nav .nav-item[data-module-id="user-management"]').click();
         const own = () => Array.from(document.querySelectorAll<HTMLTableRowElement>('#user-mgmt-rows tr'))
             .find(tr => tr.querySelector('td')?.textContent === 'admin');

@@ -258,7 +258,9 @@ A feature flag is tested in both states: stub the environment in a flag-off suit
 
 ### Test DOM
 
-Use `loadModuleDOM(moduleId, entry?)` ([tests/helpers/loadModuleDOM.ts](../tests/helpers/loadModuleDOM.ts)) for module-level tests instead of a hand-written `container.innerHTML` literal. It reads the real `src/modules/<id>/index.html` through the registry plugin's own `readModuleTemplate` and appends a container to `document.body`, so a template that grows an element is picked up by every test and the test DOM cannot drift from the build. With `entry`, it loads the composed `index.<entry>.html`, for example `loadModuleDOM('connections', 'managed')` for the Provisioned entry of the connections module.
+Use `loadModuleDOM(moduleId, entry?, build?)` ([tests/helpers/loadModuleDOM.ts](../tests/helpers/loadModuleDOM.ts)) for module-level tests instead of a hand-written `container.innerHTML` literal. It reads the real `src/modules/<id>/index.html` through the registry plugin's own `readModuleView` and appends a container to `document.body`, so a template that grows an element is picked up by every test and the test DOM cannot drift from the build. With `entry`, it loads the composed `index.<entry>.html`, for example `loadModuleDOM('connections', 'managed')` for the Provisioned entry of the connections module.
+
+`build` matters only for a template that holds the manual (the About module): `{ variant }` picks whose chapters it gets (the standard variant's when left out), and `{ demo: true }` gives the demo build, which has no Help tab.
 
 The `moduleId` is a plain string, the directory name under `src/modules/`. A module with no template throws at read time, so a typo is loud.
 
@@ -438,8 +440,8 @@ The numbered checks run in this order. Checks and groups described under a numbe
    The browser checks run here, before the sweep of check 13 and the restart of check 15. They use the app as a person does, in Chromium, at `https://gateway:9443` on the stack's network:
 
    - `B1` signs in through the gateway's own pages (one wrong password first) and lands in the app. The session cookie passes the rules of check 1, the browser holds it `HttpOnly`, and `document.cookie` is empty.
-   - `B2` checks that the Provisioned panel offers only the entitled broker and VPN, and that the sidebar shows Connections, Queue Browser, Queue Copy and Queue Subscriptions (a fresh `config.yaml` offers all three).
-   - `B3` changes `modules.userDefault` to `none` as the administrator; **Refresh** in the Provisioned panel re-reads `/managed/me` and the sidebar keeps only Connections. Restoring `all` and Refresh bring the three modules back. The app re-reads `/managed/me` only on load, on sign-in and on Refresh.
+   - `B2` checks that the Provisioned panel offers only the entitled broker and VPN, and that the sidebar shows Connections, Queue Browser, Queue Copy, Queue Subscriptions and About (a fresh `config.yaml` offers all three grantable modules).
+   - `B3` changes `modules.userDefault` to `none` as the administrator; **Refresh** in the Provisioned panel re-reads `/managed/me` and the sidebar keeps only Connections and About. Restoring `all` and Refresh bring the three modules back. The app re-reads `/managed/me` only on load, on sign-in and on Refresh.
    - `B4` connects. The browser opens its own WebSocket to `/managed/smf/<broker>/<vpn>`, sending the cookie, `Origin` and `Sec-Fetch-Site` itself, and the page shows no broker address.
    - `B5` binds the queue in Queue Browser. The queue is `Read-Only`, with no Delete.
    - `B6` checks that browser storage holds no password, store key or session cookie.

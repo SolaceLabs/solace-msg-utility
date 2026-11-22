@@ -1,0 +1,53 @@
+<article class="manual-chapter">
+    <h2>Queue Subscriptions</h2>
+    <p class="manual-lead">Find out which queues subscribe to a topic. The page lists every topic subscription on the queues you can see, and narrows the list as you type.</p>
+    <p>Queue Subscriptions needs the <strong>SEMP connection</strong> from the Connections page. Until SEMP is connected, the page shows <strong>Connection Required</strong> in place of everything below.</p>
+    <p>The list holds one row for each subscription: the Message VPN, the queue, and the topic the queue subscribes to. A queue with no topic subscription is not listed. If you signed in to a gateway, the list holds only the queues you are entitled to see, in the Message VPNs you can pick for the broker you are connected to.</p>
+
+    <h3>Finding a subscription</h3>
+    <figure class="manual-figure">
+        <img src="help/page.svg" width="760" height="290" alt="The Queue Subscriptions page: a title with a counter and a Refresh button, then a table with a filter box under each of its three column headings, VPN, Queue and Subscription.">
+        <figcaption>Queue Subscriptions, narrowed to the queues of one VPN that take orders from one topic branch.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Load</strong> fetches the list from the broker. Once the list is loaded the button reads <strong>Refresh</strong>.</li>
+        <li>The counter: how many queues and subscriptions the list holds. While you filter, it shows how many match, out of how many.</li>
+        <li>A filter box under each column heading.</li>
+        <li>The rows that pass every box you filled in.</li>
+    </ol>
+    <ol class="manual-steps">
+        <li>Press <strong>Load</strong>. The page fetches the whole list of subscriptions from the broker.</li>
+        <li>Type in one or more of the boxes under the column headings. A row is shown only when it passes every box you filled in.</li>
+        <li>Read the rows. The table draws the first 500 matches; when there are more, a last row says how many matched in all, and the counter always counts every match. Narrow the filters to see the rest.</li>
+    </ol>
+    <p>While all three boxes are empty the table shows no rows and asks you to <code>Type in any column above to start searching.</code></p>
+
+    <h3>What you can type</h3>
+    <table>
+        <thead>
+            <tr><th>Column</th><th>How your text is matched</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>VPN</strong> and <strong>Queue</strong></td><td>As any part of the name, in any letter case: <code>def</code> finds <code>default</code>. Put <code>*</code> in the box and your text is matched against the whole name instead, with <code>*</code> standing for any run of characters.</td></tr>
+            <tr><td><strong>Subscription</strong></td><td>As a topic, the way Solace compares topics. Your text and the stored subscription may both use the Solace wildcards: <code>*</code> for one level, and <code>&gt;</code> for one or more levels at the end. A row is shown when the two could match the same topic.</td></tr>
+        </tbody>
+    </table>
+    <h4>Examples</h4>
+    <table>
+        <thead>
+            <tr><th>In the box</th><th>You type</th><th>It finds</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>VPN or Queue</td><td><code>def*</code></td><td>Names that start with <code>def</code>.</td></tr>
+            <tr><td>VPN or Queue</td><td><code>*ult</code></td><td>Names that end with <code>ult</code>.</td></tr>
+            <tr><td>VPN or Queue</td><td><code>def*ult</code></td><td>Names that start with <code>def</code> and end with <code>ult</code>.</td></tr>
+            <tr><td>Subscription</td><td><code>orders/new</code></td><td>A queue subscribed to <code>orders/*</code>.</td></tr>
+            <tr><td>Subscription</td><td><code>orders/&gt;</code></td><td>A queue subscribed to <code>orders/new/details</code>.</td></tr>
+            <tr><td>Subscription</td><td><code>topic</code></td><td>A queue subscribed to <code>*</code>.</td></tr>
+        </tbody>
+    </table>
+
+    <h3>Keeping the list up to date</h3>
+    <p>The loaded list is kept in memory for as long as you stay connected. Changing a filter never contacts the broker again.</p>
+    <p>Press <strong>Refresh</strong> to fetch the list again, for example after a queue or a subscription was added or removed. The list is dropped when the SEMP connection drops; press <strong>Load</strong> again once you are connected.</p>
+</article>

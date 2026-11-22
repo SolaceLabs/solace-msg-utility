@@ -2,7 +2,7 @@ import { defineConfig, type PluginOption } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import fs from 'node:fs';
 import path from 'node:path';
-import { moduleRegistryPlugin, activeModuleIds, activeModuleEntries, readModuleTemplate, variantNeedsVendorScripts, variantGatewayOnly, stripVendorBlocks } from './scripts/module-registry-plugin.mjs';
+import { moduleRegistryPlugin, activeModuleIds, activeModuleEntries, readModuleView, variantNeedsVendorScripts, variantGatewayOnly, stripVendorBlocks } from './scripts/module-registry-plugin.mjs';
 import { applyCsp, type CspKind } from './scripts/csp.mjs';
 
 /**
@@ -27,9 +27,13 @@ const appVersion: string = (process.env.APP_VERSION ?? '0.0.0-dev').replace(/^v/
  * markup never leaks into the shipped HTML, and entry-aware: a module the
  * variant maps through `MODULE_ENTRIES` gets its entry template (e.g. the
  * connections module's `index.managed.html` in the managed build), composed by
- * `readModuleTemplate` exactly as the tests' `loadModuleDOM` composes it.
+ * `readModuleView` exactly as the tests' `loadModuleDOM` composes it.
  * Mirrors the manifest-driven module registry: the variant `.ts` is
  * authoritative for both bundled code and injected templates.
+ *
+ * The manual follows the same manifest: the About template gets the chapters
+ * of the variant's modules (`src/modules/<id>/help.html`). A demo build gets
+ * none, so the demos carry the About page without the Help tab.
  *
  * Output is alphabetized for stable build diffs; runtime kernel lookups are
  * by id (querySelector), so order is cosmetic.
@@ -38,14 +42,14 @@ const appVersion: string = (process.env.APP_VERSION ?? '0.0.0-dev').replace(/^v/
  * variant) also loses the shell's `@vendor` blocks: the Solace SDK and JSZip
  * loaders and the library banner.
  */
-function injectModuleTemplates(variant: string | undefined): PluginOption {
+function injectModuleTemplates(variant: string | undefined, demo: boolean): PluginOption {
     return {
         name: 'inject-module-templates',
         transformIndexHtml(html) {
             const entries = activeModuleEntries(__dirname, variant);
             const blocks = activeModuleIds(__dirname, variant)
                 .sort()
-                .map(id => ({ id, content: readModuleTemplate(__dirname, id, entries[id]) }))
+                .map(id => ({ id, content: readModuleView(__dirname, id, entries[id], { variant, demo }) }))
                 .filter(({ content }) => content !== null)
                 .map(({ id, content }) => `    <template data-module-id="${id}">\n${content}\n    </template>`);
             const composed = html.replace('<!-- @module-templates -->', blocks.join('\n\n'));
@@ -236,7 +240,7 @@ export default defineConfig(({ mode }) => {
             // the variant manifest like the code and the templates do.
             moduleRegistryPlugin({ root: __dirname, variant }) as PluginOption,
             isDemo && serviceDemoRedirect(demoRedirects(variant)),
-            injectModuleTemplates(variant),
+            injectModuleTemplates(variant, isDemo),
             viteSingleFile(),
             contentSecurityPolicy({ kind: cspKind, vendor: variantNeedsVendorScripts(__dirname, variant) }),
             outputName && renameHtmlAsset('index.html', outputName)

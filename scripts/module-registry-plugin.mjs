@@ -27,6 +27,13 @@
  * module code, so a variant's bundle carries exactly its modules' CSS and no
  * other's. `src/css/main.css` keeps the design system and the core components'
  * stylesheets, which `src/main.ts` imports ahead of the registry.
+ *
+ * The manual follows the manifest too. A module may hold one chapter of it,
+ * `src/modules/<id>/help.html`, with its figures in `src/modules/<id>/help/`.
+ * `readModuleView` puts the chapters of the variant's modules, in manifest
+ * order, where a template says `<!-- @module-help -->` (the About module's
+ * Help tab). A demo build, and a variant none of whose modules has a chapter,
+ * gets no manual: the template's `@help` blocks are removed instead.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,6 +43,18 @@ const RESOLVED_ID = '\0' + VIRTUAL_ID;
 
 /** Marker an entry template uses to pull in the module's base `index.html`. */
 export const MODULE_BASE_MARKER = '<!-- @module-base -->';
+
+/** Marker a template uses for the manual: the chapters of the variant's modules. */
+export const MODULE_HELP_MARKER = '<!-- @module-help -->';
+
+/** A `<!-- @help:start -->` ... `<!-- @help:end -->` block of a template, with its own lines: what only a build with a manual keeps. */
+const HELP_BLOCK = /[ \t]*<!-- @help:start -->[\s\S]*?<!-- @help:end -->[ \t]*\n?/g;
+
+/** An `<img>` of a chapter, split around its `src` value. */
+const FIGURE_SRC = /(<img\b[^>]*?\bsrc=")([^"]*)(")/g;
+
+/** The only source a chapter's figure may name: an SVG file in the module's `help/` folder. */
+const FIGURE_FILE = /^help\/[\w-]+\.svg$/;
 
 function stripComments(src) {
     return src
@@ -159,17 +178,16 @@ export function moduleStylesheet(root, id) {
 }
 
 /**
- * The template the build injects for a module, or `null` when it has none.
- * With an entry, `index.<entry>.html` is used when present; its
- * `<!-- @module-base -->` marker is replaced by the base `index.html`, so markup
- * shared by both entries lives in one file. Shared by the Vite template
- * injector and the tests' `loadModuleDOM`, so tests see exactly what ships.
+ * A module's `<stem>.html`, or `null` when it has none. With an entry,
+ * `<stem>.<entry>.html` is used when present; its `<!-- @module-base -->`
+ * marker is replaced by the base `<stem>.html`, so markup shared by both
+ * entries lives in one file.
  */
-export function readModuleTemplate(root, id, entry) {
+function readModuleFile(root, id, stem, entry) {
     const dir = path.resolve(root, 'src/modules', id);
-    const basePath = path.join(dir, 'index.html');
+    const basePath = path.join(dir, `${stem}.html`);
     const base = fs.existsSync(basePath) ? fs.readFileSync(basePath, 'utf-8') : null;
-    const entryPath = entry ? path.join(dir, `index.${entry}.html`) : null;
+    const entryPath = entry ? path.join(dir, `${stem}.${entry}.html`) : null;
     if (!entryPath || !fs.existsSync(entryPath)) return base;
     const html = fs.readFileSync(entryPath, 'utf-8');
     if (!html.includes(MODULE_BASE_MARKER)) return html;
@@ -180,6 +198,78 @@ export function readModuleTemplate(root, id, entry) {
         );
     }
     return html.replace(MODULE_BASE_MARKER, () => base.replace(/\n$/, ''));
+}
+
+/**
+ * A module's own template, or `null` when it has none: `index.html`, or the
+ * entry template `index.<entry>.html` composed with it (see `readModuleFile`).
+ * A manual marker in it is left as written; `readModuleView` fills it.
+ */
+export function readModuleTemplate(root, id, entry) {
+    return readModuleFile(root, id, 'index', entry);
+}
+
+/**
+ * A module's chapter of the manual as its author wrote it, or `null` when the
+ * module has none: `help.html`, or `help.<entry>.html` composed with it. Its
+ * figures still name their files (`help/<name>.svg`), which is what the
+ * chapter's Markdown links to (scripts/manual-to-md.mjs).
+ */
+export function readModuleHelp(root, id, entry) {
+    return readModuleFile(root, id, 'help', entry);
+}
+
+/**
+ * A chapter with each figure's file written into the page as a `data:` URL:
+ * a bundle is one file, and its policy loads an image from nowhere else. A
+ * figure that names anything but an SVG file in the module's `help/` folder,
+ * or a file that is not there, fails the build.
+ */
+function inlineFigures(html, root, id) {
+    return html.replace(FIGURE_SRC, (_img, before, src, after) => {
+        const file = path.resolve(root, 'src/modules', id, src);
+        if (!FIGURE_FILE.test(src) || !fs.existsSync(file)) {
+            throw new Error(
+                `[module-registry] src/modules/${id}/help.html has a figure with src="${src}". ` +
+                `A figure is an SVG file in src/modules/${id}/help/, named as help/<name>.svg; create the file or correct the name.`
+            );
+        }
+        return `${before}data:image/svg+xml;base64,${fs.readFileSync(file).toString('base64')}${after}`;
+    });
+}
+
+/**
+ * The manual of a variant: the chapter of each of its modules that has one, in
+ * manifest order, figures inlined. Empty when no module has a chapter.
+ */
+export function moduleHelp(root, variant) {
+    const entries = activeModuleEntries(root, variant);
+    return activeModuleIds(root, variant)
+        .map(id => ({ id, html: readModuleHelp(root, id, entries[id]) }))
+        .filter(({ html }) => html !== null)
+        .map(({ id, html }) => inlineFigures(html, root, id).trim())
+        .join('\n');
+}
+
+/**
+ * The template a build injects for a module, or `null` when it has none:
+ * `readModuleTemplate`, with the variant's manual at its `<!-- @module-help -->`
+ * marker. A demo build (`demo`), and a variant with no chapter at all, ships no
+ * manual: the template loses its `@help` blocks, the marker with them. Shared
+ * by the Vite template injector and the tests' `loadModuleDOM`, so tests see
+ * exactly what ships.
+ *
+ * @param {string} root
+ * @param {string} id
+ * @param {string} [entry]
+ * @param {{ variant?: string, demo?: boolean }} [build]
+ * @returns {string | null}
+ */
+export function readModuleView(root, id, entry, { variant, demo = false } = {}) {
+    const template = readModuleTemplate(root, id, entry);
+    if (template === null || !template.includes(MODULE_HELP_MARKER)) return template;
+    const help = demo ? '' : moduleHelp(root, variant);
+    return help ? template.replace(MODULE_HELP_MARKER, () => help) : template.replace(HELP_BLOCK, '');
 }
 
 /**

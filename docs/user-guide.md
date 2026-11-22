@@ -5,6 +5,7 @@ This guide is for people who use Solace Message Utility: operators who browse, f
 ## Contents
 
 - [Overview](#overview)
+  - [About and Help](#about-and-help)
 - [Module 1: Connections](#module-1-connections)
   - [Solace Client Connection (Web Messaging)](#solace-client-connection-web-messaging)
   - [SEMP Connection (Management API)](#semp-connection-management-api)
@@ -60,6 +61,7 @@ The interface has a **sidebar** on the left for navigation and a **main content 
 2. **Queue Browser** -- inspect, filter, forward, delete and download messages
 3. **Queue Copy** -- copy or move messages from a source queue to a destination queue or topic (same broker or another broker)
 4. **Queue Subscriptions** -- search every queue subscription on the broker by VPN, queue or topic
+5. **About** -- what the app is, the version you are running, and the manual
 
 Which modules appear depends on the build variant your deployment serves (the variants are listed in [deployment.md](deployment.md)).
 
@@ -72,6 +74,12 @@ The app runs in one of three modes:
 | **Provisioned** | You sign in and pick from the brokers an administrator granted you | [Provisioned Connections](#provisioned-connections) |
 
 In Standalone and Gateway mode you type the broker's details on the **Direct** form. [deployment.md](deployment.md#choosing-a-mode) explains how each mode is set up.
+
+### About and Help
+
+**About** is the last entry in the sidebar. Its **About** tab says what the app is, shows the **version** you are running and links to the project on GitHub.
+
+Its **Help** tab is the manual: one chapter for each page of your build, with drawings of the page. **Contents**, on the left, lists the chapters and the sections of the one that is open; press an entry to turn to it, or use **Previous chapter** and **Next chapter** under the text. The two demos have the About tab only.
 
 ---
 
@@ -523,7 +531,7 @@ Your entitlements come in two levels, **Operate** (browse and delete) and **Read
 - Typing or selecting a queue you are not entitled to **fails to bind**, with an error.
 - On a **read-only** queue, **Delete** is hidden and the queue shows a "Read-Only" badge; **Forward** is still available. On an **Operate** queue, Delete is available.
 - In **Queue Copy**, the destination queue must be one you hold **Operate** on, because copying into a queue is a write. See [Destination connection](#destination-connection-provisioned-sessions).
-- **Which modules you see is up to your administrator.** Besides Connections, a Provisioned session shows only the modules you were given (any of Queue Browser, Queue Copy and Queue Subscriptions). A module you were not given is not in the sidebar; a change shows after your next **Refresh** or page reload.
+- **Which modules you see is up to your administrator.** Besides Connections and About, a Provisioned session shows only the modules you were given (any of Queue Browser, Queue Copy and Queue Subscriptions). A module you were not given is not in the sidebar; a change shows after your next **Refresh** or page reload.
 - **Queue Subscriptions** lists only subscriptions on queues you may see, in the VPNs you can pick for the broker you are connected to. It reads the broker's whole list and narrows it in your browser, like the queue lists. Queue Discovery is never shown in a Provisioned session.
 
 If your entitlements change while you work (you or an administrator hit Refresh, or you sign out), anything that depended on what was withdrawn stops: a copy or move run in progress halts as if you pressed Cancel, and if a provisioned Queue Copy destination falls outside your entitlements, the chosen destination queue is cleared so you cannot start a run against it.

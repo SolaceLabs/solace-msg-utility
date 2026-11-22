@@ -19,6 +19,10 @@ This guide is for developers who build, change or extend the project: the TypeSc
   - [Factory Pattern](#factory-pattern)
   - [Circular Dependency Resolution](#circular-dependency-resolution)
 - [Adding a New Module](#adding-a-new-module)
+- [Writing the Manual](#writing-the-manual)
+  - [A chapter](#a-chapter)
+  - [Figures](#figures)
+  - [What checks a chapter](#what-checks-a-chapter)
 - [Testing](#testing)
 - [Code Conventions](#code-conventions)
   - [File Organization](#file-organization)
@@ -485,6 +489,55 @@ A browser event that arrives before step 3 throws `wire() not called before a br
    **Install renders from current state; an event handler acts only on a real change of the state it depends on.** The kernel replays a held `rbac:changed` to every module after install, so a handler that refetches or re-gates on every `rbac:changed` repeats the work `install` just did. The admin modules (`user-management`, `connection-management`, `gateway-settings`, `tls-certificates`, `backup`) gate through `gateOnAdminSession(app, { onAdmin, onNoAdmin })` in `src/core/components/module-gate/`: it keeps a session key (`JSON.stringify([username, admin])`, `null` when signed out), and its `rbac:changed` handler returns early when the key equals the one last applied. The `applyGate()` it returns is unconditional: the module calls it at the end of install and after a save or Refresh, so a module that emits `rbac:changed` for others about its own change (User Management saving its own entitlements) also calls `applyGate()` itself. Test it with one case for the unchanged session (no request) and one for a real change (sign-out and in, another admin, a demotion).
 
 6. **Write tests** in `tests/modules/your-module/module.test.ts`, mirroring the source path. Load the real template with `loadModuleDOM('your-module')` from `tests/helpers/loadModuleDOM.ts`. [testing.md](testing.md) has the conventions, the shared helpers and the coverage rules.
+
+7. **Write the module's chapter of the manual** in `src/modules/your-module/help.html`. The build puts it into the Help tab of the About page in every variant that lists the module. [Writing the Manual](#writing-the-manual) has the rules.
+
+---
+
+## Writing the Manual
+
+The manual is the Help tab of the About page. Each module owns one chapter of it, `src/modules/<id>/help.html`, and the build composes the chapters of a variant's modules into that variant's bundle ([architecture.md](architecture.md#dom-template-system)). The same files are the source of the user guide on GitHub. When a change alters what a page shows or does, change its chapter in the same commit.
+
+### A chapter
+
+A chapter is one `<article class="manual-chapter">` that opens with its `<h2>` title. Write for a reader who is looking at the page: say what a thing is for, then how to use it, in short plain sentences. Name a button or a field as the page labels it, in `<strong>`.
+
+Use only these parts. The app styles each one (`src/modules/about/styles.css`), and `chapterMarkdown` in [scripts/manual-to-md.mjs](../scripts/manual-to-md.mjs) refuses anything else by name.
+
+| Part | Markup | Use it for |
+| --- | --- | --- |
+| Title | `<h2>` | The chapter's name: the page's name in the sidebar. First in the chapter, once. |
+| Lead | `<p class="manual-lead">` | One or two sentences under the title: what the page is for. |
+| Section | `<h3>` | A task or a part of the page. Each is listed in the manual's Contents. |
+| Sub-heading | `<h4>` | A topic inside a section. |
+| Paragraph | `<p>` | Running text. |
+| Steps | `<ol class="manual-steps">` | What the reader does, in order. One action in each `<li>`. |
+| List | `<ul>`, `<ol>` | Choices, or facts of the same kind. An item may hold a nested list or a paragraph. |
+| Table | `<table>` with a heading row | Columns, fields, options: anything a reader looks up. Cells hold text and inline parts only. |
+| Figure | `<figure class="manual-figure">` with an `<img>` and a `<figcaption>` | A drawing of the page. The app and the guide number it ("Figure 1"), from 1 in each chapter. |
+| Legend | `<ol class="manual-callouts">` | Right after a figure: one `<li>` for each numbered disc in the drawing, in order. |
+| Aside | `<aside class="manual-note">`, with `data-kind="tip"`, `"important"` or `"warning"` for those kinds | A boxed remark. Write the text only: the app and the guide add the label. Keep `warning` for what cannot be undone. |
+| Code block | `<pre><code data-lang="json">` | A file's shape, or text to copy. Name the language. |
+| Inline | `<strong>`, `<em>`, `<code>`, `<kbd>`, `<a href="https://...">` | A label on the page, emphasis, literal text, a key, a link. |
+
+A link goes to an `https://` address. Link another guide by its address on GitHub (`https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/<file>.md#<anchor>`): the app opens it in a new tab, and the guide turns it into a relative link.
+
+### Figures
+
+A figure is an SVG file in `src/modules/<id>/help/`, named in the chapter as `<img src="help/<name>.svg" width="..." height="..." alt="...">`. The `alt` says what the drawing shows, for a reader who cannot see it.
+
+- Draw the page as a simplified diagram, not a screenshot: the real labels, example values, and a numbered disc on each part the legend explains.
+- Use presentation attributes only (`fill`, `stroke`, `font-size`). No `style` attribute, `<style>`, script, link or foreign object: the page's policy ignores or blocks them, and GitHub shows the same file.
+- Give the drawing its own background, so it reads on any page, and keep the file plain ASCII.
+- Keep to the look of the existing figures: the same colours, fonts and discs.
+
+The build writes each figure into the bundle, so every picture adds to every bundle that carries its chapter. A missing file, or a figure that is not an SVG file in the module's `help/` folder, fails the build.
+
+### What checks a chapter
+
+- `tests/build/manual-to-md.test.ts > "the chapters of the manual"` converts every chapter, so a part outside the table fails by name.
+- `tests/build/module-help.test.ts` composes the manual of the real variants and holds every figure file to the rules above.
+- `scripts/check-bundles.mjs` proves on the built files that the manual is in every app bundle and in neither demo.
 
 ---
 

@@ -82,6 +82,7 @@ Every screen, field and shortcut is described click by click in the [user guide]
 - **Queue Subscriptions** -- list every VPN, queue and topic subscription your SEMP user can see, filter each column, and answer "which queues subscribe to topic X?" with Solace topic matching.
 - **Administration (Provisioned mode)** -- manage users, brokers, grants, gateway settings, certificates and encrypted backups from `/solAdmin`.
 - **Self-signed certificates** -- a helper dialog explains how to trust a broker certificate that the browser blocks.
+- **Built-in manual** -- the About page shows the version you run, and its Help tab holds an illustrated chapter for each page of your build.
 
 ## Documentation
 

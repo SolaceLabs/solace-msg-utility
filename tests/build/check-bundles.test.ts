@@ -11,6 +11,8 @@ import {
     PROVISIONED_BUNDLE,
     ADMIN_BUNDLE,
     VENDOR_MARKERS,
+    MANUAL_MARKER,
+    MANUAL_BUNDLES,
     MANAGED_MARKERS,
     DEMO_MARKERS,
     GATEWAY_MARKER,
@@ -40,6 +42,9 @@ const PROVISIONED_DEMO_CLEAN = `<html>${[...MANAGED_MARKERS, ...DEMO_MARKERS, ..
 /** What the shell's vendor blocks leave in a bundle that needs the Solace SDK: the loaders' paths and the banner id. */
 const VENDOR = VENDOR_MARKERS.join(' ');
 
+/** What the About template leaves in a bundle with the manual: a chapter's opening tag. */
+const MANUAL = MANUAL_MARKER;
+
 /** What a clean demo.html holds: the network refusal, the vendor blocks, the Direct form and an inert namespace URL. */
 const DEMO_CLEAN = `<html>${NETWORK_MARKER} ${VENDOR}<div id="conn-host"></div><svg xmlns="http://www.w3.org/2000/svg"></svg></html>`;
 
@@ -49,7 +54,8 @@ const built = (name: string, content: string) => applyCsp(`<meta charset="UTF-8"
 /**
  * A fake project root whose dist/ holds a clean build: Direct-only bundles
  * (demo.html the offline demo), a provisioned.html carrying every managed marker,
- * and a clean provisioned-demo.html, each with its policy.
+ * and a clean provisioned-demo.html, each with its policy. Every app bundle
+ * holds the manual; neither demo does.
  * `overrides` replaces a file's content, or omits it with `null`; a file named
  * in `raw` is written as given, with no policy added.
  */
@@ -60,9 +66,9 @@ function fakeBuild(overrides: Record<string, string | null> = {}, raw: string[] 
     const dist = path.join(root, 'dist');
     fs.mkdirSync(dist);
     const files: Record<string, string | null> = {
-        ...Object.fromEntries(DIRECT_BUNDLES.map((f: string) => [f, `<html>${VENDOR}<div id="conn-host"></div></html>`])),
+        ...Object.fromEntries(DIRECT_BUNDLES.map((f: string) => [f, `<html>${VENDOR}<div id="conn-host"></div>${MANUAL}</html>`])),
         [DEMO_BUNDLE]: DEMO_CLEAN,
-        [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')} ${VENDOR}</html>`,
+        [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')} ${VENDOR}${MANUAL}</html>`,
         [PROVISIONED_DEMO_BUNDLE]: PROVISIONED_DEMO_CLEAN,
         [ADMIN_BUNDLE]: '<html><div id="admin-login"></div></html>',
         ...overrides,
@@ -82,7 +88,7 @@ describe('check-bundles — checkBundles', () => {
     });
 
     it('fails a Direct bundle that carries a managed marker, naming the file and the marker', () => {
-        const root = fakeBuild({ 'min.html': `<html>${VENDOR} fetch("/managed/logout")</html>` });
+        const root = fakeBuild({ 'min.html': `<html>${VENDOR}${MANUAL} fetch("/managed/logout")</html>` });
         const problems = checkBundles(path.join(root, 'dist'));
         expect(problems).toHaveLength(1);
         expect(problems[0]).toMatch(/^min\.html: contains the managed marker "\/managed\/logout"/);
@@ -92,7 +98,7 @@ describe('check-bundles — checkBundles', () => {
     // The broker-facing calls are managed-only too: a Direct bundle that could
     // dial or reach the SEMP relay has imported the managed entry.
     it.each(['/managed/dial', '/managed/relay/'])('fails a Direct bundle that carries %s', (marker) => {
-        const problems = checkBundles(path.join(fakeBuild({ 'index.html': `<html>${VENDOR} fetch("${marker}b1")</html>` }), 'dist'));
+        const problems = checkBundles(path.join(fakeBuild({ 'index.html': `<html>${VENDOR}${MANUAL} fetch("${marker}b1")</html>` }), 'dist'));
         expect(problems).toEqual([expect.stringContaining(`index.html: contains the managed marker "${marker}"`)]);
     });
 
@@ -107,19 +113,19 @@ describe('check-bundles — checkBundles', () => {
     });
 
     it('fails when provisioned.html lacks a marker: the override did not apply, or the marker went stale', () => {
-        const root = fakeBuild({ [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.slice(1).join(' ')} ${VENDOR}</html>` });
+        const root = fakeBuild({ [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.slice(1).join(' ')} ${VENDOR}${MANUAL}</html>` });
         const problems = checkBundles(path.join(root, 'dist'));
         expect(problems).toEqual([expect.stringContaining(`lacks the managed marker "${MANAGED_MARKERS[0]}"`)]);
     });
 
     // Either marker in a production bundle means demo code reached it.
     it.each(DEMO_MARKERS)('fails a production Direct bundle that carries the demo marker %s', (marker) => {
-        const problems = checkBundles(path.join(fakeBuild({ 'index.html': `<html>${VENDOR} ${marker}</html>` }), 'dist'));
+        const problems = checkBundles(path.join(fakeBuild({ 'index.html': `<html>${VENDOR}${MANUAL} ${marker}</html>` }), 'dist'));
         expect(problems).toEqual([expect.stringMatching(new RegExp(`^index\\.html: contains the demo marker "${marker}"\\. Only `))]);
     });
 
     it('fails provisioned.html when it carries the fake gateway', () => {
-        const root = fakeBuild({ [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')} ${VENDOR} ${DEMO_MARKERS[0]}</html>` });
+        const root = fakeBuild({ [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')} ${VENDOR}${MANUAL} ${DEMO_MARKERS[0]}</html>` });
         expect(checkBundles(path.join(root, 'dist'))).toEqual([
             expect.stringContaining(`provisioned.html: contains the demo marker "${DEMO_MARKERS[0]}"`),
         ]);
@@ -201,13 +207,13 @@ describe('check-bundles -- the vendor loaders', () => {
     const problemsFor = (overrides: Record<string, string | null>) => checkBundles(path.join(fakeBuild(overrides), 'dist'));
 
     it('fails a Direct bundle that lost a loader marker, naming the file and the marker', () => {
-        expect(problemsFor({ 'min.html': '<html>js/solclient.js missing-lib-banner</html>' })).toEqual([
+        expect(problemsFor({ 'min.html': `<html>js/solclient.js missing-lib-banner${MANUAL}</html>` })).toEqual([
             expect.stringMatching(/^min\.html: lacks the vendor marker "jszip\.min\.js"\. The shell's @vendor blocks/),
         ]);
     });
 
     it.each([
-        { name: PROVISIONED_BUNDLE, text: `<html>${MANAGED_MARKERS.join(' ')}</html>` },
+        { name: PROVISIONED_BUNDLE, text: `<html>${MANAGED_MARKERS.join(' ')}${MANUAL}</html>` },
         { name: PROVISIONED_DEMO_BUNDLE, text: PROVISIONED_DEMO_CLEAN.replace(VENDOR, '') },
     ])('fails $name without the vendor blocks, once per marker', ({ name, text }) => {
         const problems = problemsFor({ [name]: text });
@@ -224,6 +230,31 @@ describe('check-bundles -- the vendor loaders', () => {
     it.each(VENDOR_MARKERS)('fails solAdmin.html when it carries %s: the admin variant lost its flag', (marker: string) => {
         expect(problemsFor({ [ADMIN_BUNDLE]: `<html>${marker}</html>` })).toEqual([
             expect.stringMatching(new RegExp(`^solAdmin\\.html: contains the vendor marker "${marker}".*NEEDS_VENDOR_SCRIPTS = false`)),
+        ]);
+    });
+});
+
+// The manual is the About page's Help tab: in every app bundle, and in neither
+// demo, which ship the About card alone.
+describe('check-bundles -- the manual', () => {
+    const problemsFor = (name: string, text: string) => checkBundles(path.join(fakeBuild({ [name]: text }), 'dist'));
+
+    it('expects the manual in every bundle that is not a demo and holds a module with a chapter', () => {
+        expect([...MANUAL_BUNDLES].sort()).toEqual(['index.html', 'min.html', 'no-payload.html', 'no-queue-copy.html', 'provisioned.html']);
+    });
+
+    it('fails an app bundle that lost the manual, naming the file and the template to check', () => {
+        expect(problemsFor('no-payload.html', `<html>${VENDOR}</html>`)).toEqual([
+            expect.stringMatching(/^no-payload\.html: lacks the manual marker "<article class=\"manual-chapter\">"\..*src\/modules\/about\/index\.html/),
+        ]);
+    });
+
+    it.each([
+        { name: DEMO_BUNDLE, text: `${DEMO_CLEAN}${MANUAL}` },
+        { name: PROVISIONED_DEMO_BUNDLE, text: `${PROVISIONED_DEMO_CLEAN}${MANUAL}` },
+    ])('fails $name when it carries the manual: a demo ships the About page alone', ({ name, text }) => {
+        expect(problemsFor(name, text)).toEqual([
+            expect.stringContaining(`${name}: contains the manual. A demo ships the About page without the Help tab`),
         ]);
     });
 });
@@ -245,7 +276,7 @@ describe('check-bundles -- the Content-Security-Policy', () => {
 
     it('fails provisioned.html built with the Direct policy: it would connect beyond its gateway', () => {
         const root = fakeBuild();
-        write(root, PROVISIONED_BUNDLE, applyCsp(`<meta charset="UTF-8"><html>${MANAGED_MARKERS.join(' ')} ${VENDOR}</html>`, { kind: 'direct', vendor: true }));
+        write(root, PROVISIONED_BUNDLE, applyCsp(`<meta charset="UTF-8"><html>${MANAGED_MARKERS.join(' ')} ${VENDOR}${MANUAL}</html>`, { kind: 'direct', vendor: true }));
         expect(checkBundles(path.join(root, 'dist'))).toEqual([
             `provisioned.html: the policy's connect-src is "http: https: ws: wss:", expected "'self'".`,
             `provisioned.html: the policy's frame-src is "https:", expected "(none)".`,
@@ -261,6 +292,11 @@ describe('check-bundles -- strayHosts', () => {
 
     it('does not take a look-alike for the namespace host', () => {
         expect(strayHosts('http://www.w3.org.example.com/x')).toEqual(['www.w3.org.example.com']);
+    });
+
+    it("allows the project's home, which the About page links to, and no other GitHub host", () => {
+        expect(strayHosts('https://github.com/SolaceLabs/solace-msg-utility https://raw.github.com/x https://github.com.example.net/x'))
+            .toEqual(['raw.github.com', 'github.com.example.net']);
     });
 });
 
@@ -295,7 +331,7 @@ describe('check-bundles — main', () => {
 
     it('returns 1 and lists every problem', () => {
         const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-        expect(main(fakeBuild({ 'index.html': `btn-managed-login ${VENDOR}`, [PROVISIONED_BUNDLE]: null }))).toBe(1);
+        expect(main(fakeBuild({ 'index.html': `btn-managed-login ${VENDOR}${MANUAL}`, [PROVISIONED_BUNDLE]: null }))).toBe(1);
         expect(err).toHaveBeenCalledWith('Bundle check FAILED: 2 problem(s).');
         expect(err).toHaveBeenCalledWith(expect.stringContaining('index.html: contains the managed marker'));
     });

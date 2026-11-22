@@ -61,8 +61,10 @@ describe('core/rbac — isModuleVisible', () => {
 
     // Module control: past the requirements, a managed user sees the sign-in
     // module and exactly the modules the gateway granted (/managed/me).
-    it('shows the connections module in every managed session', () => {
+    it('shows the connections module and the About page in every managed session, granted or not', () => {
         expect(isModuleVisible(session(), 'connections')).toBe(true);
+        expect(isModuleVisible(session({ modules: [] }), 'about')).toBe(true);
+        expect(isModuleVisible(session({ admin: true, modules: [] }), 'about')).toBe(true);
     });
 
     it('shows the admin console\'s sign-in screen only while no one is signed in', () => {

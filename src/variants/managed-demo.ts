@@ -23,6 +23,7 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'gateway-settings': 10,        // admin-only: config.yaml
     'tls-certificates': 8,         // admin-only: gateway certificate, trusted broker CAs
     'backup': 5,                   // admin-only: export, import, scheduled backups
+    'about': 1,                    // the About card only: a demo ships no manual
 };
 
 /** Module id -> entry name (`module.<entry>.ts`, `index.<entry>.html`). */

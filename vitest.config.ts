@@ -36,10 +36,12 @@ export default defineConfig({
                 'src/**/*.js',
                 // The gate and build scripts whose logic ships or guards what
                 // ships: the bundle check, the module registry the build
-                // generates, the npm audit gate and the e2e run's helpers.
+                // generates, the manual's Markdown form, the npm audit gate and the
+                // e2e run's helpers.
                 'scripts/check-bundles.mjs',
                 'scripts/csp.mjs',
                 'scripts/module-registry-plugin.mjs',
+                'scripts/manual-to-md.mjs',
                 'scripts/npm-audit-gate.mjs',
                 'scripts/e2e-lib.mjs'
             ],

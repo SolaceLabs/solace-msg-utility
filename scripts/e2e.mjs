@@ -1857,13 +1857,13 @@ async function runBrowserChecks(admin) {
             const vpns = await values('#managed-vpn-select');
             expect(brokers.join() === BROKER && vpns.join() === vpn, `offered brokers [${brokers.join(', ')}], VPNs [${vpns.join(', ')}]`);
             const nav = await page.locator('.nav-item[data-module-id]').evaluateAll((items) => items.map((i) => i.dataset.moduleId));
-            // Connections always; the three grantable modules, as a fresh config
-            // offers them all and modules.userDefault=all grants them.
-            expect(nav.join() === 'connections,queue-browser,queue-copy,queue-subscription-explorer', `sidebar: ${nav.join(', ')}`);
+            // Connections and About always; the three grantable modules, as a fresh
+            // config offers them all and modules.userDefault=all grants them.
+            expect(nav.join() === 'connections,queue-browser,queue-copy,queue-subscription-explorer,about', `sidebar: ${nav.join(', ')}`);
         });
 
         // The app re-reads /managed/me only on load, on sign-in and on Refresh.
-        await bcheck('B3', 'a settings change reaches the sidebar on Refresh: modules.userDefault none leaves Connections only, and all brings the modules back', async () => {
+        await bcheck('B3', 'a settings change reaches the sidebar on Refresh: modules.userDefault none leaves Connections and About only, and all brings the modules back', async () => {
             expect(page, 'no signed-in page (B1)');
             const nav = () => page.locator('.nav-item[data-module-id]').evaluateAll((items) => items.map((i) => i.dataset.moduleId).join());
             const refresh = async (want) => {
@@ -1882,15 +1882,15 @@ async function runBrowserChecks(admin) {
             let shrunk = '';
             try {
                 none = await put('none');
-                if (none.status === 200) shrunk = await refresh('connections');
+                if (none.status === 200) shrunk = await refresh('connections,about');
             } finally {
                 all = await put('all');
             }
             expect(none.status === 200, `PUT userDefault none: ${none.status} ${none.body}`);
-            expect(shrunk === 'connections', `after none and Refresh the sidebar shows ${shrunk || 'nothing'}`);
+            expect(shrunk === 'connections,about', `after none and Refresh the sidebar shows ${shrunk || 'nothing'}`);
             expect(all.status === 200, `PUT userDefault all: ${all.status} ${all.body}`);
-            const back = await refresh('connections,queue-browser,queue-copy,queue-subscription-explorer');
-            expect(back === 'connections,queue-browser,queue-copy,queue-subscription-explorer', `after all and Refresh the sidebar shows ${back}`);
+            const back = await refresh('connections,queue-browser,queue-copy,queue-subscription-explorer,about');
+            expect(back === 'connections,queue-browser,queue-copy,queue-subscription-explorer,about', `after all and Refresh the sidebar shows ${back}`);
         });
 
         await bcheck('B4', `Connect opens the browser's own WebSocket to ${smfPath}, and the page shows no broker address`, async () => {

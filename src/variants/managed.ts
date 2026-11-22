@@ -16,6 +16,7 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'queue-browser': 80,
     'queue-copy': 70,
     'queue-subscription-explorer': 45,
+    'about': 1,
 };
 
 /** Module id -> entry name (`module.<entry>.ts`, `index.<entry>.html`). */

@@ -10,7 +10,8 @@ demos hold, what they accept and what they simulate. Two downloads attached to e
   administration pages, against a fake gateway inside the page.
 
 Open either straight from disk; no server is needed. Neither works with a real broker, and neither makes a network
-request. For what each module does, see the [User Guide](user-guide.md).
+request. For what each module does, see the [User Guide](user-guide.md): a demo's About page says what the app is
+and shows its version, and the manual (the Help tab) is in the real app only.
 
 ---
 

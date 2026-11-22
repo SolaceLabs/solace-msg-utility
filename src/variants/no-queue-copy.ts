@@ -9,4 +9,5 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'connections': 100,
     'queue-browser': 80,
     'queue-subscription-explorer': 45,
+    'about': 1,
 };

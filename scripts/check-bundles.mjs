@@ -27,9 +27,12 @@
  *     `<form action=...>`, and no URL literal whose host is not in
  *     ALLOWED_HOSTS;
  *   - every bundle above carries the shell's vendor loaders and library banner
- *     (VENDOR_MARKERS), and ADMIN_BUNDLE, whose five modules use neither the Solace
+ *     (VENDOR_MARKERS), and ADMIN_BUNDLE, whose modules use neither the Solace
  *     SDK nor JSZip, carries none of them (a hit means the admin variant lost its
  *     `NEEDS_VENDOR_SCRIPTS = false`, or the shell's `@vendor` markers broke);
+ *   - each MANUAL_BUNDLES file carries the manual (MANUAL_MARKER, the opening
+ *     tag of a chapter) and neither demo does: a demo ships the About page
+ *     without the Help tab;
  *   - every bundle carries the Content-Security-Policy of its kind (BUNDLE_CSP,
  *     scripts/csp.mjs): one policy tag before any script or style, hashes that
  *     match its inline scripts and stylesheet, and no style attribute, inline
@@ -83,6 +86,15 @@ export const VENDOR_MARKERS = ['js/solclient.js', 'jszip.min.js', 'missing-lib-b
 export const PROVISIONED_BUNDLE = 'provisioned.html';
 
 /**
+ * The opening tag of a chapter of the manual (a module's `help.html`): markup
+ * only the build's templates carry, which no module code names.
+ */
+export const MANUAL_MARKER = '<article class="manual-chapter">';
+
+/** The bundles whose About page has the Help tab: every one that is not a demo and has a module with a chapter. */
+export const MANUAL_BUNDLES = [...DIRECT_BUNDLES.filter(name => name !== DEMO_BUNDLE), PROVISIONED_BUNDLE];
+
+/**
  * The policy each bundle must carry (scripts/csp.mjs): its kind, and whether
  * it has the vendor loader whose scripts 'strict-dynamic' lets in. The kind
  * follows the build: demo mode for the demos, a variant's `GATEWAY_ONLY` for
@@ -122,11 +134,13 @@ export const DEMO_MARKERS = [GATEWAY_MARKER, NETWORK_MARKER];
 export const DEMO_FORBIDDEN = ['fetch.bind(', 'new WebSocket(', 'new EventSource(', 'new XMLHttpRequest('];
 
 /**
- * The hosts a URL literal in a demo bundle may name, all of them inert: the
- * SVG and XML namespace host, and the reserved `.invalid` TLD (RFC 2606), which
- * never resolves -- the mock server's route base and the demo brokers.
+ * The hosts a URL literal in a demo bundle may name. None is one the page
+ * itself reaches: the SVG and XML namespace host, the reserved `.invalid` TLD
+ * (RFC 2606), which never resolves -- the mock server's route base and the
+ * demo brokers -- and the project's home, which the About page links to and
+ * only a click opens, in a tab of its own.
  */
-export const ALLOWED_HOSTS = [/^www\.w3\.org$/, /\.invalid$/];
+export const ALLOWED_HOSTS = [/^www\.w3\.org$/, /\.invalid$/, /^github\.com$/];
 
 /** A scheme with a literal host; a bare `https://` or `https://${host}` is not one. */
 const URL_LITERAL = /\b(?:https?|wss?):\/\/([A-Za-z0-9][A-Za-z0-9.-]*)/g;
@@ -284,7 +298,18 @@ export function checkBundles(distDir) {
     // A missing bundle was reported above.
     for (const [name, opts] of Object.entries(BUNDLE_CSP)) {
         const text = read(name);
-        if (text !== null) problems.push(...cspProblems(name, text, opts));
+        if (text === null) continue;
+        problems.push(...cspProblems(name, text, opts));
+        if (MANUAL_BUNDLES.includes(name)) {
+            lacks(name, text, [MANUAL_MARKER], ['manual',
+                'The About template lost its manual: check the @help blocks and the manual marker in ' +
+                `src/modules/about/index.html and the modules' help.html files, ${stale('MANUAL_MARKER')}`]);
+        } else if (opts.kind === 'demo' && text.includes(MANUAL_MARKER)) {
+            problems.push(
+                `${name}: contains the manual. A demo ships the About page without the Help tab: check that ` +
+                'injectModuleTemplates in vite.config.ts passes demo mode on to readModuleView.',
+            );
+        }
     }
     return problems;
 }
@@ -305,7 +330,8 @@ export function main(root = repoRoot()) {
     console.log(
         `Bundle check passed (${DIRECT_BUNDLES.length} Direct bundles carry no Provisioned UI; ${PROVISIONED_BUNDLE} does; ` +
         `${PROVISIONED_DEMO_BUNDLE} runs it against the demo gateway; both demos have no network; ` +
-        `${ADMIN_BUNDLE} ships no Solace or JSZip loader; every bundle carries its Content-Security-Policy).`,
+        `${ADMIN_BUNDLE} ships no Solace or JSZip loader; the manual is in every app bundle and in no demo; ` +
+        'every bundle carries its Content-Security-Policy).',
     );
     return 0;
 }

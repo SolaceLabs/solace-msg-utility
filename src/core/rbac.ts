@@ -71,8 +71,8 @@ function vpnMatchesAny(rows: QGlob[], broker: string, vpn: string): boolean {
     return findVpnRow(rows, broker, vpn) !== undefined;
 }
 
-/** The sign-in surface: shown in every managed session, never granted. */
-const ALWAYS_VISIBLE = new Set(['connections']);
+/** The sign-in surface and the About page: shown in every managed session, never granted. */
+const ALWAYS_VISIBLE = new Set(['connections', 'about']);
 
 /**
  * The admin console's sign-in screen: shown only while no one is signed in.
@@ -83,8 +83,8 @@ const SIGNED_OUT_ONLY = 'admin-login';
 
 /**
  * Whether a module's sidebar entry + view should be shown for this session.
- * Past the requirements above, a managed user sees the connections module and
- * the modules the gateway granted them (`session.modules`, from the user's
+ * Past the requirements above, a managed user sees the connections module, the
+ * About page and the modules the gateway granted them (`session.modules`, from the user's
  * own list or the deployment default, within what the deployment offers).
  */
 export function isModuleVisible(s: ManagedSession | null | undefined, id: string): boolean {

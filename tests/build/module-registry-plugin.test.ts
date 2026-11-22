@@ -92,8 +92,8 @@ describe('moduleRegistryPlugin — extractModuleEntries', () => {
 });
 
 describe('moduleRegistryPlugin — activeModuleIds', () => {
-    it('reads the min variant manifest: connections and the Queue Browser only', () => {
-        expect(activeModuleIds(root, 'min').sort(byName)).toEqual(['connections', 'queue-browser']);
+    it('reads the min variant manifest: connections, the Queue Browser and About', () => {
+        expect(activeModuleIds(root, 'min').sort(byName)).toEqual(['about', 'connections', 'queue-browser']);
     });
 
     it('defaults to the standard variant when none is given', () => {
@@ -188,11 +188,12 @@ describe('moduleRegistryPlugin — virtual module', () => {
         // Keys are emitted via JSON.stringify → double-quoted.
         expect(code).toContain('"connections": m0');
         expect(code).toContain('"queue-browser": m1');
+        expect(code).toContain('"about": m2');
         expect(code).toMatch(/import \* as m0 from ".*\/connections\/module\.ts";/);
         // min excludes queue-copy — it must not be imported.
         expect(code).not.toContain('queue-copy');
-        // Two modules → two namespace imports.
-        expect(String(code).match(/import \* as m\d+ from/g)?.length).toBe(2);
+        // Three modules → three namespace imports.
+        expect(String(code).match(/import \* as m\d+ from/g)?.length).toBe(3);
     });
 
     it('imports the managed entry, and never the Release entry, for an overridden module', () => {
@@ -258,7 +259,7 @@ describe('moduleRegistryPlugin -- module stylesheets', () => {
     });
 
     it('carries no stylesheet of a module the variant leaves out', () => {
-        expect(stylesheets(load('min')).map(f => f.split('/').slice(-2, -1)[0])).toEqual(['connections', 'queue-browser']);
+        expect(stylesheets(load('min')).map(f => f.split('/').slice(-2, -1)[0])).toEqual(['connections', 'queue-browser', 'about']);
         for (const variant of VARIANTS) expect(load(variant)).not.toContain('/queue-discovery/');
     });
 

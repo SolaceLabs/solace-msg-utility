@@ -38,6 +38,15 @@ describe('variants', () => {
         }
     });
 
+    it('every variant ends with the About page, and lists its modules in sidebar order, which is the order of the manual\'s chapters', () => {
+        const variants = [STANDARD_VARIANT, MIN_VARIANT, NO_QUEUE_COPY_VARIANT, ADMIN_VARIANT, ALL_VARIANT, MANAGED_VARIANT, DEMO_VARIANT];
+        for (const v of variants) {
+            const ids = Object.keys(v);
+            expect(ids.at(-1)).toBe('about');
+            expect(ids).toEqual([...ids].sort((a, b) => v[b] - v[a]));
+        }
+    });
+
     it('no-queue-copy variant leaves queue-copy out and keeps the other standard modules', () => {
         expect(NO_QUEUE_COPY_VARIANT).not.toHaveProperty('queue-copy');
         for (const id of Object.keys(STANDARD_VARIANT).filter(id => id !== 'queue-copy')) {
@@ -112,6 +121,7 @@ describe('variants', () => {
         // The one shipped bundle with the admin pages: a demo, against a fake
         // gateway. No admin-login (the Managed panel owns the session).
         const editors = ['backup', 'connection-management', 'gateway-settings', 'tls-certificates', 'user-management'];
+        // "messaging" is the managed variant whole: its messaging modules and the About page.
         const messaging = Object.keys(MANAGED_VARIANT);
         expect(Object.keys(DEMO_VARIANT).sort()).toEqual([...messaging, ...editors].sort());
         expect(DEMO_VARIANT).not.toHaveProperty('admin-login');

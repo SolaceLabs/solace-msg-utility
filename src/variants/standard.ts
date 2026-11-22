@@ -16,4 +16,5 @@ export const ACTIVE_MODULES: Record<string, number> = {
     'queue-browser': 80,
     'queue-copy': 70,
     'queue-subscription-explorer': 45,
+    'about': 1,                    // what the app is, and the manual
 };
