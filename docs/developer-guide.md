@@ -22,6 +22,7 @@ This guide is for developers who build, change or extend the project: the TypeSc
 - [Writing the Manual](#writing-the-manual)
   - [A chapter](#a-chapter)
   - [Figures](#figures)
+  - [The guide on GitHub](#the-guide-on-github)
   - [What checks a chapter](#what-checks-a-chapter)
 - [Testing](#testing)
 - [Code Conventions](#code-conventions)
@@ -496,7 +497,7 @@ A browser event that arrives before step 3 throws `wire() not called before a br
 
 ## Writing the Manual
 
-The manual is the Help tab of the About page. Each module owns one chapter of it, `src/modules/<id>/help.html`, and the build composes the chapters of a variant's modules into that variant's bundle ([architecture.md](architecture.md#dom-template-system)). The same files are the source of the user guide on GitHub. When a change alters what a page shows or does, change its chapter in the same commit.
+The manual is the Help tab of the About page. Each module owns one chapter of it, `src/modules/<id>/help.html`, and the build composes the chapters of a variant's modules into that variant's bundle ([architecture.md](architecture.md#dom-template-system)). The same files are the source of the user guide on GitHub ([The guide on GitHub](#the-guide-on-github)). When a change alters what a page shows or does, change its chapter in the same commit.
 
 A module that has an entry (`MODULE_ENTRIES`) may add a chapter for it in `help.<entry>.html`: the file opens with the `<!-- @module-base -->` marker, where the build puts the module's base chapter, and holds the extra chapter after it. The connections module does this for the Provisioned sign-in (`help.managed.html`).
 
@@ -535,9 +536,20 @@ A figure is an SVG file in `src/modules/<id>/help/`, named in the chapter as `<i
 
 The build writes each figure into the bundle, so every picture adds to every bundle that carries its chapter. A missing file, or a figure that is not an SVG file in the module's `help/` folder, fails the build.
 
+### The guide on GitHub
+
+[user-guide.md](user-guide.md) is the manual as one Markdown file, and nobody edits it: [scripts/user-guide.mjs](../scripts/user-guide.mjs) writes it from the chapters. After changing a chapter, run:
+
+```bash
+npm run guide
+```
+
+and commit the guide with the chapter. The guide holds every chapter once, in parts: the chapters of the `standard` variant, then what the `managed` variant adds, then those of the `admin` variant, each in the order its variant lists the modules. `GUIDE_LAYOUT` in the script holds the parts, and the introduction above the Contents list, which is the one piece of the guide written there and not in a chapter. A chapter's sections become `###` headings, so their anchors (`user-guide.md#filtering-messages`) are what other docs link to; a section title used by more than one chapter gets a numbered anchor (`#the-page-at-a-glance-3`), so link such a section by its chapter.
+
 ### What checks a chapter
 
 - `tests/build/manual-to-md.test.ts > "the chapters of the manual"` converts every chapter, so a part outside the table fails by name.
+- `tests/build/user-guide.test.ts > "is what the chapters of the manual make: after changing a chapter, run npm run guide"` fails while the committed guide differs from what the chapters make, and `> "hold every chapter file of the repo, each chapter once, whatever bundles carry it"` fails for a chapter no part of the guide takes.
 - `tests/build/module-help.test.ts` composes the manual of the real variants and holds every figure file to the rules above.
 - `scripts/check-bundles.mjs` proves on the built files that the manual is in every app bundle and in neither demo.
 

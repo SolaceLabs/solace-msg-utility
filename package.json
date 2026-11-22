@@ -19,6 +19,7 @@
     "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
     "lint": "eslint src tests scripts vite.config.ts vitest.config.ts vitest.mock.config.ts eslint.config.mjs",
     "check:bundles": "node scripts/check-bundles.mjs",
+    "guide": "node scripts/user-guide.mjs",
     "audit:gate": "node scripts/npm-audit-gate.mjs",
     "test": "vitest run --pool=threads",
     "test:app": "vitest run --pool=threads --exclude \"tests/mock-broker/**\"",

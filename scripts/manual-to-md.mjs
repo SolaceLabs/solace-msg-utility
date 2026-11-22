@@ -40,8 +40,13 @@ function refuse(el, why) {
     throw new Error(`[manual] <${el.tagName.toLowerCase()}> ${why}: ${el.outerHTML.replace(/\s+/g, ' ').slice(0, 120)}`);
 }
 
-/** Text as Markdown: runs of white space become one space, and the characters Markdown reads as markup are escaped. */
-const escapeText = text => text.replace(/\s+/g, ' ').replace(/&/g, '&amp;').replace(/[\\`*_[\]<>|]/g, '\\$&');
+/**
+ * Text as Markdown: runs of white space become one space, and the characters
+ * Markdown reads as markup are escaped. An `&` is escaped only where Markdown
+ * would read a character reference (`&lt;`, `&#60;`): a plain one stays, so a
+ * heading such as "Backup & Restore" keeps the anchor GitHub gives its text.
+ */
+const escapeText = text => text.replace(/\s+/g, ' ').replace(/&(?=#?\w+;)/g, '&amp;').replace(/[\\`*_[\]<>|]/g, '\\$&');
 
 /** A `<code>` as a code span. A table cell also needs its `|` escaped; nowhere else may it be. */
 function codeSpan(el, inTable) {

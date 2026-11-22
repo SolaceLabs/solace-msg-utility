@@ -103,9 +103,10 @@
     </ol>
     <p>If the connect fails, the card shows one line for each part that failed, <strong>SEMP (management)</strong> or <strong>Messaging (client)</strong>, and says when a part came up and was closed again because the other failed. Each failure is also added in full to the notification bell. If the destination has no connection available to your account, the card says <strong>No connections are available for your account. Ask an administrator to grant access.</strong></p>
     <p>While <strong>Same Solace Broker as source</strong> and <strong>Same Message VPN as source</strong> are both ticked, the card is replaced by a note saying that the destination is the source connection: nothing to connect. While a connect is running, the card's lists and the two shortcuts are locked. If the destination on show changes before the connection comes up, for example because a refresh of your entitlements removes the Message VPN you chose, the late connection is dropped and the card says <strong>The destination changed while connecting. Connect again.</strong></p>
-    <p>If your sign-in changes to or from a signed-in session while the page is open, any destination connection and the target you chose are dropped.</p>
+    <p>If your sign-in changes to or from a signed-in session while the page is open, any destination connection and the target you chose are dropped. The same happens to the destination queue you chose when a refresh of your entitlements removes the Message VPN of a connected destination: the <strong>Queue name</strong> box is emptied, so you cannot start a run against it.</p>
+    <p>The card's connection is one unit: if its messaging connection drops, its SEMP connection is closed with it, and <strong>Disconnect</strong> closes both.</p>
     <aside class="manual-note" data-kind="important">
-        <p>In a signed-in session you can copy only into queues you are entitled to operate on, and the <strong>Topic</strong> choice is not available: the switch is locked, and the page explains that entitlements are defined per queue. A topic delivers to every queue that subscribes to it, so it cannot be checked. A run that would break either rule is refused before anything is read.</p>
+        <p>In a signed-in session you can copy only into queues you are entitled to operate on, and the <strong>Topic</strong> choice is not available: the switch is locked, and the page explains that entitlements are defined per queue. A topic delivers to every queue that subscribes to it, so it cannot be checked. The page says so with <code>Topic destinations are unavailable with provisioned connections -- entitlements are defined per queue.</code> A run that would break either rule is refused before anything is read. Outside a signed-in session there is no such rule: the destination may be a topic.</p>
     </aside>
 
     <h3>The destination target</h3>
@@ -204,7 +205,8 @@
             <tr><td>A red banner: <strong>You don't have access to this queue</strong></td><td>You are not the queue's owner and its permission for others is No-Access. Both <strong>Copy</strong> and <strong>Move</strong> are blocked.</td><td>Connect as the owner, or as a user with at least read-only permission, then press <strong>Refresh</strong>.</td></tr>
         </tbody>
     </table>
-    <p>The owner of a queue always has full access. When the queue's owner is the username of your client connection, the dialog treats the queue as read and write, whatever its permission for others says.</p>
+    <p>The owner of a queue always has full access. When the queue's owner is the username of your client connection, the dialog treats the queue as read and write, whatever its permission for others says. The match is exact, letter case included. Without SEMP the page cannot read the owner, but the broker's answer to the temporary browser already counts ownership.</p>
+    <p>With SEMP connected, the dialog reads the queue's permission for other users (No-Access, Read-Only, Consume, Modify-Topic or Delete) through SEMP. Without SEMP, it takes it from the broker's answer when the temporary browser binds. If neither gives an answer, the dialog does not block the run and leaves the broker to refuse it.</p>
 
     <h3>Running a copy or a move</h3>
     <p>Press the start button. The dialog changes to the run.</p>
@@ -262,7 +264,7 @@
     <p>A run also ends when the source has delivered no message for 30 seconds. It is then reported as <strong>Completed</strong> only if every message of the check has been sent.</p>
     <aside class="manual-note" data-kind="warning">
         <p>A move cannot be undone. A run that stops, whether you cancel it or it fails, does not put anything back: messages already sent stay on the destination, and messages already removed stay removed from the source.</p>
-        <p>The page counts a message as moved once the destination has acknowledged it and the removal has been requested. It does not read the source queue again afterwards. To see what is left on the source, press <strong>Next</strong> again and read <strong>Message Count</strong> before you rely on the result. When a run stops on an error, a message whose acknowledgement arrives after the page has stopped reading the source is counted but is not removed from it, so it can be on both queues.</p>
+        <p>The page counts a message as moved once the destination has acknowledged it and the removal has been requested. It does not read the source queue again afterwards. The broker does not answer a removal request, so the page cannot tell whether it worked: a removal the broker refuses goes unseen, the message stays on the source, and the page still counts it as moved. To see what is left on the source, press <strong>Next</strong> again and read <strong>Message Count</strong> before you rely on the result. When a run stops on an error, a message whose acknowledgement arrives after the page has stopped reading the source is counted but is not removed from it, so it can be on both queues.</p>
     </aside>
     <aside class="manual-note" data-kind="tip">
         <p>When you are unsure, try the run first as a <strong>Copy</strong> into a spare queue. A copy never changes the source, so nothing is lost if the destination turns out to be wrong.</p>

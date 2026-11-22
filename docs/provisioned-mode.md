@@ -2,7 +2,7 @@
 
 Provisioned mode is for teams whose users should not handle broker credentials. Users sign in to the gateway with their own account and see only the brokers and Message VPNs an administrator granted them. They never see or type a broker's address or password.
 
-This page is for the people who run a Provisioned gateway: operators who deploy and configure it, and administrators who look after its users and connections. It covers setup, every setting, two-factor sign-in, certificates, backup and restore, the files the gateway keeps, the audit trail, what the security model does and does not guarantee, and what to do when the gateway will not start. The screens an administrator clicks through are in [user-guide.md](user-guide.md#administration-soladmin). The design of the gateway is in [architecture.md](architecture.md).
+This page is for the people who run a Provisioned gateway: operators who deploy and configure it, and administrators who look after its users and connections. It covers setup, every setting, two-factor sign-in, certificates, backup and restore, the files the gateway keeps, the audit trail, what the security model does and does not guarantee, and what to do when the gateway will not start. The screens an administrator clicks through are in [user-guide.md](user-guide.md#administration). The design of the gateway is in [architecture.md](architecture.md).
 
 It is the same container image as [Gateway mode](deployment.md#gateway-mode), with one setting changed. Everything in the deployment guide about the image, TLS and mounts applies here too.
 
@@ -260,7 +260,7 @@ A backup carries each user's two-factor secret and the hashes of the unused reco
 
 ## Administer
 
-The admin console is at `https://<host>:9443/solAdmin`, for administrator accounts only. Its pages, click by click, are in [user-guide.md](user-guide.md#administration-soladmin); this section gives the facts an operator needs.
+The admin console is at `https://<host>:9443/solAdmin`, for administrator accounts only. Its pages, click by click, are in [user-guide.md](user-guide.md#administration); this section gives the facts an operator needs.
 
 - **User Management:** add users, reset passwords, make someone an administrator, and grant brokers, VPNs and queues. A grant can use `*` wildcards, for example queues `orders.*`. The **Two-factor** column shows On or Off, and **Reset two-factor** on an On row removes it (see [A lost phone](#a-lost-phone)); a save never carries or clears it.
 - **Connection Management:** add brokers, their SEMP account and their VPNs' client credentials. Leave a password blank to keep the stored one. The gateway reaches each broker over TLS (`https` for SEMP, `wss` for messaging), so the ports are the broker's TLS ports, unless the connection's `scheme` names the plain one (`http` for SEMP, `ws` for messaging; each side set on its own). A connection with no scheme, or a blank one, uses TLS. Pick `http` or `ws` only for a broker on a trusted network that does not serve TLS on that port: the gateway then reaches it unencrypted, and the SEMP and SMF credentials cross that hop in clear text. Set the scheme in Connections -> Add or Edit connection.

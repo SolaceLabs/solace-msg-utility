@@ -142,7 +142,7 @@
     <p>Delete works on every file the list shows, including a file that someone placed in the folder by hand.</p>
 
     <h3>The standard root CAs</h3>
-    <p>The <strong>Standard root CAs</strong> card describes the public root CAs that the gateway's image carries, from Mozilla's list. The page cannot add or delete them: they come with the image and change with a new release. Whether the gateway trusts them is a setting, <strong>Trust the standard root CAs</strong>, on the Gateway Settings page (see the Gateway Settings chapter).</p>
+    <p>The <strong>Standard root CAs</strong> card describes the public root CAs that the gateway's image carries, from Mozilla's list. The page cannot add or delete them: they come with the image and change with a new release, unless whoever runs the gateway mounts the host's CA bundle in place of the image's list. The gateway then trusts what the host trusts, and reads it at every start. That is set up outside these pages: see <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md#trusting-the-hosts-ca-store">Trusting the host's CA store</a>. Whether the gateway trusts them is a setting, <strong>Trust the standard root CAs</strong>, on the Gateway Settings page (see the Gateway Settings chapter).</p>
     <ul>
         <li>When they are on, the card says <code>Trusted: brokers whose certificates chain to one of these N certificates are accepted.</code></li>
         <li>When they are off, it says <code>Not trusted: turned off on Gateway Settings. Only the CA files above are trusted.</code></li>

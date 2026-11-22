@@ -39,7 +39,12 @@ describe('a chapter as Markdown', () => {
 
     it('escapes what Markdown would read as markup, and leaves code as written', () => {
         expect(md('<p>Use * and _x_ with [a] &lt;b&gt; | c &amp; d \\ e, not <code>&lt;name&gt; * _</code></p>'))
-            .toBe('Use \\* and \\_x\\_ with \\[a\\] \\<b\\> \\| c &amp; d \\\\ e, not `<name> * _`');
+            .toBe('Use \\* and \\_x\\_ with \\[a\\] \\<b\\> \\| c & d \\\\ e, not `<name> * _`');
+    });
+
+    it('escapes an & only where Markdown would read a character reference', () => {
+        expect(md('<p>Backup &amp; Restore, R&amp;D, the text &amp;lt; and &amp;#60;</p>'))
+            .toBe('Backup & Restore, R&D, the text &amp;lt; and &amp;#60;');
     });
 
     it('links a guide by its file, and any other https address in full', () => {

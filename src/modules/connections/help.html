@@ -115,7 +115,7 @@
     </table>
 
     <h3>Connecting SEMP</h3>
-    <p>SEMP is the broker's management interface. The page uses it to read facts about the broker, such as which queues exist. The pages that list a broker's queues and subscriptions need it. A SEMP connection is not a standing session: the page checks your account with one request, and then sends each later request with the same account.</p>
+    <p>SEMP is the broker's management interface. The page connects to its SEMP v2 REST API and uses it to read facts about the broker, such as which queues exist. The pages that list a broker's queues and subscriptions need it. A SEMP connection is not a standing session: the page checks your account with one request, and then sends each later request with the same account.</p>
     <ol class="manual-steps">
         <li>Fill in <strong>Broker Host (IP or Hostname)</strong> at the top of the page. The SEMP connection uses the same host as the Solace client.</li>
         <li>In the <strong>Solace SEMP (Management)</strong> card, fill in the address and the account.</li>

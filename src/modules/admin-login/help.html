@@ -9,6 +9,7 @@
     <ul>
         <li>It exists only on a gateway that runs in Provisioned mode. On any other gateway, and at a wrong address, the gateway answers that the page is not found.</li>
         <li>Only an account marked as an administrator may open it. Any other account that signs in sees the gateway's <strong>Administrator access required</strong> page, which says <code>You are signed in as bob, which is not an administrator.</code> and offers <strong>Back to the app</strong>.</li>
+        <li>The address with a trailing slash, <code>/solAdmin/</code>, takes you to <code>/solAdmin</code>.</li>
         <li>The gateway checks the administrator flag again on every request, so a change to your account applies at once.</li>
     </ul>
 

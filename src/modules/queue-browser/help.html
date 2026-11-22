@@ -26,7 +26,7 @@
         <li>Press <strong>Bind</strong>, or press <kbd>Enter</kbd>.</li>
         <li>A message confirms <code>Queue "&lt;name&gt;" bound</code>. The queue appears in <strong>Bound Queues</strong>, and its messages start to arrive in the table.</li>
     </ol>
-    <p>You can bind up to <strong>3 queues at once</strong>. Switch between them in <strong>Bound Queues</strong>; each queue keeps its own messages. To stop receiving messages from a queue, select it and press <strong>Unbind</strong>.</p>
+    <p>You can bind up to <strong>3 queues at once</strong>. Switch between them in <strong>Bound Queues</strong>; each queue keeps its own messages. To stop receiving messages from a queue, select it and press <strong>Unbind</strong>. <strong>Unbind</strong> also discards the messages the page had read from that queue; bind it again to read them afresh.</p>
     <aside class="manual-note">
         <p>The table is a snapshot. Another application may have consumed a message since you bound the queue, so a message you see here may no longer be on the broker.</p>
         <p>The page keeps the latest messages of each queue: as many as <strong>Max Messages per Queue</strong> allows (in Advanced Settings on the Connections page), and never more than 32 MiB. The oldest messages go first, at whichever limit is reached first.</p>
@@ -90,7 +90,7 @@
         <li><strong>Search Criteria</strong>. <strong>Match ANY (OR)</strong> shows a message that passes at least one of the rules you filled in. <strong>Match ALL (AND)</strong> shows only a message that passes every one.</li>
         <li><strong>Message ID</strong> and <strong>Message Type</strong> (Any, Text, Binary, Map or Stream).</li>
         <li><strong>Destination Name</strong> and its <strong>Type</strong> (Any, Topic or Queue).</li>
-        <li><strong>Properties Filter</strong>. Press <strong>+ Add</strong> for each property to test. The key is the name of a standard or an application property, in any letter case; the key box suggests the standard ones.</li>
+        <li><strong>Properties Filter</strong>. Press <strong>+ Add</strong> for each property to test. The key is the name of a standard or an application property, in any letter case; the key box suggests the standard ones: App Msg Id, Cache Id, Corr Id, Delivery Count, Delivery Mode, HTTP Encoding, HTTP Type, Priority, Reply To, Sender Id, SeqNumber, TTL and TopicSeqNum.</li>
         <li><strong>Body Content</strong>: text the payload must contain, in any letter case. A binary payload that is not text never matches.</li>
         <li><strong>Search Time Range</strong>: the sender's timestamp must be at or after <strong>Newer than</strong>, and at or before <strong>Older than</strong>. Fill in either or both. A message without a timestamp is left out once either is set.</li>
         <li><strong>Apply Filter</strong> filters the table. <strong>Clear Filter</strong> removes every rule and shows all messages. <strong>Cancel</strong> closes the dialog and changes nothing.</li>
@@ -149,7 +149,7 @@
     <aside class="manual-note" data-kind="warning">
         <p>A deleted message is removed from the queue on the broker. It cannot be brought back.</p>
     </aside>
-    <p>You can delete only on a queue whose badge reads <strong>Read-Write</strong>. On a <strong>Read-Only</strong> queue the rows have no delete button.</p>
+    <p>You can delete only on a queue whose badge reads <strong>Read-Write</strong>. It reads so when the queue's permission for other clients is Consume, Modify-Topic or Delete, or when you own the queue. When the broker lets your client do no more than read, the badge reads <strong>Read-Only</strong> and the rows have no delete button.</p>
     <ul>
         <li><strong>One message</strong>: press the delete button on its row. A dialog asks <code>Delete message &lt;id&gt;?</code></li>
         <li><strong>Several messages</strong>: tick them and press <strong>Delete</strong> above the table. The dialog says how many.</li>

@@ -44,7 +44,7 @@
         <li>You return to the app with the <strong>Provisioned</strong> tab open and the Connect card ready.</li>
     </ol>
     <p>If the gateway asks you to choose a password first, the card's button reads <strong>Change password</strong> instead of <strong>Sign in</strong>. Press it and follow "Changing your password" below.</p>
-    <p>Your sign-in survives a reload of the page. It ends when you sign out, after a period without activity, and a fixed time after you signed in; your administrator sets both limits. It also ends when an administrator changes your account. If it ends while you are using the page, the card says <code>Your session has ended. Sign in again.</code></p>
+    <p>Your sign-in survives a reload of the page. It ends when you sign out, after a period without activity, and a fixed time after you signed in; your administrator sets both limits. Unless your administrator has changed them, they are 10 minutes without activity and 30 minutes after you signed in. It also ends when an administrator changes your account. If it ends while you are using the page, the card says <code>Your session has ended. Sign in again.</code></p>
 
     <h3>Connecting to a broker</h3>
     <p>The <strong>Connect to a broker</strong> card, called the Connect card in this chapter, holds the lists and the button.</p>
@@ -158,20 +158,21 @@
         <li>On the page <strong>Two-factor sign-in</strong>, type your <strong>Password</strong>. If two-factor is already on, also type <strong>Current code or a recovery code</strong>. Press <strong>Continue</strong>. <strong>Cancel</strong> leaves without changing anything.</li>
         <li>On <strong>Set up two-factor sign-in</strong>, scan the picture with an authenticator app. Or type the <strong>Key</strong> shown under it into the app. If the picture cannot be drawn, the page says <code>The picture could not be drawn. Type the key into your app instead.</code></li>
         <li>Type the six-digit code the app shows in <strong>Code</strong> and press <strong>Turn on two-factor sign-in</strong>.</li>
-        <li>The page <strong>Recovery codes</strong> lists ten codes in groups of four characters. Save them somewhere other than your phone. Each works once, and this page is the only place they are shown. Press <strong>Continue</strong>.</li>
+        <li>The page <strong>Recovery codes</strong> lists ten codes in groups of four characters. Save them somewhere other than your phone. Each works once, and this page is the only place they are shown. Press <strong>Continue</strong>. If you must also choose a new password, <strong>Continue</strong> takes you to that page first.</li>
     </ol>
     <aside class="manual-note" data-kind="warning">
-        <p>The recovery codes are shown only once. If you lose your phone and have no recovery code left, only an administrator can reset your two-factor sign-in.</p>
+        <p>The recovery codes are shown only once. If you lose your phone and have no recovery code left, only an administrator can reset your two-factor sign-in. You cannot turn it off yourself, and your password alone does not get you in.</p>
     </aside>
+    <p>If you lose your phone but still have a recovery code, type it in <strong>Code</strong> to sign in. Then set two-factor sign-in up again on the new phone.</p>
     <p>Setting it up again, for example on another phone, replaces the key and the recovery codes and signs you out everywhere else. This browser stays signed in.</p>
     <h4>Signing in with a code</h4>
-    <p>After your password, the page <strong>Two-factor sign-in</strong> says <code>Enter the 6-digit code from your authenticator app, or one of your recovery codes.</code> Type the code in <strong>Code</strong> and press <strong>Continue</strong>. Spaces or hyphens inside the digits do not matter. A recovery code works once. <strong>Start again</strong> goes back to the password. A half-finished sign-in is dropped after the time your administrator allows.</p>
+    <p>After your password, the page <strong>Two-factor sign-in</strong> says <code>Enter the 6-digit code from your authenticator app, or one of your recovery codes.</code> Type the code in <strong>Code</strong> and press <strong>Continue</strong>. Spaces or hyphens inside the digits do not matter. A recovery code works once, and its letters may be in either case, with or without hyphens or spaces. <strong>Start again</strong> goes back to the password. A half-finished sign-in is dropped after the time your administrator allows, 10 minutes unless they have changed it.</p>
     <table>
         <thead>
             <tr><th>Message</th><th>What to do</th></tr>
         </thead>
         <tbody>
-            <tr><td><code>The code is not correct.</code></td><td>Type the code the app currently shows. The same message appears on the set-up page when the first code is wrong. A used recovery code does not work again. Wrong codes count like wrong passwords.</td></tr>
+            <tr><td><code>The code is not correct.</code></td><td>Type the code the app currently shows. A code works once, so if you sign in again straight away, wait for the app's next code. The same message appears on the set-up page when the first code is wrong, and the page shows the same key again. A used recovery code does not work again. Wrong codes count like wrong passwords.</td></tr>
             <tr><td><code>The password or the code is not correct.</code></td><td>On the page <strong>Two-factor sign-in</strong> that asks for your password, check both and try again.</td></tr>
             <tr><td><code>Too many attempts. Try again in N seconds.</code></td><td>Wait as long as the message says.</td></tr>
             <tr><td><code>The gateway cannot record changes right now, so it cannot accept a recovery code. Sign in with the code from your authenticator app, or try again later.</code></td><td>Use the code from the app, or wait.</td></tr>
@@ -193,11 +194,12 @@
         <li>The <strong>Broker</strong> and <strong>Message VPN</strong> lists, and the queue lists in the pages, hold only what you were granted.</li>
         <li>If you type the name of a queue you were not granted, it does not bind, and Queue Browser says <code>You are not entitled to browse queue "orders.private".</code></li>
         <li>In Queue Copy, the queue lists of the destination hold only queues on which you hold Operate, because copying into a queue changes it.</li>
+        <li>The page applies the queue limits itself: the gateway checks that you were granted the broker, and the page then narrows each list to the queues you were granted.</li>
         <li>Queue Subscriptions lists only subscriptions on queues you may see, as the Queue Subscriptions chapter says.</li>
         <li>Queue Copy does not copy to a topic: it says <code>Topic destinations are unavailable with provisioned connections -- entitlements are defined per queue.</code> A destination queue you may not write to gives <code>You are not entitled to write to queue "orders.archive".</code></li>
         <li>The sidebar shows Connections and About, and then only the pages your administrator gave you, out of Queue Browser, Queue Copy and Queue Subscriptions. A page you were not given is not listed. A change shows after you press <strong>Refresh</strong> or reload the page.</li>
     </ul>
-    <p>If an administrator takes away something you were using while you work, whatever depended on it stops.</p>
+    <p>If an administrator takes away something you were using while you work, whatever depended on it stops. The gateway also closes your messaging connection when you sign out, in this tab or another, when your password or administrator status changes, and when an administrator removes your access to that broker or Message VPN. SEMP is closed with it, as in "The connected view" above.</p>
 
     <h3>Other messages</h3>
     <table>

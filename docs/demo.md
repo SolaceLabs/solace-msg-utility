@@ -243,7 +243,7 @@ The panel is the one in `demo.html`, with the Direct connection values replaced 
     card reads "SEMP (management): broker not reachable" and "Messaging (client): connected, closed because SEMP
     failed"; with the dial rate limited it reads "Messaging (client): too many attempts, wait a minute" and "SEMP
     (management): connected, closed because messaging failed". The full texts are in the notification bell. See
-    [Signing in and connecting](user-guide.md#signing-in-and-connecting).
+    [Signing in](user-guide.md#signing-in).
   - **TLS files:** *writable* (the start) or *read-only*. Read-only turns both writable flags off, so the Certificates page disables replace, add and delete and says the files are read-only on the gateway host, and the writes answer `409 tls_read_only`, as a read-only mount of `/tls` does.
 
 **Queue state**, **Connection faults** and **Latency and volume** work as in `demo.html`, across every broker. A SEMP

@@ -101,6 +101,7 @@
             <tr><td><strong>Broker connects per user per minute</strong></td><td>How many broker credential requests and messaging sockets one user may open in a minute.</td><td>A whole number from 1 to 1000.</td><td>20</td></tr>
         </tbody>
     </table>
+    <p>The gateway also caps how many messaging sockets stay open at once: 20 for one user and 1000 for the whole gateway. Both are fixed and have no setting. A socket beyond either cap is refused until one closes. The connects per minute limit above bounds how fast sockets open, and these caps bound how many stay open.</p>
 
     <h3>Sign-in throttle</h3>
     <p>The throttle slows down anyone who keeps getting a password or a code wrong. After a number of failures, the gateway makes the account, and the client address, wait before it checks another attempt. The wait starts at the first back-off and doubles with each further failure, up to the longest back-off. A successful sign-in clears the account's failures, but never the client's: those fade by themselves after the time you set.</p>
@@ -239,6 +240,7 @@
         <p><code>config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit; saving here is blocked until then.</code></p>
     </aside>
     <p><strong>Save</strong> is off while the banner shows. The gateway holds to the settings it loaded, and it will not save over a change it has not read. Press <strong>Restart gateway</strong> to make it read the file, then make your changes. A refused save also brings the banner up.</p>
+    <p>The users store, the connections store and the store key have no setting: they always live in the gateway's <code>/data</code> folder. <strong>Backup &amp; Restore</strong> is how you move them to another gateway.</p>
 
     <h3>Restarting the gateway</h3>
     <p>The <strong>Gateway</strong> card at the foot of the page holds one button, <strong>Restart gateway</strong>. It makes the gateway start its program again, in place, with the same arguments and environment. You rarely need it: settings apply when you save them. Use it to make the gateway read a settings file that was changed on its host.</p>
