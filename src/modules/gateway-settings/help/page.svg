@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 640" width="760" height="640" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="640" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="16" width="720" height="64" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="38" y="42" font-size="11.5" fill="#64748b">The gateway's settings. A saved setting applies at once.</text>
+    <text x="38" y="60" font-size="11.5" fill="#64748b">Certificates are managed under Certificates.</text>
+    <rect x="650" y="33" width="72" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="686" y="50" font-weight="700" text-anchor="middle">Reload</text>
+    <circle cx="612" cy="48" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="612" y="52" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <rect x="20" y="90" width="720" height="34" fill="#fffbeb" rx="6" stroke="#fcd34d"/>
+    <text x="36" y="112" font-size="11" fill="#b45309">config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway ...</text>
+    <circle cx="716" cy="107" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="111" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <rect x="20" y="134" width="720" height="84" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="38" y="160" font-size="14" font-weight="700">Connections</text>
+    <text x="38" y="172" font-size="11" fill="#64748b" font-weight="700">Connection modes the app offers</text>
+    <rect x="38" y="180" width="300" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="48" y="198">Provisioned only (everyone signs in)</text>
+    <path d="M318 192 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="372" y="172" font-size="11" fill="#64748b" font-weight="700">Tab shown first when both are offered</text>
+    <rect x="372" y="180" width="300" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="382" y="198">Direct</text>
+    <path d="M652 192 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <circle cx="716" cy="176" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="180" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <rect x="20" y="228" width="720" height="112" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="38" y="254" font-size="14" font-weight="700">Access</text>
+    <text x="38" y="272" font-size="11" fill="#64748b">Your address as the gateway sees it: 10.0.4.17 (the TCP peer).</text>
+    <rect x="38" y="282" width="330" height="50" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="48" y="311" font-family="Consolas, Menlo, monospace">10.0.0.0/8</text>
+    <rect x="390" y="282" width="290" height="50" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <circle cx="716" cy="300" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="304" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+    <rect x="20" y="350" width="720" height="28" fill="#ffffff" rx="6" stroke="#e2e8f0"/>
+    <text x="38" y="369" font-size="13" font-weight="700">Sessions</text>
+    <rect x="480" y="356" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="550" y="356" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="620" y="356" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="20" y="384" width="720" height="28" fill="#ffffff" rx="6" stroke="#e2e8f0"/>
+    <text x="38" y="403" font-size="13" font-weight="700">Sign-in throttle</text>
+    <rect x="480" y="390" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="550" y="390" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="620" y="390" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="20" y="418" width="720" height="28" fill="#ffffff" rx="6" stroke="#e2e8f0"/>
+    <text x="38" y="437" font-size="13" font-weight="700">Passwords and two-factor sign-in</text>
+    <rect x="480" y="424" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="550" y="424" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="620" y="424" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="20" y="452" width="720" height="28" fill="#ffffff" rx="6" stroke="#e2e8f0"/>
+    <text x="38" y="471" font-size="13" font-weight="700">Modules</text>
+    <rect x="480" y="458" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="550" y="458" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="620" y="458" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="20" y="486" width="720" height="28" fill="#ffffff" rx="6" stroke="#e2e8f0"/>
+    <text x="38" y="505" font-size="13" font-weight="700">Logging</text>
+    <rect x="480" y="492" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="550" y="492" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="620" y="492" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="20" y="520" width="720" height="28" fill="#ffffff" rx="6" stroke="#e2e8f0"/>
+    <text x="38" y="539" font-size="13" font-weight="700">Audit trail</text>
+    <rect x="480" y="526" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="550" y="526" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="620" y="526" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="20" y="554" width="720" height="28" fill="#ffffff" rx="6" stroke="#e2e8f0"/>
+    <text x="38" y="573" font-size="13" font-weight="700">Broker trust</text>
+    <rect x="480" y="560" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="550" y="560" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <rect x="620" y="560" width="60" height="16" fill="#f1f5f9" rx="3" stroke="#e2e8f0"/>
+    <circle cx="716" cy="365" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="369" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+    <rect x="20" y="592" width="70" height="28" fill="#00C895" rx="5"/>
+    <text x="55" y="610" fill="#ffffff" font-weight="700" text-anchor="middle">Save</text>
+    <text x="20" y="634" font-size="11" fill="#ef4444">A refusal shows here, in red, under Save.</text>
+    <circle cx="112" cy="606" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="112" y="610" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+</svg>

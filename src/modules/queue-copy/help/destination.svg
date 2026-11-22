@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 450" width="760" height="450" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="450" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="16" width="720" height="104" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="42" font-size="15" font-weight="700">Destination Broker</text>
+    <text x="40" y="66" font-size="11" fill="#64748b" font-weight="700">Broker Host (IP or Hostname)</text>
+    <rect x="40" y="74" width="330" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="92">broker2.example.com</text>
+    <circle cx="392" cy="88" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="392" y="92" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <rect x="430" y="80" width="14" height="14" fill="#ffffff" rx="3" stroke="#cbd5e1"/>
+    <text x="450" y="91" font-size="11">Same Solace Broker as source</text>
+    <rect x="430" y="100" width="14" height="14" fill="#ffffff" rx="3" stroke="#cbd5e1"/>
+    <text x="450" y="111" font-size="11" fill="#64748b">Same Message VPN as source</text>
+    <circle cx="660" cy="94" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="660" y="98" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <rect x="20" y="132" width="720" height="150" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="158" font-size="15" font-weight="700">Solace SEMP (Management)</text>
+    <text x="40" y="182" font-size="11" fill="#64748b" font-weight="700">Protocol</text>
+    <rect x="40" y="190" width="120" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="208">https://</text>
+    <path d="M140 202 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="172" y="182" font-size="11" fill="#64748b" font-weight="700">Port</text>
+    <rect x="172" y="190" width="90" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="182" y="208">943</text>
+    <text x="274" y="182" font-size="11" fill="#64748b" font-weight="700">URL Path</text>
+    <rect x="274" y="190" width="150" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="284" y="208">/</text>
+    <text x="40" y="232" font-size="11" fill="#64748b" font-weight="700">Username</text>
+    <rect x="40" y="240" width="240" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="258">semp-admin</text>
+    <text x="292" y="232" font-size="11" fill="#64748b" font-weight="700">Password</text>
+    <rect x="292" y="240" width="240" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="302" y="258">........</text>
+    <rect x="560" y="240" width="84" height="26" fill="#00C895" rx="5"/>
+    <text x="602" y="257" fill="#ffffff" font-weight="700" text-anchor="middle">Connect</text>
+    <text x="560" y="232" font-size="11" fill="#64748b">Not connected</text>
+    <circle cx="716" cy="158" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="162" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <rect x="20" y="294" width="720" height="148" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="320" font-size="15" font-weight="700">Solace Messaging (Client)</text>
+    <text x="40" y="344" font-size="11" fill="#64748b" font-weight="700">Protocol</text>
+    <rect x="40" y="352" width="120" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="370">wss://</text>
+    <path d="M140 364 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="172" y="344" font-size="11" fill="#64748b" font-weight="700">Port</text>
+    <rect x="172" y="352" width="90" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="182" y="370">443</text>
+    <text x="274" y="344" font-size="11" fill="#64748b" font-weight="700">URL Path</text>
+    <rect x="274" y="352" width="150" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="284" y="370">/</text>
+    <text x="436" y="344" font-size="11" fill="#64748b" font-weight="700">Message VPN</text>
+    <rect x="436" y="352" width="200" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="446" y="370">default</text>
+    <text x="40" y="394" font-size="11" fill="#64748b" font-weight="700">Username</text>
+    <rect x="40" y="402" width="240" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="420">copy-client</text>
+    <text x="292" y="394" font-size="11" fill="#64748b" font-weight="700">Password</text>
+    <rect x="292" y="402" width="240" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="302" y="420">........</text>
+    <rect x="560" y="402" width="100" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="610" y="419" fill="#ef4444" font-weight="700" text-anchor="middle">Disconnect</text>
+    <text x="560" y="394" font-size="11" fill="#00C895" font-weight="700">Connected (default)</text>
+    <circle cx="716" cy="320" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="324" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+</svg>

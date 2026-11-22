@@ -9,7 +9,8 @@
  * written in that module's own `help.html` and put into this module's template
  * by the build (`readModuleView` in scripts/module-registry-plugin.mjs). One
  * chapter shows at a time, like a manual opened at a chapter; the Contents
- * list beside it turns to a chapter or to one of its sections. A demo build,
+ * list beside it turns to a chapter or to one of its sections, and marks the
+ * section being read as the reader scrolls. A demo build,
  * and a bundle none of whose modules has a chapter, ships no Help tab: the
  * template then holds the About card alone.
  */
@@ -26,6 +27,35 @@ function contentsButton(label: string, className: string, onClick: () => void): 
     button.addEventListener('click', onClick);
     item.appendChild(button);
     return item;
+}
+
+/**
+ * How far down the window the reading line sits, as the share of the window
+ * below it: a section counts as being read once its heading is above the line.
+ */
+const BELOW_READING_LINE = '60%';
+
+/**
+ * Mark, in Contents, the section being read: the last heading the reader has
+ * scrolled past. The observer's box is everything above the reading line, so
+ * a heading is in it exactly while it is past the line, whichever way the page
+ * moves and whatever scrolls it. A heading of a chapter that is not on show,
+ * or of a page that is not, is never in the box, so nothing is marked for it.
+ *
+ * @param entries each section heading, with its entry in Contents
+ */
+function followReading(entries: Map<Element, HTMLElement>): void {
+    const headings = Array.from(entries.keys());
+    const passed = new Set<Element>();
+    const observer = new IntersectionObserver((changes) => {
+        for (const change of changes) {
+            if (change.isIntersecting) passed.add(change.target);
+            else passed.delete(change.target);
+        }
+        const reading = headings.filter(heading => passed.has(heading)).at(-1);
+        entries.forEach((entry, heading) => entry.classList.toggle('is-reading', heading === reading));
+    }, { rootMargin: `100000px 0px -${BELOW_READING_LINE} 0px` });
+    headings.forEach(heading => observer.observe(heading));
 }
 
 /** The two tabs: the one pressed shows its panel and hides the other. */
@@ -54,6 +84,8 @@ function installManual(container: HTMLElement): void {
     const prev = required<HTMLButtonElement>(container, '#btn-manual-prev');
     const next = required<HTMLButtonElement>(container, '#btn-manual-next');
     const chapters = Array.from(sheet.querySelectorAll<HTMLElement>('.manual-chapter'));
+    /** Each section heading, with its entry in Contents. */
+    const sectionEntries = new Map<Element, HTMLElement>();
     let current = 0;
 
     /** Show one chapter and mark it in the Contents list. */
@@ -78,7 +110,9 @@ function installManual(container: HTMLElement): void {
         const sections = document.createElement('ol');
         sections.className = 'manual-contents-sections';
         chapter.querySelectorAll<HTMLElement>('h3').forEach((heading) => {
-            sections.appendChild(contentsButton(String(heading.textContent), 'manual-contents-section', () => turnTo(index, heading)));
+            const section = contentsButton(String(heading.textContent), 'manual-contents-section', () => turnTo(index, heading));
+            sectionEntries.set(heading, section);
+            sections.appendChild(section);
         });
         entry.appendChild(sections);
         list.appendChild(entry);
@@ -90,13 +124,12 @@ function installManual(container: HTMLElement): void {
         link.rel = 'noopener noreferrer';
     });
 
-    // A one-chapter manual has nowhere to turn to.
-    required<HTMLElement>(container, '#manual-pager').classList.toggle('hidden', chapters.length < 2);
     prev.addEventListener('click', () => turnTo(current - 1));
     next.addEventListener('click', () => turnTo(current + 1));
 
     // Opened at the first chapter without scrolling: the page is not on screen yet.
     show(0);
+    followReading(sectionEntries);
 }
 
 export const AboutModule = {

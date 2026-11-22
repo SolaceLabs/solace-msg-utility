@@ -70,7 +70,7 @@ function fakeBuild(overrides: Record<string, string | null> = {}, raw: string[] 
         [DEMO_BUNDLE]: DEMO_CLEAN,
         [PROVISIONED_BUNDLE]: `<html>${MANAGED_MARKERS.join(' ')} ${VENDOR}${MANUAL}</html>`,
         [PROVISIONED_DEMO_BUNDLE]: PROVISIONED_DEMO_CLEAN,
-        [ADMIN_BUNDLE]: '<html><div id="admin-login"></div></html>',
+        [ADMIN_BUNDLE]: `<html><div id="admin-login"></div>${MANUAL}</html>`,
         ...overrides,
     };
     for (const [name, content] of Object.entries(files)) {
@@ -228,7 +228,7 @@ describe('check-bundles -- the vendor loaders', () => {
     });
 
     it.each(VENDOR_MARKERS)('fails solAdmin.html when it carries %s: the admin variant lost its flag', (marker: string) => {
-        expect(problemsFor({ [ADMIN_BUNDLE]: `<html>${marker}</html>` })).toEqual([
+        expect(problemsFor({ [ADMIN_BUNDLE]: `<html>${marker}${MANUAL}</html>` })).toEqual([
             expect.stringMatching(new RegExp(`^solAdmin\\.html: contains the vendor marker "${marker}".*NEEDS_VENDOR_SCRIPTS = false`)),
         ]);
     });
@@ -240,7 +240,7 @@ describe('check-bundles -- the manual', () => {
     const problemsFor = (name: string, text: string) => checkBundles(path.join(fakeBuild({ [name]: text }), 'dist'));
 
     it('expects the manual in every bundle that is not a demo and holds a module with a chapter', () => {
-        expect([...MANUAL_BUNDLES].sort()).toEqual(['index.html', 'min.html', 'no-payload.html', 'no-queue-copy.html', 'provisioned.html']);
+        expect([...MANUAL_BUNDLES].sort()).toEqual(['index.html', 'min.html', 'no-payload.html', 'no-queue-copy.html', 'provisioned.html', 'solAdmin.html']);
     });
 
     it('fails an app bundle that lost the manual, naming the file and the template to check', () => {

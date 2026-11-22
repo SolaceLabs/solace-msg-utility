@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 560" width="760" height="560" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="560" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="16" width="720" height="530" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="38" y="44" font-size="14" font-weight="700">Trusted broker CAs</text>
+    <text x="38" y="66" font-size="10" fill="#64748b">The gateway trusts the certificates in these files when it checks a broker.</text>
+    <rect x="38" y="80" width="640" height="56" fill="#f8fafc" rx="6" stroke="#e2e8f0"/>
+    <text x="50" y="98" font-weight="700">east-prod-ca.pem</text>
+    <rect x="598" y="86" width="66" height="24" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="631" y="102" font-weight="700" text-anchor="middle">Delete</text>
+    <text x="50" y="118" font-size="9.5" fill="#64748b">CN=East Prod CA: valid to 2025-05-01 00:00 UTC; SHA-256 B1:6C:0E:A4:73:D9:2F:85...</text>
+    <rect x="520" y="108" width="58" height="18" fill="#fef2f2" rx="9" stroke="#ef4444"/>
+    <text x="549" y="120.5" font-size="10" fill="#ef4444" font-weight="700" text-anchor="middle">Expired</text>
+    <circle cx="716" cy="108" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="112" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <rect x="38" y="146" width="640" height="52" fill="#f8fafc" rx="6" stroke="#e2e8f0"/>
+    <text x="50" y="164" font-weight="700">notes.pem</text>
+    <rect x="598" y="152" width="66" height="24" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="631" y="168" font-weight="700" text-anchor="middle">Delete</text>
+    <text x="50" y="186" font-size="10" fill="#ef4444">No certificate from this file: The file holds no certificate.</text>
+    <circle cx="716" cy="172" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="176" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <text x="38" y="232" font-size="12.5" font-weight="700">Add CA certificate</text>
+    <text x="38" y="254" font-size="11" fill="#64748b" font-weight="700">CA certificate file</text>
+    <rect x="38" y="260" width="300" height="26" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="48" y="277">west-test-ca.crt</text>
+    <circle cx="356" cy="273" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="356" y="277" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <text x="38" y="306" font-size="11" fill="#64748b" font-weight="700">CA certificate (PEM)</text>
+    <rect x="38" y="312" width="640" height="70" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="48" y="330" font-size="10" font-family="Consolas, Menlo, monospace">-----BEGIN CERTIFICATE-----</text>
+    <text x="48" y="346" font-size="10" font-family="Consolas, Menlo, monospace">MIIDXTCCAkWgAwIBAgIJ...</text>
+    <text x="48" y="362" font-size="10" font-family="Consolas, Menlo, monospace">-----END CERTIFICATE-----</text>
+    <circle cx="716" cy="347" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="351" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+    <text x="38" y="402" font-size="11" fill="#64748b" font-weight="700">File name (optional)</text>
+    <rect x="38" y="408" width="300" height="26" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="48" y="425">west-test-ca.crt</text>
+    <circle cx="356" cy="421" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="356" y="425" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+    <text x="38" y="452" font-size="10" fill="#64748b">Ends in .crt or .pem. Left empty, the gateway names it after the certificate's subject.</text>
+    <text x="38" y="472" font-size="10.5" fill="#ef4444">A CA file with that name already exists. Delete it first, or choose another name.</text>
+    <circle cx="716" cy="468" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="472" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+    <rect x="38" y="490" width="150" height="28" fill="#00C895" rx="5"/>
+    <text x="113" y="508" fill="#ffffff" font-weight="700" text-anchor="middle">Add CA certificate</text>
+    <circle cx="212" cy="504" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="212" y="508" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
+</svg>

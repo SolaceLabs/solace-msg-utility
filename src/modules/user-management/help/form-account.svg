@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 390" width="760" height="390" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="390" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="16" width="690" height="158" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="46" font-size="15" font-weight="700">Edit user &quot;alice&quot;</text>
+    <text x="40" y="74" font-size="11" fill="#64748b" font-weight="700">Username</text>
+    <rect x="40" y="82" width="300" height="28" fill="#e2e8f0" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="100" fill="#64748b">alice</text>
+    <circle cx="360" cy="96" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="360" y="100" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <text x="400" y="74" font-size="11" fill="#64748b" font-weight="700">Password </text>
+    <text x="459.4" y="74" font-size="11" fill="#64748b">(leave blank to keep current)</text>
+    <rect x="400" y="82" width="290" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="410" y="100">........</text>
+    <circle cx="730" cy="96" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="730" y="100" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <rect x="40" y="128" width="14" height="14" fill="#00C895" rx="3"/>
+    <path d="M43 135.5 l3 3 l5 -6" fill="none" stroke="#ffffff" stroke-width="1.8"/>
+    <text x="62" y="140">Administrator</text>
+    <circle cx="730" cy="135" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="730" y="139" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <rect x="20" y="188" width="690" height="192" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="218" font-size="15" font-weight="700">Modules</text>
+    <text x="40" y="238" font-size="11" fill="#64748b">The app modules this user may open.</text>
+    <circle cx="46" cy="258" r="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+    <text x="60" y="262">Deployment default: Queue Browser, Queue Copy, Queue Subscriptions</text>
+    <circle cx="46" cy="282" r="6" fill="#ffffff" stroke="#00C895" stroke-width="1.5"/>
+    <circle cx="46" cy="282" r="3" fill="#00C895"/>
+    <text x="60" y="286">Choose for this user</text>
+    <circle cx="730" cy="272" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="730" y="276" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+    <rect x="40" y="300" width="131" height="24" fill="#f1f5f9" rx="12" stroke="#cbd5e1"/>
+    <text x="52" y="316">Queue Browser</text>
+    <text x="157" y="316" fill="#64748b" font-weight="700" text-anchor="middle">x</text>
+    <rect x="179" y="300" width="111" height="24" fill="#f1f5f9" rx="12" stroke="#cbd5e1"/>
+    <text x="191" y="316">Queue Copy</text>
+    <text x="276" y="316" fill="#64748b" font-weight="700" text-anchor="middle">x</text>
+    <circle cx="730" cy="312" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="730" y="316" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+    <rect x="40" y="338" width="110" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="95" y="355" font-weight="700" text-anchor="middle">+ Add module</text>
+    <circle cx="172" cy="351" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="172" y="355" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+</svg>

@@ -92,7 +92,7 @@ export const PROVISIONED_BUNDLE = 'provisioned.html';
 export const MANUAL_MARKER = '<article class="manual-chapter">';
 
 /** The bundles whose About page has the Help tab: every one that is not a demo and has a module with a chapter. */
-export const MANUAL_BUNDLES = [...DIRECT_BUNDLES.filter(name => name !== DEMO_BUNDLE), PROVISIONED_BUNDLE];
+export const MANUAL_BUNDLES = [...DIRECT_BUNDLES.filter(name => name !== DEMO_BUNDLE), PROVISIONED_BUNDLE, ADMIN_BUNDLE];
 
 /**
  * The policy each bundle must carry (scripts/csp.mjs): its kind, and whether

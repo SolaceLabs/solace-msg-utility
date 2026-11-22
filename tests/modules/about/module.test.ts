@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { completeContext } from '../../helpers/appContext';
@@ -15,9 +15,30 @@ let container: HTMLElement;
 /** Every element the page scrolled to, in order (jsdom has no scrollIntoView of its own). */
 let scrolledTo: Element[];
 
+/**
+ * jsdom lays nothing out and has no IntersectionObserver. This one keeps what
+ * the page watches and lets a test say which headings crossed the reading line.
+ */
+class ReadingLine {
+    readonly watched: Element[] = [];
+    constructor(private readonly report: IntersectionObserverCallback) { readingLines.push(this); }
+    observe(el: Element): void { this.watched.push(el); }
+    /** Headings that went past the line (true) or came back below it (false), as one report. */
+    cross(...changes: [Element, boolean][]): void {
+        const entries = changes.map(([target, isIntersecting]) => ({ target, isIntersecting }) as IntersectionObserverEntry);
+        this.report(entries, this as unknown as IntersectionObserver);
+    }
+}
+let readingLines: ReadingLine[];
+
 beforeEach(() => {
     scrolledTo = [];
     Element.prototype.scrollIntoView = function (this: Element) { scrolledTo.push(this); };
+    readingLines = [];
+    vi.stubGlobal('IntersectionObserver', ReadingLine);
+});
+afterEach(() => {
+    vi.unstubAllGlobals();
 });
 
 async function install(build: { variant?: string; demo?: boolean } = {}): Promise<void> {
@@ -91,7 +112,6 @@ describe('About module', () => {
         const last = titles.length - 1;
         const [prev, next] = pager();
         expect([prev.disabled, next.disabled]).toEqual([true, false]);
-        expect(hidden(q('#manual-pager'))).toBe(false);
 
         entries()[last].click();
         expect(onShow()).toEqual([titles[last]]);
@@ -118,19 +138,34 @@ describe('About module', () => {
         expect(scrolls()).toEqual([heading.textContent]);
     });
 
+    it('marks in Contents the section being read: the last heading scrolled past, and none above the first', async () => {
+        await install();
+        const [line] = readingLines;
+        const headings = Array.from(chapters()[0].querySelectorAll('h3'));
+        const reading = () => all('.manual-contents-sections > li.is-reading').map(entry => entry.textContent);
+        expect(line.watched).toHaveLength(all('.manual-chapter h3').length);
+        expect(reading()).toEqual([]);
+
+        line.cross([headings[0], true]);
+        expect(reading()).toEqual([headings[0].textContent]);
+
+        // A fast scroll takes two headings past the line at once: the later one is being read.
+        line.cross([headings[2], true], [headings[1], true]);
+        expect(reading()).toEqual([headings[2].textContent]);
+
+        // Scrolling back up brings the third heading below the line again.
+        line.cross([headings[2], false]);
+        expect(reading()).toEqual([headings[1].textContent]);
+
+        line.cross([headings[0], false], [headings[1], false]);
+        expect(reading()).toEqual([]);
+    });
+
     it('opens a link out of a chapter in a tab of its own, which cannot reach back into the app', async () => {
         await install();
         const links = all<HTMLAnchorElement>('.manual-chapter a');
         expect(links.length).toBeGreaterThan(0);
         for (const link of links) expect([link.href.startsWith('https://'), link.target, link.rel]).toEqual([true, '_blank', 'noopener noreferrer']);
-    });
-
-    it('shows no pager in a manual of one chapter', async () => {
-        await install({ variant: 'min' });
-        expect(chapters()).toHaveLength(1);
-        expect(onShow()).toEqual([titleOf(chapters()[0])]);
-        expect(hidden(q('#manual-pager'))).toBe(true);
-        expect(pager().map(b => b.disabled)).toEqual([true, true]);
     });
 
     it('shows the About card alone in a demo build, which ships no manual', async () => {

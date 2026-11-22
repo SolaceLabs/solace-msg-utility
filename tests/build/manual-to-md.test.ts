@@ -132,12 +132,14 @@ describe('a chapter the guide cannot carry is refused by name', () => {
 // The guide on GitHub is made from these same files, so each must stay within
 // the parts above: a part outside them fails here, naming it.
 describe('the chapters of the manual', () => {
-    const modules = fs.readdirSync(path.join(REPO_ROOT, 'src/modules'))
-        .map(id => ({ id, html: readModuleHelp(REPO_ROOT, id) as string | null }))
-        .filter((m): m is { id: string; html: string } => m.html !== null);
+    // help.html, and help.<entry>.html for an entry that adds a chapter (read with its base, as a build composes it).
+    const files = fs.readdirSync(path.join(REPO_ROOT, 'src/modules')).flatMap(id =>
+        fs.readdirSync(path.join(REPO_ROOT, 'src/modules', id))
+            .filter(file => /^help(\.[\w-]+)?\.html$/.test(file))
+            .map(file => ({ id, file, entry: file.split('.').length === 3 ? file.split('.')[1] : undefined })));
 
-    it.each(modules)('$id: every chapter is one the guide can carry, and its figures exist where the guide links them', ({ id, html }) => {
-        const found = chapters(html);
+    it.each(files)('$id/$file: every chapter is one the guide can carry, and its figures exist where the guide links them', ({ id, entry }) => {
+        const found = chapters(readModuleHelp(REPO_ROOT, id, entry) as string);
         expect(found.length).toBeGreaterThan(0);
         for (const chapter of found) {
             expect(chapter.className).toBe('manual-chapter');

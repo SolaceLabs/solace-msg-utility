@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { REPO_ROOT } from '../helpers/sources';
+import { DEMO_MARKERS, MANAGED_MARKERS, VENDOR_MARKERS, findMarkers } from '../../scripts/check-bundles.mjs';
 import {
+    activeModuleEntries,
     activeModuleIds,
     moduleHelp,
     readModuleHelp,
@@ -22,8 +24,14 @@ const root = REPO_ROOT;
 const CHAPTER = '<article class="manual-chapter">';
 const count = (text: string, part: string) => text.split(part).length - 1;
 
+/** A module's chapter files: `help.html`, and `help.<entry>.html` for an entry that adds a chapter. */
+const helpFiles = (id: string) => fs.readdirSync(path.join(root, 'src/modules', id)).filter(file => /^help(\.[\w-]+)?\.html$/.test(file));
+
 /** The module ids of the repo that hold a chapter. */
-const WITH_HELP = fs.readdirSync(path.join(root, 'src/modules')).filter(id => readModuleHelp(root, id) !== null);
+const WITH_HELP = fs.readdirSync(path.join(root, 'src/modules')).filter(id => helpFiles(id).length > 0);
+
+/** The titles of the chapters in a piece of HTML, in order. */
+const titlesOf = (html: string | null) => [...(html ?? '').matchAll(/<article class="manual-chapter">\s*<h2>([^<]+)<\/h2>/g)].map(m => m[1]);
 
 /** Throwaway project roots: `files` maps a root-relative path to its content. */
 const tmpRoots: string[] = [];
@@ -52,28 +60,35 @@ function manualRoot(chapters: Record<string, string>, extra: Record<string, stri
 }
 
 describe('the manual of a build', () => {
-    it('is the chapters of the variant\'s modules, in the order the variant lists them', () => {
-        for (const variant of ['standard', 'min', 'no-queue-copy', 'managed']) {
-            const want = activeModuleIds(root, variant).filter((id: string) => WITH_HELP.includes(id));
-            const view = readModuleView(root, 'about', undefined, { variant })!;
-            expect(count(view, CHAPTER), variant).toBe(want.length);
-            const titles = [...view.matchAll(/<article class="manual-chapter">\s*<h2>([^<]+)<\/h2>/g)].map(m => m[1]);
-            const own = want.map((id: string) => readModuleHelp(root, id)!.match(/<h2>([^<]+)<\/h2>/)![1]);
-            expect(titles, variant).toEqual(own);
-            expect(view).not.toContain(MODULE_HELP_MARKER);
-        }
-        // The smallest bundle still has a chapter, and the standard one more than one to turn between.
-        expect(count(readModuleView(root, 'about', undefined, { variant: 'min' })!, CHAPTER)).toBe(1);
-        expect(count(readModuleView(root, 'about')!, CHAPTER)).toBeGreaterThan(1);
+    // Every variant a bundle is built from. Each manual has more than one chapter, so its pager always has somewhere to go.
+    it.each(['standard', 'min', 'no-queue-copy', 'managed', 'admin'])('of %s is the chapters of its modules, in the order the variant lists them', (variant) => {
+        const entries = activeModuleEntries(root, variant);
+        const want = activeModuleIds(root, variant).flatMap((id: string) => titlesOf(readModuleHelp(root, id, entries[id])));
+        const view = readModuleView(root, 'about', undefined, { variant })!;
+        expect(titlesOf(view)).toEqual(want);
+        expect(count(view, CHAPTER)).toBe(want.length);
+        expect(want.length).toBeGreaterThan(1);
+        expect(view).not.toContain(MODULE_HELP_MARKER);
     });
 
-    it('writes each figure into the page as a data: URL of its SVG file', () => {
-        const view = readModuleView(root, 'about', undefined, { variant: 'min' })!;
+    it('gets the Provisioned chapter from the managed entry of connections, after the Connections one, and only there', () => {
+        const direct = titlesOf(readModuleHelp(root, 'connections'));
+        expect(direct).toHaveLength(1);
+        expect(titlesOf(readModuleHelp(root, 'connections', 'managed'))).toEqual([...direct, 'Provisioned connections']);
+        expect(titlesOf(moduleHelp(root, 'standard'))).not.toContain('Provisioned connections');
+    });
+
+    it('writes each figure into the page as a data: URL of its SVG file, in the order the chapters name them', () => {
+        const variant = 'managed';
+        const entries = activeModuleEntries(root, variant);
+        const files = activeModuleIds(root, variant).flatMap((id: string) =>
+            [...(readModuleHelp(root, id, entries[id]) ?? '').matchAll(/<img\b[^>]*\bsrc="(help\/[^"]+)"/g)].map(m => path.join(root, 'src/modules', id, m[1])));
+        const view = readModuleView(root, 'about', undefined, { variant })!;
         expect(view).not.toMatch(/<img\b[^>]*\bsrc="help\//);
-        const first = view.match(/<img\b[^>]*\bsrc="data:image\/svg\+xml;base64,([^"]+)"/)![1];
-        const named = readModuleHelp(root, 'queue-browser')!.match(/<img\b[^>]*\bsrc="(help\/[^"]+)"/)![1];
-        expect(Buffer.from(first, 'base64').toString('utf-8'))
-            .toBe(fs.readFileSync(path.join(root, 'src/modules/queue-browser', named), 'utf-8'));
+        const written = [...view.matchAll(/<img\b[^>]*\bsrc="data:image\/svg\+xml;base64,([^"]+)"/g)].map(m => Buffer.from(m[1], 'base64').toString('utf-8'));
+        expect(files.length).toBeGreaterThan(0);
+        expect(written.length).toBe(files.length);
+        written.forEach((svg, i) => expect(svg === fs.readFileSync(files[i], 'utf-8'), files[i]).toBe(true));
     });
 
     it('leaves the Help tab out of a demo build: the About card stands alone', () => {
@@ -136,6 +151,19 @@ describe('a chapter\'s figures', () => {
             expect(text, String(refused)).not.toMatch(refused);
         }
         expect([...text].every(ch => ch.charCodeAt(0) < 128), 'plain ASCII').toBe(true);
-        expect(readModuleHelp(root, id)).toContain(`src="help/${file}"`);
+        const chapters = helpFiles(id).map(name => fs.readFileSync(path.join(root, 'src/modules', id, name), 'utf-8')).join('\n');
+        expect(chapters).toContain(`src="help/${file}"`);
+    });
+});
+
+// scripts/check-bundles.mjs proves the same on the built files; here a chapter
+// that names such a string fails before any build.
+describe('a chapter keeps the bundles apart', () => {
+    it.each(['standard', 'min', 'no-queue-copy'])('the %s manual names nothing of the Provisioned sign-in and nothing of a demo', (variant) => {
+        expect(findMarkers(moduleHelp(root, variant), [...MANAGED_MARKERS, ...DEMO_MARKERS])).toEqual([]);
+    });
+
+    it('the admin manual names none of the vendor files the admin bundle carries none of', () => {
+        expect(findMarkers(moduleHelp(root, 'admin'), VENDOR_MARKERS)).toEqual([]);
     });
 });

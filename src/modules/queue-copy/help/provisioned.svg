@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 190" width="760" height="190" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="190" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="16" width="720" height="158" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="44" font-size="15" font-weight="700">Destination Connection</text>
+    <text x="40" y="72" font-size="11" fill="#64748b" font-weight="700">Broker</text>
+    <rect x="40" y="80" width="300" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="98">west-test</text>
+    <path d="M320 92 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <circle cx="358" cy="94" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="358" y="98" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <text x="396" y="72" font-size="11" fill="#64748b" font-weight="700">Message VPN</text>
+    <rect x="396" y="80" width="260" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="406" y="98">default</text>
+    <path d="M636 92 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <circle cx="674" cy="94" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="674" y="98" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <rect x="40" y="122" width="110" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="95" y="139" fill="#ef4444" font-weight="700" text-anchor="middle">Disconnect</text>
+    <circle cx="168" cy="135" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="168" y="139" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <text x="40" y="166" font-size="11" fill="#64748b">Broker &quot;west-test&quot;, VPN &quot;default&quot;</text>
+    <circle cx="262" cy="161" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="262" y="165" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+</svg>

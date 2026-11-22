@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 150" width="760" height="150" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="150" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="20" width="720" height="110" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="56" font-size="15" font-weight="700">Connected</text>
+    <rect x="620" y="38" width="100" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="670" y="55" fill="#ef4444" font-weight="700" text-anchor="middle">Disconnect</text>
+    <circle cx="602" cy="51" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="602" y="55" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <text x="40" y="98" fill="#64748b">Broker &quot;east-prod&quot;, VPN &quot;default&quot;</text>
+    <circle cx="287.76" cy="94" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="287.76" y="98" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+</svg>

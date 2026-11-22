@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 600" width="760" height="600" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="600" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="20" width="720" height="222" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="48" font-size="15" font-weight="700">Configuration</text>
+    <text x="40" y="66" font-size="10.5" fill="#64748b">A backup holds the users, the connections and the gateway settings, encrypted with a passphrase.</text>
+    <text x="40" y="94" font-size="13" font-weight="700">Export</text>
+    <text x="40" y="112" font-size="11" fill="#64748b" font-weight="700">Passphrase (12 to 128 characters)</text>
+    <rect x="40" y="118" width="300" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="136">............</text>
+    <text x="40" y="158" font-size="11" fill="#64748b" font-weight="700">Confirm the passphrase</text>
+    <rect x="40" y="164" width="300" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="182">............</text>
+    <rect x="40" y="204" width="70" height="26" fill="#00C895" rx="5"/>
+    <text x="75" y="221" fill="#ffffff" font-weight="700" text-anchor="middle">Export</text>
+    <circle cx="132" cy="217" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="132" y="221" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <text x="392" y="94" font-size="13" font-weight="700">Import</text>
+    <text x="392" y="112" font-size="11" fill="#64748b" font-weight="700">Backup file</text>
+    <rect x="392" y="118" width="328" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="402" y="136">smu-backup-20261122T020000Z.json</text>
+    <text x="392" y="158" font-size="11" fill="#64748b" font-weight="700">Passphrase</text>
+    <rect x="392" y="164" width="328" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="402" y="182">............</text>
+    <rect x="392" y="204" width="76" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="430" y="221" font-weight="700" text-anchor="middle">Preview</text>
+    <circle cx="490" cy="217" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="490" y="221" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <rect x="20" y="258" width="720" height="322" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="288" font-size="15" font-weight="700">Schedule</text>
+    <rect x="652" y="272" width="68" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="686" y="289" font-weight="700" text-anchor="middle">Reload</text>
+    <circle cx="634" cy="285" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="634" y="289" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <text x="40" y="314" font-size="11" fill="#64748b">Daily at 02:00 UTC; keeps the last 14. Next backup: 2026-11-23 02:00 UTC.</text>
+    <circle cx="716" cy="310" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="314" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+    <text x="40" y="342" font-size="11" fill="#64748b" font-weight="700">Frequency</text>
+    <rect x="40" y="348" width="140" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="366">Daily</text>
+    <path d="M160 360 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="196" y="342" font-size="11" fill="#64748b" font-weight="700">Time (UTC)</text>
+    <rect x="196" y="348" width="110" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="206" y="366">02:00</text>
+    <text x="322" y="342" font-size="11" fill="#64748b" font-weight="700">Backups to keep</text>
+    <rect x="322" y="348" width="110" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="332" y="366">14</text>
+    <text x="448" y="342" font-size="11" fill="#64748b" font-weight="700">Passphrase</text>
+    <rect x="448" y="348" width="130" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="458" y="366">............</text>
+    <text x="594" y="342" font-size="11" fill="#64748b" font-weight="700">Confirm the passphrase</text>
+    <rect x="594" y="348" width="114" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="604" y="366">............</text>
+    <circle cx="728" cy="362" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="728" y="366" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+    <rect x="40" y="396" width="112" height="26" fill="#00C895" rx="5"/>
+    <text x="96" y="413" fill="#ffffff" font-weight="700" text-anchor="middle">Save schedule</text>
+    <rect x="160" y="396" width="104" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="212" y="413" font-weight="700" text-anchor="middle">Back up now</text>
+    <rect x="272" y="396" width="126" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="335" y="413" fill="#ef4444" font-weight="700" text-anchor="middle">Remove schedule</text>
+    <circle cx="418" cy="409" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="418" y="413" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+    <text x="40" y="450" font-size="13" font-weight="700">Saved backups</text>
+    <rect x="40" y="460" width="680" height="98" fill="#ffffff" rx="6" stroke="#e2e8f0"/>
+    <rect x="41" y="461" width="678" height="28" fill="#f1f5f9"/>
+    <text x="56" y="479" font-size="11" fill="#64748b" font-weight="700">File</text>
+    <text x="330" y="479" font-size="11" fill="#64748b" font-weight="700">Created (UTC)</text>
+    <text x="500" y="479" font-size="11" fill="#64748b" font-weight="700">Size</text>
+    <line x1="41" y1="489" x2="719" y2="489" stroke="#e2e8f0"/>
+    <text x="56" y="511">smu-backup-20261122T020000Z.json</text>
+    <text x="330" y="511">2026-11-22 02:00 UTC</text>
+    <text x="500" y="511">3.42 KB</text>
+    <rect x="648" y="495" width="22" height="22" fill="#ffffff" rx="4" stroke="#e2e8f0"/>
+    <path d="M659 501 v8 M655 505 l4 4 l4 -4 M654 512 h10" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <rect x="676" y="495" width="22" height="22" fill="#ffffff" rx="4" stroke="#e2e8f0"/>
+    <path d="M682 501 v4 h4 M682 505 a5.5 5.5 0 1 0 1.5 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <line x1="41" y1="523" x2="719" y2="523" stroke="#e2e8f0"/>
+    <text x="56" y="545">smu-backup-20261121T020000Z.json</text>
+    <text x="330" y="545">2026-11-21 02:00 UTC</text>
+    <text x="500" y="545">3.41 KB</text>
+    <rect x="648" y="529" width="22" height="22" fill="#ffffff" rx="4" stroke="#e2e8f0"/>
+    <path d="M659 535 v8 M655 539 l4 4 l4 -4 M654 546 h10" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <rect x="676" y="529" width="22" height="22" fill="#ffffff" rx="4" stroke="#e2e8f0"/>
+    <path d="M682 535 v4 h4 M682 539 a5.5 5.5 0 1 0 1.5 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <circle cx="610" cy="475" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="610" y="479" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
+</svg>

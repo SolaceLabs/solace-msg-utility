@@ -1,0 +1,225 @@
+<article class="manual-chapter">
+    <h2>User Mgmt.</h2>
+    <p class="manual-lead">Decide who may sign in to the gateway, which brokers, Message VPNs and queues each person may reach, and which pages of the app they may open. You also reset two-factor sign-in here, and test what a saved user gets.</p>
+    <p>User Mgmt. is a page of the administration app, which the gateway serves at <code>/solAdmin</code> to administrators only. It needs an administrator's session. Without one, the page shows <strong>Administrator Sign-in Required</strong> and the line <code>Sign in as an administrator to manage users.</code> in place of everything below. How the gateway is set up, and how an operator prepares the settings these pages rely on, is in the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#administer">operator's guide</a>.</p>
+
+    <h3>The page at a glance</h3>
+    <p>The page has two views. The list view shows every user, with the <strong>Permission test</strong> card under it. <strong>Add user</strong> and the edit button of a row replace both with the user form: three cards (the account, <strong>Modules</strong> and <strong>Entitlements</strong>) and the <strong>Save</strong> and <strong>Cancel</strong> buttons.</p>
+    <figure class="manual-figure">
+        <img src="help/list.svg" width="760" height="290" alt="The user list: Refresh and Add user buttons, a search box, and a table of three users with Username, Role and Two-factor columns and the row buttons.">
+        <figcaption>The user list, with one user who has two-factor sign-in turned on.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Refresh</strong> loads the list from the gateway again. <strong>Add user</strong> opens the empty user form.</li>
+        <li>The search box. It narrows the list as you type.</li>
+        <li>The columns: <strong>Username</strong>, <strong>Role</strong> (<code>Admin</code> or <code>User</code>) and <strong>Two-factor</strong> (<code>On</code> or <code>Off</code>), then <strong>Actions</strong>.</li>
+        <li>The row buttons: <strong>Reset two-factor</strong> (the shield, only on a row where two-factor is <code>On</code>), <strong>Edit</strong> (the pencil) and <strong>Delete</strong> (the bin). Hover over a button to see its name, for example <code>Edit user "alice"</code>.</li>
+    </ol>
+
+    <h3>Finding a user</h3>
+    <p>Type in the search box, which reads <code>Search users (* = any)</code>. The list shows the users whose username contains your text, in any letter case. Put <code>*</code> in the text to stand for any run of characters: <code>a*e</code> finds <code>alice</code>. The search looks at usernames only, and it works on the list already loaded, so it never contacts the gateway.</p>
+    <p>An empty list says <code>No users.</code> A search that finds nothing says <code>No users match "text".</code>, with your text between the quotes. If the gateway cannot give the list, a red line under the table says why. Press <strong>Refresh</strong> to load the list again, for example after another administrator made a change.</p>
+
+    <h3>Adding a user</h3>
+    <ol class="manual-steps">
+        <li>Press <strong>Add user</strong>. The form opens under the title <strong>Add user</strong>.</li>
+        <li>Type the <strong>Username</strong> and the <strong>Password</strong>. The rules are in the table below.</li>
+        <li>Tick <strong>Administrator</strong> only if this person is to manage the gateway.</li>
+        <li>In <strong>Modules</strong>, leave <strong>Deployment default</strong> selected, or choose the modules for this user (see below).</li>
+        <li>In <strong>Entitlements</strong>, add the rows that give the user their brokers, Message VPNs and queues (see below).</li>
+        <li>Press <strong>Save</strong>. The toast <code>User saved</code> appears and the list returns with the user in it. <strong>Cancel</strong> returns to the list and keeps nothing.</li>
+    </ol>
+
+    <h3>The account card</h3>
+    <figure class="manual-figure">
+        <img src="help/form-account.svg" width="760" height="390" alt="The user form for alice: the account card with username, password and Administrator box, and the Modules card with two radio buttons, two module pills and an Add module button.">
+        <figcaption>The first two cards of the user form, here editing alice with a list of modules of her own.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Username</strong>. You type it when you add a user. When you edit a user, it is fixed.</li>
+        <li><strong>Password</strong>, with a hint after its name: <code>(required)</code> when you add a user, <code>(leave blank to keep current)</code> when you edit one.</li>
+        <li>The <strong>Administrator</strong> box.</li>
+        <li>The two choices for the user's modules: <strong>Deployment default</strong> and <strong>Choose for this user</strong>.</li>
+        <li>The modules the user may open, each as a pill.</li>
+        <li><strong>+ Add module</strong>, which lists the modules you can still add.</li>
+    </ol>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it accepts</th><th>Default</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Username</strong></td><td>1 to 64 characters from <code>A-Z a-z 0-9 . _ @ -</code>, and not only dots. Spaces around it are removed. It cannot be changed once the user exists: to rename someone, add the name you want and delete the old one.</td><td>Empty</td></tr>
+            <tr><td><strong>Password</strong></td><td>12 to 128 characters. The lower limit is the <strong>Minimum password length</strong> of Gateway Settings when that is higher than 12. The page sends the password over TLS and the gateway stores only a hash of it. It is never shown again. When you edit a user, leave the box empty to keep the stored password.</td><td>Empty</td></tr>
+            <tr><td><strong>Administrator</strong></td><td>A box. It lets the user open <code>/solAdmin</code>. It gives no access to any broker by itself: an administrator needs entitlement rows like anybody else.</td><td>Off</td></tr>
+        </tbody>
+    </table>
+    <aside class="manual-note" data-kind="tip">
+        <p>The password box forgets what you typed when you press <strong>Cancel</strong>, save, sign out or lose your session. Nothing you typed there stays in the page.</p>
+    </aside>
+
+    <h3>Editing a user</h3>
+    <ol class="manual-steps">
+        <li>Press the pencil on the user's row. The form opens under the title <code>Edit user "alice"</code>, filled with what is saved.</li>
+        <li>Change what you need. Leave <strong>Password</strong> empty unless you are setting a password.</li>
+        <li>Press <strong>Save</strong>.</li>
+    </ol>
+    <p>The page sends the whole user each time, so a save replaces the user's flag, modules and both lists of entitlements with what the form shows.</p>
+
+    <h3>Deleting a user</h3>
+    <ol class="manual-steps">
+        <li>Press the bin on the user's row.</li>
+        <li>Read the question, <code>Delete user "bob"?</code>, and press <strong>Delete</strong>. <strong>Cancel</strong> keeps the user.</li>
+    </ol>
+    <p>The toast <code>User deleted</code> appears and the list reloads. The user's sessions end at once.</p>
+
+    <h3>Modules</h3>
+    <p>The <strong>Modules</strong> card sets which pages of the app a user may open: Queue Browser, Queue Copy and Queue Subscriptions. The Connections page and the About page are always shown. Which of the three the gateway offers at all, and what a user without a list of their own gets, are set in Gateway Settings (<a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#what-users-may-open">What users may open</a>).</p>
+    <table>
+        <thead>
+            <tr><th>Choice</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Deployment default:</strong></td><td>The user gets what Gateway Settings give everyone. The modules it gives are named after the label (or <code>no modules</code>) and shown as pills without a remove button. This is the choice for a user you add. If the settings change, so does what this user gets.</td></tr>
+            <tr><td><strong>Choose for this user</strong></td><td>The user has a list of their own. It starts as what the default gives. Each module is a pill with a remove button, named for screen readers <code>Remove Queue Browser</code> and so on. <strong>+ Add module</strong> opens a menu of the offered modules that are not in the list yet; pick one to add it, and press <kbd>Esc</kbd> to close the menu. The button is disabled when nothing is left to add. An empty list reads <code>No modules.</code></td></tr>
+        </tbody>
+    </table>
+    <p>A pill marked <code>not offered</code> is a module the gateway does not offer. It has no effect until Gateway Settings offer it, and you can remove it. The gateway never gives a user a module it does not offer.</p>
+    <p>When you select <strong>Deployment default</strong> again, the user's own list is dropped on save.</p>
+
+    <h3>Entitlements</h3>
+    <p>The <strong>Entitlements</strong> card decides which brokers, Message VPNs and queues the user reaches. A user without a row reaches nothing.</p>
+    <figure class="manual-figure">
+        <img src="help/form-entitlements.svg" width="760" height="372" alt="The Entitlements card: a notice, a list of operate rows and a list of read-only rows, each row with three boxes and a remove button, and the Save and Cancel buttons below.">
+        <figcaption>The Entitlements card with two operate rows and one read-only row.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The notice at the top of the card. It begins <code>These entitlements cover queues only.</code> and says that the broker's own ACL profile decides where messages may go.</li>
+        <li><strong>Operate entitlements (read + write)</strong>, and its <strong>+ Add</strong> button, which adds an empty row.</li>
+        <li>A row: three boxes under the headings <strong>Brokers</strong>, <strong>Message VPNs</strong> and <strong>Queues</strong>. An empty box shows the hint <code>brokers (e.g. *)</code>, <code>msgVpns (e.g. *)</code> or <code>queues (e.g. *)</code>.</li>
+        <li>The remove button of a row. Its tooltip is <code>Remove row</code>.</li>
+        <li><strong>Read-only entitlements</strong>, with its own <strong>+ Add</strong> button.</li>
+        <li><strong>Save</strong> and <strong>Cancel</strong>.</li>
+    </ol>
+    <p>Each box holds a name or a pattern. A row gives access when the broker, the Message VPN and the queue all match their box. A row whose three boxes are all empty is ignored on save. A box left empty matches no name, so type <code>*</code> where any name will do.</p>
+    <table>
+        <thead>
+            <tr><th>List</th><th>What its rows give</th><th>When it is empty</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Operate entitlements (read + write)</strong></td><td>On a matching queue: browse, forward and delete messages, and copy into the queue.</td><td><code>None: this user changes no queue (no delete, no copy into one). Read-only rows still let them browse.</code></td></tr>
+            <tr><td><strong>Read-only entitlements</strong></td><td>On a matching queue: browse and forward messages. No delete, and no copy into the queue.</td><td><code>None. With no operate rows either, this user can sign in but reaches no broker.</code></td></tr>
+        </tbody>
+    </table>
+    <p>A user reaches a broker's Message VPN when any row, operate or read-only, matches that broker and that Message VPN. They see the queues that the queue boxes of those rows match. Where a queue matches rows of both lists, the operate row wins. The gateway enforces the broker and the Message VPN. The queue boxes are applied by the app itself.</p>
+    <h4>How the wildcard matches</h4>
+    <p>A pattern must match the whole name. <code>*</code> stands for any run of characters, including none. Every other character stands for itself: there is no <code>?</code> and there are no character classes. Matching is case-sensitive, so <code>Orders.*</code> does not match <code>orders.incoming</code>.</p>
+    <table>
+        <thead>
+            <tr><th>Pattern</th><th>Matches</th><th>Does not match</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>*</code></td><td>Any name.</td><td>None.</td></tr>
+            <tr><td><code>orders.*</code></td><td><code>orders.incoming</code>, <code>orders.</code></td><td><code>orders</code>, <code>Orders.incoming</code></td></tr>
+            <tr><td><code>*.dlq</code></td><td><code>orders.incoming.dlq</code></td><td><code>orders.dlq.old</code></td></tr>
+            <tr><td><code>east-*</code></td><td><code>east-prod</code></td><td><code>west-test</code></td></tr>
+            <tr><td><code>default</code></td><td><code>default</code> only.</td><td><code>default2</code></td></tr>
+        </tbody>
+    </table>
+    <aside class="manual-note" data-kind="important">
+        <p>Entitlements cover queues only. Sending and forwarding messages depend on the broker: the ACL profile of the Message VPN's client username decides where messages may go, whatever the rows say. Give the gateway's broker accounts the least access they need, through their client profile and ACL profile on the broker. See <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#what-it-does-not-enforce">What it does not enforce</a>.</p>
+    </aside>
+
+    <h3>Testing what a user gets</h3>
+    <p>The <strong>Permission test</strong> card, under the list, shows what a saved user gets on one queue. Use it after a change, instead of asking the user to try.</p>
+    <figure class="manual-figure">
+        <img src="help/permission-test.svg" width="760" height="290" alt="The Permission test card: four boxes for the user, the broker, the Message VPN and the queue, and below them a green Operate answer, the matching row and the modules.">
+        <figcaption>The Permission test card, answering for alice on one queue.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>User</strong>: a list of the saved users, starting with <code>Select a user...</code>.</li>
+        <li><strong>Broker</strong>: the broker's name as it is in Connection Management.</li>
+        <li><strong>Message VPN</strong>.</li>
+        <li><strong>Queue</strong>.</li>
+        <li>The answer, as a label and a sentence.</li>
+        <li>The row that gave the answer, and the modules the user may open.</li>
+    </ol>
+    <ol class="manual-steps">
+        <li>Pick a user.</li>
+        <li>Type the broker, the Message VPN and the queue. Type full names: the test matches them exactly and in the same letter case, and <code>*</code> counts as a wildcard only inside the user's rows.</li>
+        <li>Read the answer. It updates as you type. Until all four are filled in, the card says <code>Pick a user and enter a broker, Message VPN and queue.</code></li>
+    </ol>
+    <table>
+        <thead>
+            <tr><th>Answer</th><th>It says</th><th>Meaning</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Operate</strong></td><td>Browse, forward and delete messages, and copy into this queue.</td><td>An operate row matches the broker, the Message VPN and the queue.</td></tr>
+            <tr><td><strong>Read-only</strong></td><td>Browse and forward messages; no delete, no copy into this queue.</td><td>No operate row matches, and a read-only row does.</td></tr>
+            <tr><td><strong>Queue hidden</strong></td><td>Reaches this Message VPN, but no row's queue pattern matches this queue.</td><td>A row matches the broker and the Message VPN, but none matches the queue.</td></tr>
+            <tr><td><strong>No access</strong></td><td>No row matches this broker and Message VPN.</td><td>The user does not reach this Message VPN.</td></tr>
+        </tbody>
+    </table>
+    <p>Under the answer, <code>Matching row:</code> names the row that gave it, as its three boxes, and <code>Modules:</code> lists the modules the user may open, or <code>none</code>. The test reads the user as saved, never the form you have open. It cannot see the broker's own queue permissions, which still apply, and the broker and Message VPN must be in Connection Management for anyone to reach them.</p>
+
+    <h3>Resetting two-factor sign-in</h3>
+    <p>The <strong>Two-factor</strong> column says <code>On</code> when the user has set up a code from an authenticator app. Use the reset for a user who lost their phone and their recovery codes.</p>
+    <ol class="manual-steps">
+        <li>Press the shield on the user's row. The button exists only where the column says <code>On</code>. Its tooltip is <code>Reset two-factor for user "alice"</code>.</li>
+        <li>Read the question, <code>Reset two-factor sign-in for "alice"? They will have to set it up again.</code>, and press <strong>Reset</strong>.</li>
+        <li>The toast <code>Two-factor sign-in reset</code> appears and the list reloads. The column reads <code>Off</code>.</li>
+    </ol>
+    <p>The reset ends the user's sessions. It leaves the password as it is. What the user must do at the next sign-in depends on the gateway's two-factor mode (<a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#a-lost-phone">A lost phone</a>). A save of the user form never changes two-factor, in either direction.</p>
+
+    <h3>Forcing a password change</h3>
+    <p>An account can be marked so that its owner may use only the password page until they change it. This page has no control for it and the list does not show it. The gateway marks the first administrator it creates, named <code>admin</code>, this way, and that person changes the password at the first sign-in (<a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#start-it">Start it</a>). A password you save here clears the mark. To change only your own password, use <strong>Change password</strong> in the account control of the sidebar.</p>
+
+    <h3>What a change does to a user who is signed in</h3>
+    <table>
+        <thead>
+            <tr><th>You change</th><th>The user, signed in at that moment</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>The password, the <strong>Administrator</strong> box, or you delete the user</td><td>All their sessions end and their open broker connections close. They sign in again, with the password you set if you changed it.</td></tr>
+            <tr><td>You reset two-factor</td><td>All their sessions end and their open broker connections close. They sign in again.</td></tr>
+            <tr><td>The entitlements</td><td>They stay signed in. The gateway applies the rows to their next request, and closes any broker connection to a Message VPN they may not reach.</td></tr>
+        </tbody>
+    </table>
+    <h4>Your own account</h4>
+    <p>The gateway lets you change your own account. When the change ends your session, the page asks the app to sign you out, so you sign in again.</p>
+    <ul>
+        <li>Setting a password for yourself: the toast <code>Password changed. Sign in again.</code></li>
+        <li>A change to your own <strong>Administrator</strong> box: <code>Administrator flag changed. Sign in again.</code></li>
+        <li>Deleting yourself asks <code>Delete your own account "admin"? You will be signed out.</code> and ends with <code>Account deleted. You have been signed out.</code></li>
+        <li>Resetting your own two-factor asks <code>Reset your own two-factor sign-in? You will be signed out and must set it up again.</code> and ends with <code>Two-factor sign-in reset. You have been signed out.</code></li>
+        <li>Saving only your own entitlements or modules keeps you signed in and shows <code>User saved</code>.</li>
+    </ul>
+
+    <h3>When the gateway refuses</h3>
+    <p>A refusal on the form shows in red under <strong>Save</strong> and keeps what you typed. A refusal of a delete or a reset shows as a red toast. A refusal while loading the list shows under the table. A refusal that says your session has ended shows as a red toast on every page, and the app signs you out.</p>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>Why</th><th>What to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Username is required.</code></td><td>The username box is empty.</td><td>Type a username.</td></tr>
+            <tr><td><code>A password is required for a new user.</code> and <code>A new user needs a password.</code></td><td>You add a user with an empty password. The page checks first and the gateway checks again.</td><td>Type a password.</td></tr>
+            <tr><td><code>User "bob" already exists. Use Edit to change it.</code></td><td>The username is taken.</td><td>Press <strong>Cancel</strong> and edit that user, or choose another name.</td></tr>
+            <tr><td><code>Username must be 1 to 64 characters from A-Z a-z 0-9 . _ @ -, not only dots.</code></td><td>The username breaks the rule in the table above.</td><td>Change the username.</td></tr>
+            <tr><td><code>Password must be 12 to 128 characters.</code></td><td>The password is too short or too long. The first number is the gateway's minimum, which may be higher than 12.</td><td>Type a password within the limits.</td></tr>
+            <tr><td><code>At least one administrator must remain.</code></td><td>You delete the only administrator, or clear the flag of the only administrator.</td><td>Make another user an administrator first.</td></tr>
+            <tr><td><code>This needs an administrator.</code></td><td>Your account is not an administrator's.</td><td>Sign in with an administrator account.</td></tr>
+            <tr><td><code>Your session has ended. Sign in again.</code></td><td>The gateway ended your session.</td><td>Sign in again. The page asks the app to sign you out.</td></tr>
+            <tr><td><code>This user was changed by someone else since you opened it.</code></td><td>Another administrator saved the same user first. A dialog shows the message with <strong>Reload</strong> and <strong>Cancel</strong>.</td><td>Press <strong>Reload</strong> to see the current user, then repeat your change. <strong>Cancel</strong> keeps your form open. See <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#two-administrators-at-once">Two administrators at once</a>.</td></tr>
+            <tr><td><code>This user was deleted by someone else.</code></td><td>The user is gone. A red toast shows the message and the page returns to the reloaded list.</td><td>Nothing: the user no longer exists.</td></tr>
+            <tr><td><code>The gateway could not write its data files, so nothing was changed. Its log has the cause.</code></td><td>The gateway could not store the change.</td><td>Ask the operator to read the gateway's log.</td></tr>
+            <tr><td><code>The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.</code></td><td>The gateway is set to refuse changes while it cannot record them.</td><td>Ask the operator to read the gateway's log.</td></tr>
+            <tr><td><code>A data file (users, connections or backup settings) was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.</code></td><td>The users file changed outside the gateway.</td><td>Ask the operator to restart the gateway.</td></tr>
+            <tr><td><code>The gateway could not complete the request. Its log has the cause.</code></td><td>The gateway failed in a way it did not expect.</td><td>Ask the operator to read the gateway's log.</td></tr>
+            <tr><td><code>Too many requests. Wait a minute and try again.</code></td><td>The gateway limits how fast requests may come.</td><td>Wait, then try again.</td></tr>
+            <tr><td><code>The gateway could not be reached.</code> and <code>The gateway did not answer in time. If this was a change, it may still have been applied: reload to see where it stands before you try again.</code></td><td>The gateway did not answer.</td><td>Press <strong>Refresh</strong> and check the user before you try again.</td></tr>
+        </tbody>
+    </table>
+    <aside class="manual-note" data-kind="warning">
+        <p>Deleting a user, and a reset of two-factor sign-in, cannot be undone from this page. A deleted user must be added again, with a password and entitlement rows.</p>
+    </aside>
+</article>

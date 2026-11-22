@@ -1,0 +1,242 @@
+<article class="manual-chapter">
+    <h2>Certificates</h2>
+    <p class="manual-lead">See the certificate the gateway presents to browsers and the CA certificates it trusts when it connects to brokers. Where the gateway's files allow it, replace the certificate and add or delete trusted CAs.</p>
+    <p>Certificates is a page of the administration app, which the gateway serves at <code>/solAdmin</code> to administrators only. It needs an administrator's session. Without one, the page shows <strong>Administrator Sign-in Required</strong> and the line <code>Sign in as an administrator to see or change the gateway's certificates.</code> in place of everything below. How the gateway's certificate files are mounted, and how an operator locks them, is in the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#certificates-from-the-console">operator's guide</a>.</p>
+    <p>A change made here applies at once and needs no restart. The gateway's files are named by its environment, never on this page.</p>
+
+    <h3>The page at a glance</h3>
+    <p>The page is an introduction card and three more cards: <strong>Gateway certificate</strong> (which also holds the <strong>Replace certificate</strong> form), <strong>Trusted broker CAs</strong> (which also holds the <strong>Add CA certificate</strong> form) and <strong>Standard root CAs</strong>.</p>
+    <figure class="manual-figure">
+        <img src="help/page.svg" width="760" height="700" alt="The Certificates page: the introduction with a Reload button, the Gateway certificate card with its details, the Replace certificate form, the Trusted broker CAs card with one file and the Add CA certificate form, and the Standard root CAs card.">
+        <figcaption>The Certificates page, with a gateway certificate that ends in nine days.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Reload</strong> reads the certificate and the trusted CAs from the gateway again.</li>
+        <li>What the page shows about the gateway's own certificate: <strong>Subject</strong>, <strong>Names</strong>, <strong>Issuer</strong>, <strong>Valid from</strong>, <strong>Valid to</strong> and <strong>Fingerprint (SHA-256)</strong>.</li>
+        <li>The mark after <strong>Valid to</strong>: <strong>Expired</strong>, or <strong>Expires in N days</strong> when 30 days or fewer remain.</li>
+        <li>The note shown for a self-signed certificate.</li>
+        <li>The <strong>Certificate file</strong> and <strong>Key file</strong> choosers.</li>
+        <li>The <strong>Certificate (PEM)</strong> and <strong>Private key (PEM)</strong> boxes, for pasting text instead of choosing a file.</li>
+        <li><strong>Replace certificate</strong> checks the pair, then installs it once you confirm.</li>
+        <li>A trusted CA file, with the certificates it holds and its <strong>Delete</strong> button.</li>
+        <li>The <strong>Add CA certificate</strong> form: a file chooser, a PEM box, an optional file name and the <strong>Add CA certificate</strong> button.</li>
+        <li>The standard root CAs the gateway carries, whether they are trusted, and a list of them.</li>
+    </ol>
+    <p>The red lines on the page are refusals: one under the introduction, one in each form and one above the trusted CA list. They are listed under Refusals below. A red line clears when you start the next action.</p>
+
+    <h3>Reading the gateway certificate</h3>
+    <p>The <strong>Gateway certificate</strong> card describes the certificate the gateway presents to browsers and to every client that connects to it. It shows the leaf certificate only: the first certificate of a chain.</p>
+    <table>
+        <thead>
+            <tr><th>Line</th><th>What it shows</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Subject</strong></td><td>Who the certificate is issued to, with every attribute in the certificate's order, as <code>openssl</code> prints it: <code>CN=gateway.example.org, O=Example</code>.</td></tr>
+            <tr><td><strong>Names</strong></td><td>The DNS names, then the IP addresses, that the certificate covers, one to a line. <code>None listed</code> when it names none.</td></tr>
+            <tr><td><strong>Issuer</strong></td><td>Who signed it, in the same form as the subject.</td></tr>
+            <tr><td><strong>Valid from</strong></td><td>The start of its validity, in UTC.</td></tr>
+            <tr><td><strong>Valid to</strong></td><td>The end of its validity, in UTC, with the expiry mark when one applies.</td></tr>
+            <tr><td><strong>Fingerprint (SHA-256)</strong></td><td>The SHA-256 fingerprint as hex pairs. Compare it with the fingerprint your certificate authority gave you.</td></tr>
+        </tbody>
+    </table>
+    <p>When the certificate's subject and issuer are the same, the card adds a note: <code>This certificate is self-signed (the gateway makes one for itself at first start). Browsers warn about it until it is replaced with one they trust.</code></p>
+
+    <h3>Expiry marks</h3>
+    <p>A mark follows the <strong>Valid to</strong> time of every certificate the page lists: the gateway's own, the one in the preview of a replacement, every certificate in a trusted CA file and every standard root CA.</p>
+    <ul>
+        <li><strong>Expired</strong> (red) when the end of validity has passed.</li>
+        <li><strong>Expires in N days</strong> (amber) when 30 days or fewer remain, counted up to the next whole day. It reads <strong>Expires in 1 day</strong> for the last day.</li>
+        <li>No mark when more than 30 days remain.</li>
+    </ul>
+    <aside class="manual-note" data-kind="important">
+        <p>The page does not renew anything and does not send a reminder. Look at <strong>Valid to</strong> from time to time. A self-signed certificate that the gateway made for itself at first start lasts seven days and is never renewed, so replace it soon after the first start.</p>
+    </aside>
+
+    <h3>Replacing the gateway certificate</h3>
+    <p>You need two things from your certificate authority: the certificate (it may carry its chain, leaf first) and its private key without a passphrase. The gateway checks the pair before it writes anything.</p>
+    <figure class="manual-figure">
+        <img src="help/replace.svg" width="760" height="470" alt="The Replace certificate form after a successful check: the file choosers, the certificate box with PEM text, the key box shown as dots, the preview of what will be installed and the Replace certificate button.">
+        <figcaption>A pair that the gateway accepted. The key is drawn as dots here; the page does not show it back.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The <strong>Certificate file</strong> and <strong>Key file</strong> choosers.</li>
+        <li>The <strong>Certificate (PEM)</strong> and <strong>Private key (PEM)</strong> boxes. Whatever is in these boxes is what the page sends.</li>
+        <li>The preview: <code>The gateway accepted the pair. This is what will be installed:</code>, with the details of the certificate.</li>
+        <li><strong>Replace certificate</strong>.</li>
+    </ol>
+    <ol class="manual-steps">
+        <li>Choose the <strong>Certificate file</strong> (<code>.crt</code>, <code>.pem</code> or <code>.cer</code>) and the <strong>Key file</strong> (<code>.key</code> or <code>.pem</code>). The page reads each file into the box beside it. Or paste the PEM text into <strong>Certificate (PEM)</strong> and <strong>Private key (PEM)</strong>.</li>
+        <li>Press <strong>Replace certificate</strong>. The gateway checks the pair and writes nothing yet. If it refuses, a red line under the boxes says why; see Refusals below.</li>
+        <li>Read the preview on the page behind the box. Look at <strong>Names</strong>: the gateway does not compare them with the address people use to reach it.</li>
+        <li>A box asks the question below, with the subject, the end of validity and the fingerprint of the certificate. Press <strong>Install</strong> to go on, or <strong>Cancel</strong> to stop. The preview closes when you answer.</li>
+        <li>The toast <code>Certificate replaced. New connections use it now.</code> appears, and the card shows the certificate you installed.</li>
+    </ol>
+    <figure class="manual-figure">
+        <img src="help/install.svg" width="640" height="230" alt="The confirmation box that asks whether to install the certificate, with its Cancel and Install buttons.">
+        <figcaption>The question before the certificate goes live.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The question: <code>Install this certificate?</code>, with the subject, the end of validity and the fingerprint, and what happens next.</li>
+        <li><strong>Cancel</strong> leaves the certificate as it is.</li>
+        <li><strong>Install</strong> replaces it.</li>
+    </ol>
+    <h4>What the gateway checks</h4>
+    <p>The same checks run when you press <strong>Replace certificate</strong> and again when you press <strong>Install</strong>, so a certificate that expires in between is still refused.</p>
+    <ul>
+        <li>The certificate box holds certificates only: at least one, no key, no other kind of block and no text after the last block.</li>
+        <li>The key box holds exactly one private key, without a passphrase, in a kind the gateway supports: RSA, ECDSA or Ed25519.</li>
+        <li>The key matches the first certificate.</li>
+        <li>The first certificate is valid today: not expired and already started.</li>
+        <li>The certificate's own key is one that browsers can use: RSA of at least 2048 bits, or ECDSA on P-256 or P-384. An Ed25519 certificate is refused here, although an Ed25519 key is otherwise accepted. The gateway serves the new certificate at once, so a certificate that browsers refuse would lock you out of this page.</li>
+    </ul>
+    <h4>What happens to your key</h4>
+    <p>The page sends the key once and keeps no copy. The gateway writes it to its key file and nowhere else: it does not echo it, log it or write it to the audit trail. The <strong>Private key (PEM)</strong> box and the <strong>Key file</strong> chooser are emptied after every attempt, whether it succeeds, is refused or is cancelled. The certificate box is emptied only after a successful replacement, so after a refusal you can fix the key and try again.</p>
+    <h4>What applies at once</h4>
+    <p>Connections to the gateway made from then on present the installed certificate. Connections already open carry on with the old one until they close. The gateway keeps the certificate and the key in its files, so they are still in place after a restart. Each replacement is written to the audit trail with the subject and the end of validity.</p>
+
+    <h3>Reading the trusted broker CAs</h3>
+    <p>The <strong>Trusted broker CAs</strong> card lists the files the gateway reads when it checks a broker's certificate: every <code>.crt</code> and <code>.pem</code> file in its trust folder, by name. Under each name the card lists the certificates in the file, one to a line, as <code>subject: valid to time; SHA-256 fingerprint</code>, with the expiry mark when one applies. A file may hold several certificates.</p>
+    <p>A file that gives no certificate says why in red: <code>No certificate from this file: The file holds no certificate.</code> or <code>No certificate from this file: The file cannot be read.</code> When the folder holds no such file, the card says <code>No CA files in the trust directory.</code></p>
+    <figure class="manual-figure">
+        <img src="help/trust.svg" width="760" height="560" alt="The Trusted broker CAs card: one CA file with an Expired mark, one file that holds no certificate, and the Add CA certificate form with a file chooser, a PEM box, a file name and a refusal in red.">
+        <figcaption>Two files in the list, and the form that adds a third.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>A file whose certificate has expired: the file name, its <strong>Delete</strong> button, the certificate line and the <strong>Expired</strong> mark.</li>
+        <li>A file that holds no certificate, with the reason in red.</li>
+        <li>The <strong>CA certificate file</strong> chooser.</li>
+        <li>The <strong>CA certificate (PEM)</strong> box.</li>
+        <li>The <strong>File name (optional)</strong> field.</li>
+        <li>A refusal from the form.</li>
+        <li>The <strong>Add CA certificate</strong> button.</li>
+    </ol>
+
+    <h3>Adding a trusted CA</h3>
+    <ol class="manual-steps">
+        <li>Choose a <strong>CA certificate file</strong> (<code>.crt</code>, <code>.pem</code> or <code>.cer</code>), or paste the text into <strong>CA certificate (PEM)</strong>.</li>
+        <li>If you want to name the file, type the name in <strong>File name (optional)</strong>. The rules are in the table below.</li>
+        <li>Press <strong>Add CA certificate</strong>.</li>
+        <li>The toast <code>CA certificate added. New broker connections trust it now.</code> appears, the three boxes are emptied and the file is in the list.</li>
+    </ol>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it is</th><th>What it accepts</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>CA certificate file</strong></td><td>A file the page reads into the box below it.</td><td>A file of 64 KiB or less.</td></tr>
+            <tr><td><strong>CA certificate (PEM)</strong></td><td>The certificates to trust.</td><td>One or more certificate blocks and nothing else: a private key is refused, and so is any text after the last block. Required.</td></tr>
+            <tr><td><strong>File name (optional)</strong></td><td>The name of the file the gateway writes.</td><td>Letters, digits, dots, dashes and underscores. It starts with a letter or a digit, ends in <code>.crt</code> or <code>.pem</code> in lower case, and has at most 64 characters before the extension. Left empty, the gateway names the file after the common name of the first certificate: lower case, every run of other characters turned into one dash, dashes at both ends dropped, then <code>.crt</code> (<code>ca.crt</code> when nothing is left).</td></tr>
+        </tbody>
+    </table>
+    <p>The gateway never writes over a file. A name that is already in the list is refused: delete that file first, or choose another name. The certificates in the file are trusted by the next connection the gateway makes to a broker.</p>
+
+    <h3>Deleting a trusted CA</h3>
+    <ol class="manual-steps">
+        <li>Press <strong>Delete</strong> on the file's row.</li>
+        <li>Read the question: <code>Delete "east-prod-ca.pem" from the trusted CAs? Brokers that rely on it stop verifying for new connections at once.</code></li>
+        <li>Press <strong>Delete</strong> to confirm, or <strong>Cancel</strong>. The toast reads <code>Deleted east-prod-ca.pem</code> and the file leaves the list.</li>
+    </ol>
+    <aside class="manual-note" data-kind="warning">
+        <p>A deleted file cannot be brought back from this page. A broker whose certificate chains only to a CA in that file, and not to a standard root CA that is trusted, fails to verify on its next connection until you add the CA again. Connections already open carry on.</p>
+    </aside>
+    <p>Delete works on every file the list shows, including a file that someone placed in the folder by hand.</p>
+
+    <h3>The standard root CAs</h3>
+    <p>The <strong>Standard root CAs</strong> card describes the public root CAs that the gateway's image carries, from Mozilla's list. The page cannot add or delete them: they come with the image and change with a new release. Whether the gateway trusts them is a setting, <strong>Trust the standard root CAs</strong>, on the Gateway Settings page (see the Gateway Settings chapter).</p>
+    <ul>
+        <li>When they are on, the card says <code>Trusted: brokers whose certificates chain to one of these N certificates are accepted.</code></li>
+        <li>When they are off, it says <code>Not trusted: turned off on Gateway Settings. Only the CA files above are trusted.</code></li>
+        <li><strong>Show the N certificates</strong> opens the list, sorted by subject, in the same form as the trusted CA files. It is absent when the gateway read none.</li>
+        <li>When the gateway read none, a red line says why: <code>The gateway image holds no standard root CA bundle.</code>, <code>The standard root CA bundle cannot be read.</code> or <code>The standard root CA bundle holds no certificate.</code> Only the CA files above are trusted then. When the standard root CAs are on, the status line still reads <code>Trusted</code>, with <code>0 certificates</code>.</li>
+    </ul>
+
+    <h3>When the certificates are locked</h3>
+    <p>Whether the page may change the files is decided by how the operator mounted them, not by a setting on this page. When the gateway cannot write them, the page still shows everything, but it says so and disables the controls. The certificate and the trusted CAs are judged separately.</p>
+    <figure class="manual-figure">
+        <img src="help/locked.svg" width="760" height="470" alt="The Certificates page with its files locked: a warning line under the gateway certificate, a warning line over the trusted CAs, and the Replace certificate, Delete and Add CA certificate buttons greyed out.">
+        <figcaption>Both sets of files locked, and the standard root CAs turned off with no bundle to read.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><code>The certificate files are read-only on the gateway host, so the certificate cannot be replaced here.</code></li>
+        <li><strong>Replace certificate</strong>, the file choosers and the PEM boxes of the form are disabled.</li>
+        <li><code>The trust files are read-only on the gateway host, so CA certificates cannot be added or deleted here.</code></li>
+        <li>Every <strong>Delete</strong> button is disabled.</li>
+        <li>The <strong>Add CA certificate</strong> form is disabled.</li>
+        <li>The status of the standard root CAs, here <code>Not trusted: turned off on Gateway Settings. Only the CA files above are trusted.</code></li>
+        <li>The reason the gateway read no standard root CAs.</li>
+    </ol>
+    <p>The certificate is locked when its folder is not writable, and also when the certificate and its key are in two different folders. A locked certificate changes on the gateway host: the operator replaces the files and restarts the gateway. Ask the operator, or read how the files are locked and unlocked in the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#locking-them">operator's guide</a>.</p>
+    <p>If the files turn read-only while the page is open, the action is refused with the message below and the page reloads, so it shows the banners and the disabled controls.</p>
+
+    <h3>Refusals</h3>
+    <p>A refusal appears as a red line: under the introduction when the page cannot load, under the form for a replacement or an addition, and above the list for a deletion. The gateway's own words are shown as they are.</p>
+    <h4>Before anything is sent</h4>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>What to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Choose a certificate file or paste the certificate (PEM).</code></td><td>Fill the certificate box.</td></tr>
+            <tr><td><code>Choose a key file or paste the private key (PEM).</code></td><td>Fill the key box.</td></tr>
+            <tr><td><code>Choose a CA certificate file or paste the certificate (PEM).</code></td><td>Fill the CA certificate box.</td></tr>
+            <tr><td><code>name is larger than 64 KiB, the most the gateway accepts in one request.</code> (with the file's name in front)</td><td>A file chosen in any of the three choosers is larger than one request can carry. The page does not read it. Use a smaller file.</td></tr>
+            <tr><td><code>The certificate and key together are larger than the 64 KiB the gateway accepts in one request. Leave out any certificate the chain does not need.</code></td><td>Remove certificates from the chain that the gateway does not need, such as the root.</td></tr>
+            <tr><td><code>This CA file is larger than the 64 KiB the gateway accepts in one request. Split it into smaller files and add each one.</code></td><td>Add the certificates in several files.</td></tr>
+        </tbody>
+    </table>
+    <h4>From the certificate checks</h4>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>What it means</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>No certificate was found. Send the PEM text, from -----BEGIN CERTIFICATE----- to -----END CERTIFICATE-----.</code></td><td>The certificate box has no certificate block.</td></tr>
+            <tr><td><code>A private key was found. A private key never belongs here: send only the certificate.</code></td><td>A key is in a certificate box, for the gateway or for a CA.</td></tr>
+            <tr><td><code>A "TYPE" block was found. Only CERTIFICATE blocks are accepted.</code></td><td>The text holds another kind of block. The message names the kind in place of TYPE.</td></tr>
+            <tr><td><code>A CERTIFICATE block cannot be read as a certificate.</code></td><td>The text is damaged or cut short.</td></tr>
+            <tr><td><code>There is text after the last certificate block. Send only certificate blocks.</code></td><td>Delete what follows the last <code>-----END CERTIFICATE-----</code> line.</td></tr>
+            <tr><td><code>No private key was found. Send the PEM text, from -----BEGIN PRIVATE KEY----- to -----END PRIVATE KEY-----.</code></td><td>The key box has no key block.</td></tr>
+            <tr><td><code>The key is encrypted. Send it without a passphrase (openssl pkey -in key.pem -out plain.pem).</code></td><td>Remove the passphrase first, with the command the message names.</td></tr>
+            <tr><td><code>A "TYPE" block was found. Only the private key belongs here.</code></td><td>The key box holds another kind of block, for example the certificate.</td></tr>
+            <tr><td><code>More than one private key was found. Send exactly one.</code></td><td>Keep one key.</td></tr>
+            <tr><td><code>There is text after the key block. Send only the key.</code></td><td>Delete what follows the key block.</td></tr>
+            <tr><td><code>The key does not match the certificate (the first one sent).</code></td><td>The key belongs to another certificate. The first certificate in the box must be the leaf.</td></tr>
+            <tr><td><code>The private key cannot be read, or is a kind the gateway does not support. Use an RSA, ECDSA or Ed25519 key.</code></td><td>The key text is damaged, or the key is of another kind.</td></tr>
+            <tr><td><code>The certificate expired on 2026-11-01T09:00:00Z.</code></td><td>The certificate's end of validity has passed. The message gives it in UTC. Get a renewed certificate.</td></tr>
+            <tr><td><code>The certificate is not valid until 2026-12-01T09:00:00Z.</code></td><td>The certificate has not started yet. The message gives its start in UTC.</td></tr>
+            <tr><td><code>The certificate's key is ECDSA on P-521, which Chrome and Edge cannot use for TLS. Issue the certificate for an RSA key of at least 2048 bits, or an ECDSA key on P-256 or P-384.</code></td><td>The gateway refuses a certificate that browsers cannot use. The first part of the message changes with the key: <code>RSA with N bits, which browsers refuse</code> for an RSA key under 2048 bits, and <code>Ed25519, which browsers do not accept in a TLS certificate</code>.</td></tr>
+        </tbody>
+    </table>
+    <h4>From the file name and the files</h4>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>What it means</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Use letters, digits, dots, dashes and underscores, start with a letter or digit, end in .crt or .pem, and keep the name before the extension to 64 characters.</code></td><td>The <strong>File name (optional)</strong> breaks the rules in the table above.</td></tr>
+            <tr><td><code>A CA file with that name already exists. Delete it first, or choose another name.</code></td><td>The name is in the list.</td></tr>
+            <tr><td><code>Not found. It may already have been removed.</code></td><td>A <strong>Delete</strong> found the file gone, for example because another administrator deleted it. The list reloads.</td></tr>
+            <tr><td><code>The gateway's certificate or trust files are read-only on its host, so they cannot be changed here.</code></td><td>The files are locked. See the section above.</td></tr>
+            <tr><td><code>The gateway could not write its certificate or trust files, so nothing was changed. Its log has the cause.</code></td><td>The write failed, for example on a full disk. Nothing changed. Ask the operator to read the gateway's log.</td></tr>
+        </tbody>
+    </table>
+    <h4>From the session and the gateway</h4>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>What it means</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Your session has ended. Sign in again.</code></td><td>Shown as a toast, and the app signs you out.</td></tr>
+            <tr><td><code>This needs an administrator.</code></td><td>The session is not an administrator's.</td></tr>
+            <tr><td><code>You must change your password before you continue.</code></td><td>The administrator's password must be changed first.</td></tr>
+            <tr><td><code>The gateway rejected the request as malformed.</code></td><td>The gateway could not read what the page sent.</td></tr>
+            <tr><td><code>The gateway refused a cross-site request.</code></td><td>The page was not opened from the gateway's own address.</td></tr>
+            <tr><td><code>The request is too large.</code></td><td>The gateway refused the size of the request.</td></tr>
+            <tr><td><code>Too many requests. Wait a minute and try again.</code></td><td>The gateway is limiting how often you call it.</td></tr>
+            <tr><td><code>The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.</code></td><td>The gateway is set to refuse changes while its audit trail cannot be written, and a certificate or CA change is a change. Checking a certificate and reading the page still work.</td></tr>
+            <tr><td><code>The gateway could not be reached.</code></td><td>The page cannot reach the gateway. Check the connection and press <strong>Reload</strong>.</td></tr>
+            <tr><td><code>The gateway did not answer in time. If this was a change, it may still have been applied: reload to see where it stands before you try again.</code></td><td>Press <strong>Reload</strong> and look at the page before you repeat a change.</td></tr>
+            <tr><td><code>The gateway sent a response this page cannot read.</code></td><td>Something between you and the gateway answered in its place. Press <strong>Reload</strong>.</td></tr>
+        </tbody>
+    </table>
+</article>

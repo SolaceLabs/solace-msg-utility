@@ -498,6 +498,8 @@ A browser event that arrives before step 3 throws `wire() not called before a br
 
 The manual is the Help tab of the About page. Each module owns one chapter of it, `src/modules/<id>/help.html`, and the build composes the chapters of a variant's modules into that variant's bundle ([architecture.md](architecture.md#dom-template-system)). The same files are the source of the user guide on GitHub. When a change alters what a page shows or does, change its chapter in the same commit.
 
+A module that has an entry (`MODULE_ENTRIES`) may add a chapter for it in `help.<entry>.html`: the file opens with the `<!-- @module-base -->` marker, where the build puts the module's base chapter, and holds the extra chapter after it. The connections module does this for the Provisioned sign-in (`help.managed.html`).
+
 ### A chapter
 
 A chapter is one `<article class="manual-chapter">` that opens with its `<h2>` title. Write for a reader who is looking at the page: say what a thing is for, then how to use it, in short plain sentences. Name a button or a field as the page labels it, in `<strong>`.

@@ -79,7 +79,7 @@ In Standalone and Gateway mode you type the broker's details on the **Direct** f
 
 **About** is the last entry in the sidebar. Its **About** tab says what the app is, shows the **version** you are running and links to the project on GitHub.
 
-Its **Help** tab is the manual: one chapter for each page of your build, with drawings of the page. **Contents**, on the left, lists the chapters and the sections of the one that is open; press an entry to turn to it, or use **Previous chapter** and **Next chapter** under the text. The two demos have the About tab only.
+Its **Help** tab is the manual: one chapter for each page of your build, with drawings of the page. **Contents**, on the left, lists the chapters and the sections of the one that is open, and marks the section you are reading as you scroll; press an entry to turn to it, or use **Previous chapter** and **Next chapter** under the text. The two demos have the About tab only.
 
 ---
 

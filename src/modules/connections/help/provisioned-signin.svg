@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 280" width="760" height="280" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="280" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="20" width="330" height="170" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="54" font-size="15" font-weight="700">Sign in</text>
+    <text x="40" y="82" font-size="11" fill="#64748b">Sign in with your account to connect to the</text>
+    <text x="40" y="98" font-size="11" fill="#64748b">brokers you are entitled to.</text>
+    <rect x="40" y="120" width="90" height="30" fill="#00C895" rx="5"/>
+    <text x="85" y="139" fill="#ffffff" font-weight="700" text-anchor="middle">Sign in</text>
+    <circle cx="152" cy="135" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="152" y="139" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <path d="M362 120 h34 M388 113 l8 7 l-8 7" fill="none" stroke="#64748b" stroke-width="2"/>
+    <rect x="410" y="20" width="330" height="240" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <rect x="411" y="21" width="328" height="40" fill="#093B5F"/>
+    <text x="430" y="46" font-size="13" fill="#ffffff" font-weight="700">Solace</text>
+    <text x="481.8" y="46" font-size="13" fill="#00C895" font-weight="700">Message Utility</text>
+    <text x="430" y="92" font-size="15" font-weight="700">Sign in</text>
+    <text x="430" y="118" font-size="11" fill="#64748b" font-weight="700">Username</text>
+    <rect x="430" y="124" width="260" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="440" y="142">alice</text>
+    <text x="430" y="166" font-size="11" fill="#64748b" font-weight="700">Password</text>
+    <rect x="430" y="172" width="260" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="440" y="190">************</text>
+    <rect x="430" y="218" width="260" height="30" fill="#00C895" rx="5"/>
+    <text x="560" y="237" fill="#ffffff" font-weight="700" text-anchor="middle">Sign in</text>
+    <circle cx="714" cy="138" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="714" y="142" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <circle cx="714" cy="233" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="714" y="237" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+</svg>
