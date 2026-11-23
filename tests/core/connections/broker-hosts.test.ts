@@ -6,6 +6,8 @@ import { createBrokerHosts, BROKER_HOSTS_TEXT, type BrokerHostsOptions, type Bro
  * The broker-type control and the two host boxes it governs, on the markup of
  * the Direct form (src/modules/connections/index.html): one host for a
  * software or cloud broker, a management and a messaging host for an appliance.
+ * The control's own behaviour (the pressed button, a missing button) is in
+ * tests/core/segmented.test.ts.
  */
 let container: HTMLElement;
 const el = <T extends HTMLElement>(sel: string) => container.querySelector<T>(sel)!;
@@ -163,10 +165,5 @@ describe('createBrokerHosts', () => {
         expect([el('#lbl-conn-host').textContent, el('#conn-broker-type-hint').textContent]).toEqual(['Hostname', 'one']);
         hosts.setType('appliance');
         expect([el('#lbl-conn-host').textContent, el('#conn-broker-type-hint').textContent]).toEqual(['Management hostname', 'two']);
-    });
-
-    it('refuses a control that lacks the button of a type', () => {
-        button('appliance').remove();
-        expect(() => create()).toThrow('Required element missing: button[data-broker-type="appliance"]');
     });
 });

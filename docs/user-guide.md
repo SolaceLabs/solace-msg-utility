@@ -194,22 +194,21 @@ A message that appears as a toast is gone within a moment. The bell keeps what t
 
 ### The page at a glance
 
-![The Connections page: the Solace Event Broker Type card with its two choices, the Solace SEMP card with the Broker Host, the Solace Messaging card with its Messaging Host, settings button and sign-in choice, and the three buttons at the foot.](../src/modules/connections/help/page.svg)
+![The Connections page: the Solace Event Broker Type card with its two choices, the Solace SEMP card with its protocol, Broker Host and port on one row, the Solace Messaging card with its settings button, sign-in choice and address row, and the three buttons at the foot.](../src/modules/connections/help/page.svg)
 
 *Figure 3. The Connections page, filled in for a broker with a Message VPN called default.*
 
 1. The broker type: **Software / Cloud** or **Appliance**.
-2. **Broker Host (IP or Hostname)**. For a software or cloud broker, the one host of both connections.
-3. The SEMP address: **Protocol**, **Port** and the optional **URL Path**.
+2. The SEMP address on one row, read as a URL: **Protocol**, **Broker Host (IP or Hostname)** and **Port**. For a software or cloud broker, the Broker Host is the one host of both connections.
+3. **+ URL path**, which adds the optional **URL Path** box to the row. The Messaging card has one too.
 4. The SEMP **Username** and **Password**.
 5. The SEMP **Connect** button.
 6. The settings button beside the card's title, which opens Advanced Connection Settings.
 7. The sign-in scheme: **Basic** or **OAuth2**.
-8. **Messaging Host (IP or Hostname)**. Locked for a software or cloud broker, where it shows the Broker Host.
-9. The Messaging address: **Protocol**, **Port**, the optional **URL Path**, and the **Message VPN**.
-10. The Messaging **Username** and **Password**.
-11. The Messaging **Connect** button.
-12. **Reset Form**, **Load All Config** and **Save All Config**.
+8. The Messaging address on one row: **Protocol**, **Messaging Host (IP or Hostname)** and **Port**. The Messaging Host is locked for a software or cloud broker, where it shows the Broker Host.
+9. The **Message VPN**, and the Messaging **Username** and **Password**.
+10. The Messaging **Connect** button.
+11. **Reset Form**, **Load All Config** and **Save All Config**.
 
 The two connections are independent. You can make either one, or both, in either order. Press the <kbd>Enter</kbd> key in a text box of a card to press that card's **Connect** button. The Broker Host belongs to the SEMP card, and the Messaging Host to the Messaging card.
 
@@ -242,14 +241,14 @@ While the Solace client is connected, every field of the card is locked, and so 
 | **Broker Host (IP or Hostname)**, or **Messaging Host (IP or Hostname)** for an appliance | A host name such as `broker.example.com`, or an IPv4 address. An IPv6 address is not accepted. A bad value turns the box red with `Invalid hostname or IP address.` The Broker Host starts as `localhost` when nothing has been saved. |
 | **Protocol** | `wss://` (encrypted, the default) or `ws://`. The list also shows `http://` and `https://`, but they are greyed out and cannot be chosen. A page opened over `https://` without a gateway offers only `wss://`, because the browser blocks an unencrypted connection from it. |
 | **Port** | The broker's WebSocket port, a whole number from 1 to 65535. A bad value turns the box red with `Invalid port.` |
-| **URL Path** | Optional. A path placed after the port, for a broker behind a reverse proxy. The box is hidden until you press **+ URL path**; the cross in the box empties it and hides it again. A leading `/` is added and a trailing one dropped. A path that is saved, loaded or typed always shows its box. |
+| **URL Path** | Optional. A path placed after the port, for a broker behind a reverse proxy. The row shows only a small **+ URL path** button, above the end of the row, until you press it. The box then joins the row after the port; the cross in the box empties it and hides it again. A leading `/` is added and a trailing one dropped. A path that is saved, loaded or typed always shows its box. |
 | **Message VPN** | The Message VPN to join, for example `default`. It cannot be blank: `Message VPN is required.` |
 | **Username** | The client username: up to 189 printable ASCII characters, without `?` or `*`. Letter case counts. A blank value turns the box red with `Field is required.` A refused value turns it red too, and an error line under the card says why. |
 | **Password** | The client password. The page does not check it, and it is never saved. |
 
 #### Basic and OAuth2
 
-The two choices at the top right of the card pick how you sign in to the broker.
+The two joined buttons at the top right of the card pick how you sign in to the broker. The pressed one is the choice.
 
 - **Basic** signs in with a username and a password. This is the default.
 - **OAuth2** signs in with tokens. The first box is then labelled **Access Token** and the second **ID Token**. The rule for client usernames does not apply to a token.
@@ -269,7 +268,7 @@ A red line under the Connect button says what went wrong. Look for these.
 
 SEMP is the broker's management interface. The page connects to its SEMP v2 REST API and uses it to read facts about the broker, such as which queues exist. The pages that list a broker's queues and subscriptions need it. A SEMP connection is not a standing session: the page checks your account with one request, and then sends each later request with the same account.
 
-1. Fill in **Broker Host (IP or Hostname)** at the top of the card. For an appliance the box is labelled **Management Host (IP or Hostname)** and takes its management address.
+1. Fill in **Broker Host (IP or Hostname)**, in the first row of the card. For an appliance the box is labelled **Management Host (IP or Hostname)** and takes its management address.
 2. In the **Solace SEMP (Management)** card, fill in the address and the account.
 3. Press **Connect**. The button reads `Connecting...` while the page waits.
 4. When the broker accepts the account the button turns red and reads **Disconnect**, and the SEMP indicator turns green.
@@ -280,7 +279,7 @@ The fields lock while SEMP is connected. The Broker Host of a software or cloud 
 | --- | --- |
 | **Protocol** | `https://` (the default) or `http://`. A page opened over `https://` without a gateway offers only `https://`. |
 | **Port** | The broker's SEMP port, a whole number from 1 to 65535. |
-| **URL Path** | Optional, and hidden until you press **+ URL path**, as in the Messaging card. The path goes after the port and before the SEMP address, for a broker behind a reverse proxy. |
+| **URL Path** | Optional, and hidden until you press the small **+ URL path** button, as in the Messaging card. The path goes after the port and before the SEMP address, for a broker behind a reverse proxy. |
 | **Username** | The SEMP account name: 1 to 32 characters from A-Z, a-z, 0-9, underscore and hyphen. Without one the page says `SEMP username is required.` (the box says `Username is required.`). |
 | **Password** | The account's password: 1 to 128 printable ASCII characters, no spaces, and none of these: colon, parentheses, double quote, semicolon, apostrophe, less-than and greater-than signs, comma, backtick, backslash, asterisk, ampersand, vertical bar. The page refuses anything else before it sends a request, and says why under the card. |
 
@@ -1732,21 +1731,20 @@ Press **Refresh** to load the list again, for example after another administrato
 
 The form is the same one you use to edit a connection, so Figure 2 shows it with a connection open.
 
-![The connection form open on east-prod: broker name and broker type, the SEMP part with the hostname, the Client part with the messaging hostname, two Message VPN rows, Save and Cancel, and a red message under the form.](../src/modules/connection-management/help/form.svg)
+![The connection form open on east-prod: broker name and broker type, the SEMP part with its scheme, hostname and port on one row and the account below, the Client part with its scheme, messaging hostname and port on one row, two Message VPN rows, Save and Cancel, and a red message under the form.](../src/modules/connection-management/help/form.svg)
 
 *Figure 2. The form, editing the connection east-prod.*
 
 1. **Broker name**: the name users and the gateway call this broker by.
 2. **Solace Event Broker Type**: **Software / Cloud** for a broker with one hostname, **Appliance** for one with two.
-3. **Hostname**: where the broker is.
-4. The SEMP account: **Scheme**, **Port** and **Username**.
+3. The SEMP address on one row, read as a URL: **Scheme**, **Hostname** (where the broker is) and **Port**.
+4. The SEMP **Username**.
 5. The SEMP **Password**. While you edit, its hint reads `(leave blank to keep current)`.
-6. **Messaging hostname**. Locked for a software or cloud broker, where it shows the hostname above.
-7. The messaging **Scheme** and **Port**.
-8. **+ Add** adds a row to the Message VPN list.
-9. One row for each Message VPN: its name, the client username and the client password. The cross at the end of a row removes it.
-10. **Save** stores the connection. **Cancel** returns to the list and keeps nothing.
-11. The place where the form tells you what is wrong.
+6. The messaging address on one row: **Scheme**, **Messaging hostname** and **Port**. The hostname is locked for a software or cloud broker, where it shows the hostname above.
+7. **+ Add** adds a row to the Message VPN list.
+8. One row for each Message VPN: its name, the client username and the client password. The cross at the end of a row removes it.
+9. **Save** stores the connection. **Cancel** returns to the list and keeps nothing.
+10. The place where the form tells you what is wrong.
 
 ### The fields of the form
 
@@ -1756,8 +1754,8 @@ The form is the same one you use to edit a connection, so Figure 2 shows it with
 | --- | --- | --- |
 | **Broker name** | The name of the connection. Users are granted brokers by this name, and the list is kept by it. | Required. 1 to 64 characters from `A-Z a-z 0-9 . _ -`, and not only dots. The name must not be in the list already. While you edit, the box is locked: the name is what identifies the connection. |
 | **Solace Event Broker Type** | How many addresses the broker has. A software or cloud broker answers SEMP and messaging on one hostname. A Solace appliance answers SEMP on its management address and messaging on another. | **Software / Cloud** or **Appliance**. The form opens a connection that has one hostname as **Software / Cloud**, and one that has two as **Appliance**. |
-| **Hostname** | The first box under **SEMP (management)**. The address the gateway connects to: for both SEMP and messaging on a software or cloud broker, and for SEMP on an appliance, where its label reads **Management hostname**. | Required. A bare host name (`A-Z a-z 0-9 . _ -`, up to 253 characters, beginning and ending with a letter, a digit or `_`) or an IP address. IPv6 goes without brackets. No `https://`, no port, no path, no spaces. |
-| **Messaging hostname** | The first box under **Client (messaging)**. For **Software / Cloud** it is locked and shows the hostname. For **Appliance** it is the address the gateway connects to for messaging. | Required for an appliance, by the rules of **Hostname**. It starts with the hostname already typed. The same hostname in both boxes is stored as one, and the connection opens again as **Software / Cloud**. |
+| **Hostname** | The middle box of the first row under **SEMP (management)**. The address the gateway connects to: for both SEMP and messaging on a software or cloud broker, and for SEMP on an appliance, where its label reads **Management hostname**. | Required. A bare host name (`A-Z a-z 0-9 . _ -`, up to 253 characters, beginning and ending with a letter, a digit or `_`) or an IP address. IPv6 goes without brackets. No `https://`, no port, no path, no spaces. |
+| **Messaging hostname** | The middle box of the row under **Client (messaging)**. For **Software / Cloud** it is locked and shows the hostname. For **Appliance** it is the address the gateway connects to for messaging. | Required for an appliance, by the rules of **Hostname**. It starts with the hostname already typed. The same hostname in both boxes is stored as one, and the connection opens again as **Software / Cloud**. |
 
 #### SEMP (management)
 

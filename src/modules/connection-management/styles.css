@@ -21,3 +21,18 @@
     margin: 1.25rem 0 0.5rem;
     font-size: 0.95rem;
 }
+
+/* An address on one row, read as a URL: the scheme and the port keep their
+ * width, and the hostname takes the rest. */
+.conn-mgmt-scheme {
+    flex: 0 0 150px;
+}
+
+.conn-mgmt-host {
+    flex: 1;
+    min-width: 0;
+}
+
+.conn-mgmt-port {
+    flex: 0 0 100px;
+}

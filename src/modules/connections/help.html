@@ -52,20 +52,19 @@
 
     <h3>The page at a glance</h3>
     <figure class="manual-figure">
-        <img src="help/page.svg" width="760" height="656" alt="The Connections page: the Solace Event Broker Type card with its two choices, the Solace SEMP card with the Broker Host, the Solace Messaging card with its Messaging Host, settings button and sign-in choice, and the three buttons at the foot.">
+        <img src="help/page.svg" width="760" height="560" alt="The Connections page: the Solace Event Broker Type card with its two choices, the Solace SEMP card with its protocol, Broker Host and port on one row, the Solace Messaging card with its settings button, sign-in choice and address row, and the three buttons at the foot.">
         <figcaption>The Connections page, filled in for a broker with a Message VPN called default.</figcaption>
     </figure>
     <ol class="manual-callouts">
         <li>The broker type: <strong>Software / Cloud</strong> or <strong>Appliance</strong>.</li>
-        <li><strong>Broker Host (IP or Hostname)</strong>. For a software or cloud broker, the one host of both connections.</li>
-        <li>The SEMP address: <strong>Protocol</strong>, <strong>Port</strong> and the optional <strong>URL Path</strong>.</li>
+        <li>The SEMP address on one row, read as a URL: <strong>Protocol</strong>, <strong>Broker Host (IP or Hostname)</strong> and <strong>Port</strong>. For a software or cloud broker, the Broker Host is the one host of both connections.</li>
+        <li><strong>+ URL path</strong>, which adds the optional <strong>URL Path</strong> box to the row. The Messaging card has one too.</li>
         <li>The SEMP <strong>Username</strong> and <strong>Password</strong>.</li>
         <li>The SEMP <strong>Connect</strong> button.</li>
         <li>The settings button beside the card's title, which opens Advanced Connection Settings.</li>
         <li>The sign-in scheme: <strong>Basic</strong> or <strong>OAuth2</strong>.</li>
-        <li><strong>Messaging Host (IP or Hostname)</strong>. Locked for a software or cloud broker, where it shows the Broker Host.</li>
-        <li>The Messaging address: <strong>Protocol</strong>, <strong>Port</strong>, the optional <strong>URL Path</strong>, and the <strong>Message VPN</strong>.</li>
-        <li>The Messaging <strong>Username</strong> and <strong>Password</strong>.</li>
+        <li>The Messaging address on one row: <strong>Protocol</strong>, <strong>Messaging Host (IP or Hostname)</strong> and <strong>Port</strong>. The Messaging Host is locked for a software or cloud broker, where it shows the Broker Host.</li>
+        <li>The <strong>Message VPN</strong>, and the Messaging <strong>Username</strong> and <strong>Password</strong>.</li>
         <li>The Messaging <strong>Connect</strong> button.</li>
         <li><strong>Reset Form</strong>, <strong>Load All Config</strong> and <strong>Save All Config</strong>.</li>
     </ol>
@@ -105,7 +104,7 @@
             <tr><td><strong>Broker Host (IP or Hostname)</strong>, or <strong>Messaging Host (IP or Hostname)</strong> for an appliance</td><td>A host name such as <code>broker.example.com</code>, or an IPv4 address. An IPv6 address is not accepted. A bad value turns the box red with <code>Invalid hostname or IP address.</code> The Broker Host starts as <code>localhost</code> when nothing has been saved.</td></tr>
             <tr><td><strong>Protocol</strong></td><td><code>wss://</code> (encrypted, the default) or <code>ws://</code>. The list also shows <code>http://</code> and <code>https://</code>, but they are greyed out and cannot be chosen. A page opened over <code>https://</code> without a gateway offers only <code>wss://</code>, because the browser blocks an unencrypted connection from it.</td></tr>
             <tr><td><strong>Port</strong></td><td>The broker's WebSocket port, a whole number from 1 to 65535. A bad value turns the box red with <code>Invalid port.</code></td></tr>
-            <tr><td><strong>URL Path</strong></td><td>Optional. A path placed after the port, for a broker behind a reverse proxy. The box is hidden until you press <strong>+ URL path</strong>; the cross in the box empties it and hides it again. A leading <code>/</code> is added and a trailing one dropped. A path that is saved, loaded or typed always shows its box.</td></tr>
+            <tr><td><strong>URL Path</strong></td><td>Optional. A path placed after the port, for a broker behind a reverse proxy. The row shows only a small <strong>+ URL path</strong> button, above the end of the row, until you press it. The box then joins the row after the port; the cross in the box empties it and hides it again. A leading <code>/</code> is added and a trailing one dropped. A path that is saved, loaded or typed always shows its box.</td></tr>
             <tr><td><strong>Message VPN</strong></td><td>The Message VPN to join, for example <code>default</code>. It cannot be blank: <code>Message VPN is required.</code></td></tr>
             <tr><td><strong>Username</strong></td><td>The client username: up to 189 printable ASCII characters, without <code>?</code> or <code>*</code>. Letter case counts. A blank value turns the box red with <code>Field is required.</code> A refused value turns it red too, and an error line under the card says why.</td></tr>
             <tr><td><strong>Password</strong></td><td>The client password. The page does not check it, and it is never saved.</td></tr>
@@ -113,7 +112,7 @@
     </table>
 
     <h4>Basic and OAuth2</h4>
-    <p>The two choices at the top right of the card pick how you sign in to the broker.</p>
+    <p>The two joined buttons at the top right of the card pick how you sign in to the broker. The pressed one is the choice.</p>
     <ul>
         <li><strong>Basic</strong> signs in with a username and a password. This is the default.</li>
         <li><strong>OAuth2</strong> signs in with tokens. The first box is then labelled <strong>Access Token</strong> and the second <strong>ID Token</strong>. The rule for client usernames does not apply to a token.</li>
@@ -136,7 +135,7 @@
     <h3>Connecting SEMP</h3>
     <p>SEMP is the broker's management interface. The page connects to its SEMP v2 REST API and uses it to read facts about the broker, such as which queues exist. The pages that list a broker's queues and subscriptions need it. A SEMP connection is not a standing session: the page checks your account with one request, and then sends each later request with the same account.</p>
     <ol class="manual-steps">
-        <li>Fill in <strong>Broker Host (IP or Hostname)</strong> at the top of the card. For an appliance the box is labelled <strong>Management Host (IP or Hostname)</strong> and takes its management address.</li>
+        <li>Fill in <strong>Broker Host (IP or Hostname)</strong>, in the first row of the card. For an appliance the box is labelled <strong>Management Host (IP or Hostname)</strong> and takes its management address.</li>
         <li>In the <strong>Solace SEMP (Management)</strong> card, fill in the address and the account.</li>
         <li>Press <strong>Connect</strong>. The button reads <code>Connecting...</code> while the page waits.</li>
         <li>When the broker accepts the account the button turns red and reads <strong>Disconnect</strong>, and the SEMP indicator turns green.</li>
@@ -149,7 +148,7 @@
         <tbody>
             <tr><td><strong>Protocol</strong></td><td><code>https://</code> (the default) or <code>http://</code>. A page opened over <code>https://</code> without a gateway offers only <code>https://</code>.</td></tr>
             <tr><td><strong>Port</strong></td><td>The broker's SEMP port, a whole number from 1 to 65535.</td></tr>
-            <tr><td><strong>URL Path</strong></td><td>Optional, and hidden until you press <strong>+ URL path</strong>, as in the Messaging card. The path goes after the port and before the SEMP address, for a broker behind a reverse proxy.</td></tr>
+            <tr><td><strong>URL Path</strong></td><td>Optional, and hidden until you press the small <strong>+ URL path</strong> button, as in the Messaging card. The path goes after the port and before the SEMP address, for a broker behind a reverse proxy.</td></tr>
             <tr><td><strong>Username</strong></td><td>The SEMP account name: 1 to 32 characters from A-Z, a-z, 0-9, underscore and hyphen. Without one the page says <code>SEMP username is required.</code> (the box says <code>Username is required.</code>).</td></tr>
             <tr><td><strong>Password</strong></td><td>The account's password: 1 to 128 printable ASCII characters, no spaces, and none of these: colon, parentheses, double quote, semicolon, apostrophe, less-than and greater-than signs, comma, backtick, backslash, asterisk, ampersand, vertical bar. The page refuses anything else before it sends a request, and says why under the card.</td></tr>
         </tbody>

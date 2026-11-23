@@ -886,9 +886,7 @@ describe('ConnectionsModule', () => {
         fillSolaceForm(container);
         const createSession = (window as any).solace.SolclientFactory.createSession;
         createSession.mockClear();
-        const oauth = container.querySelector('input[name="solace-auth-mode"][value="oauth"]') as HTMLInputElement;
-        oauth.checked = true;
-        oauth.dispatchEvent(new Event('change'));
+        (container.querySelector('#solace-auth-mode [data-auth-mode="oauth"]') as HTMLButtonElement).click();
         const user = container.querySelector('#solace-username') as HTMLInputElement;
         user.value = 'eyJ' + 'a'.repeat(300) + '*';
 

@@ -21,13 +21,8 @@
     <div class="flex-row justify-between items-center mb-4">
         <h2 class="m-0">Solace SEMP (Management)</h2>
     </div>
-    <!-- The one host of a software or cloud broker; the management host of an appliance. -->
-    <div class="form-group">
-        <label id="lbl-conn-host" for="conn-host">Broker Host (IP or Hostname)</label>
-        <input type="text" id="conn-host" class="form-control"
-            placeholder="e.g. localhost or my-broker.solace.cloud or 192.168.0.10" value="localhost">
-        <div class="invalid-feedback">Invalid hostname or IP address.</div>
-    </div>
+    <!-- One row, read as a URL: protocol, host, port and the optional path. The host is the
+         one host of a software or cloud broker; the management host of an appliance. -->
     <div class="form-group flex-row">
         <div class="w-150px">
             <label>Protocol</label>
@@ -36,23 +31,28 @@
                 <option value="https" selected>https://</option>
             </select>
         </div>
+        <div class="w-full">
+            <label id="lbl-conn-host" for="conn-host">Broker Host (IP or Hostname)</label>
+            <input type="text" id="conn-host" class="form-control"
+                placeholder="e.g. localhost or my-broker.solace.cloud or 192.168.0.10" value="localhost">
+            <div class="invalid-feedback">Invalid hostname or IP address.</div>
+        </div>
         <div class="w-100px">
             <label>Port</label>
             <input type="text" id="semp-port" class="form-control">
             <div class="invalid-feedback">Invalid port.</div>
         </div>
-        <!-- Optional: hidden while empty, behind "+ URL path" (optional-field.ts). -->
-        <div id="semp-url-path-field" class="conn-optional w-150px">
+        <!-- Optional: a small "+ URL path" button on the labels' line until it is added (optional-field.ts). -->
+        <div id="semp-url-path-field" class="conn-optional">
             <label for="semp-url-path">URL Path</label>
             <div class="conn-optional-input">
                 <input type="text" id="semp-url-path" class="form-control">
                 <button type="button" id="btn-semp-url-path-clear" class="btn-icon conn-optional-clear"
                     title="Remove the URL path" aria-label="Remove the URL path">&#x2715;</button>
             </div>
-            <button type="button" id="btn-semp-url-path-add" class="conn-optional-add"
+            <button type="button" id="btn-semp-url-path-add" class="btn btn-secondary btn-sm conn-optional-add"
                 title="Add a path after the port, before /SEMP (e.g. behind a reverse proxy)">+ URL path</button>
         </div>
-        <div class="w-full"></div> <!-- Spacer -->
     </div>
     <div class="form-group flex-row">
         <div class="w-full">
@@ -84,24 +84,15 @@
                 </svg>
             </button>
         </div>
-        <!-- Auth Mode Toggle -->
-        <div class="auth-toggle flex-row gap-4 text-body-sm">
-            <label class="flex-row items-center font-normal cursor-pointer gap-1">
-                <input type="radio" name="solace-auth-mode" value="basic" checked> Basic
-            </label>
-            <label class="flex-row items-center font-normal cursor-pointer gap-1">
-                <input type="radio" name="solace-auth-mode" value="oauth"> OAuth2
-            </label>
+        <!-- Basic (a username and password) or OAuth2 (tokens): the pressed button is the mode (core/segmented.ts). -->
+        <div class="segmented" id="solace-auth-mode" role="group" aria-label="Authentication">
+            <button type="button" class="segmented-option" data-auth-mode="basic" aria-pressed="true">Basic</button>
+            <button type="button" class="segmented-option" data-auth-mode="oauth" aria-pressed="false">OAuth2</button>
         </div>
     </div>
 
-    <!-- Locked to the host above for a software or cloud broker; an appliance's own messaging host. -->
-    <div class="form-group">
-        <label for="solace-host">Messaging Host (IP or Hostname)</label>
-        <input type="text" id="solace-host" class="form-control" disabled>
-        <div class="invalid-feedback">Invalid hostname or IP address.</div>
-        <small id="solace-host-hint" class="text-secondary text-xs">Follows the Broker Host above. Choose Appliance to set its own.</small>
-    </div>
+    <!-- One row, read as a URL: protocol, host, port and the optional path. The host is locked to
+         the host above for a software or cloud broker; an appliance's own messaging host. -->
     <div class="form-group flex-row">
         <div class="w-150px">
             <label>Protocol</label>
@@ -112,29 +103,35 @@
                 <option value="https" disabled>https://</option>
             </select>
         </div>
+        <div class="w-full">
+            <label for="solace-host">Messaging Host (IP or Hostname)</label>
+            <input type="text" id="solace-host" class="form-control" disabled>
+            <div class="invalid-feedback">Invalid hostname or IP address.</div>
+            <small id="solace-host-hint" class="text-secondary text-xs">Follows the Broker Host above. Choose Appliance to set its own.</small>
+        </div>
         <div class="w-100px">
             <label>Port</label>
             <input type="text" id="solace-port" class="form-control">
             <div class="invalid-feedback">Invalid port.</div>
         </div>
-        <!-- Optional: hidden while empty, behind "+ URL path" (optional-field.ts). -->
-        <div id="solace-url-path-field" class="conn-optional w-150px">
+        <!-- Optional: a small "+ URL path" button on the labels' line until it is added (optional-field.ts). -->
+        <div id="solace-url-path-field" class="conn-optional">
             <label for="solace-url-path">URL Path</label>
             <div class="conn-optional-input">
                 <input type="text" id="solace-url-path" class="form-control">
                 <button type="button" id="btn-solace-url-path-clear" class="btn-icon conn-optional-clear"
                     title="Remove the URL path" aria-label="Remove the URL path">&#x2715;</button>
             </div>
-            <button type="button" id="btn-solace-url-path-add" class="conn-optional-add"
+            <button type="button" id="btn-solace-url-path-add" class="btn btn-secondary btn-sm conn-optional-add"
                 title="Add a path after the port (e.g. behind a reverse proxy)">+ URL path</button>
         </div>
+    </div>
+    <div class="form-group flex-row">
         <div class="w-full">
             <label>Message VPN</label>
             <input type="text" id="solace-vpn" class="form-control">
             <div class="invalid-feedback">Message VPN is required.</div>
         </div>
-    </div>
-    <div class="form-group flex-row">
         <div class="w-full">
             <label id="lbl-solace-username">Username</label>
             <input type="text" id="solace-username" class="form-control">

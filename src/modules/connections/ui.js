@@ -1,6 +1,7 @@
 // @ts-nocheck -- checkJs backlog (JSDoc types for this file are pending; remove this line once they are in).
 import { isValidHost, isValidPort } from '../../core/utils';
 import { required, attachBackdropClose } from '../../core/dom';
+import { createSegmented } from '../../core/segmented';
 
 /** @type {any} */
 export const ui = {};
@@ -39,7 +40,12 @@ export const ui = {};
         elements.elSolClientNameId = required(container, '#solace-client-name-id');
         elements.elSolClientNameIdError = required(container, '#solace-client-name-id-error');
         elements.btnSolace = required(container, '#btn-solace-connect');
-        elements.radiosAuth = container.querySelectorAll('input[name="solace-auth-mode"]');
+        // Basic or OAuth2: the pressed button of the control (core/segmented.ts).
+        elements.authMode = createSegmented(required(container, '#solace-auth-mode'), {
+            attr: 'data-auth-mode',
+            choices: ['basic', 'oauth'],
+            onChange: () => ui.updateAuthUI(),
+        });
         elements.lblSolUser = container.querySelector('#lbl-solace-username');
         elements.lblSolPass = container.querySelector('#lbl-solace-password');
 
@@ -84,8 +90,6 @@ export const ui = {};
         els.btnCloseSsl.addEventListener('click', () => els.elSslModal.close());
         attachBackdropClose(els.elSettingsModal);
         attachBackdropClose(els.elSslModal);
-        // Auth Toggle — radiosAuth is a NodeList from querySelectorAll (never null).
-        els.radiosAuth.forEach(r => r.addEventListener('change', ui.updateAuthUI));
     };
 
     ui.showConnectError = function (el, msg, helpUrl) {
@@ -143,17 +147,12 @@ export const ui = {};
     };
 
     ui.getAuthMode = function () {
-        // `radiosAuth` is a NodeList from querySelectorAll — never null, empty if no matches.
-        for (const r of elements.radiosAuth) {
-            if (r.checked) return r.value;
-        }
-        return 'basic';
+        return elements.authMode.value();
     };
 
+    // A mode the control does not offer (a saved config from elsewhere) changes nothing.
     ui.setAuthMode = function (mode) {
-        for (const r of elements.radiosAuth) {
-            if (r.value === mode) r.checked = true;
-        }
+        elements.authMode.set(mode);
         ui.updateAuthUI();
     };
 
@@ -187,7 +186,7 @@ export const ui = {};
         els.elSolVpn.disabled = isSolaceConnected;
         els.elSolUser.disabled = isSolaceConnected;
         els.elSolPass.disabled = isSolaceConnected;
-        els.radiosAuth.forEach(r => r.disabled = isSolaceConnected);
+        els.authMode.setDisabled(isSolaceConnected);
         // Settings modal stays openable while connected so the user can review
         // the values that took effect — each field inside is disabled below
         // so nothing can be edited mid-session.

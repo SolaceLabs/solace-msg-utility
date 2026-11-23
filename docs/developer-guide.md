@@ -158,6 +158,8 @@ src/
     boot.ts            # Starts the app; the demo build swaps it for mock-broker/boot
     dom.ts             # required() fail-fast required-element assertion, setError(el, msg) error banner,
                        # attachBackdropClose(dialog)
+    segmented.ts       # createSegmented(): wires a .segmented group of joined buttons (the broker type,
+                       # the Direct form's Basic / OAuth2); the pressed button is the choice
     utils.ts           # Pure utilities (escapeHtml, escapeXml, formatBytes, generateUuid, matchString,
                        # matchContains, topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
                        # solaceErrorText, isValidHost, isValidPort)
@@ -228,7 +230,7 @@ src/
       module.managed.ts # Provisioned entry (the managed variant): tab bar + installDirect + panel
       managed-panel.ts # The Provisioned tab -- gateway session restore, provisioned dropdowns, browser guardrails
       vpn-switch.ts    # The VPN switch both modes share (connection:check-connection)
-      optional-field.ts # Optional connection fields
+      optional-field.ts # The URL Path of a card: a small "+ URL path" button until a path is added
       config.js        # localStorage persistence (values obfuscated at rest)
       ui.js            # Element caching, auth mode, visual feedback
       styles.css       # Module-scoped styles

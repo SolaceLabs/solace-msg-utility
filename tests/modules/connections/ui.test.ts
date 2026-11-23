@@ -64,18 +64,6 @@ describe('connections/ui', () => {
             els.btnCloseSsl.click();
             expect(els.elSslModal.open).toBe(false);
         });
-
-        it('wires auth radio change to updateAuthUI', () => {
-            ui.initEvents();
-            const els = ui.getElements();
-            const radios = els.radiosAuth;
-
-            // Switch to oauth
-            radios[1].checked = true;
-            radios[1].dispatchEvent(new Event('change'));
-            expect(els.lblSolUser.textContent).toBe('Access Token');
-            expect(els.lblSolPass.textContent).toBe('ID Token');
-        });
     });
 
     describe('showConnectError', () => {
@@ -141,8 +129,27 @@ describe('connections/ui', () => {
     });
 
     describe('getAuthMode / setAuthMode', () => {
+        const authButton = (mode: string) => container.querySelector<HTMLButtonElement>(`#solace-auth-mode [data-auth-mode="${mode}"]`)!;
+
         it('returns basic by default', () => {
             expect(ui.getAuthMode()).toBe('basic');
+        });
+
+        it('a click on OAuth2 makes it the mode and names the two fields as tokens', () => {
+            const els = ui.getElements();
+            authButton('oauth').click();
+            expect(ui.getAuthMode()).toBe('oauth');
+            expect([els.lblSolUser.textContent, els.lblSolPass.textContent]).toEqual(['Access Token', 'ID Token']);
+
+            authButton('basic').click();
+            expect([els.lblSolUser.textContent, els.lblSolPass.textContent]).toEqual(['Username', 'Password']);
+        });
+
+        it('setAuthMode keeps the mode for one the control does not offer', () => {
+            ui.setAuthMode('oauth');
+            ui.setAuthMode('kerberos');
+            expect(ui.getAuthMode()).toBe('oauth');
+            expect(ui.getElements().lblSolUser.textContent).toBe('Access Token');
         });
 
         it('setAuthMode switches to oauth and updates UI', () => {
@@ -172,6 +179,10 @@ describe('connections/ui', () => {
             expect(els.elSolVpn.disabled).toBe(true);
             expect(els.elSolUser.disabled).toBe(true);
             expect(els.elSolPass.disabled).toBe(true);
+            const authButtons = [...container.querySelectorAll<HTMLButtonElement>('#solace-auth-mode button')];
+            expect(authButtons.map(b => b.disabled)).toEqual([true, true]);
+            ui.updateInputState({ isConnected: false, isSempConnected: false });
+            expect(authButtons.map(b => b.disabled)).toEqual([false, false]);
         });
 
         it('keeps the settings button enabled when connected so the user can review (read-only) values mid-session', () => {
@@ -223,14 +234,6 @@ describe('connections/ui', () => {
             expect(els.elSolPort.disabled).toBe(false);
             expect(els.elSempUser.disabled).toBe(false);
             expect([els.btnSolUrlPathAdd.disabled, els.btnSempUrlPathClear.disabled]).toEqual([false, false]);
-        });
-    });
-
-    describe('getAuthMode edge cases', () => {
-        it('returns basic when no radio is checked', () => {
-            const els = ui.getElements();
-            els.radiosAuth.forEach((r: any) => (r.checked = false));
-            expect(ui.getAuthMode()).toBe('basic');
         });
     });
 

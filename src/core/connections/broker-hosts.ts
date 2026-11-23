@@ -17,7 +17,7 @@
  * appliance whose messaging host is another host, so a record with one host
  * has one spelling and opens as Software / Cloud.
  */
-import { required } from '../dom';
+import { createSegmented, type Segmented } from '../segmented';
 
 export type BrokerType = 'software' | 'appliance';
 
@@ -30,7 +30,7 @@ export interface BrokerHostValues {
 }
 
 export interface BrokerHostsElements {
-    /** The type control: one button per type, each naming it in `data-broker-type`. */
+    /** The type control (core/segmented.ts): one button per type, each naming it in `data-broker-type`. */
     typeGroup: HTMLElement;
     /** One line by the control, saying what the chosen type means. */
     typeHint: HTMLElement;
@@ -90,21 +90,21 @@ export interface BrokerHosts {
 
 export function createBrokerHosts(els: BrokerHostsElements, opts: BrokerHostsOptions = {}): BrokerHosts {
     const text = opts.text ?? BROKER_HOSTS_TEXT;
-    const buttons: Record<BrokerType, HTMLButtonElement> = {
-        software: required<HTMLButtonElement>(els.typeGroup, 'button[data-broker-type="software"]'),
-        appliance: required<HTMLButtonElement>(els.typeGroup, 'button[data-broker-type="appliance"]'),
-    };
-    const types = Object.keys(buttons) as BrokerType[];
-    let type: BrokerType = 'software';
+    const control: Segmented<BrokerType> = createSegmented<BrokerType>(els.typeGroup, {
+        attr: 'data-broker-type',
+        choices: ['software', 'appliance'],
+        onChange(type) {
+            render();
+            opts.onTypeChange?.(type);
+        },
+    });
     let locks: BrokerHostsLocks = { management: false, messaging: false };
 
     function render(): void {
+        const type = control.value();
         const appliance = type === 'appliance';
         const either = locks.management || locks.messaging;
-        for (const t of types) {
-            buttons[t].setAttribute('aria-pressed', String(t === type));
-            buttons[t].disabled = either;
-        }
+        control.setDisabled(either);
         els.hostLabel.textContent = text.hostLabel[type];
         els.typeHint.textContent = text.typeHint[type];
         els.messagingHint.classList.toggle('hidden', appliance);
@@ -114,32 +114,24 @@ export function createBrokerHosts(els: BrokerHostsElements, opts: BrokerHostsOpt
         els.messagingHost.disabled = appliance ? locks.messaging : true;
     }
 
-    for (const t of types) {
-        buttons[t].addEventListener('click', () => {
-            if (t === type) return;
-            type = t;
-            render();
-            opts.onTypeChange?.(type);
-        });
-    }
     els.host.addEventListener('input', render);
 
     render();
     return {
-        type: () => type,
+        type: control.value,
         setType(next) {
-            type = next;
+            control.set(next);
             render();
         },
-        messagingHost: () => (type === 'appliance' ? els.messagingHost.value : els.host.value),
+        messagingHost: () => (control.value() === 'appliance' ? els.messagingHost.value : els.host.value),
         values() {
             const host = els.host.value;
             const messagingHost = els.messagingHost.value;
-            return type === 'appliance' && messagingHost && messagingHost !== host ? { host, messagingHost } : { host };
+            return control.value() === 'appliance' && messagingHost && messagingHost !== host ? { host, messagingHost } : { host };
         },
         write({ host, messagingHost }) {
             els.host.value = host;
-            type = messagingHost ? 'appliance' : 'software';
+            control.set(messagingHost ? 'appliance' : 'software');
             if (messagingHost) els.messagingHost.value = messagingHost;
             render();
         },

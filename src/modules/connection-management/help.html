@@ -32,17 +32,16 @@
     </ol>
     <p>The form is the same one you use to edit a connection, so Figure 2 shows it with a connection open.</p>
     <figure class="manual-figure">
-        <img src="help/form.svg" width="760" height="708" alt="The connection form open on east-prod: broker name and broker type, the SEMP part with the hostname, the Client part with the messaging hostname, two Message VPN rows, Save and Cancel, and a red message under the form.">
+        <img src="help/form.svg" width="760" height="658" alt="The connection form open on east-prod: broker name and broker type, the SEMP part with its scheme, hostname and port on one row and the account below, the Client part with its scheme, messaging hostname and port on one row, two Message VPN rows, Save and Cancel, and a red message under the form.">
         <figcaption>The form, editing the connection east-prod.</figcaption>
     </figure>
     <ol class="manual-callouts">
         <li><strong>Broker name</strong>: the name users and the gateway call this broker by.</li>
         <li><strong>Solace Event Broker Type</strong>: <strong>Software / Cloud</strong> for a broker with one hostname, <strong>Appliance</strong> for one with two.</li>
-        <li><strong>Hostname</strong>: where the broker is.</li>
-        <li>The SEMP account: <strong>Scheme</strong>, <strong>Port</strong> and <strong>Username</strong>.</li>
+        <li>The SEMP address on one row, read as a URL: <strong>Scheme</strong>, <strong>Hostname</strong> (where the broker is) and <strong>Port</strong>.</li>
+        <li>The SEMP <strong>Username</strong>.</li>
         <li>The SEMP <strong>Password</strong>. While you edit, its hint reads <code>(leave blank to keep current)</code>.</li>
-        <li><strong>Messaging hostname</strong>. Locked for a software or cloud broker, where it shows the hostname above.</li>
-        <li>The messaging <strong>Scheme</strong> and <strong>Port</strong>.</li>
+        <li>The messaging address on one row: <strong>Scheme</strong>, <strong>Messaging hostname</strong> and <strong>Port</strong>. The hostname is locked for a software or cloud broker, where it shows the hostname above.</li>
         <li><strong>+ Add</strong> adds a row to the Message VPN list.</li>
         <li>One row for each Message VPN: its name, the client username and the client password. The cross at the end of a row removes it.</li>
         <li><strong>Save</strong> stores the connection. <strong>Cancel</strong> returns to the list and keeps nothing.</li>
@@ -58,8 +57,8 @@
         <tbody>
             <tr><td><strong>Broker name</strong></td><td>The name of the connection. Users are granted brokers by this name, and the list is kept by it.</td><td>Required. 1 to 64 characters from <code>A-Z a-z 0-9 . _ -</code>, and not only dots. The name must not be in the list already. While you edit, the box is locked: the name is what identifies the connection.</td></tr>
             <tr><td><strong>Solace Event Broker Type</strong></td><td>How many addresses the broker has. A software or cloud broker answers SEMP and messaging on one hostname. A Solace appliance answers SEMP on its management address and messaging on another.</td><td><strong>Software / Cloud</strong> or <strong>Appliance</strong>. The form opens a connection that has one hostname as <strong>Software / Cloud</strong>, and one that has two as <strong>Appliance</strong>.</td></tr>
-            <tr><td><strong>Hostname</strong></td><td>The first box under <strong>SEMP (management)</strong>. The address the gateway connects to: for both SEMP and messaging on a software or cloud broker, and for SEMP on an appliance, where its label reads <strong>Management hostname</strong>.</td><td>Required. A bare host name (<code>A-Z a-z 0-9 . _ -</code>, up to 253 characters, beginning and ending with a letter, a digit or <code>_</code>) or an IP address. IPv6 goes without brackets. No <code>https://</code>, no port, no path, no spaces.</td></tr>
-            <tr><td><strong>Messaging hostname</strong></td><td>The first box under <strong>Client (messaging)</strong>. For <strong>Software / Cloud</strong> it is locked and shows the hostname. For <strong>Appliance</strong> it is the address the gateway connects to for messaging.</td><td>Required for an appliance, by the rules of <strong>Hostname</strong>. It starts with the hostname already typed. The same hostname in both boxes is stored as one, and the connection opens again as <strong>Software / Cloud</strong>.</td></tr>
+            <tr><td><strong>Hostname</strong></td><td>The middle box of the first row under <strong>SEMP (management)</strong>. The address the gateway connects to: for both SEMP and messaging on a software or cloud broker, and for SEMP on an appliance, where its label reads <strong>Management hostname</strong>.</td><td>Required. A bare host name (<code>A-Z a-z 0-9 . _ -</code>, up to 253 characters, beginning and ending with a letter, a digit or <code>_</code>) or an IP address. IPv6 goes without brackets. No <code>https://</code>, no port, no path, no spaces.</td></tr>
+            <tr><td><strong>Messaging hostname</strong></td><td>The middle box of the row under <strong>Client (messaging)</strong>. For <strong>Software / Cloud</strong> it is locked and shows the hostname. For <strong>Appliance</strong> it is the address the gateway connects to for messaging.</td><td>Required for an appliance, by the rules of <strong>Hostname</strong>. It starts with the hostname already typed. The same hostname in both boxes is stored as one, and the connection opens again as <strong>Software / Cloud</strong>.</td></tr>
         </tbody>
     </table>
     <h4>SEMP (management)</h4>
