@@ -4,21 +4,29 @@
     <button id="btn-conn-probe-retry" class="btn btn-secondary" type="button">Retry</button>
 </div>
 
+<!-- The broker type decides how many hosts the form takes (core/connections/broker-hosts.ts):
+     one for a software or cloud broker, two for an appliance. -->
 <div class="card">
     <div class="flex-row justify-between items-center mb-4">
-        <h2 class="m-0">Broker Configuration</h2>
+        <h2 class="m-0">Solace Event Broker Type</h2>
+        <div class="segmented" id="conn-broker-type" role="group" aria-label="Solace Event Broker Type">
+            <button type="button" class="segmented-option" data-broker-type="software" aria-pressed="true">Software / Cloud</button>
+            <button type="button" class="segmented-option" data-broker-type="appliance" aria-pressed="false">Appliance</button>
+        </div>
     </div>
-    <div class="form-group">
-        <label>Broker Host (IP or Hostname)</label>
-        <input type="text" id="conn-host" class="form-control"
-            placeholder="e.g. localhost or my-broker.solace.cloud or 192.168.0.10" value="localhost">
-        <div class="invalid-feedback">Invalid hostname or IP address.</div>
-    </div>
+    <p id="conn-broker-type-hint" class="text-secondary text-body-sm m-0"></p>
 </div>
 
 <div class="card">
     <div class="flex-row justify-between items-center mb-4">
         <h2 class="m-0">Solace SEMP (Management)</h2>
+    </div>
+    <!-- The one host of a software or cloud broker; the management host of an appliance. -->
+    <div class="form-group">
+        <label id="lbl-conn-host" for="conn-host">Broker Host (IP or Hostname)</label>
+        <input type="text" id="conn-host" class="form-control"
+            placeholder="e.g. localhost or my-broker.solace.cloud or 192.168.0.10" value="localhost">
+        <div class="invalid-feedback">Invalid hostname or IP address.</div>
     </div>
     <div class="form-group flex-row">
         <div class="w-150px">
@@ -87,6 +95,13 @@
         </div>
     </div>
 
+    <!-- Locked to the host above for a software or cloud broker; an appliance's own messaging host. -->
+    <div class="form-group">
+        <label for="solace-host">Messaging Host (IP or Hostname)</label>
+        <input type="text" id="solace-host" class="form-control" disabled>
+        <div class="invalid-feedback">Invalid hostname or IP address.</div>
+        <small id="solace-host-hint" class="text-secondary text-xs">Follows the Broker Host above. Choose Appliance to set its own.</small>
+    </div>
     <div class="form-group flex-row">
         <div class="w-150px">
             <label>Protocol</label>

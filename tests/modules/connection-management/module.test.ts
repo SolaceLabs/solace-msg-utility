@@ -560,3 +560,102 @@ describe('connection-management -- versions', () => {
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').querySelectorAll('tr').length).toBe(1));
     });
 });
+
+// A software or cloud broker has one hostname. An appliance answers SEMP on
+// its management hostname and messaging on another (client.hostname);
+// tests/core/connections/broker-hosts.test.ts covers the type control itself.
+describe('connection-management -- an appliance\'s two hostnames', () => {
+    const APPLIANCE = {
+        rev: 3, broker: 'ap1', hostname: 'mgmt1',
+        semp: { port: '443', user: 'mon', pass: '' },
+        client: { hostname: 'msg1', port: '443', msgVpns: [] },
+    };
+    const typeButton = (c: HTMLElement, type: 'software' | 'appliance') =>
+        el<HTMLButtonElement>(c, `#conn-mgmt-broker-type [data-broker-type="${type}"]`);
+    const hostnames = (c: HTMLElement) => [
+        typeButton(c, 'appliance').getAttribute('aria-pressed'),
+        el(c, '#lbl-conn-mgmt-hostname').textContent,
+        el<HTMLInputElement>(c, '#conn-mgmt-hostname').value,
+        el<HTMLInputElement>(c, '#conn-mgmt-client-hostname').value,
+        el<HTMLInputElement>(c, '#conn-mgmt-client-hostname').disabled,
+    ];
+    const editRow = (c: HTMLElement, n: number) =>
+        el(c, '#conn-mgmt-rows').querySelectorAll('tr')[n].querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
+
+    async function setupWithAppliance() {
+        const { container } = await setup();
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [CONNS[0], APPLIANCE] } });
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-refresh').click();
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').textContent).toContain('ap1'));
+        return container;
+    }
+
+    /** Type the fields of a new connection `broker`, as an appliance, and press Save. */
+    function saveAppliance(c: HTMLElement, broker: string, hostname: string, clientHostname: string): void {
+        el<HTMLButtonElement>(c, '#btn-conn-mgmt-add').click();
+        el<HTMLInputElement>(c, '#conn-mgmt-broker').value = broker;
+        typeButton(c, 'appliance').click();
+        el<HTMLInputElement>(c, '#conn-mgmt-hostname').value = hostname;
+        el<HTMLInputElement>(c, '#conn-mgmt-client-hostname').value = clientHostname;
+        el<HTMLButtonElement>(c, '#btn-conn-mgmt-save').click();
+    }
+
+    it('lists an appliance with its messaging hostname, and finds it by either', async () => {
+        const container = await setupWithAppliance();
+        const rows = el(container, '#conn-mgmt-rows').querySelectorAll('tr');
+        expect(rows[0].children[1].textContent).toBe('host1');
+        expect(rows[1].children[1].textContent).toBe('mgmt1 (messaging: msg1)');
+
+        const search = el<HTMLInputElement>(container, '#conn-mgmt-search');
+        const found = (q: string) => {
+            search.value = q;
+            search.dispatchEvent(new Event('input'));
+            return Array.from(el(container, '#conn-mgmt-rows').querySelectorAll('tr'), r => r.children[0].textContent);
+        };
+        expect(found('msg1')).toEqual(['ap1']);
+        expect(found('mgmt1')).toEqual(['ap1']);
+    });
+
+    it('opens an appliance as one, a connection with one hostname as Software / Cloud, and a new one as Software / Cloud', async () => {
+        const container = await setupWithAppliance();
+        editRow(container, 1);
+        expect(hostnames(container)).toEqual(['true', 'Management hostname', 'mgmt1', 'msg1', false]);
+
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
+        editRow(container, 0);
+        expect(hostnames(container)).toEqual(['false', 'Hostname', 'host1', 'host1', true]);
+
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
+        editRow(container, 1);
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        expect(hostnames(container)).toEqual(['false', 'Hostname', '', '', true]);
+    });
+
+    it('saves an appliance\'s messaging hostname with the client part, trimmed', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue(saved());
+        saveAppliance(container, 'ap2', ' mgmt2 ', ' msg2 ');
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
+        const sent = svcMock.saveConnection.mock.calls[0][0];
+        expect([sent.hostname, sent.client.hostname]).toEqual(['mgmt2', 'msg2']);
+    });
+
+    it('sends one hostname for an appliance whose two are the same host', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue(saved());
+        saveAppliance(container, 'ap3', 'same', 'same');
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
+        const sent = svcMock.saveConnection.mock.calls[0][0];
+        expect(sent.hostname).toBe('same');
+        expect('hostname' in sent.client).toBe(false);
+    });
+
+    it('refuses an appliance without a messaging hostname, and sends nothing', async () => {
+        const { container } = await setup();
+        saveAppliance(container, 'ap4', 'mgmt4', '  ');
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent)
+            .toBe('Messaging hostname is required for an appliance. Choose Software / Cloud for a broker with one hostname.'));
+        expect(svcMock.saveConnection).not.toHaveBeenCalled();
+    });
+});

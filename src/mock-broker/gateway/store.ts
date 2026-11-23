@@ -64,12 +64,16 @@ const userView = (u: UserRec): Omit<ListedUser, 'rev'> => ({
 const cloneTotp = (u: UserRec): { totp?: UserTotp } =>
     (u.totp ? { totp: { secret: u.totp.secret, recovery: [...u.totp.recovery] } } : {});
 
+/** clientHost: the host the broker's messaging answers on, the client part's own or the record's. */
+const clientHost = (c: ConnRec): string => c.client.hostname || c.hostname;
+
 /** What `GET /managed/connections` shows of a record, but its rev: no password, both schemes named. */
 const connView = (c: ConnRec): Omit<ListedConn, 'rev'> => ({
     broker: c.broker,
     hostname: c.hostname,
     semp: { scheme: c.semp.scheme || 'https', port: c.semp.port, user: c.semp.username, pass: '' },
     client: {
+        ...(clientHost(c) === c.hostname ? {} : { hostname: clientHost(c) }),
         scheme: c.client.scheme || 'wss',
         port: c.client.port,
         msgVpns: c.client.msgVpns.map(v => ({ name: v.name, user: v.username, pass: '' })),
@@ -155,7 +159,7 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
             const u = findUser(name);
             const c = conns.find(x => x.broker === broker);
             const v = u && c ? entitledVpns(u, c).find(x => x.name === vpn) : undefined;
-            return c && v ? { scheme: c.client.scheme || 'wss', host: c.hostname, port: c.client.port, user: v.username, pass: v.password } : null;
+            return c && v ? { scheme: c.client.scheme || 'wss', host: clientHost(c), port: c.client.port, user: v.username, pass: v.password } : null;
         },
 
         /** isAdmin: null for a deleted user. */

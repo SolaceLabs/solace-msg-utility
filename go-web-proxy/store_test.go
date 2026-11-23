@@ -2095,6 +2095,50 @@ func TestStore_ConnectionSchemes(t *testing.T) {
 	}
 }
 
+// An appliance answers messaging on another host than its SEMP: the client
+// part names it. Left blank, messaging uses the record's hostname.
+func TestStore_ClientHostname(t *testing.T) {
+	cases := []struct {
+		name, client, wantSMF string
+	}{
+		{"blank is the record's hostname", "", "host1"},
+		{"an appliance's own", "msg1", "msg1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := newStoreWithFixtures(t)
+			rec := connRec{Broker: "b1", Hostname: "host1",
+				Semp:   sempRec{Port: "8080", Username: "mon"},
+				Client: clientRec{Hostname: c.client, Port: "8008", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}},
+			}
+			if err := validateConn(rec); err != nil {
+				t.Fatal(err)
+			}
+			putConn(t, s, rec)
+			if st, ok := s.sempTarget("viewer", "b1"); !ok || st.host != "host1" {
+				t.Errorf("SEMP target: %+v %v, want host host1", st, ok)
+			}
+			if mt, ok := s.smfTarget("viewer", "b1", "v1"); !ok || mt.host != c.wantSMF {
+				t.Errorf("SMF target: %+v %v, want host %s", mt, ok, c.wantSMF)
+			}
+		})
+	}
+	err := validateConn(connRec{Broker: "b1", Hostname: "host1", Client: clientRec{Hostname: "bad host"}})
+	if want := `broker "b1": client.hostname "bad host" ` + hostRule; err == nil || err.Error() != want {
+		t.Errorf("want %q, got %v", want, err)
+	}
+	if canonClientHost("host1", "host1") != "" || canonClientHost("", "host1") != "" || canonClientHost("msg1", "host1") != "msg1" {
+		t.Error("a save stores a client hostname equal to the record's as blank and keeps another")
+	}
+	// What an admin sees of a record: a blank client hostname is the record's own.
+	base := connRec{Broker: "b1", Hostname: "host1"}
+	same, other := base, base
+	same.Client.Hostname, other.Client.Hostname = "host1", "msg1"
+	if !sameConnView(base, same) || sameConnView(base, other) {
+		t.Error("a blank client hostname shows as the record's hostname, and another host as a change")
+	}
+}
+
 // ----- two-factor (the totp field of a user) --------------------------------------------------
 
 // Two valid secrets (base32, 32 characters): the RFC 6238 test key and another.

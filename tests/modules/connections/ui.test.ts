@@ -162,12 +162,6 @@ describe('connections/ui', () => {
     });
 
     describe('updateInputState', () => {
-        it('disables host when any connection is active', () => {
-            const els = ui.getElements();
-            ui.updateInputState({ isConnected: true, isSempConnected: false });
-            expect(els.elHost.disabled).toBe(true);
-        });
-
         it('disables Solace fields when connected', () => {
             const els = ui.getElements();
             ui.updateInputState({ isConnected: true, isSempConnected: false });
@@ -226,7 +220,6 @@ describe('connections/ui', () => {
         it('enables all when disconnected', () => {
             const els = ui.getElements();
             ui.updateInputState({ isConnected: false, isSempConnected: false });
-            expect(els.elHost.disabled).toBe(false);
             expect(els.elSolPort.disabled).toBe(false);
             expect(els.elSempUser.disabled).toBe(false);
             expect([els.btnSolUrlPathAdd.disabled, els.btnSempUrlPathClear.disabled]).toEqual([false, false]);

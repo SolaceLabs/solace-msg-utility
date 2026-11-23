@@ -193,18 +193,24 @@ export function createRouter({ store, sessions, settings, faults, anonymous, con
 
     const listConnections: Handler = () => ok({ connections: store.listConnections() });
 
-    /** saveConnection: a scheme left out, or the TLS one, is stored as the default (canonScheme). */
+    /**
+     * saveConnection: a scheme left out, or the TLS one, is stored as the default (canonScheme),
+     * and a client hostname equal to the connection's is stored as none (canonClientHost).
+     */
     const saveConnection: Handler = (req, _s, _sid, [broker]) => {
         const b = object(parseBody(req.body), ['hostname', 'semp', 'client', 'rev']);
         const semp = object(b.semp, ['scheme', 'port', 'user', 'pass']);
-        const cl = object(b.client, ['scheme', 'port', 'msgVpns']);
+        const cl = object(b.client, ['hostname', 'scheme', 'port', 'msgVpns']);
+        const hostname = string(b.hostname);
+        const clientHostname = string(cl.hostname);
         const sempScheme = canonScheme(string(semp.scheme), 'https');
         const clientScheme = canonScheme(string(cl.scheme), 'wss');
         const rec: ConnRec = {
             broker,
-            hostname: string(b.hostname),
+            hostname,
             semp: { ...(sempScheme ? { scheme: sempScheme } : {}), port: string(semp.port), username: string(semp.user), password: string(semp.pass) },
             client: {
+                ...(clientHostname && clientHostname !== hostname ? { hostname: clientHostname } : {}),
                 ...(clientScheme ? { scheme: clientScheme } : {}),
                 port: string(cl.port),
                 msgVpns: list(cl.msgVpns, x => {

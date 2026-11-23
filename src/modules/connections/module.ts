@@ -28,6 +28,7 @@ import { logger } from '../../core/logger';
 import { required } from '../../core/dom';
 import { normalizeUrlPath, generateUuid, sdkClientName, sempAccountError, clientUsernameError } from '../../core/utils';
 import { createOptionalField } from './optional-field';
+import { createBrokerHosts } from '../../core/connections/broker-hosts';
 import { isHostedDeployment, limitSchemeOptions, probeDeployment, usableScheme } from '../../core/hosted';
 import { DEFAULT_CONN_CONFIG } from '../../core/connections/conn-modes';
 import { DEFAULT_MAX_MESSAGES_PER_QUEUE, MAX_MESSAGES_PER_QUEUE } from '../../core/connections/defaults';
@@ -35,7 +36,7 @@ import { createVpnSwitch, type CheckConnectionRequest } from './vpn-switch';
 import type { AppContext, ConnectionConfig, SolaceConfig, SempConfig } from '../../core/types';
 
 /** A saved config as stored: any field may be missing (a user saved only some). */
-type SavedConfig = Partial<Pick<ConnectionConfig, 'host'>> & {
+type SavedConfig = Partial<Pick<ConnectionConfig, 'host' | 'messagingHost'>> & {
     solace?: Partial<SolaceConfig>;
     semp?: Partial<SempConfig>;
 };
@@ -90,6 +91,36 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         createOptionalField({ wrap: els.elSempUrlPathField, input: els.elSempUrlPath, add: els.btnSempUrlPathAdd, clear: els.btnSempUrlPathClear }),
     ];
     const syncUrlPaths = () => urlPaths.forEach(f => f.sync());
+
+    // The broker type and the host box of each card. A type change drops the
+    // marks of a check made for the other type.
+    const hosts = createBrokerHosts({
+        typeGroup: els.elBrokerType,
+        typeHint: els.elBrokerTypeHint,
+        host: els.elHost,
+        hostLabel: els.lblHost,
+        messagingHost: els.elSolHost,
+        messagingHint: els.elSolHostHint,
+    }, {
+        onTypeChange: () => [els.elHost, els.elSolHost].forEach((el: HTMLElement) => ui.showError(el, false)),
+    });
+
+    /** Lock the fields of each live connection; the broker type and a host stay as they are while their side is up. */
+    function updateInputState(): void {
+        ui.updateInputState(appState);
+        hosts.lock({ management: appState.isSempConnected, messaging: appState.isConnected });
+    }
+
+    /**
+     * The page the Certificate Trust Helper opens after a failed messaging
+     * connect, for the user to accept the broker's certificate. One host: the
+     * SEMP address (`sempUrl`). An appliance: the messaging address itself,
+     * since its management host may hold another certificate.
+     */
+    function trustUrl(sempUrl: string): string {
+        if (hosts.type() !== 'appliance') return sempUrl;
+        return `${els.elSolProtocol.value === 'ws' ? 'http' : 'https'}://${hosts.messagingHost()}:${els.elSolPort.value}`;
+    }
 
     // 2. Build broker-side service clients with bridging hooks.
     //    These hooks ARE the primary-specific behavior: writes to global
@@ -169,7 +200,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
             // suppress the link.
             let helpUrl: string | null = null;
             if (infoStr && infoStr.includes('Connection error') && !hosted) {
-                helpUrl = `${els.elSempProtocol.value}://${els.elHost.value}:${els.elSempPort.value}${normalizeUrlPath(els.elSempUrlPath.value)}`;
+                helpUrl = trustUrl(`${els.elSempProtocol.value}://${els.elHost.value}:${els.elSempPort.value}${normalizeUrlPath(els.elSempUrlPath.value)}`);
             }
             ui.showConnectError(els.elSolError, `Connection Failed: ${infoStr}`, helpUrl);
             resetSolaceButton();
@@ -178,7 +209,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         onError: (err) => {
             let helpUrl: string | null = null;
             if (err.message && err.message.includes('Certificate') && !hosted) {
-                helpUrl = `${els.elSempProtocol.value}://${els.elHost.value}:${els.elSempPort.value}`;
+                helpUrl = trustUrl(`${els.elSempProtocol.value}://${els.elHost.value}:${els.elSempPort.value}`);
             }
             ui.showConnectError(els.elSolError, err.message, helpUrl);
             resetSolaceButton();
@@ -243,7 +274,8 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
             if (s !== saved) moved.push(`${saved}:// is now ${s}://`);
             return s;
         };
-        if (cfg.host) els.elHost.value = cfg.host;
+        // One host, or two for an appliance: the saved config decides the broker type.
+        hosts.write({ host: cfg.host || els.elHost.value, messagingHost: cfg.messagingHost });
 
         if (cfg.solace) {
             if (cfg.solace.protocol) els.elSolProtocol.value = scheme(cfg.solace.protocol);
@@ -389,7 +421,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
             return;
         }
         const newCfg: ConnectionConfig = {
-            host: els.elHost.value,
+            ...hosts.values(),
             solace: {
                 protocol: els.elSolProtocol.value,
                 port: els.elSolPort.value,
@@ -434,7 +466,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
 
     // Reset
     els.btnReset.addEventListener('click', () => {
-        els.elHost.value = '';
+        hosts.write({ host: '' });
         els.elSolProtocol.value = 'wss';
         els.elSolPort.value = '';
         els.elSolUrlPath.value = '';
@@ -456,7 +488,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         els.elSempPass.value = '';
         syncUrlPaths();
 
-        [els.elHost, els.elSolPort, els.elSolVpn, els.elSolUser, els.elSempPort, els.elSempUser, els.elSempPass]
+        [els.elHost, els.elSolHost, els.elSolPort, els.elSolVpn, els.elSolUser, els.elSempPort, els.elSempUser, els.elSempPass]
             .forEach((el: HTMLElement) => ui.showError(el, false));
 
         showToast('Form reset', 'info');
@@ -465,7 +497,9 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
     // Validate Helpers
     function validateSolace() {
         let valid = true;
-        if (!ui.isValidHost(els.elHost.value)) { ui.showError(els.elHost, true); valid = false; } else ui.showError(els.elHost, false);
+        // The box that holds the messaging host: the Messaging card's own for an appliance, else the one host.
+        const hostBox = hosts.type() === 'appliance' ? els.elSolHost : els.elHost;
+        if (!ui.isValidHost(hostBox.value)) { ui.showError(hostBox, true); valid = false; } else ui.showError(hostBox, false);
         if (!ui.isValidPort(els.elSolPort.value)) { ui.showError(els.elSolPort, true); valid = false; } else ui.showError(els.elSolPort, false);
         if (!els.elSolVpn.value.trim()) { ui.showError(els.elSolVpn, true); valid = false; } else ui.showError(els.elSolVpn, false);
         // A client username the broker refuses (clientUsernameError) is
@@ -542,10 +576,11 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         // Stash the cfg + host + password so onConnected can publish
         // them into AppState.solaceConnection for cross-module consumers
         // (queue-copy mirrors the password into its source-side panel).
-        lastSolaceAttempt = { host: els.elHost.value, cfg, pass: els.elSolPass.value };
+        const host = hosts.messagingHost();
+        lastSolaceAttempt = { host, cfg, pass: els.elSolPass.value };
 
-        log.info(`connecting to ${els.elHost.value} VPN "${cfg.vpn}"`);
-        serviceSolace.connect(cfg, els.elHost.value, els.elSolPass.value, clientName);
+        log.info(`connecting to ${host} VPN "${cfg.vpn}"`);
+        serviceSolace.connect(cfg, host, els.elSolPass.value, clientName);
         return true;
     }
 
@@ -564,10 +599,12 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         if (e.key === 'Enter') { e.preventDefault(); btn.click(); }
     }
 
-    [els.elHost, els.elSolPort, els.elSolUrlPath, els.elSolVpn, els.elSolUser, els.elSolPass].forEach((input: HTMLElement) => {
+    // Each card's fields connect that card: the host of the SEMP card with SEMP,
+    // an appliance's messaging host with messaging.
+    [els.elSolHost, els.elSolPort, els.elSolUrlPath, els.elSolVpn, els.elSolUser, els.elSolPass].forEach((input: HTMLElement) => {
         input.addEventListener('keydown', (e: KeyboardEvent) => onEnter(e, els.btnSolace));
     });
-    [els.elSempPort, els.elSempUrlPath, els.elSempUser, els.elSempPass].forEach((input: HTMLElement) => {
+    [els.elHost, els.elSempPort, els.elSempUrlPath, els.elSempUser, els.elSempPass].forEach((input: HTMLElement) => {
         input.addEventListener('keydown', (e: KeyboardEvent) => onEnter(e, els.btnSemp));
     });
 
@@ -614,15 +651,15 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
     // Listen for Global Events to Update UI State via EventBus
     eventBus.on('client:connected', () => {
         logger.debug('EventBus: client:connected -> Updating Input State');
-        ui.updateInputState(appState);
+        updateInputState();
     });
     eventBus.on('client:disconnected', () => {
         logger.debug('EventBus: client:disconnected -> Updating Input State');
-        ui.updateInputState(appState);
+        updateInputState();
     });
     eventBus.on('semp:connected', () => {
         logger.debug('EventBus: semp:connected -> Updating Input State');
-        ui.updateInputState(appState);
+        updateInputState();
     });
     // Every SEMP teardown resets the button: this form's own disconnect, and
     // the kernel's when a request gets a 401 (kernel.ts sempFetch), which
@@ -630,10 +667,10 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
     eventBus.on('semp:disconnected', () => {
         logger.debug('EventBus: semp:disconnected -> Updating Input State');
         resetSempUi();
-        ui.updateInputState(appState);
+        updateInputState();
     });
 
-    ui.updateInputState(appState);
+    updateInputState();
 
     // Cross-module "open this queue" requests: the shared VPN switch, with the
     // Direct form's own connect. A form that does not validate fails the

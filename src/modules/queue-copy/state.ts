@@ -33,8 +33,10 @@ export interface DestForm {
     credMode: DestCredMode;
     /** The provisioned destination last connected (or connecting) -- names only, set when the card's Connect is clicked. */
     provisioned: { broker: string; vpn: string };
-    /** Visible only when !sameBroker. */
+    /** Editable only when !sameBroker: the one host, or the SEMP (management) host of an appliance. */
     host: string;
+    /** An appliance's messaging host, when it is not `host`; see `destMessagingHost`. */
+    messagingHost?: string;
     /** Visible when !sameBroker || !sameVpn (Solace client side). */
     solace: { protocol: string; port: string; urlPath: string; vpn: string; user: string };
     /** Visible only when !sameBroker (SEMP REST side). */
@@ -198,15 +200,20 @@ export function createInitialState(): QueueCopyState {
     };
 }
 
+/** The host a typed destination's messaging connects to: its own for an appliance, else the one host. */
+export function destMessagingHost(f: Pick<DestForm, 'host' | 'messagingHost'>): string {
+    return f.messagingHost || f.host;
+}
+
 /**
  * Identity of the destination a secondary Client connection reaches: the broker
- * (provisioned name, or typed host) and the Message VPN. Two forms with the
- * same key address the same place.
+ * (provisioned name, or the typed messaging host) and the Message VPN. Two
+ * forms with the same key address the same place.
  */
 export function destTargetKey(f: DestForm): string {
     return f.credMode === 'provisioned'
         ? `provisioned|${f.provisioned.broker}|${f.provisioned.vpn}`
-        : `manual|${f.host}|${f.solace.vpn}`;
+        : `manual|${destMessagingHost(f)}|${f.solace.vpn}`;
 }
 
 /**
@@ -230,6 +237,7 @@ export function resetTransientState(s: QueueCopyState): void {
  */
 export interface DestPrefillSnapshot {
     host: string;
+    messagingHost?: string;
     solace: { protocol: string; port: string; urlPath: string; vpn: string; user: string };
     semp: { protocol: string; port: string; urlPath: string; user: string };
 }
@@ -248,6 +256,7 @@ export interface DestPrefillSnapshot {
 export function syncDestFormFromSnapshot(state: QueueCopyState, snap: DestPrefillSnapshot | null): void {
     if (state.destForm.sameBroker && snap) {
         state.destForm.host = snap.host;
+        state.destForm.messagingHost = snap.messagingHost;
         state.destForm.semp = {
             protocol: snap.semp.protocol,
             port: snap.semp.port,

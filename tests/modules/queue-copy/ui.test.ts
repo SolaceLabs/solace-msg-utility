@@ -73,6 +73,21 @@ describe('queue-copy/ui', () => {
             expect(elsHolder.els.sourceSolPass.value).toBe('sol-secret');
         });
 
+        it('shows an appliance primary as one: its management host with SEMP, its messaging host with the Client, nothing editable', () => {
+            const e = elsHolder.els;
+            const typeButtons = () => Array.from(e.container.querySelectorAll<HTMLButtonElement>('#copy-source-broker-type button'));
+            applySourceReadonly(e, { ...PRIMARY, host: 'mgmt.solace.com', messagingHost: 'msg.solace.com' });
+            expect(e.sourceHosts.type()).toBe('appliance');
+            expect([e.sourceHost.value, e.sourceSolHost.value]).toEqual(['mgmt.solace.com', 'msg.solace.com']);
+            expect([e.sourceHost.disabled, e.sourceSolHost.disabled, ...typeButtons().map(b => b.disabled)]).toEqual([true, true, true, true]);
+
+            // A primary with one host shows it in both cards.
+            applySourceReadonly(e, PRIMARY);
+            expect(e.sourceHosts.type()).toBe('software');
+            expect([e.sourceHost.value, e.sourceSolHost.value]).toEqual(['broker.solace.com', 'broker.solace.com']);
+            expect([e.sourceHost.disabled, e.sourceSolHost.disabled, ...typeButtons().map(b => b.disabled)]).toEqual([true, true, true, true]);
+        });
+
         it('null snapshot blanks scalar fields without throwing; protocol selects keep their default', () => {
             // First populate, then re-apply with null to verify the clear path.
             applySourceReadonly(elsHolder.els, PRIMARY);
@@ -97,6 +112,19 @@ describe('queue-copy/ui', () => {
     // tests/core/components/module-gate.
 
     describe('applyDestPrefill', () => {
+        it('sameBroker=true: takes the primary\'s broker type and both hosts, locked; unticked, they are the user\'s', () => {
+            const e = elsHolder.els;
+            const typeButtons = () => Array.from(e.destBrokerType.querySelectorAll<HTMLButtonElement>('button'));
+            applyDestPrefill(e, true, true, { ...PRIMARY, host: 'mgmt.solace.com', messagingHost: 'msg.solace.com' });
+            expect(e.destHosts.type()).toBe('appliance');
+            expect([e.destHost.value, e.destSolHost.value]).toEqual(['mgmt.solace.com', 'msg.solace.com']);
+            expect([e.destHost.disabled, e.destSolHost.disabled, ...typeButtons().map(b => b.disabled)]).toEqual([true, true, true, true]);
+
+            applyDestPrefill(e, false, false, PRIMARY);
+            expect(e.destHosts.type()).toBe('appliance');
+            expect([e.destHost.disabled, e.destSolHost.disabled, ...typeButtons().map(b => b.disabled)]).toEqual([false, false, false, false]);
+        });
+
         it('sameBroker=true & sameVpn=true: disables every dest field, prefills with primary values', () => {
             applyDestPrefill(elsHolder.els, true, true, PRIMARY);
             expect(elsHolder.els.destHost.disabled).toBe(true);
@@ -264,17 +292,17 @@ describe('queue-copy/ui', () => {
     describe('applyDestMode', () => {
         const shown = (el: HTMLElement) => !el.classList.contains('hidden');
 
-        it('Direct primary: the typed Broker host, SEMP and Client cards; no provisioned card', () => {
+        it('Direct primary: the broker type, SEMP and Client cards; no provisioned card', () => {
             const e = elsHolder.els;
             applyDestMode(e, { provisioned: false, needsSecondary: true });
-            expect([e.destHostGroup, e.destSempCard, e.destSolCard].every(shown)).toBe(true);
+            expect([e.destTypeGroup, e.destSempCard, e.destSolCard].every(shown)).toBe(true);
             expect(shown(e.destProv)).toBe(false);
         });
 
-        it('Provisioned primary needing a secondary: the card replaces the host field and both cards', () => {
+        it('Provisioned primary needing a secondary: the card replaces the broker type and both cards', () => {
             const e = elsHolder.els;
             applyDestMode(e, { provisioned: true, needsSecondary: true });
-            expect([e.destHostGroup, e.destSempCard, e.destSolCard].some(shown)).toBe(false);
+            expect([e.destTypeGroup, e.destSempCard, e.destSolCard].some(shown)).toBe(false);
             expect(shown(e.destProv)).toBe(true);
             expect(shown(e.destProvCardHost)).toBe(true);
             expect(shown(e.destProvSame)).toBe(false);

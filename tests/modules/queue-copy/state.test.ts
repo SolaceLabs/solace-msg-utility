@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { createInitialState, resetTransientState, syncDestFormFromSnapshot, destTargetKey } from '../../../src/modules/queue-copy/state';
+import { createInitialState, resetTransientState, syncDestFormFromSnapshot, destTargetKey, destMessagingHost } from '../../../src/modules/queue-copy/state';
 import type { DestPrefillSnapshot } from '../../../src/modules/queue-copy/state';
 
 describe('queue-copy/state', () => {
@@ -42,6 +42,17 @@ describe('queue-copy/state', () => {
             expect(s.destForm.solace.user).toBe('kept-user');
         });
 
+        it('sameBroker=true: takes an appliance primary\'s messaging host too, and drops it for a primary with one host', () => {
+            const s = createInitialState();
+            syncDestFormFromSnapshot(s, { ...SNAP, host: 'mgmt.example', messagingHost: 'msg.example' });
+            expect([s.destForm.host, s.destForm.messagingHost]).toEqual(['mgmt.example', 'msg.example']);
+            expect(destMessagingHost(s.destForm)).toBe('msg.example');
+
+            syncDestFormFromSnapshot(s, SNAP);
+            expect([s.destForm.host, s.destForm.messagingHost]).toEqual(['broker.solace.com', undefined]);
+            expect(destMessagingHost(s.destForm)).toBe('broker.solace.com');
+        });
+
         it('sameBroker=false: leaves the form untouched (different broker means different everything)', () => {
             const s = createInitialState();
             s.destForm.sameBroker = false;
@@ -70,6 +81,18 @@ describe('queue-copy/state', () => {
             s.destForm.solace.vpn = 'typed-vpn';
             expect(destTargetKey(s.destForm)).toBe(key);
             s.destForm.provisioned.vpn = 'v2';
+            expect(destTargetKey(s.destForm)).not.toBe(key);
+        });
+
+        it('a manual appliance destination is its messaging host and VPN: the management host does not carry messages', () => {
+            const s = createInitialState();
+            s.destForm.host = 'mgmt';
+            s.destForm.messagingHost = 'msg1';
+            s.destForm.solace.vpn = 'v1';
+            const key = destTargetKey(s.destForm);
+            s.destForm.host = 'mgmt2';
+            expect(destTargetKey(s.destForm)).toBe(key);
+            s.destForm.messagingHost = 'msg2';
             expect(destTargetKey(s.destForm)).not.toBe(key);
         });
 

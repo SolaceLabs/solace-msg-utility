@@ -500,6 +500,33 @@ describe('queue-copy/module', () => {
             consoleSpy.mockRestore();
         });
 
+        // An appliance answers SEMP and messaging on two hosts. AppState holds
+        // one per connection, so the primary's two are known once both are up.
+        it('an appliance primary: the source cards show both hosts, and each destination Connect goes to its own', async () => {
+            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            const ctx = makeCtx(eventBus, container, {
+                isConnected: true,
+                selectedVpn: 'default',
+                solaceConnection: makeSolaceConnection({ host: 'msg.example' }),
+                sempCredentials: sempCreds('https://mgmt.example:1943/SEMP/v2'),
+            });
+            await QueueCopyModule.install(ctx);
+            const val = (sel: string) => container.querySelector<HTMLInputElement>(sel)!.value;
+            expect([val('#copy-source-host'), val('#copy-source-sol-host')]).toEqual(['mgmt.example', 'msg.example']);
+            expect([val('#copy-dest-host'), val('#copy-dest-sol-host')]).toEqual(['mgmt.example', 'msg.example']);
+
+            // Same broker off and nothing retyped: the destination keeps both hosts.
+            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
+            toggle.checked = false;
+            toggle.dispatchEvent(new Event('change'));
+            typeDestSempPass(container, 'p');
+            container.querySelector<HTMLButtonElement>('#copy-btn-dest-semp-connect')!.click();
+            expect(destSempConnect).toHaveBeenCalledWith(expect.anything(), 'mgmt.example', 'p');
+            container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!.click();
+            expect(destSolConnect).toHaveBeenCalledWith(expect.anything(), 'msg.example', expect.any(String));
+            consoleSpy.mockRestore();
+        });
+
         it('Connect Client refuses a client username the broker refuses, with the reason, before any connect', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const ctx = makeCtx(eventBus, container, {

@@ -10,9 +10,11 @@
  * encrypted connections file and never sends them back. The list response
  * omits them, so editing a connection with blank password fields keeps the
  * stored ones. The list filters as you type in its search box (`matchContains`
- * on broker or hostname: contains, case-insensitive, `*` = any run), from the
- * last load without a refetch. Imports only from `src/core/*` and its own
- * service.
+ * on broker or either hostname: contains, case-insensitive, `*` = any run),
+ * from the last load without a refetch. The form's broker type decides whether
+ * a connection has one hostname or, for an appliance, a messaging hostname of
+ * its own (`src/core/connections/broker-hosts.ts`). Imports only from
+ * `src/core/*` and its own service.
  *
  * Every listed connection carries a `rev`. The form keeps the rev of the record
  * it opened (0 for a new connection) and a save sends it; the 200 answer
@@ -31,6 +33,7 @@ import { escapeHtml, matchContains, sempUsernameOk, clientUsernameError } from '
 import { logger } from '../../core/logger';
 import { handleConflict } from '../../core/admin-conflict';
 import { reportManagedFailure } from '../../core/services/managed-api';
+import { createBrokerHosts, BROKER_HOSTS_TEXT } from '../../core/connections/broker-hosts';
 import { createConnMgmtService, type ManagedConnRecord } from './service';
 import type { AppContext } from '../../core/types';
 
@@ -42,6 +45,10 @@ const VPN_FIELDS = [
 
 /** Why the form refuses a SEMP username (sempUsernameOk). */
 const SEMP_USERNAME_RULE = 'SEMP username may be up to 32 characters: letters, digits, - and _.';
+
+/** A connection's host as the list shows it: an appliance names its messaging host too. */
+const hostCell = (c: ManagedConnRecord): string =>
+    (c.client.hostname ? `${c.hostname} (messaging: ${c.client.hostname})` : c.hostname);
 
 /** What an empty VPN list means, shown in its place. */
 export const NO_VPNS = 'None: no user can reach this broker until it lists a Message VPN.';
@@ -65,7 +72,12 @@ export const ConnectionManagementModule = {
             formView: required<HTMLElement>(container, '#conn-mgmt-form-view'),
             formTitle: required<HTMLElement>(container, '#conn-mgmt-form-title'),
             broker: required<HTMLInputElement>(container, '#conn-mgmt-broker'),
+            brokerType: required<HTMLElement>(container, '#conn-mgmt-broker-type'),
+            brokerTypeHint: required<HTMLElement>(container, '#conn-mgmt-broker-type-hint'),
             hostname: required<HTMLInputElement>(container, '#conn-mgmt-hostname'),
+            hostnameLabel: required<HTMLElement>(container, '#lbl-conn-mgmt-hostname'),
+            clientHostname: required<HTMLInputElement>(container, '#conn-mgmt-client-hostname'),
+            clientHostnameHint: required<HTMLElement>(container, '#conn-mgmt-client-hostname-hint'),
             sempScheme: required<HTMLSelectElement>(container, '#conn-mgmt-semp-scheme'),
             sempPort: required<HTMLInputElement>(container, '#conn-mgmt-semp-port'),
             sempUser: required<HTMLInputElement>(container, '#conn-mgmt-semp-user'),
@@ -81,6 +93,16 @@ export const ConnectionManagementModule = {
         };
 
         const service = createConnMgmtService();
+        const hosts = createBrokerHosts({
+            typeGroup: els.brokerType,
+            typeHint: els.brokerTypeHint,
+            host: els.hostname,
+            hostLabel: els.hostnameLabel,
+            messagingHost: els.clientHostname,
+            messagingHint: els.clientHostnameHint,
+        }, {
+            text: { ...BROKER_HOSTS_TEXT, hostLabel: { software: 'Hostname', appliance: 'Management hostname' } },
+        });
         const vpnList = createRowList(els.vpnRows, VPN_FIELDS, { empty: NO_VPNS });
         const gate = createGate(container, {
             id: 'conn-mgmt-gate',
@@ -115,15 +137,15 @@ export const ConnectionManagementModule = {
             vpnList.clear();
         }
 
-        /** The loaded connections the search box matches (broker or hostname), or a row saying why there are none. */
+        /** The loaded connections the search box matches (broker or either hostname), or a row saying why there are none. */
         function renderList(): void {
             const query = els.search.value.trim();
-            const shown = conns.filter(c => matchContains(c.broker, query) || matchContains(c.hostname, query));
+            const shown = conns.filter(c => matchContains(c.broker, query) || matchContains(hostCell(c), query));
             renderAdminRows(els.rows, shown, conns.length, query, {
                 plural: 'connections',
                 noun: 'connection',
                 classPrefix: 'conn-mgmt',
-                cells: c => `<td>${escapeHtml(c.broker)}</td><td>${escapeHtml(c.hostname)}</td>`,
+                cells: c => `<td>${escapeHtml(c.broker)}</td><td>${escapeHtml(hostCell(c))}</td>`,
                 label: c => c.broker,
                 onEdit: openEdit,
                 onDelete: c => void removeConn(c.broker, c.rev),
@@ -159,7 +181,7 @@ export const ConnectionManagementModule = {
             els.formTitle.textContent = 'Add connection';
             els.broker.value = '';
             els.broker.disabled = false;
-            els.hostname.value = '';
+            hosts.write({ host: '' });
             els.sempScheme.value = 'https';
             els.sempPort.value = '';
             els.sempUser.value = '';
@@ -179,7 +201,7 @@ export const ConnectionManagementModule = {
             els.formTitle.textContent = `Edit connection "${c.broker}"`;
             els.broker.value = c.broker;
             els.broker.disabled = true; // broker is the key; rename = delete + recreate
-            els.hostname.value = c.hostname;
+            hosts.write({ host: c.hostname, messagingHost: c.client.hostname });
             els.sempScheme.value = c.semp.scheme === 'http' ? 'http' : 'https';
             els.sempPort.value = c.semp.port;
             els.sempUser.value = c.semp.user;
@@ -204,6 +226,13 @@ export const ConnectionManagementModule = {
             // Early check; the gateway refuses it too (exists) when the list is out of date.
             if (!editing && conns.some(c => c.broker === broker)) {
                 setError(els.formError, `Connection "${broker}" already exists. Use Edit to change it.`);
+                return;
+            }
+            // An appliance names both hostnames; the gateway checks what they hold.
+            const hostname = els.hostname.value.trim();
+            const clientHostname = hosts.type() === 'appliance' ? els.clientHostname.value.trim() : '';
+            if (hosts.type() === 'appliance' && !clientHostname) {
+                setError(els.formError, 'Messaging hostname is required for an appliance. Choose Software / Cloud for a broker with one hostname.');
                 return;
             }
             // A blank password keeps the stored one, matched by VPN name; a new
@@ -234,7 +263,7 @@ export const ConnectionManagementModule = {
                 const connection: ManagedConnRecord = {
                     rev: editingRev,
                     broker,
-                    hostname: els.hostname.value.trim(),
+                    hostname,
                     semp: {
                         scheme: els.sempScheme.value === 'http' ? 'http' : 'https',
                         port: els.sempPort.value.trim(),
@@ -242,6 +271,8 @@ export const ConnectionManagementModule = {
                         pass: els.sempPass.value,
                     },
                     client: {
+                        // The same hostname twice is one hostname: the gateway stores it so too.
+                        ...(clientHostname && clientHostname !== hostname ? { hostname: clientHostname } : {}),
                         scheme: els.clientScheme.value === 'ws' ? 'ws' : 'wss',
                         port: els.clientPort.value.trim(),
                         msgVpns: rows.map(r => ({ name: r.name, user: r.user, pass: r.pass })),

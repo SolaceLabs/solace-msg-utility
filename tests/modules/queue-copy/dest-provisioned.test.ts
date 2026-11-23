@@ -221,7 +221,7 @@ describe('queue-copy -- the destination follows the primary connection mode', ()
 
         expect(hidden('#copy-dest-prov')).toBe(false);
         expect(hidden('#copy-dest-prov-card')).toBe(false);
-        expect(hidden('#copy-dest-host-group')).toBe(true);
+        expect(hidden('#copy-dest-type-group')).toBe(true);
         expect(hidden('#copy-dest-semp-card')).toBe(true);
         expect(hidden('#copy-dest-sol-card')).toBe(true);
         expect(options(el, '#copy-dest-prov-broker')).toEqual(['b1', 'b2']);
@@ -258,11 +258,11 @@ describe('queue-copy -- the destination follows the primary connection mode', ()
         expect(hidden('#copy-dest-prov-card')).toBe(false);
     });
 
-    it('Direct primary: the typed Broker host, SEMP and Client cards stay, and no provisioned card shows', async () => {
+    it('Direct primary: the broker type, SEMP and Client cards stay, and no provisioned card shows', async () => {
         const { el, hidden } = await setupProvisioned({ managed: null }, false);
         needSecondary(el);
         expect(hidden('#copy-dest-prov')).toBe(true);
-        expect(hidden('#copy-dest-host-group')).toBe(false);
+        expect(hidden('#copy-dest-type-group')).toBe(false);
         expect(hidden('#copy-dest-semp-card')).toBe(false);
         expect(hidden('#copy-dest-sol-card')).toBe(false);
         expect(el<HTMLInputElement>('#copy-dest-host').disabled).toBe(false);

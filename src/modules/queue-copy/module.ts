@@ -44,7 +44,7 @@ import {
 import type { PrimarySnapshot } from './ui';
 import { wireUiEvents } from './ui-events';
 import { destNameProblem } from './service';
-import { createInitialState, syncDestFormFromSnapshot, destTargetKey } from './state';
+import { createInitialState, syncDestFormFromSnapshot, destTargetKey, destMessagingHost } from './state';
 import {
     createServiceSolace,
     type SolaceConnectionHooks,
@@ -118,8 +118,12 @@ export const QueueCopyModule = {
             const sempCreds = appState.sempCredentials;
             if (!sol && !sempCreds) return null;
 
+            // The SEMP host names the broker; messaging on another host is an appliance.
+            const solHost = sol?.host ?? '';
+            const host = sempCreds?.host ?? solHost;
             const snap: PrimarySnapshot = {
-                host: sol?.host ?? '',
+                host,
+                ...(sol && solHost !== host ? { messagingHost: solHost } : {}),
                 solace: {
                     protocol: sol?.protocol ?? 'wss',
                     port: sol?.port ?? '',
@@ -135,7 +139,6 @@ export const QueueCopyModule = {
                 // Read the structured fields the connections module captured
                 // at Connect time — these always reflect what the user typed,
                 // regardless of hosted-mode URL rewriting on `baseUrl`.
-                if (!snap.host) snap.host = sempCreds.host;
                 snap.semp.protocol = sempCreds.protocol;
                 snap.semp.port = sempCreds.port;
                 snap.semp.urlPath = sempCreds.urlPath;
@@ -399,7 +402,7 @@ export const QueueCopyModule = {
             destSolClient.init();
             setDestSolStatus(els, 'connecting');
             setDestSolError(els, null);
-            destSolClient.connect(cfg, f.host, state.destSolacePass);
+            destSolClient.connect(cfg, destMessagingHost(f), state.destSolacePass);
         }
 
         /**

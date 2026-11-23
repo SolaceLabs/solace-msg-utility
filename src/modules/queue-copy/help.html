@@ -12,7 +12,7 @@
     <ol class="manual-callouts">
         <li><strong>Important Considerations</strong>: what to know before you run a copy. They are listed in full under "Before you move messages".</li>
         <li>The source cards. They show the connection you made on the Connections page and cannot be edited here. Each has an <strong>Edit in Connections</strong> button that takes you back to that page.</li>
-        <li><strong>Destination Broker</strong>, with its two shortcuts: <strong>Same Solace Broker as source</strong> and <strong>Same Message VPN as source</strong>.</li>
+        <li><strong>Destination Broker</strong>, with the broker type and its two shortcuts: <strong>Same Solace Broker as source</strong> and <strong>Same Message VPN as source</strong>.</li>
         <li>The destination's <strong>Solace SEMP (Management)</strong> and <strong>Solace Messaging (Client)</strong> cards.</li>
         <li><strong>Source Queue</strong>: the queue to read from. The magnifier button, when it is shown, picks the queue from a list.</li>
         <li>The <strong>Queue</strong> or <strong>Topic</strong> switch: what the messages go to.</li>
@@ -22,7 +22,7 @@
     </ol>
 
     <h3>The source</h3>
-    <p>The three source cards, <strong>Source Broker</strong>, <strong>Solace SEMP (Management)</strong> and <strong>Solace Messaging (Client)</strong>, are a mirror of the connection you made on the Connections page. Their boxes are locked. To change anything, press <strong>Edit in Connections</strong>. If you are signed in to a gateway, the broker's name appears in place of an address and the password boxes stay empty, because the gateway keeps the credentials.</p>
+    <p>The three source cards, <strong>Source Broker</strong>, <strong>Solace SEMP (Management)</strong> and <strong>Solace Messaging (Client)</strong>, are a mirror of the connection you made on the Connections page. <strong>Source Broker</strong> shows the broker type, and each of the other two cards shows the host it uses. Their boxes are locked. To change anything, press <strong>Edit in Connections</strong>. If you are signed in to a gateway, the broker's name appears in place of an address and the password boxes stay empty, because the gateway keeps the credentials.</p>
     <p>The only box you fill in on the source side is the queue.</p>
     <ol class="manual-steps">
         <li>Type the name of the source queue in <strong>Queue name</strong> under <strong>Source Queue</strong>. Spaces at either end are dropped.</li>
@@ -67,25 +67,26 @@
     <h4>Typed details</h4>
     <p>If you connected on the Connections page by typing the broker's details, the destination has the cards below. Fill in the ones the table above says are yours.</p>
     <figure class="manual-figure">
-        <img src="help/destination.svg" width="760" height="450" alt="The destination cards for another broker: the broker host and the two shortcuts, the SEMP card with a Connect button, and the Client card showing a live connection.">
-        <figcaption>A destination on another broker: SEMP not yet connected, the messaging connection up.</figcaption>
+        <img src="help/destination.svg" width="760" height="558" alt="The destination cards for another broker, an appliance: the broker type and the two shortcuts, the SEMP card with its Management Host and a Connect button, and the Client card with its Messaging Host, showing a live connection.">
+        <figcaption>A destination on another broker, an appliance: SEMP not yet connected, the messaging connection up.</figcaption>
     </figure>
     <ol class="manual-callouts">
-        <li><strong>Broker Host (IP or Hostname)</strong>. Both cards share this host.</li>
+        <li><strong>Solace Event Broker Type</strong>: <strong>Software / Cloud</strong> or <strong>Appliance</strong>. Here it is an appliance, so each card has a host of its own.</li>
         <li>The two shortcuts. Here neither is ticked, so <strong>Same Message VPN as source</strong> is locked.</li>
-        <li><strong>Solace SEMP (Management)</strong>: Protocol, Port, URL Path, Username and Password, with a <strong>Connect</strong> button and a status line.</li>
-        <li><strong>Solace Messaging (Client)</strong>: Protocol, Port, URL Path, Message VPN, Username and Password, with a <strong>Connect</strong> button, shown as <strong>Disconnect</strong> while connected, and a status line.</li>
+        <li><strong>Solace SEMP (Management)</strong>: the host, Protocol, Port, URL Path, Username and Password, with a <strong>Connect</strong> button and a status line.</li>
+        <li><strong>Solace Messaging (Client)</strong>: the host, Protocol, Port, URL Path, Message VPN, Username and Password, with a <strong>Connect</strong> button, shown as <strong>Disconnect</strong> while connected, and a status line.</li>
     </ol>
+    <p>The broker type works as it does on the Connections page, whose chapter describes it under "One host or two: the broker type". For <strong>Software / Cloud</strong> you type one host, in <strong>Broker Host (IP or Hostname)</strong> on the SEMP card, and the Messaging card shows the same host, locked. For <strong>Appliance</strong> the SEMP card takes the <strong>Management Host (IP or Hostname)</strong> and the Messaging card the <strong>Messaging Host (IP or Hostname)</strong>.</p>
     <ol class="manual-steps">
         <li>Fill in the <strong>Solace Messaging (Client)</strong> card and press <strong>Connect</strong>. The status line reads <strong>Connecting...</strong>, then <strong>Connected</strong> followed by the Message VPN in brackets. The page cannot run a copy until this connection is up, unless the destination is your own client connection.</li>
         <li>If you want to pick the destination queue from a list, fill in the <strong>Solace SEMP (Management)</strong> card too and press <strong>Connect</strong>. The status line reads <strong>Connected</strong>. The destination's SEMP connection serves only the list. A copy does not need it.</li>
         <li>To close a connection, press <strong>Disconnect</strong> on its card. The boxes unlock again.</li>
     </ol>
-    <p>Pressing <kbd>Enter</kbd> in a box presses the <strong>Connect</strong> button of its card. The broker host belongs to both cards, and <kbd>Enter</kbd> there presses the SEMP <strong>Connect</strong>. While a connection is up, its boxes, and the broker host, are locked.</p>
+    <p>Pressing <kbd>Enter</kbd> in a box presses the <strong>Connect</strong> button of its card. While a connection is up, its boxes are locked, and so are the broker type and both hosts.</p>
     <p>The page checks what you typed before it connects. A SEMP username or password the broker would refuse, or a client username with a character the broker does not allow, is refused with the reason on the card. If the broker rejects the details, the card says so in red: <strong>SEMP authentication failed (401).</strong>, <strong>SEMP error:</strong> followed by the reason, or <strong>Connection failed:</strong> followed by the reason.</p>
 
     <h4>The Destination Connection card</h4>
-    <p>If you are signed in to a gateway, you type no addresses and no passwords. The broker host and both cards give way to one card, <strong>Destination Connection</strong>. The two shortcuts stay.</p>
+    <p>If you are signed in to a gateway, you type no addresses and no passwords. The broker type and both cards give way to one card, <strong>Destination Connection</strong>. The two shortcuts stay.</p>
     <figure class="manual-figure">
         <img src="help/provisioned.svg" width="760" height="190" alt="The Destination Connection card with a Broker list, a Message VPN list, a Disconnect button and a status line naming the broker and VPN.">
         <figcaption>The Destination Connection card of a signed-in session, connected.</figcaption>

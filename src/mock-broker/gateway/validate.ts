@@ -127,6 +127,9 @@ export function connectionProblem(c: ConnRec): string | null {
         seen.add(v.name);
     }
     if (!validHost(c.hostname)) return `broker ${b}: hostname ${quote(c.hostname)} ${HOST_RULE}`;
+    if (c.client.hostname && !validHost(c.client.hostname)) {
+        return `broker ${b}: client.hostname ${quote(c.client.hostname)} ${HOST_RULE}`;
+    }
     if (c.semp.username !== '' && c.semp.port === '') {
         return `broker ${b}: semp.port is required when a SEMP username is set`;
     }

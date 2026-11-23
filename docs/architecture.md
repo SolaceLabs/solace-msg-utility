@@ -33,6 +33,7 @@ This document is for developers who work on the code, in the web app (`src/`) or
   - [Topology](#topology)
   - [Locked decisions](#locked-decisions)
   - [Connection modes](#connection-modes)
+  - [Broker type: one host or two](#broker-type-one-host-or-two)
   - [The connections module: two entries, one owner](#the-connections-module-two-entries-one-owner)
   - [Managed profile (core-owned, names only)](#managed-profile-core-owned-names-only)
   - [RBAC state + matchers](#rbac-state--matchers)
@@ -713,6 +714,24 @@ The config reaches the app through the gateway probe only:
 
 The resolved config is published once to `AppState.connConfig` by the connections module, so no other module probes the gateway again. Queue Copy does not read the enum: its destination mode follows the primary connection (a signed-in managed profile means Provisioned), so `conn-modes.ts` keeps only `resolveConnTabs`.
 
+### Broker type: one host or two
+
+A software or cloud broker answers SEMP and messaging on one host. A Solace appliance answers SEMP on its management address and messaging on another, so a connection may carry a second host. Three forms take it: the Direct form (connections), Queue Copy's typed destination, and the broker form of Conn. Mgmt.
+
+Each form holds a type control (**Software / Cloud** or **Appliance**), a host box in its SEMP part and one in its Messaging part. [src/core/connections/broker-hosts.ts](../src/core/connections/broker-hosts.ts) wires them (`createBrokerHosts`): for Software / Cloud the Messaging part's box is locked and shows the one host; for Appliance it is free. The markup is each form's own template, and the control is the shared `.segmented` primitive of `components.css`. A form locks the parts through `lock({ management, messaging })`; the type cannot change while either is locked.
+
+A record names the second host only when it is another host, so a broker with one host has one spelling and opens as Software / Cloud:
+
+| Where | The one host, or the management host | The messaging host of an appliance |
+| --- | --- | --- |
+| Saved Direct config (`ConnectionConfig`) | `host` | `messagingHost` |
+| `AppState` of a live Direct connection | `sempCredentials.host` | `solaceConnection.host` |
+| Queue Copy's typed destination (`DestForm`) | `host` | `messagingHost` (`destMessagingHost`) |
+| Admin API (`/managed/connections`) | `hostname` | `client.hostname` |
+| `connections.yaml` (`connRec`) | `hostname` | `client.hostname` (`clientHost()`) |
+
+`AppState` keeps one host per connection, so Queue Copy learns that its primary is an appliance from the two differing (`getPrimarySnapshot`). In the gateway, `sempTarget` uses the record's hostname and `smfTarget` the client part's own when it has one; a save stores a client hostname equal to the record's as blank (`canonClientHost`), as it stores the TLS scheme.
+
 ### The connections module: two entries, one owner
 
 [src/modules/connections/](../src/modules/connections/) owns the primary connection in both modes, through two entry files with the same id and sidebar entry:
@@ -826,7 +845,7 @@ msg-utility-connections:
     client: { port: 1443, msgVpns: [ { name: vpn-name, username: default, password: <password> } ] }   # handed out by dial
 ```
 
-A blank `scheme` on `semp` or `client` means TLS (https and wss); an administrator may choose `http` or `ws` per connection. How `seq` and `rev` work is in [The single writer](#the-single-writer).
+A blank `scheme` on `semp` or `client` means TLS (https and wss); an administrator may choose `http` or `ws` per connection. `client` may also hold a `hostname`: an appliance's messaging address, used in place of the record's `hostname` for messaging ([Broker type: one host or two](#broker-type-one-host-or-two)); it is left out for a broker with one host. How `seq` and `rev` work is in [The single writer](#the-single-writer).
 
 A save (`PUT /managed/connections/{broker}`) also holds the usernames to what a broker accepts (`checkBrokerUsernames` in [store.go](../go-web-proxy/store.go)): `semp.username` up to 32 characters from `A-Z a-z 0-9 _ -`, and each VPN's `username` up to 189 printable ASCII characters without `?` or `*`. Load and import check `validateConn` only, so a stored or restored record with another name loads as it is, and its next save asks for a valid one. The app's forms apply the same rules (`sempUsernameOk` and `clientUsernameError` in [src/core/utils.ts](../src/core/utils.ts)), and `validation.json` holds both sides to them.
 

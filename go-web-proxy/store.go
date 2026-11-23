@@ -95,10 +95,17 @@ type vpnRec struct {
 // administrator's choice per connection (http for SEMP, ws for SMF). A save
 // stores the TLS scheme as blank (canonScheme), so a record has one spelling
 // either way.
+//
+// A broker's SEMP and messaging share the record's hostname, unless the client
+// part names one of its own: an appliance, which answers SEMP on its
+// management address and messaging on another. A save stores a client
+// hostname equal to the record's as blank (canonClientHost), so a broker with
+// one host has one spelling too.
 type clientRec struct {
-	Scheme  string   `yaml:"scheme,omitempty"`
-	Port    flexStr  `yaml:"port"`
-	MsgVpns []vpnRec `yaml:"msgVpns"`
+	Hostname string   `yaml:"hostname,omitempty"`
+	Scheme   string   `yaml:"scheme,omitempty"`
+	Port     flexStr  `yaml:"port"`
+	MsgVpns  []vpnRec `yaml:"msgVpns"`
 }
 
 type sempRec struct {
@@ -142,6 +149,24 @@ type connRec struct {
 	Hostname string    `yaml:"hostname"`
 	Semp     sempRec   `yaml:"semp"`
 	Client   clientRec `yaml:"client"`
+}
+
+// clientHost is the host the broker's messaging answers on: the client
+// part's own for an appliance, else the record's hostname.
+func (c connRec) clientHost() string {
+	if c.Client.Hostname != "" {
+		return c.Client.Hostname
+	}
+	return c.Hostname
+}
+
+// canonClientHost is how a save stores a client hostname: one equal to the
+// record's hostname as blank.
+func canonClientHost(client, hostname string) string {
+	if client == hostname {
+		return ""
+	}
+	return client
 }
 
 // connsDoc is connections.yaml, with a seq as usersDoc has.
@@ -452,6 +477,9 @@ func validateConn(c connRec) error {
 	if !validHost(c.Hostname) {
 		return fmt.Errorf("broker %q: hostname %q %s", c.Broker, c.Hostname, hostRule)
 	}
+	if c.Client.Hostname != "" && !validHost(c.Client.Hostname) {
+		return fmt.Errorf("broker %q: client.hostname %q %s", c.Broker, c.Client.Hostname, hostRule)
+	}
 	if c.Semp.Username != "" && c.Semp.Port == "" {
 		return fmt.Errorf("broker %q: semp.port is required when a SEMP username is set", c.Broker)
 	}
@@ -638,7 +666,7 @@ func (s *store) smfTarget(username, broker, vpn string) (brokerTarget, bool) {
 		}
 		for _, v := range entitledVPNs(&u, c) {
 			if v.Name == vpn {
-				return brokerTarget{scheme: orTLS(c.Client.Scheme, clientTLS), host: c.Hostname, port: string(c.Client.Port), user: v.Username, pass: v.Password}, true
+				return brokerTarget{scheme: orTLS(c.Client.Scheme, clientTLS), host: c.clientHost(), port: string(c.Client.Port), user: v.Username, pass: v.Password}, true
 			}
 		}
 	}
@@ -906,9 +934,10 @@ func sameUserView(a, b userRec) bool {
 }
 
 // sameConnView is sameUserView for a connection: what connToOutput shows,
-// which leaves every password out. A blank scheme is TLS either way.
+// which leaves every password out. A blank scheme is TLS either way, and a
+// blank client hostname is the record's.
 func sameConnView(a, b connRec) bool {
-	return a.Broker == b.Broker && a.Hostname == b.Hostname &&
+	return a.Broker == b.Broker && a.Hostname == b.Hostname && a.clientHost() == b.clientHost() &&
 		orTLS(a.Semp.Scheme, sempTLS) == orTLS(b.Semp.Scheme, sempTLS) && a.Semp.Port == b.Semp.Port && a.Semp.Username == b.Semp.Username &&
 		orTLS(a.Client.Scheme, clientTLS) == orTLS(b.Client.Scheme, clientTLS) && a.Client.Port == b.Client.Port &&
 		slices.EqualFunc(a.Client.MsgVpns, b.Client.MsgVpns, func(x, y vpnRec) bool { return x.Name == y.Name && x.Username == y.Username })

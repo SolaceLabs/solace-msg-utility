@@ -387,6 +387,22 @@ func TestSMF_UsesTheConnectionsScheme(t *testing.T) {
 	}
 }
 
+// An appliance's messaging answers on its own host: the gate dials the client
+// part's hostname, not the connection's.
+func TestSMF_DialsTheClientHostname(t *testing.T) {
+	up := &urlRecorder{}
+	e := newManagedEnvWith(t, nil, up)
+	putConn(t, e.api.store, connRec{
+		Broker: "b1", Hostname: "mgmt1",
+		Client: clientRec{Hostname: "msg1", Port: "8008", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}},
+	})
+	expect(t, e.do("GET", "/managed/smf/b1/v1", "", e.cookie("viewer", false), wsHeaders("https://gw.example")...),
+		http.StatusBadGateway, "upstream_unavailable")
+	if got, want := up.last(t), "https://msg1:8008/"; got != want {
+		t.Errorf("the gate dialled %s, want %s", got, want)
+	}
+}
+
 // A connection that cannot be taken over (here a recorder) is a 500, and the
 // broker side that already upgraded is closed.
 func TestSMF_NoTakeoverClosesTheBrokerSide(t *testing.T) {

@@ -1,82 +1,95 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 590" width="760" height="590" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="0" y="0" width="760" height="590" fill="#f8fafc" rx="8"/>
-    <rect x="20" y="16" width="720" height="86" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
-    <text x="40" y="44" font-size="15" font-weight="700">Broker Configuration</text>
-    <text x="40" y="66" font-size="11" fill="#64748b" font-weight="700">Broker Host (IP or Hostname)</text>
-    <rect x="40" y="74" width="300" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="50" y="92">broker.example.com</text>
-    <circle cx="366" cy="88" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="366" y="92" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
-    <rect x="20" y="116" width="720" height="178" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
-    <text x="40" y="144" font-size="15" font-weight="700">Solace SEMP (Management)</text>
-    <text x="40" y="166" font-size="11" fill="#64748b" font-weight="700">Protocol</text>
-    <rect x="40" y="174" width="130" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="50" y="192">https://</text>
-    <path d="M150 186 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
-    <text x="184" y="166" font-size="11" fill="#64748b" font-weight="700">Port</text>
-    <rect x="184" y="174" width="90" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="194" y="192">1943</text>
-    <text x="288" y="166" font-size="11" fill="#64748b" font-weight="700">URL Path</text>
-    <text x="288" y="192" font-size="11" fill="#009193" font-weight="700">+ URL path</text>
-    <circle cx="420" cy="188" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="420" y="192" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
-    <text x="40" y="216" font-size="11" fill="#64748b" font-weight="700">Username</text>
-    <rect x="40" y="224" width="250" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="50" y="242">admin</text>
-    <text x="304" y="216" font-size="11" fill="#64748b" font-weight="700">Password</text>
-    <rect x="304" y="224" width="250" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="314" y="242">........</text>
-    <circle cx="580" cy="238" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="580" y="242" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
-    <rect x="40" y="258" width="90" height="26" fill="#00C895" rx="5"/>
-    <text x="85" y="275" fill="#ffffff" font-weight="700" text-anchor="middle">Connect</text>
-    <circle cx="150" cy="271" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="150" y="275" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
-    <rect x="20" y="308" width="720" height="214" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
-    <text x="40" y="336" font-size="15" font-weight="700">Solace Messaging (Client)</text>
-    <circle cx="287" cy="331" r="9" fill="none" stroke="#64748b" stroke-width="1.5"/>
-    <circle cx="287" cy="331" r="3" fill="none" stroke="#64748b" stroke-width="1.3"/>
-    <circle cx="317" cy="331" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="317" y="335" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
-    <circle cx="560" cy="331" r="6" fill="#ffffff" stroke="#00C895" stroke-width="1.5"/>
-    <circle cx="560" cy="331" r="3" fill="#00C895"/>
-    <text x="572" y="335">Basic</text>
-    <circle cx="630" cy="331" r="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
-    <text x="642" y="335">OAuth2</text>
-    <circle cx="530" cy="331" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="530" y="335" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
-    <text x="40" y="358" font-size="11" fill="#64748b" font-weight="700">Protocol</text>
-    <rect x="40" y="366" width="130" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="50" y="384">wss://</text>
-    <path d="M150 378 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
-    <text x="184" y="358" font-size="11" fill="#64748b" font-weight="700">Port</text>
-    <rect x="184" y="366" width="90" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="194" y="384">1443</text>
-    <text x="288" y="358" font-size="11" fill="#64748b" font-weight="700">URL Path</text>
-    <text x="288" y="384" font-size="11" fill="#009193" font-weight="700">+ URL path</text>
-    <text x="400" y="358" font-size="11" fill="#64748b" font-weight="700">Message VPN</text>
-    <rect x="400" y="366" width="250" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="410" y="384">default</text>
-    <circle cx="676" cy="380" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="676" y="384" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
-    <text x="40" y="408" font-size="11" fill="#64748b" font-weight="700">Username</text>
-    <rect x="40" y="416" width="250" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="50" y="434">orders-app</text>
-    <text x="304" y="408" font-size="11" fill="#64748b" font-weight="700">Password</text>
-    <rect x="304" y="416" width="250" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="314" y="434">........</text>
-    <circle cx="580" cy="430" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="580" y="434" font-weight="700" fill="#ffffff" text-anchor="middle">8</text>
-    <rect x="40" y="450" width="90" height="26" fill="#00C895" rx="5"/>
-    <text x="85" y="467" fill="#ffffff" font-weight="700" text-anchor="middle">Connect</text>
-    <circle cx="150" cy="463" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="150" y="467" font-weight="700" fill="#ffffff" text-anchor="middle">9</text>
-    <rect x="340" y="540" width="100" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
-    <text x="390" y="557" font-weight="700" text-anchor="middle">Reset Form</text>
-    <rect x="448" y="540" width="130" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
-    <text x="513" y="557" font-weight="700" text-anchor="middle">Load All Config</text>
-    <rect x="586" y="540" width="140" height="26" fill="#00C895" rx="5"/>
-    <text x="656" y="557" fill="#ffffff" font-weight="700" text-anchor="middle">Save All Config</text>
-    <circle cx="312" cy="553" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="312" y="557" font-weight="700" fill="#ffffff" text-anchor="middle">10</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 656" width="760" height="656" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="656" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="16" width="720" height="70" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="44" font-size="15" font-weight="700">Solace Event Broker Type</text>
+    <rect x="500" y="28" width="220" height="26" fill="#f1f5f9" rx="5" stroke="#e2e8f0"/>
+    <rect x="500" y="28" width="130" height="26" fill="#00C895" rx="5"/>
+    <text x="565" y="45" fill="#ffffff" font-weight="700" text-anchor="middle">Software / Cloud</text>
+    <text x="675" y="45" fill="#64748b" text-anchor="middle">Appliance</text>
+    <circle cx="474" cy="41" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="474" y="45" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <text x="40" y="68" font-size="11" fill="#64748b">One host serves both management and messaging.</text>
+    <rect x="20" y="100" width="720" height="228" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="128" font-size="15" font-weight="700">Solace SEMP (Management)</text>
+    <text x="40" y="150" font-size="11" fill="#64748b" font-weight="700">Broker Host (IP or Hostname)</text>
+    <rect x="40" y="158" width="300" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="176">broker.example.com</text>
+    <circle cx="366" cy="172" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="366" y="176" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <text x="40" y="200" font-size="11" fill="#64748b" font-weight="700">Protocol</text>
+    <rect x="40" y="208" width="130" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="226">https://</text>
+    <path d="M150 220 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="184" y="200" font-size="11" fill="#64748b" font-weight="700">Port</text>
+    <rect x="184" y="208" width="90" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="194" y="226">1943</text>
+    <text x="288" y="200" font-size="11" fill="#64748b" font-weight="700">URL Path</text>
+    <text x="288" y="226" font-size="11" fill="#009193" font-weight="700">+ URL path</text>
+    <circle cx="420" cy="222" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="420" y="226" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <text x="40" y="250" font-size="11" fill="#64748b" font-weight="700">Username</text>
+    <rect x="40" y="258" width="250" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="276">admin</text>
+    <text x="304" y="250" font-size="11" fill="#64748b" font-weight="700">Password</text>
+    <rect x="304" y="258" width="250" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="314" y="276">........</text>
+    <circle cx="580" cy="272" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="580" y="276" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+    <rect x="40" y="292" width="90" height="26" fill="#00C895" rx="5"/>
+    <text x="85" y="309" fill="#ffffff" font-weight="700" text-anchor="middle">Connect</text>
+    <circle cx="150" cy="305" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="150" y="309" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+    <rect x="20" y="342" width="720" height="250" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="370" font-size="15" font-weight="700">Solace Messaging (Client)</text>
+    <circle cx="287" cy="365" r="9" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <circle cx="287" cy="365" r="3" fill="none" stroke="#64748b" stroke-width="1.3"/>
+    <circle cx="317" cy="365" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="317" y="369" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+    <circle cx="560" cy="365" r="6" fill="#ffffff" stroke="#00C895" stroke-width="1.5"/>
+    <circle cx="560" cy="365" r="3" fill="#00C895"/>
+    <text x="572" y="369">Basic</text>
+    <circle cx="630" cy="365" r="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+    <text x="642" y="369">OAuth2</text>
+    <circle cx="530" cy="365" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="530" y="369" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
+    <text x="40" y="392" font-size="11" fill="#64748b" font-weight="700">Messaging Host (IP or Hostname)</text>
+    <rect x="40" y="400" width="300" height="28" fill="#e2e8f0" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="418" fill="#94a3b8">broker.example.com</text>
+    <circle cx="366" cy="414" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="366" y="418" font-weight="700" fill="#ffffff" text-anchor="middle">8</text>
+    <text x="40" y="442" font-size="10" fill="#64748b">Follows the Broker Host above. Choose Appliance to set its own.</text>
+    <text x="40" y="460" font-size="11" fill="#64748b" font-weight="700">Protocol</text>
+    <rect x="40" y="468" width="130" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="486">wss://</text>
+    <path d="M150 480 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="184" y="460" font-size="11" fill="#64748b" font-weight="700">Port</text>
+    <rect x="184" y="468" width="90" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="194" y="486">1443</text>
+    <text x="288" y="460" font-size="11" fill="#64748b" font-weight="700">URL Path</text>
+    <text x="288" y="486" font-size="11" fill="#009193" font-weight="700">+ URL path</text>
+    <text x="400" y="460" font-size="11" fill="#64748b" font-weight="700">Message VPN</text>
+    <rect x="400" y="468" width="250" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="410" y="486">default</text>
+    <circle cx="676" cy="482" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="676" y="486" font-weight="700" fill="#ffffff" text-anchor="middle">9</text>
+    <text x="40" y="510" font-size="11" fill="#64748b" font-weight="700">Username</text>
+    <rect x="40" y="518" width="250" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="536">orders-app</text>
+    <text x="304" y="510" font-size="11" fill="#64748b" font-weight="700">Password</text>
+    <rect x="304" y="518" width="250" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="314" y="536">........</text>
+    <circle cx="580" cy="532" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="580" y="536" font-weight="700" fill="#ffffff" text-anchor="middle">10</text>
+    <rect x="40" y="552" width="90" height="26" fill="#00C895" rx="5"/>
+    <text x="85" y="569" fill="#ffffff" font-weight="700" text-anchor="middle">Connect</text>
+    <circle cx="150" cy="565" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="150" y="569" font-weight="700" fill="#ffffff" text-anchor="middle">11</text>
+    <rect x="340" y="610" width="100" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="390" y="627" font-weight="700" text-anchor="middle">Reset Form</text>
+    <rect x="448" y="610" width="130" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="513" y="627" font-weight="700" text-anchor="middle">Load All Config</text>
+    <rect x="586" y="610" width="140" height="26" fill="#00C895" rx="5"/>
+    <text x="656" y="627" fill="#ffffff" font-weight="700" text-anchor="middle">Save All Config</text>
+    <circle cx="312" cy="623" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="312" y="627" font-weight="700" fill="#ffffff" text-anchor="middle">12</text>
 </svg>

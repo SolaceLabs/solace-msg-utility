@@ -44,8 +44,14 @@
                 <button type="button" class="btn btn-secondary copy-source-edit-btn">Edit in Connections</button>
             </div>
             <div class="form-group">
-                <label>Broker Host (IP or Hostname)</label>
-                <input type="text" id="copy-source-host" class="form-control" disabled>
+                <label>Solace Event Broker Type</label>
+                <div class="flex-row items-center gap-4">
+                    <div class="segmented" id="copy-source-broker-type" role="group" aria-label="Source Solace Event Broker Type">
+                        <button type="button" class="segmented-option" data-broker-type="software" aria-pressed="true" disabled>Software / Cloud</button>
+                        <button type="button" class="segmented-option" data-broker-type="appliance" aria-pressed="false" disabled>Appliance</button>
+                    </div>
+                    <span id="copy-source-broker-type-hint" class="text-secondary text-body-sm"></span>
+                </div>
             </div>
         </div>
 
@@ -53,10 +59,15 @@
             <div class="flex-row justify-between items-center mb-4">
                 <h2 class="m-0">Destination Broker</h2>
             </div>
-            <div class="form-group" id="copy-dest-host-group">
-                <label>Broker Host (IP or Hostname)</label>
-                <input type="text" id="copy-dest-host" class="form-control">
-                <div class="invalid-feedback">Invalid hostname or IP address.</div>
+            <div class="form-group" id="copy-dest-type-group">
+                <label>Solace Event Broker Type</label>
+                <div class="flex-row items-center gap-4">
+                    <div class="segmented" id="copy-dest-broker-type" role="group" aria-label="Dest Solace Event Broker Type">
+                        <button type="button" class="segmented-option" data-broker-type="software" aria-pressed="true">Software / Cloud</button>
+                        <button type="button" class="segmented-option" data-broker-type="appliance" aria-pressed="false">Appliance</button>
+                    </div>
+                    <span id="copy-dest-broker-type-hint" class="text-secondary text-body-sm"></span>
+                </div>
             </div>
             <div class="form-group flex-row gap-4 items-center">
                 <label class="flex-row items-center gap-2 font-normal cursor-pointer">
@@ -73,6 +84,10 @@
             <div class="flex-row justify-between items-center mb-4">
                 <h2 class="m-0">Solace SEMP (Management)</h2>
                 <button type="button" class="btn btn-secondary copy-source-edit-btn">Edit in Connections</button>
+            </div>
+            <div class="form-group">
+                <label id="lbl-copy-source-host">Broker Host (IP or Hostname)</label>
+                <input type="text" id="copy-source-host" class="form-control" disabled>
             </div>
             <div class="form-group flex-row">
                 <div class="w-150px">
@@ -107,6 +122,11 @@
         <div class="card" id="copy-dest-semp-card">
             <div class="flex-row justify-between items-center mb-4">
                 <h2 class="m-0">Solace SEMP (Management)</h2>
+            </div>
+            <div class="form-group">
+                <label id="lbl-copy-dest-host" for="copy-dest-host">Broker Host (IP or Hostname)</label>
+                <input type="text" id="copy-dest-host" class="form-control">
+                <div class="invalid-feedback">Invalid hostname or IP address.</div>
             </div>
             <div class="form-group flex-row">
                 <div class="w-150px">
@@ -165,6 +185,11 @@
                 <h2 class="m-0">Solace Messaging (Client)</h2>
                 <button type="button" class="btn btn-secondary copy-source-edit-btn">Edit in Connections</button>
             </div>
+            <div class="form-group">
+                <label>Messaging Host (IP or Hostname)</label>
+                <input type="text" id="copy-source-sol-host" class="form-control" disabled>
+                <small id="copy-source-sol-host-hint" class="text-secondary text-xs">Follows the Broker Host above.</small>
+            </div>
             <div class="form-group flex-row">
                 <div class="w-150px">
                     <label>Protocol</label>
@@ -201,6 +226,11 @@
         <div class="card" id="copy-dest-sol-card">
             <div class="flex-row justify-between items-center mb-4">
                 <h2 class="m-0">Solace Messaging (Client)</h2>
+            </div>
+            <div class="form-group">
+                <label for="copy-dest-sol-host">Messaging Host (IP or Hostname)</label>
+                <input type="text" id="copy-dest-sol-host" class="form-control" disabled>
+                <small id="copy-dest-sol-host-hint" class="text-secondary text-xs">Follows the Broker Host above. Choose Appliance to set its own.</small>
             </div>
             <div class="form-group flex-row">
                 <div class="w-150px">

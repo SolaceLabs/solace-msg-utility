@@ -1861,4 +1861,180 @@ describe('ConnectionsModule', () => {
         });
     });
 
+    // One host for a software or cloud broker. An appliance has a management
+    // host (the SEMP card's box) and a messaging host (the Messaging card's);
+    // tests/core/connections/broker-hosts.test.ts covers the control itself.
+    describe('broker type and hosts', () => {
+        const input = (sel: string) => container.querySelector(sel) as HTMLInputElement;
+        const button = (sel: string) => container.querySelector(sel) as HTMLButtonElement;
+        const typeButton = (type: 'software' | 'appliance') => button(`#conn-broker-type [data-broker-type="${type}"]`);
+        const invalid = (sel: string) => input(sel).classList.contains('is-invalid');
+        const createSession = () => (window as any).solace.SolclientFactory.createSession;
+        /** Where the Certificate Trust Helper would send the user, read by pressing the link under the failed connect. */
+        function trustUrl(): string | null {
+            (container.querySelector('#solace-connect-error a') as HTMLAnchorElement).click();
+            return container.querySelector('#ssl-trust-url-text')!.textContent;
+        }
+
+        /** A valid appliance form: its management host in the SEMP card, its messaging host in the Messaging card. */
+        function fillAppliance(): void {
+            typeButton('appliance').click();
+            input('#conn-host').value = 'mgmt.test';
+            input('#solace-host').value = 'msg.test';
+            input('#solace-port').value = '8080';
+            input('#solace-vpn').value = 'default';
+            input('#solace-username').value = 'admin';
+            input('#semp-port').value = '943';
+            input('#semp-username').value = 'admin';
+            input('#semp-password').value = 'admin';
+        }
+
+        it('connects an appliance\'s messaging to its messaging host and its SEMP to its management host', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            const { ctx, appState } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+
+            button('#btn-solace-connect').click();
+            expect(createSession().mock.calls[0][0].url).toBe('wss://msg.test:8080');
+            sessionHandler('UP_NOTICE')();
+            expect(appState.solaceConnection!.host).toBe('msg.test');
+
+            button('#btn-semp-connect').click();
+            await vi.waitFor(() => expect(appState.sempCredentials?.host).toBe('mgmt.test'));
+            expect(appState.sempCredentials!.baseUrl).toBe('https://mgmt.test:943');
+        });
+
+        it('checks the host of the card that connects: an appliance\'s messaging host for messaging, its management host for SEMP', async () => {
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+            input('#solace-host').value = 'not a host';
+            input('#conn-host').value = '';
+
+            button('#btn-solace-connect').click();
+            expect([invalid('#solace-host'), invalid('#conn-host')]).toEqual([true, false]);
+            expect(createSession()).not.toHaveBeenCalled();
+
+            // The management host is SEMP's to check, not messaging's.
+            input('#solace-host').value = 'msg.test';
+            button('#btn-solace-connect').click();
+            expect([invalid('#solace-host'), invalid('#conn-host')]).toEqual([false, false]);
+            expect(createSession()).toHaveBeenCalledTimes(1);
+
+            button('#btn-semp-connect').click();
+            expect(invalid('#conn-host')).toBe(true);
+        });
+
+        it('drops the marks of a failed check when the broker type changes', async () => {
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            input('#conn-host').value = '';
+            button('#btn-solace-connect').click();
+            expect(invalid('#conn-host')).toBe(true);
+
+            typeButton('appliance').click();
+            expect([invalid('#conn-host'), invalid('#solace-host')]).toEqual([false, false]);
+        });
+
+        it('locks the broker type with either connection, the one host with either, and each host of an appliance with its own', async () => {
+            const { ctx, eventBus, appState } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            const locks = () => [typeButton('appliance').disabled, input('#conn-host').disabled, input('#solace-host').disabled];
+            // One host: the Messaging card's box only shows it.
+            expect(locks()).toEqual([false, false, true]);
+
+            appState.isSempConnected = true;
+            eventBus.emit('semp:connected');
+            expect(locks()).toEqual([true, true, true]);
+
+            appState.isSempConnected = false;
+            eventBus.emit('semp:disconnected');
+            typeButton('appliance').click();
+            expect(locks()).toEqual([false, false, false]);
+
+            appState.isConnected = true;
+            eventBus.emit('client:connected', { session: {} });
+            expect(locks()).toEqual([true, false, true]);
+        });
+
+        it('saves an appliance\'s two hosts and loads them back as an appliance; a config with one host loads as Software / Cloud', async () => {
+            toastContainer();
+            const save = vi.spyOn(config, 'save').mockReturnValue(true);
+            const load = vi.spyOn(config, 'load').mockReturnValue(null);
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+            const shown = () => [
+                typeButton('appliance').getAttribute('aria-pressed'),
+                input('#conn-host').value, input('#solace-host').value, input('#solace-host').disabled,
+            ];
+
+            button('#btn-save-config').click();
+            const saved = save.mock.calls[0][0] as ConnectionConfig;
+            expect([saved.host, saved.messagingHost]).toEqual(['mgmt.test', 'msg.test']);
+
+            load.mockReturnValue(asConfig({ host: 'one.test' }));
+            button('#btn-load-config').click();
+            expect(shown()).toEqual(['false', 'one.test', 'one.test', true]);
+
+            load.mockReturnValue(saved);
+            button('#btn-load-config').click();
+            expect(shown()).toEqual(['true', 'mgmt.test', 'msg.test', false]);
+        });
+
+        it('Reset Form returns to Software / Cloud with no host', async () => {
+            toastContainer();
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+            input('#solace-host').classList.add('is-invalid');
+
+            button('#btn-reset-form').click();
+            expect(typeButton('software').getAttribute('aria-pressed')).toBe('true');
+            expect([input('#conn-host').value, input('#solace-host').value, invalid('#solace-host')]).toEqual(['', '', false]);
+        });
+
+        it('connects SEMP on Enter in the SEMP card\'s host, and messaging on Enter in an appliance\'s messaging host', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+            (globalThis.fetch as any).mockClear();
+
+            input('#conn-host').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+            await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+                expect.stringContaining('https://mgmt.test:943/SEMP/v2/monitor/msgVpns'), expect.anything()));
+            expect(createSession()).not.toHaveBeenCalled();
+
+            input('#solace-host').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+            expect(createSession().mock.calls[0][0].url).toBe('wss://msg.test:8080');
+        });
+
+        // One host: the link opens the SEMP address, as
+        // "onConnectFailed with \"Connection error\" surfaces a helpUrl link to the SEMP base" above holds.
+        it('sends an appliance\'s Trust Certificate link to its messaging address: the management host may hold another certificate', async () => {
+            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            createSession().mockImplementation(() => { throw new Error('Certificate Not Trusted'); });
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+
+            button('#btn-solace-connect').click();
+            expect(trustUrl()).toBe('https://msg.test:8080');
+            consoleSpy.mockRestore();
+        });
+
+        it('sends it to the plain address of an appliance reached over ws://', async () => {
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+            (container.querySelector('#solace-protocol') as HTMLSelectElement).value = 'ws';
+
+            button('#btn-solace-connect').click();
+            sessionHandler('CONNECT_FAILED_ERROR')({ infoStr: 'Connection error to host' });
+            expect(trustUrl()).toBe('http://msg.test:8080');
+        });
+    });
+
 });

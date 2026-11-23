@@ -426,6 +426,11 @@
         },
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "rev": 0, "hostname": "host4", "semp": { "port": "1943", "user": "mon", "pass": "p" }, "client": { "hostname": "bad host", "port": "1443", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": client.hostname \"bad host\" must be a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
           "body": { "rev": 0, "hostname": "host4", "semp": { "port": "+80", "user": "mon", "pass": "p" }, "client": { "port": "1443", "msgVpns": [] } },
           "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b4\": semp.port \"+80\" is not a port (1 to 65535)" }
         },
@@ -1756,6 +1761,53 @@
                 "broker": "b4", "rev": 2, "hostname": "host4",
                 "semp": { "scheme": "http", "port": "8080", "user": "mon", "pass": "" },
                 "client": { "scheme": "ws", "port": "8008", "msgVpns": [{ "name": "v4", "user": "u4", "pass": "" }] }
+              },
+              {
+                "broker": "b5", "rev": 3, "hostname": "host5",
+                "semp": { "scheme": "https", "port": "1943", "user": "", "pass": "" },
+                "client": { "scheme": "wss", "port": "1443", "msgVpns": [] }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "connections: an appliance's messaging hostname is kept, and one equal to the hostname is left out",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "rev": 0, "hostname": "mgmt4", "semp": { "port": "443", "user": "mon", "pass": "p" }, "client": { "hostname": "msg4", "port": "443", "msgVpns": [{ "name": "v4", "user": "u4", "pass": "p4" }] } },
+          "status": 200, "response": { "rev": 2 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b5",
+          "body": { "rev": 0, "hostname": "host5", "semp": { "port": "1943", "user": "", "pass": "" }, "client": { "hostname": "host5", "port": "1443", "msgVpns": [] } },
+          "status": 200, "response": { "rev": 3 }
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/connections", "status": 200,
+          "response": {
+            "connections": [
+              {
+                "broker": "b1", "rev": 1, "hostname": "host1",
+                "semp": { "scheme": "https", "port": "1943", "user": "mon", "pass": "" },
+                "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }
+              },
+              {
+                "broker": "b2", "rev": 1, "hostname": "host2",
+                "semp": { "scheme": "http", "port": "1943", "user": "mon", "pass": "" },
+                "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v9", "user": "u9", "pass": "" }] }
+              },
+              {
+                "broker": "b3", "rev": 1, "hostname": "host3",
+                "semp": { "scheme": "https", "port": "", "user": "", "pass": "" },
+                "client": { "scheme": "ws", "port": "1443", "msgVpns": [{ "name": "v3", "user": "u3", "pass": "" }] }
+              },
+              {
+                "broker": "b4", "rev": 2, "hostname": "mgmt4",
+                "semp": { "scheme": "https", "port": "443", "user": "mon", "pass": "" },
+                "client": { "hostname": "msg4", "scheme": "wss", "port": "443", "msgVpns": [{ "name": "v4", "user": "u4", "pass": "" }] }
               },
               {
                 "broker": "b5", "rev": 3, "hostname": "host5",

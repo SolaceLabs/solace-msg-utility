@@ -190,6 +190,8 @@ src/
       defaults.ts              # DEFAULT_CONFIG + validateConfig (data-shape validator)
       conn-modes.ts            # ConnDeploymentConfig + DEFAULT_CONN_CONFIG + coerceConnConfig +
                                # resolveConnTabs (fed by SMU_CONN_MODES/SMU_DEFAULT_CONN)
+      broker-hosts.ts          # createBrokerHosts(): the broker-type control and the two host boxes of a
+                               # connection form (one host, or an appliance's management and messaging hosts)
     components/                # Reusable UI components with function APIs.
       queue-picker/
         index.ts               # createQueuePicker() -> ctx.queuePicker.pick(source, opts?) -- takes a QueueSource, never SEMP directly

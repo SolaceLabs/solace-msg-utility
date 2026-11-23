@@ -555,10 +555,13 @@ type sempJSON struct {
 	Pass   string `json:"pass"` // plaintext over TLS; "" = keep on edit; never listed
 }
 
+// clientJSON names a hostname only for an appliance, whose messaging answers
+// on another host than its SEMP: left out, messaging uses the connection's.
 type clientJSON struct {
-	Scheme  string    `json:"scheme"`
-	Port    string    `json:"port"`
-	MsgVpns []vpnJSON `json:"msgVpns"`
+	Hostname string    `json:"hostname,omitempty"`
+	Scheme   string    `json:"scheme"`
+	Port     string    `json:"port"`
+	MsgVpns  []vpnJSON `json:"msgVpns"`
 }
 
 // connJSON is a connection as the admin app lists it.
@@ -611,7 +614,12 @@ func (c connSaveJSON) toRec(broker string) connRec {
 		Broker:   broker,
 		Hostname: c.Hostname,
 		Semp:     sempRec{Scheme: canonScheme(c.Semp.Scheme, sempTLS), Port: flexStr(c.Semp.Port), Username: c.Semp.User, Password: c.Semp.Pass},
-		Client:   clientRec{Scheme: canonScheme(c.Client.Scheme, clientTLS), Port: flexStr(c.Client.Port), MsgVpns: vpns},
+		Client: clientRec{
+			Hostname: canonClientHost(c.Client.Hostname, c.Hostname),
+			Scheme:   canonScheme(c.Client.Scheme, clientTLS),
+			Port:     flexStr(c.Client.Port),
+			MsgVpns:  vpns,
+		},
 	}
 }
 
@@ -628,6 +636,7 @@ func connToOutput(c connRec) connJSON {
 	out.Semp.Scheme = orTLS(c.Semp.Scheme, sempTLS)
 	out.Semp.Port = string(c.Semp.Port)
 	out.Semp.User = c.Semp.Username
+	out.Client.Hostname = canonClientHost(c.Client.Hostname, c.Hostname)
 	out.Client.Scheme = orTLS(c.Client.Scheme, clientTLS)
 	out.Client.Port = string(c.Client.Port)
 	// Initialise so a VPN-less connection serialises "msgVpns":[] (not null),
@@ -872,7 +881,7 @@ func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request, 
 	}
 	h.log(r).Info("connection saved", "target", rec.Broker, "created", rev == 0, "hostname", rec.Hostname,
 		"semp_scheme", orTLS(rec.Semp.Scheme, sempTLS), "semp_port", string(rec.Semp.Port), "semp_password_set", body.Semp.Pass != "",
-		"client_scheme", orTLS(rec.Client.Scheme, clientTLS), "client_port", string(rec.Client.Port),
+		"client_hostname", rec.clientHost(), "client_scheme", orTLS(rec.Client.Scheme, clientTLS), "client_port", string(rec.Client.Port),
 		"vpns", vpns, "vpn_passwords_set", newPasswords, "rev", got.rev)
 	writeJSON(w, http.StatusOK, map[string]int{"rev": got.rev})
 }
@@ -898,7 +907,7 @@ func connChanges(old, next connRec) []string {
 	if old.Semp.Scheme != next.Semp.Scheme || old.Semp.Port != next.Semp.Port || old.Semp.Username != next.Semp.Username || next.Semp.Password != "" {
 		out = append(out, "semp")
 	}
-	if old.Client.Scheme != next.Client.Scheme || old.Client.Port != next.Client.Port {
+	if old.clientHost() != next.clientHost() || old.Client.Scheme != next.Client.Scheme || old.Client.Port != next.Client.Port {
 		out = append(out, "client")
 	}
 	named := func(vpns []vpnRec, name string) int {

@@ -59,9 +59,14 @@ export interface SempConfig {
     hosted?: boolean;
 }
 
-/** Full broker connection config. Host is shared between Solace and SEMP. */
+/**
+ * Full broker connection config. `host` serves SEMP and messaging alike,
+ * unless `messagingHost` names another host for messaging: an appliance,
+ * whose management and messaging addresses differ (`./broker-hosts.ts`).
+ */
 export interface ConnectionConfig {
     host: string;
+    messagingHost?: string;
     solace: SolaceConfig;
     semp: SempConfig;
 }

@@ -31,13 +31,25 @@
             <label for="conn-mgmt-broker">Broker name</label>
             <input type="text" id="conn-mgmt-broker" class="form-control" autocomplete="off">
         </div>
+        <!-- One hostname for a software or cloud broker, two for an appliance
+             (core/connections/broker-hosts.ts). -->
         <div class="w-full">
-            <label for="conn-mgmt-hostname">Hostname</label>
-            <input type="text" id="conn-mgmt-hostname" class="form-control" autocomplete="off">
+            <label>Solace Event Broker Type</label>
+            <div class="flex-row items-center gap-4">
+                <div class="segmented" id="conn-mgmt-broker-type" role="group" aria-label="Solace Event Broker Type">
+                    <button type="button" class="segmented-option" data-broker-type="software" aria-pressed="true">Software / Cloud</button>
+                    <button type="button" class="segmented-option" data-broker-type="appliance" aria-pressed="false">Appliance</button>
+                </div>
+                <span id="conn-mgmt-broker-type-hint" class="text-secondary text-body-sm"></span>
+            </div>
         </div>
     </div>
 
     <h3 class="conn-mgmt-section">SEMP (management)</h3>
+    <div class="form-group">
+        <label id="lbl-conn-mgmt-hostname" for="conn-mgmt-hostname">Hostname</label>
+        <input type="text" id="conn-mgmt-hostname" class="form-control" autocomplete="off">
+    </div>
     <div class="form-group flex-row">
         <div class="w-full">
             <label for="conn-mgmt-semp-scheme">Scheme</label>
@@ -61,6 +73,11 @@
     </div>
 
     <h3 class="conn-mgmt-section">Client (messaging)</h3>
+    <div class="form-group">
+        <label for="conn-mgmt-client-hostname">Messaging hostname</label>
+        <input type="text" id="conn-mgmt-client-hostname" class="form-control" autocomplete="off" disabled>
+        <small id="conn-mgmt-client-hostname-hint" class="text-secondary text-xs">Follows the hostname above. Choose Appliance to set its own.</small>
+    </div>
     <div class="form-group flex-row">
         <div class="w-full">
             <label for="conn-mgmt-client-scheme">Scheme</label>

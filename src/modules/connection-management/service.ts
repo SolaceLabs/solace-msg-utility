@@ -19,14 +19,18 @@ export interface ManagedConnVpn {
     pass: string; // as typed on write; '' from list / '' = keep on edit
 }
 
-/** A blank or missing scheme is TLS: https for SEMP, wss for SMF. */
+/**
+ * A blank or missing scheme is TLS: https for SEMP, wss for SMF. `hostname`
+ * serves SEMP and messaging alike unless `client.hostname` names another host
+ * for messaging: an appliance, whose management and messaging addresses differ.
+ */
 export interface ManagedConnRecord {
     /** The record's version, as listed; a save sends it back (0 = a new connection). */
     rev: number;
     broker: string;
     hostname: string;
     semp: { scheme?: 'https' | 'http'; port: string; user: string; pass: string };
-    client: { scheme?: 'wss' | 'ws'; port: string; msgVpns: ManagedConnVpn[] };
+    client: { hostname?: string; scheme?: 'wss' | 'ws'; port: string; msgVpns: ManagedConnVpn[] };
 }
 
 export interface ConnMgmtService {

@@ -141,8 +141,17 @@ export function wireUiEvents(
         if (state.destForm.credMode === 'provisioned') destCard.setStatus('disconnected');
     }
 
-    // ===== Destination Broker host =====
-    els.destHost.addEventListener('input', () => { state.destForm.host = els.destHost.value.trim(); });
+    // ===== Destination broker type and hosts =====
+    // The form's hosts follow the two boxes and the type control, whose own
+    // listener (set when the elements were cached) has run by the time this one does.
+    const readDestHosts = (): void => {
+        const { host, messagingHost } = els.destHosts.values();
+        state.destForm.host = host.trim();
+        state.destForm.messagingHost = messagingHost?.trim();
+    };
+    els.destHost.addEventListener('input', readDestHosts);
+    els.destSolHost.addEventListener('input', readDestHosts);
+    els.destBrokerType.addEventListener('click', readDestHosts);
 
     // ===== Destination Connect buttons =====
     // Same one-button toggle as the connections module: read the button's
@@ -179,9 +188,8 @@ export function wireUiEvents(
 
     // Enter-to-connect: pressing Enter in any destination field triggers the
     // same click path as the Connect button on that card. Mirrors the
-    // connections module's Enter bindings. The destHost field is shared so
-    // it binds to the SEMP Connect (SEMP is typically established first
-    // because it powers the destination queue picker).
+    // connections module's Enter bindings: destHost sits in the SEMP card and
+    // binds to the SEMP Connect, an appliance's destSolHost to the Client one.
     //
     // `keydown` (not deprecated `keypress`) for cross-layout parity.
     const onEnter = (e: KeyboardEvent, btn: HTMLButtonElement): void => {
@@ -195,6 +203,7 @@ export function wireUiEvents(
         input.addEventListener('keydown', (e) => onEnter(e as KeyboardEvent, els.btnDestSempConnect));
     });
     const solFields: HTMLElement[] = [
+        els.destSolHost,
         els.destSolPort, els.destSolUrlPath, els.destSolVpn, els.destSolUser, els.destSolPass,
     ];
     solFields.forEach((input) => {

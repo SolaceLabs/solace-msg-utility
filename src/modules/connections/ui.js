@@ -15,8 +15,13 @@ export const ui = {};
     ui.cacheElements = function (container) {
         elements.container = container;
 
-        // Broker Inputs — required: module installs require these.
+        // Broker type and its two host boxes (core/connections/broker-hosts.ts) -- required.
+        elements.elBrokerType = required(container, '#conn-broker-type');
+        elements.elBrokerTypeHint = required(container, '#conn-broker-type-hint');
         elements.elHost = required(container, '#conn-host');
+        elements.lblHost = required(container, '#lbl-conn-host');
+        elements.elSolHost = required(container, '#solace-host');
+        elements.elSolHostHint = required(container, '#solace-host-hint');
         elements.btnSave = required(container, '#btn-save-config');
         elements.btnLoad = required(container, '#btn-load-config');
         elements.btnReset = required(container, '#btn-reset-form');
@@ -166,13 +171,12 @@ export const ui = {};
 
     // CRITICAL: Matches global state logic to disable inputs
     // Accepts appState parameter — no window.App references.
+    // The broker type and the host boxes are locked by module.ts, with the
+    // same two facts (BrokerHosts.lock).
     ui.updateInputState = function (appState) {
         const isSempConnected = appState.isSempConnected;
         const isSolaceConnected = appState.isConnected;
         const els = elements;
-
-        const anyConnected = isSolaceConnected || isSempConnected;
-        els.elHost.disabled = anyConnected;
 
         // Solace Fields
         els.elSolProtocol.disabled = isSolaceConnected;

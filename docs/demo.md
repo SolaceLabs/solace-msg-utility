@@ -61,6 +61,10 @@ Use host **`broker.solace.com`** with any non-empty credentials, or let **Fill t
 controls type them for you. Any other hostname is refused on both cards, and a hostname containing `untrust.com`
 simulates an untrusted certificate on the messaging connection, so the error paths are demoable too.
 
+To try a broker with two addresses, choose **Appliance** in the **Solace Event Broker Type** card. Keep
+`broker.solace.com` as the Management Host and give the Messaging Host a name that contains it, such as
+`msg.broker.solace.com`: the demo's messaging connection accepts any such name.
+
 `demo.html` is Direct-only. To try the Provisioned sign-in without a gateway, open [`provisioned-demo.html`](#provisioned-demo-provisioned-demohtml).
 
 ### The demo topology

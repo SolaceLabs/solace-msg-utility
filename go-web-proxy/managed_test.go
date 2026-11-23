@@ -690,6 +690,44 @@ func TestManagedAPI_ConnectionSchemes(t *testing.T) {
 	}
 }
 
+// An appliance's messaging hostname is saved with the client part and listed
+// there. One equal to the connection's hostname is a broker with one host: it
+// is stored and listed without it. A change to it is a change to "client".
+func TestManagedAPI_ConnectionClientHostname(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	appliance := `{"hostname":"mgmt3","semp":{"port":"443","user":"","pass":""},"client":{"hostname":"msg3","port":"443","msgVpns":[]}}`
+	oneHost := `{"hostname":"h4","semp":{"port":"1943","user":"","pass":""},"client":{"hostname":"h4","port":"1443","msgVpns":[]}}`
+	expect(t, e.putConnAs(c, "b3", appliance), http.StatusOK, "")
+	expect(t, e.putConnAs(c, "b4", oneHost), http.StatusOK, "")
+	rec := e.do("GET", "/managed/connections", "", c)
+	expect(t, rec, http.StatusOK, "")
+	var list struct{ Connections []connJSON }
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"b1": "", "b2": "", "b3": "msg3", "b4": ""}
+	for _, conn := range list.Connections {
+		if conn.Client.Hostname != want[conn.Broker] {
+			t.Errorf("%s: client hostname %q, want %q", conn.Broker, conn.Client.Hostname, want[conn.Broker])
+		}
+	}
+	if got := strings.Count(rec.Body.String(), `"hostname"`); got != len(list.Connections)+1 {
+		t.Errorf("only the appliance's client part names a hostname, got %d in %s", got, rec.Body.String())
+	}
+	bad := e.do("PUT", "/managed/connections/b5", `{"hostname":"h5","semp":{},"client":{"hostname":"not a host"}}`, c)
+	expect(t, bad, http.StatusUnprocessableEntity, "invalid")
+	if r := errorCode(t, bad); r.Field != "connection" || r.Reason != `broker "b5": client.hostname "not a host" `+hostRule {
+		t.Errorf("want the field and reason, got %+v", r)
+	}
+	old := connRec{Broker: "b3", Hostname: "mgmt3"}
+	next := old
+	next.Client.Hostname = "msg3"
+	if got := strings.Join(connChanges(old, next), ","); got != "client" {
+		t.Errorf("a new messaging hostname changes the client part, got %q", got)
+	}
+}
+
 // GET /managed/client says which address the gateway took this browser for,
 // and whether a trusted proxy's X-Forwarded-For decided it.
 func TestManagedAPI_ClientSeen(t *testing.T) {

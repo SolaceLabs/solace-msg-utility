@@ -81,6 +81,8 @@ describe('mock-broker/gateway/backup -- the file format', () => {
 
     it('seals and opens a document, carrying every user and connection field', async () => {
         const original = doc();
+        // An appliance: its messaging answers on a host of its own.
+        original.connections.push({ broker: 'ap1', hostname: 'mgmt1', semp: { port: '443', username: 'mon', password: 's' }, client: { hostname: 'msg1', port: '443', msgVpns: [] } });
         const file = await sealBackup(await newBackupKey(PASS, 1000), original);
         expect(file).not.toContain('admin-password-1');
         expect(JSON.parse(file).kdf).toEqual({ name: 'pbkdf2-sha256', iter: 1000, salt: expect.any(String) });
@@ -346,6 +348,15 @@ describe('mock-broker/gateway/backup -- the routes', () => {
         const basisOf = (gw: Gw) => ({ ...gw.store.seqs(), settings: gw.settings.rev() });
         const imp = (gw: Gw, f: string, users: string, connections: string, s: string, basis: object = basisOf(gw)) =>
             call(gw, 'POST', '/managed/backup/import', { file: f, passphrase: PASS, users, connections, settings: s, basis });
+
+        it('brings in an appliance\'s messaging hostname: the preview names the connection as changed, and the list shows it after', async () => {
+            const gw = gateway();
+            const f = await file(gw, d => { d.connections[0].client.hostname = 'msg1'; });
+            const preview = await call(gw, 'POST', '/managed/backup/preview', { file: f, passphrase: PASS });
+            expect(preview.json.connections).toEqual({ added: [], changed: [gw.store.listConnections()[0].broker], removed: [] });
+            expect((await imp(gw, f, 'skip', 'replace', 'skip')).json).toEqual({ signedOut: false });
+            expect(gw.store.listConnections()[0].client.hostname).toBe('msg1');
+        });
 
         it('refuses a missing source, a missing saved backup and a file it cannot open', async () => {
             const gw = gateway();

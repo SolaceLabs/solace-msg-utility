@@ -52,38 +52,57 @@
 
     <h3>The page at a glance</h3>
     <figure class="manual-figure">
-        <img src="help/page.svg" width="760" height="590" alt="The Connections page: the Broker Configuration card, the Solace SEMP card, the Solace Messaging card with its settings button and sign-in choice, and the three buttons at the foot.">
+        <img src="help/page.svg" width="760" height="656" alt="The Connections page: the Solace Event Broker Type card with its two choices, the Solace SEMP card with the Broker Host, the Solace Messaging card with its Messaging Host, settings button and sign-in choice, and the three buttons at the foot.">
         <figcaption>The Connections page, filled in for a broker with a Message VPN called default.</figcaption>
     </figure>
     <ol class="manual-callouts">
-        <li><strong>Broker Host (IP or Hostname)</strong>. One host, shared by both connections.</li>
+        <li>The broker type: <strong>Software / Cloud</strong> or <strong>Appliance</strong>.</li>
+        <li><strong>Broker Host (IP or Hostname)</strong>. For a software or cloud broker, the one host of both connections.</li>
         <li>The SEMP address: <strong>Protocol</strong>, <strong>Port</strong> and the optional <strong>URL Path</strong>.</li>
         <li>The SEMP <strong>Username</strong> and <strong>Password</strong>.</li>
         <li>The SEMP <strong>Connect</strong> button.</li>
         <li>The settings button beside the card's title, which opens Advanced Connection Settings.</li>
         <li>The sign-in scheme: <strong>Basic</strong> or <strong>OAuth2</strong>.</li>
+        <li><strong>Messaging Host (IP or Hostname)</strong>. Locked for a software or cloud broker, where it shows the Broker Host.</li>
         <li>The Messaging address: <strong>Protocol</strong>, <strong>Port</strong>, the optional <strong>URL Path</strong>, and the <strong>Message VPN</strong>.</li>
         <li>The Messaging <strong>Username</strong> and <strong>Password</strong>.</li>
         <li>The Messaging <strong>Connect</strong> button.</li>
         <li><strong>Reset Form</strong>, <strong>Load All Config</strong> and <strong>Save All Config</strong>.</li>
     </ol>
-    <p>The two connections are independent. You can make either one, or both, in either order. Press the <kbd>Enter</kbd> key in a text box of the SEMP card to press its <strong>Connect</strong> button. In a text box of the Messaging card, or in <strong>Broker Host (IP or Hostname)</strong>, it presses the Messaging <strong>Connect</strong> button.</p>
+    <p>The two connections are independent. You can make either one, or both, in either order. Press the <kbd>Enter</kbd> key in a text box of a card to press that card's <strong>Connect</strong> button. The Broker Host belongs to the SEMP card, and the Messaging Host to the Messaging card.</p>
+
+    <h3>One host or two: the broker type</h3>
+    <p>A software or cloud broker answers SEMP and messaging on one host. A Solace appliance answers SEMP on its management address and messaging on another. The <strong>Solace Event Broker Type</strong> card at the top of the page says which of the two you have.</p>
+    <table>
+        <thead>
+            <tr><th>Type</th><th>The host boxes</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Software / Cloud</strong></td><td>One host. Type it into <strong>Broker Host (IP or Hostname)</strong>, in the SEMP card. The <strong>Messaging Host (IP or Hostname)</strong> box of the Messaging card is locked and shows the same host. The page opens with this choice, and the card reads <code>One host serves both management and messaging.</code></td></tr>
+            <tr><td><strong>Appliance</strong></td><td>Two hosts. The box of the SEMP card is labelled <strong>Management Host (IP or Hostname)</strong>. The box of the Messaging card is free: it starts with the host already typed, for you to replace with the appliance's messaging address. The card reads <code>Management and messaging each take their own host.</code></td></tr>
+        </tbody>
+    </table>
+    <ul>
+        <li>The type cannot be changed while either connection is up.</li>
+        <li>Changing back to <strong>Software / Cloud</strong> drops the messaging host you typed.</li>
+        <li><strong>Appliance</strong> with the same host in both boxes is a broker with one host. It is saved, and loads again, as <strong>Software / Cloud</strong>.</li>
+    </ul>
 
     <h3>Connecting the Solace client</h3>
     <p>The Solace client connection opens a Web Messaging session (a WebSocket) to your broker. The Queue Browser chapter describes what it does with that session: read, forward and delete messages.</p>
     <ol class="manual-steps">
-        <li>Fill in <strong>Broker Host (IP or Hostname)</strong>, at the top of the page.</li>
+        <li>Give the host. For a software or cloud broker, fill in <strong>Broker Host (IP or Hostname)</strong> in the SEMP card. For an appliance, fill in <strong>Messaging Host (IP or Hostname)</strong> in the Messaging card.</li>
         <li>In the <strong>Solace Messaging (Client)</strong> card, choose the sign-in scheme and fill in the address, the <strong>Message VPN</strong>, and the account.</li>
         <li>Press <strong>Connect</strong>. The button reads <code>Connecting...</code> and stays off until the broker answers.</li>
         <li>When the session is up the button turns red and reads <strong>Disconnect</strong>, and the Client indicator turns green. Press <strong>Disconnect</strong> to end the session.</li>
     </ol>
-    <p>While the Solace client is connected, every field of the card is locked, and so is the Broker Host. Disconnect to change them.</p>
+    <p>While the Solace client is connected, every field of the card is locked, and so is the host it uses: the Broker Host of a software or cloud broker, the Messaging Host of an appliance. Disconnect to change them.</p>
     <table>
         <thead>
             <tr><th>Field</th><th>What to enter</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>Broker Host (IP or Hostname)</strong></td><td>A host name such as <code>broker.example.com</code>, or an IPv4 address. An IPv6 address is not accepted. A bad value turns the box red with <code>Invalid hostname or IP address.</code> The box starts as <code>localhost</code> when nothing has been saved.</td></tr>
+            <tr><td><strong>Broker Host (IP or Hostname)</strong>, or <strong>Messaging Host (IP or Hostname)</strong> for an appliance</td><td>A host name such as <code>broker.example.com</code>, or an IPv4 address. An IPv6 address is not accepted. A bad value turns the box red with <code>Invalid hostname or IP address.</code> The Broker Host starts as <code>localhost</code> when nothing has been saved.</td></tr>
             <tr><td><strong>Protocol</strong></td><td><code>wss://</code> (encrypted, the default) or <code>ws://</code>. The list also shows <code>http://</code> and <code>https://</code>, but they are greyed out and cannot be chosen. A page opened over <code>https://</code> without a gateway offers only <code>wss://</code>, because the browser blocks an unencrypted connection from it.</td></tr>
             <tr><td><strong>Port</strong></td><td>The broker's WebSocket port, a whole number from 1 to 65535. A bad value turns the box red with <code>Invalid port.</code></td></tr>
             <tr><td><strong>URL Path</strong></td><td>Optional. A path placed after the port, for a broker behind a reverse proxy. The box is hidden until you press <strong>+ URL path</strong>; the cross in the box empties it and hides it again. A leading <code>/</code> is added and a trailing one dropped. A path that is saved, loaded or typed always shows its box.</td></tr>
@@ -117,12 +136,12 @@
     <h3>Connecting SEMP</h3>
     <p>SEMP is the broker's management interface. The page connects to its SEMP v2 REST API and uses it to read facts about the broker, such as which queues exist. The pages that list a broker's queues and subscriptions need it. A SEMP connection is not a standing session: the page checks your account with one request, and then sends each later request with the same account.</p>
     <ol class="manual-steps">
-        <li>Fill in <strong>Broker Host (IP or Hostname)</strong> at the top of the page. The SEMP connection uses the same host as the Solace client.</li>
+        <li>Fill in <strong>Broker Host (IP or Hostname)</strong> at the top of the card. For an appliance the box is labelled <strong>Management Host (IP or Hostname)</strong> and takes its management address.</li>
         <li>In the <strong>Solace SEMP (Management)</strong> card, fill in the address and the account.</li>
         <li>Press <strong>Connect</strong>. The button reads <code>Connecting...</code> while the page waits.</li>
         <li>When the broker accepts the account the button turns red and reads <strong>Disconnect</strong>, and the SEMP indicator turns green.</li>
     </ol>
-    <p>The fields lock while SEMP is connected. The Broker Host stays locked while either connection is up.</p>
+    <p>The fields lock while SEMP is connected. The Broker Host of a software or cloud broker stays locked while either connection is up. An appliance's Management Host is locked by the SEMP connection alone.</p>
     <table>
         <thead>
             <tr><th>Field</th><th>What to enter</th></tr>
@@ -202,12 +221,12 @@
         <tbody>
             <tr><td><strong>Save All Config</strong></td><td>Saves what the form shows, replacing the earlier set. A toast reads <code>Configuration saved</code>. If the browser cannot store it, an error toast says that storage is unavailable. An invalid Max Messages per Queue or Client Name Identifier stops the save without a toast; open Advanced Settings to read the message.</td></tr>
             <tr><td><strong>Load All Config</strong></td><td>Puts the saved set into the form and shows <code>Configuration loaded</code>. With nothing saved, nothing happens. The saved set is also loaded by itself each time you open the page.</td></tr>
-            <tr><td><strong>Reset Form</strong></td><td>Empties the form: the host, ports, paths, Message VPN, usernames and passwords. It sets both protocols to <code>wss://</code> and <code>https://</code>, sign-in to <strong>Basic</strong>, and the Client Name Identifier to a fresh one. The five numbers in Advanced Settings stay as they are, and so do the saved set and any live connection. A toast reads <code>Form reset</code>.</td></tr>
+            <tr><td><strong>Reset Form</strong></td><td>Empties the form: the host, ports, paths, Message VPN, usernames and passwords. It sets the broker type to <strong>Software / Cloud</strong>, both protocols to <code>wss://</code> and <code>https://</code>, sign-in to <strong>Basic</strong>, and the Client Name Identifier to a fresh one. The five numbers in Advanced Settings stay as they are, and so do the saved set and any live connection. A toast reads <code>Form reset</code>.</td></tr>
         </tbody>
     </table>
     <h4>What is stored, and what is not</h4>
     <ul>
-        <li>Stored: the Broker Host; for each connection the protocol, port, URL path and username; the Message VPN; the sign-in scheme; the five numbers of Advanced Settings; and the Client Name Identifier.</li>
+        <li>Stored: the Broker Host, and an appliance's Messaging Host, which also tells the page the broker type; for each connection the protocol, port, URL path and username; the Message VPN; the sign-in scheme; the five numbers of Advanced Settings; and the Client Name Identifier.</li>
         <li>Not stored: both passwords. Type them again after a load.</li>
         <li>In OAuth2 mode the first box holds the access token. It is stored like the Messaging username, so an access token is saved with the rest.</li>
     </ul>
@@ -231,7 +250,7 @@
         <li>The address that button opens.</li>
     </ol>
     <ol class="manual-steps">
-        <li>Press <strong>Open Broker URL</strong>. The address opens in another tab. It is built from the Broker Host and the Protocol and Port of the SEMP card (with its URL Path, if you set one), so fill those in first.</li>
+        <li>Press <strong>Open Broker URL</strong>. The address opens in another tab. It is built from the Broker Host and the Protocol and Port of the SEMP card (with its URL Path, if you set one), so fill those in first. After a failed Messaging connect to an appliance it is the Messaging Host and the Port of the Messaging card, since the appliance's two addresses may hold different certificates.</li>
         <li>If the browser shows a privacy warning, press <strong>Advanced</strong>, then <strong>Proceed</strong> (or Accept).</li>
         <li>Close that tab, come back and press <strong>Connect</strong> again.</li>
     </ol>

@@ -70,22 +70,24 @@ export interface VpnRec { name: string; username: string; password: string }
 /**
  * A connections-file record (store.go `connRec`). A blank or absent scheme is
  * TLS (https for SEMP, wss for SMF); a save stores the TLS scheme as absent,
- * so a record names only the plain one (http, ws).
+ * so a record names only the plain one (http, ws). The client part names a
+ * hostname only for an appliance, whose messaging answers on another host
+ * than its SEMP; a save stores one equal to the record's as absent.
  */
 export interface ConnRec {
     broker: string;
     hostname: string;
     semp: { scheme?: string; port: string; username: string; password: string };
-    client: { scheme?: string; port: string; msgVpns: VpnRec[] };
+    client: { hostname?: string; scheme?: string; port: string; msgVpns: VpnRec[] };
 }
 
-/** A connection as `GET /managed/connections` lists it: no password, both schemes named. */
+/** A connection as `GET /managed/connections` lists it: no password, both schemes named, a client hostname only when it is another host. */
 export interface ListedConn {
     rev: number;
     broker: string;
     hostname: string;
     semp: { scheme: string; port: string; user: string; pass: string };
-    client: { scheme: string; port: string; msgVpns: { name: string; user: string; pass: string }[] };
+    client: { hostname?: string; scheme: string; port: string; msgVpns: { name: string; user: string; pass: string }[] };
 }
 
 /** `GET /managed/client`: the address the gateway took the browser for, and how. */

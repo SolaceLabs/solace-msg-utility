@@ -229,6 +229,23 @@ describe('queue-copy/ui-events', () => {
             expect(state.destForm.host).toBe('h');
         });
 
+        it('an appliance\'s two hosts, and one host again once the type is back on Software / Cloud', () => {
+            const { els, state } = setup();
+            els.toggleSameBroker.checked = false;
+            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            const typeButton = (type: string) => els.destBrokerType.querySelector<HTMLButtonElement>(`[data-broker-type="${type}"]`)!;
+
+            typeButton('appliance').click();
+            els.destHost.value = ' mgmt ';
+            els.destHost.dispatchEvent(new Event('input'));
+            els.destSolHost.value = ' msg ';
+            els.destSolHost.dispatchEvent(new Event('input'));
+            expect([state.destForm.host, state.destForm.messagingHost]).toEqual(['mgmt', 'msg']);
+
+            typeButton('software').click();
+            expect([state.destForm.host, state.destForm.messagingHost]).toEqual(['mgmt', undefined]);
+        });
+
         it('SEMP fields', () => {
             const { els, state } = setup();
             els.toggleSameBroker.checked = false;
@@ -633,12 +650,21 @@ describe('queue-copy/ui-events', () => {
             expect(services.connectDestSemp).toHaveBeenCalledTimes(1);
         });
 
-        it('Enter in destHost triggers SEMP Connect (shared host binds to SEMP)', () => {
+        it('Enter in destHost triggers SEMP Connect (the host sits in the SEMP card)', () => {
             const { els, services } = setup();
             els.toggleSameBroker.checked = false;
             els.toggleSameBroker.dispatchEvent(new Event('change'));
             fireEnter(els.destHost);
             expect(services.connectDestSemp).toHaveBeenCalledTimes(1);
+        });
+
+        it('Enter in an appliance\'s destSolHost triggers the Client Connect', () => {
+            const { els, services } = setup();
+            els.toggleSameBroker.checked = false;
+            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            fireEnter(els.destSolHost);
+            expect(services.connectDestSol).toHaveBeenCalledTimes(1);
+            expect(services.connectDestSemp).not.toHaveBeenCalled();
         });
 
         it('Enter in destSempPass triggers SEMP Connect', () => {
