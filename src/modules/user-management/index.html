@@ -46,9 +46,13 @@
         <h2 class="card-title mb-4">Modules</h2>
         <p class="user-mgmt-hint text-secondary mb-2">The app modules this user may open.</p>
         <div>
-            <div class="segmented" id="user-mgmt-modules-mode" role="group" aria-label="Modules">
-                <button type="button" class="segmented-option" id="user-mgmt-modules-default" data-modules-mode="default" aria-pressed="true">Deployment default</button>
-                <button type="button" class="segmented-option" id="user-mgmt-modules-choose" data-modules-mode="choose" aria-pressed="false">Choose for this user</button>
+            <div class="slide-choice" id="user-mgmt-modules-mode" role="group" aria-label="Modules">
+                <span class="slide-choice-label active" data-choice="default">Deployment default</span>
+                <span class="switch" title="Toggle between Deployment default and Choose for this user">
+                    <input type="checkbox" aria-label="Choose the modules for this user">
+                    <span class="switch-slider"></span>
+                </span>
+                <span class="slide-choice-label" data-choice="choose">Choose for this user</span>
             </div>
         </div>
         <p class="user-mgmt-hint text-secondary mt-2">Deployment default: <span id="user-mgmt-modules-default-hint"></span></p>

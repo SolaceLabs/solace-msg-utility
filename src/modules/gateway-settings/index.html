@@ -2,7 +2,9 @@
 
 <!-- Every section is its own card, stacked full width. Each .form-group's
      data-key is its settings key. Fields share a row (.form-cols); an on/off
-     setting is a switch on a line of its own. The page's title is the module's name in the
+     setting is a switch on a line of its own. A setting with two answers is a
+     segmented button or a slide choice, each answer naming its value in
+     data-choice. The page's title is the module's name in the
      sidebar; the first card holds only what the page is for and Reload. -->
 <div id="gw-set-view" class="hidden">
     <div class="card">
@@ -26,18 +28,22 @@
              SMU_CONN_MODES=direct and no config.yaml. -->
         <div class="form-cols">
             <div class="form-group" data-key="connModes">
-                <label for="gw-set-connModes">Connection modes the app offers</label>
-                <select id="gw-set-connModes" class="form-control">
-                    <option value="provisioned">Provisioned only (everyone signs in)</option>
-                    <option value="both">Direct and Provisioned</option>
-                </select>
+                <label id="gw-set-connModes-label">Connection modes the app offers</label>
+                <div class="segmented" id="gw-set-connModes" role="group" aria-labelledby="gw-set-connModes-label">
+                    <button type="button" class="segmented-option" data-choice="provisioned" aria-pressed="true">Provisioned only</button>
+                    <button type="button" class="segmented-option" data-choice="both" aria-pressed="false">Direct and Provisioned</button>
+                </div>
             </div>
             <div class="form-group" data-key="defaultConn">
-                <label for="gw-set-defaultConn">Tab shown first when both are offered</label>
-                <select id="gw-set-defaultConn" class="form-control">
-                    <option value="direct">Direct</option>
-                    <option value="provisioned">Provisioned</option>
-                </select>
+                <label id="gw-set-defaultConn-label">Tab shown first when both are offered</label>
+                <div class="slide-choice" id="gw-set-defaultConn" role="group" aria-labelledby="gw-set-defaultConn-label">
+                    <span class="slide-choice-label active" data-choice="direct">Direct</span>
+                    <span class="switch" title="Toggle between Direct and Provisioned">
+                        <input type="checkbox" aria-label="Show the Provisioned tab first">
+                        <span class="switch-slider"></span>
+                    </span>
+                    <span class="slide-choice-label" data-choice="provisioned">Provisioned</span>
+                </div>
             </div>
         </div>
     </div>
@@ -141,11 +147,11 @@
         </div>
         <div class="form-cols">
             <div class="form-group" data-key="modules.userDefault">
-                <label for="gw-set-modules-userDefault">A user without a list of their own gets</label>
-                <select id="gw-set-modules-userDefault" class="form-control">
-                    <option value="all">Every offered module</option>
-                    <option value="none">No modules</option>
-                </select>
+                <label id="gw-set-modules-userDefault-label">A user without a list of their own gets</label>
+                <div class="segmented" id="gw-set-modules-userDefault" role="group" aria-labelledby="gw-set-modules-userDefault-label">
+                    <button type="button" class="segmented-option" data-choice="all" aria-pressed="true">Every offered module</button>
+                    <button type="button" class="segmented-option" data-choice="none" aria-pressed="false">No modules</button>
+                </div>
             </div>
         </div>
     </div>
@@ -178,11 +184,16 @@
         </div>
         <div class="form-cols">
             <div class="form-group" data-key="audit.onFailure">
-                <label for="gw-set-audit-onFailure">If the audit log cannot be written</label>
-                <select id="gw-set-audit-onFailure" class="form-control">
-                    <option value="continue">Carry on, and log the lost record</option>
-                    <option value="refuse">Refuse changes until it can be written</option>
-                </select>
+                <label id="gw-set-audit-onFailure-label">If the audit log cannot be written</label>
+                <div class="slide-choice" id="gw-set-audit-onFailure" role="group" aria-labelledby="gw-set-audit-onFailure-label">
+                    <span class="slide-choice-label active" data-choice="continue">Carry on</span>
+                    <span class="switch" title="Toggle between Carry on and Refuse changes">
+                        <input type="checkbox" aria-label="Refuse changes while the audit log cannot be written">
+                        <span class="switch-slider"></span>
+                    </span>
+                    <span class="slide-choice-label" data-choice="refuse">Refuse changes</span>
+                </div>
+                <small class="text-secondary text-xs">Carry on logs each lost record in the gateway log. Refuse changes stops every change until the audit log can be written.</small>
             </div>
         </div>
     </div>

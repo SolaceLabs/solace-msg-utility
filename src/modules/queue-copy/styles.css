@@ -92,22 +92,6 @@
     }
 }
 
-/* A choice between two named answers as a slide toggle: Queue / Topic in the
-   Destination card's top-right header, Copy / Move under Mode. Two static
-   labels on either side; the slider in between reflects checkbox state. */
-.copy-slide-choice {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.85rem;
-    color: var(--text-secondary);
-    user-select: none;
-}
-.copy-slide-choice .copy-slide-label.active {
-    color: var(--text-primary);
-    font-weight: 600;
-}
-
 /* Destination connect buttons — mirror the connections module's per-card
    "Connect" pattern, with a status line + optional error pane below. */
 .copy-dest-connect-row {

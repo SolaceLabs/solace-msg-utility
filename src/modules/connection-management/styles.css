@@ -8,6 +8,13 @@
     flex: 0 0 150px;
 }
 
+/* The scheme button is as tall as the boxes beside it, so the row reads as
+ * one address. */
+.conn-mgmt-scheme .segmented-option {
+    padding: 0.625rem 0.875rem;
+    font-size: 0.95rem;
+}
+
 .conn-mgmt-host {
     flex: 1;
     min-width: 0;

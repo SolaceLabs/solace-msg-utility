@@ -34,9 +34,10 @@
     <path d="M400 352 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
     <text x="48" y="390" font-size="11">Change: east-prod</text>
     <text x="40" y="418" font-size="11" fill="#64748b" font-weight="700">Settings</text>
-    <rect x="40" y="424" width="380" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="50" y="442">Replace</text>
-    <path d="M400 436 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="40" y="442" font-size="11" fill="#64748b">Skip</text>
+    <rect x="72.64" y="430" width="30" height="16" fill="#00C895" rx="8"/>
+    <circle cx="94.64" cy="438" r="6" fill="#ffffff"/>
+    <text x="110.64" y="442" font-size="11" font-weight="700">Replace</text>
     <text x="48" y="474" font-size="11">Change: logLevel, session.idleMinutes</text>
     <rect x="40" y="490" width="680" height="30" fill="#fffbeb" rx="5" stroke="#fcd34d"/>
     <text x="52" y="509" font-size="11" fill="#b45309">Importing the users this way changes your own account: you will be signed out.</text>

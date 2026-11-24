@@ -405,14 +405,19 @@ describe('user-management — modules', () => {
     const pillIds = (c: HTMLElement) => pills(c).map(p => p.dataset.module);
     const menuIds = (c: HTMLElement) =>
         [...el(c, '#user-mgmt-module-menu').querySelectorAll<HTMLElement>('.user-mgmt-menu-item')].map(i => i.dataset.module);
-    // The two parts of the Modules button; the pressed one is the choice.
-    const defaultPart = (c: HTMLElement) => el<HTMLButtonElement>(c, '#user-mgmt-modules-default');
-    const choosePart = (c: HTMLElement) => el<HTMLButtonElement>(c, '#user-mgmt-modules-choose');
-    const pressed = (part: HTMLButtonElement) => part.getAttribute('aria-pressed') === 'true';
+    // The Modules slide choice: its switch is off for Deployment default and on for Choose for this user.
+    const modeSwitch = (c: HTMLElement) => el<HTMLInputElement>(c, '#user-mgmt-modules-mode input');
+    /** The highlighted answers of the Modules slide choice. */
+    const mode = (c: HTMLElement) =>
+        [...el(c, '#user-mgmt-modules-mode').querySelectorAll<HTMLElement>('.slide-choice-label.active')].map(l => l.textContent);
+    function slideMode(c: HTMLElement, on: boolean): void {
+        modeSwitch(c).checked = on;
+        modeSwitch(c).dispatchEvent(new Event('change'));
+    }
     const addBtn = (c: HTMLElement) => el<HTMLButtonElement>(c, '#btn-user-mgmt-add-module');
-    /** Pick "Choose for this user" with a click. */
+    /** Slide to "Choose for this user". */
     function chooseForUser(c: HTMLElement): void {
-        choosePart(c).click();
+        slideMode(c, true);
     }
     function save(c: HTMLElement): void {
         el<HTMLButtonElement>(c, '#btn-user-mgmt-save').click();
@@ -423,7 +428,7 @@ describe('user-management — modules', () => {
     it('a new user starts on the deployment default: its modules named, pills without remove buttons, no Add module', async () => {
         const { container } = await setup();
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
-        expect([pressed(defaultPart(container)), pressed(choosePart(container))]).toEqual([true, false]);
+        expect([modeSwitch(container).checked, mode(container)]).toEqual([false, ['Deployment default']]);
         expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('Queue Browser');
         expect(pillIds(container)).toEqual(['queue-browser']);
         expect(el(container, '#user-mgmt-modules').querySelector('.user-mgmt-pill-remove')).toBeNull();
@@ -436,7 +441,7 @@ describe('user-management — modules', () => {
         await UserManagementModule.install(makeCtx(container, ADMIN));
         await vi.waitFor(() => expect(rowCount(container)).toBe(2));
         clickRow(container, 1, '.user-mgmt-edit'); // viewer: ['queue-browser']
-        expect(pressed(choosePart(container))).toBe(true);
+        expect([modeSwitch(container).checked, mode(container)]).toEqual([true, ['Choose for this user']]);
         expect(pillIds(container)).toEqual(['queue-browser']);
         expect(el(container, '#user-mgmt-modules').querySelectorAll('.user-mgmt-pill-remove')).toHaveLength(1);
         expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(false);
@@ -524,7 +529,7 @@ describe('user-management — modules', () => {
         svcMock.saveUser.mockResolvedValue(saved());
         clickRow(container, 0, '.user-mgmt-edit'); // admin: default
         chooseForUser(container);
-        expect(pressed(choosePart(container))).toBe(true);
+        expect([modeSwitch(container).checked, mode(container)]).toEqual([true, ['Choose for this user']]);
         expect(pillIds(container)).toEqual(['queue-browser']);
         expect(el(container, '#user-mgmt-modules').querySelectorAll('.user-mgmt-pill-remove')).toHaveLength(1);
         expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(false);
@@ -538,7 +543,7 @@ describe('user-management — modules', () => {
         svcMock.saveUser.mockResolvedValue(saved());
         clickRow(container, 1, '.user-mgmt-edit'); // viewer: own list
         el<HTMLButtonElement>(container, '.user-mgmt-pill-remove').click();
-        defaultPart(container).click();
+        slideMode(container, false);
         expect(pillIds(container)).toEqual(['queue-browser']);
         expect(el(container, '#user-mgmt-modules').querySelector('.user-mgmt-pill-remove')).toBeNull();
         expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(true);

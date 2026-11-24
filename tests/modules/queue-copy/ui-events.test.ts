@@ -10,12 +10,19 @@ import { createManagedProfile } from '../../../src/core/services/managed-profile
 
 import { completeContext } from '../../helpers/appContext';
 
-/** The context's queue picker: `ctx.queuePicker.pick`. */
 /** Press one part of the Copy to button. */
 function pickScope(els: CopyUiElements, scope: DestScope): void {
     els.destScopeGroup.querySelector<HTMLButtonElement>(`[data-dest-scope="${scope}"]`)!.click();
 }
 
+/** Move a slide choice's switch as a user does: Queue / Topic ('#copy-dest-type-toggle') or Copy / Move ('#copy-mode-toggle'). */
+function slideTo(els: CopyUiElements, toggle: string, on: boolean): void {
+    const input = els.container.querySelector<HTMLInputElement>(toggle)!;
+    input.checked = on;
+    input.dispatchEvent(new Event('change'));
+}
+
+/** The context's queue picker: `ctx.queuePicker.pick`. */
 const pickQueue = vi.fn(async (..._args: unknown[]): Promise<{ vpn: string; queue: string } | null> => ({ vpn: 'default', queue: 'picked-q' }));
 
 const PRIMARY: PrimarySnapshot = {
@@ -305,18 +312,15 @@ describe('queue-copy/ui-events', () => {
     describe('dest type + name', () => {
         it('switching the slide toggle to topic hides the dest pick icon', () => {
             const { els, state } = setup();
-            els.destTypeToggle.checked = true;
-            els.destTypeToggle.dispatchEvent(new Event('change'));
+            slideTo(els, '#copy-dest-type-toggle', true);
             expect(state.dest.type).toBe('topic');
             expect(els.btnDestPick.classList.contains('hidden')).toBe(true);
         });
 
         it('switching the slide toggle back to queue with primary SEMP available reveals the icon', () => {
             const { els, state } = setup();
-            els.destTypeToggle.checked = true;
-            els.destTypeToggle.dispatchEvent(new Event('change'));
-            els.destTypeToggle.checked = false;
-            els.destTypeToggle.dispatchEvent(new Event('change'));
+            slideTo(els, '#copy-dest-type-toggle', true);
+            slideTo(els, '#copy-dest-type-toggle', false);
             expect(state.dest.type).toBe('queue');
             expect(els.btnDestPick.classList.contains('hidden')).toBe(false);
         });
@@ -344,8 +348,7 @@ describe('queue-copy/ui-events', () => {
             state.destSempCtx = { fetch: async () => new Response(), baseUrl: 'http://d' };
             // cross-broker reveals the icon now that destSempCtx is set; force the
             // slide toggle change once more to trigger refreshDestPickVisible
-            els.destTypeToggle.checked = false;
-            els.destTypeToggle.dispatchEvent(new Event('change'));
+            slideTo(els, '#copy-dest-type-toggle', false);
             els.btnDestPick.click();
             await Promise.resolve();
             await Promise.resolve();
@@ -393,8 +396,7 @@ describe('queue-copy/ui-events', () => {
             pickScope(els, 'another-broker');
             state.destSempCtx = { fetch: async () => new Response(), baseUrl: 'http://d' };
             state.destForm.solace.vpn = 'destVpn';
-            els.destTypeToggle.checked = false;
-            els.destTypeToggle.dispatchEvent(new Event('change'));
+            slideTo(els, '#copy-dest-type-toggle', false);
             els.btnDestPick.click();
             await Promise.resolve();
             await Promise.resolve();
@@ -431,8 +433,7 @@ describe('queue-copy/ui-events', () => {
             pickScope(els, 'another-broker');
             state.destSempCtx = { fetch: async () => new Response(), baseUrl: 'http://d' };
             state.destForm.solace.vpn = '';
-            els.destTypeToggle.checked = false;
-            els.destTypeToggle.dispatchEvent(new Event('change'));
+            slideTo(els, '#copy-dest-type-toggle', false);
             els.btnDestPick.click();
             await Promise.resolve();
             await Promise.resolve();
@@ -441,16 +442,15 @@ describe('queue-copy/ui-events', () => {
     });
 
     describe('mode slide toggle', () => {
-        const slide = (els: CopyUiElements, on: boolean) => {
-            els.modeToggle.checked = on;
-            els.modeToggle.dispatchEvent(new Event('change'));
-        };
+        const slide = (els: CopyUiElements, on: boolean) => slideTo(els, '#copy-mode-toggle', on);
+        const highlighted = (els: CopyUiElements) =>
+            [...els.container.querySelectorAll('#copy-mode-switch .slide-choice-label.active')].map(l => l.textContent);
 
         it('sliding to Move updates state.mode and highlights that side', () => {
             const { els, state } = setup();
             slide(els, true);
             expect(state.mode).toBe('move');
-            expect([els.modeLabelCopy.classList.contains('active'), els.modeLabelMove.classList.contains('active')]).toEqual([false, true]);
+            expect(highlighted(els)).toEqual(['Move (destructive: removes from source)']);
         });
 
         it('sliding back makes it a copy again', () => {
@@ -458,7 +458,7 @@ describe('queue-copy/ui-events', () => {
             slide(els, true);
             slide(els, false);
             expect(state.mode).toBe('copy');
-            expect([els.modeLabelCopy.classList.contains('active'), els.modeLabelMove.classList.contains('active')]).toEqual([true, false]);
+            expect(highlighted(els)).toEqual(['Copy']);
         });
     });
 
@@ -547,11 +547,9 @@ describe('queue-copy/ui-events', () => {
             const { els } = setup();
             // Same-broker + primary SEMP: picker initially visible.
             expect(els.btnDestPick.classList.contains('hidden')).toBe(false);
-            els.destTypeToggle.checked = true;
-            els.destTypeToggle.dispatchEvent(new Event('change'));
+            slideTo(els, '#copy-dest-type-toggle', true);
             expect(els.btnDestPick.classList.contains('hidden')).toBe(true);
-            els.destTypeToggle.checked = false;
-            els.destTypeToggle.dispatchEvent(new Event('change'));
+            slideTo(els, '#copy-dest-type-toggle', false);
             // Back to queue → visible again
             expect(els.btnDestPick.classList.contains('hidden')).toBe(false);
         });

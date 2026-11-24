@@ -32,6 +32,12 @@ function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
     return c.querySelector(sel) as T;
 }
 const hidden = (c: HTMLElement, sel: string) => el(c, sel).classList.contains('hidden');
+/** One part of a scheme button: `semp` (https, http) or `client` (wss, ws). */
+const schemePart = (c: HTMLElement, card: 'semp' | 'client', scheme: string) =>
+    el<HTMLButtonElement>(c, `#conn-mgmt-${card}-scheme button[data-scheme="${scheme}"]`);
+/** The pressed parts of the two scheme buttons: SEMP's, then the Client's. */
+const schemes = (c: HTMLElement) => (['semp', 'client'] as const).map(card =>
+    [...el(c, `#conn-mgmt-${card}-scheme`).querySelectorAll<HTMLElement>('button[aria-pressed="true"]')].map(b => b.dataset.scheme));
 
 function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppContext {
     const eventBus = createEventBus();
@@ -220,8 +226,8 @@ describe('connection-management — create / edit form', () => {
         svcMock.saveConnection.mockResolvedValue(saved());
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
         el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'b8';
-        el<HTMLSelectElement>(container, '#conn-mgmt-semp-scheme').value = 'http';
-        el<HTMLSelectElement>(container, '#conn-mgmt-client-scheme').value = 'ws';
+        schemePart(container, 'semp', 'http').click();
+        schemePart(container, 'client', 'ws').click();
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
         await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
         const sent = svcMock.saveConnection.mock.calls[0][0];
@@ -239,16 +245,12 @@ describe('connection-management — create / edit form', () => {
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').children.length).toBe(3));
         const edit = (i: number) => el(container, '#conn-mgmt-rows').querySelectorAll('tr')[i]
             .querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
-        const shown = () => [
-            el<HTMLSelectElement>(container, '#conn-mgmt-semp-scheme').value,
-            el<HTMLSelectElement>(container, '#conn-mgmt-client-scheme').value,
-        ];
         edit(0);
-        expect(shown()).toEqual(['http', 'ws']);
+        expect(schemes(container)).toEqual([['http'], ['ws']]);
         edit(1);
-        expect(shown()).toEqual(['https', 'wss']);
+        expect(schemes(container)).toEqual([['https'], ['wss']]);
         edit(2);
-        expect(shown()).toEqual(['https', 'wss']);
+        expect(schemes(container)).toEqual([['https'], ['wss']]);
     });
 
     it('Add starts on the TLS schemes even after editing a plain connection', async () => {
@@ -260,8 +262,7 @@ describe('connection-management — create / edit form', () => {
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').children.length).toBe(1));
         el(container, '#conn-mgmt-rows').querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
-        expect(el<HTMLSelectElement>(container, '#conn-mgmt-semp-scheme').value).toBe('https');
-        expect(el<HTMLSelectElement>(container, '#conn-mgmt-client-scheme').value).toBe('wss');
+        expect(schemes(container)).toEqual([['https'], ['wss']]);
     });
 
     it('shows the gateway 422 for a refused scheme through the form error', async () => {

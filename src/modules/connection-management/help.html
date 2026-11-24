@@ -32,7 +32,7 @@
     </ol>
     <p>The form is the same one you use to edit a connection, so Figure 2 shows it with a connection open.</p>
     <figure class="manual-figure">
-        <img src="help/form.svg" width="760" height="658" alt="The connection form open on east-prod: broker name and broker type, the SEMP part with its scheme, hostname and port on one row and the account below, the Client part with its scheme, messaging hostname and port on one row, two Message VPN rows, Save and Cancel, and a red message under the form.">
+        <img src="help/form.svg" width="760" height="658" alt="The connection form open on east-prod: broker name and broker type, the SEMP part with its scheme button, hostname and port on one row and the account below, the Client part with its scheme button, messaging hostname and port on one row, two Message VPN rows, Save and Cancel, and a red message under the form.">
         <figcaption>The form, editing the connection east-prod.</figcaption>
     </figure>
     <ol class="manual-callouts">
@@ -68,7 +68,7 @@
             <tr><th>Field</th><th>What it accepts</th><th>Default</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>Scheme</strong></td><td><code>https (TLS)</code> or <code>http (plain)</code>. Choose <code>http</code> only for a broker whose SEMP port does not serve TLS, on a network you trust: the gateway then reaches it unencrypted, and the account's password crosses that hop in clear text.</td><td><code>https (TLS)</code></td></tr>
+            <tr><td><strong>Scheme</strong></td><td>A button with two parts: <code>https</code> (TLS) or <code>http</code> (plain). Choose <code>http</code> only for a broker whose SEMP port does not serve TLS, on a network you trust: the gateway then reaches it unencrypted, and the account's password crosses that hop in clear text.</td><td><code>https</code></td></tr>
             <tr><td><strong>Port</strong></td><td>A whole number from 1 to 65535, in digits only. A blank port is never taken to mean a default. Required when a SEMP username is set. A connection with no SEMP port gives users no management access to the broker.</td><td>Blank</td></tr>
             <tr><td><strong>Username</strong></td><td>Up to 32 characters from <code>A-Z a-z 0-9 _ -</code>. It may be left blank.</td><td>Blank</td></tr>
             <tr><td><strong>Password</strong></td><td>The account's password, typed with its characters hidden. The gateway refuses control characters in it and applies no other rule of its own.</td><td>Blank</td></tr>
@@ -84,7 +84,7 @@
             <tr><th>Field</th><th>What it accepts</th><th>Default</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>Scheme</strong></td><td><code>wss (TLS)</code> or <code>ws (plain)</code>. Choose <code>ws</code> only for a broker that does not serve TLS on its messaging port, on a network you trust: the credentials of the Message VPNs then cross that hop in clear text.</td><td><code>wss (TLS)</code></td></tr>
+            <tr><td><strong>Scheme</strong></td><td>A button with two parts: <code>wss</code> (TLS) or <code>ws</code> (plain). Choose <code>ws</code> only for a broker that does not serve TLS on its messaging port, on a network you trust: the credentials of the Message VPNs then cross that hop in clear text.</td><td><code>wss</code></td></tr>
             <tr><td><strong>Port</strong></td><td>As the SEMP port: digits, 1 to 65535. Required once a Message VPN is listed.</td><td>Blank</td></tr>
         </tbody>
     </table>

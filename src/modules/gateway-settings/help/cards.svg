@@ -37,9 +37,10 @@
     <circle cx="716" cy="255" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="716" y="259" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
     <text x="38" y="308" font-size="11" fill="#64748b" font-weight="700">A user without a list of their own gets</text>
-    <rect x="300" y="294" width="250" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="310" y="312">Every offered module</text>
-    <path d="M530 306 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <rect x="300" y="295" width="260" height="26" fill="#f1f5f9" rx="5" stroke="#e2e8f0"/>
+    <rect x="300" y="295" width="160" height="26" fill="#00C895" rx="5"/>
+    <text x="380" y="312" fill="#ffffff" font-weight="700" text-anchor="middle">Every offered module</text>
+    <text x="510" y="312" fill="#64748b" text-anchor="middle">No modules</text>
     <circle cx="716" cy="308" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="716" y="312" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
     <rect x="20" y="356" width="720" height="216" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
@@ -56,9 +57,12 @@
     <circle cx="716" cy="447" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="716" y="451" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
     <text x="38" y="486" font-size="11" fill="#64748b" font-weight="700">If the audit log cannot be written</text>
-    <rect x="38" y="494" width="340" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="48" y="512">Carry on, and log the lost record</text>
-    <path d="M358 506 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="38" y="509" font-size="11" font-weight="700">Carry on</text>
+    <rect x="98.8" y="497" width="30" height="16" fill="#cbd5e1" rx="8"/>
+    <circle cx="106.8" cy="505" r="6" fill="#ffffff"/>
+    <text x="136.8" y="509" font-size="11" fill="#64748b">Refuse changes</text>
+    <text x="38" y="536" font-size="10" fill="#64748b">Carry on logs each lost record in the gateway log. Refuse changes stops every change until the audit log</text>
+    <text x="38" y="550" font-size="10" fill="#64748b">can be written.</text>
     <circle cx="716" cy="508" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="716" y="512" font-weight="700" fill="#ffffff" text-anchor="middle">8</text>
 </svg>

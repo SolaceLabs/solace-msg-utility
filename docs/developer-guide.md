@@ -159,7 +159,9 @@ src/
     dom.ts             # required() fail-fast required-element assertion, setError(el, msg) error banner,
                        # attachBackdropClose(dialog)
     segmented.ts       # createSegmented(): wires a .segmented group of joined buttons (the broker type, Queue Copy's Copy to,
-                       # the Direct form's Basic / OAuth2, User Management's Modules); the pressed button is the choice
+                       # the Direct form's Basic / OAuth2, Conn. Mgmt's schemes); the pressed button is the choice
+    slide-choice.ts    # createSlideChoice(): wires a .slide-choice, a switch with an answer on either side (Queue Copy's
+                       # Queue / Topic and Copy / Move, User Management's Modules); off is the first answer, on the second
     utils.ts           # Pure utilities (escapeHtml, escapeXml, formatBytes, generateUuid, matchString,
                        # matchContains, topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
                        # solaceErrorText, isValidHost, isValidPort)
@@ -644,6 +646,7 @@ Styles are split by responsibility ([architecture.md -> CSS Organization](archit
   - `.card` (it fills its column, up to 2048px), `.card-narrow` for a sign-in box, `.card-title` on every card's heading and `.card-subtitle` on the heading of a part within a card.
   - `.form-cols` for fields side by side, `.input-with-search` and `.input-search-btn` for a text box with a pick button, `.banner-warning` for a warning inside a card.
   - `.tabs` and `.tab` (the open one is `is-active`) for a strip of tabs, `.segmented` for a choice between a few options (wired by `createSegmented`).
+  - A choice between exactly two named answers can be a `.segmented` or a `.slide-choice` (a switch with an answer on either side, wired by `createSlideChoice`); the admin pages use one of the two for every such setting. Both helpers give the same `value()`, `set()`, `setDisabled()` and `onChange()`. Inside a `.form-group` the switch of a slide choice is a `span.switch`, not a `label`, so the field's label rule leaves it alone.
   - An on/off setting is a `.switch` (inside a `label.switch-field` when it has text). A tick box is for a row of a table and a radio for one choice of a few; both are styled by element, so they need no class. A `select.form-control` draws the queue picker's chevron.
   - `.data-table`, `.data-table-frame` and `.data-table-actions` (the column of a row's buttons).
 - Shell chrome (anything the user sees outside a module's content area) goes in `layout.css`.

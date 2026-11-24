@@ -16,9 +16,10 @@
     <text x="730" y="110" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
     <text x="60" y="168" font-size="13" font-weight="700">SEMP (management)</text>
     <text x="60" y="192" font-size="11" fill="#64748b" font-weight="700">Scheme</text>
-    <rect x="60" y="200" width="130" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="70" y="218">https (TLS)</text>
-    <path d="M170 212 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <rect x="60" y="200" width="118" height="28" fill="#f1f5f9" rx="5" stroke="#e2e8f0"/>
+    <rect x="60" y="200" width="62" height="28" fill="#00C895" rx="5"/>
+    <text x="91" y="218" fill="#ffffff" font-weight="700" text-anchor="middle">https</text>
+    <text x="150" y="218" fill="#64748b" text-anchor="middle">http</text>
     <text x="200" y="192" font-size="11" fill="#64748b" font-weight="700">Hostname</text>
     <rect x="200" y="200" width="390" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
     <text x="210" y="218">east.example.com</text>
@@ -39,9 +40,10 @@
     <text x="730" y="268" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
     <text x="60" y="316" font-size="13" font-weight="700">Client (messaging)</text>
     <text x="60" y="340" font-size="11" fill="#64748b" font-weight="700">Scheme</text>
-    <rect x="60" y="348" width="130" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="70" y="366">wss (TLS)</text>
-    <path d="M170 360 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <rect x="60" y="348" width="104" height="28" fill="#f1f5f9" rx="5" stroke="#e2e8f0"/>
+    <rect x="60" y="348" width="56" height="28" fill="#00C895" rx="5"/>
+    <text x="88" y="366" fill="#ffffff" font-weight="700" text-anchor="middle">wss</text>
+    <text x="140" y="366" fill="#64748b" text-anchor="middle">ws</text>
     <text x="200" y="340" font-size="11" fill="#64748b" font-weight="700">Messaging hostname</text>
     <rect x="200" y="348" width="390" height="28" fill="#e2e8f0" rx="4" stroke="#e2e8f0"/>
     <text x="210" y="366" fill="#94a3b8">east.example.com</text>

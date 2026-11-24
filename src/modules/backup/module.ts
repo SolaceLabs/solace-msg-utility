@@ -28,6 +28,7 @@ import { logger } from '../../core/logger';
 import { showToast } from '../../core/toast';
 import { formatBytes, formatUtc } from '../../core/utils';
 import { reportManagedFailure, SIGNED_OUT_TOAST_MS } from '../../core/services/managed-api';
+import { createSlideChoice } from '../../core/slide-choice';
 import { handleConflict, STALE_IMPORT_MESSAGE } from '../../core/admin-conflict';
 import {
     createBackupService, type BackupSchedule, type BackupStatus, type ImportPreview, type ImportSource,
@@ -96,7 +97,7 @@ export const BackupModule = {
             previewMeta: q<HTMLElement>('#backup-preview-meta'),
             choiceUsers: q<HTMLSelectElement>('#backup-choice-users'),
             choiceConns: q<HTMLSelectElement>('#backup-choice-connections'),
-            choiceSettings: q<HTMLSelectElement>('#backup-choice-settings'),
+            choiceSettings: q<HTMLElement>('#backup-choice-settings'),
             diffUsers: q<HTMLElement>('#backup-diff-users'),
             diffConns: q<HTMLElement>('#backup-diff-connections'),
             diffSettings: q<HTMLElement>('#backup-diff-settings'),
@@ -121,6 +122,8 @@ export const BackupModule = {
         };
 
         const service = createBackupService();
+        // Settings are imported whole or not at all: a choice of two, so a slide choice.
+        const settingsChoice = createSlideChoice<'skip' | 'replace'>(els.choiceSettings, { choices: ['skip', 'replace'] });
         const gate = createGate(container, {
             id: 'backup-gate',
             title: 'Administrator Sign-in Required',
@@ -330,7 +333,8 @@ export const BackupModule = {
             fillDiff(els.diffUsers, diffLines(p.users, 'Remove (Replace only)'));
             fillDiff(els.diffConns, diffLines(p.connections, 'Remove (Replace only)'));
             fillDiff(els.diffSettings, p.settings.length ? [`Change: ${p.settings.join(', ')}`] : ['No change.']);
-            for (const sel of [els.choiceUsers, els.choiceConns, els.choiceSettings]) sel.value = 'skip';
+            for (const sel of [els.choiceUsers, els.choiceConns]) sel.value = 'skip';
+            settingsChoice.set('skip');
             signsOut = p.signsOutCaller;
             basis = p.basis;
             showSignOutWarning();
@@ -342,7 +346,7 @@ export const BackupModule = {
             const choices = {
                 users: els.choiceUsers.value as SectionChoice,
                 connections: els.choiceConns.value as SectionChoice,
-                settings: els.choiceSettings.value as 'replace' | 'skip',
+                settings: settingsChoice.value(),
             };
             const chosen = Object.entries(choices).filter(([, v]) => v !== 'skip').map(([k, v]) => `${k} (${v})`);
             if (chosen.length && !(await confirmDialog(`Import ${chosen.join(', ')} from this backup? The gateway applies it at once.`, { confirmLabel: 'Import' }))) return;

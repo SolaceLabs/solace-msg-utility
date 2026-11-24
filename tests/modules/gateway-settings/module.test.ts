@@ -41,6 +41,20 @@ function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
 }
 const hidden = (c: HTMLElement, sel: string) => el(c, sel).classList.contains('hidden');
 const value = (c: HTMLElement, id: string) => el<HTMLInputElement>(c, `#gw-set-${id}`).value;
+/** The answers a segmented setting offers, and the pressed ones among them. */
+const parts = (c: HTMLElement, id: string) => [...el(c, `#gw-set-${id}`).querySelectorAll<HTMLButtonElement>('button.segmented-option')];
+const chosen = (c: HTMLElement, id: string) => parts(c, id).filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.choice);
+/** Where a slide-choice setting stands: its switch, and the highlighted answers. */
+const slideInput = (c: HTMLElement, id: string) => el<HTMLInputElement>(c, `#gw-set-${id} input`);
+const slid = (c: HTMLElement, id: string) => [
+    slideInput(c, id).checked,
+    [...el(c, `#gw-set-${id}`).querySelectorAll('.slide-choice-label.active')].map(l => l.textContent),
+];
+/** Move a slide-choice setting's switch as a user does. */
+function slideTo(c: HTMLElement, id: string, on: boolean): void {
+    slideInput(c, id).checked = on;
+    slideInput(c, id).dispatchEvent(new Event('change'));
+}
 const tiles = (c: HTMLElement) => [...el(c, '#gw-set-modules-offered').querySelectorAll<HTMLButtonElement>('button.gw-set-tile')];
 const pressed = (c: HTMLElement) => tiles(c).map(t => t.getAttribute('aria-pressed') === 'true');
 const errorText = (c: HTMLElement) => el(c, '#gw-set-error').textContent;
@@ -86,7 +100,7 @@ describe('gateway-settings — load', () => {
         const { container } = await setup();
         expect(hidden(container, '#gw-set-gate')).toBe(true);
         expect(hidden(container, '#gw-set-view')).toBe(false);
-        expect(value(container, 'connModes')).toBe('both');
+        expect(chosen(container, 'connModes')).toEqual(['both']);
         expect(value(container, 'access-allow')).toBe('10.0.0.0/8\n192.0.2.0/24');
         expect(value(container, 'session-idleMinutes')).toBe('10');
         expect(el<HTMLInputElement>(container, '#gw-set-tls-insecureSkipVerify').checked).toBe(false);
@@ -120,7 +134,7 @@ describe('gateway-settings — load', () => {
         svcMock.client.mockResolvedValue({ ok: false, status: 500, code: 'x' });
         const { container } = await setup();
         expect(el(container, '#gw-set-client').textContent).toBe('Your address as the gateway sees it: unavailable.');
-        expect(value(container, 'connModes')).toBe('both');
+        expect(chosen(container, 'connModes')).toEqual(['both']);
     });
 
     it('has no path fields, and offers neither hosted nor connModes "direct"', async () => {
@@ -131,7 +145,10 @@ describe('gateway-settings — load', () => {
         // page offers neither it nor connModes "direct".
         const keys = [...container.querySelectorAll<HTMLElement>('[data-key]')].map(g => g.dataset.key);
         expect(keys).not.toContain('hosted');
-        expect([...container.querySelectorAll<HTMLOptionElement>('#gw-set-connModes option')].map(o => o.value)).toEqual(['provisioned', 'both']);
+        expect(parts(container, 'connModes').map(b => [b.dataset.choice, b.textContent])).toEqual([
+            ['provisioned', 'Provisioned only'],
+            ['both', 'Direct and Provisioned'],
+        ]);
     });
 
     it('every field is enabled', async () => {
@@ -179,7 +196,7 @@ describe('gateway-settings — load', () => {
         const { container, ctx } = await setup(null);
         ctx.setState('managed', ADMIN);
         ctx.eventBus.emit('rbac:changed');
-        await vi.waitFor(() => expect(value(container, 'connModes')).toBe('both'));
+        await vi.waitFor(() => expect(chosen(container, 'connModes')).toEqual(['both']));
         expect(hidden(container, '#gw-set-gate')).toBe(true);
         el<HTMLButtonElement>(container, '#btn-gw-set-reload').click();
         expect(svcMock.load).toHaveBeenCalledTimes(2);
@@ -221,11 +238,10 @@ describe('gateway-settings -- audit trail', () => {
         const { container } = await setup(ADMIN, view({
             settings: { ...SETTINGS, audit: { ...SETTINGS.audit, onFailure: 'refuse' } },
         }));
-        const select = el<HTMLSelectElement>(container, '#gw-set-audit-onFailure');
-        expect(select.value).toBe('refuse');
-        expect(select.disabled).toBe(false);
-        expect([...select.options].map(o => o.value)).toEqual(['continue', 'refuse']);
-        select.value = 'continue';
+        expect(slid(container, 'audit-onFailure')).toEqual([true, ['Refuse changes']]);
+        expect(slideInput(container, 'audit-onFailure').disabled).toBe(false);
+        slideTo(container, 'audit-onFailure', false);
+        expect(slid(container, 'audit-onFailure')).toEqual([false, ['Carry on']]);
         svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
@@ -256,6 +272,44 @@ describe('gateway-settings -- audit trail', () => {
         clickSave(container);
         await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
         expect(svcMock.save.mock.calls[0][0].audit).toEqual({ stdout: false, access: false, onFailure: 'continue' });
+    });
+});
+
+describe('gateway-settings -- settings with two answers', () => {
+    it('shows the second answer of each control when the gateway holds it', async () => {
+        const { container } = await setup(ADMIN, view({
+            settings: {
+                ...SETTINGS, connModes: 'provisioned', defaultConn: 'provisioned',
+                modules: { ...SETTINGS.modules, userDefault: 'none' },
+            },
+        }));
+        expect(chosen(container, 'connModes')).toEqual(['provisioned']);
+        expect(slid(container, 'defaultConn')).toEqual([true, ['Provisioned']]);
+        expect(chosen(container, 'modules-userDefault')).toEqual(['none']);
+        expect(parts(container, 'modules-userDefault').map(b => b.textContent)).toEqual(['Every offered module', 'No modules']);
+    });
+
+    it('shows the loaded settings on each control, and sends the answers chosen', async () => {
+        const { container } = await setup();
+        expect(chosen(container, 'connModes')).toEqual(['both']);
+        expect(slid(container, 'defaultConn')).toEqual([false, ['Direct']]);
+        expect(chosen(container, 'modules-userDefault')).toEqual(['all']);
+
+        parts(container, 'connModes')[0].click();
+        slideTo(container, 'defaultConn', true);
+        parts(container, 'modules-userDefault')[1].click();
+        slideTo(container, 'audit-onFailure', true);
+        svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
+        clickSave(container);
+
+        await vi.waitFor(() => expect(svcMock.save).toHaveBeenCalled());
+        expect(svcMock.save).toHaveBeenCalledWith({
+            ...SETTINGS,
+            connModes: 'provisioned',
+            defaultConn: 'provisioned',
+            modules: { ...SETTINGS.modules, userDefault: 'none' },
+            audit: { ...SETTINGS.audit, onFailure: 'refuse' },
+        }, 'rev-1');
     });
 });
 

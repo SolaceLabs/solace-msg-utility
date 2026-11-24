@@ -4,7 +4,6 @@ import {
     cacheElements,
     applyDestPrefill,
     applyDestType,
-    applyMode,
     applySourceReadonly,
     setSourcePickVisible,
     setDestPickVisible,
@@ -58,6 +57,14 @@ describe('queue-copy/ui', () => {
     beforeEach(() => {
         elsHolder = setup();
     });
+
+    /** A slide choice's tick box: Queue / Topic ('#copy-dest-type-switch') or Copy / Move ('#copy-mode-switch'). */
+    const slideInput = (group: string) => elsHolder.els.container.querySelector<HTMLInputElement>(`${group} input`)!;
+    /** Where a slide choice stands: its switch, and the text of each highlighted answer. */
+    const slide = (group: string) => [
+        slideInput(group).checked,
+        [...elsHolder.els.container.querySelectorAll(`${group} .slide-choice-label.active`)].map(l => l.textContent),
+    ];
 
     describe('applySourceReadonly', () => {
         it('populates every source field from the snapshot, including passwords', () => {
@@ -176,19 +183,16 @@ describe('queue-copy/ui', () => {
 
     describe('applyDestType', () => {
         it('queue: toggle unchecked, Queue label active, queue placeholder', () => {
+            applyDestType(elsHolder.els, 'topic');
             applyDestType(elsHolder.els, 'queue');
-            expect(elsHolder.els.destTypeToggle.checked).toBe(false);
-            expect(elsHolder.els.destTypeLabelQueue.classList.contains('active')).toBe(true);
-            expect(elsHolder.els.destTypeLabelTopic.classList.contains('active')).toBe(false);
+            expect(slide('#copy-dest-type-switch')).toEqual([false, ['Queue']]);
             expect(elsHolder.els.destNameLabel.textContent).toContain('Queue');
             expect(elsHolder.els.destInput.placeholder).toContain('queue');
         });
 
         it('topic: toggle checked, Topic label active, topic placeholder', () => {
             applyDestType(elsHolder.els, 'topic');
-            expect(elsHolder.els.destTypeToggle.checked).toBe(true);
-            expect(elsHolder.els.destTypeLabelTopic.classList.contains('active')).toBe(true);
-            expect(elsHolder.els.destTypeLabelQueue.classList.contains('active')).toBe(false);
+            expect(slide('#copy-dest-type-switch')).toEqual([true, ['Topic']]);
             expect(elsHolder.els.destNameLabel.textContent).toContain('Topic');
             expect(elsHolder.els.destInput.placeholder).toContain('topic');
         });
@@ -352,15 +356,12 @@ describe('queue-copy/ui', () => {
         });
     });
 
-    describe('applyMode', () => {
-        it('shows the mode on the slide toggle: its position and the highlighted side', () => {
+    describe('mode', () => {
+        it('opens on Copy, and shows a mode chosen in code on the slide choice', () => {
             const e = elsHolder.els;
-            const state = () => [e.modeToggle.checked, e.modeLabelCopy.classList.contains('active'), e.modeLabelMove.classList.contains('active')];
-            expect(state()).toEqual([false, true, false]);   // the page opens on Copy
-            applyMode(e, 'move');
-            expect(state()).toEqual([true, false, true]);
-            applyMode(e, 'copy');
-            expect(state()).toEqual([false, true, false]);
+            expect([e.mode.value(), slide('#copy-mode-switch')]).toEqual(['copy', [false, ['Copy']]]);
+            e.mode.set('move');
+            expect([e.mode.value(), slide('#copy-mode-switch')]).toEqual(['move', [true, ['Move (destructive: removes from source)']]]);
         });
     });
 
@@ -509,8 +510,8 @@ describe('queue-copy/ui', () => {
             const { els } = elsHolder;
             const controls = [
                 els.sourceInput, els.btnSourcePick, ...els.destScopeGroup.querySelectorAll('button'), els.destHost,
-                els.destSempPort, els.destSolPort, els.destSolVpn, els.destTypeToggle, els.destInput,
-                els.btnDestPick, els.btnStart, els.modeToggle, ...els.sourceEditButtons,
+                els.destSempPort, els.destSolPort, els.destSolVpn, slideInput('#copy-dest-type-switch'), els.destInput,
+                els.btnDestPick, els.btnStart, slideInput('#copy-mode-switch'), ...els.sourceEditButtons,
             ];
             controls.forEach(c => expect(els.content.contains(c)).toBe(true));
             // The modal's own buttons stay usable while the page is locked.

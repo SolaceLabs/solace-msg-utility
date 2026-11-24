@@ -118,6 +118,18 @@
     align-self: end;
 }
 
+/* A segmented button or a slide choice keeps its own width in its column;
+ * a segmented button wider than a narrow column wraps its words. */
+.form-cols > .form-group > .segmented,
+.form-cols > .form-group > .slide-choice {
+    justify-self: start;
+    max-width: 100%;
+}
+
+.form-cols > .form-group > .segmented > .segmented-option {
+    white-space: normal;
+}
+
 .form-group label {
     display: block;
     margin-bottom: 0.5rem;
@@ -332,6 +344,28 @@ label.switch-field {
 label.switch-field:has(input:disabled) {
     color: var(--text-muted);
     cursor: not-allowed;
+}
+
+/* A choice between two named answers: a switch with an answer on either
+ * side, off for the first and on for the second. The current answer's text
+ * is `active` (core/slide-choice.ts). Markup:
+ *   <div class="slide-choice" role="group">
+ *     <span class="slide-choice-label active" data-choice="a">A</span>
+ *     <span class="switch">...</span>
+ *     <span class="slide-choice-label" data-choice="b">B</span>
+ *   </div> */
+.slide-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    user-select: none;
+}
+
+.slide-choice-label.active {
+    color: var(--text-primary);
+    font-weight: 600;
 }
 
 /* ---------- Tabs ----------

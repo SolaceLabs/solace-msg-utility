@@ -178,7 +178,7 @@ All of these are on the Gateway Settings page and apply at once. No environment 
 | `audit.access` | `false` | Leave off unless you need to know who opened which broker: it adds a line for every dial, socket and SEMP relay request, which is a high volume (see [Audit trail](#audit-trail)). No environment variable. |
 | `audit.onFailure` | `continue` | `continue` unless losing an audit record is worse for you than refusing changes. `refuse` stops every change to users, connections, settings, the backup schedule, the gateway's certificate and its trusted CAs (`503 audit_unavailable`) while the audit log cannot be written, until it can; reads, **Restart gateway** and a normal sign-in carry on, and so does a sign-in that changes nothing, but the sign-in steps that write are refused (see [If a line cannot be written](#audit-trail)). The one change that met the failure stands; every change after it is refused, one that was already waiting included. Use `refuse` only with something watching the gateway's log for `AUDIT RECORD LOST` and the disk holding `/data`. No environment variable. See [If a line cannot be written](#audit-trail). |
 
-All three are on the Gateway Settings page (`audit.onFailure` is a select beside the two checkboxes) and apply at the next audited event, with no restart.
+All three are on the Gateway Settings page (`audit.onFailure` is the switch between **Carry on** and **Refuse changes**, under the two audit switches) and apply at the next audited event, with no restart.
 
 ### Environment variables
 

@@ -34,6 +34,7 @@ import { logger } from '../../core/logger';
 import { handleConflict } from '../../core/admin-conflict';
 import { reportManagedFailure } from '../../core/services/managed-api';
 import { createBrokerHosts, BROKER_HOSTS_TEXT } from '../../core/connections/broker-hosts';
+import { createSegmented } from '../../core/segmented';
 import { createConnMgmtService, type ManagedConnRecord } from './service';
 import type { AppContext } from '../../core/types';
 
@@ -77,12 +78,12 @@ export const ConnectionManagementModule = {
             hostnameLabel: required<HTMLElement>(container, '#lbl-conn-mgmt-hostname'),
             clientHostname: required<HTMLInputElement>(container, '#conn-mgmt-client-hostname'),
             clientHostnameHint: required<HTMLElement>(container, '#conn-mgmt-client-hostname-hint'),
-            sempScheme: required<HTMLSelectElement>(container, '#conn-mgmt-semp-scheme'),
+            sempScheme: required<HTMLElement>(container, '#conn-mgmt-semp-scheme'),
             sempPort: required<HTMLInputElement>(container, '#conn-mgmt-semp-port'),
             sempUser: required<HTMLInputElement>(container, '#conn-mgmt-semp-user'),
             sempPass: required<HTMLInputElement>(container, '#conn-mgmt-semp-pass'),
             sempPassHint: required<HTMLElement>(container, '#conn-mgmt-semp-pass-hint'),
-            clientScheme: required<HTMLSelectElement>(container, '#conn-mgmt-client-scheme'),
+            clientScheme: required<HTMLElement>(container, '#conn-mgmt-client-scheme'),
             clientPort: required<HTMLInputElement>(container, '#conn-mgmt-client-port'),
             vpnRows: required<HTMLElement>(container, '#conn-mgmt-vpn-rows'),
             btnAddVpn: required<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn'),
@@ -92,6 +93,9 @@ export const ConnectionManagementModule = {
         };
 
         const service = createConnMgmtService();
+        // TLS is the first choice of each scheme, so it is the one an empty form starts on.
+        const sempScheme = createSegmented<'https' | 'http'>(els.sempScheme, { attr: 'data-scheme', choices: ['https', 'http'] });
+        const clientScheme = createSegmented<'wss' | 'ws'>(els.clientScheme, { attr: 'data-scheme', choices: ['wss', 'ws'] });
         const hosts = createBrokerHosts({
             typeGroup: els.brokerType,
             host: els.hostname,
@@ -180,12 +184,12 @@ export const ConnectionManagementModule = {
             els.broker.value = '';
             els.broker.disabled = false;
             hosts.write({ host: '' });
-            els.sempScheme.value = 'https';
+            sempScheme.set('https');
             els.sempPort.value = '';
             els.sempUser.value = '';
             els.sempPass.value = '';
             els.sempPassHint.textContent = '';
-            els.clientScheme.value = 'wss';
+            clientScheme.set('wss');
             els.clientPort.value = '';
             vpnList.clear();
             setError(els.formError, null);
@@ -200,12 +204,12 @@ export const ConnectionManagementModule = {
             els.broker.value = c.broker;
             els.broker.disabled = true; // broker is the key; rename = delete + recreate
             hosts.write({ host: c.hostname, messagingHost: c.client.hostname });
-            els.sempScheme.value = c.semp.scheme === 'http' ? 'http' : 'https';
+            sempScheme.set(c.semp.scheme === 'http' ? 'http' : 'https');
             els.sempPort.value = c.semp.port;
             els.sempUser.value = c.semp.user;
             els.sempPass.value = '';
             els.sempPassHint.textContent = '(leave blank to keep current)';
-            els.clientScheme.value = c.client.scheme === 'ws' ? 'ws' : 'wss';
+            clientScheme.set(c.client.scheme === 'ws' ? 'ws' : 'wss');
             els.clientPort.value = c.client.port;
             vpnList.clear();
             c.client.msgVpns.forEach(v =>
@@ -268,7 +272,7 @@ export const ConnectionManagementModule = {
                     broker,
                     hostname,
                     semp: {
-                        scheme: els.sempScheme.value === 'http' ? 'http' : 'https',
+                        scheme: sempScheme.value(),
                         port: els.sempPort.value.trim(),
                         user: sempUser,
                         pass: els.sempPass.value,
@@ -276,7 +280,7 @@ export const ConnectionManagementModule = {
                     client: {
                         // The same hostname twice is one hostname: the gateway stores it so too.
                         ...(clientHostname && clientHostname !== hostname ? { hostname: clientHostname } : {}),
-                        scheme: els.clientScheme.value === 'ws' ? 'ws' : 'wss',
+                        scheme: clientScheme.value(),
                         port: els.clientPort.value.trim(),
                         msgVpns: rows.map(r => ({ name: r.name, user: r.user, pass: r.pass })),
                     },

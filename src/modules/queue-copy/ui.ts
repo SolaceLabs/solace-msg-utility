@@ -2,6 +2,7 @@ import { required } from '../../core/dom';
 import { createBrokerHosts, type BrokerHosts } from '../../core/connections/broker-hosts';
 import { formatBytes } from '../../core/utils';
 import { createSegmented, type Segmented } from '../../core/segmented';
+import { createSlideChoice, type SlideChoice } from '../../core/slide-choice';
 import { DEST_SCOPES, destScopeOf } from './state';
 import type { CopyJob, VerifyResult, DestType, CopyMode, DestScope } from './state';
 
@@ -92,20 +93,16 @@ export interface CopyUiElements {
     destSolStatus: HTMLElement;
     destSolError: HTMLElement;
 
-    // Destination target — slide toggle (unchecked = queue, checked = topic).
-    destTypeToggle: HTMLInputElement;
-    destTypeLabelQueue: HTMLElement;
-    destTypeLabelTopic: HTMLElement;
+    // Destination target: a slide choice (core/slide-choice.ts), Queue or Topic.
+    destType: SlideChoice<DestType>;
     destTopicBlocked: HTMLElement;
     destNameLabel: HTMLElement;
     destInput: HTMLInputElement;
     btnDestPick: HTMLButtonElement;
     destError: HTMLElement;
 
-    // Mode (lives inside the Destination card) — slide toggle (unchecked = copy, checked = move).
-    modeToggle: HTMLInputElement;
-    modeLabelCopy: HTMLElement;
-    modeLabelMove: HTMLElement;
+    // Mode (lives inside the Destination card): a slide choice, Copy or Move.
+    mode: SlideChoice<CopyMode>;
 
     // Footer action
     btnStart: HTMLButtonElement;
@@ -246,18 +243,14 @@ export function cacheElements(container: HTMLElement): CopyUiElements {
         destSolStatus: required(container, '#copy-dest-sol-status'),
         destSolError: required(container, '#copy-dest-sol-error'),
 
-        destTypeToggle: required<HTMLInputElement>(container, '#copy-dest-type-toggle'),
-        destTypeLabelQueue: required(container, '#copy-dest-type-label-queue'),
-        destTypeLabelTopic: required(container, '#copy-dest-type-label-topic'),
+        destType: createSlideChoice<DestType>(required(container, '#copy-dest-type-switch'), { choices: ['queue', 'topic'] }),
         destTopicBlocked: required(container, '#copy-dest-topic-blocked'),
         destNameLabel: required(container, '#copy-dest-name-label'),
         destInput: required<HTMLInputElement>(container, '#copy-dest-input'),
         btnDestPick: required<HTMLButtonElement>(container, '#copy-btn-dest-pick'),
         destError: required(container, '#copy-dest-error'),
 
-        modeToggle: required<HTMLInputElement>(container, '#copy-mode-toggle'),
-        modeLabelCopy: required(container, '#copy-mode-label-copy'),
-        modeLabelMove: required(container, '#copy-mode-label-move'),
+        mode: createSlideChoice<CopyMode>(required(container, '#copy-mode-switch'), { choices: ['copy', 'move'] }),
 
         btnStart: required<HTMLButtonElement>(container, '#copy-btn-start'),
 
@@ -572,8 +565,6 @@ function setErrorPane(el: HTMLElement, message: string | null): void {
     }
 }
 
-/** Update the dest-name field label + the slide-toggle's active-side
- *  highlight based on dest type. */
 /**
  * Disable the Topic option when the publish path uses provisioned managed
  * credentials. `QGlob` has no topic vocabulary — a topic fans out to whichever
@@ -582,25 +573,14 @@ function setErrorPane(el: HTMLElement, message: string | null): void {
  * from offering something that would only fail later.
  */
 export function setDestTopicBlocked(els: CopyUiElements, blocked: boolean): void {
-    els.destTypeToggle.disabled = blocked;
-    els.destTypeLabelTopic.classList.toggle('copy-dest-type-disabled', blocked);
+    els.destType.setDisabled(blocked);
     els.destTopicBlocked.classList.toggle('hidden', !blocked);
 }
 
-/** Show the mode on its slide toggle: the switch position and the active-side highlight. */
-export function applyMode(els: CopyUiElements, mode: CopyMode): void {
-    const isMove = mode === 'move';
-    els.modeToggle.checked = isMove;
-    els.modeLabelCopy.classList.toggle('active', !isMove);
-    els.modeLabelMove.classList.toggle('active', isMove);
-}
-
+/** Show the destination type: on its slide choice, and in the name field's label and placeholder. */
 export function applyDestType(els: CopyUiElements, type: DestType): void {
-    const isTopic = type === 'topic';
-    els.destTypeToggle.checked = isTopic;
-    els.destTypeLabelQueue.classList.toggle('active', !isTopic);
-    els.destTypeLabelTopic.classList.toggle('active', isTopic);
-    if (isTopic) {
+    els.destType.set(type);
+    if (type === 'topic') {
         els.destNameLabel.textContent = 'Topic';
         els.destInput.placeholder = 'Destination topic (e.g. orders/created)';
     } else {

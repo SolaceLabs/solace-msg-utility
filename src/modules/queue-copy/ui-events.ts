@@ -7,7 +7,7 @@ import {
 } from '../../core/components/provisioned-connection';
 import * as ui from './ui';
 import type { CopyUiElements, PrimarySnapshot } from './ui';
-import type { QueueCopyState, DestType } from './state';
+import type { QueueCopyState } from './state';
 import { syncDestFormFromSnapshot } from './state';
 import { openCopyModal, cancelCopyModal } from './ui-modal';
 
@@ -204,11 +204,9 @@ export function wireUiEvents(
     });
 
     // ===== Destination type + name =====
-    // Slide toggle: unchecked = queue, checked = topic. Drives state.dest.type
-    // and re-applies the label / placeholder + active-side highlight via
-    // ui.applyDestType.
-    els.destTypeToggle.addEventListener('change', () => {
-        const type: DestType = els.destTypeToggle.checked ? 'topic' : 'queue';
+    // The Queue / Topic slide choice drives state.dest.type; ui.applyDestType
+    // re-applies the name field's label and placeholder.
+    els.destType.onChange((type) => {
         state.dest.type = type;
         ui.applyDestType(els, type);
         services.refreshDestPickVisible();
@@ -250,9 +248,8 @@ export function wireUiEvents(
     });
 
     // ===== Mode =====
-    els.modeToggle.addEventListener('change', () => {
-        state.mode = els.modeToggle.checked ? 'move' : 'copy';
-        ui.applyMode(els, state.mode);
+    els.mode.onChange((mode) => {
+        state.mode = mode;
     });
 
     // ===== Footer: Next =====

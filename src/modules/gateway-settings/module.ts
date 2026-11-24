@@ -29,19 +29,19 @@ import { moduleLabel } from '../../core/utils';
 import { logger } from '../../core/logger';
 import { askReload } from '../../core/admin-conflict';
 import { reportManagedFailure } from '../../core/services/managed-api';
+import { createSegmented } from '../../core/segmented';
+import { createSlideChoice } from '../../core/slide-choice';
 import { createSettingsService, type ClientSeen, type GatewaySettings, type SettingsView } from './service';
 import type { AppContext } from '../../core/types';
 
 type Kind = 'text' | 'bool' | 'int' | 'lines';
 
 /**
- * Every form field: its settings key and how its input holds the value.
- * The input's id is `gw-set-` plus the key with the dot as a dash.
+ * Every form field that is an input: its settings key and how the input holds
+ * the value. The input's id is `gw-set-` plus the key with the dot as a dash.
  * `modules.offered` is a toggle tile per catalog module, handled on its own.
  */
 const FIELDS: ReadonlyArray<{ key: string; kind: Kind }> = [
-    { key: 'connModes', kind: 'text' },
-    { key: 'defaultConn', kind: 'text' },
     { key: 'access.allow', kind: 'lines' },
     { key: 'access.trustedProxies', kind: 'lines' },
     { key: 'session.idleMinutes', kind: 'int' },
@@ -57,14 +57,28 @@ const FIELDS: ReadonlyArray<{ key: string; kind: Kind }> = [
     { key: 'login.passwordMinLength', kind: 'int' },
     { key: 'login.twoFactor', kind: 'text' },
     { key: 'login.twoFactorMinutes', kind: 'int' },
-    { key: 'modules.userDefault', kind: 'text' },
     { key: 'logLevel', kind: 'text' },
     { key: 'audit.stdout', kind: 'bool' },
     { key: 'audit.access', kind: 'bool' },
-    { key: 'audit.onFailure', kind: 'text' },
     { key: 'tls.standardRoots', kind: 'bool' },
     { key: 'tls.insecureSkipVerify', kind: 'bool' },
 ];
+
+/**
+ * Every setting with two answers, and the control that holds it: a segmented
+ * button (core/segmented.ts) or a slide choice (core/slide-choice.ts). The
+ * control's group has the id an input would have, each answer names its
+ * value in `data-choice`, and `values` are in the control's order.
+ */
+const CHOICES: ReadonlyArray<{ key: string; control: 'segmented' | 'slide'; values: readonly [string, string] }> = [
+    { key: 'connModes', control: 'segmented', values: ['provisioned', 'both'] },
+    { key: 'defaultConn', control: 'slide', values: ['direct', 'provisioned'] },
+    { key: 'modules.userDefault', control: 'segmented', values: ['all', 'none'] },
+    { key: 'audit.onFailure', control: 'slide', values: ['continue', 'refuse'] },
+];
+
+/** The id of a setting's input or control. */
+const fieldId = (key: string): string => `#gw-set-${key.replace('.', '-')}`;
 
 /** One line under each module's name on its tile; a module not listed shows its name alone. */
 const MODULE_DESCRIPTIONS: Readonly<Record<string, string>> = {
@@ -119,7 +133,14 @@ export const GatewaySettingsModule = {
             offered: required<HTMLElement>(container, '#gw-set-modules-offered'),
             error: required<HTMLElement>(container, '#gw-set-error'),
         };
-        const inputs = new Map(FIELDS.map(f => [f.key, required<Input>(container, `#gw-set-${f.key.replace('.', '-')}`)] as const));
+        const inputs = new Map(FIELDS.map(f => [f.key, required<Input>(container, fieldId(f.key))] as const));
+        const choices = new Map(CHOICES.map((c) => {
+            const group = required<HTMLElement>(container, fieldId(c.key));
+            const control = c.control === 'segmented'
+                ? createSegmented(group, { attr: 'data-choice', choices: c.values })
+                : createSlideChoice(group, { choices: c.values });
+            return [c.key, control] as const;
+        }));
 
         const service = createSettingsService();
         const wait = opts.wait ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
@@ -183,6 +204,7 @@ export const GatewaySettingsModule = {
                 else if (f.kind === 'lines') input.value = (value as string[]).join('\n');
                 else input.value = String(value);
             }
+            for (const [key, control] of choices) control.set(String(read(tree, key)));
             els.offered.innerHTML = '';
             for (const id of view.catalog) els.offered.appendChild(moduleTile(id, view.settings.modules.offered.includes(id)));
             showChangedOnDisk(view.changedOnDisk);
@@ -232,6 +254,7 @@ export const GatewaySettingsModule = {
                 }
                 write(next, f.key, value);
             }
+            for (const [key, control] of choices) write(next, key, control.value());
             const offered = [...els.offered.querySelectorAll<HTMLElement>('.gw-set-tile')]
                 .filter(t => t.getAttribute('aria-pressed') === 'true')
                 .map(t => t.dataset.module as string);

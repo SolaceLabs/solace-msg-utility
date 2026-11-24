@@ -37,8 +37,8 @@
             <tr><th>Field</th><th>What it does</th><th>Choices</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>Connection modes the app offers</strong></td><td>Which connection tabs people see in the app.</td><td><strong>Provisioned only (everyone signs in)</strong>: users sign in and use the brokers they were given. <strong>Direct and Provisioned</strong>: users may also type a broker's details into the Direct form.</td></tr>
-            <tr><td><strong>Tab shown first when both are offered</strong></td><td>The tab the app opens on when both are offered.</td><td><strong>Direct</strong> (the default) or <strong>Provisioned</strong>.</td></tr>
+            <tr><td><strong>Connection modes the app offers</strong></td><td>Which connection tabs people see in the app.</td><td>A button with two parts. <strong>Provisioned only</strong>: everyone signs in, and uses the brokers they were given. <strong>Direct and Provisioned</strong>: users may also type a broker's details into the Direct form.</td></tr>
+            <tr><td><strong>Tab shown first when both are offered</strong></td><td>The tab the app opens on when both are offered.</td><td>A switch between <strong>Direct</strong> (the default) and <strong>Provisioned</strong>.</td></tr>
         </tbody>
     </table>
     <p>The page offers only these two modes, because this app is served only while the gateway runs in Provisioned mode. The gateway also refuses to save a setting that would turn Provisioned mode off, because that would turn this app off with it.</p>
@@ -49,7 +49,7 @@
     <h3>Access</h3>
     <p>The Access card decides which computers may reach the gateway at all. It opens with one line that says which address the gateway takes your browser for. Read it before you change either list.</p>
     <figure class="manual-figure">
-        <img src="help/cards.svg" width="760" height="582" alt="Three cards of Gateway Settings: Access with the client address line and two address lists side by side, Modules with three toggle tiles and a select, and Audit trail with two switches and a select.">
+        <img src="help/cards.svg" width="760" height="582" alt="Three cards of Gateway Settings: Access with the client address line and two address lists side by side, Modules with three toggle tiles and a two-part button, and Audit trail with two switches and a switch between two answers.">
         <figcaption>The Access, Modules and Audit trail cards.</figcaption>
     </figure>
     <ol class="manual-callouts">
@@ -57,10 +57,10 @@
         <li><strong>Allowed clients</strong>, one range on each line, on the left.</li>
         <li><strong>Trusted reverse proxies</strong>, one range on each line, on the right.</li>
         <li>The <strong>Modules signed-in users may be given</strong> tiles. A tile with a tick is offered.</li>
-        <li><strong>A user without a list of their own gets</strong>.</li>
+        <li><strong>A user without a list of their own gets</strong>, a button with two parts.</li>
         <li><strong>Copy audit lines to the gateway log (stdout)</strong>.</li>
         <li><strong>Also audit broker access</strong>.</li>
-        <li><strong>If the audit log cannot be written</strong>.</li>
+        <li><strong>If the audit log cannot be written</strong>, a switch between two answers with a line of help under it.</li>
     </ol>
     <h4>Your address as the gateway sees it</h4>
     <p>The line begins <code>Your address as the gateway sees it:</code> and then says one of these things.</p>
@@ -177,11 +177,11 @@
         <tbody>
             <tr><td><strong>Copy audit lines to the gateway log (stdout)</strong></td><td>Also writes each audit line to the gateway's own log, for a log shipper that reads it.</td><td>Off</td></tr>
             <tr><td><strong>Also audit broker access: dials, SMF sockets and SEMP relay requests</strong></td><td>Adds a line each time a user is given broker credentials, opens a messaging socket or sends a request through the gateway to a broker.</td><td>Off</td></tr>
-            <tr><td><strong>If the audit log cannot be written</strong></td><td>What the gateway does when a line cannot be written, for example because the disk is full. <strong>Carry on, and log the lost record</strong> logs the loss and carries on. <strong>Refuse changes until it can be written</strong> also refuses every change until a line can be written again.</td><td>Carry on, and log the lost record</td></tr>
+            <tr><td><strong>If the audit log cannot be written</strong></td><td>What the gateway does when a line cannot be written, for example because the disk is full. <strong>Carry on</strong> logs the loss and carries on. <strong>Refuse changes</strong> also refuses every change until a line can be written again.</td><td>Carry on</td></tr>
         </tbody>
     </table>
     <aside class="manual-note" data-kind="warning">
-        <p>With <strong>Refuse changes until it can be written</strong>, a full disk stops you changing users, connections, settings, certificates and backups. Reading, signing in as usual and <strong>Restart gateway</strong> still work. Choose it only if something watches the gateway's log and its disk. More is in the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#audit-trail">Audit trail</a> section of the Provisioned mode guide.</p>
+        <p>With <strong>Refuse changes</strong>, a full disk stops you changing users, connections, settings, certificates and backups. Reading, signing in as usual and <strong>Restart gateway</strong> still work. Choose it only if something watches the gateway's log and its disk. More is in the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#audit-trail">Audit trail</a> section of the Provisioned mode guide.</p>
     </aside>
 
     <h3>Broker trust</h3>
@@ -223,7 +223,7 @@
         <tbody>
             <tr><td>A dialog: <code>This settings page was changed by someone else since you opened it.</code> with <strong>Reload</strong></td><td>Another administrator saved first. <strong>Reload</strong> shows their settings and drops your changes. Cancel, <kbd>Esc</kbd> or a click outside leaves the dialog and keeps your edits on the page, but they cannot be saved until you reload.</td></tr>
             <tr><td><code>config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.</code></td><td>See the next section.</td></tr>
-            <tr><td><code>The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.</code></td><td>The audit setting above is on <strong>Refuse changes until it can be written</strong>, and the audit log is failing. Fix the disk on the gateway host.</td></tr>
+            <tr><td><code>The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.</code></td><td>The audit setting above is on <strong>Refuse changes</strong>, and the audit log is failing. Fix the disk on the gateway host.</td></tr>
             <tr><td><code>The gateway could not write its data files, so nothing was changed. Its log has the cause.</code></td><td>The settings file could not be written. Check the gateway's data volume on its host.</td></tr>
             <tr><td><code>The gateway cannot read config.yaml (&lt;cause&gt;). The cause is on the gateway host; once the gateway can read the file again, reload this page.</code></td><td>The page shows this when it loads the settings, instead of the settings, with the cause the gateway found in place of <code>&lt;cause&gt;</code>. Reload once the gateway can read the file.</td></tr>
             <tr><td><code>The page did not send the version it was working from, so the gateway refused the change. Reload the page and try again.</code></td><td>Press <strong>Reload</strong>, make your change again and save.</td></tr>

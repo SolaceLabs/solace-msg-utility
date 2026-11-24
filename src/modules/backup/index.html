@@ -62,11 +62,15 @@
             <ul id="backup-diff-connections" class="backup-diff"></ul>
         </div>
         <div class="form-group">
-            <label for="backup-choice-settings">Settings</label>
-            <select id="backup-choice-settings" class="form-control">
-                <option value="skip">Skip</option>
-                <option value="replace">Replace</option>
-            </select>
+            <label id="backup-choice-settings-label">Settings</label>
+            <div class="slide-choice" id="backup-choice-settings" role="group" aria-labelledby="backup-choice-settings-label">
+                <span class="slide-choice-label active" data-choice="skip">Skip</span>
+                <span class="switch" title="Toggle between Skip and Replace">
+                    <input type="checkbox" aria-label="Replace the settings">
+                    <span class="switch-slider"></span>
+                </span>
+                <span class="slide-choice-label" data-choice="replace">Replace</span>
+            </div>
             <ul id="backup-diff-settings" class="backup-diff"></ul>
         </div>
         <div id="backup-signout" class="banner-warning hidden">

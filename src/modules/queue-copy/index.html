@@ -314,13 +314,13 @@
                 <h2 class="card-title">Destination</h2>
                 <!-- Queue / Topic slide toggle. Unchecked = Queue, Checked = Topic.
                      Sits in the card's top-right corner per design. -->
-                <div class="copy-slide-choice" id="copy-dest-type-switch">
-                    <span class="copy-slide-label active" id="copy-dest-type-label-queue">Queue</span>
-                    <label class="switch" title="Toggle between Queue and Topic">
-                        <input type="checkbox" id="copy-dest-type-toggle" aria-label="Destination type">
+                <div class="slide-choice" id="copy-dest-type-switch" role="group" aria-label="Destination type">
+                    <span class="slide-choice-label active" data-choice="queue">Queue</span>
+                    <span class="switch" title="Toggle between Queue and Topic">
+                        <input type="checkbox" id="copy-dest-type-toggle" aria-label="Topic">
                         <span class="switch-slider"></span>
-                    </label>
-                    <span class="copy-slide-label" id="copy-dest-type-label-topic">Topic</span>
+                    </span>
+                    <span class="slide-choice-label" data-choice="topic">Topic</span>
                 </div>
                 <div class="text-secondary hidden copy-topic-blocked" id="copy-dest-topic-blocked">
                     Topic destinations are unavailable with provisioned connections -- entitlements are defined per queue.
@@ -342,15 +342,15 @@
                 <div id="copy-dest-error" class="invalid-feedback"></div>
             </div>
             <div class="form-group">
-                <label>Mode</label>
+                <label id="copy-mode-label">Mode</label>
                 <!-- Copy / Move slide toggle. Unchecked = Copy, Checked = Move. -->
-                <div class="copy-slide-choice" id="copy-mode-switch">
-                    <span class="copy-slide-label active" id="copy-mode-label-copy">Copy</span>
-                    <label class="switch" title="Toggle between Copy and Move">
+                <div class="slide-choice" id="copy-mode-switch" role="group" aria-labelledby="copy-mode-label">
+                    <span class="slide-choice-label active" data-choice="copy">Copy</span>
+                    <span class="switch" title="Toggle between Copy and Move">
                         <input type="checkbox" id="copy-mode-toggle" aria-label="Move the messages">
                         <span class="switch-slider"></span>
-                    </label>
-                    <span class="copy-slide-label" id="copy-mode-label-move">Move <span class="text-error">(destructive: removes from source)</span></span>
+                    </span>
+                    <span class="slide-choice-label" data-choice="move">Move <span class="text-error">(destructive: removes from source)</span></span>
                 </div>
             </div>
         </div>

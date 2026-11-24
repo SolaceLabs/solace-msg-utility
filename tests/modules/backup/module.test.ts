@@ -64,6 +64,18 @@ const choose = (c: HTMLElement, sel: string, v: string) => {
     el<HTMLSelectElement>(c, sel).value = v;
     el(c, sel).dispatchEvent(new Event('change'));
 };
+/** The import's Settings slide choice: its switch is off for Skip and on for Replace. */
+const settingsSwitch = (c: HTMLElement) => el<HTMLInputElement>(c, '#backup-choice-settings input');
+const slideSettings = (c: HTMLElement, on: boolean) => {
+    settingsSwitch(c).checked = on;
+    settingsSwitch(c).dispatchEvent(new Event('change'));
+};
+/** The three import choices as shown: users, connections, settings. */
+const importChoices = (c: HTMLElement) => [
+    el<HTMLSelectElement>(c, '#backup-choice-users').value,
+    el<HTMLSelectElement>(c, '#backup-choice-connections').value,
+    [...c.querySelectorAll('#backup-choice-settings .slide-choice-label.active')].map(l => l.textContent).join(),
+];
 
 function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppContext {
     const eventBus = createEventBus();
@@ -307,7 +319,8 @@ describe('backup -- import', () => {
             .toEqual(['Add: newbie', 'Change: admin', 'Remove (Replace only): operator']);
         expect(text(c, '#backup-diff-connections')).toBe('No change.');
         expect(text(c, '#backup-diff-settings')).toBe('Change: logLevel');
-        expect(['users', 'connections', 'settings'].map(s => el<HTMLSelectElement>(c, `#backup-choice-${s}`).value)).toEqual(['skip', 'skip', 'skip']);
+        expect(importChoices(c)).toEqual(['skip', 'skip', 'Skip']);
+        expect(settingsSwitch(c).checked).toBe(false);
         expect(hidden(c, '#backup-signout')).toBe(true);
         choose(c, '#backup-choice-users', 'replace');
         expect(hidden(c, '#backup-signout')).toBe(false);
@@ -321,6 +334,16 @@ describe('backup -- import', () => {
         await click(c, '#btn-backup-preview');
         expect(hidden(c, '#backup-preview')).toBe(true);
         expect(text(c, '#backup-import-error')).toBe('The passphrase does not open this file, or the file is damaged.');
+    });
+
+    it('a new preview puts every choice back at Skip', async () => {
+        const { c } = await previewed();
+        choose(c, '#backup-choice-users', 'merge');
+        choose(c, '#backup-choice-connections', 'replace');
+        slideSettings(c, true);
+        expect(importChoices(c)).toEqual(['merge', 'replace', 'Replace']);
+        await click(c, '#btn-backup-preview');
+        expect(importChoices(c)).toEqual(['skip', 'skip', 'Skip']);
     });
 
     it('asks before importing and sends nothing when declined', async () => {
@@ -342,7 +365,7 @@ describe('backup -- import', () => {
     it('imports the chosen sections and resets the form', async () => {
         const { c } = await previewed();
         choose(c, '#backup-choice-connections', 'replace');
-        choose(c, '#backup-choice-settings', 'replace');
+        slideSettings(c, true);
         svc.importFile.mockResolvedValue(ok({ signedOut: false }));
         await click(c, '#btn-backup-import');
         await answer(true);

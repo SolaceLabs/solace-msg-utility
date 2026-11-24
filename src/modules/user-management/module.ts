@@ -47,7 +47,7 @@
 import { required, setError } from '../../core/dom';
 import { createGate, gateOnAdminSession } from '../../core/components/module-gate';
 import { createRowList, renderAdminRows } from '../../core/components/row-list';
-import { createSegmented } from '../../core/segmented';
+import { createSlideChoice } from '../../core/slide-choice';
 import { iconButton } from '../../core/icons';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
@@ -199,8 +199,7 @@ export const UserManagementModule = {
         // Deployment default, or a list of the user's own. Leaving the default
         // starts that list from what the default grants; returning to it shows
         // the default again.
-        const modulesMode = createSegmented<'default' | 'choose'>(els.modulesMode, {
-            attr: 'data-modules-mode',
+        const modulesMode = createSlideChoice<'default' | 'choose'>(els.modulesMode, {
             choices: ['default', 'choose'],
             onChange: (mode) => {
                 if (mode === 'choose') chosen = grantedModules(null, choices);

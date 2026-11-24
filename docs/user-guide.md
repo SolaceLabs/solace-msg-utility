@@ -744,7 +744,7 @@ The page checks what you typed before it connects. A SEMP username or password t
 
 If you are signed in to a gateway, you type no addresses and no passwords. On the source side, one card, **Source Connection**, shows the connection you have. On the destination side, the broker type and both cards give way to one card, **Destination Connection**. The **Copy to** button stays.
 
-![Queue Copy in a signed-in session: on the left the Source Connection card with a locked Broker list and Message VPN list and an Edit in Connections button; on the right the Destination Broker card with its two switches, and under it the Destination Connection card with a locked Broker list, a Message VPN list, a Disconnect button and a status line.](../src/modules/queue-copy/help/provisioned.svg)
+![Queue Copy in a signed-in session: on the left the Source Connection card with a locked Broker list and Message VPN list and an Edit in Connections button; on the right the Destination Broker card with its Copy to button, and under it the Destination Connection card with a locked Broker list, a Message VPN list, a Disconnect button and a status line.](../src/modules/queue-copy/help/provisioned.svg)
 
 *Figure 3. A signed-in session copying to another Message VPN on the same broker, connected.*
 
@@ -1458,7 +1458,7 @@ The gateway keeps the users, the connections, the backup schedule and its settin
 | `A data file (users, connections or backup settings) was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.` | A data file was changed outside the pages. Nothing for those files can be saved until the gateway restarts. |
 | `config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.` | The same for the settings file. Gateway Settings shows it as a banner and blocks saving until the restart. |
 | `The gateway could not write its data files, so nothing was changed. Its log has the cause.` | The write failed, for example on a full disk, and was rolled back. Try again once the cause is fixed. |
-| `The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.` | The choice **Refuse changes until it can be written** is set in Gateway Settings and the audit log is failing. Changes wait until it can be written. |
+| `The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.` | The choice **Refuse changes** is set in Gateway Settings and the audit log is failing. Changes wait until it can be written. |
 | `The gateway cannot read its config.yaml. Its log has the cause.` | The settings file cannot be read. Nothing can be saved to it. |
 | `The gateway's certificate or trust files are read-only on its host, so they cannot be changed here.` | The host forbids writing them. Retrying does not help until whoever runs the gateway makes them writable. |
 | `The gateway could not write its certificate or trust files, so nothing was changed. Its log has the cause.` | The write failed and was rolled back, so the old certificate and authorities still stand. |
@@ -1522,14 +1522,14 @@ An empty list says `No users.` A search that finds nothing says `No users match 
 
 ### The account card
 
-![The user form for alice: the account card with username, password and Administrator switch, and the Modules card with its two-part button, two module pills and an Add module button.](../src/modules/user-management/help/form-account.svg)
+![The user form for alice: the account card with username, password and Administrator switch, and the Modules card with its switch between two answers, two module pills and an Add module button.](../src/modules/user-management/help/form-account.svg)
 
 *Figure 2. The first two cards of the user form, here editing alice with a list of modules of her own.*
 
 1. **Username**. You type it when you add a user. When you edit a user, it is fixed.
 2. **Password**, with a hint after its name: `(required)` when you add a user, `(leave blank to keep current)` when you edit one.
 3. The **Administrator** switch.
-4. The button for the user's modules, with two parts: **Deployment default** and **Choose for this user**. The pressed part is the choice, and the line under it names what the default gives.
+4. The switch for the user's modules, between **Deployment default** and **Choose for this user**. The answer in bold is the choice, and the line under it names what the default gives.
 5. The modules the user may open, each as a pill.
 6. **+ Add module**, which lists the modules you can still add.
 
@@ -1563,12 +1563,12 @@ The **Modules** card sets which pages of the app a user may open: Queue Browser,
 
 | Choice | What it does |
 | --- | --- |
-| **Deployment default** | The user gets what Gateway Settings give everyone. The modules it gives are named in the line under the button (or `no modules`) and shown as pills without a remove button. This is the choice for a user you add. If the settings change, so does what this user gets. |
+| **Deployment default** | The user gets what Gateway Settings give everyone. The modules it gives are named in the line under the switch (or `no modules`) and shown as pills without a remove button. This is the choice for a user you add. If the settings change, so does what this user gets. |
 | **Choose for this user** | The user has a list of their own. It starts as what the default gives. Each module is a pill with a remove button, named for screen readers `Remove Queue Browser` and so on. **+ Add module** opens a menu of the offered modules that are not in the list yet; pick one to add it, and press <kbd>Esc</kbd> to close the menu. The button is disabled when nothing is left to add. An empty list reads `No modules.` |
 
 A pill marked `not offered` is a module the gateway does not offer. It has no effect until Gateway Settings offer it, and you can remove it. The gateway never gives a user a module it does not offer.
 
-When you press **Deployment default** again, the user's own list is dropped on save.
+When you slide the switch back to **Deployment default**, the user's own list is dropped on save.
 
 ### Entitlements
 
@@ -1736,7 +1736,7 @@ Press **Refresh** to load the list again, for example after another administrato
 
 The form is the same one you use to edit a connection, so Figure 2 shows it with a connection open.
 
-![The connection form open on east-prod: broker name and broker type, the SEMP part with its scheme, hostname and port on one row and the account below, the Client part with its scheme, messaging hostname and port on one row, two Message VPN rows, Save and Cancel, and a red message under the form.](../src/modules/connection-management/help/form.svg)
+![The connection form open on east-prod: broker name and broker type, the SEMP part with its scheme button, hostname and port on one row and the account below, the Client part with its scheme button, messaging hostname and port on one row, two Message VPN rows, Save and Cancel, and a red message under the form.](../src/modules/connection-management/help/form.svg)
 
 *Figure 2. The form, editing the connection east-prod.*
 
@@ -1768,7 +1768,7 @@ SEMP is how the gateway reads a broker's configuration for its users: queues, su
 
 | Field | What it accepts | Default |
 | --- | --- | --- |
-| **Scheme** | `https (TLS)` or `http (plain)`. Choose `http` only for a broker whose SEMP port does not serve TLS, on a network you trust: the gateway then reaches it unencrypted, and the account's password crosses that hop in clear text. | `https (TLS)` |
+| **Scheme** | A button with two parts: `https` (TLS) or `http` (plain). Choose `http` only for a broker whose SEMP port does not serve TLS, on a network you trust: the gateway then reaches it unencrypted, and the account's password crosses that hop in clear text. | `https` |
 | **Port** | A whole number from 1 to 65535, in digits only. A blank port is never taken to mean a default. Required when a SEMP username is set. A connection with no SEMP port gives users no management access to the broker. | Blank |
 | **Username** | Up to 32 characters from `A-Z a-z 0-9 _ -`. It may be left blank. | Blank |
 | **Password** | The account's password, typed with its characters hidden. The gateway refuses control characters in it and applies no other rule of its own. | Blank |
@@ -1782,7 +1782,7 @@ Messaging is how a user's browser connects to the broker, through the gateway, t
 
 | Field | What it accepts | Default |
 | --- | --- | --- |
-| **Scheme** | `wss (TLS)` or `ws (plain)`. Choose `ws` only for a broker that does not serve TLS on its messaging port, on a network you trust: the credentials of the Message VPNs then cross that hop in clear text. | `wss (TLS)` |
+| **Scheme** | A button with two parts: `wss` (TLS) or `ws` (plain). Choose `ws` only for a broker that does not serve TLS on its messaging port, on a network you trust: the credentials of the Message VPNs then cross that hop in clear text. | `wss` |
 | **Port** | As the SEMP port: digits, 1 to 65535. Required once a Message VPN is listed. | Blank |
 
 The two schemes are chosen separately. A connection stored with no scheme shows `https` and `wss`.
@@ -1944,8 +1944,8 @@ The gateway checks every value as it does at start. If any one is refused, none 
 
 | Field | What it does | Choices |
 | --- | --- | --- |
-| **Connection modes the app offers** | Which connection tabs people see in the app. | **Provisioned only (everyone signs in)**: users sign in and use the brokers they were given. **Direct and Provisioned**: users may also type a broker's details into the Direct form. |
-| **Tab shown first when both are offered** | The tab the app opens on when both are offered. | **Direct** (the default) or **Provisioned**. |
+| **Connection modes the app offers** | Which connection tabs people see in the app. | A button with two parts. **Provisioned only**: everyone signs in, and uses the brokers they were given. **Direct and Provisioned**: users may also type a broker's details into the Direct form. |
+| **Tab shown first when both are offered** | The tab the app opens on when both are offered. | A switch between **Direct** (the default) and **Provisioned**. |
 
 The page offers only these two modes, because this app is served only while the gateway runs in Provisioned mode. The gateway also refuses to save a setting that would turn Provisioned mode off, because that would turn this app off with it.
 
@@ -1956,7 +1956,7 @@ The page offers only these two modes, because this app is served only while the 
 
 The Access card decides which computers may reach the gateway at all. It opens with one line that says which address the gateway takes your browser for. Read it before you change either list.
 
-![Three cards of Gateway Settings: Access with the client address line and two address lists side by side, Modules with three toggle tiles and a select, and Audit trail with two switches and a select.](../src/modules/gateway-settings/help/cards.svg)
+![Three cards of Gateway Settings: Access with the client address line and two address lists side by side, Modules with three toggle tiles and a two-part button, and Audit trail with two switches and a switch between two answers.](../src/modules/gateway-settings/help/cards.svg)
 
 *Figure 2. The Access, Modules and Audit trail cards.*
 
@@ -1964,10 +1964,10 @@ The Access card decides which computers may reach the gateway at all. It opens w
 2. **Allowed clients**, one range on each line, on the left.
 3. **Trusted reverse proxies**, one range on each line, on the right.
 4. The **Modules signed-in users may be given** tiles. A tile with a tick is offered.
-5. **A user without a list of their own gets**.
+5. **A user without a list of their own gets**, a button with two parts.
 6. **Copy audit lines to the gateway log (stdout)**.
 7. **Also audit broker access**.
-8. **If the audit log cannot be written**.
+8. **If the audit log cannot be written**, a switch between two answers with a line of help under it.
 
 #### Your address as the gateway sees it
 
@@ -2061,10 +2061,10 @@ The gateway always writes an audit trail of what administrators and users do, to
 | --- | --- | --- |
 | **Copy audit lines to the gateway log (stdout)** | Also writes each audit line to the gateway's own log, for a log shipper that reads it. | Off |
 | **Also audit broker access: dials, SMF sockets and SEMP relay requests** | Adds a line each time a user is given broker credentials, opens a messaging socket or sends a request through the gateway to a broker. | Off |
-| **If the audit log cannot be written** | What the gateway does when a line cannot be written, for example because the disk is full. **Carry on, and log the lost record** logs the loss and carries on. **Refuse changes until it can be written** also refuses every change until a line can be written again. | Carry on, and log the lost record |
+| **If the audit log cannot be written** | What the gateway does when a line cannot be written, for example because the disk is full. **Carry on** logs the loss and carries on. **Refuse changes** also refuses every change until a line can be written again. | Carry on |
 
 > [!WARNING]
-> With **Refuse changes until it can be written**, a full disk stops you changing users, connections, settings, certificates and backups. Reading, signing in as usual and **Restart gateway** still work. Choose it only if something watches the gateway's log and its disk. More is in the [Audit trail](provisioned-mode.md#audit-trail) section of the Provisioned mode guide.
+> With **Refuse changes**, a full disk stops you changing users, connections, settings, certificates and backups. Reading, signing in as usual and **Restart gateway** still work. Choose it only if something watches the gateway's log and its disk. More is in the [Audit trail](provisioned-mode.md#audit-trail) section of the Provisioned mode guide.
 
 ### Broker trust
 
@@ -2106,7 +2106,7 @@ A bad line in an address list is named by its position, counting from 0: `key "a
 | --- | --- |
 | A dialog: `This settings page was changed by someone else since you opened it.` with **Reload** | Another administrator saved first. **Reload** shows their settings and drops your changes. Cancel, <kbd>Esc</kbd> or a click outside leaves the dialog and keeps your edits on the page, but they cannot be saved until you reload. |
 | `config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.` | See the next section. |
-| `The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.` | The audit setting above is on **Refuse changes until it can be written**, and the audit log is failing. Fix the disk on the gateway host. |
+| `The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.` | The audit setting above is on **Refuse changes**, and the audit log is failing. Fix the disk on the gateway host. |
 | `The gateway could not write its data files, so nothing was changed. Its log has the cause.` | The settings file could not be written. Check the gateway's data volume on its host. |
 | `The gateway cannot read config.yaml (<cause>). The cause is on the gateway host; once the gateway can read the file again, reload this page.` | The page shows this when it loads the settings, instead of the settings, with the cause the gateway found in place of `<cause>`. Reload once the gateway can read the file. |
 | `The page did not send the version it was working from, so the gateway refused the change. Reload the page and try again.` | Press **Reload**, make your change again and save. |
@@ -2447,7 +2447,7 @@ Restoring is two steps. **Preview** opens the file and shows what an import woul
 
 1. The file, its passphrase and **Preview**. Under the file box the page names what you chose.
 2. When the backup was made and by which gateway version.
-3. One choice for **Users**, **Connections** and **Settings**.
+3. One choice for **Users**, **Connections** and **Settings**. Settings have two answers, so theirs is a switch between **Skip** and **Replace**.
 4. What importing that part would add, change and remove.
 5. The warning that the import signs you out.
 6. **Import** applies the choices.

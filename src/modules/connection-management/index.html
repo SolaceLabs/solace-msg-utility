@@ -46,11 +46,11 @@
     <h3 class="card-subtitle">SEMP (management)</h3>
     <div class="form-group flex-row">
         <div class="conn-mgmt-scheme">
-            <label for="conn-mgmt-semp-scheme">Scheme</label>
-            <select id="conn-mgmt-semp-scheme" class="form-control">
-                <option value="https">https (TLS)</option>
-                <option value="http">http (plain)</option>
-            </select>
+            <label>Scheme</label>
+            <div class="segmented" id="conn-mgmt-semp-scheme" role="group" aria-label="SEMP scheme">
+                <button type="button" class="segmented-option" data-scheme="https" aria-pressed="true" title="TLS">https</button>
+                <button type="button" class="segmented-option" data-scheme="http" aria-pressed="false" title="Plain, no TLS">http</button>
+            </div>
         </div>
         <div class="conn-mgmt-host">
             <label id="lbl-conn-mgmt-hostname" for="conn-mgmt-hostname">Hostname</label>
@@ -75,11 +75,11 @@
     <h3 class="card-subtitle">Client (messaging)</h3>
     <div class="form-group flex-row">
         <div class="conn-mgmt-scheme">
-            <label for="conn-mgmt-client-scheme">Scheme</label>
-            <select id="conn-mgmt-client-scheme" class="form-control">
-                <option value="wss">wss (TLS)</option>
-                <option value="ws">ws (plain)</option>
-            </select>
+            <label>Scheme</label>
+            <div class="segmented" id="conn-mgmt-client-scheme" role="group" aria-label="Client scheme">
+                <button type="button" class="segmented-option" data-scheme="wss" aria-pressed="true" title="TLS">wss</button>
+                <button type="button" class="segmented-option" data-scheme="ws" aria-pressed="false" title="Plain, no TLS">ws</button>
+            </div>
         </div>
         <div class="conn-mgmt-host">
             <label for="conn-mgmt-client-hostname">Messaging hostname</label>
