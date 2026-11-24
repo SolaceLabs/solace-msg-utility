@@ -29,6 +29,9 @@
  * moved only when there was two-factor to remove, which also ends that
  * user's sessions and tickets). A user's PUT never carries or clears it.
  *
+ * The Message VPN lookup of the connection form: `POST
+ * /managed/connections/vpns` (vpns.ts), administrators only.
+ *
  * TLS and restart: `/managed/tls/*` (tls.ts) and `POST /managed/restart`, administrators
  * only like the rest. A restart answers `202 { restarting: true }` and then,
  * through `restart` (index.ts), ends every session and ticket.
@@ -42,6 +45,7 @@
 import { BadRequest, boolean, list, nullableList, object, parseBody, string } from './strict';
 import { brokerUsernamesProblem, canonScheme, CATALOG, connectionProblem, moduleIdsProblem, passwordOk, PASSWORD_MAX, USERNAME_RULE, validUsername } from './validate';
 import { relay, RELAY_PREFIX, type Upstream } from './relay';
+import { lookupVpns } from './vpns';
 import type { GatewayStore } from './store';
 import type { GatewaySessions, Session } from './sessions';
 import { refusalBody, splitRev, type GatewaySettingsFile, type Refusal } from './settings';
@@ -52,7 +56,7 @@ import type { QGlob } from '../../core/types';
 
 /** The control panel's gateway faults. */
 export interface RouterFaults {
-    /** The relay cannot reach the broker. */
+    /** The relay, and the Message VPN lookup, cannot reach a broker. */
     relayUnreachable: boolean;
     /** Dial answers as over its window, whatever the count (the Demo controls' lever). */
     dialRateLimited: boolean;
@@ -236,6 +240,17 @@ export function createRouter({ store, sessions, settings, faults, anonymous, con
         return r === 'stale' ? stale(store.connRev(broker)!) : noContent;
     };
 
+    /** `POST /managed/connections/vpns`: the Message VPN names of the broker the connection form describes (vpns.ts). */
+    const connectionVpns: Handler = (req) => {
+        const b = object(parseBody(req.body), ['broker', 'hostname', 'semp']);
+        const semp = object(b.semp, ['scheme', 'port', 'user', 'pass']);
+        return lookupVpns({
+            broker: string(b.broker),
+            hostname: string(b.hostname),
+            semp: { scheme: string(semp.scheme), port: string(semp.port), user: string(semp.user), pass: string(semp.pass) },
+        }, store, faults().relayUnreachable, upstream);
+    };
+
     const refusal = (r: Refusal): GatewayResponse => ({ status: r.status, json: refusalBody(r) });
 
     const getSettings: Handler = () => {
@@ -273,6 +288,7 @@ export function createRouter({ store, sessions, settings, faults, anonymous, con
         ['GET', '/managed/connections', adminOnly(listConnections)],
         ['PUT', '/managed/connections/{}', adminOnly(saveConnection)],
         ['DELETE', '/managed/connections/{}', adminOnly(deleteConnection)],
+        ['POST', '/managed/connections/vpns', adminOnly(connectionVpns)],
         ['GET', '/managed/settings', adminOnly(getSettings)],
         ['PUT', '/managed/settings', adminOnly(saveSettings)],
         ['GET', '/managed/client', adminOnly(clientSeen)],

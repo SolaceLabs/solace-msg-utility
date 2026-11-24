@@ -16,6 +16,11 @@
  * its own (`src/core/connections/broker-hosts.ts`). Imports only from
  * `src/core/*` and its own service.
  *
+ * Retrieve VPNs fills the Message VPN list from the broker: the gateway reads
+ * the broker's Message VPN names over SEMP with the form's SEMP details
+ * (`POST /managed/connections/vpns`), and each name the list does not hold yet
+ * gets a row. The client username and password of a row are still typed.
+ *
  * Every listed connection carries a `rev`. The form keeps the rev of the record
  * it opened (0 for a new connection) and a save sends it; the 200 answer
  * carries the new rev. A delete sends the rev of its row. When someone else got
@@ -50,6 +55,24 @@ const SEMP_USERNAME_RULE = 'SEMP username may be up to 32 characters: letters, d
 /** A connection's host as the list shows it: an appliance names its messaging host too. */
 const hostCell = (c: ManagedConnRecord): string =>
     (c.client.hostname ? `${c.hostname} (messaging: ${c.client.hostname})` : c.hostname);
+
+/**
+ * What the form says when the broker turns a Retrieve VPNs away. The stock
+ * lines for these two codes are worded for a user of a saved connection.
+ */
+const LOOKUP_FAILURES: Readonly<Record<string, string>> = {
+    upstream_auth: 'The broker refused the SEMP username and password, or that account may not read its Message VPNs.',
+    upstream_unavailable: "The gateway could not reach the broker's SEMP address, or the broker's answer was not a list of Message VPNs. The gateway's log has the cause.",
+};
+
+/** What Retrieve VPNs says once the broker has answered: the rows it added, of the Message VPNs the broker listed. */
+function retrievedText(added: number, listed: number): string {
+    if (listed === 0) return 'The broker listed no Message VPN for this SEMP account.';
+    if (added === 0) return 'Every Message VPN the broker listed is already in the list.';
+    return added === 1
+        ? 'Added 1 Message VPN. Fill in its client username and password.'
+        : `Added ${added} Message VPNs. Fill in their client usernames and passwords.`;
+}
 
 /** What an empty VPN list means, shown in its place. */
 export const NO_VPNS = 'None: no user can reach this broker until it lists a Message VPN.';
@@ -87,6 +110,7 @@ export const ConnectionManagementModule = {
             clientPort: required<HTMLInputElement>(container, '#conn-mgmt-client-port'),
             vpnRows: required<HTMLElement>(container, '#conn-mgmt-vpn-rows'),
             btnAddVpn: required<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn'),
+            btnRetrieveVpns: required<HTMLButtonElement>(container, '#btn-conn-mgmt-retrieve-vpns'),
             btnSave: required<HTMLButtonElement>(container, '#btn-conn-mgmt-save'),
             btnCancel: required<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel'),
             formError: required<HTMLElement>(container, '#conn-mgmt-form-error'),
@@ -120,6 +144,9 @@ export const ConnectionManagementModule = {
         // connection has a stored password for (none when adding).
         let conns: ManagedConnRecord[] = [];
         let storedVpns = new Set<string>();
+        // Counts each time the form closes, so an answer that arrives after
+        // that is dropped: it belongs to a form no longer on show.
+        let formShown = 0;
 
         function showView(view: 'list' | 'form'): void {
             gate.hide();
@@ -135,6 +162,7 @@ export const ConnectionManagementModule = {
         }
         /** A hidden form keeps no typed password, SEMP or VPN: Cancel, a save, a sign-out or a 401. */
         function forgetPasswords(): void {
+            formShown++;
             els.sempPass.value = '';
             vpnList.clear();
         }
@@ -303,6 +331,37 @@ export const ConnectionManagementModule = {
             }
         }
 
+        /**
+         * Retrieve VPNs: the gateway reads the Message VPNs of the broker the
+         * form describes, over SEMP, and each one the list does not name yet
+         * gets a row with its name. Rows already there stay as they are. A
+         * blank SEMP password stands for the stored one, which the gateway
+         * uses only for a saved connection whose address and account are
+         * unchanged; otherwise it asks for the password.
+         */
+        async function retrieveVpns(): Promise<void> {
+            const shown = formShown;
+            setError(els.formError, null);
+            els.btnRetrieveVpns.disabled = true;
+            const res = await service.lookupVpns({
+                broker: editing ?? '',
+                hostname: els.hostname.value.trim(),
+                semp: { scheme: sempScheme.value(), port: els.sempPort.value.trim(), user: els.sempUser.value.trim(), pass: els.sempPass.value },
+            });
+            els.btnRetrieveVpns.disabled = false;
+            if (shown !== formShown) return; // the form was closed meanwhile
+            if (!res.ok) {
+                const said = LOOKUP_FAILURES[res.code];
+                if (said) setError(els.formError, said);
+                else reportManagedFailure(res, eventBus, msg => setError(els.formError, msg));
+                return;
+            }
+            const named = new Set(vpnList.readRows().map(r => r.name));
+            const added = res.data.vpns.filter(name => !named.has(name));
+            added.forEach(name => vpnList.addRow({ name }));
+            showToast(retrievedText(added.length, res.data.vpns.length), 'ok');
+        }
+
         async function removeConn(broker: string, rev: number): Promise<void> {
             if (!(await confirmDialog(`Delete connection "${broker}"?`, { confirmLabel: 'Delete' }))) return;
             const res = await service.deleteConnection(broker, rev);
@@ -321,6 +380,7 @@ export const ConnectionManagementModule = {
         els.btnSave.addEventListener('click', () => void saveForm());
         els.btnCancel.addEventListener('click', () => showView('list'));
         els.btnAddVpn.addEventListener('click', () => vpnList.addRow());
+        els.btnRetrieveVpns.addEventListener('click', () => void retrieveVpns());
 
         applyGate(); // gate until an admin session exists; load the list when it does
         logger.info('Connection Management Module Setup Complete');

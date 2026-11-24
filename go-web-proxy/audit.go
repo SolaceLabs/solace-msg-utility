@@ -76,6 +76,8 @@ const (
 	auditSMFOpen  = "smf.open"
 	auditSMFClose = "smf.close"
 	auditRelay    = "relay"
+	// A Message VPN lookup for the connection form (vpns.go).
+	auditVPNLookup = "vpns.lookup"
 )
 
 // auditBadCode is the Code of a refused signin or twofactor.enrol whose one-time

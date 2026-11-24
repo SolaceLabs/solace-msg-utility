@@ -34,4 +34,13 @@ describe('connection-management/service', () => {
         expect(await createConnMgmtService().deleteConnection('b 1', 5)).toEqual({ ok: true, data: undefined });
         expect(fetchMock()).toHaveBeenCalledWith('/managed/connections/b%201?rev=5', { method: 'DELETE', credentials: 'same-origin' });
     });
+
+    it("lookupVpns POSTs the form's SEMP details and answers the broker's Message VPN names", async () => {
+        const lookup = { broker: 'b1', hostname: 'host1', semp: { scheme: 'https' as const, port: '1943', user: 'mon', pass: '' } };
+        fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => ({ vpns: ['v1', 'v2'] }) });
+        expect(await createConnMgmtService().lookupVpns(lookup)).toEqual({ ok: true, data: { vpns: ['v1', 'v2'] } });
+        expect(fetchMock()).toHaveBeenCalledWith('/managed/connections/vpns', expect.objectContaining({
+            method: 'POST', body: JSON.stringify(lookup),
+        }));
+    });
 });

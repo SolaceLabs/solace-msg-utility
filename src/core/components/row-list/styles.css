@@ -1,9 +1,34 @@
-/* Row-list editor (src/core/components/row-list): the column labels above the
- * rows, lined up with the inputs, and the note an empty list shows. Imported
- * by src/css/main.css with the other reusable components. */
+/* Row-list editor (src/core/components/row-list): the line above a list (its
+ * title and buttons), the column labels above the rows, lined up with the
+ * inputs, and the note an empty list shows. Imported by src/css/main.css with
+ * the other reusable components. */
+
+/* The line above a list, in the caller's template: the list's title in bold
+ * with its buttons right after it. */
+.row-list-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.row-list-title {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+/* The list itself: the column labels and the rows, close together like the
+ * rows of a table. */
+.row-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+}
 
 .row-list-head {
-    margin-bottom: 0.25rem;
     font-size: 0.8rem;
     color: var(--text-secondary);
 }
@@ -21,7 +46,6 @@
 }
 
 .row-list-empty {
-    margin: 0 0 0.5rem;
     font-size: 0.85rem;
     color: var(--text-secondary);
 }

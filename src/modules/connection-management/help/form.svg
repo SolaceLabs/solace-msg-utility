@@ -53,11 +53,13 @@
     <text x="200" y="390" font-size="10" fill="#64748b">Follows the hostname above. Choose Appliance to set its own.</text>
     <circle cx="730" cy="362" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="730" y="366" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
-    <text x="60" y="430" font-size="11" fill="#64748b" font-weight="700">Message VPNs (name / user / password)</text>
-    <rect x="630" y="416" width="60" height="22" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
-    <text x="660" y="430.667" font-size="11" font-weight="700" text-anchor="middle">+ Add</text>
-    <circle cx="730" cy="427" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="730" y="431" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
+    <text x="60" y="430" font-weight="700">Message VPNs (name / user / password)</text>
+    <rect x="340" y="415" width="60" height="22" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="370" y="429.667" font-size="11" font-weight="700" text-anchor="middle">+ Add</text>
+    <rect x="408" y="415" width="110" height="22" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="463" y="429.667" font-size="11" font-weight="700" text-anchor="middle">Retrieve VPNs</text>
+    <circle cx="542" cy="426" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="542" y="430" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
     <text x="60" y="458" font-size="11" fill="#64748b" font-weight="700">Message VPN</text>
     <text x="258" y="458" font-size="11" fill="#64748b" font-weight="700">Client username</text>
     <text x="456" y="458" font-size="11" fill="#64748b" font-weight="700">Client password</text>
@@ -68,13 +70,13 @@
     <rect x="456" y="466" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
     <text x="466" y="484" fill="#94a3b8">password (blank = keep)</text>
     <text x="652" y="484" font-size="13" fill="#64748b" font-weight="700">x</text>
-    <rect x="60" y="502" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="70" y="520">qa</text>
-    <rect x="258" y="502" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="268" y="520">client?qa</text>
-    <rect x="456" y="502" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="466" y="520" fill="#94a3b8">password (blank = keep)</text>
-    <text x="652" y="520" font-size="13" fill="#64748b" font-weight="700">x</text>
+    <rect x="60" y="498" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="70" y="516">qa</text>
+    <rect x="258" y="498" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="268" y="516">client?qa</text>
+    <rect x="456" y="498" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="466" y="516" fill="#94a3b8">password (blank = keep)</text>
+    <text x="652" y="516" font-size="13" fill="#64748b" font-weight="700">x</text>
     <circle cx="22" cy="494" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="22" y="498" font-weight="700" fill="#ffffff" text-anchor="middle">8</text>
     <rect x="60" y="554" width="70" height="26" fill="#00C895" rx="5"/>

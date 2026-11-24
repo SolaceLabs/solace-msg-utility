@@ -27,12 +27,12 @@
     <ol class="manual-steps">
         <li>Press <strong>Add connection</strong>. The form opens with the title <strong>Add connection</strong>, <code>https</code> and <code>wss</code> chosen as the schemes, and no ports or Message VPNs.</li>
         <li>Fill in the broker's name and choose its type, then fill in the <strong>SEMP (management)</strong> and <strong>Client (messaging)</strong> parts, each with its hostname. Figure 2 and the tables below say what each field takes.</li>
-        <li>Under <strong>Message VPNs (name / user / password)</strong>, press <strong>+ Add</strong> once for each Message VPN users may connect to, and fill in its row.</li>
+        <li>Under <strong>Message VPNs (name / user / password)</strong>, press <strong>+ Add</strong> once for each Message VPN users may connect to, and fill in its row. Or press <strong>Retrieve VPNs</strong> to have the rows added for you with the names the broker holds (see "Retrieve VPNs" below).</li>
         <li>Press <strong>Save</strong>. The page shows the toast <code>Connection saved</code> and returns to the list, loaded again.</li>
     </ol>
     <p>The form is the same one you use to edit a connection, so Figure 2 shows it with a connection open.</p>
     <figure class="manual-figure">
-        <img src="help/form.svg" width="760" height="658" alt="The connection form open on east-prod: broker name and broker type, the SEMP part with its scheme button, hostname and port on one row and the account below, the Client part with its scheme button, messaging hostname and port on one row, two Message VPN rows, Save and Cancel, and a red message under the form.">
+        <img src="help/form.svg" width="760" height="658" alt="The connection form open on east-prod: broker name and broker type, the SEMP part with its scheme button, hostname and port on one row and the account below, the Client part with its scheme button, messaging hostname and port on one row, the Message VPN list with its + Add and Retrieve VPNs buttons and two rows, Save and Cancel, and a red message under the form.">
         <figcaption>The form, editing the connection east-prod.</figcaption>
     </figure>
     <ol class="manual-callouts">
@@ -42,7 +42,7 @@
         <li>The SEMP <strong>Username</strong>.</li>
         <li>The SEMP <strong>Password</strong>. While you edit, its hint reads <code>(leave blank to keep current)</code>.</li>
         <li>The messaging address on one row: <strong>Scheme</strong>, <strong>Messaging hostname</strong> and <strong>Port</strong>. The hostname is locked for a software or cloud broker, where it shows the hostname above.</li>
-        <li><strong>+ Add</strong> adds a row to the Message VPN list.</li>
+        <li><strong>+ Add</strong> adds a row to the Message VPN list. <strong>Retrieve VPNs</strong>, beside it, adds a row for each Message VPN the broker holds.</li>
         <li>One row for each Message VPN: its name, the client username and the client password. The cross at the end of a row removes it.</li>
         <li><strong>Save</strong> stores the connection. <strong>Cancel</strong> returns to the list and keeps nothing.</li>
         <li>The place where the form tells you what is wrong.</li>
@@ -104,6 +104,16 @@
     </table>
     <p>A row in which every box is empty is ignored when you save.</p>
 
+    <h4>Retrieve VPNs</h4>
+    <p><strong>Retrieve VPNs</strong> fills the list from the broker. The gateway asks the broker for its Message VPNs over SEMP, with the SEMP details the form holds at that moment, and the page adds a row for each Message VPN the list does not name yet. It works before the connection is saved, and nothing is stored until you press <strong>Save</strong>.</p>
+    <ol class="manual-steps">
+        <li>Fill in the SEMP part of the form: <strong>Scheme</strong>, <strong>Hostname</strong>, <strong>Port</strong>, <strong>Username</strong> and <strong>Password</strong>.</li>
+        <li>Press <strong>Retrieve VPNs</strong>. The button is off until the gateway answers.</li>
+        <li>Each row it adds carries the Message VPN's name only. Type its client username and password, and remove the rows of Message VPNs users should not reach.</li>
+    </ol>
+    <p>Rows already in the list stay as they are, with what you typed in them. A toast says what was found: <code>Added 2 Message VPNs. Fill in their client usernames and passwords.</code>, <code>Every Message VPN the broker listed is already in the list.</code> or <code>The broker listed no Message VPN for this SEMP account.</code></p>
+    <p>While you edit a saved connection you may leave the SEMP <strong>Password</strong> blank, and the gateway uses the stored one. It does so only while the hostname, scheme, port and username are the saved ones. If you changed any of them, or the connection is not saved yet, type the password.</p>
+
     <h3>Passwords</h3>
     <p>Passwords are sent to the gateway as you type them, over the connection to the gateway, and the gateway keeps them in its encrypted store. No page of the app shows a stored password again, and the list does not carry one. The boxes stay empty when you open a connection to edit it.</p>
     <ul>
@@ -150,8 +160,8 @@
         <li><strong>Deleting the connection.</strong> Users connected through any of its VPNs are disconnected at once. Their requests for that broker are refused with <code>Not found. It may already have been removed.</code></li>
         <li><strong>An empty VPN list.</strong> No user can reach the broker, so every open connection to it closes.</li>
     </ul>
-    <p>The page has no button to test a connection. A connection that cannot be reached shows when a user tries to use it. A user whose request meets a wrong password sees <code>The broker refused the credential the gateway holds for it. Ask an administrator to check the connection.</code> A user whose request meets a wrong address, port or scheme sees <code>The gateway could not reach the broker, or the broker gave an answer it cannot pass on. Its log has the cause.</code></p>
-    <p>Each save and each deletion is written to the gateway's audit trail with your name and the parts that changed, never a password. See <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#audit-trail">Audit trail</a>.</p>
+    <p>The page has no button to test a whole connection. <strong>Retrieve VPNs</strong> shows that the SEMP address and its account work; the messaging address and the credentials of the Message VPNs are tried only when a user connects. A connection that cannot be reached shows when a user tries to use it. A user whose request meets a wrong password sees <code>The broker refused the credential the gateway holds for it. Ask an administrator to check the connection.</code> A user whose request meets a wrong address, port or scheme sees <code>The gateway could not reach the broker, or the broker gave an answer it cannot pass on. Its log has the cause.</code></p>
+    <p>Each save and each deletion is written to the gateway's audit trail with your name and the parts that changed, never a password. While the gateway audits broker access, each <strong>Retrieve VPNs</strong> is written there too, with your name and the address that was asked. See <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#audit-trail">Audit trail</a>.</p>
 
     <h3>When the page or the gateway refuses</h3>
     <p>Before it sends a save, the page checks a few things and says what is wrong under the form. The message stays until you save again or leave the form.</p>
@@ -168,6 +178,8 @@
             <tr><td><code>VPN "qa": Client username must not exceed 189 characters.</code></td><td>A client username is too long.</td></tr>
             <tr><td><code>VPN "qa": Client username may contain only printable ASCII characters: no accented letters or control characters.</code></td><td>A client username holds a character outside the printable ASCII range.</td></tr>
             <tr><td><code>VPN "qa": Client username must not contain ? or *.</code></td><td>The broker reads those two characters as wildcards, so they cannot be in a username.</td></tr>
+            <tr><td><code>The broker refused the SEMP username and password, or that account may not read its Message VPNs.</code></td><td>From <strong>Retrieve VPNs</strong>. Check the SEMP username and password. The account needs read access to the broker's Message VPNs.</td></tr>
+            <tr><td><code>The gateway could not reach the broker's SEMP address, or the broker's answer was not a list of Message VPNs. The gateway's log has the cause.</code></td><td>From <strong>Retrieve VPNs</strong>. Check the hostname, the scheme and the port. A broker certificate the gateway does not trust ends here too: see the Certificates page.</td></tr>
         </tbody>
     </table>
     <p>The gateway checks every save again, whatever the page let through, and gives the reason in its own words. The page shows it under the form, and nothing is stored. The reasons name the connection, and never print a password.</p>
@@ -187,6 +199,8 @@
             <tr><td><code>broker "east-prod": message VPN "qa": the client username must be up to 189 printable ASCII characters, without ? or *</code></td><td>The client username of that VPN.</td></tr>
             <tr><td><code>broker "east-prod": the SEMP username and password must not contain control characters, and the username no ':'</code></td><td>Retype the SEMP username or password.</td></tr>
             <tr><td><code>broker "east-prod": message VPN "qa": the name, username and password must not contain control characters</code></td><td>Retype the row.</td></tr>
+            <tr><td><code>Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged.</code></td><td>From <strong>Retrieve VPNs</strong> with a blank SEMP password, on a connection that is not saved or whose SEMP address or username you changed. Type the password.</td></tr>
+            <tr><td><code>A SEMP port is required to read the Message VPNs.</code></td><td>From <strong>Retrieve VPNs</strong>. Give the SEMP port. The same holds for the username: <code>A SEMP username is required to read the Message VPNs.</code></td></tr>
         </tbody>
     </table>
     <p>A connection that is already stored, or that came in from a restored backup, loads as it is even when a username breaks these rules. Saving it asks for a valid one.</p>

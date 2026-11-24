@@ -58,7 +58,7 @@
         <p class="user-mgmt-hint text-secondary">Deployment default: <span id="user-mgmt-modules-default-hint"></span></p>
         <div id="user-mgmt-modules" class="user-mgmt-pills mt-2"></div>
         <div id="user-mgmt-module-add" class="user-mgmt-menu-wrap mt-2">
-            <button type="button" id="btn-user-mgmt-add-module" class="btn btn-secondary btn-sm"
+            <button type="button" id="btn-user-mgmt-add-module" class="btn btn-secondary btn-compact"
                 aria-haspopup="menu" aria-expanded="false">+ Add module</button>
             <div id="user-mgmt-module-menu" class="user-mgmt-menu hidden" role="menu" aria-label="Modules to add"></div>
         </div>
@@ -73,18 +73,18 @@
             ACL profile on the broker.
         </p>
         <div class="form-group">
-            <div class="flex-row justify-between items-center mb-2">
-                <label class="m-0">Operate entitlements (read + write)</label>
-                <button id="btn-user-mgmt-add-operate" class="btn btn-secondary btn-sm">+ Add</button>
+            <div class="row-list-bar">
+                <span class="row-list-title" id="user-mgmt-operate-title">Operate entitlements (read + write)</span>
+                <button id="btn-user-mgmt-add-operate" type="button" class="btn btn-secondary btn-compact">+ Add</button>
             </div>
-            <div id="user-mgmt-operate-rows" class="flex-col"></div>
+            <div id="user-mgmt-operate-rows" role="group" aria-labelledby="user-mgmt-operate-title"></div>
         </div>
         <div class="form-group">
-            <div class="flex-row justify-between items-center mb-2">
-                <label class="m-0">Read-only entitlements</label>
-                <button id="btn-user-mgmt-add-readonly" class="btn btn-secondary btn-sm">+ Add</button>
+            <div class="row-list-bar">
+                <span class="row-list-title" id="user-mgmt-readonly-title">Read-only entitlements</span>
+                <button id="btn-user-mgmt-add-readonly" type="button" class="btn btn-secondary btn-compact">+ Add</button>
             </div>
-            <div id="user-mgmt-readonly-rows" class="flex-col"></div>
+            <div id="user-mgmt-readonly-rows" role="group" aria-labelledby="user-mgmt-readonly-title"></div>
             <p id="user-mgmt-grants-hint" class="user-mgmt-hint text-secondary">
                 Each row names brokers, Message VPNs and queues; <code>*</code> matches any run of characters.
                 A user reaches a broker's Message VPN when any row, operate or read-only, matches both, and sees

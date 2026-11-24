@@ -10,6 +10,9 @@
  * Every listed connection carries its `rev`: a save sends the rev of the record
  * the form opened (0 creates) and gets the new rev back; a delete sends it as
  * `?rev=N`. The gateway refuses a rev that is no longer current (`stale`).
+ *
+ * A Message VPN lookup sends the form's SEMP details, saved or not, and gets
+ * the broker's Message VPN names back: the gateway asks the broker.
  */
 import { managedRequest, type ManagedResult } from '../../core/services/managed-api';
 
@@ -33,6 +36,14 @@ export interface ManagedConnRecord {
     client: { hostname?: string; scheme?: 'wss' | 'ws'; port: string; msgVpns: ManagedConnVpn[] };
 }
 
+/** What a Message VPN lookup sends: the SEMP details in the form, saved or not. */
+export interface VpnLookup {
+    /** The saved connection the form edits, '' for a new one: a blank password stands for its stored one. */
+    broker: string;
+    hostname: string;
+    semp: { scheme: 'https' | 'http'; port: string; user: string; pass: string };
+}
+
 export interface ConnMgmtService {
     /** GET /managed/connections: the gateway's list, as it sends it. */
     listConnections(): Promise<ManagedResult<{ connections: ManagedConnRecord[] }>>;
@@ -40,6 +51,8 @@ export interface ConnMgmtService {
     saveConnection(connection: ManagedConnRecord): Promise<ManagedResult<{ rev: number }>>;
     /** DELETE /managed/connections/{broker}?rev=N. */
     deleteConnection(broker: string, rev: number): Promise<ManagedResult<void>>;
+    /** POST /managed/connections/vpns: the Message VPN names of the broker the form describes, which the gateway reads over SEMP. */
+    lookupVpns(lookup: VpnLookup): Promise<ManagedResult<{ vpns: string[] }>>;
 }
 
 const connPath = (broker: string) => `/managed/connections/${encodeURIComponent(broker)}`;
@@ -49,5 +62,6 @@ export function createConnMgmtService(): ConnMgmtService {
         listConnections: () => managedRequest<{ connections: ManagedConnRecord[] }>('GET', '/managed/connections'),
         saveConnection: ({ broker, ...body }) => managedRequest<{ rev: number }>('PUT', connPath(broker), body),
         deleteConnection: (broker, rev) => managedRequest('DELETE', `${connPath(broker)}?rev=${rev}`),
+        lookupVpns: lookup => managedRequest<{ vpns: string[] }>('POST', '/managed/connections/vpns', lookup),
     };
 }

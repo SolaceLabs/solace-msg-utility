@@ -65,6 +65,8 @@ describe('core/components/row-list', () => {
     it('adds nothing but rows when no field is labelled and no empty note is given', () => {
         const c = container();
         createRowList(c, FIELDS).addRow();
+        // The container is the list: its style spaces the header and the rows.
+        expect(c.classList.contains('row-list')).toBe(true);
         expect(c.children.length).toBe(1);
         expect(c.querySelector('.row-list-head, .row-list-empty')).toBeNull();
     });

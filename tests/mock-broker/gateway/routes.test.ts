@@ -164,6 +164,11 @@ const ROWS: { key: string; route: string; call: () => Promise<Outcome> }[] = [
             return list.ok ? conns.deleteConnection('b3', list.data.connections.find(c => c.broker === 'b3')!.rev) : list;
         },
     },
+    {
+        key: 'POST /managed/connections/vpns',
+        route: 'POST /managed/connections/vpns, with the stored password of a saved connection',
+        call: () => conns.lookupVpns({ broker: 'b1', hostname: 'host1', semp: { scheme: 'https', port: '1943', user: 'mon', pass: '' } }),
+    },
     { key: 'GET /managed/settings', route: 'GET /managed/settings', call: () => settings.load() },
     { key: 'GET /managed/client', route: 'GET /managed/client, how the gateway sees this browser', call: () => settings.client() },
     {

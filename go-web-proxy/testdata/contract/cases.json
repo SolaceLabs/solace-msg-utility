@@ -2400,6 +2400,67 @@
       "steps": [
         { "as": "admin", "method": "POST", "path": "/managed/restart", "status": 202, "headers": { "Content-Type": "application/json", "Cache-Control": "no-store" }, "response": {"restarting": true} }
       ]
+    },
+    {
+      "name": "vpns: an administrator reads the Message VPN names of the broker a form describes, with the typed or the stored credential",
+      "steps": [
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://host9:943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 200, "headers": {"Content-Type": "application/json"}, "body": "{\"data\":[{\"msgVpnName\":\"v2\"},{\"msgVpnName\":\"default\"},{\"msgVpnName\":\"v2\"},{\"msgVpnName\":\"\"},{},{\"msgVpnName\":\"a-name-longer-than-a-broker-allows-01\"},{\"msgVpnName\":\"bad\\u0007name\"}],\"meta\":{\"responseCode\":200}}"}, "status": 200, "response": {"vpns": ["default", "v2"]}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b2", "hostname": "host2", "semp": {"scheme": "http", "port": "1943", "user": "mon", "pass": ""}}, "upstream": {"url": "http://host2:1943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 200, "headers": {"Content-Type": "application/json"}, "body": "{\"data\":[],\"meta\":{\"paging\":{}}}"}, "status": 200, "response": {"vpns": []}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host1", "semp": {"port": "1943", "user": "mon", "pass": ""}}, "upstream": {"url": "https://host1:1943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 200, "headers": {"Content-Type": "application/json"}, "body": "{\"data\":[{\"msgVpnName\":\"v1\"}]}"}, "status": 200, "response": {"vpns": ["v1"]}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "::1", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://[::1]:943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 200, "headers": {"Content-Type": "application/json"}, "body": "{}"}, "status": 200, "response": {"vpns": []}}
+      ]
+    },
+    {
+      "name": "vpns: only the cursor of the next page is used, a next page that cannot be read ends the list, and the list is cut at the page cap",
+      "steps": [
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://host9:943/SEMP/v2/monitor/msgVpns?count=100&cursor=c2&select=msgVpnName", "status": 200, "headers": {"Content-Type": "application/json"}, "body": "{\"data\":[{\"msgVpnName\":\"v1\"}],\"meta\":{\"paging\":{\"nextPageUri\":\"https://elsewhere.example/other/path?count=5&cursor=c2\"}}}"}, "status": 200, "response": {"vpns": ["v1"]}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://host9:943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 200, "headers": {"Content-Type": "application/json"}, "body": "{\"data\":[{\"msgVpnName\":\"v1\"}],\"meta\":{\"paging\":{\"nextPageUri\":\"https://[bad\"}}}"}, "status": 200, "response": {"vpns": ["v1"]}}
+      ]
+    },
+    {
+      "name": "vpns: a blank password stands for the stored one only for the saved connection, unchanged",
+      "steps": [
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host1", "semp": {"scheme": "https", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b9", "hostname": "host1", "semp": {"scheme": "https", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host9", "semp": {"scheme": "https", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host1", "semp": {"scheme": "http", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host1", "semp": {"scheme": "https", "port": "1944", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host1", "semp": {"scheme": "https", "port": "1943", "user": "other", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}}
+      ]
+    },
+    {
+      "name": "vpns: an address or an account a save would refuse is refused before the broker is asked",
+      "steps": [
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "https://host1", "semp": {"scheme": "https", "port": "943", "user": "mon", "pass": "pw"}}, "status": 422, "response": {"error": "invalid", "field": "hostname", "reason": "hostname \"https://host1\" must be a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port"}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host1", "semp": {"scheme": "ftp", "port": "943", "user": "mon", "pass": "pw"}}, "status": 422, "response": {"error": "invalid", "field": "semp.scheme", "reason": "semp.scheme \"ftp\" must be \"https\" or \"http\""}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host1", "semp": {"scheme": "https", "port": "", "user": "mon", "pass": "pw"}}, "status": 422, "response": {"error": "invalid", "field": "semp.port", "reason": "A SEMP port is required to read the Message VPNs."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host1", "semp": {"scheme": "https", "port": "70000", "user": "mon", "pass": "pw"}}, "status": 422, "response": {"error": "invalid", "field": "semp.port", "reason": "semp.port \"70000\" is not a port (1 to 65535)"}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host1", "semp": {"scheme": "https", "port": "943", "user": "", "pass": "pw"}}, "status": 422, "response": {"error": "invalid", "field": "semp.user", "reason": "A SEMP username is required to read the Message VPNs."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host1", "semp": {"scheme": "https", "port": "943", "user": "a:b", "pass": "pw"}}, "status": 422, "response": {"error": "invalid", "field": "semp.user", "reason": "The SEMP username must be up to 32 characters from A-Z a-z 0-9 _ -."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host1", "semp": {"scheme": "https", "port": "943", "user": "mon", "pass": "a\u0007b"}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "The SEMP password must not contain control characters."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"hostname": "host1", "extra": 1}, "status": 400, "response": {"error": "bad_request"}}
+      ]
+    },
+    {
+      "name": "vpns: a broker that refuses the account, fails or cannot be reached is a 502",
+      "steps": [
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://host9:943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 401}, "status": 502, "response": {"error": "upstream_auth"}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://host9:943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 403}, "status": 502, "response": {"error": "upstream_auth"}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://host9:943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 407}, "status": 502, "response": {"error": "upstream_auth"}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://host9:943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 500, "headers": {"Content-Type": "application/json"}, "body": "{\"meta\":{\"responseCode\":500}}"}, "status": 502, "response": {"error": "upstream_unavailable"}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://host9:943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 302, "headers": {"Location": "https://elsewhere.example/"}}, "status": 502, "response": {"error": "upstream_unavailable"}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://host9:943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 200}, "status": 502, "response": {"error": "upstream_unavailable"}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://host9:943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 200, "headers": {"Content-Type": "text/html"}, "body": "<html>"}, "status": 502, "response": {"error": "upstream_unavailable"}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "upstream": {"url": "https://host9:943/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "error": "dial tcp: connection refused"}, "status": 502, "response": {"error": "upstream_unavailable"}}
+      ]
+    },
+    {
+      "name": "vpns: the lookup is for administrators, and only as a POST",
+      "steps": [
+        {"as": "viewer", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "status": 403, "response": {"error": "forbidden"}},
+        {"method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host9", "semp": {"scheme": "https", "port": "943", "user": "reader", "pass": "typed-pw"}}, "status": 401, "response": {"error": "unauthenticated"}},
+        {"as": "admin", "method": "GET", "path": "/managed/connections/vpns", "status": 404, "response": {"error": "not_found"}}
+      ]
     }
   ]
 }

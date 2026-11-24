@@ -17,7 +17,7 @@ const BROKER = /^[A-Za-z0-9._-]{1,64}$/;
 export const USERNAME_RULE = 'must be 1 to 64 characters from A-Z a-z 0-9 . _ @ -, not only dots';
 export const BROKER_RULE = 'must be 1 to 64 characters from A-Z a-z 0-9 . _ -, not only dots';
 const HOST = /^[A-Za-z0-9_]([A-Za-z0-9_.-]{0,251}[A-Za-z0-9_])?$/;
-const HOST_RULE = 'must be a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port';
+export const HOST_RULE = 'must be a host name (A-Z a-z 0-9 . _ -) or an IP address, without scheme or port';
 
 export const PASSWORD_MIN = 12;
 export const PASSWORD_MAX = 128;
@@ -147,7 +147,7 @@ export function connectionProblem(c: ConnRec): string | null {
     return null;
 }
 
-const SEMP_USER_RULE = 'must be up to 32 characters from A-Z a-z 0-9 _ -';
+export const SEMP_USER_RULE = 'must be up to 32 characters from A-Z a-z 0-9 _ -';
 const CLIENT_USER_RULE = 'must be up to 189 printable ASCII characters, without ? or *';
 
 /**

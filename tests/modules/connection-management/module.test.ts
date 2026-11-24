@@ -3,13 +3,14 @@ import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { createEventBus } from '../../../src/core/event-bus';
 import type { AppContext, AppState, ManagedSession } from '../../../src/core/types';
 
-const svcMock = vi.hoisted(() => ({ listConnections: vi.fn(), saveConnection: vi.fn(), deleteConnection: vi.fn() }));
+const svcMock = vi.hoisted(() => ({ listConnections: vi.fn(), saveConnection: vi.fn(), deleteConnection: vi.fn(), lookupVpns: vi.fn() }));
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
 
 vi.mock('../../../src/core/toast', () => ({ showToast: toastMock.showToast }));
 vi.mock('../../../src/modules/connection-management/service', () => ({
     createConnMgmtService: () => ({
         listConnections: svcMock.listConnections, saveConnection: svcMock.saveConnection, deleteConnection: svcMock.deleteConnection,
+        lookupVpns: svcMock.lookupVpns,
     }),
 }));
 
@@ -67,6 +68,7 @@ beforeEach(() => {
     svcMock.listConnections.mockReset();
     svcMock.saveConnection.mockReset();
     svcMock.deleteConnection.mockReset();
+    svcMock.lookupVpns.mockReset();
     toastMock.showToast.mockReset();
 });
 
@@ -682,5 +684,99 @@ describe('connection-management -- an appliance\'s two hostnames', () => {
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent)
             .toBe('Messaging hostname is required for an appliance. Choose Software / Cloud for a broker with one hostname.'));
         expect(svcMock.saveConnection).not.toHaveBeenCalled();
+    });
+});
+
+describe('connection-management -- Retrieve VPNs', () => {
+    /** The Message VPN rows as shown: name, client username, client password. */
+    const vpnRows = (c: HTMLElement) => Array.from(el(c, '#conn-mgmt-vpn-rows').querySelectorAll('.row-list-row'),
+        row => Array.from(row.querySelectorAll<HTMLInputElement>('input'), i => i.value));
+    const retrieve = (c: HTMLElement) => el<HTMLButtonElement>(c, '#btn-conn-mgmt-retrieve-vpns');
+    const formError = (c: HTMLElement) => el(c, '#conn-mgmt-form-error').textContent;
+    const found = (vpns: string[]) => ({ ok: true, data: { vpns } });
+
+    it("sends a new connection's SEMP details as typed, and adds a row for each Message VPN the list does not hold", async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        el<HTMLInputElement>(container, '#conn-mgmt-hostname').value = ' h9 ';
+        schemePart(container, 'semp', 'http').click();
+        el<HTMLInputElement>(container, '#conn-mgmt-semp-port').value = '8080';
+        el<HTMLInputElement>(container, '#conn-mgmt-semp-user').value = 'mon';
+        el<HTMLInputElement>(container, '#conn-mgmt-semp-pass').value = 'secret';
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn').click();
+        const typed = el(container, '#conn-mgmt-vpn-rows').querySelectorAll<HTMLInputElement>('input');
+        typed[0].value = 'v1'; typed[1].value = 'u1'; typed[2].value = 'vpnpw';
+
+        let answer!: (res: unknown) => void;
+        svcMock.lookupVpns.mockReturnValue(new Promise(resolve => { answer = resolve; }));
+        retrieve(container).click();
+        // One lookup at a time: the button is off until the gateway answers.
+        expect(retrieve(container).disabled).toBe(true);
+        expect(svcMock.lookupVpns).toHaveBeenCalledExactlyOnceWith({
+            broker: '', hostname: 'h9', semp: { scheme: 'http', port: '8080', user: 'mon', pass: 'secret' },
+        });
+
+        answer(found(['default', 'v1', 'v2']));
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Added 2 Message VPNs. Fill in their client usernames and passwords.', 'ok'));
+        // The row already there keeps what was typed; the new ones carry the name only.
+        expect(vpnRows(container)).toEqual([['v1', 'u1', 'vpnpw'], ['default', '', ''], ['v2', '', '']]);
+        expect(retrieve(container).disabled).toBe(false);
+    });
+
+    it('names the saved connection on Edit, so a blank password can stand for the stored one, and says what it found', async () => {
+        const { container } = await setup();
+        el(container, '#conn-mgmt-rows').querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click(); // b1: v1 listed
+        svcMock.lookupVpns.mockResolvedValue(found(['v1', 'v7']));
+        retrieve(container).click();
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Added 1 Message VPN. Fill in its client username and password.', 'ok'));
+        expect(svcMock.lookupVpns).toHaveBeenCalledWith({
+            broker: 'b1', hostname: 'host1', semp: { scheme: 'https', port: '1943', user: 'mon', pass: '' },
+        });
+        expect(vpnRows(container)).toEqual([['v1', 'u1', ''], ['v7', '', '']]);
+
+        // A second press finds nothing new, and a broker with no Message VPN says so.
+        retrieve(container).click();
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Every Message VPN the broker listed is already in the list.', 'ok'));
+        svcMock.lookupVpns.mockResolvedValue(found([]));
+        retrieve(container).click();
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('The broker listed no Message VPN for this SEMP account.', 'ok'));
+        expect(vpnRows(container)).toEqual([['v1', 'u1', ''], ['v7', '', '']]);
+    });
+
+    it.each([
+        ['a refused SEMP account', failed(502, 'upstream_auth'),
+            'The broker refused the SEMP username and password, or that account may not read its Message VPNs.'],
+        ['a broker that cannot be reached', failed(502, 'upstream_unavailable'),
+            "The gateway could not reach the broker's SEMP address, or the broker's answer was not a list of Message VPNs. The gateway's log has the cause."],
+        ["the gateway's own reason", failed(422, 'invalid', { field: 'semp.pass', reason: 'Type the SEMP password.' }), 'Type the SEMP password.'],
+    ])('shows %s under the form, adds no row and frees the button', async (_, refusal, message) => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        svcMock.lookupVpns.mockResolvedValue(refusal);
+        retrieve(container).click();
+        await vi.waitFor(() => expect(formError(container)).toBe(message));
+        expect(vpnRows(container)).toEqual([]);
+        expect(retrieve(container).disabled).toBe(false);
+        expect(toastMock.showToast).not.toHaveBeenCalled();
+
+        // The next press clears the message before it asks again.
+        svcMock.lookupVpns.mockResolvedValue(found([]));
+        retrieve(container).click();
+        expect(hidden(container, '#conn-mgmt-form-error')).toBe(true);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalled());
+    });
+
+    it('drops an answer that arrives after the form was closed', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        let answer!: (res: unknown) => void;
+        svcMock.lookupVpns.mockReturnValue(new Promise(resolve => { answer = resolve; }));
+        retrieve(container).click();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        answer(found(['v1']));
+        await vi.waitFor(() => expect(retrieve(container).disabled).toBe(false));
+        expect(vpnRows(container)).toEqual([]);
+        expect(toastMock.showToast).not.toHaveBeenCalled();
     });
 });

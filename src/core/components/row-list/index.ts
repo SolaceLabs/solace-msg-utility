@@ -13,8 +13,11 @@
  * filled, so they cannot label it) and, with `RowListOptions.empty`, a note
  * saying what an empty list means. The header shows while there are rows, the
  * note while there are none. The DOM is the source of truth -- there is no
- * parallel array to keep in sync. Layout uses the shared utility classes
- * (`flex-row`, `gap-2`, `btn-icon`) plus this component's `styles.css`.
+ * parallel array to keep in sync. The container becomes a `.row-list`, which
+ * sets the space between the header and the rows; a row uses the shared
+ * utility classes (`flex-row`, `gap-2`, `btn-icon`). The line above a list,
+ * its title and buttons, is the caller's own markup: a `.row-list-bar` holding
+ * a `.row-list-title` (this component's `styles.css`).
  */
 import { required } from '../../dom';
 import { ICONS, iconButton } from '../../icons';
@@ -50,6 +53,7 @@ const ROW_CLASS = 'row-list-row';
 const REMOVE_GLYPH = '\u2715';
 
 export function createRowList(container: HTMLElement, fields: RowField[], opts: RowListOptions = {}): RowList {
+    container.classList.add('row-list');
     let head: HTMLElement | null = null;
     if (fields.some(f => f.label)) {
         head = document.createElement('div');
@@ -88,7 +92,7 @@ export function createRowList(container: HTMLElement, fields: RowField[], opts: 
 
     function addRow(values: Record<string, string> = {}): void {
         const row = document.createElement('div');
-        row.className = `flex-row gap-2 mb-2 ${ROW_CLASS}`;
+        row.className = `flex-row gap-2 ${ROW_CLASS}`;
 
         fields.forEach(f => {
             const input = document.createElement('input');

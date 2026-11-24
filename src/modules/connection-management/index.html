@@ -92,11 +92,16 @@
         </div>
     </div>
     <div class="form-group">
-        <div class="flex-row justify-between items-center mb-2">
-            <label class="m-0">Message VPNs (name / user / password)</label>
-            <button id="btn-conn-mgmt-add-vpn" class="btn btn-secondary btn-sm">+ Add</button>
+        <!-- Retrieve VPNs asks the gateway to read the broker's Message VPNs over
+             SEMP, with the SEMP details above, and adds a row for each one the
+             list does not hold yet. -->
+        <div class="row-list-bar">
+            <span class="row-list-title" id="conn-mgmt-vpns-title">Message VPNs (name / user / password)</span>
+            <button id="btn-conn-mgmt-add-vpn" type="button" class="btn btn-secondary btn-compact">+ Add</button>
+            <button id="btn-conn-mgmt-retrieve-vpns" type="button" class="btn btn-secondary btn-compact"
+                title="Read the broker's Message VPNs over SEMP and add a row for each one not listed yet">Retrieve VPNs</button>
         </div>
-        <div id="conn-mgmt-vpn-rows" class="flex-col"></div>
+        <div id="conn-mgmt-vpn-rows" role="group" aria-labelledby="conn-mgmt-vpns-title"></div>
     </div>
 
     <div class="flex-row gap-4 mt-2">

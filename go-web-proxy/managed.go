@@ -34,6 +34,7 @@ type managedHandler struct {
 	settings *settingsFile
 	backups  *backupService // /managed/backup* (backup_api.go)
 	relay    http.Handler   // /managed/relay/*, dispatched before the mux (relay.go)
+	vpns     http.Handler   // POST /managed/connections/vpns (vpns.go)
 	smf      http.Handler   // /managed/smf/*, dispatched before the mux (smf.go)
 	dial     http.Handler   // POST /managed/dial (dial.go)
 	tls      *tlsManager    // /managed/tls* (tls_api.go)
@@ -48,13 +49,13 @@ type managedHandler struct {
 // managedEndpoints are the broker-facing handlers managedHandler serves
 // behind its gates.
 type managedEndpoints struct {
-	relay, smf, dial http.Handler
+	relay, smf, dial, vpns http.Handler
 }
 
 func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *settingsFile, bk *backupService, tm *tlsManager, ep managedEndpoints, logger *slog.Logger) *managedHandler {
 	h := &managedHandler{
 		store: st, sessions: ss, throttle: th, live: lv, settings: sf, backups: bk, tls: tm,
-		relay: ep.relay, smf: ep.smf, dial: ep.dial, restart: func() {},
+		relay: ep.relay, smf: ep.smf, dial: ep.dial, vpns: ep.vpns, restart: func() {},
 		totp: newTOTPGuard(), cop: http.NewCrossOriginProtection(), logger: logger,
 	}
 	mux := http.NewServeMux()
@@ -68,6 +69,7 @@ func newManagedHandler(st *store, ss *sessions, th *throttle, lv *live, sf *sett
 	mux.HandleFunc("GET /managed/connections", h.adminOnly(h.listConnections))
 	mux.HandleFunc("PUT /managed/connections/{broker}", h.audited(h.connectionAction, h.saveConnection))
 	mux.HandleFunc("DELETE /managed/connections/{broker}", h.audited(fixedAction(auditConnectionDelete), h.deleteConnection))
+	mux.HandleFunc("POST /managed/connections/vpns", h.adminOnly(func(w http.ResponseWriter, r *http.Request) { h.vpns.ServeHTTP(w, r) }))
 	mux.HandleFunc("GET /managed/settings", h.adminOnly(h.getSettings))
 	mux.HandleFunc("PUT /managed/settings", h.audited(fixedAction(auditSettingsUpdate), h.saveSettings))
 	mux.HandleFunc("GET /managed/client", h.adminOnly(h.clientSeen))

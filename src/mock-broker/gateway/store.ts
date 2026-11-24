@@ -154,6 +154,12 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
             return { scheme: c.semp.scheme || 'https', host: c.hostname, port: c.semp.port, user: c.semp.username, pass: c.semp.password };
         },
 
+        /** A saved connection's SEMP address and credential, whoever asks: what the Message VPN lookup compares a form with (vpns.ts). */
+        sempOf(broker: string): BrokerTarget | null {
+            const c = conns.find(x => x.broker === broker);
+            return c ? { scheme: c.semp.scheme || 'https', host: c.hostname, port: c.semp.port, user: c.semp.username, pass: c.semp.password } : null;
+        },
+
         /** smfTarget: the VPN's client credential when the user may reach it. */
         smfTarget(name: string, broker: string, vpn: string): BrokerTarget | null {
             const u = findUser(name);
