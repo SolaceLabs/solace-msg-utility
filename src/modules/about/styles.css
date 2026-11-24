@@ -1,38 +1,11 @@
-/* About module -- the About card, the tab strip, and the manual of the Help tab.
- * Two prefixes, both this module's: `.about-*` for the page and its tabs, and
+/* About module -- the About card and the manual of the Help tab (the tab strip
+ * is the design system's `.tabs`). Two prefixes, both this module's:
+ * `.about-*` for the page, and
  * `.manual-*` for the manual: its frame here, and the parts a chapter
  * (src/modules/<id>/help.html) is written with. docs/developer-guide.md lists
  * those parts. */
 
-/* ---------- The page and its tabs ---------- */
-.about-tabs {
-    display: flex;
-    gap: 0.25rem;
-    margin-bottom: 1.5rem;
-    border-bottom: 2px solid var(--border-color);
-}
-
-.about-tab {
-    padding: 0.6rem 1.25rem;
-    margin-bottom: -2px;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    background: none;
-    color: var(--text-secondary);
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.about-tab:hover {
-    color: var(--text-primary);
-}
-
-.about-tab.is-active {
-    border-bottom-color: var(--accent-primary);
-    color: var(--solace-dark-blue);
-}
-
+/* ---------- The page ---------- */
 .about-card {
     max-width: 760px;
     margin: 0 auto;

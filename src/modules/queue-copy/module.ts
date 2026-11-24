@@ -5,7 +5,8 @@
  *   - Source (left): Broker / SEMP / Client cards mirroring the live primary
  *     connection (read-only); Source Queue is editable; an "Edit in
  *     Connections" button jumps to the connections module for credential
- *     changes.
+ *     changes. A Provisioned primary shows one read-only connection card
+ *     (its Broker and Message VPN) in place of the three.
  *   - Destination (right): Broker (with Same-broker / Same-VPN toggles), SEMP,
  *     Client, Destination target (queue/topic + mode). The destination
  *     follows the primary connection's mode: a Direct primary keeps the typed
@@ -621,6 +622,8 @@ export const QueueCopyModule = {
             state.primaryPublisher = createSolacePublisher(session);
             setPrimaryConnected(true);
             refreshFromPrimary();
+            // A provisioned primary that moved to another Message VPN.
+            destUi.refreshSource();
         });
 
         eventBus.on('client:disconnected', () => {

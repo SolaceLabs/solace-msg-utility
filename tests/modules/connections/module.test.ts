@@ -6,7 +6,7 @@ import { createEventBus } from '../../../src/core/event-bus';
 import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import { INPUT_DEBOUNCE_MS } from '../../../src/core/timing';
 import { DEFAULT_CONN_CONFIG } from '../../../src/core/connections/conn-modes';
-import { MAX_MESSAGES_PER_QUEUE } from '../../../src/core/connections/defaults';
+import { DEFAULT_CONNECT_TIMEOUT_MS, MAX_MESSAGES_PER_QUEUE } from '../../../src/core/connections/defaults';
 import { logger } from '../../../src/core/logger';
 import { createSolaceMock } from '../../setup';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
@@ -225,6 +225,14 @@ describe('ConnectionsModule', () => {
             expect(input.classList.contains('is-invalid')).toBe(false);
             expect(errEl.textContent).toBe('');
         });
+    });
+
+    // The provisioned and destination connections take the constant; the
+    // Direct form's box repeats it in the template.
+    it('starts the Connect Timeout box at the default connect timeout', async () => {
+        const { ctx } = createTestContext(container);
+        await ConnectionsModule.install(ctx);
+        expect((container.querySelector('#sol-connect-timeout') as HTMLInputElement).value).toBe(String(DEFAULT_CONNECT_TIMEOUT_MS));
     });
 
     describe('max-messages cap validation', () => {

@@ -254,10 +254,22 @@ export const BROKER_FIELDS = [
 const RENAMED = { E2E_BROKER_IP: 'E2E_BROKER_ADDR' };
 
 /**
+ * A details file value without the one pair of matching quotes around it, if
+ * any: KEY="a value" and KEY='a value' both give `a value`, the way people
+ * write a value that holds spaces. A value whose own first and last
+ * characters are such a pair keeps them inside a second pair.
+ */
+const unquoted = (v) => (v.length >= 2 && (v[0] === '"' || v[0] === "'") && v.at(-1) === v[0] ? v.slice(1, -1) : v);
+
+/** A value as a details file line holds it: in a pair of quotes when parseDetailsFile would take its own first and last characters for one. */
+const fileValue = (v) => (unquoted(v) === v ? v : `"${v}"`);
+
+/**
  * The KEY=value lines of a details file as { values, lines }, keyed by the
  * env name. Blank lines and '#' comments are skipped, keys and values are
- * trimmed, and an empty value counts as unset. Throws on a line without '=',
- * an unknown, renamed or repeated key, naming the line but never its value.
+ * trimmed, one pair of quotes around a value is dropped, and an empty value
+ * counts as unset. Throws on a line without '=', an unknown, renamed or
+ * repeated key, naming the line but never its value.
  */
 export function parseDetailsFile(text, name) {
     const known = BROKER_FIELDS.map((f) => f.env);
@@ -274,7 +286,7 @@ export function parseDetailsFile(text, name) {
         if (!known.includes(key)) throw new Error(`${where}: unknown key ${key}; the keys are ${known.join(', ')}`);
         if (key in lines) throw new Error(`${where}: ${key} is already set on line ${lines[key]}`);
         lines[key] = i + 1;
-        const value = line.slice(eq + 1).trim();
+        const value = unquoted(line.slice(eq + 1).trim());
         if (value) values[key] = value;
     });
     return { values, lines };
@@ -328,7 +340,7 @@ export function dnsServers(value) {
 /**
  * The IP address a host alias maps to: E2E_BROKER_ADDR itself when it is one,
  * else the address `lookup` finds for that name, because a compose extra_hosts
- * entry takes an address only. `lookup` is dns.promises.lookup (this machine's
+ * entry takes an address only. `lookup` is machineLookup (this machine's
  * resolver) or resolverLookup over the E2E_DNS servers, and `asked` names it
  * for the error. Throws, naming the variable, when the name does not resolve,
  * or resolves to an address the gateway would not parse (an IPv6 zone).
@@ -349,6 +361,19 @@ export async function aliasAddress(addr, lookup, asked = "this machine's resolve
 }
 
 /**
+ * A lookup for aliasAddress that asks this machine's resolver (`lookup` is
+ * dns.promises.lookup): the name's IPv4 address, else whatever address it
+ * has. IPv4 first, as resolverLookup does, because the resolver's own order
+ * can put an IPv6 address first and the compose network the gateway
+ * containers sit on carries IPv4 only. A name with no address rejects with
+ * the second lookup's error.
+ * @param {(name: string, options?: { family: number }) => Promise<{ address: string }>} lookup
+ */
+export function machineLookup(lookup) {
+    return (name) => lookup(name, { family: 4 }).catch(() => lookup(name));
+}
+
+/**
  * A lookup for aliasAddress that asks `resolver` (a dns.promises.Resolver set
  * to the E2E_DNS servers) instead of this machine's resolver: the name's
  * first A record, else its first AAAA record. A name with neither rejects
@@ -360,6 +385,78 @@ export function resolverLookup(resolver) {
         const found = await resolver.resolve4(name).catch(() => resolver.resolve6(name));
         return { address: found[0] };
     };
+}
+
+/**
+ * The app's connect timeout, in milliseconds (DEFAULT_CONNECT_TIMEOUT_MS in
+ * src/core/connections/defaults.ts; tests/build/e2e-lib.test.ts holds the two
+ * equal). The harness's own SMF sessions use it as the app does, for the
+ * session and for the WebSocket's opening, so a broker too slow for the app
+ * fails the preflight.
+ */
+export const APP_CONNECT_TIMEOUT_MS = 10_000;
+
+/** What to look at when a gateway container cannot reach a broker port; `portEnv` names that port's detail. */
+const unreachableHint = (portEnv) => `check that the broker is up and this machine's network reaches it, E2E_BROKER_HOST and ${portEnv}, `
+    + "E2E_BROKER_ADDR or E2E_DNS when the containers cannot resolve the name, and that E2E_BROKER_CA signs the broker's certificate; "
+    + "the direct log's upstream proxy error line says which";
+
+/**
+ * Why the broker cannot be used, from the Direct relay's answer to the
+ * preflight's SEMP read of the queue; '' when the answer names the queue. The
+ * relay forwards the caller's credential and passes the broker's answer
+ * through, so a 401 or a 403 is the broker's own, and a 502 is the relay
+ * failing to reach it. `res.status` is 0, with the error text as the body,
+ * when the relay gave no answer at all. `b` is the broker's details.
+ * @param {{ status: number, body: string }} res
+ * @param {{ host: string, sempPort: string, sempUser: string, vpn: string, queue: string }} b
+ * @returns {string}
+ */
+export function sempPreflightProblem(res, b) {
+    const at = `https://${b.host}:${b.sempPort}`;
+    const got = `${res.status || 'no answer'}: ${String(res.body).trim().slice(0, 200)}`;
+    if (res.status === 200) {
+        let named;
+        try {
+            named = JSON.parse(res.body).data?.queueName;
+        } catch {
+            // not JSON: reported below with the text
+        }
+        return named === b.queue ? '' : `SEMP at ${at} answered without queue ${b.queue} (${got}): check E2E_SEMP_PORT and E2E_QUEUE`;
+    }
+    if (res.status === 401) return `the broker refused the SEMP username or password (401 from ${at} as ${b.sempUser}): check E2E_SEMP_USER and E2E_SEMP_PASSWORD`;
+    if (res.status === 403) {
+        return `the broker does not let SEMP user ${b.sempUser} read queue ${b.queue} in VPN ${b.vpn} (403 from ${at}): check E2E_SEMP_USER, E2E_VPN and E2E_QUEUE`;
+    }
+    if (res.status === 0 || res.status === 502) {
+        return `the broker's SEMP port is not reachable at ${at} from the gateway container (${got}): ${unreachableHint('E2E_SEMP_PORT')}`;
+    }
+    return `SEMP at ${at} did not return queue ${b.queue} of VPN ${b.vpn} (${got}): check E2E_VPN and E2E_QUEUE`;
+}
+
+/**
+ * Why the broker cannot be used, from a failed preflight SMF login through the
+ * Direct relay. `upgrade` is what became of the WebSocket the relay was asked
+ * for: 'opened' (the broker took the socket, so the login failed), 'refused'
+ * (the relay answered without one: the port was not reached) or 'pending'
+ * (the relay was still connecting to the broker when the SDK gave up).
+ * `message` is what the SDK and the relay reported.
+ * @param {string} message
+ * @param {'opened' | 'refused' | 'pending'} upgrade
+ * @param {{ host: string, smfPort: string, vpn: string, clientUser: string }} b
+ * @returns {string}
+ */
+export function smfPreflightProblem(message, upgrade, b) {
+    const at = `wss://${b.host}:${b.smfPort}`;
+    if (upgrade === 'opened') {
+        return `the broker at ${at} did not log client username ${b.clientUser} in to VPN ${b.vpn} (${message}): check E2E_VPN, E2E_CLIENT_USER and E2E_CLIENT_PASSWORD`;
+    }
+    if (upgrade === 'pending') {
+        return `the gateway container was still connecting to the broker at ${at} when the SDK gave up (${message}): `
+            + `a WebSocket has ${APP_CONNECT_TIMEOUT_MS / 1000} seconds to open, the app's connect timeout, `
+            + 'so check that the broker accepts a connection on E2E_SMF_PORT well inside that, and that nothing filters the port';
+    }
+    return `no WebSocket to the broker at ${at} from the gateway container (${message}): ${unreachableHint('E2E_SMF_PORT')}`;
 }
 
 /**
@@ -378,9 +475,11 @@ export function resolutionOverride(host, ip, dns = []) {
 const DETAILS_FILE_HEADER = [
     '# Broker details for ./scripts/dev.sh e2e (scripts/e2e.mjs). Git-ignored:',
     '# never commit it. One KEY=value per line; an E2E_* environment variable',
-    '# overrides its line. The harness adds what it had to ask for, except the',
-    '# passwords: set E2E_SEMP_PASSWORD and E2E_CLIENT_PASSWORD here yourself',
-    '# to skip those prompts, and keep the file private.',
+    '# overrides its line. One pair of quotes around a value is dropped, so a',
+    '# value with spaces may be written with or without them. The harness adds',
+    '# what it had to ask for, except the passwords: set E2E_SEMP_PASSWORD and',
+    '# E2E_CLIENT_PASSWORD here yourself to skip those prompts, and keep the',
+    '# file private.',
 ];
 
 /**
@@ -392,8 +491,8 @@ export function detailsFileText(existing, additions) {
     const lines = existing ? existing.replace(/\r?\n$/, '').split(/\r?\n/) : [...DETAILS_FILE_HEADER];
     for (const [key, value] of Object.entries(additions)) {
         const blank = lines.findIndex((l) => l.replace(/\s+/g, '') === `${key}=`);
-        if (blank >= 0) lines[blank] = `${key}=${value}`;
-        else lines.push(`${key}=${value}`);
+        if (blank >= 0) lines[blank] = `${key}=${fileValue(value)}`;
+        else lines.push(`${key}=${fileValue(value)}`);
     }
     return `${lines.join('\n')}\n`;
 }

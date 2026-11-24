@@ -18,6 +18,7 @@ import {
     setDestBrokerLocked,
     setDestTargetLocked,
     applyDestMode,
+    applySourceMode,
     clearDestTypedSecrets,
     DEST_TARGET_LOCKED_TITLE,
     renderModalInitial,
@@ -314,6 +315,24 @@ describe('queue-copy/ui', () => {
             expect(shown(e.destProv)).toBe(true);
             expect(shown(e.destProvCardHost)).toBe(false);
             expect(shown(e.destProvSame)).toBe(true);
+        });
+    });
+
+    describe('applySourceMode', () => {
+        const shown = (el: HTMLElement) => !el.classList.contains('hidden');
+
+        it('Direct primary: the Broker, SEMP and Client cards; no connection card', () => {
+            const e = elsHolder.els;
+            applySourceMode(e, false);
+            expect([e.sourceBrokerCard, e.sourceSempCard, e.sourceSolCard].every(shown)).toBe(true);
+            expect(shown(e.sourceProv)).toBe(false);
+        });
+
+        it('Provisioned primary: the one connection card in place of the three', () => {
+            const e = elsHolder.els;
+            applySourceMode(e, true);
+            expect([e.sourceBrokerCard, e.sourceSempCard, e.sourceSolCard].some(shown)).toBe(false);
+            expect(shown(e.sourceProv)).toBe(true);
         });
     });
 

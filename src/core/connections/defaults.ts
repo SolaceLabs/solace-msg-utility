@@ -18,12 +18,23 @@ export const DEFAULT_MAX_MESSAGES_PER_QUEUE = 100;
 export const SEMP_PROBE_TIMEOUT_MS = 15000;
 
 /**
+ * How long one connect attempt of an SDK session may take, in milliseconds:
+ * what the Connect Timeout field starts with, and the fixed value where there
+ * is no Advanced Settings form. The WebSocket has the whole of it to open
+ * (solace-client.ts), so a broker that is slow to accept a connection still
+ * connects. `src/modules/connections/index.html` repeats it as the field's
+ * `value` attribute (HTML cannot import it);
+ * tests/modules/connections/module.test.ts holds the two equal.
+ */
+export const DEFAULT_CONNECT_TIMEOUT_MS = 10000;
+
+/**
  * SDK connect and reconnect settings for a provisioned (managed) session: the
  * user has no Advanced Settings form there, so these are fixed.
  */
 export const PROVISIONED_SDK_CONNECT = {
     connectRetries: 1,
-    connectTimeout: 3000,
+    connectTimeout: DEFAULT_CONNECT_TIMEOUT_MS,
     reconnectRetries: 1,
     reconnectWait: 3000,
 } as const;
@@ -31,11 +42,11 @@ export const PROVISIONED_SDK_CONNECT = {
 /**
  * SDK connect and reconnect settings for Queue Copy's destination connection,
  * which has no Advanced Settings form either: one connect attempt, so a wrong
- * address is reported at once.
+ * address is reported after one timeout.
  */
 export const DESTINATION_SDK_CONNECT = {
     connectRetries: 0,
-    connectTimeout: 3000,
+    connectTimeout: DEFAULT_CONNECT_TIMEOUT_MS,
     reconnectRetries: 1,
     reconnectWait: 3000,
 } as const;

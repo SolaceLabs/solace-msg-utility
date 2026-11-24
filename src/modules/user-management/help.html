@@ -24,7 +24,7 @@
     <ol class="manual-steps">
         <li>Press <strong>Add user</strong>. The form opens under the title <strong>Add user</strong>.</li>
         <li>Type the <strong>Username</strong> and the <strong>Password</strong>. The rules are in the table below.</li>
-        <li>Tick <strong>Administrator</strong> only if this person is to manage the gateway.</li>
+        <li>Switch on <strong>Administrator</strong> only if this person is to manage the gateway.</li>
         <li>In <strong>Modules</strong>, leave <strong>Deployment default</strong> selected, or choose the modules for this user (see below).</li>
         <li>In <strong>Entitlements</strong>, add the rows that give the user their brokers, Message VPNs and queues (see below).</li>
         <li>Press <strong>Save</strong>. The toast <code>User saved</code> appears and the list returns with the user in it. <strong>Cancel</strong> returns to the list and keeps nothing.</li>
@@ -32,13 +32,13 @@
 
     <h3>The account card</h3>
     <figure class="manual-figure">
-        <img src="help/form-account.svg" width="760" height="390" alt="The user form for alice: the account card with username, password and Administrator box, and the Modules card with two radio buttons, two module pills and an Add module button.">
+        <img src="help/form-account.svg" width="760" height="390" alt="The user form for alice: the account card with username, password and Administrator switch, and the Modules card with two radio buttons, two module pills and an Add module button.">
         <figcaption>The first two cards of the user form, here editing alice with a list of modules of her own.</figcaption>
     </figure>
     <ol class="manual-callouts">
         <li><strong>Username</strong>. You type it when you add a user. When you edit a user, it is fixed.</li>
         <li><strong>Password</strong>, with a hint after its name: <code>(required)</code> when you add a user, <code>(leave blank to keep current)</code> when you edit one.</li>
-        <li>The <strong>Administrator</strong> box.</li>
+        <li>The <strong>Administrator</strong> switch.</li>
         <li>The two choices for the user's modules: <strong>Deployment default</strong> and <strong>Choose for this user</strong>.</li>
         <li>The modules the user may open, each as a pill.</li>
         <li><strong>+ Add module</strong>, which lists the modules you can still add.</li>
@@ -50,7 +50,7 @@
         <tbody>
             <tr><td><strong>Username</strong></td><td>1 to 64 characters from <code>A-Z a-z 0-9 . _ @ -</code>, and not only dots. Spaces around it are removed. It cannot be changed once the user exists: to rename someone, add the name you want and delete the old one.</td><td>Empty</td></tr>
             <tr><td><strong>Password</strong></td><td>12 to 128 characters. The lower limit is the <strong>Minimum password length</strong> of Gateway Settings when that is higher than 12. The page sends the password over TLS and the gateway stores only a hash of it. It is never shown again. When you edit a user, leave the box empty to keep the stored password.</td><td>Empty</td></tr>
-            <tr><td><strong>Administrator</strong></td><td>A box. It lets the user open <code>/solAdmin</code>. It gives no access to any broker by itself: an administrator needs entitlement rows like anybody else.</td><td>Off</td></tr>
+            <tr><td><strong>Administrator</strong></td><td>A switch. It lets the user open <code>/solAdmin</code>. It gives no access to any broker by itself: an administrator needs entitlement rows like anybody else.</td><td>Off</td></tr>
         </tbody>
     </table>
     <aside class="manual-note" data-kind="tip">
@@ -179,7 +179,7 @@
             <tr><th>You change</th><th>The user, signed in at that moment</th></tr>
         </thead>
         <tbody>
-            <tr><td>The password, the <strong>Administrator</strong> box, or you delete the user</td><td>All their sessions end and their open broker connections close. They sign in again, with the password you set if you changed it.</td></tr>
+            <tr><td>The password, the <strong>Administrator</strong> switch, or you delete the user</td><td>All their sessions end and their open broker connections close. They sign in again, with the password you set if you changed it.</td></tr>
             <tr><td>You reset two-factor</td><td>All their sessions end and their open broker connections close. They sign in again.</td></tr>
             <tr><td>The entitlements</td><td>They stay signed in. The gateway applies the rows to their next request, and closes any broker connection to a Message VPN they may not reach.</td></tr>
         </tbody>
@@ -188,7 +188,7 @@
     <p>The gateway lets you change your own account. When the change ends your session, the page asks the app to sign you out, so you sign in again.</p>
     <ul>
         <li>Setting a password for yourself: the toast <code>Password changed. Sign in again.</code></li>
-        <li>A change to your own <strong>Administrator</strong> box: <code>Administrator flag changed. Sign in again.</code></li>
+        <li>A change to your own <strong>Administrator</strong> switch: <code>Administrator flag changed. Sign in again.</code></li>
         <li>Deleting yourself asks <code>Delete your own account "admin"? You will be signed out.</code> and ends with <code>Account deleted. You have been signed out.</code></li>
         <li>Resetting your own two-factor asks <code>Reset your own two-factor sign-in? You will be signed out and must set it up again.</code> and ends with <code>Two-factor sign-in reset. You have been signed out.</code></li>
         <li>Saving only your own entitlements or modules keeps you signed in and shows <code>User saved</code>.</li>

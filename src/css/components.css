@@ -51,11 +51,39 @@
     padding: 1.5rem;
     margin-bottom: 1.5rem;
     box-shadow: var(--shadow-sm);
+    /* A card fills its column, up to this width on a very wide screen. */
+    max-width: 2048px;
 }
 
 .card h2,
 .card h3 {
     font-weight: 600;
+}
+
+/* A sign-in box: a card kept narrow, in the middle of the page. */
+.card-narrow {
+    max-width: 520px;
+    margin: 2rem auto;
+}
+
+/* A card's heading, and the heading of a part within a card. Spacing is the
+ * heading's own (a margin utility, or the row it shares with a button). */
+.card-title {
+    font-size: 1.125rem;
+}
+
+.card-subtitle {
+    margin: 1.5rem 0 0.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+/* A warning inside a card: what stands in the way, or what a choice costs. */
+.banner-warning {
+    border-left: 3px solid var(--status-warning);
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
 }
 
 .card-light {
@@ -69,12 +97,25 @@
     margin-bottom: 1rem;
 }
 
-/* Short fields (numbers, selects) of one card side by side; they wrap to one
- * column on a narrow screen. Long fields stay outside it, at full width. */
+/* Fields of one card side by side; they wrap to more lines, down to one
+ * column, on a narrow screen. A field that needs the full width stays outside. */
 .form-cols {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 0.75rem 1rem;
+    gap: 0 1rem;
+}
+
+/* Each field is three rows of the shared grid -- its label, its control and one
+ * line under it (a hint) -- so the controls of a line of fields sit level
+ * whatever its labels and hints take. A field holds no more than those three. */
+.form-cols > .form-group {
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-row: span 3;
+}
+
+.form-cols > .form-group > label {
+    align-self: end;
 }
 
 .form-group label {
@@ -107,6 +148,225 @@
     background-color: var(--bg-form-disabled);
     color: var(--text-muted);
     cursor: not-allowed;
+}
+
+/* A select draws the queue picker's chevron, inset from the edge as the
+ * picker's is, in place of the browser's own arrow. */
+select.form-control {
+    appearance: none;
+    padding-right: 2rem;
+    background-image: var(--icon-chevron-down);
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 14px;
+}
+
+/* A text box with a search button inside its right edge (pick from a list). */
+.input-with-search {
+    position: relative;
+    display: block;
+    flex: 1;
+}
+
+.input-with-search > .form-control {
+    width: 100%;
+    padding-right: 2.5rem;
+}
+
+.input-search-btn {
+    position: absolute;
+    top: 50%;
+    right: 0.5rem;
+    transform: translateY(-50%);
+    background: transparent;
+    border: 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.input-search-btn:hover {
+    color: var(--text-primary);
+    background-color: rgba(0, 0, 0, 0.04);
+}
+
+.input-search-btn:focus-visible {
+    outline: 2px solid var(--accent-secondary);
+    outline-offset: 1px;
+}
+
+/* ---------- Tick boxes, radios and switches ----------
+ * An on/off setting is a .switch. A tick box is for a row of a table, a radio
+ * for one choice of a few; both are drawn here to match the text boxes. */
+input[type='checkbox'],
+input[type='radio'] {
+    appearance: none;
+    flex: 0 0 auto;
+    width: 1.125rem;
+    height: 1.125rem;
+    vertical-align: middle;
+    background-color: var(--bg-input);
+    background-repeat: no-repeat;
+    background-position: center;
+    border: 1px solid var(--text-muted);
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s;
+}
+
+input[type='checkbox'] {
+    border-radius: 4px;
+}
+
+input[type='radio'] {
+    border-radius: 50%;
+}
+
+input[type='checkbox']:hover:not(:disabled),
+input[type='radio']:hover:not(:disabled) {
+    border-color: var(--accent-primary);
+}
+
+input[type='checkbox']:checked {
+    background-color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    background-image: var(--icon-tick);
+    background-size: 0.85rem;
+}
+
+input[type='radio']:checked {
+    border-color: var(--accent-primary);
+    background-image: radial-gradient(circle, var(--accent-primary) 0 45%, transparent 50%);
+}
+
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible {
+    outline: 2px solid var(--accent-secondary);
+    outline-offset: 2px;
+}
+
+input[type='checkbox']:disabled,
+input[type='radio']:disabled {
+    background-color: var(--bg-form-disabled);
+    border-color: var(--bg-form-disabled);
+}
+
+input[type='checkbox']:disabled:checked {
+    background-color: var(--text-muted);
+    border-color: var(--text-muted);
+}
+
+/* A slide switch: a tick box (the input keeps the state and the keyboard)
+ * under a drawn track. Markup:
+ *   <span class="switch"><input type="checkbox"><span class="switch-slider"></span></span> */
+.switch {
+    position: relative;
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 38px;
+    height: 22px;
+}
+
+.switch > input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    opacity: 0;
+}
+
+.switch-slider {
+    position: absolute;
+    inset: 0;
+    background-color: var(--border-color);
+    border-radius: 22px;
+    transition: background-color 0.2s;
+    pointer-events: none;
+}
+
+.switch-slider::before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: #ffffff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.switch > input:checked + .switch-slider {
+    background-color: var(--accent-primary);
+}
+
+.switch > input:checked + .switch-slider::before {
+    transform: translateX(16px);
+}
+
+.switch > input:focus-visible + .switch-slider {
+    outline: 2px solid var(--accent-secondary);
+    outline-offset: 2px;
+}
+
+.switch > input:disabled + .switch-slider {
+    opacity: 0.55;
+}
+
+/* A switch with its text, as one label: a click on the text flips it. */
+label.switch-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+label.switch-field:has(input:disabled) {
+    color: var(--text-muted);
+    cursor: not-allowed;
+}
+
+/* ---------- Tabs ----------
+ * A strip of tabs above the panels they switch; the open one is `is-active`. */
+.tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.tab {
+    padding: 0.6rem 1.25rem;
+    margin-bottom: -2px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--text-secondary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.tab:hover {
+    color: var(--text-primary);
+}
+
+.tab.is-active {
+    border-bottom-color: var(--accent-primary);
+    color: var(--solace-dark-blue);
+}
+
+.tab:focus-visible {
+    outline: 2px solid var(--accent-secondary);
+    outline-offset: -2px;
 }
 
 /* ---------- Buttons ---------- */
@@ -236,6 +496,7 @@ a.btn {
  * (aria-pressed) is the choice. */
 .segmented {
     display: inline-flex;
+    flex: 0 0 auto;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     overflow: hidden;
@@ -244,6 +505,7 @@ a.btn {
 .segmented-option {
     padding: 0.375rem 0.875rem;
     font-size: 0.875rem;
+    white-space: nowrap;
     color: var(--text-secondary);
     background-color: var(--bg-input);
     border: none;
@@ -304,6 +566,12 @@ a.btn {
 
 .data-table tbody tr:hover {
     background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* The column of a row's buttons: as narrow as they are. */
+.data-table-actions {
+    width: 1%;
+    white-space: nowrap;
 }
 
 /* Bordered scroll box around a .data-table; its header stays put (sticky th). */

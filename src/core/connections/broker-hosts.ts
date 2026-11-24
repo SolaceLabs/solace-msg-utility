@@ -32,8 +32,8 @@ export interface BrokerHostValues {
 export interface BrokerHostsElements {
     /** The type control (core/segmented.ts): one button per type, each naming it in `data-broker-type`. */
     typeGroup: HTMLElement;
-    /** One line by the control, saying what the chosen type means. */
-    typeHint: HTMLElement;
+    /** One line by the control, saying what the chosen type means. A form with no room for it leaves it out. */
+    typeHint?: HTMLElement;
     /** The host box of the SEMP part, and its label. */
     host: HTMLInputElement;
     hostLabel: HTMLElement;
@@ -106,7 +106,7 @@ export function createBrokerHosts(els: BrokerHostsElements, opts: BrokerHostsOpt
         const either = locks.management || locks.messaging;
         control.setDisabled(either);
         els.hostLabel.textContent = text.hostLabel[type];
-        els.typeHint.textContent = text.typeHint[type];
+        if (els.typeHint) els.typeHint.textContent = text.typeHint[type];
         els.messagingHint.classList.toggle('hidden', appliance);
         // One host: the Messaging part shows it and cannot change it.
         if (!appliance) els.messagingHost.value = els.host.value;

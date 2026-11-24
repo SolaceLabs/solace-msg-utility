@@ -13,9 +13,9 @@
     <text x="410" y="100">........</text>
     <circle cx="730" cy="96" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="730" y="100" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
-    <rect x="40" y="128" width="14" height="14" fill="#00C895" rx="3"/>
-    <path d="M43 135.5 l3 3 l5 -6" fill="none" stroke="#ffffff" stroke-width="1.8"/>
-    <text x="62" y="140">Administrator</text>
+    <rect x="40" y="127" width="30" height="16" fill="#00C895" rx="8"/>
+    <circle cx="62" cy="135" r="6" fill="#ffffff"/>
+    <text x="78" y="140">Administrator</text>
     <circle cx="730" cy="135" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="730" y="139" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
     <rect x="20" y="188" width="690" height="192" fill="#ffffff" rx="8" stroke="#e2e8f0"/>

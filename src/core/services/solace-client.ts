@@ -228,6 +228,11 @@ export function createServiceSolace(hooks: SolaceConnectionHooks): SolaceClient 
             // Advanced Props — required by SolaceConfig, no undefined-guard needed.
             props.connectRetries = cfg.connectRetries;
             props.connectTimeoutInMsecs = cfg.connectTimeout;
+            // Left alone, the SDK gives the WebSocket 3 seconds to open and the
+            // login 3 more to be answered, whatever the connect timeout is: a
+            // broker slower than that never connects. Both get the whole
+            // connect timeout.
+            props.transportDowngradeTimeoutInMsecs = cfg.connectTimeout;
             props.reconnectRetries = cfg.reconnectRetries;
             props.reconnectRetryWaitInMsecs = cfg.reconnectWait;
 

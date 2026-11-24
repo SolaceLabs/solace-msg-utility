@@ -7,44 +7,6 @@
     gap: 0.5rem;
 }
 
-/* Bind input + inline "pick from list" search button. Mirrors the queue-copy
-   .copy-input-with-search pattern: the input fills its flex cell, and the
-   search button overlays its right edge, giving the input padding-right room
-   for the icon. The button is hidden via .hidden when the primary SEMP
-   connection is not live (no list to pick from). */
-.browser-input-with-search {
-    position: relative;
-    display: block;
-    flex: 1;
-}
-.browser-input-with-search > .form-control {
-    width: 100%;
-    padding-right: 2.5rem;
-}
-.browser-search-btn {
-    position: absolute;
-    top: 50%;
-    right: 0.5rem;
-    transform: translateY(-50%);
-    background: transparent;
-    border: 0;
-    color: var(--text-secondary);
-    cursor: pointer;
-    padding: 4px 6px;
-    border-radius: var(--radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.browser-search-btn:hover {
-    background-color: var(--bg-hover, rgba(0, 0, 0, 0.04));
-    color: var(--text-primary);
-}
-.browser-search-btn:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 1px;
-}
-
 .clickable-row {
     cursor: pointer;
 }

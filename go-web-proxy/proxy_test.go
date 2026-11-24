@@ -688,6 +688,33 @@ func TestReverseProxy_UpstreamCannotSetTheSessionCookie(t *testing.T) {
 	}
 }
 
+func TestReverseProxy_UpstreamChallengeNeverReachesTheBrowser(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="SEMP"`)
+		w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+	upURL, _ := url.Parse(upstream.URL)
+	gw := httptest.NewServer(newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger()))
+	defer gw.Close()
+
+	resp, err := http.Get(gw.URL + "/http/" + upURL.Port() + "/" + upURL.Hostname() + "/SEMP")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	// The refusal itself passes: the app tells wrong credentials by the 401.
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status: want 401, got %d", resp.StatusCode)
+	}
+	for _, k := range []string{"WWW-Authenticate", "Proxy-Authenticate"} {
+		if got := resp.Header.Values(k); len(got) != 0 {
+			t.Errorf("%s to the browser: want none, got %q", k, got)
+		}
+	}
+}
+
 func TestReverseProxy_BadPathReturns400(t *testing.T) {
 	rp := newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger())
 	gw := httptest.NewServer(rp)

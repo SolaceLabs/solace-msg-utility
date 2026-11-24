@@ -49,13 +49,13 @@
     <h3>Access</h3>
     <p>The Access card decides which computers may reach the gateway at all. It opens with one line that says which address the gateway takes your browser for. Read it before you change either list.</p>
     <figure class="manual-figure">
-        <img src="help/cards.svg" width="760" height="620" alt="Three cards of Gateway Settings: Access with the client address line and two address lists, Modules with three toggle tiles and a select, and Audit trail with two checkboxes and a select.">
+        <img src="help/cards.svg" width="760" height="582" alt="Three cards of Gateway Settings: Access with the client address line and two address lists side by side, Modules with three toggle tiles and a select, and Audit trail with two switches and a select.">
         <figcaption>The Access, Modules and Audit trail cards.</figcaption>
     </figure>
     <ol class="manual-callouts">
         <li>The line that names your address and how the gateway worked it out.</li>
-        <li><strong>Allowed clients</strong>, one range on each line.</li>
-        <li><strong>Trusted reverse proxies</strong>, one range on each line.</li>
+        <li><strong>Allowed clients</strong>, one range on each line, on the left.</li>
+        <li><strong>Trusted reverse proxies</strong>, one range on each line, on the right.</li>
         <li>The <strong>Modules signed-in users may be given</strong> tiles. A tile with a tick is offered.</li>
         <li><strong>A user without a list of their own gets</strong>.</li>
         <li><strong>Copy audit lines to the gateway log (stdout)</strong>.</li>
@@ -110,9 +110,9 @@
             <tr><th>Field</th><th>What it does</th><th>Accepts</th><th>Default</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>Count failures per client address</strong></td><td>A checkbox. On, the gateway counts failures for each client address as well as for each account, which catches guesses spread over many usernames. Off, it counts per account only. Turn it off only where every user reaches the gateway from one address: with it on, one person's typos would slow everyone down.</td><td>On or off.</td><td>On</td></tr>
+            <tr><td><strong>Count failures per client address</strong></td><td>A switch. On, the gateway counts failures for each client address as well as for each account, which catches guesses spread over many usernames. Off, it counts per account only. Turn it off only where every user reaches the gateway from one address: with it on, one person's typos would slow everyone down.</td><td>On or off.</td><td>On</td></tr>
             <tr><td><strong>Failed sign-ins per account before a back-off</strong></td><td>How many failures one account may have before it must wait.</td><td>1 to 1000.</td><td>5</td></tr>
-            <tr><td><strong>Failed sign-ins per client before a back-off</strong></td><td>How many failures one client address may have, across all accounts, before it must wait. Not used while the checkbox is off.</td><td>1 to 1000.</td><td>10</td></tr>
+            <tr><td><strong>Failed sign-ins per client before a back-off</strong></td><td>How many failures one client address may have, across all accounts, before it must wait. Not used while the switch is off.</td><td>1 to 1000.</td><td>10</td></tr>
             <tr><td><strong>Forget failures after (minutes)</strong></td><td>A count is forgotten after this long without another failure.</td><td>1 to 1440.</td><td>15</td></tr>
             <tr><td><strong>First back-off (seconds)</strong></td><td>The first wait.</td><td>1 up to the longest back-off.</td><td>30</td></tr>
             <tr><td><strong>Longest back-off (seconds)</strong></td><td>The longest the wait can grow to.</td><td>1 to 86400.</td><td>900</td></tr>
@@ -191,7 +191,7 @@
             <tr><th>Field</th><th>What it does</th><th>Default</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>Trust the standard root CAs</strong></td><td>The gateway trusts the public root CAs its image carries (Mozilla's list), as well as the CA files you add on the Certificates page. With the box off, only the CA files are trusted.</td><td>On</td></tr>
+            <tr><td><strong>Trust the standard root CAs</strong></td><td>The gateway trusts the public root CAs its image carries (Mozilla's list), as well as the CA files you add on the Certificates page. With the switch off, only the CA files are trusted.</td><td>On</td></tr>
             <tr><td><strong>Skip broker certificate checks (insecure)</strong></td><td>The gateway connects to a broker without checking its certificate at all, so it cannot tell the broker from an impostor.</td><td>Off</td></tr>
         </tbody>
     </table>

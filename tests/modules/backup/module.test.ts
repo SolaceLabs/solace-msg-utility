@@ -155,7 +155,7 @@ describe('backup -- gate and status', () => {
             ['smu-backup-20261109T021500Z.json', '2026-11-09 02:15 UTC', '2 KB'],
             ['smu-backup-20261102T021500Z.json', '2026-11-02 02:15 UTC', '1 KB'],
         ]);
-        expect([...rows[0].querySelectorAll('.backup-actions-col button')].map(b => b.getAttribute('aria-label'))).toEqual([
+        expect([...rows[0].querySelectorAll('.data-table-actions button')].map(b => b.getAttribute('aria-label'))).toEqual([
             'Download "smu-backup-20261109T021500Z.json"', 'Restore "smu-backup-20261109T021500Z.json"',
         ]);
         // Only the weekly fields show.

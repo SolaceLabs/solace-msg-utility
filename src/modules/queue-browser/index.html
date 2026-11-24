@@ -4,16 +4,16 @@
 <div id="browser-active-view" class="hidden">
     <!-- QB Session Panel -->
     <div class="card mb-4" id="browser-panel-manager">
-        <h2 class="mb-4">QB Session</h2>
+        <h2 class="card-title mb-4">QB Session</h2>
         <div class="flex-row items-start gap-4">
             <div class="flex-1">
                 <label>Queue Name</label>
                 <div class="flex-col w-full gap-1">
                     <div class="flex-row gap-2">
-                        <div class="browser-input-with-search">
+                        <div class="input-with-search">
                             <input type="text" id="browser-bind-input" class="form-control"
                                 placeholder="Enter Queue Name to Bind">
-                            <button id="btn-browser-bind-pick" type="button" class="browser-search-btn hidden"
+                            <button id="btn-browser-bind-pick" type="button" class="input-search-btn hidden"
                                 title="Pick from list of queues" aria-label="Pick queue">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -59,7 +59,7 @@
 
         <div class="flex-row justify-between items-center mb-2">
             <div class="flex-row items-center gap-2 min-w-0 flex-1">
-                <h2 class="m-0 min-w-0 flex-1">
+                <h2 class="card-title min-w-0 flex-1">
                     <!-- Whole "vpn :: queue" title is scrollable as one unit so arbitrarily long
                          VPN or queue names don't push the badge/filter button off-screen. -->
                     <div class="browser-title-scroll">

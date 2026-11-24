@@ -166,4 +166,18 @@ describe('createBrokerHosts', () => {
         hosts.setType('appliance');
         expect([el('#lbl-conn-host').textContent, el('#conn-broker-type-hint').textContent]).toEqual(['Management hostname', 'two']);
     });
+
+    it('serves a form that has no line by the control', () => {
+        const hosts = createBrokerHosts({
+            typeGroup: el('#conn-broker-type'),
+            host: host(),
+            hostLabel: el('#lbl-conn-host'),
+            messagingHost: messagingHost(),
+            messagingHint: el('#solace-host-hint'),
+        });
+        hosts.setType('appliance');
+        expect(el('#lbl-conn-host').textContent).toBe(BROKER_HOSTS_TEXT.hostLabel.appliance);
+        expect(locked()).toEqual({ type: false, host: false, messaging: false });
+        expect(el('#conn-broker-type-hint').textContent).toBe('');
+    });
 });

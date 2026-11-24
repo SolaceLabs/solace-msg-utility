@@ -7,13 +7,14 @@ import tls from 'node:tls';
 import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import {
-    BROKER_FIELDS, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, base32Decode, basisMoved, certFingerprint, continueLinkFromPage,
+    APP_CONNECT_TIMEOUT_MS, BROKER_FIELDS, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, base32Decode, basisMoved, certFingerprint, continueLinkFromPage,
     createCookieJar, detailsFileText, dnsServers, findTokens, freshTotp,
     hostAliasProblem,
-    issueCert, issueExpiredCert, jsonFindings, listedRev, listedRow, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, recoveryCodeProblems,
-    recoveryCodesFromPage, refusalProblem, resolutionOverride, resolveDetails, resolverLookup, sealedHeaderProblem, sessionCookieProblems, signinCookieProblems,
-    sweepSecrets, tlsFingerprint, totpAt, totpCode, totpStep, twoFactorSecretFromPage, wrongTotp, wroteFile,
+    issueCert, issueExpiredCert, jsonFindings, listedRev, listedRow, machineLookup, makeCA, maskSecrets, parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, recoveryCodeProblems,
+    recoveryCodesFromPage, refusalProblem, resolutionOverride, resolveDetails, resolverLookup, sealedHeaderProblem, sempPreflightProblem, sessionCookieProblems,
+    signinCookieProblems, smfPreflightProblem, sweepSecrets, tlsFingerprint, totpAt, totpCode, totpStep, twoFactorSecretFromPage, wrongTotp, wroteFile,
 } from '../../scripts/e2e-lib.mjs';
+import { DEFAULT_CONNECT_TIMEOUT_MS } from '../../src/core/connections/defaults';
 import { REPO_ROOT } from '../helpers/sources';
 import { WIDENING, securityOpt, serviceBlock } from '../helpers/compose';
 
@@ -299,6 +300,24 @@ describe('e2e-lib -- broker details', () => {
             'E2E_BROKER_ADDR nowhere.invalid does not resolve (ENOTFOUND, asked E2E_DNS 10.14.128.2): give an IP address, or a name that resolver knows');
     });
 
+    // The compose network carries IPv4 only, and this machine's resolver may
+    // list a name's IPv6 address first.
+    it("asks this machine's resolver for an E2E_BROKER_ADDR name's IPv4 address, and for any address only when it has none", async () => {
+        const none = () => Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' });
+        const system = vi.fn(async (name: string, options?: { family: number }) => {
+            if (name === 'both.lab.example.net') return { address: options?.family === 4 ? '10.14.1.2' : 'fd00::5' };
+            if (name === 'v6.lab.example.net' && !options) return { address: 'fd00::5' };
+            throw none();
+        });
+        const lookup = machineLookup(system);
+        expect(await aliasAddress('both.lab.example.net', lookup)).toBe('10.14.1.2');
+        expect(system.mock.calls).toEqual([['both.lab.example.net', { family: 4 }]]);
+        expect(await aliasAddress('v6.lab.example.net', lookup)).toBe('fd00::5');
+        expect(system.mock.calls.slice(1)).toEqual([['v6.lab.example.net', { family: 4 }], ['v6.lab.example.net']]);
+        await expect(aliasAddress('nowhere.invalid', lookup)).rejects.toThrow(
+            "E2E_BROKER_ADDR nowhere.invalid does not resolve (ENOTFOUND, asked this machine's resolver): give an IP address, or a name that resolver knows");
+    });
+
     // A compose extra_hosts entry takes an address, so a DNS name given as
     // E2E_BROKER_ADDR is resolved by the harness, on the machine that runs it.
     it('maps the alias to E2E_BROKER_ADDR as given when it is an address, and to what a DNS name resolves to', async () => {
@@ -335,12 +354,122 @@ describe('e2e-lib -- broker details', () => {
         expect(() => parseDetailsFile('E2E_VPN=a\r\nE2E_VPN=', FILE)).toThrow(`${FILE} line 2: E2E_VPN is already set on line 1`);
     });
 
+    // A VPN or queue name with spaces is naturally written in quotes; kept,
+    // they would reach the broker as part of the name.
+    it('drops one pair of matching quotes around a file value, and no other quote', () => {
+        const text = [
+            'E2E_VPN="A VPN WITH SPACES"', "E2E_QUEUE='a queue'", 'E2E_CLIENT_USER=\'"quoted"\'', 'E2E_SEMP_USER="open', "E2E_BROKER_HOST=it's", 'E2E_SEMP_PASSWORD=""',
+            'E2E_CLIENT_PASSWORD="',
+        ].join('\n');
+        expect(parseDetailsFile(text, FILE).values).toEqual({
+            E2E_VPN: 'A VPN WITH SPACES', E2E_QUEUE: 'a queue', E2E_CLIENT_USER: '"quoted"', E2E_SEMP_USER: '"open', E2E_BROKER_HOST: "it's", E2E_CLIENT_PASSWORD: '"',
+        });
+    });
+
+    it('writes a value that begins and ends with one quote character so that it reads back whole', () => {
+        const text = detailsFileText('E2E_VPN=\n', { E2E_VPN: '"v"', E2E_QUEUE: "'q'", E2E_CLIENT_USER: 'plain user' });
+        expect(text).toBe('E2E_VPN=""v""\nE2E_QUEUE="\'q\'"\nE2E_CLIENT_USER=plain user\n');
+        expect(parseDetailsFile(text, FILE).values).toEqual({ E2E_VPN: '"v"', E2E_QUEUE: "'q'", E2E_CLIENT_USER: 'plain user' });
+    });
+
     it('starts a new file with its header and fills an existing one in place', () => {
         const fresh = detailsFileText(null, { E2E_BROKER_HOST: 'broker', E2E_VPN: 'default' });
         expect(fresh).toMatch(/^# Broker details for \.\/scripts\/dev\.sh e2e .*\n(#.*\n)+E2E_BROKER_HOST=broker\nE2E_VPN=default\n$/);
         expect(parseDetailsFile(fresh, FILE).values).toEqual({ E2E_BROKER_HOST: 'broker', E2E_VPN: 'default' });
         const own = '# mine\r\nE2E_SEMP_PASSWORD=kept-by-hand\r\nE2E_QUEUE = \r\n';
         expect(detailsFileText(own, { E2E_QUEUE: 'q1', E2E_VPN: 'v' })).toBe('# mine\nE2E_SEMP_PASSWORD=kept-by-hand\nE2E_QUEUE=q1\nE2E_VPN=v\n');
+    });
+});
+
+// What the harness says when its broker preflight (preflight in
+// scripts/e2e.mjs) cannot use the broker: the line is all a person has to go
+// on, so each answer must name the details to check.
+describe('e2e-lib -- broker preflight', () => {
+    const b = { host: 'broker.example', sempPort: '1943', sempUser: 'ro', smfPort: '1443', vpn: 'v1', clientUser: 'app', queue: 'q1' };
+    const SEMP = 'https://broker.example:1943';
+    const queueAnswer = (queueName: string) => ({ status: 200, body: JSON.stringify({ data: { queueName } }) });
+
+    it('accepts the SEMP answer that names the queue', () => {
+        expect(sempPreflightProblem(queueAnswer('q1'), b)).toBe('');
+    });
+
+    it('names the SEMP credential when the broker refuses it, and the user, VPN and queue when the broker forbids the read', () => {
+        expect(sempPreflightProblem({ status: 401, body: '' }, b))
+            .toBe(`the broker refused the SEMP username or password (401 from ${SEMP} as ro): check E2E_SEMP_USER and E2E_SEMP_PASSWORD`);
+        expect(sempPreflightProblem({ status: 403, body: '' }, b))
+            .toBe(`the broker does not let SEMP user ro read queue q1 in VPN v1 (403 from ${SEMP}): check E2E_SEMP_USER, E2E_VPN and E2E_QUEUE`);
+    });
+
+    it("says the SEMP port is not reachable for the relay's 502 and for no answer at all", () => {
+        const refused = sempPreflightProblem({ status: 502, body: '502 bad gateway: upstream unreachable\n' }, b);
+        expect(refused.startsWith(`the broker's SEMP port is not reachable at ${SEMP} from the gateway container (502: 502 bad gateway: upstream unreachable): `)).toBe(true);
+        for (const detail of ['E2E_BROKER_HOST and E2E_SEMP_PORT', 'E2E_BROKER_ADDR or E2E_DNS', 'E2E_BROKER_CA', 'the direct log']) expect(refused).toContain(detail);
+        const silent = sempPreflightProblem({ status: 0, body: 'direct GET /https/1943/broker.example/SEMP: no answer in 30s' }, b);
+        expect(silent).toContain('is not reachable');
+        expect(silent).toContain('(no answer: direct GET /https/1943/broker.example/SEMP: no answer in 30s)');
+    });
+
+    it('names the VPN and the queue for an answer that is not the queue, and the SEMP port for a 200 from something else', () => {
+        const missing = '{"meta":{"error":{"status":"NOT_FOUND"}}}';
+        expect(sempPreflightProblem({ status: 400, body: missing }, b))
+            .toBe(`SEMP at ${SEMP} did not return queue q1 of VPN v1 (400: ${missing}): check E2E_VPN and E2E_QUEUE`);
+        for (const res of [queueAnswer('other'), { status: 200, body: '{}' }, { status: 200, body: '<html>' }, { status: 200, body: 'null' }]) {
+            expect(sempPreflightProblem(res, b)).toBe(`SEMP at ${SEMP} answered without queue q1 (200: ${res.body}): check E2E_SEMP_PORT and E2E_QUEUE`);
+        }
+    });
+
+    it('quotes no more than the start of a long answer', () => {
+        const problem = sempPreflightProblem({ status: 500, body: 'x'.repeat(5000) }, b);
+        expect(problem).toContain(`(500: ${'x'.repeat(200)})`);
+    });
+
+    it('tells an SMF port the relay could not open from a login the broker refused', () => {
+        const unopened = smfPreflightProblem('SMF connect failed: closed; gateway answer: 502 bad gateway: upstream unreachable', 'refused', b);
+        expect(unopened.startsWith('no WebSocket to the broker at wss://broker.example:1443 from the gateway container '
+            + '(SMF connect failed: closed; gateway answer: 502 bad gateway: upstream unreachable): ')).toBe(true);
+        expect(unopened).toContain('E2E_BROKER_HOST and E2E_SMF_PORT');
+        expect(unopened).not.toContain('E2E_CLIENT_PASSWORD');
+        expect(smfPreflightProblem('SMF connect failed: Unauthorized; gateway answer: none', 'opened', b))
+            .toBe('the broker at wss://broker.example:1443 did not log client username app in to VPN v1 '
+                + '(SMF connect failed: Unauthorized; gateway answer: none): check E2E_VPN, E2E_CLIENT_USER and E2E_CLIENT_PASSWORD');
+    });
+
+    // A broker that takes longer to accept a connection than the SDK waits
+    // for a WebSocket: the relay has answered nothing yet, so no credential
+    // has been judged and none is named.
+    it('tells a broker too slow for the SDK from one that refused the login', () => {
+        const slow = smfPreflightProblem('SMF connect failed: Connection timed out; gateway answer: none', 'pending', b);
+        expect(slow).toBe('the gateway container was still connecting to the broker at wss://broker.example:1443 when the SDK gave up '
+            + "(SMF connect failed: Connection timed out; gateway answer: none): a WebSocket has 10 seconds to open, the app's connect timeout, "
+            + 'so check that the broker accepts a connection on E2E_SMF_PORT well inside that, and that nothing filters the port');
+        expect(slow).not.toContain('E2E_CLIENT_PASSWORD');
+    });
+
+    // A harness more patient than the app would pass a broker the browser
+    // checks then fail against.
+    it("connects its SMF sessions with the app's connect timeout, for the session and for the WebSocket's opening", () => {
+        expect(APP_CONNECT_TIMEOUT_MS).toBe(DEFAULT_CONNECT_TIMEOUT_MS);
+        const harness = fs.readFileSync(path.join(REPO_ROOT, 'scripts/e2e.mjs'), 'utf-8');
+        expect(harness).toContain('props.connectTimeoutInMsecs = APP_CONNECT_TIMEOUT_MS;');
+        expect(harness).toContain('props.transportDowngradeTimeoutInMsecs = APP_CONNECT_TIMEOUT_MS;');
+    });
+
+    // The bridge reports 'none' as the gateway's answer both when a WebSocket
+    // opened and when the gateway has not answered, so the preflight asks it
+    // which.
+    it('asks the bridge what became of the WebSocket, not whether the gateway refused it', () => {
+        const harness = fs.readFileSync(path.join(REPO_ROOT, 'scripts/e2e.mjs'), 'utf-8');
+        expect(harness).toContain("upgrade: () => (opened ? 'opened' : lastRefusal ? 'refused' : 'pending'),");
+        expect(harness).toContain('smfPreflightProblem(e.message, bridge.upgrade(), broker)');
+    });
+
+    // A check that ran before the preflight would fail against a broker the
+    // preflight is there to refuse, and the Provisioned gateway and the browser
+    // would start for nothing.
+    it('runs after the direct service starts alone, and before the Provisioned gateway starts', () => {
+        const harness = fs.readFileSync(path.join(REPO_ROOT, 'scripts/e2e.mjs'), 'utf-8');
+        expect(harness).toMatch(/compose\(\[\s*'up',\s*'-d',\s*'direct'\s*\]\)/);
+        expect(harness).toMatch(/await startDirect\(\);\s*await preflight\(\);\s*await startGateway\(\);\s*const admin = await configureGateway\(\);/);
     });
 });
 
@@ -393,7 +522,7 @@ describe('e2e stack -- browser', () => {
 
     // A bare `up` would start the browser even with E2E_BROWSER=0.
     it('is started by name, and only when the browser checks run', () => {
-        expect(read('scripts/e2e.mjs')).toMatch(/compose\(\[\s*'up',\s*'-d',\s*'gateway',\s*'direct',\s*\.\.\.\(browserOn\(\)\s*\?\s*\['browser'\]\s*:\s*\[\]\)\s*\]\)/);
+        expect(read('scripts/e2e.mjs')).toMatch(/compose\(\[\s*'up',\s*'-d',\s*'gateway',\s*\.\.\.\(browserOn\(\)\s*\?\s*\['browser'\]\s*:\s*\[\]\)\s*\]\)/);
     });
 
     it('never reaches the app: nothing under src/ names playwright', () => {

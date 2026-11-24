@@ -32,7 +32,8 @@
 // containers (a host alias, through a compose override under scripts/logs/e2e/),
 // so the host can be the name in the broker's certificate even where no DNS
 // resolves it. It is an IP address or a DNS name; a name is resolved once, on
-// this machine, because the alias itself takes an address.
+// this machine, because the alias itself takes an address, and to its IPv4
+// address when it has one, because the containers' network carries IPv4 only.
 //
 // E2E_DNS names DNS servers (addresses, separated by commas). Both gateway
 // containers resolve through them, so E2E_BROKER_HOST may be a name only they
@@ -44,6 +45,13 @@
 // whose certificate does not name the host it is dialled by. The run then says
 // so at the start and in its summary: checks 3, 4, 6, 11 and 12 and D2-D4 pass
 // without proving the broker's TLS is trusted.
+//
+// A broker preflight runs before any check. The `direct` service starts first,
+// alone, and the harness asks the broker through its Direct relay: one SEMP
+// read of the queue with the SEMP credential, then one SMF login as the client
+// username that binds a browser to the queue. A broker that cannot be reached,
+// or that refuses either credential, ends the run there with a line naming the
+// details to check: the Provisioned gateway and the browser never start.
 //
 // Every check prints PASS or FAIL with its id: 1-31, B1-B9 in the browser and
 // D1-D4 in Gateway mode. Any FAIL, or a setup step that cannot complete, exits
@@ -83,11 +91,11 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import {
-    MIN_MASKED, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, basisMoved, certFingerprint, continueLinkFromPage, createCookieJar, detailsFileText,
-    dnsServers, findTokens, freshTotp, issueCert, issueExpiredCert, jsonFindings, hostAliasProblem, listedRev, listedRow, makeCA, maskSecrets,
+    APP_CONNECT_TIMEOUT_MS, MIN_MASKED, SESSION_COOKIE, SIGNIN_COOKIE, aliasAddress, auditMissing, basisMoved, certFingerprint, continueLinkFromPage, createCookieJar, detailsFileText,
+    dnsServers, findTokens, freshTotp, issueCert, issueExpiredCert, jsonFindings, hostAliasProblem, listedRev, listedRow, machineLookup, makeCA, maskSecrets,
     parseAuditLog, parseDetailsFile, parseSetCookie, pemCertificates, recoveryCodeProblems, recoveryCodesFromPage, refusalProblem, resolutionOverride,
-    resolveDetails, resolverLookup, sealedHeaderProblem, sessionCookieProblems, signinCookieProblems, sweepSecrets, tlsFingerprint, twoFactorSecretFromPage,
-    wrongTotp,
+    resolveDetails, resolverLookup, sealedHeaderProblem, sempPreflightProblem, sessionCookieProblems, signinCookieProblems, smfPreflightProblem, sweepSecrets,
+    tlsFingerprint, twoFactorSecretFromPage, wrongTotp,
 } from './e2e-lib.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -283,7 +291,7 @@ async function checkedAlias(values) {
 
 /** Who resolves an E2E_BROKER_ADDR name, and what to call it: the E2E_DNS servers when given, else this machine's resolver. */
 function aliasLookup(servers) {
-    if (!servers.length) return [dns.promises.lookup];
+    if (!servers.length) return [machineLookup(dns.promises.lookup)];
     const resolver = new dns.promises.Resolver();
     resolver.setServers(servers);
     return [resolverLookup(resolver), `E2E_DNS ${servers.join(', ')}`];
@@ -602,8 +610,16 @@ function upgrade(pathname, { cookie, origin } = {}) {
 // --- SMF -----------------------------------------------------------------------
 
 const WS_HEADERS = ['sec-websocket-key', 'sec-websocket-version', 'sec-websocket-protocol', 'sec-websocket-extensions'];
-// Every bridge and SMF session the run opens, closed at its end (runChecks).
+// Every bridge and SMF session the run opens, closed by closeOpened: at the end
+// of the preflight and at the end of the checks (runChecks).
 const closers = [];
+
+/** Closes every bridge and SMF session opened so far, newest first: each session before the bridge it runs through. */
+function closeOpened() {
+    for (const close of closers.splice(0).reverse()) {
+        try { close(); } catch { /* already gone */ }
+    }
+}
 
 /**
  * A loopback WebSocket bridge: the SDK connects to ws://127.0.0.1:<port>/..., and
@@ -615,6 +631,7 @@ function startBridge({ at = GATEWAY, cookie } = {}) {
     const sockets = new Set();
     const closeWaiters = [];
     let lastRefusal = '';
+    let opened = false;
     const server = http.createServer((_req, res) => res.writeHead(404).end());
     server.on('upgrade', (req, client, head) => {
         client.on('error', () => {});
@@ -624,6 +641,7 @@ function startBridge({ at = GATEWAY, cookie } = {}) {
         for (const h of WS_HEADERS) if (req.headers[h]) headers[h] = req.headers[h];
         const up = https.request({ ...at, path: req.url, method: 'GET', headers, ca: caPem, agent: false });
         up.on('upgrade', (res, gw, gwHead) => {
+            opened = true;
             gw.on('error', () => {});
             sockets.add(gw);
             records.push({ label: `${tag(at === DIRECT)}GET ${req.url} (bridge) -> 101`, headers: rawHeaderText(res), body: '' });
@@ -650,6 +668,8 @@ function startBridge({ at = GATEWAY, cookie } = {}) {
         const bridge = {
             port: server.address().port,
             refusal: () => lastRefusal || 'none',
+            // What became of the upgrades asked for: one opened, else the gateway answered without one, else it has not answered.
+            upgrade: () => (opened ? 'opened' : lastRefusal ? 'refused' : 'pending'),
             nextGatewayClose: (ms) => withTimeout(new Promise((r) => closeWaiters.push(r)), ms, `the gateway did not close the SMF socket within ${ms / 1000}s`),
             close: () => { for (const s of sockets) s.destroy(); server.close(); },
         };
@@ -660,7 +680,7 @@ function startBridge({ at = GATEWAY, cookie } = {}) {
 
 let solaceSdk = null;
 
-/** The SDK under Node, initialised once: checks 6 and 11 and D3 share it. */
+/** The SDK under Node, initialised once: the preflight, checks 6 and 11 and D3 share it. */
 function loadSolace() {
     if (solaceSdk) return solaceSdk;
     const solace = createRequire(import.meta.url)(path.join(WORK, 'solclient.cjs'));
@@ -684,7 +704,9 @@ async function openSession(solace, bridge, dial) {
     props.authenticationScheme = solace.AuthenticationScheme.BASIC;
     props.connectRetries = 0;
     props.reconnectRetries = 0;
-    props.connectTimeoutInMsecs = 15_000;
+    // As the app sets them (src/core/services/solace-client.ts): the WebSocket has the whole connect timeout to open.
+    props.connectTimeoutInMsecs = APP_CONNECT_TIMEOUT_MS;
+    props.transportDowngradeTimeoutInMsecs = APP_CONNECT_TIMEOUT_MS;
     const session = solace.SolclientFactory.createSession(props);
     closers.push(() => session.dispose());
     const ev = solace.SessionEventCode;
@@ -719,14 +741,53 @@ function bindQueue(solace, session, queue) {
 
 // --- setup -----------------------------------------------------------------------
 
-async function stackUp() {
+/** Clears what an earlier run left and starts the `direct` service alone: all the broker preflight needs. */
+async function startDirect() {
     compose(['down', '-v', '--remove-orphans'], { quiet: true });
+    const up = compose(['up', '-d', 'direct']);
+    expect(up.code === 0, 'docker compose up failed (output above); the direct gateway uses the image `./scripts/dev.sh image` builds');
+    await waitFor('the direct gateway', 60, async () => (await request('GET', '/hosted', { at: DIRECT })).status === 200, 'direct');
+}
+
+/**
+ * Ends the run before the Provisioned gateway and the browser start, and before
+ * any check runs, when the broker cannot be reached or refuses a credential.
+ * It asks the broker through the Direct relay, which forwards what the caller
+ * sends from a container the checks use: one SEMP read of the queue, then one
+ * SMF login that binds a browser to it. Nothing is consumed.
+ */
+async function preflight() {
+    const res = await request('GET', directSempPath(), { at: DIRECT, headers: sempAuth() }).catch((e) => ({ status: 0, body: e.message }));
+    const semp = sempPreflightProblem(res, broker);
+    expect(!semp, `broker preflight: ${semp}`);
+    const bridge = await startBridge({ at: DIRECT });
+    try {
+        const solace = loadSolace();
+        const login = { smfPath: `/wss/${broker.smfPort}/${broker.host}`, vpn: broker.vpn, user: broker.clientUser, pass: brokerSecrets.clientPassword };
+        const smf = await openSession(solace, bridge, login).catch((e) => {
+            throw new Error(`broker preflight: ${smfPreflightProblem(e.message, bridge.upgrade(), broker)}`);
+        });
+        await bindQueue(solace, smf.session, broker.queue).catch((e) => {
+            throw new Error(`broker preflight: client username ${broker.clientUser} cannot browse queue ${broker.queue} in VPN ${broker.vpn} (${e.message}): `
+                + 'check E2E_QUEUE, and that the client username may browse it');
+        });
+        smf.session.disconnect();
+        // Tidying only: D3 is the check that holds the disconnect to its limit.
+        await withTimeout(smf.down, 10_000, 'no disconnect').catch(() => {});
+    } finally {
+        closeOpened();
+    }
+    say(`broker preflight: SEMP answers as ${broker.sempUser}, the SMF login as ${broker.clientUser} works and queue ${broker.queue} binds`);
+}
+
+/** Starts the Provisioned gateway beside the running `direct` service, once the preflight has passed. */
+async function startGateway() {
+    gatewayStarted = true;
     // By name: the browser only when its checks run.
-    const up = compose(['up', '-d', 'gateway', 'direct', ...(browserOn() ? ['browser'] : [])]);
-    expect(up.code === 0, 'docker compose up failed (output above); both gateways use the image `./scripts/dev.sh image` builds, '
+    const up = compose(['up', '-d', 'gateway', ...(browserOn() ? ['browser'] : [])]);
+    expect(up.code === 0, 'docker compose up failed (output above); the gateway uses the image `./scripts/dev.sh image` builds, '
         + 'and the browser container pulls the Playwright image the compose file pins');
     await waitFor('the gateway', 60, async () => (await request('GET', '/hosted')).status === 200, 'gateway');
-    await waitFor('the direct gateway', 60, async () => (await request('GET', '/hosted', { at: DIRECT })).status === 200, 'direct');
 }
 
 /** Signs the bootstrap admin in, changes its password, adds both connections and the user. */
@@ -1636,10 +1697,7 @@ async function runChecks(admin) {
             return `${text.split('\n').length} lines, ${auditText.split('\n').length} audit lines`;
         });
     } finally {
-        // Newest first: each SMF session before the bridge it runs through.
-        for (const close of closers.splice(0).reverse()) {
-            try { close(); } catch { /* already gone */ }
-        }
+        closeOpened();
     }
 }
 
@@ -2137,6 +2195,8 @@ async function runDirectChecks() {
 // True from writeMaterial on: from then the stack and WORK exist to tear down.
 let started = false;
 let tornDown = false;
+// True from startGateway on: a run the preflight ended has no gateway log to show.
+let gatewayStarted = false;
 
 function teardown() {
     if (tornDown) return;
@@ -2220,7 +2280,9 @@ async function run() {
         if (browserOn()) playwright = await loadPlaywright();
         started = true;
         writeMaterial(certs);
-        await stackUp();
+        await startDirect();
+        await preflight();
+        await startGateway();
         const admin = await configureGateway();
         await runChecks(admin);
     } catch (e) {
@@ -2232,8 +2294,10 @@ async function run() {
     if (started) {
         if (setupError || failed.length) {
             try {
-                say('--- gateway log (last 60 lines) ---');
-                compose(['logs', '--no-color', '--tail', '60', 'gateway']);
+                if (gatewayStarted) {
+                    say('--- gateway log (last 60 lines) ---');
+                    compose(['logs', '--no-color', '--tail', '60', 'gateway']);
+                }
                 if (setupError || failed.some((n) => String(n).startsWith('D'))) {
                     say('--- direct log (last 60 lines) ---');
                     compose(['logs', '--no-color', '--tail', '60', 'direct']);

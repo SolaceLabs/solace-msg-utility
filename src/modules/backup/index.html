@@ -1,39 +1,42 @@
 <!-- The admin gate is created at install by createGate() (see module.ts). -->
 <!-- Two cards under one hidden wrapper: Configuration (export and import by hand) and
      Schedule (the gateway's own scheduled backups and the files they leave). The page's
-     title is the module's name in the sidebar. -->
+     title is the module's name in the sidebar. Fields that belong together share a
+     row (.form-cols). -->
 <div id="backup-view" class="hidden">
-<div class="card backup-card">
-    <div class="backup-head">
-        <h3 class="backup-title">Configuration</h3>
-    </div>
-    <p class="text-secondary backup-intro">
+<div class="card">
+    <h3 class="card-title mb-3">Configuration</h3>
+    <p class="text-secondary text-body-sm">
         A backup holds the users (their password hashes, never the passwords), the connections with their
         credentials, and the gateway settings except the file paths, encrypted with a passphrase. Keep the
         passphrase safe: without it a backup cannot be opened.
     </p>
 
-    <h4 class="backup-section">Export</h4>
-    <div class="form-group">
-        <label for="backup-export-pass">Passphrase (12 to 128 characters)</label>
-        <input id="backup-export-pass" type="password" class="form-control" autocomplete="new-password">
-    </div>
-    <div class="form-group">
-        <label for="backup-export-confirm">Confirm the passphrase</label>
-        <input id="backup-export-confirm" type="password" class="form-control" autocomplete="new-password">
+    <h4 class="card-subtitle">Export</h4>
+    <div class="form-cols">
+        <div class="form-group">
+            <label for="backup-export-pass">Passphrase (12 to 128 characters)</label>
+            <input id="backup-export-pass" type="password" class="form-control" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+            <label for="backup-export-confirm">Confirm the passphrase</label>
+            <input id="backup-export-confirm" type="password" class="form-control" autocomplete="new-password">
+        </div>
     </div>
     <div id="backup-export-error" class="text-error hidden" role="alert"></div>
     <button id="btn-backup-export" type="button" class="btn btn-primary">Export</button>
 
-    <h4 class="backup-section">Import</h4>
-    <div class="form-group">
-        <label for="backup-import-file">Backup file</label>
-        <input id="backup-import-file" type="file" class="form-control" accept=".json,application/json">
-        <p id="backup-import-source" class="backup-hint hidden"></p>
-    </div>
-    <div class="form-group">
-        <label for="backup-import-pass">Passphrase</label>
-        <input id="backup-import-pass" type="password" class="form-control" autocomplete="off">
+    <h4 class="card-subtitle">Import</h4>
+    <div class="form-cols">
+        <div class="form-group">
+            <label for="backup-import-file">Backup file</label>
+            <input id="backup-import-file" type="file" class="form-control" accept=".json,application/json">
+            <p id="backup-import-source" class="backup-hint hidden"></p>
+        </div>
+        <div class="form-group">
+            <label for="backup-import-pass">Passphrase</label>
+            <input id="backup-import-pass" type="password" class="form-control" autocomplete="off">
+        </div>
     </div>
     <div id="backup-import-error" class="text-error hidden" role="alert"></div>
     <button id="btn-backup-preview" type="button" class="btn btn-secondary">Preview</button>
@@ -66,16 +69,16 @@
             </select>
             <ul id="backup-diff-settings" class="backup-diff"></ul>
         </div>
-        <div id="backup-signout" class="backup-banner hidden">
+        <div id="backup-signout" class="banner-warning hidden">
             Importing the users this way changes your own account: you will be signed out.
         </div>
         <button id="btn-backup-import" type="button" class="btn btn-primary">Import</button>
     </div>
 </div>
 
-<div class="card backup-card">
-    <div class="backup-head">
-        <h3 class="backup-title">Schedule</h3>
+<div class="card">
+    <div class="flex-row justify-between items-center mb-3">
+        <h3 class="card-title">Schedule</h3>
         <button id="btn-backup-reload" type="button" class="btn btn-secondary" title="Reload the schedule and the saved backups">Reload</button>
     </div>
     <p class="backup-hint">
@@ -83,55 +86,61 @@
         files outside the container. Times are UTC.
     </p>
     <div id="backup-error" class="text-error hidden" role="alert"></div>
-    <div id="backup-dir-problem" class="backup-banner hidden"></div>
-    <p id="backup-schedule-status" class="backup-status"></p>
-    <div class="form-group">
-        <label for="backup-kind">Frequency</label>
-        <select id="backup-kind" class="form-control">
-            <option value="hourly">Hourly</option>
-            <option value="daily" selected>Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-        </select>
+    <div id="backup-dir-problem" class="banner-warning hidden"></div>
+    <p id="backup-schedule-status" class="text-body-sm"></p>
+    <!-- One row for when and how many, one for the passphrase. A field that
+         does not apply to the chosen frequency (data-kinds) is hidden. -->
+    <div class="form-cols">
+        <div class="form-group">
+            <label for="backup-kind">Frequency</label>
+            <select id="backup-kind" class="form-control">
+                <option value="hourly">Hourly</option>
+                <option value="daily" selected>Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+            </select>
+        </div>
+        <div class="form-group" data-kinds="weekly">
+            <label for="backup-weekday">Day of the week</label>
+            <select id="backup-weekday" class="form-control">
+                <option value="0">Sunday</option>
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+            </select>
+        </div>
+        <div class="form-group" data-kinds="monthly">
+            <label for="backup-day">Day of the month</label>
+            <input id="backup-day" type="number" class="form-control" min="1" max="31" value="1">
+            <p class="backup-hint">A month without that day backs up on its last day.</p>
+        </div>
+        <div class="form-group" data-kinds="daily weekly monthly">
+            <label for="backup-time">Time (UTC)</label>
+            <input id="backup-time" type="time" class="form-control" value="02:00">
+        </div>
+        <div class="form-group" data-kinds="hourly">
+            <label for="backup-minute">Minute past the hour</label>
+            <input id="backup-minute" type="number" class="form-control" min="0" max="59" value="0">
+        </div>
+        <div class="form-group">
+            <label for="backup-keep">Backups to keep</label>
+            <input id="backup-keep" type="number" class="form-control" min="1" max="365" value="14">
+            <p class="backup-hint">The oldest beyond this number are deleted after each backup.</p>
+        </div>
     </div>
-    <div class="form-group" data-kinds="weekly">
-        <label for="backup-weekday">Day of the week</label>
-        <select id="backup-weekday" class="form-control">
-            <option value="0">Sunday</option>
-            <option value="1">Monday</option>
-            <option value="2">Tuesday</option>
-            <option value="3">Wednesday</option>
-            <option value="4">Thursday</option>
-            <option value="5">Friday</option>
-            <option value="6">Saturday</option>
-        </select>
-    </div>
-    <div class="form-group" data-kinds="monthly">
-        <label for="backup-day">Day of the month</label>
-        <input id="backup-day" type="number" class="form-control" min="1" max="31" value="1">
-        <p class="backup-hint">A month without that day backs up on its last day.</p>
-    </div>
-    <div class="form-group" data-kinds="daily weekly monthly">
-        <label for="backup-time">Time (UTC)</label>
-        <input id="backup-time" type="time" class="form-control" value="02:00">
-    </div>
-    <div class="form-group" data-kinds="hourly">
-        <label for="backup-minute">Minute past the hour</label>
-        <input id="backup-minute" type="number" class="form-control" min="0" max="59" value="0">
-    </div>
-    <div class="form-group">
-        <label for="backup-keep">Backups to keep</label>
-        <input id="backup-keep" type="number" class="form-control" min="1" max="365" value="14">
-        <p class="backup-hint">The oldest beyond this number are deleted after each backup.</p>
-    </div>
-    <div class="form-group">
-        <label for="backup-sched-pass">Passphrase</label>
-        <input id="backup-sched-pass" type="password" class="form-control" autocomplete="new-password">
-        <p id="backup-sched-pass-hint" class="backup-hint"></p>
-    </div>
-    <div class="form-group">
-        <label for="backup-sched-confirm">Confirm the passphrase</label>
-        <input id="backup-sched-confirm" type="password" class="form-control" autocomplete="new-password">
+    <div class="form-cols">
+        <div class="form-group">
+            <label for="backup-sched-pass">Passphrase</label>
+            <input id="backup-sched-pass" type="password" class="form-control" autocomplete="new-password">
+            <p id="backup-sched-pass-hint" class="backup-hint"></p>
+        </div>
+        <div class="form-group">
+            <label for="backup-sched-confirm">Confirm the passphrase</label>
+            <input id="backup-sched-confirm" type="password" class="form-control" autocomplete="new-password">
+        </div>
     </div>
     <div id="backup-schedule-error" class="text-error hidden" role="alert"></div>
     <div class="flex-row gap-2">
@@ -140,11 +149,11 @@
         <button id="btn-backup-remove-schedule" type="button" class="btn btn-danger">Remove schedule</button>
     </div>
 
-    <h4 class="backup-section">Saved backups</h4>
+    <h4 class="card-subtitle">Saved backups</h4>
     <div class="data-table-frame">
         <table class="data-table">
             <thead>
-                <tr><th>File</th><th>Created (UTC)</th><th>Size</th><th class="backup-actions-col" aria-label="Actions"></th></tr>
+                <tr><th>File</th><th>Created (UTC)</th><th>Size</th><th class="data-table-actions" aria-label="Actions"></th></tr>
             </thead>
             <tbody id="backup-rows"></tbody>
         </table>

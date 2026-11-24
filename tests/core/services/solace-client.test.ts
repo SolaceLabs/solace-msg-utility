@@ -146,6 +146,18 @@ describe('core/services/solace-client', () => {
             expect(propsObj.reconnectRetryWaitInMsecs).toBe(5000);
         });
 
+        // The SDK's own limit for a WebSocket to open is 3 seconds, so a
+        // broker that takes longer to accept a connection would fail inside a
+        // longer connect timeout.
+        it('gives the WebSocket the whole connect timeout to open', () => {
+            const service = createServiceSolace(makeHooks());
+            service.init();
+            service.connect(baseCfg({ connectTimeout: 10000 }), 'broker.test', 'admin');
+            const propsObj = solaceMock.SessionProperties.mock.results[0].value;
+            expect(propsObj.connectTimeoutInMsecs).toBe(10000);
+            expect(propsObj.transportDowngradeTimeoutInMsecs).toBe(10000);
+        });
+
         it('registers a generic debug listener for every SessionEventCode', () => {
             const service = createServiceSolace(makeHooks());
             service.init();

@@ -18,7 +18,7 @@
         <li>The notification bell.</li>
     </ol>
     <aside class="manual-note">
-        <p>The app is made for a desktop browser window at least 1024 pixels wide. In a narrower window a <strong>Desktop Only</strong> message covers the app and shows the size of your window. Widen the window and the message goes.</p>
+        <p>The app is made for a desktop browser window at least 800 pixels wide. In a narrower window a <strong>Desktop Only</strong> message covers the app and shows the size of your window. Widen the window and the message goes.</p>
     </aside>
 
     <h4>The Client and SEMP indicators</h4>
@@ -191,7 +191,7 @@
         </thead>
         <tbody>
             <tr><td><strong>Connect Retries</strong></td><td><code>0</code></td><td>How many times to try again when the first connect fails. The box marks 0 as its lowest value.</td></tr>
-            <tr><td><strong>Connect Timeout (ms)</strong></td><td><code>3000</code></td><td>How long to wait for the first connect, in milliseconds. The box marks 100 as its lowest value.</td></tr>
+            <tr><td><strong>Connect Timeout (ms)</strong></td><td><code>10000</code></td><td>How long one connect attempt may take, in milliseconds: the broker has that long to accept the connection and answer the login. The box marks 100 as its lowest value.</td></tr>
             <tr><td><strong>Reconnect Retries</strong></td><td><code>1</code></td><td>How many times to try again when an open session drops. <code>-1</code> never gives up. The box marks -1 as its lowest value.</td></tr>
             <tr><td><strong>Reconnect Wait (ms)</strong></td><td><code>3000</code></td><td>The pause between those attempts, in milliseconds. The box marks 100 as its lowest value.</td></tr>
             <tr><td><strong>Max Messages per Queue</strong></td><td><code>100</code></td><td>How many messages the Queue Browser keeps for each queue. A whole number from 1 to 10000.</td></tr>

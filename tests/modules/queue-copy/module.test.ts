@@ -404,10 +404,11 @@ describe('queue-copy/module', () => {
             eventBus.on('connection:edit-requested', handler);
 
             const editBtns = container.querySelectorAll<HTMLButtonElement>('.copy-source-edit-btn');
-            // One button per source card (Broker / SEMP / Client).
-            expect(editBtns.length).toBe(3);
+            // One button per source card (Broker / SEMP / Client), and the
+            // provisioned source card's.
+            expect(editBtns.length).toBe(4);
             editBtns.forEach((btn) => btn.click());
-            expect(handler).toHaveBeenCalledTimes(3);
+            expect(handler).toHaveBeenCalledTimes(4);
             consoleSpy.mockRestore();
         });
     });

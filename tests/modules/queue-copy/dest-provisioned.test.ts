@@ -214,6 +214,52 @@ function names(el: El): void {
 /** What the notification bell holds, as module, level and text. */
 const bell = (ctx: AppContext) => ctx.notifications.entries().map(e => ({ level: e.level, module: e.module, text: e.text }));
 
+describe('queue-copy -- the source follows the primary connection mode', () => {
+    const SOURCE_CARDS = ['#copy-source-broker-card', '#copy-source-semp-card', '#copy-source-sol-card'];
+
+    it('Provisioned primary: one read-only connection card stands in for the Broker, SEMP and Client cards', async () => {
+        const { el, hidden } = await setupProvisioned();
+        expect(SOURCE_CARDS.map(hidden)).toEqual([true, true, true]);
+        expect(hidden('#copy-source-prov')).toBe(false);
+        expect(el('#copy-source-prov .prov-conn-title').textContent).toBe('Source Connection');
+        // The primary's own broker and Message VPN, shown and not chosen here.
+        expect(options(el, '#copy-source-prov-broker')).toEqual(['b1']);
+        expect(options(el, '#copy-source-prov-vpn')).toEqual(['v1']);
+        expect([el<HTMLSelectElement>('#copy-source-prov-broker').disabled, el<HTMLSelectElement>('#copy-source-prov-vpn').disabled]).toEqual([true, true]);
+        expect(el('#copy-source-prov .prov-conn-action').classList.contains('hidden')).toBe(true);
+        expect(el('#copy-source-prov .prov-conn-status').textContent).toBe('Broker "b1", VPN "v1"');
+    });
+
+    it('the card\'s Edit in Connections asks for the Connections page', async () => {
+        const { el } = await setupProvisioned();
+        const asked = vi.fn();
+        eventBus.on('connection:edit-requested', asked);
+        el<HTMLButtonElement>('#copy-source-prov .copy-source-edit-btn').click();
+        expect(asked).toHaveBeenCalledTimes(1);
+    });
+
+    it('follows the primary to another Message VPN', async () => {
+        const { el, appState } = await setupProvisioned();
+        appState.selectedVpn = 'v2';
+        eventBus.emit('client:connected', { session: { on: vi.fn() } });
+        expect(options(el, '#copy-source-prov-vpn')).toEqual(['v2']);
+        expect(el('#copy-source-prov .prov-conn-status').textContent).toBe('Broker "b1", VPN "v2"');
+    });
+
+    it('with no primary broker or Message VPN on record the card names no connection', async () => {
+        const { el } = await setupProvisioned({ managed: null, selectedVpn: null });
+        expect(options(el, '#copy-source-prov-broker')).toEqual([]);
+        expect(options(el, '#copy-source-prov-vpn')).toEqual([]);
+        expect(el('#copy-source-prov .prov-conn-status').classList.contains('hidden')).toBe(true);
+    });
+
+    it('Direct primary: the three source cards stay and no connection card shows', async () => {
+        const { hidden } = await setupProvisioned({ managed: null }, false);
+        expect(SOURCE_CARDS.map(hidden)).toEqual([false, false, false]);
+        expect(hidden('#copy-source-prov')).toBe(true);
+    });
+});
+
 describe('queue-copy -- the destination follows the primary connection mode', () => {
     it('Provisioned primary: the card replaces the host field and the SEMP and Client cards', async () => {
         const { el, hidden } = await setupProvisioned();
@@ -226,6 +272,7 @@ describe('queue-copy -- the destination follows the primary connection mode', ()
         expect(hidden('#copy-dest-sol-card')).toBe(true);
         expect(options(el, '#copy-dest-prov-broker')).toEqual(['b1', 'b2']);
         expect(options(el, '#copy-dest-prov-vpn')).toEqual(['v1', 'v2']);
+        expect(el<HTMLSelectElement>('#copy-dest-prov-broker').disabled).toBe(false);
     });
 
     it('re-lists the VPNs when the card\'s broker changes', async () => {
@@ -242,12 +289,13 @@ describe('queue-copy -- the destination follows the primary connection mode', ()
         expect(hidden('#copy-dest-prov-same')).toBe(false);
     });
 
-    it('Same broker with another VPN offers only the primary\'s own broker', async () => {
+    it('Same broker with another VPN shows the primary\'s own broker, fixed, and leaves the VPN to choose', async () => {
         const { el, hidden } = await setupProvisioned();
         otherVpn(el);
         expect(hidden('#copy-dest-prov-card')).toBe(false);
         expect(options(el, '#copy-dest-prov-broker')).toEqual(['b1']);
         expect(options(el, '#copy-dest-prov-vpn')).toEqual(['v1', 'v2']);
+        expect([el<HTMLSelectElement>('#copy-dest-prov-broker').disabled, el<HTMLSelectElement>('#copy-dest-prov-vpn').disabled]).toEqual([true, false]);
     });
 
     it('with no primary broker on record, Same broker leaves nothing to pick and the card says so', async () => {

@@ -2,29 +2,10 @@
  * the shared (inlined) cascade. Shipped only in the admin app and the
  * Provisioned demo. Cards stack full width; only the key pair sits in columns. */
 
-.tls-card {
-    width: 100%;
-    margin: 0 0 1rem;
-}
-
-.tls-intro,
 .tls-hint {
     font-size: 0.9rem;
-}
-
-.tls-hint {
     color: var(--text-secondary);
     margin: 0.25rem 0 0.75rem;
-}
-
-.tls-section {
-    margin: 0 0 0.75rem;
-    font-size: 1rem;
-}
-
-.tls-subsection {
-    margin: 1.5rem 0 0.5rem;
-    font-size: 0.95rem;
 }
 
 .tls-details {

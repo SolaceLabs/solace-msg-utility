@@ -29,6 +29,12 @@ export interface CopyUiElements {
     sourceSolPass: HTMLInputElement;
     /** All "Edit in Connections" buttons — one in each source card header. */
     sourceEditButtons: NodeListOf<HTMLButtonElement>;
+    // Provisioned source (the primary is a Provisioned connection): the host
+    // of the read-only connection card shown in place of the three source cards.
+    sourceBrokerCard: HTMLElement;
+    sourceSempCard: HTMLElement;
+    sourceSolCard: HTMLElement;
+    sourceProv: HTMLElement;
 
     // Source queue (editable)
     sourceInput: HTMLInputElement;
@@ -188,6 +194,10 @@ export function cacheElements(container: HTMLElement): CopyUiElements {
         sourceSolUser: required<HTMLInputElement>(container, '#copy-source-sol-user'),
         sourceSolPass: required<HTMLInputElement>(container, '#copy-source-sol-pass'),
         sourceEditButtons: container.querySelectorAll<HTMLButtonElement>('.copy-source-edit-btn'),
+        sourceBrokerCard: required<HTMLElement>(container, '#copy-source-broker-card'),
+        sourceSempCard: required<HTMLElement>(container, '#copy-source-semp-card'),
+        sourceSolCard: required<HTMLElement>(container, '#copy-source-sol-card'),
+        sourceProv: required<HTMLElement>(container, '#copy-source-prov'),
 
         sourceInput: required<HTMLInputElement>(container, '#copy-source-input'),
         btnSourcePick: required<HTMLButtonElement>(container, '#copy-btn-source-pick'),
@@ -407,6 +417,18 @@ export function applyDestMode(
 }
 
 /**
+ * Render the source for the primary connection's mode: the Broker, SEMP and
+ * Client cards that mirror a Direct primary, or the one read-only connection
+ * card of a Provisioned one, which has no address or credential to show.
+ */
+export function applySourceMode(els: CopyUiElements, provisioned: boolean): void {
+    els.sourceBrokerCard.classList.toggle('hidden', provisioned);
+    els.sourceSempCard.classList.toggle('hidden', provisioned);
+    els.sourceSolCard.classList.toggle('hidden', provisioned);
+    els.sourceProv.classList.toggle('hidden', !provisioned);
+}
+
+/**
  * Forget the typed destination passwords (the field values; the caller clears
  * the state copies). Run when the destination stops being typed: a secret
  * must not sit in a field the user can no longer see.
@@ -574,7 +596,7 @@ export function applyDestType(els: CopyUiElements, type: DestType): void {
 
 /**
  * Show (`message`) or clear (`null`) the inline error under the destination
- * name. The input sits inside `.copy-input-with-search`, so the design
+ * name. The input sits inside `.input-with-search`, so the design
  * system's `.is-invalid + .invalid-feedback` rule cannot reach the feedback
  * line; `copy-feedback-visible` (styles.css) shows it instead.
  */

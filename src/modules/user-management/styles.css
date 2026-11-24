@@ -2,17 +2,6 @@
  * collide in the shared (inlined) cascade. Shipped only in the managed build
  * (main-admin.css). */
 
-/* Every section is a card; cards stack full width, never side by side. */
-.user-mgmt-card {
-    width: 100%;
-    margin: 0 0 1rem;
-}
-
-.user-mgmt-search {
-    width: 100%;
-    margin-bottom: 1rem;
-}
-
 .user-mgmt-hint {
     font-size: 0.85rem;
     margin: 0.25rem 0 0;
@@ -26,11 +15,6 @@
     background: rgba(252, 171, 41, 0.12);
     color: var(--status-warning);
     border-radius: var(--radius-md);
-}
-
-.user-mgmt-actions-col {
-    width: 1%;
-    white-space: nowrap;
 }
 
 .user-mgmt-test-result {

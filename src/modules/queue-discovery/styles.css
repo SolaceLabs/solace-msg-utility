@@ -5,15 +5,15 @@
     width: 100%;
 }
 
+/* The chevron sits where the queue picker's and a select's do. */
 .searchable-select-container input.form-control {
-    padding-right: 2.5rem;
-    /* Space for icon */
+    padding-right: 2rem;
     cursor: text;
 }
 
 .searchable-select-icon {
     position: absolute;
-    right: 0.75rem;
+    right: 0.5rem;
     top: 50%;
     transform: translateY(-50%);
     pointer-events: none;

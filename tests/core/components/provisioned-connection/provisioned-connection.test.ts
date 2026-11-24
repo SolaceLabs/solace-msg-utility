@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-    createProvisionedConnectionCard, type ProvisionedConnectionCardDeps,
+    createProvisionedConnectionCard, type ConnectingCardDeps,
 } from '../../../../src/core/components/provisioned-connection';
 import { createManagedProfile } from '../../../../src/core/services/managed-profile';
 import type { ManagedProfile } from '../../../../src/core/services/managed-service';
@@ -19,7 +19,7 @@ const PROFILE: ManagedProfile = {
     ],
 } as ManagedProfile;
 
-function setup(over: Partial<ProvisionedConnectionCardDeps> = {}, profile: ManagedProfile = PROFILE) {
+function setup(over: Partial<ConnectingCardDeps> = {}, profile: ManagedProfile = PROFILE) {
     const store = createManagedProfile();
     store.setProfile(profile);
     const host = document.createElement('div');
@@ -178,6 +178,34 @@ describe('core/components/provisioned-connection -- host options and lifecycle',
             ['x-error', 'prov-conn-error'], ['x-empty', 'prov-conn-empty'], ['x-controls', 'prov-conn-controls']]) {
             expect(host.querySelector(`#${id}`)!.classList.contains(cls)).toBe(true);
         }
+    });
+
+    it('a fixed broker cannot be changed while its VPN still can', () => {
+        let fixed = true;
+        const { card, broker, vpn, action } = setup({ brokerFixed: () => fixed });
+        card.setChoices();
+        expect([broker.disabled, vpn.disabled, action.disabled]).toEqual([true, false, false]);
+        fixed = false;
+        card.setChoices();
+        expect(broker.disabled).toBe(false);
+    });
+
+    it('a read-only card shows a connection: no button, and neither select can change', () => {
+        const store = createManagedProfile();
+        store.setProfile(PROFILE);
+        const host = document.createElement('div');
+        const card = createProvisionedConnectionCard(host, { profile: store, readOnly: true, title: 'Source Connection' });
+        const q = <T extends HTMLElement>(sel: string) => host.querySelector(sel) as T;
+        card.setChoices();
+        card.setStatus('connected', 'Broker "b1", VPN "v1"');
+        expect(shown(q('.prov-conn-action'))).toBe(false);
+        expect([q<HTMLSelectElement>('.prov-conn-broker').disabled, q<HTMLSelectElement>('.prov-conn-vpn').disabled]).toEqual([true, true]);
+        expect(q('.prov-conn-status').textContent).toBe('Broker "b1", VPN "v1"');
+        // The hidden button is wired to nothing.
+        q<HTMLButtonElement>('.prov-conn-action').click();
+        expect(card.status()).toBe('connected');
+        card.setStatus('disconnected');
+        expect([q<HTMLSelectElement>('.prov-conn-broker').disabled, shown(q('.prov-conn-action'))]).toEqual([true, false]);
     });
 
     it('destroy removes the card from its host', () => {

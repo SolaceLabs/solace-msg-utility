@@ -209,7 +209,7 @@ export const BackupModule = {
                     tr.appendChild(td);
                 }
                 const actions = document.createElement('td');
-                actions.className = 'backup-actions-col';
+                actions.className = 'data-table-actions';
                 actions.appendChild(iconButton(DOWNLOAD_ICON, `Download "${f.name}"`, 'backup-download', () => void downloadSaved(f.name)));
                 actions.appendChild(iconButton(RESTORE_ICON, `Restore "${f.name}"`, 'backup-restore', () => chooseSaved(f.name)));
                 tr.appendChild(actions);

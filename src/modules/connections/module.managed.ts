@@ -29,8 +29,7 @@ function createConnTabs(container: HTMLElement) {
     const panelManaged = required<HTMLElement>(container, '#conn-panel-managed');
 
     function setTabActive(btn: HTMLElement, active: boolean): void {
-        btn.classList.toggle('btn-primary', active);
-        btn.classList.toggle('btn-secondary', !active);
+        btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-selected', active ? 'true' : 'false');
     }
 

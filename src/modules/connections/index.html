@@ -8,7 +8,7 @@
      one for a software or cloud broker, two for an appliance. -->
 <div class="card">
     <div class="flex-row justify-between items-center mb-4">
-        <h2 class="m-0">Solace Event Broker Type</h2>
+        <h2 class="card-title">Solace Event Broker Type</h2>
         <div class="segmented" id="conn-broker-type" role="group" aria-label="Solace Event Broker Type">
             <button type="button" class="segmented-option" data-broker-type="software" aria-pressed="true">Software / Cloud</button>
             <button type="button" class="segmented-option" data-broker-type="appliance" aria-pressed="false">Appliance</button>
@@ -19,7 +19,7 @@
 
 <div class="card">
     <div class="flex-row justify-between items-center mb-4">
-        <h2 class="m-0">Solace SEMP (Management)</h2>
+        <h2 class="card-title">Solace SEMP (Management)</h2>
     </div>
     <!-- One row, read as a URL: protocol, host, port and the optional path. The host is the
          one host of a software or cloud broker; the management host of an appliance. -->
@@ -73,7 +73,7 @@
 <div class="card">
     <div class="flex-row justify-between items-center mb-4">
         <div class="flex-row items-center gap-4">
-            <h2 class="m-0">Solace Messaging (Client)</h2>
+            <h2 class="card-title">Solace Messaging (Client)</h2>
             <button id="btn-solace-settings" class="btn-icon items-center flex" title="Connection Settings">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                     stroke-linecap="round" stroke-linejoin="round">
@@ -162,7 +162,7 @@
     </div>
     <div class="form-group">
         <label>Connect Timeout (ms)</label>
-        <input type="number" id="sol-connect-timeout" class="form-control" value="3000" min="100">
+        <input type="number" id="sol-connect-timeout" class="form-control" value="10000" min="100">
     </div>
     <div class="form-group">
         <label>Reconnect Retries</label>

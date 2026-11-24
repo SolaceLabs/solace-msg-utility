@@ -24,12 +24,12 @@
     <rect x="410" y="184" width="130" height="26" fill="#7fd6bf" rx="5"/>
     <text x="475" y="201" fill="#ffffff" font-weight="700" text-anchor="middle">Software / Cloud</text>
     <text x="585" y="201" fill="#64748b" text-anchor="middle">Appliance</text>
-    <rect x="410" y="220" width="14" height="14" fill="#00C895" rx="3"/>
-    <path d="M413 227.5 l3 3 l5 -6" fill="none" stroke="#ffffff" stroke-width="1.8"/>
-    <text x="430" y="231" font-size="11">Same Solace Broker as source</text>
-    <rect x="410" y="240" width="14" height="14" fill="#00C895" rx="3"/>
-    <path d="M413 247.5 l3 3 l5 -6" fill="none" stroke="#ffffff" stroke-width="1.8"/>
-    <text x="430" y="251" font-size="11">Same Message VPN as source</text>
+    <rect x="410" y="217" width="30" height="16" fill="#00C895" rx="8"/>
+    <circle cx="432" cy="225" r="6" fill="#ffffff"/>
+    <text x="448" y="229" font-size="11">Same Solace Broker as source</text>
+    <rect x="410" y="237" width="30" height="16" fill="#00C895" rx="8"/>
+    <circle cx="432" cy="245" r="6" fill="#ffffff"/>
+    <text x="448" y="249" font-size="11">Same Message VPN as source</text>
     <circle cx="710" cy="236" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="710" y="240" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
     <rect x="20" y="272" width="350" height="58" fill="#ffffff" rx="8" stroke="#e2e8f0"/>

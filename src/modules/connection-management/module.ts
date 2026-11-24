@@ -73,7 +73,6 @@ export const ConnectionManagementModule = {
             formTitle: required<HTMLElement>(container, '#conn-mgmt-form-title'),
             broker: required<HTMLInputElement>(container, '#conn-mgmt-broker'),
             brokerType: required<HTMLElement>(container, '#conn-mgmt-broker-type'),
-            brokerTypeHint: required<HTMLElement>(container, '#conn-mgmt-broker-type-hint'),
             hostname: required<HTMLInputElement>(container, '#conn-mgmt-hostname'),
             hostnameLabel: required<HTMLElement>(container, '#lbl-conn-mgmt-hostname'),
             clientHostname: required<HTMLInputElement>(container, '#conn-mgmt-client-hostname'),
@@ -95,7 +94,6 @@ export const ConnectionManagementModule = {
         const service = createConnMgmtService();
         const hosts = createBrokerHosts({
             typeGroup: els.brokerType,
-            typeHint: els.brokerTypeHint,
             host: els.hostname,
             hostLabel: els.hostnameLabel,
             messagingHost: els.clientHostname,
@@ -235,12 +233,17 @@ export const ConnectionManagementModule = {
                 setError(els.formError, 'Messaging hostname is required for an appliance. Choose Software / Cloud for a broker with one hostname.');
                 return;
             }
-            // A blank password keeps the stored one, matched by VPN name; a new
-            // or renamed VPN has none to keep.
+            // A blank password keeps the stored one, matched by VPN name. A name
+            // with none stored is a row that was added, and it saves with an
+            // empty password -- unless a stored VPN's name has gone from the
+            // list in the same save: that reads as a rename, and the password
+            // stays with the name it was stored under.
             const rows = vpnList.readRows();
-            const unkept = rows.find(r => r.name && !r.pass && !storedVpns.has(r.name));
+            const named = new Set(rows.map(r => r.name));
+            const nameGone = [...storedVpns].some(name => !named.has(name));
+            const unkept = nameGone ? rows.find(r => r.name && !r.pass && !storedVpns.has(r.name)) : undefined;
             if (unkept) {
-                setError(els.formError, `VPN "${unkept.name}" has no stored password to keep. Enter its password.`);
+                setError(els.formError, `VPN "${unkept.name}" has no stored password to keep. Enter its password, or save the removal of the other VPN first to add this one with none.`);
                 return;
             }
             // Usernames a broker refuses; the gateway refuses them too.

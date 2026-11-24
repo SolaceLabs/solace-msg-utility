@@ -4,10 +4,10 @@
 .app-container {
     display: flex;
     height: 100vh;
+    /* The narrowest window the app lays out for; the desktop-only gate
+       (below) covers anything narrower. */
     min-width: 800px;
-    /* Enforce min width */
     overflow-x: auto;
-    /* Allow horizontal scroll if < 800px */
 }
 
 /* ---------- Sidebar ---------- */
@@ -267,7 +267,8 @@
 
 /* ---------- Desktop-only gate ----------
  * Full-viewport overlay shown when the inline <head> script sets
- * `html.mobile-blocked` (viewport width < 1024px). Hides the app chrome,
+ * `html.mobile-blocked` (viewport width < 800px, the app container's own
+ * minimum). Hides the app chrome,
  * supplementary banners, and any toast layer so nothing behind it is interactable.
  * App still initialises underneath — the overlay hides, it doesn't halt the shell. */
 .desktop-only-overlay {

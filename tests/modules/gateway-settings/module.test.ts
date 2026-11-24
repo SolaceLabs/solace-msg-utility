@@ -419,7 +419,7 @@ describe('gateway-settings -- broker trust', () => {
     it('keeps Skip broker certificate checks in its card, saved with the rest', async () => {
         const { container } = await setup();
         const box = el<HTMLInputElement>(container, '#gw-set-tls-insecureSkipVerify');
-        expect(box.closest('.card')?.querySelector('.gw-set-section')?.textContent).toBe('Broker trust');
+        expect(box.closest('.card')?.querySelector('.card-title')?.textContent).toBe('Broker trust');
         expect(box.checked).toBe(false);
         box.checked = true;
         svcMock.save.mockResolvedValue({ ok: true, data: { rev: 'rev-2' } });
@@ -431,7 +431,7 @@ describe('gateway-settings -- broker trust', () => {
     it('shows Trust the standard root CAs in the same card, on as loaded, and saves it off', async () => {
         const { container } = await setup();
         const box = el<HTMLInputElement>(container, '#gw-set-tls-standardRoots');
-        expect(box.closest('.card')?.querySelector('.gw-set-section')?.textContent).toBe('Broker trust');
+        expect(box.closest('.card')?.querySelector('.card-title')?.textContent).toBe('Broker trust');
         expect(box.closest('label')?.textContent?.trim()).toBe('Trust the standard root CAs');
         expect(box.checked).toBe(true);
         box.checked = false;

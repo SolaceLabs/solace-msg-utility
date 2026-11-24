@@ -10,32 +10,32 @@
     <circle cx="716" cy="108" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="716" y="112" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
     <text x="40" y="146" font-size="11" fill="#64748b" font-weight="700">Frequency</text>
-    <rect x="40" y="152" width="150" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <rect x="40" y="152" width="140" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
     <text x="50" y="170">Weekly</text>
-    <path d="M170 164 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
-    <text x="206" y="146" font-size="11" fill="#64748b" font-weight="700">Day of the week</text>
-    <rect x="206" y="152" width="160" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="216" y="170">Monday</text>
-    <path d="M346 164 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
-    <text x="382" y="146" font-size="11" fill="#64748b" font-weight="700">Time (UTC)</text>
-    <rect x="382" y="152" width="110" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="392" y="170">02:15</text>
-    <circle cx="520" cy="166" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="520" y="170" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
-    <text x="40" y="200" font-size="11" fill="#64748b" font-weight="700">Backups to keep</text>
-    <rect x="40" y="206" width="120" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="50" y="224">14</text>
-    <circle cx="182" cy="220" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="182" y="224" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
-    <text x="216" y="200" font-size="11" fill="#64748b" font-weight="700">Passphrase</text>
-    <rect x="216" y="206" width="220" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="226" y="224">............</text>
-    <text x="452" y="200" font-size="11" fill="#64748b" font-weight="700">Confirm the passphrase</text>
-    <rect x="452" y="206" width="220" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="462" y="224">............</text>
-    <text x="216" y="252" font-size="10.5" fill="#64748b">Leave blank to keep the current passphrase.</text>
-    <circle cx="704" cy="220" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="704" y="224" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+    <path d="M160 164 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="196" y="146" font-size="11" fill="#64748b" font-weight="700">Day of the week</text>
+    <rect x="196" y="152" width="150" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="206" y="170">Monday</text>
+    <path d="M326 164 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="362" y="146" font-size="11" fill="#64748b" font-weight="700">Time (UTC)</text>
+    <rect x="362" y="152" width="100" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="372" y="170">02:15</text>
+    <circle cx="482" cy="166" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="482" y="170" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <text x="506" y="146" font-size="11" fill="#64748b" font-weight="700">Backups to keep</text>
+    <rect x="506" y="152" width="120" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="516" y="170">14</text>
+    <circle cx="646" cy="166" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="646" y="170" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <text x="40" y="200" font-size="11" fill="#64748b" font-weight="700">Passphrase</text>
+    <rect x="40" y="206" width="300" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="224">............</text>
+    <text x="356" y="200" font-size="11" fill="#64748b" font-weight="700">Confirm the passphrase</text>
+    <rect x="356" y="206" width="300" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="366" y="224">............</text>
+    <text x="40" y="252" font-size="10.5" fill="#64748b">Leave blank to keep the current passphrase.</text>
+    <circle cx="680" cy="220" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="680" y="224" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
     <rect x="40" y="272" width="112" height="26" fill="#00C895" rx="5"/>
     <text x="96" y="289" fill="#ffffff" font-weight="700" text-anchor="middle">Save schedule</text>
     <rect x="160" y="272" width="104" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>

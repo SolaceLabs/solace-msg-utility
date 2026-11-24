@@ -11,7 +11,7 @@
          (or a mobile user rotating) sees the gate appear/disappear without reload. -->
     <script>
         (function () {
-            var MIN_DESKTOP_WIDTH = 1024;
+            var MIN_DESKTOP_WIDTH = 800;
             function check() {
                 var blocked = window.innerWidth < MIN_DESKTOP_WIDTH;
                 document.documentElement.classList.toggle('mobile-blocked', blocked);
@@ -185,7 +185,7 @@
 <body class="dark-theme">
     <!-- Desktop-only overlay. Covers the app when `html.mobile-blocked` is set by
          the inline gate script in <head>. The app-container below continues to
-         initialise; resizing the viewport to >= 1024px reveals it without reload. -->
+         initialise; resizing the viewport to >= 800px reveals it without reload. -->
     <div id="desktop-only-overlay" class="desktop-only-overlay" role="alert">
         <div class="desktop-only-message">
             <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -196,7 +196,7 @@
             </svg>
             <h2>Desktop Only</h2>
             <p>This application is designed for desktop browsers. Please open it on a
-                computer with a browser window of at least <strong>1024 px</strong> wide.</p>
+                computer with a browser window of at least <strong>800 px</strong> wide.</p>
             <p class="desktop-only-viewport-line">
                 Current viewport: <span id="desktop-only-viewport">—</span>
             </p>

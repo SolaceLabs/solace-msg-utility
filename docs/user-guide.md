@@ -165,7 +165,7 @@ Every page of the app sits inside the same frame. Learn the frame once and it lo
 6. The notification bell.
 
 > [!NOTE]
-> The app is made for a desktop browser window at least 1024 pixels wide. In a narrower window a **Desktop Only** message covers the app and shows the size of your window. Widen the window and the message goes.
+> The app is made for a desktop browser window at least 800 pixels wide. In a narrower window a **Desktop Only** message covers the app and shows the size of your window. Widen the window and the message goes.
 
 #### The Client and SEMP indicators
 
@@ -315,7 +315,7 @@ Press the settings button beside the title of the Messaging card to open **Advan
 | Setting | Default | What it does |
 | --- | --- | --- |
 | **Connect Retries** | `0` | How many times to try again when the first connect fails. The box marks 0 as its lowest value. |
-| **Connect Timeout (ms)** | `3000` | How long to wait for the first connect, in milliseconds. The box marks 100 as its lowest value. |
+| **Connect Timeout (ms)** | `10000` | How long one connect attempt may take, in milliseconds: the broker has that long to accept the connection and answer the login. The box marks 100 as its lowest value. |
 | **Reconnect Retries** | `1` | How many times to try again when an open session drops. `-1` never gives up. The box marks -1 as its lowest value. |
 | **Reconnect Wait (ms)** | `3000` | The pause between those attempts, in milliseconds. The box marks 100 as its lowest value. |
 | **Max Messages per Queue** | `100` | How many messages the Queue Browser keeps for each queue. A whole number from 1 to 10000. |
@@ -666,7 +666,7 @@ The **SEMP connection** is not required, but it helps. With it, the magnifier bu
 
 1. **Important Considerations**: what to know before you run a copy. They are listed in full under "Before you move messages".
 2. The source cards. They show the connection you made on the Connections page and cannot be edited here. Each has an **Edit in Connections** button that takes you back to that page.
-3. **Destination Broker**, with the broker type and its two shortcuts: **Same Solace Broker as source** and **Same Message VPN as source**.
+3. **Destination Broker**, with the broker type and its two shortcuts, each a switch: **Same Solace Broker as source** and **Same Message VPN as source**.
 4. The destination's **Solace SEMP (Management)** and **Solace Messaging (Client)** cards.
 5. **Source Queue**: the queue to read from. The magnifier button, when it is shown, picks the queue from a list.
 6. The **Queue** or **Topic** switch: what the messages go to.
@@ -676,7 +676,7 @@ The **SEMP connection** is not required, but it helps. With it, the magnifier bu
 
 ### The source
 
-The three source cards, **Source Broker**, **Solace SEMP (Management)** and **Solace Messaging (Client)**, are a mirror of the connection you made on the Connections page. **Source Broker** shows the broker type, and each of the other two cards shows the host it uses. Their boxes are locked. To change anything, press **Edit in Connections**. If you are signed in to a gateway, the broker's name appears in place of an address and the password boxes stay empty, because the gateway keeps the credentials.
+The three source cards, **Source Broker**, **Solace SEMP (Management)** and **Solace Messaging (Client)**, are a mirror of the connection you made on the Connections page. **Source Broker** shows the broker type, and each of the other two cards shows the host it uses. Their boxes are locked. To change anything, press **Edit in Connections**. If you are signed in to a gateway, one card takes the place of the three: **Source Connection** shows the **Broker** and **Message VPN** of your connection, both locked, with the same **Edit in Connections** button. It has no address or password to show, because the gateway keeps them. The card is pictured under "The Destination Connection card".
 
 The only box you fill in on the source side is the queue.
 
@@ -705,13 +705,13 @@ The destination is where the messages go. It can be the connection you already h
 
 #### The two shortcuts
 
-The **Destination Broker** card holds the two shortcuts. Both are ticked when the page opens.
+The **Destination Broker** card holds the two shortcuts. Each is a switch, and both are on when the page opens.
 
 | Same Solace Broker | Same Message VPN | What it means |
 | --- | --- | --- |
-| Ticked | Ticked | The destination is your client connection itself. The destination boxes are filled in and locked, and there is nothing to connect. |
-| Ticked | Not ticked | Another Message VPN on the same broker. The broker and SEMP boxes are filled in and locked, and the destination uses your SEMP connection. The Message VPN, username and password boxes are yours to fill in, and the Messaging card needs its own **Connect**. |
-| Not ticked | Locked, not ticked | Another broker. Every box is yours to fill in, and both cards need their own **Connect**. |
+| On | On | The destination is your client connection itself. The destination boxes are filled in and locked, and there is nothing to connect. |
+| On | Off | Another Message VPN on the same broker. The broker and SEMP boxes are filled in and locked, and the destination uses your SEMP connection. The Message VPN, username and password boxes are yours to fill in, and the Messaging card needs its own **Connect**. |
+| Off | Off, locked | Another broker. Every box is yours to fill in, and both cards need their own **Connect**. |
 
 Changing either shortcut closes any destination connection you opened and empties the destination password boxes, so you start from a clean slate. While the destination's messaging connection is being made, both shortcuts are locked, and their tooltip says **Locked while the destination connects.**
 
@@ -726,7 +726,7 @@ If you connected on the Connections page by typing the broker's details, the des
 *Figure 2. A destination on another broker, an appliance: SEMP not yet connected, the messaging connection up.*
 
 1. **Solace Event Broker Type**: **Software / Cloud** or **Appliance**. Here it is an appliance, so each card has a host of its own.
-2. The two shortcuts. Here neither is ticked, so **Same Message VPN as source** is locked.
+2. The two shortcuts. Here both are off, so **Same Message VPN as source** is locked.
 3. **Solace SEMP (Management)**: the host, Protocol, Port, URL Path, Username and Password, with a **Connect** button and a status line.
 4. **Solace Messaging (Client)**: the host, Protocol, Port, URL Path, Message VPN, Username and Password, with a **Connect** button, shown as **Disconnect** while connected, and a status line.
 
@@ -742,24 +742,27 @@ The page checks what you typed before it connects. A SEMP username or password t
 
 #### The Destination Connection card
 
-If you are signed in to a gateway, you type no addresses and no passwords. The broker type and both cards give way to one card, **Destination Connection**. The two shortcuts stay.
+If you are signed in to a gateway, you type no addresses and no passwords. On the source side, one card, **Source Connection**, shows the connection you have. On the destination side, the broker type and both cards give way to one card, **Destination Connection**. The two shortcuts stay.
 
-![The Destination Connection card with a Broker list, a Message VPN list, a Disconnect button and a status line naming the broker and VPN.](../src/modules/queue-copy/help/provisioned.svg)
+![Queue Copy in a signed-in session: on the left the Source Connection card with a locked Broker list and Message VPN list and an Edit in Connections button; on the right the Destination Broker card with its two switches, and under it the Destination Connection card with a locked Broker list, a Message VPN list, a Disconnect button and a status line.](../src/modules/queue-copy/help/provisioned.svg)
 
-*Figure 3. The Destination Connection card of a signed-in session, connected.*
+*Figure 3. A signed-in session copying to another Message VPN on the same broker, connected.*
 
-1. **Broker**: the brokers your account may use. While **Same Solace Broker as source** is ticked, only the source's broker is offered.
-2. **Message VPN**: the Message VPNs your account may use on the chosen broker.
-3. **Connect**, which reads **Connecting...** and is off while it works, and **Disconnect** once connected.
-4. The status line. While connecting it names the step: **Connecting SEMP (management)** or **Connecting messaging (client)**, with the broker and Message VPN. When connected it names the broker and the Message VPN.
+1. **Source Connection**: the broker and Message VPN of the connection you made on the Connections page. Both lists are locked, and the line under them names the two.
+2. **Edit in Connections**: takes you to the Connections page, where you change the connection.
+3. The two shortcuts. Here **Same Solace Broker as source** is on and **Same Message VPN as source** is off: another Message VPN on the same broker.
+4. **Broker**: the brokers your account may use. While **Same Solace Broker as source** is on, it shows the source's broker and is locked, so only the Message VPN is yours to choose.
+5. **Message VPN**: the Message VPNs your account may use on the chosen broker.
+6. **Connect**, which reads **Connecting...** and is off while it works, and **Disconnect** once connected.
+7. The status line. While connecting it names the step: **Connecting SEMP (management)** or **Connecting messaging (client)**, with the broker and Message VPN. When connected it names the broker and the Message VPN.
 
-1. Choose a **Broker** and a **Message VPN**.
+1. Choose a **Broker**, unless **Same Solace Broker as source** is on, and a **Message VPN**.
 2. Press **Connect**. The gateway supplies the credentials. When the broker is not the source's, the card opens a SEMP connection for the destination as well as the messaging connection. When it is the source's, only the messaging connection is opened.
 3. Wait for the card to show the broker and VPN. The card is connected only when everything it needs is up.
 
 If the connect fails, the card shows one line for each part that failed, **SEMP (management)** or **Messaging (client)**, and says when a part came up and was closed again because the other failed. Each failure is also added in full to the notification bell. If the destination has no connection available to your account, the card says **No connections are available for your account. Ask an administrator to grant access.**
 
-While **Same Solace Broker as source** and **Same Message VPN as source** are both ticked, the card is replaced by a note saying that the destination is the source connection: nothing to connect. While a connect is running, the card's lists and the two shortcuts are locked. If the destination on show changes before the connection comes up, for example because a refresh of your entitlements removes the Message VPN you chose, the late connection is dropped and the card says **The destination changed while connecting. Connect again.**
+While **Same Solace Broker as source** and **Same Message VPN as source** are both on, the card is replaced by a note saying that the destination is the source connection: nothing to connect. While a connect is running, the card's lists and the two shortcuts are locked. If the destination on show changes before the connection comes up, for example because a refresh of your entitlements removes the Message VPN you chose, the late connection is dropped and the card says **The destination changed while connecting. Connect again.**
 
 If your sign-in changes to or from a signed-in session while the page is open, any destination connection and the target you chose are dropped. The same happens to the destination queue you chose when a refresh of your entitlements removes the Message VPN of a connected destination: the **Queue name** box is emptied, so you cannot start a run against it.
 
@@ -774,7 +777,7 @@ The **Destination** card says what the messages go to.
 
 1. Use the switch at the top of the card to choose **Queue** or **Topic**. The box under it is labelled **Queue name** or **Topic** to match.
 2. Type the name. For a queue the magnifier button opens the picker. It is shown only when the page can list the queues of the destination: the SEMP connection is up for the same broker, or the destination's own SEMP connection is up for another one. A topic has no list, so the button is hidden.
-3. If you pick a queue from another Message VPN than the destination's, the destination's Message VPN box takes that VPN. If **Same Message VPN as source** was ticked, it is unticked. You then connect to it as usual.
+3. If you pick a queue from another Message VPN than the destination's, the destination's Message VPN box takes that VPN. If **Same Message VPN as source** was on, it is switched off. You then connect to it as usual.
 
 The page checks the name as you type, with the rules the messaging library applies when it publishes. A name that breaks one is marked, the reason appears under the box, and **Next** stays off.
 
@@ -800,7 +803,7 @@ The page checks the name as you type, with the rules the messaging library appli
 
 - the source queue has a name;
 - the destination has a name that passes the rules above;
-- the destination is ready: **Same Message VPN as source** is ticked, or the destination's Messaging connection is up.
+- the destination is ready: **Same Message VPN as source** is on, or the destination's Messaging connection is up.
 
 If you disconnect the client connection, the page returns to **Connection Required**.
 
@@ -1510,20 +1513,20 @@ An empty list says `No users.` A search that finds nothing says `No users match 
 
 1. Press **Add user**. The form opens under the title **Add user**.
 2. Type the **Username** and the **Password**. The rules are in the table below.
-3. Tick **Administrator** only if this person is to manage the gateway.
+3. Switch on **Administrator** only if this person is to manage the gateway.
 4. In **Modules**, leave **Deployment default** selected, or choose the modules for this user (see below).
 5. In **Entitlements**, add the rows that give the user their brokers, Message VPNs and queues (see below).
 6. Press **Save**. The toast `User saved` appears and the list returns with the user in it. **Cancel** returns to the list and keeps nothing.
 
 ### The account card
 
-![The user form for alice: the account card with username, password and Administrator box, and the Modules card with two radio buttons, two module pills and an Add module button.](../src/modules/user-management/help/form-account.svg)
+![The user form for alice: the account card with username, password and Administrator switch, and the Modules card with two radio buttons, two module pills and an Add module button.](../src/modules/user-management/help/form-account.svg)
 
 *Figure 2. The first two cards of the user form, here editing alice with a list of modules of her own.*
 
 1. **Username**. You type it when you add a user. When you edit a user, it is fixed.
 2. **Password**, with a hint after its name: `(required)` when you add a user, `(leave blank to keep current)` when you edit one.
-3. The **Administrator** box.
+3. The **Administrator** switch.
 4. The two choices for the user's modules: **Deployment default** and **Choose for this user**.
 5. The modules the user may open, each as a pill.
 6. **+ Add module**, which lists the modules you can still add.
@@ -1532,7 +1535,7 @@ An empty list says `No users.` A search that finds nothing says `No users match 
 | --- | --- | --- |
 | **Username** | 1 to 64 characters from `A-Z a-z 0-9 . _ @ -`, and not only dots. Spaces around it are removed. It cannot be changed once the user exists: to rename someone, add the name you want and delete the old one. | Empty |
 | **Password** | 12 to 128 characters. The lower limit is the **Minimum password length** of Gateway Settings when that is higher than 12. The page sends the password over TLS and the gateway stores only a hash of it. It is never shown again. When you edit a user, leave the box empty to keep the stored password. | Empty |
-| **Administrator** | A box. It lets the user open `/solAdmin`. It gives no access to any broker by itself: an administrator needs entitlement rows like anybody else. | Off |
+| **Administrator** | A switch. It lets the user open `/solAdmin`. It gives no access to any broker by itself: an administrator needs entitlement rows like anybody else. | Off |
 
 > [!TIP]
 > The password box forgets what you typed when you press **Cancel**, save, sign out or lose your session. Nothing you typed there stays in the page.
@@ -1650,7 +1653,7 @@ An account can be marked so that its owner may use only the password page until 
 
 | You change | The user, signed in at that moment |
 | --- | --- |
-| The password, the **Administrator** box, or you delete the user | All their sessions end and their open broker connections close. They sign in again, with the password you set if you changed it. |
+| The password, the **Administrator** switch, or you delete the user | All their sessions end and their open broker connections close. They sign in again, with the password you set if you changed it. |
 | You reset two-factor | All their sessions end and their open broker connections close. They sign in again. |
 | The entitlements | They stay signed in. The gateway applies the rows to their next request, and closes any broker connection to a Message VPN they may not reach. |
 
@@ -1659,7 +1662,7 @@ An account can be marked so that its owner may use only the password page until 
 The gateway lets you change your own account. When the change ends your session, the page asks the app to sign you out, so you sign in again.
 
 - Setting a password for yourself: the toast `Password changed. Sign in again.`
-- A change to your own **Administrator** box: `Administrator flag changed. Sign in again.`
+- A change to your own **Administrator** switch: `Administrator flag changed. Sign in again.`
 - Deleting yourself asks `Delete your own account "admin"? You will be signed out.` and ends with `Account deleted. You have been signed out.`
 - Resetting your own two-factor asks `Reset your own two-factor sign-in? You will be signed out and must set it up again.` and ends with `Two-factor sign-in reset. You have been signed out.`
 - Saving only your own entitlements or modules keeps you signed in and shows `User saved`.
@@ -1790,7 +1793,7 @@ A user connects to one Message VPN of a broker, with the client username and pas
 | --- | --- |
 | **Message VPN** | The VPN's name on the broker. Required for each row, and no two rows may carry the same name. Users are granted VPNs by this name. |
 | **Client username** | Up to 189 printable ASCII characters (a space is allowed), without `?` or `*`. Letter case counts. A blank username passes the check. |
-| **Client password** | The credential for that username, typed with its characters hidden. The gateway refuses control characters in it. While you edit, a blank box keeps the stored password. The box's hint reads `password (blank = keep)`, and its other hints read `vpn name` and `username`. |
+| **Client password** | The credential for that username, typed with its characters hidden. The gateway refuses control characters in it. While you edit, a blank box keeps the stored password. On a row you add, a blank box stores an empty password, for a client username that has none. The box's hint reads `password (blank = keep)`, and its other hints read `vpn name` and `username`. |
 
 A row in which every box is empty is ignored when you save.
 
@@ -1800,7 +1803,8 @@ Passwords are sent to the gateway as you type them, over the connection to the g
 
 - To keep a password, leave its box blank. This holds for the SEMP password and for each Message VPN's password.
 - To replace a password, type the replacement in its box.
-- A stored VPN password belongs to the VPN's name. A VPN row you add, or one whose name you change, has no stored password, so it needs one typed in. If you leave it blank, **Save** refuses and the form says `VPN "qa" has no stored password to keep. Enter its password.`
+- A stored VPN password belongs to the VPN's name. A row you add has none, and saves with an empty password if you leave its box blank.
+- A row whose name you change has no stored password under its new name, so it needs one typed in. If you leave it blank, **Save** refuses and the form says `VPN "qa" has no stored password to keep. Enter its password, or save the removal of the other VPN first to add this one with none.` The form reads a stored name that has gone from the list as a change of name. So to remove one VPN and add another that has no password, save the removal first.
 - What you typed is cleared when the form closes, by **Cancel**, by **Save**, or when your session ends.
 
 ### Editing a connection
@@ -1851,7 +1855,7 @@ Before it sends a save, the page checks a few things and says what is wrong unde
 | `Broker name is required.` | The **Broker name** box is empty. |
 | `Connection "east-prod" already exists. Use Edit to change it.` | You are adding a name that is in the list. The gateway gives the same answer if the list on your screen is out of date and another administrator added the name meanwhile. |
 | `Messaging hostname is required for an appliance. Choose Software / Cloud for a broker with one hostname.` | The type is **Appliance** and the **Messaging hostname** box is empty. |
-| `VPN "qa" has no stored password to keep. Enter its password.` | A VPN row has no password and the connection holds none for that name. |
+| `VPN "qa" has no stored password to keep. Enter its password, or save the removal of the other VPN first to add this one with none.` | A VPN row has no password, the connection holds none for that name, and a stored VPN's name has gone from the list in the same save. Type the password. If the row is a VPN you are adding with no password, save the removal of the other VPN first. |
 | `SEMP username may be up to 32 characters: letters, digits, - and _.` | The SEMP **Username** breaks its rule. |
 | `VPN "qa": Client username must not exceed 189 characters.` | A client username is too long. |
 | `VPN "qa": Client username may contain only printable ASCII characters: no accented letters or control characters.` | A client username holds a character outside the printable ASCII range. |
@@ -1950,13 +1954,13 @@ The page offers only these two modes, because this app is served only while the 
 
 The Access card decides which computers may reach the gateway at all. It opens with one line that says which address the gateway takes your browser for. Read it before you change either list.
 
-![Three cards of Gateway Settings: Access with the client address line and two address lists, Modules with three toggle tiles and a select, and Audit trail with two checkboxes and a select.](../src/modules/gateway-settings/help/cards.svg)
+![Three cards of Gateway Settings: Access with the client address line and two address lists side by side, Modules with three toggle tiles and a select, and Audit trail with two switches and a select.](../src/modules/gateway-settings/help/cards.svg)
 
 *Figure 2. The Access, Modules and Audit trail cards.*
 
 1. The line that names your address and how the gateway worked it out.
-2. **Allowed clients**, one range on each line.
-3. **Trusted reverse proxies**, one range on each line.
+2. **Allowed clients**, one range on each line, on the left.
+3. **Trusted reverse proxies**, one range on each line, on the right.
 4. The **Modules signed-in users may be given** tiles. A tile with a tick is offered.
 5. **A user without a list of their own gets**.
 6. **Copy audit lines to the gateway log (stdout)**.
@@ -2002,9 +2006,9 @@ The throttle slows down anyone who keeps getting a password or a code wrong. Aft
 
 | Field | What it does | Accepts | Default |
 | --- | --- | --- | --- |
-| **Count failures per client address** | A checkbox. On, the gateway counts failures for each client address as well as for each account, which catches guesses spread over many usernames. Off, it counts per account only. Turn it off only where every user reaches the gateway from one address: with it on, one person's typos would slow everyone down. | On or off. | On |
+| **Count failures per client address** | A switch. On, the gateway counts failures for each client address as well as for each account, which catches guesses spread over many usernames. Off, it counts per account only. Turn it off only where every user reaches the gateway from one address: with it on, one person's typos would slow everyone down. | On or off. | On |
 | **Failed sign-ins per account before a back-off** | How many failures one account may have before it must wait. | 1 to 1000. | 5 |
-| **Failed sign-ins per client before a back-off** | How many failures one client address may have, across all accounts, before it must wait. Not used while the checkbox is off. | 1 to 1000. | 10 |
+| **Failed sign-ins per client before a back-off** | How many failures one client address may have, across all accounts, before it must wait. Not used while the switch is off. | 1 to 1000. | 10 |
 | **Forget failures after (minutes)** | A count is forgotten after this long without another failure. | 1 to 1440. | 15 |
 | **First back-off (seconds)** | The first wait. | 1 up to the longest back-off. | 30 |
 | **Longest back-off (seconds)** | The longest the wait can grow to. | 1 to 86400. | 900 |
@@ -2066,7 +2070,7 @@ This card decides how the gateway checks the certificate of a broker it connects
 
 | Field | What it does | Default |
 | --- | --- | --- |
-| **Trust the standard root CAs** | The gateway trusts the public root CAs its image carries (Mozilla's list), as well as the CA files you add on the Certificates page. With the box off, only the CA files are trusted. | On |
+| **Trust the standard root CAs** | The gateway trusts the public root CAs its image carries (Mozilla's list), as well as the CA files you add on the Certificates page. With the switch off, only the CA files are trusted. | On |
 | **Skip broker certificate checks (insecure)** | The gateway connects to a broker without checking its certificate at all, so it cannot tell the broker from an impostor. | Off |
 
 > [!WARNING]

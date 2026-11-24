@@ -54,9 +54,10 @@ While you fix a failure, rerun only the task that failed (for example `./scripts
 | `image` | Builds the container image through `docker/docker-compose.yaml` |
 | `up` / `down` | Brings the compose stack up or down |
 | `graphify` | Refreshes the knowledge graph. Local only: skipped when `CI` is set |
+| `guide` | `npm run guide`: writes `docs/user-guide.md` from the manual's chapters. Local only: skipped when `CI` is set, so a runner tests the committed guide and never rewrites it |
 | `e2e` | The gateway image in Gateway and Provisioned mode against an existing Solace broker you name: builds the image, then runs `node scripts/e2e.mjs` over `docker/docker-compose.e2e.yaml`. Local only and standalone: skipped when `CI` is set or without a Linux-container Docker, and never part of `all` or `full`. Setup, broker details and the list of checks are in [testing.md](testing.md) |
 | `all` | `build vet test mock` |
-| `full` | `all` + `cov image scan graphify`: the pre-tag sweep |
+| `full` | `guide`, then `all` + `cov image scan graphify`: the pre-tag sweep. `guide` runs first because `test` and `cov` check the guide it writes |
 
 Every task name is checked before any task runs, so a typo fails at once. Each task writes `scripts/logs/<task>.log` with a timestamped footer, and a run of more than one task ends with a console-only `timing:` line giving each task's seconds.
 

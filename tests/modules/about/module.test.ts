@@ -77,7 +77,7 @@ describe('About module', () => {
 
     it('opens on the About card; Help swaps it for the manual, and About swaps back', async () => {
         await install();
-        const [about, help] = all<HTMLButtonElement>('.about-tab');
+        const [about, help] = all<HTMLButtonElement>('.tab');
         const panels = () => [hidden(q('#about-panel-about')), hidden(q('#about-panel-help'))];
         const selected = () => [about, help].map(t => [t.getAttribute('aria-selected'), t.classList.contains('is-active')]);
         expect(panels()).toEqual([false, true]);
@@ -193,6 +193,6 @@ describe('About module', () => {
         await install({ variant: 'standard', demo: true });
         expect(q('#about-version').textContent).toBe(__APP_VERSION__);
         expect(hidden(q('#about-panel-about'))).toBe(false);
-        expect(all('.about-tab, .manual-chapter, #about-panel-help')).toEqual([]);
+        expect(all('.tab, .manual-chapter, #about-panel-help')).toEqual([]);
     });
 });

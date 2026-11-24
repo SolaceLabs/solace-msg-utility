@@ -2,26 +2,6 @@
  * never collide in the shared (inlined) cascade. Shipped only in the managed
  * build (main-admin.css). */
 
-.conn-mgmt-card {
-    max-width: 720px;
-    margin: 2rem auto;
-}
-
-.conn-mgmt-search {
-    width: 100%;
-    margin-bottom: 1rem;
-}
-
-.conn-mgmt-actions-col {
-    width: 1%;
-    white-space: nowrap;
-}
-
-.conn-mgmt-section {
-    margin: 1.25rem 0 0.5rem;
-    font-size: 0.95rem;
-}
-
 /* An address on one row, read as a URL: the scheme and the port keep their
  * width, and the hostname takes the rest. */
 .conn-mgmt-scheme {

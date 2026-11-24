@@ -332,6 +332,7 @@ func newReverseProxy(transport http.RoundTripper, logger *slog.Logger) *reverseP
 		// Runs for a 101 upgrade answer too, before its headers are copied.
 		ModifyResponse: func(res *http.Response) error {
 			dropSessionSetCookie(res.Header)
+			dropAuthChallenge(res.Header)
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -344,6 +345,16 @@ func newReverseProxy(transport http.RoundTripper, logger *slog.Logger) *reverseP
 		},
 	}
 	return p
+}
+
+// dropAuthChallenge removes a Direct upstream's sign-in challenge. A broker
+// answers wrong SEMP credentials with 401 and WWW-Authenticate: Basic, and
+// that answer is served on the gateway's own origin, where a browser raises
+// its own username and password prompt for it. The app reads the 401 and
+// reports it itself; the status passes as sent.
+func dropAuthChallenge(h http.Header) {
+	h.Del("WWW-Authenticate")
+	h.Del("Proxy-Authenticate")
 }
 
 // sessionCookie carries the Provisioned sign-in session id (session.go). The

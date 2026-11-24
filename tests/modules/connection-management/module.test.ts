@@ -367,7 +367,7 @@ describe('connection-management — create / edit form', () => {
         const vpnInputs = el(container, '#conn-mgmt-vpn-rows').querySelectorAll<HTMLInputElement>('input');
         vpnInputs[0].value = 'v1-prod';
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
-        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe('VPN "v1-prod" has no stored password to keep. Enter its password.'));
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe('VPN "v1-prod" has no stored password to keep. Enter its password, or save the removal of the other VPN first to add this one with none.'));
         expect(svcMock.saveConnection).not.toHaveBeenCalled();
 
         vpnInputs[2].value = 'vpnpw';
@@ -376,19 +376,43 @@ describe('connection-management — create / edit form', () => {
         expect(svcMock.saveConnection.mock.calls[0][0].client.msgVpns).toEqual([{ name: 'v1-prod', user: 'u1', pass: 'vpnpw' }]);
     });
 
-    it('a VPN on a new connection needs a password; one without a name is left to the gateway', async () => {
+    it('a VPN on a new connection saves with an empty password when none is typed', async () => {
         const { container } = await setup();
-        svcMock.saveConnection.mockResolvedValue({ ok: false, status: 422, code: 'invalid', field: 'connection', reason: 'broker "b9": a message VPN has no name' });
+        svcMock.saveConnection.mockResolvedValue(saved());
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
         el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'b9';
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn').click();
         const vpnInputs = el(container, '#conn-mgmt-vpn-rows').querySelectorAll<HTMLInputElement>('input');
         vpnInputs[0].value = 'v1'; vpnInputs[1].value = 'u1';
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
-        await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe('VPN "v1" has no stored password to keep. Enter its password.'));
-        expect(svcMock.saveConnection).not.toHaveBeenCalled();
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
+        expect(svcMock.saveConnection.mock.calls[0][0].client.msgVpns).toEqual([{ name: 'v1', user: 'u1', pass: '' }]);
+    });
 
-        vpnInputs[0].value = '';
+    it('a VPN added while editing saves with an empty password while every stored VPN keeps its name', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue(saved());
+        el(container, '#conn-mgmt-rows').querySelectorAll('tr')[0]
+            .querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn').click();
+        const vpnInputs = el(container, '#conn-mgmt-vpn-rows').querySelectorAll<HTMLInputElement>('input');
+        vpnInputs[3].value = 'v9'; vpnInputs[4].value = 'u9';
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
+        expect(svcMock.saveConnection.mock.calls[0][0].client.msgVpns).toEqual([
+            { name: 'v1', user: 'u1', pass: '' },
+            { name: 'v9', user: 'u9', pass: '' },
+        ]);
+    });
+
+    it('a VPN without a name is left to the gateway', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue({ ok: false, status: 422, code: 'invalid', field: 'connection', reason: 'broker "b9": a message VPN has no name' });
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'b9';
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn').click();
+        const vpnInputs = el(container, '#conn-mgmt-vpn-rows').querySelectorAll<HTMLInputElement>('input');
+        vpnInputs[1].value = 'u1';
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent).toBe('broker "b9": a message VPN has no name'));
         expect(svcMock.saveConnection.mock.calls[0][0].client.msgVpns).toEqual([{ name: '', user: 'u1', pass: '' }]);

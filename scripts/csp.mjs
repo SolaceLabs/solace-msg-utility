@@ -15,7 +15,8 @@
  *   - styles: the inlined stylesheet by its hash; no style attribute and no
  *     other `<style>` (writes through the CSSOM, `el.style.x = ...`, are not
  *     affected);
- *   - images: `data:` URLs (the favicon) and the page's own `blob:` URLs
+ *   - images: `data:` URLs (the favicon, and the chevron and tick the
+ *     stylesheet draws) and the page's own `blob:` URLs
  *     (Queue Browser's preview of an image payload);
  *   - connections and frames: what the bundle's kind needs (CSP_KINDS);
  *   - nothing else: no `<base>`, no form submission, no plugin, no worker.

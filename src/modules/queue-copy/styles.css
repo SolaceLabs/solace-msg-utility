@@ -40,6 +40,25 @@
     gap: 1rem;
 }
 
+/* Provisioned source: one read-only connection card stands in for the source
+   Broker, SEMP and Client cards, spans the three rows they would have taken
+   and fills them, so it ends level with the destination's cards. */
+.copy-source-prov {
+    grid-row: span 3;
+    display: flex;
+    flex-direction: column;
+}
+.copy-source-prov > .card {
+    flex: 1;
+}
+
+@media (max-width: 880px) {
+    .copy-source-prov,
+    .copy-dest-prov {
+        grid-row: auto;
+    }
+}
+
 /* Source-card "Edit in Connections" buttons are inline at the top-right of
    each source card header. Slightly smaller than the default .btn so they
    fit alongside the h2 without crowding it. */
@@ -84,46 +103,6 @@
     color: var(--text-secondary);
     user-select: none;
 }
-.copy-dest-type-switch .copy-switch {
-    position: relative;
-    display: inline-block;
-    width: 38px;
-    height: 22px;
-}
-.copy-dest-type-switch .copy-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-.copy-dest-type-switch .copy-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: var(--border-color);
-    border-radius: 22px;
-    transition: background-color 0.2s;
-}
-.copy-dest-type-switch .copy-slider::before {
-    position: absolute;
-    content: "";
-    height: 16px;
-    width: 16px;
-    left: 3px;
-    bottom: 3px;
-    background-color: #ffffff;
-    border-radius: 50%;
-    transition: transform 0.2s;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-}
-.copy-dest-type-switch input:checked + .copy-slider {
-    background-color: var(--accent-primary);
-}
-.copy-dest-type-switch input:checked + .copy-slider::before {
-    transform: translateX(16px);
-}
 .copy-dest-type-switch .copy-dest-type-label.active {
     color: var(--text-primary);
     font-weight: 600;
@@ -147,46 +126,10 @@
     color: var(--status-error);
 }
 
-/* Search-icon-in-input combobox style. The input fills its container; the
-   search button is absolutely positioned on the right edge inside the input,
-   visually attached but with its own click target. Hidden via .hidden when
-   the relevant SEMP context is unavailable. */
-.copy-input-with-search {
-    position: relative;
-    display: block;
-    width: 100%;
-}
-.copy-input-with-search > .form-control {
-    width: 100%;
-    padding-right: 2.5rem;
-}
-/* The wrapper sits between an input and its .invalid-feedback line, so the
+/* The search box's wrapper (.input-with-search) sits between an input and its .invalid-feedback line, so the
    design system's adjacent-sibling rule cannot show it; ui.ts toggles this. */
 .copy-feedback-visible {
     display: block;
-}
-.copy-search-btn {
-    position: absolute;
-    top: 50%;
-    right: 0.5rem;
-    transform: translateY(-50%);
-    background: transparent;
-    border: 0;
-    color: var(--text-secondary);
-    cursor: pointer;
-    padding: 4px 6px;
-    border-radius: var(--radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.copy-search-btn:hover {
-    background-color: var(--bg-hover, rgba(0, 0, 0, 0.04));
-    color: var(--text-primary);
-}
-.copy-search-btn:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 1px;
 }
 
 /* Modal layout */

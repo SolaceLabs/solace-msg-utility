@@ -2,7 +2,8 @@
  * Provisioned connection card -- pick a provisioned broker and Message VPN and
  * connect to it, for any module that opens a provisioned (managed) connection:
  * the connections module's Provisioned panel (the primary connection) and
- * queue-copy's provisioned destination.
+ * queue-copy's provisioned destination. Queue-copy also shows its source with
+ * the card, as a read-only one.
  *
  * The card owns its DOM (title, Broker and Message VPN selects, one
  * Connect/Disconnect button, a status line, an error line, an empty state when
@@ -19,6 +20,8 @@
  *         title: 'Destination',                      // optional, default 'Connect to a broker'
  *         headerActions: refreshButton,              // optional, placed at the right of the header
  *         ids: { broker: 'my-broker-select' },       // optional ids for the parts (see CardPart)
+ *         brokerFixed: () => sameBroker,             // optional: true while the Broker select cannot change
+ *         readOnly: true,                            // optional: show a connection, with no button and no choice
  *     });
  *     card.setChoices();                  // (re)read brokers + VPNs from the profile; keeps a still-provisioned selection
  *     card.setStatus('connected', 'Broker "b1", VPN "v1"');   // 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -45,20 +48,34 @@ export interface ProvisionedTarget {
 /** The parts a host may give ids to (stable hooks for its own tests and labels). */
 export type CardPart = 'broker' | 'vpn' | 'action' | 'error' | 'empty' | 'controls';
 
-export interface ProvisionedConnectionCardDeps {
+interface CardCommonDeps {
     /** The provisioned names: `ctx.managedProfile`. */
     profile: Pick<ManagedProfileStore, 'brokers' | 'vpnsFor'>;
-    /** Start connecting to `target`. A rejection is shown as the card's error. */
-    onConnect(target: ProvisionedTarget): Promise<void>;
-    /** The button was clicked while connected. */
-    onDisconnect(): void;
     /** Card heading; default 'Connect to a broker'. */
     title?: string;
     /** An element the card places at the right of its header (e.g. a Refresh button). */
     headerActions?: HTMLElement;
     /** Ids for the card's parts, for a host that instantiates it once. */
     ids?: Partial<Record<CardPart, string>>;
+    /** True while the broker is not the user's to choose (e.g. it must be another connection's): the Broker select stays disabled. */
+    brokerFixed?(): boolean;
 }
+
+/** A card that connects: its button starts and ends the connection. */
+export interface ConnectingCardDeps extends CardCommonDeps {
+    readOnly?: false;
+    /** Start connecting to `target`. A rejection is shown as the card's error. */
+    onConnect(target: ProvisionedTarget): Promise<void>;
+    /** The button was clicked while connected. */
+    onDisconnect(): void;
+}
+
+/** A card that only shows a connection made elsewhere: no button, and neither select can change. */
+export interface ReadOnlyCardDeps extends CardCommonDeps {
+    readOnly: true;
+}
+
+export type ProvisionedConnectionCardDeps = ConnectingCardDeps | ReadOnlyCardDeps;
 
 export interface ProvisionedConnectionCard {
     /** (Re)read the provisioned brokers and VPNs from `deps.profile`. */
@@ -100,7 +117,7 @@ export function createProvisionedConnectionCard(
     const root = make('div', 'card prov-conn');
 
     const header = make('div', 'prov-conn-header');
-    header.append(make('h2', 'prov-conn-title', deps.title ?? DEFAULT_TITLE));
+    header.append(make('h2', 'card-title prov-conn-title', deps.title ?? DEFAULT_TITLE));
     if (deps.headerActions) header.append(deps.headerActions);
 
     const empty = make('div', 'prov-conn-empty text-secondary hidden', EMPTY_TEXT);
@@ -112,10 +129,12 @@ export function createProvisionedConnectionCard(
     brokerLabel.append(brokerSelect);
     const vpnLabel = make('label', 'prov-conn-field', 'Message VPN');
     vpnLabel.append(vpnSelect);
-    const fields = make('div', 'form-group prov-conn-fields');
+    const fields = make('div', 'form-group flex-row');
     fields.append(brokerLabel, vpnLabel);
     const action = make('button', 'btn btn-primary prov-conn-action', 'Connect');
     action.type = 'button';
+    const readOnly = deps.readOnly === true;
+    action.classList.toggle('hidden', readOnly);
     const statusLine = make('div', 'prov-conn-status text-secondary hidden');
     const errorLine = make('div', 'prov-conn-error text-error hidden');
     controls.append(fields, action, statusLine, errorLine);
@@ -141,8 +160,8 @@ export function createProvisionedConnectionCard(
 
     /** Enable, label and show every control for the status, lock and selection. */
     function render(): void {
-        const busy = current === 'connecting' || current === 'connected';
-        brokerSelect.disabled = locked || busy;
+        const busy = readOnly || current === 'connecting' || current === 'connected';
+        brokerSelect.disabled = locked || busy || deps.brokerFixed?.() === true;
         vpnSelect.disabled = locked || busy || vpnSelect.options.length === 0;
         const connected = current === 'connected';
         action.textContent = current === 'connecting' ? 'Connecting...' : connected ? 'Disconnect' : 'Connect';
@@ -164,16 +183,19 @@ export function createProvisionedConnectionCard(
 
     brokerSelect.addEventListener('change', populateVpns);
     vpnSelect.addEventListener('change', render);
-    action.addEventListener('click', () => {
-        if (current === 'connected') {
-            deps.onDisconnect();
-            return;
-        }
-        const target = { broker: brokerSelect.value, vpn: vpnSelect.value };
-        if (!target.broker || !target.vpn) return;
-        setStatus('connecting', `Connecting to broker "${target.broker}", VPN "${target.vpn}"...`);
-        deps.onConnect(target).catch((e: unknown) => setStatus('error', errMessage(e)));
-    });
+    if (deps.readOnly !== true) {
+        const { onConnect, onDisconnect } = deps;
+        action.addEventListener('click', () => {
+            if (current === 'connected') {
+                onDisconnect();
+                return;
+            }
+            const target = { broker: brokerSelect.value, vpn: vpnSelect.value };
+            if (!target.broker || !target.vpn) return;
+            setStatus('connecting', `Connecting to broker "${target.broker}", VPN "${target.vpn}"...`);
+            onConnect(target).catch((e: unknown) => setStatus('error', errMessage(e)));
+        });
+    }
 
     render();
 

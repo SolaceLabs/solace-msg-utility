@@ -99,7 +99,7 @@
         <tbody>
             <tr><td><strong>Message VPN</strong></td><td>The VPN's name on the broker. Required for each row, and no two rows may carry the same name. Users are granted VPNs by this name.</td></tr>
             <tr><td><strong>Client username</strong></td><td>Up to 189 printable ASCII characters (a space is allowed), without <code>?</code> or <code>*</code>. Letter case counts. A blank username passes the check.</td></tr>
-            <tr><td><strong>Client password</strong></td><td>The credential for that username, typed with its characters hidden. The gateway refuses control characters in it. While you edit, a blank box keeps the stored password. The box's hint reads <code>password (blank = keep)</code>, and its other hints read <code>vpn name</code> and <code>username</code>.</td></tr>
+            <tr><td><strong>Client password</strong></td><td>The credential for that username, typed with its characters hidden. The gateway refuses control characters in it. While you edit, a blank box keeps the stored password. On a row you add, a blank box stores an empty password, for a client username that has none. The box's hint reads <code>password (blank = keep)</code>, and its other hints read <code>vpn name</code> and <code>username</code>.</td></tr>
         </tbody>
     </table>
     <p>A row in which every box is empty is ignored when you save.</p>
@@ -109,7 +109,8 @@
     <ul>
         <li>To keep a password, leave its box blank. This holds for the SEMP password and for each Message VPN's password.</li>
         <li>To replace a password, type the replacement in its box.</li>
-        <li>A stored VPN password belongs to the VPN's name. A VPN row you add, or one whose name you change, has no stored password, so it needs one typed in. If you leave it blank, <strong>Save</strong> refuses and the form says <code>VPN "qa" has no stored password to keep. Enter its password.</code></li>
+        <li>A stored VPN password belongs to the VPN's name. A row you add has none, and saves with an empty password if you leave its box blank.</li>
+        <li>A row whose name you change has no stored password under its new name, so it needs one typed in. If you leave it blank, <strong>Save</strong> refuses and the form says <code>VPN "qa" has no stored password to keep. Enter its password, or save the removal of the other VPN first to add this one with none.</code> The form reads a stored name that has gone from the list as a change of name. So to remove one VPN and add another that has no password, save the removal first.</li>
         <li>What you typed is cleared when the form closes, by <strong>Cancel</strong>, by <strong>Save</strong>, or when your session ends.</li>
     </ul>
 
@@ -162,7 +163,7 @@
             <tr><td><code>Broker name is required.</code></td><td>The <strong>Broker name</strong> box is empty.</td></tr>
             <tr><td><code>Connection "east-prod" already exists. Use Edit to change it.</code></td><td>You are adding a name that is in the list. The gateway gives the same answer if the list on your screen is out of date and another administrator added the name meanwhile.</td></tr>
             <tr><td><code>Messaging hostname is required for an appliance. Choose Software / Cloud for a broker with one hostname.</code></td><td>The type is <strong>Appliance</strong> and the <strong>Messaging hostname</strong> box is empty.</td></tr>
-            <tr><td><code>VPN "qa" has no stored password to keep. Enter its password.</code></td><td>A VPN row has no password and the connection holds none for that name.</td></tr>
+            <tr><td><code>VPN "qa" has no stored password to keep. Enter its password, or save the removal of the other VPN first to add this one with none.</code></td><td>A VPN row has no password, the connection holds none for that name, and a stored VPN's name has gone from the list in the same save. Type the password. If the row is a VPN you are adding with no password, save the removal of the other VPN first.</td></tr>
             <tr><td><code>SEMP username may be up to 32 characters: letters, digits, - and _.</code></td><td>The SEMP <strong>Username</strong> breaks its rule.</td></tr>
             <tr><td><code>VPN "qa": Client username must not exceed 189 characters.</code></td><td>A client username is too long.</td></tr>
             <tr><td><code>VPN "qa": Client username may contain only printable ASCII characters: no accented letters or control characters.</code></td><td>A client username holds a character outside the printable ASCII range.</td></tr>

@@ -16,13 +16,16 @@
         2. SEMP          (Source SEMP       | Destination SEMP)
         3. Client        (Source Client     | Destination Client)
         4. Target        (Source Queue      | Destination type/name/mode)
+      With a Provisioned primary, one Source Connection card takes the place
+      of the source's first three, and one Destination Connection card that
+      of the destination's SEMP and Client.
     -->
     <div class="copy-grid">
 
         <!-- ===== Important Considerations (spans both columns) ===== -->
         <div class="card copy-notes-card" id="copy-notes-card">
             <div class="flex-row justify-between items-center mb-2">
-                <h2 class="m-0">Important Considerations</h2>
+                <h2 class="card-title">Important Considerations</h2>
             </div>
             <ul class="copy-notes-list text-secondary">
                 <li>Please do not execute this on a live queue with active publisher(s) and consumer(s).</li>
@@ -37,10 +40,17 @@
             </ul>
         </div>
 
+        <!-- Provisioned source (the primary is a Provisioned connection): ONE
+             read-only connection card stands in for the three source cards
+             below (Broker, SEMP, Client) and spans their rows. Built at install
+             by createProvisionedConnectionCard (see ui-events.ts); hidden while
+             the primary is a Direct connection. -->
+        <div class="copy-source-prov hidden" id="copy-source-prov"></div>
+
         <!-- ===== Pair 1: Broker ===== -->
-        <div class="card">
+        <div class="card" id="copy-source-broker-card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Source Broker</h2>
+                <h2 class="card-title">Source Broker</h2>
                 <button type="button" class="btn btn-secondary copy-source-edit-btn">Edit in Connections</button>
             </div>
             <div class="form-group">
@@ -57,7 +67,7 @@
 
         <div class="card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Destination Broker</h2>
+                <h2 class="card-title">Destination Broker</h2>
             </div>
             <div class="form-group" id="copy-dest-type-group">
                 <label>Solace Event Broker Type</label>
@@ -70,19 +80,19 @@
                 </div>
             </div>
             <div class="form-group flex-row gap-4 items-center">
-                <label class="flex-row items-center gap-2 font-normal cursor-pointer">
-                    <input type="checkbox" id="copy-toggle-same-broker" checked> Same Solace Broker as source
+                <label class="switch-field">
+                    <span class="switch"><input type="checkbox" id="copy-toggle-same-broker" checked><span class="switch-slider"></span></span> Same Solace Broker as source
                 </label>
-                <label class="flex-row items-center gap-2 font-normal cursor-pointer">
-                    <input type="checkbox" id="copy-toggle-same-vpn" checked> Same Message VPN as source
+                <label class="switch-field">
+                    <span class="switch"><input type="checkbox" id="copy-toggle-same-vpn" checked><span class="switch-slider"></span></span> Same Message VPN as source
                 </label>
             </div>
         </div>
 
         <!-- ===== Pair 2: SEMP ===== -->
-        <div class="card">
+        <div class="card" id="copy-source-semp-card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Solace SEMP (Management)</h2>
+                <h2 class="card-title">Solace SEMP (Management)</h2>
                 <button type="button" class="btn btn-secondary copy-source-edit-btn">Edit in Connections</button>
             </div>
             <div class="form-group">
@@ -121,7 +131,7 @@
 
         <div class="card" id="copy-dest-semp-card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Solace SEMP (Management)</h2>
+                <h2 class="card-title">Solace SEMP (Management)</h2>
             </div>
             <div class="form-group">
                 <label id="lbl-copy-dest-host" for="copy-dest-host">Broker Host (IP or Hostname)</label>
@@ -180,9 +190,9 @@
         </div>
 
         <!-- ===== Pair 3: Client ===== -->
-        <div class="card">
+        <div class="card" id="copy-source-sol-card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Solace Messaging (Client)</h2>
+                <h2 class="card-title">Solace Messaging (Client)</h2>
                 <button type="button" class="btn btn-secondary copy-source-edit-btn">Edit in Connections</button>
             </div>
             <div class="form-group">
@@ -225,7 +235,7 @@
 
         <div class="card" id="copy-dest-sol-card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Solace Messaging (Client)</h2>
+                <h2 class="card-title">Solace Messaging (Client)</h2>
             </div>
             <div class="form-group">
                 <label for="copy-dest-sol-host">Messaging Host (IP or Hostname)</label>
@@ -276,12 +286,12 @@
 
         <!-- ===== Pair 4: Source Queue / Destination target ===== -->
         <div class="card">
-            <h2 class="m-0 mb-4">Source Queue</h2>
+            <h2 class="card-title mb-4">Source Queue</h2>
             <div class="form-group">
                 <label>Queue name</label>
-                <div class="copy-input-with-search">
+                <div class="input-with-search">
                     <input type="text" id="copy-source-input" class="form-control" autocomplete="off">
-                    <button id="copy-btn-source-pick" type="button" class="copy-search-btn hidden"
+                    <button id="copy-btn-source-pick" type="button" class="input-search-btn hidden"
                         title="Pick from list of queues" aria-label="Pick queue">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -296,14 +306,14 @@
 
         <div class="card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Destination</h2>
+                <h2 class="card-title">Destination</h2>
                 <!-- Queue / Topic slide toggle. Unchecked = Queue, Checked = Topic.
                      Sits in the card's top-right corner per design. -->
                 <div class="copy-dest-type-switch" id="copy-dest-type-switch">
                     <span class="copy-dest-type-label active" id="copy-dest-type-label-queue">Queue</span>
-                    <label class="copy-switch" title="Toggle between Queue and Topic">
+                    <label class="switch" title="Toggle between Queue and Topic">
                         <input type="checkbox" id="copy-dest-type-toggle" aria-label="Destination type">
-                        <span class="copy-slider"></span>
+                        <span class="switch-slider"></span>
                     </label>
                     <span class="copy-dest-type-label" id="copy-dest-type-label-topic">Topic</span>
                 </div>
@@ -313,9 +323,9 @@
             </div>
             <div class="form-group">
                 <label id="copy-dest-name-label">Queue name</label>
-                <div class="copy-input-with-search">
+                <div class="input-with-search">
                     <input type="text" id="copy-dest-input" class="form-control" autocomplete="off">
-                    <button id="copy-btn-dest-pick" type="button" class="copy-search-btn hidden"
+                    <button id="copy-btn-dest-pick" type="button" class="input-search-btn hidden"
                         title="Pick from list of queues" aria-label="Pick queue">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

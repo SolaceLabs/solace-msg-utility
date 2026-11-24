@@ -75,7 +75,7 @@ function followReading(sheet: HTMLElement, entries: Map<Element, HTMLElement>): 
 
 /** The two tabs: the one pressed shows its panel and hides the other. */
 function installTabs(container: HTMLElement): void {
-    const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>('.about-tab'));
+    const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>('.tab'));
     const panelOf = (tab: HTMLButtonElement) => required<HTMLElement>(container, `#${tab.getAttribute('aria-controls')}`);
     for (const tab of tabs) {
         tab.addEventListener('click', () => {

@@ -2,15 +2,6 @@
  * Add module-specific selectors (e.g. `.conn-optional`, `.conn-ssl-*`) here if/when
  * they need styling beyond what the design system provides. */
 
-/* Managed-tab cards (login / broker selection / connected). Module-prefixed
- * (.managed-conn-*) so they never collide in the shared (inlined) cascade.
- * Moved here from the former standalone managed-connections module when the
- * two connection modes merged into this module's tabs. */
-.managed-conn-card {
-    max-width: 520px;
-    margin: 2rem auto;
-}
-
 /* The URL Path columns (optional-field.ts). Closed (no `is-open`): the column
  * holds only the small add button, on the labels' line, and takes its width.
  * Open: the label and the input with its clear button, as wide as the

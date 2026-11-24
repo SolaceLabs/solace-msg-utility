@@ -36,7 +36,7 @@ export function createGate(container: HTMLElement, opts: GateOptions): ModuleGat
     el.className = 'card text-center p-6 hidden';
 
     const heading = document.createElement('h2');
-    heading.className = 'mb-4 text-secondary';
+    heading.className = 'card-title mb-4 text-secondary';
     heading.textContent = opts.title;
 
     const body = document.createElement('p');

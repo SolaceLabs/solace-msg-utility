@@ -5,13 +5,13 @@
     <rect x="640" y="36" width="80" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
     <text x="680" y="53" font-weight="700" text-anchor="middle">Refresh</text>
     <text x="40" y="86" font-size="11" fill="#64748b" font-weight="700">Broker</text>
-    <rect x="40" y="94" width="200" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <rect x="40" y="94" width="332" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
     <text x="50" y="112">east-prod</text>
-    <path d="M220 106 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
-    <text x="276" y="86" font-size="11" fill="#64748b" font-weight="700">Message VPN</text>
-    <rect x="276" y="94" width="200" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="286" y="112">default</text>
-    <path d="M456 106 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <path d="M352 106 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="388" y="86" font-size="11" fill="#64748b" font-weight="700">Message VPN</text>
+    <rect x="388" y="94" width="332" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="398" y="112">default</text>
+    <path d="M700 106 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
     <rect x="40" y="144" width="110" height="30" fill="#00C895" rx="5"/>
     <text x="95" y="163" fill="#ffffff" font-weight="700" text-anchor="middle">Connect</text>
     <circle cx="166" cy="159" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>

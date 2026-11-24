@@ -54,6 +54,8 @@ export interface CopyUiApi {
     refreshDestTarget: () => void;
     /** The provisioned destination card; module.ts reports connect outcomes to it. */
     destCard: ProvisionedConnectionCard;
+    /** Re-read the primary connection's broker and Message VPN into the provisioned source card. */
+    refreshSource: () => void;
 }
 
 export function wireUiEvents(
@@ -306,10 +308,41 @@ export function wireUiEvents(
             vpnsFor: (broker) => ctx.managedProfile.vpnsFor(broker),
         },
         title: 'Destination Connection',
+        // Same broker leaves only the Message VPN to choose.
+        brokerFixed: () => state.destForm.sameBroker,
         onConnect: async (target) => { services.connectDestProvisioned(target); },
         onDisconnect: () => services.disconnectDestProvisioned(),
         ids: { broker: 'copy-dest-prov-broker', vpn: 'copy-dest-prov-vpn', action: 'copy-btn-dest-prov-connect', error: 'copy-dest-prov-error' },
     });
+
+    /**
+     * The provisioned source card: the primary connection's broker and Message
+     * VPN, shown and never chosen here. Its header button goes to Connections,
+     * as the source cards' own do.
+     */
+    const btnSourceProvEdit = document.createElement('button');
+    btnSourceProvEdit.type = 'button';
+    btnSourceProvEdit.className = 'btn btn-secondary copy-source-edit-btn';
+    btnSourceProvEdit.textContent = 'Edit in Connections';
+    btnSourceProvEdit.addEventListener('click', () => ctx.eventBus.emit('connection:edit-requested'));
+    /** The primary connection's broker and Message VPN; '' for one it does not have. */
+    const primaryNames = () => ({ broker: ctx.appState.managed?.broker ?? '', vpn: ctx.appState.selectedVpn ?? '' });
+    const sourceCard = createProvisionedConnectionCard(els.sourceProv, {
+        profile: {
+            brokers: () => [primaryNames().broker].filter(Boolean),
+            vpnsFor: () => [primaryNames().vpn].filter(Boolean),
+        },
+        title: 'Source Connection',
+        headerActions: btnSourceProvEdit,
+        readOnly: true,
+        ids: { broker: 'copy-source-prov-broker', vpn: 'copy-source-prov-vpn' },
+    });
+
+    function refreshSource(): void {
+        sourceCard.setChoices();
+        const { broker, vpn } = primaryNames();
+        sourceCard.setStatus('connected', broker && vpn ? `Broker "${broker}", VPN "${vpn}"` : '');
+    }
 
     /** False until the first derive: a mode change is a flip only once a mode has been shown. */
     let modeShown = false;
@@ -338,11 +371,13 @@ export function wireUiEvents(
         renderDestMode();
     }
 
-    /** Render the destination for the mode in state: the card and its lists, or the typed cards. */
+    /** Render both sides for the mode in state: the provisioned cards and their lists, or the typed cards. */
     function renderDestMode(): void {
         const provisioned = state.destForm.credMode === 'provisioned';
+        ui.applySourceMode(els, provisioned);
         ui.applyDestMode(els, { provisioned, needsSecondary: needsSecondary() });
         if (provisioned) {
+            refreshSource();
             destCard.setChoices();
         } else {
             // Never leave a typed secret sitting in a field the user can no longer see.
@@ -429,7 +464,7 @@ export function wireUiEvents(
     deriveDestMode();
     services.refreshStartEnabled();
     services.refreshDestPickVisible();
-    return { refreshDestTarget, destCard };
+    return { refreshDestTarget, destCard, refreshSource };
 }
 
 /**

@@ -1,10 +1,10 @@
 <!-- The admin gate is created at install by createGate() (see module.ts). -->
 <div id="tls-view" class="hidden">
-    <div class="card tls-card">
+    <div class="card">
         <div class="flex-row justify-end items-center mb-4">
             <button id="btn-tls-reload" type="button" class="btn btn-secondary" title="Reload the certificate and the trusted CAs">Reload</button>
         </div>
-        <p class="text-secondary tls-intro">
+        <p class="text-secondary text-body-sm">
             The gateway's own certificate, and the CA certificates it trusts when it connects to brokers. A change
             applies at once: new connections use it, open ones carry on. The files are named by the gateway's
             environment, not here.
@@ -12,8 +12,8 @@
         <div id="tls-error" class="text-error hidden" role="alert"></div>
     </div>
 
-    <div id="tls-cert-card" class="card tls-card">
-        <h3 class="tls-section">Gateway certificate</h3>
+    <div id="tls-cert-card" class="card">
+        <h3 class="card-title mb-3">Gateway certificate</h3>
         <dl id="tls-cert-details" class="tls-details"></dl>
         <p id="tls-cert-selfsigned" class="tls-hint hidden">
             This certificate is self-signed (the gateway makes one for itself at first start). Browsers warn about it
@@ -23,7 +23,7 @@
             The certificate files are read-only on the gateway host, so the certificate cannot be replaced here.
         </p>
 
-        <h4 class="tls-subsection">Replace certificate</h4>
+        <h4 class="card-subtitle">Replace certificate</h4>
         <p class="tls-hint">
             Choose a certificate file and a key file, or paste the PEM. The certificate may carry its chain, leaf first.
             The gateway checks the pair before anything is written. The key is sent once and never kept.
@@ -50,8 +50,8 @@
         <button id="btn-tls-cert-replace" type="button" class="btn btn-primary">Replace certificate</button>
     </div>
 
-    <div id="tls-trust-card" class="card tls-card">
-        <h3 class="tls-section">Trusted broker CAs</h3>
+    <div id="tls-trust-card" class="card">
+        <h3 class="card-title mb-3">Trusted broker CAs</h3>
         <p class="tls-hint">
             The gateway trusts the certificates in these files when it checks a broker, and the standard root CAs
             below while they are on.
@@ -62,7 +62,7 @@
         <div id="tls-trust-error" class="text-error hidden" role="alert"></div>
         <div id="tls-trust-list" class="tls-trust-list"></div>
 
-        <h4 class="tls-subsection">Add CA certificate</h4>
+        <h4 class="card-subtitle">Add CA certificate</h4>
         <div class="form-group">
             <label for="tls-ca-file">CA certificate file</label>
             <input id="tls-ca-file" type="file" class="form-control" accept=".crt,.pem,.cer">
@@ -78,8 +78,8 @@
         <button id="btn-tls-ca-add" type="button" class="btn btn-primary">Add CA certificate</button>
     </div>
 
-    <div id="tls-standard-card" class="card tls-card">
-        <h3 class="tls-section">Standard root CAs</h3>
+    <div id="tls-standard-card" class="card">
+        <h3 class="card-title mb-3">Standard root CAs</h3>
         <p class="tls-hint">
             The public root CAs the gateway image carries, from Mozilla's list. They come with the image and change
             only with a new release. Turn them on or off on Gateway Settings.

@@ -202,7 +202,7 @@ src/
         index.ts               # createRowList(container, fields) -- dynamic add/remove row editor (admin forms);
                                # renderAdminRows(tbody, shown, total, query, opts) -- the admin table body
       provisioned-connection/
-        index.ts               # createProvisionedConnectionCard -- Broker + Message VPN pickers, Connect, status; used by connections and queue-copy
+        index.ts               # createProvisionedConnectionCard -- Broker + Message VPN pickers, Connect, status (or read-only); used by connections and queue-copy
         styles.css             # Component-scoped styles
       account-control/
         index.ts               # createAccountControl(onSignOut, { next }) -- the sidebar's account actions; used by connections and admin-login
@@ -217,7 +217,7 @@ src/
     variables.css      # :root design tokens
     reset.css          # * resets
     layout.css         # Shell chrome -- app container, sidebar, top bar, status
-    components.css     # Generic UI -- buttons, cards, forms, modals, tables, badges
+    components.css     # Generic UI -- buttons, cards, forms, tabs, switches, modals, tables, badges
     utilities.css      # Atomic helpers -- flex, gap, spacing, sizing
     main.css           # @import entry, imported by main.ts: the design system and the core components' styles.css
                        # (a module's styles.css comes with its manifest line, through virtual:module-registry)
@@ -548,7 +548,7 @@ The build writes each figure into the bundle, so every picture adds to every bun
 npm run guide
 ```
 
-and commit the guide with the chapter. The guide holds every chapter once, in parts: the chapters of the `standard` variant, then what the `managed` variant adds, then those of the `admin` variant, each in the order its variant lists the modules. `GUIDE_LAYOUT` in the script holds the parts, and the introduction above the Contents list, which is the one piece of the guide written there and not in a chapter. A chapter's sections become `###` headings, so their anchors (`user-guide.md#filtering-messages`) are what other docs link to; a section title used by more than one chapter gets a numbered anchor (`#the-page-at-a-glance-3`), so link such a section by its chapter.
+and commit the guide with the chapter. `./scripts/dev.sh guide` runs the same command, and `full` starts with it, so a pre-tag sweep never tests a stale guide; the task is skipped in CI, where the committed guide is what gets tested. The guide holds every chapter once, in parts: the chapters of the `standard` variant, then what the `managed` variant adds, then those of the `admin` variant, each in the order its variant lists the modules. `GUIDE_LAYOUT` in the script holds the parts, and the introduction above the Contents list, which is the one piece of the guide written there and not in a chapter. A chapter's sections become `###` headings, so their anchors (`user-guide.md#filtering-messages`) are what other docs link to; a section title used by more than one chapter gets a numbered anchor (`#the-page-at-a-glance-3`), so link such a section by its chapter.
 
 ### What checks a chapter
 
@@ -640,6 +640,12 @@ Styles are split by responsibility ([architecture.md -> CSS Organization](archit
 - A selector shaped like `.browser-*`, `.detail-*`, `.filter-*` or `.searchable-*` goes in the module's `styles.css`; component-prefixed selectors (`.picker-*`, `.toast-*`) go in the component's `styles.css`.
 - A selector shared across modules (generic `.btn-*`, `.modal-*`, `.badge-*`, `.form-*`) goes in `src/css/components.css`.
 - A Tailwind-style atomic (`.mt-4`, `.flex-row`, `.hidden`) goes in `utilities.css`.
+- **One look, one class.** Before writing a module rule, look for the primitive in `components.css`; a module's `styles.css` holds only what no other page has. Two modules that need the same rule get one shared class, not a copy each. The primitives a page is built from:
+  - `.card` (it fills its column, up to 2048px), `.card-narrow` for a sign-in box, `.card-title` on every card's heading and `.card-subtitle` on the heading of a part within a card.
+  - `.form-cols` for fields side by side, `.input-with-search` and `.input-search-btn` for a text box with a pick button, `.banner-warning` for a warning inside a card.
+  - `.tabs` and `.tab` (the open one is `is-active`) for a strip of tabs, `.segmented` for a choice between a few options (wired by `createSegmented`).
+  - An on/off setting is a `.switch` (inside a `label.switch-field` when it has text). A tick box is for a row of a table and a radio for one choice of a few; both are styled by element, so they need no class. A `select.form-control` draws the queue picker's chevron.
+  - `.data-table`, `.data-table-frame` and `.data-table-actions` (the column of a row's buttons).
 - Shell chrome (anything the user sees outside a module's content area) goes in `layout.css`.
 - Never `@import` a module stylesheet from `main.css`, and never reach for `!important` to beat another file's rule: if a rule needs it, the rule is in the wrong file.
 - No `style` attribute, in a template or in markup built from a string, and no `setAttribute('style', ...)`: every bundle's Content-Security-Policy makes the browser ignore them. Give the element a class. Setting a property through the CSSOM (`el.style.display = 'none'`) is fine. For the same reason, no inline event handler (`onclick="..."`) and no `javascript:` URL: add a listener in code. `tests/build/no-inline-styles.test.ts` fails on any of them.
@@ -815,7 +821,8 @@ The gateway's certificate and trusted CAs are live ([architecture.md -> Live TLS
 
 ### Laying out an admin page
 
-- **Every section is its own `.card`.** Cards stack at the full width of the page and are never side by side; give the card a heading (`h3`) and, in the module's `styles.css`, a module-prefixed class (`gw-set-card`, `user-mgmt-card`, `tls-card`). A view that holds several cards is a plain wrapper, not a card itself.
-- **Short fields share a row with `.form-cols`** (in `src/css/components.css`: `display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem 1rem;`): numbers, selects, a username and a password. Text areas, lists and tables keep the full width.
+- **Every section is its own `.card`.** Cards stack at the full width of the page and are never side by side; give the card a heading with `.card-title`, and the heading of a part within it `.card-subtitle`. The card needs no class of the module's own. A view that holds several cards is a plain wrapper, not a card itself.
+- **Fields that belong together share a row with `.form-cols`** (in `src/css/components.css`: a grid of `repeat(auto-fit, minmax(180px, 1fr))` columns): numbers, selects, a username and a password, a passphrase and its confirmation. Each `.form-group` in it is three rows of that grid (label, control, one line under it), so the controls of a row sit level whatever its labels and hints take; a field there holds no more than those three. Lists and tables keep the full width.
+- **An on/off setting is a switch on a line of its own**, outside `.form-cols`: `<label class="switch-field"><span class="switch"><input type="checkbox" id="..."><span class="switch-slider"></span></span> Text</label>`. The input keeps the state, so code and tests read `checked` as before.
 - **A choice from a short fixed list is tiles or pills, not a column of checkboxes.** Gateway Settings' offered modules are `button.gw-set-tile[aria-pressed]` (one per catalog module, with a name and a line of description; an unknown module falls back to its name alone). A user's own modules are pills (`span.user-mgmt-pill[data-module]`, a remove button each) with a **+ Add module** menu of the offered ones not yet chosen; a module that is not offered stays as a pill marked *not offered* so it can be removed. Under the deployment default the pills show what the default gives, without remove buttons.
 - **A module-owned element comes from `required()`**, as everywhere (see [DOM Access](#dom-access)); tests build the DOM with `loadModuleDOM`.

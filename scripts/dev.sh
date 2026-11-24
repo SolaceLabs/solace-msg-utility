@@ -295,6 +295,15 @@ task_graphify() {
   run graphify graphify update .
 }
 
+# Local only: docs/user-guide.md is written from the manual's chapters and
+# committed. A runner must not write it: tests/build/user-guide.test.ts holds
+# the committed guide to the chapters, and a rewrite there would hide a stale one.
+task_guide() {
+  [ -n "${CI:-}" ] && { warn "guide is local-only; skipping in CI"; return 0; }
+  ensure_deps guide || return $?
+  run guide npm run guide
+}
+
 # Local only, and standalone: not in `all` or `full`. The image in Gateway and
 # Provisioned mode against an existing broker, driven by scripts/e2e.mjs, which owns the stack's lifetime;
 # the down -v here is the backstop for a run that died before its own.
@@ -313,16 +322,18 @@ task_e2e() {
 
 # --- dispatch ---------------------------------------------------------------
 ALL="build vet test mock"
-FULL="build vet test mock cov image scan graphify"
+# guide comes first: test and cov read the guide it writes.
+FULL="guide build vet test mock cov image scan graphify"
 
 usage() {
   cat <<EOF
 usage: $(basename "$0") <task>...
 
-  build vet test mock cov scan image up down graphify e2e
+  build vet test mock cov scan image up down graphify guide e2e
   all   = $ALL       (what CI runs, as: all cov scan)
   full  = $FULL      (pre-tag sweep)
   mock  = the demo broker and fake-gateway suites (tests/mock-broker/)
+  guide = docs/user-guide.md, written from the manual's chapters (local only)
   e2e   = the gateway in Gateway and Provisioned mode against an existing broker (local only, standalone)
 EOF
 }
