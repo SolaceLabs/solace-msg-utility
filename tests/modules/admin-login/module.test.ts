@@ -15,6 +15,14 @@ const { me, logout } = vi.hoisted(() => ({ me: vi.fn() as any, logout: vi.fn() a
 vi.mock('../../../src/core/services/managed-service', () => ({
     createManagedService: () => ({ me, logout }),
 }));
+// The keep-alive (tests/core/services/session-activity.test.ts has its rules): here, only when it runs.
+const activityMock = vi.hoisted(() => ({ made: vi.fn(), start: vi.fn(), stop: vi.fn() }));
+vi.mock('../../../src/core/services/session-activity', () => ({
+    keepSessionAlive: (...args: unknown[]) => {
+        activityMock.made(...args);
+        return { start: activityMock.start, stop: activityMock.stop };
+    },
+}));
 
 import { AdminLoginModule } from '../../../src/modules/admin-login/module';
 import { completeContext } from '../../helpers/appContext';
@@ -65,6 +73,9 @@ beforeEach(() => {
     me.mockReset();
     logout.mockReset();
     logout.mockResolvedValue({ ok: true });
+    activityMock.made.mockClear();
+    activityMock.start.mockClear();
+    activityMock.stop.mockClear();
 });
 
 describe('admin-login — restoring the gateway session', () => {
@@ -163,5 +174,37 @@ describe('admin-login — sign-out requested by another module', () => {
         eventBus.emit('rbac:sign-out-requested');
         expect(logout).not.toHaveBeenCalled();
         expect(appState.managed).not.toBeNull();
+    });
+});
+
+describe('admin-login -- keeping the session alive', () => {
+    it("watches the whole page for the administrator's input from sign-in, over this module's own request, and stops at sign-out", async () => {
+        const { account } = await install();
+        expect(activityMock.made).toHaveBeenCalledExactlyOnceWith(document, me, expect.any(Function));
+        expect(activityMock.start).toHaveBeenCalledTimes(1);
+        expect(activityMock.stop).not.toHaveBeenCalled();
+
+        account()!.querySelector<HTMLButtonElement>('.account-control-signout')!.click();
+        expect(activityMock.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('signs out, with the toast every admin page shows, when the gateway ended the session under an administrator at work', async () => {
+        const { hidden } = await install();
+        // The shell's toast container, so the toast has somewhere to show.
+        document.body.insertAdjacentHTML('beforeend', '<div id="toast-container"></div>');
+        const ended = activityMock.made.mock.calls[0][2] as () => void;
+        ended();
+        expect(document.querySelector('.toast')?.textContent).toContain('Your session has ended. Sign in again.');
+        expect(appState.managed).toBeNull();
+        expect(hidden('#admin-login-view')).toBe(false);
+        expect(activityMock.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ['nobody is signed in', { ok: false, status: 401, code: 'unauthenticated' }],
+        ['the account is not an administrator', { ok: true, data: { ...ADMIN_PROFILE, admin: false } }],
+    ])('watches nothing while %s', async (_, answer) => {
+        await install(answer);
+        expect(activityMock.start).not.toHaveBeenCalled();
     });
 });

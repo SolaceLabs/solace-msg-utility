@@ -56,7 +56,9 @@ import { createAccountControl } from '../../core/components/account-control';
 import { createServiceSolace, type SolaceConnectionHooks } from '../../core/services/solace-client';
 import { createServiceSemp, type SempConnectionHooks } from '../../core/services/semp-client';
 import { createManagedService, type ManagedProfile } from '../../core/services/managed-service';
-import { managedErrorMessage, type ManagedError } from '../../core/services/managed-api';
+import { keepSessionAlive } from '../../core/services/session-activity';
+import { managedErrorMessage, SIGNED_OUT_TOAST_MS, type ManagedError } from '../../core/services/managed-api';
+import { showToast } from '../../core/toast';
 import { isSessionEnded, provisionedNames } from '../../core/services/managed-profile';
 import { connectProvisioned, gatewayCodeOf, outcomeDetails, outcomeLines, PART_LABEL, type StepResult } from '../../core/services/provisioned-connect';
 import { isQueueVisible } from '../../core/rbac';
@@ -128,6 +130,17 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
 
     const service = createManagedService();
     const profile = app.managedProfile;
+    // The gateway counts the session idle from its last request, and reading
+    // messages or typing sends none: while signed in, the user's input anywhere
+    // on the page reaches the gateway now and then (session-activity.ts).
+    // A session the gateway ended under a user at work is shown as after any
+    // request it refused: the sign-in card says why. The user may be on
+    // another page, so a toast says it too.
+    const activity = keepSessionAlive(container.ownerDocument, service.me, () => {
+        const ended: ManagedError = { ok: false, status: 401, code: 'unauthenticated' };
+        showToast(managedErrorMessage(ended), 'error', SIGNED_OUT_TOAST_MS);
+        sessionGone(ended);
+    });
     // Change password, Two-factor sign-in and Sign out sit at the top of the
     // sidebar, on every page and through a connection; this panel keeps Refresh.
     const account = createAccountControl(() => doLogout());
@@ -423,6 +436,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     function adopt(p: ManagedProfile): void {
         const standing = signedIn() && !live();
         session = p;
+        activity.start();
         account.show({ username: p.username, admin: p.admin });
         if (!standing) publish();
         card.setChoices();
@@ -479,6 +493,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     function clearSession(): void {
         if (live()) closeLive();
         session = null;
+        activity.stop();
         account.show(null);
         unpublish();
     }

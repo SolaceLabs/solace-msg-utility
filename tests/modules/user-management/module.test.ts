@@ -410,6 +410,11 @@ describe('user-management — modules', () => {
     /** The highlighted answers of the Modules slide choice. */
     const mode = (c: HTMLElement) =>
         [...el(c, '#user-mgmt-modules-mode').querySelectorAll<HTMLElement>('.slide-choice-label.active')].map(l => l.textContent);
+    /** The line that says what the default gives, as shown: null while it is hidden. */
+    const defaultLine = (c: HTMLElement) => {
+        const line = el(c, '#user-mgmt-modules-default-line');
+        return line.classList.contains('hidden') ? null : line.textContent;
+    };
     function slideMode(c: HTMLElement, on: boolean): void {
         modeSwitch(c).checked = on;
         modeSwitch(c).dispatchEvent(new Event('change'));
@@ -425,11 +430,11 @@ describe('user-management — modules', () => {
     /** The catalog has three modules, two offered; the second offered one is not in the first user's reach. */
     const THREE = { catalog: ['queue-browser', 'queue-copy', 'queue-subscriptions'], offered: ['queue-browser', 'queue-subscriptions'], userDefault: 'all' };
 
-    it('a new user starts on the deployment default: its modules named, pills without remove buttons, no Add module', async () => {
+    it('a new user starts on the deployment default: its modules as pills without remove buttons, no line repeating them, no Add module', async () => {
         const { container } = await setup();
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
         expect([modeSwitch(container).checked, mode(container)]).toEqual([false, ['Deployment default']]);
-        expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('Queue Browser');
+        expect(defaultLine(container)).toBeNull();
         expect(pillIds(container)).toEqual(['queue-browser']);
         expect(el(container, '#user-mgmt-modules').querySelector('.user-mgmt-pill-remove')).toBeNull();
         expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(true);
@@ -446,7 +451,7 @@ describe('user-management — modules', () => {
         expect(el(container, '#user-mgmt-modules').querySelectorAll('.user-mgmt-pill-remove')).toHaveLength(1);
         expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(false);
         expect(menuIds(container)).toEqual(['queue-subscriptions']);
-        expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('Queue Browser, Queue Subscriptions');
+        expect(defaultLine(container)).toBe('The deployment default gives: Queue Browser, Queue Subscriptions');
     });
 
     it('Add module opens the menu, picking a module adds its pill and closes the menu, and the save sends the list', async () => {
@@ -552,16 +557,18 @@ describe('user-management — modules', () => {
         expect(svcMock.saveUser.mock.calls[0][0].modules).toBeNull();
     });
 
-    it('under a "none" default the label says so and the pills are empty', async () => {
+    it('under a "none" default the pills are empty, and the line beside a list of the user\'s own says so', async () => {
         const container = loadModuleDOM('user-management');
         const ctx = makeCtx(container, ADMIN);
         svcMock.listUsers.mockResolvedValue(listed(USERS, { ...CHOICES, userDefault: 'none' }));
         await UserManagementModule.install(ctx);
         await vi.waitFor(() => expect(rowCount(container)).toBe(2));
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
-        expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('no modules');
+        expect(defaultLine(container)).toBeNull();
         expect(pillIds(container)).toEqual([]);
         expect(el(container, '#user-mgmt-modules').textContent).toBe('No modules.');
+        chooseForUser(container);
+        expect(defaultLine(container)).toBe('The deployment default gives: no modules');
     });
 });
 

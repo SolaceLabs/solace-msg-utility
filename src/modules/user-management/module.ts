@@ -96,6 +96,7 @@ export const UserManagementModule = {
             passwordHint: required<HTMLElement>(container, '#user-mgmt-password-hint'),
             admin: required<HTMLInputElement>(container, '#user-mgmt-admin'),
             modulesMode: required<HTMLElement>(container, '#user-mgmt-modules-mode'),
+            modulesDefaultLine: required<HTMLElement>(container, '#user-mgmt-modules-default-line'),
             modulesDefaultHint: required<HTMLElement>(container, '#user-mgmt-modules-default-hint'),
             modules: required<HTMLElement>(container, '#user-mgmt-modules'),
             moduleAdd: required<HTMLElement>(container, '#user-mgmt-module-add'),
@@ -264,6 +265,9 @@ export const UserManagementModule = {
         function renderModules(): void {
             const useDefault = modulesMode.value() === 'default';
             const given = grantedModules(null, choices);
+            // Under the default the pills are what it gives; beside a list of the
+            // user's own, a line says what the default would give instead.
+            els.modulesDefaultLine.classList.toggle('hidden', useDefault);
             els.modulesDefaultHint.textContent = given.length ? given.map(moduleLabel).join(', ') : 'no modules';
             const shown = useDefault ? given : chosen;
             if (shown.length) {

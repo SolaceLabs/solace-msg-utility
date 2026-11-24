@@ -1029,7 +1029,7 @@ While you are signed out, the Provisioned tab shows a **Sign in** card. The butt
 
 If the gateway asks you to choose a password first, the card's button reads **Change password** instead of **Sign in**. Press it and follow "Changing your password" below.
 
-Your sign-in survives a reload of the page. It ends when you sign out, after a period without activity, and a fixed time after you signed in; your administrator sets both limits. Unless your administrator has changed them, they are 10 minutes without activity and 30 minutes after you signed in. It also ends when an administrator changes your account. If it ends while you are using the page, the card says `Your session has ended. Sign in again.`
+Your sign-in survives a reload of the page. It ends when you sign out, after a period without activity, and a fixed time after you signed in; your administrator sets both limits. Activity is your own typing, clicking and scrolling anywhere in the app: while you work, the page keeps the sign-in in use, and a page left alone runs out. Unless your administrator has changed them, they are 10 minutes without activity and 30 minutes after you signed in. It also ends when an administrator changes your account. If it ends while you are using the page, the card says `Your session has ended. Sign in again.`
 
 ### Connecting to a broker
 
@@ -1387,7 +1387,7 @@ While no administrator is signed in, each page shows a gate with the heading **A
 A session ends in these ways:
 
 - You press **Sign out**.
-- The gateway ends it. A session ends after it has been idle for a set time, and after a set total time whatever you do. The defaults are 10 and 30 minutes, and Gateway Settings changes them. A gateway restart ends every session. See [Sessions and sign-in](provisioned-mode.md#sessions-and-sign-in) in the Provisioned mode guide.
+- The gateway ends it. A session ends after it has been idle for a set time, and after a set total time whatever you do. Idle means nobody typed, clicked or scrolled in the page: while you work, the page keeps the session in use. The defaults are 10 and 30 minutes, and Gateway Settings changes them. A gateway restart ends every session. See [Sessions and sign-in](provisioned-mode.md#sessions-and-sign-in) in the Provisioned mode guide.
 - Your account changes. Changing your password, setting two-factor up again, or an administrator's reset ends your other sessions.
 
 The page does not poll the gateway. It notices when you next do something that needs the gateway, such as pressing **Refresh** or saving. A toast then says `Your session has ended. Sign in again.`, stays up for five seconds, and the app returns to **Not signed in**. A password typed into the user form is cleared. Press **Sign in**, and the gateway brings you back to the administration app.
@@ -1529,7 +1529,7 @@ An empty list says `No users.` A search that finds nothing says `No users match 
 1. **Username**. You type it when you add a user. When you edit a user, it is fixed.
 2. **Password**, with a hint after its name: `(required)` when you add a user, `(leave blank to keep current)` when you edit one.
 3. The **Administrator** switch.
-4. The switch for the user's modules, between **Deployment default** and **Choose for this user**. The answer in bold is the choice, and the line under it names what the default gives.
+4. The switch for the user's modules, between **Deployment default** and **Choose for this user**. The answer in bold is the choice. While **Choose for this user** is on, a line under the switch names what the default gives.
 5. The modules the user may open, each as a pill.
 6. **+ Add module**, which lists the modules you can still add.
 
@@ -1563,8 +1563,8 @@ The **Modules** card sets which pages of the app a user may open: Queue Browser,
 
 | Choice | What it does |
 | --- | --- |
-| **Deployment default** | The user gets what Gateway Settings give everyone. The modules it gives are named in the line under the switch (or `no modules`) and shown as pills without a remove button. This is the choice for a user you add. If the settings change, so does what this user gets. |
-| **Choose for this user** | The user has a list of their own. It starts as what the default gives. Each module is a pill with a remove button, named for screen readers `Remove Queue Browser` and so on. **+ Add module** opens a menu of the offered modules that are not in the list yet; pick one to add it, and press <kbd>Esc</kbd> to close the menu. The button is disabled when nothing is left to add. An empty list reads `No modules.` |
+| **Deployment default** | The user gets what Gateway Settings give everyone. The modules it gives are shown as pills without a remove button, or `No modules.` when it gives none. This is the choice for a user you add. If the settings change, so does what this user gets. |
+| **Choose for this user** | The user has a list of their own. It starts as what the default gives. A line under the switch still says what the default gives, for example `The deployment default gives: Queue Browser, Queue Copy` (or `no modules`). Each module is a pill with a remove button, named for screen readers `Remove Queue Browser` and so on. **+ Add module** opens a menu of the offered modules that are not in the list yet; pick one to add it, and press <kbd>Esc</kbd> to close the menu. The button is disabled when nothing is left to add. An empty list reads `No modules.` |
 
 A pill marked `not offered` is a module the gateway does not offer. It has no effect until Gateway Settings offer it, and you can remove it. The gateway never gives a user a module it does not offer.
 
@@ -2012,7 +2012,7 @@ A session is a signed-in browser. These limits apply to every user, administrato
 
 | Field | What it does | Accepts | Default |
 | --- | --- | --- | --- |
-| **Idle limit (minutes)** | A session ends after this long without a request. | A whole number from 1 up to the absolute limit. | 10 |
+| **Idle limit (minutes)** | A session ends after this long without a request. The app sends one while its user types, clicks or scrolls, so this is time away from the page. | A whole number from 1 up to the absolute limit. | 10 |
 | **Absolute limit (minutes)** | A session ends this long after sign-in, however busy it is. | A whole number from 1 to 1440 (a day). | 30 |
 | **Broker connects per user per minute** | How many broker credential requests and messaging sockets one user may open in a minute. | A whole number from 1 to 1000. | 20 |
 

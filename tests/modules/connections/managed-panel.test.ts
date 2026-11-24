@@ -39,6 +39,8 @@ const sempMock = vi.hoisted(() => {
     };
 });
 const svcMock = vi.hoisted(() => ({ me: vi.fn(), logout: vi.fn(), dial: vi.fn() }));
+// The keep-alive (tests/core/services/session-activity.test.ts has its rules): here, only when it runs.
+const activityMock = vi.hoisted(() => ({ made: vi.fn(), start: vi.fn(), stop: vi.fn() }));
 // Advertise managed mode so the module renders (and instantiates) the Managed tab.
 const hostedMock = vi.hoisted(() => ({
     probeDeployment: vi.fn(async () => ({ hosted: true, conn: { connModes: 'provisioned', defaultConn: 'provisioned' } })),
@@ -68,6 +70,12 @@ vi.mock('../../../src/core/services/managed-service', () => ({
         me: svcMock.me, logout: svcMock.logout, dial: svcMock.dial,
         relayBase: (broker: string) => `/managed/relay/${broker}`,
     }),
+}));
+vi.mock('../../../src/core/services/session-activity', () => ({
+    keepSessionAlive: (...args: unknown[]) => {
+        activityMock.made(...args);
+        return { start: activityMock.start, stop: activityMock.stop };
+    },
 }));
 
 // Import AFTER the mocks are registered.
@@ -1494,5 +1502,48 @@ describe('connections/managed panel — mode interlock + tab activation', () => 
         const { container } = await setup();
         directUp(container);
         expect([hidden(container, '#conn-note-direct'), hidden(container, '#conn-note-managed')]).toEqual([true, true]);
+    });
+});
+
+describe('connections/managed panel -- keeping the session alive', () => {
+    beforeEach(() => {
+        activityMock.made.mockClear();
+        activityMock.start.mockClear();
+        activityMock.stop.mockClear();
+    });
+
+    it("watches the whole page for the user's input from sign-in, over the panel's own request, and stops at sign-out", async () => {
+        await signedIn();
+        expect(activityMock.made).toHaveBeenCalledExactlyOnceWith(document, svcMock.me, expect.any(Function));
+        expect(activityMock.start).toHaveBeenCalled();
+        expect(activityMock.stop).not.toHaveBeenCalled();
+
+        signOut();
+        expect(activityMock.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('watches nothing while nobody is signed in', async () => {
+        await setup();
+        expect(activityMock.start).not.toHaveBeenCalled();
+    });
+
+    it('shows a session the gateway ended under a user at work as after a refused request: the sign-in card says why, and a toast too', async () => {
+        const { container, ctx } = await signedIn();
+        // The shell's toast container, so the toast has somewhere to show.
+        document.body.insertAdjacentHTML('beforeend', '<div id="toast-container"></div>');
+        const ended = activityMock.made.mock.calls[0][2] as () => void;
+        ended();
+        expect(hidden(container, '#managed-login-view')).toBe(false);
+        expect(el(container, '#managed-login-error').textContent).toBe('Your session has ended. Sign in again.');
+        expect(document.querySelector('.toast')?.textContent).toContain('Your session has ended. Sign in again.');
+        expect(ctx.appState.managed ?? null).toBeNull();
+        expect(activityMock.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops when a Refresh finds that the gateway has ended the session', async () => {
+        const { container } = await signedIn();
+        svcMock.me.mockResolvedValue(NO_SESSION);
+        el<HTMLButtonElement>(container, '#btn-managed-refresh').click();
+        await vi.waitFor(() => expect(activityMock.stop).toHaveBeenCalledTimes(1));
     });
 });

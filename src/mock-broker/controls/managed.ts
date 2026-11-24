@@ -72,7 +72,7 @@ export function managedSections({ gateway, navigate }: ManagedPanelDeps): HTMLEl
         button('Clear the sign-in lockout', () => gateway.throttle.clear()),
     );
     events.appendChild(el('p', 'mockctl-hint',
-        'Ending a session or revoking access closes its broker connections; an expiry does not, as in the gateway. The app notices at its next call.'));
+        'Ending a session or revoking access closes its broker connections; an expiry does not, as in the gateway. The app notices at its next call: within half a minute of your next key or click.'));
 
     const f = gateway.faults;
     const relay = select([

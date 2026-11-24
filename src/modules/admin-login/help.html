@@ -184,7 +184,7 @@
     <p>A session ends in these ways:</p>
     <ul>
         <li>You press <strong>Sign out</strong>.</li>
-        <li>The gateway ends it. A session ends after it has been idle for a set time, and after a set total time whatever you do. The defaults are 10 and 30 minutes, and Gateway Settings changes them. A gateway restart ends every session. See <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#sessions-and-sign-in">Sessions and sign-in</a> in the Provisioned mode guide.</li>
+        <li>The gateway ends it. A session ends after it has been idle for a set time, and after a set total time whatever you do. Idle means nobody typed, clicked or scrolled in the page: while you work, the page keeps the session in use. The defaults are 10 and 30 minutes, and Gateway Settings changes them. A gateway restart ends every session. See <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#sessions-and-sign-in">Sessions and sign-in</a> in the Provisioned mode guide.</li>
         <li>Your account changes. Changing your password, setting two-factor up again, or an administrator's reset ends your other sessions.</li>
     </ul>
     <p>The page does not poll the gateway. It notices when you next do something that needs the gateway, such as pressing <strong>Refresh</strong> or saving. A toast then says <code>Your session has ended. Sign in again.</code>, stays up for five seconds, and the app returns to <strong>Not signed in</strong>. A password typed into the user form is cleared. Press <strong>Sign in</strong>, and the gateway brings you back to the administration app.</p>

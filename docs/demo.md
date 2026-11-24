@@ -240,7 +240,8 @@ The panel is the one in `demo.html`, with the Direct connection values replaced 
 - **Authenticator:** every account that has a two-factor secret, enrolled or being set up (shown as "name (setting up)"), with its current mock code (click to copy) and the seconds left in the step. It refreshes every second while it is on the page, and says how to get a secret while nobody has one.
 - **Gateway events:**
   - **End my session** closes its broker connections, as a sign-out does; **Expire my session** does not, as an
-    expiry does not.
+    expiry does not. The app notices an expiry at its next request, which your next key or click brings within
+    half a minute.
   - **Revoke my VPN access** removes every row of the signed-in user.
   - **Clear the sign-in lockout.**
   - The relay (the broker unreachable: `502`), the dial (rate limited: `429`) and `config.yaml` (edited on the host,

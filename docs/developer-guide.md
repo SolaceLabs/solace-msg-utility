@@ -189,6 +189,7 @@ src/
       managed-profile.ts       # Provisioned broker/VPN names; dial(target, {connect}): relay config or a dialled SMF credential
       managed-api.ts           # managedRequest() -- /managed/* on the gateway session cookie; error codes -> text
       managed-service.ts       # createManagedService() -> /managed/me, /managed/logout, /managed/dial, the relay base
+      session-activity.ts      # keepSessionAlive() -- one small request while the user is at work, so the session does not idle out
     connections/               # Connection-domain library (types and config coercion -- no orchestration here).
       types.ts                 # SolaceConfig, SempConfig, ConnectionConfig, ConnectionCredentials, SempContext
       defaults.ts              # DEFAULT_CONFIG + validateConfig (data-shape validator)

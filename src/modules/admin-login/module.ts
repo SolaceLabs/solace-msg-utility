@@ -23,7 +23,8 @@
 import { required } from '../../core/dom';
 import { createAccountControl } from '../../core/components/account-control';
 import { createManagedService } from '../../core/services/managed-service';
-import { managedErrorMessage } from '../../core/services/managed-api';
+import { keepSessionAlive } from '../../core/services/session-activity';
+import { managedErrorMessage, reportManagedFailure } from '../../core/services/managed-api';
 import { logger } from '../../core/logger';
 import type { AppContext } from '../../core/types';
 
@@ -46,6 +47,13 @@ export const AdminLoginModule = {
         };
 
         const account = createAccountControl(() => doLogout(), { next: '/solAdmin' });
+        // The gateway counts the session idle from its last request: while this
+        // module holds the session, the administrator's input anywhere on the
+        // page reaches the gateway now and then (session-activity.ts).
+        // A session the gateway ended under an administrator at work is reported
+        // as any admin page reports a 401: the toast, then the sign-out below.
+        const activity = keepSessionAlive(container.ownerDocument, service.me, () =>
+            reportManagedFailure({ ok: false, status: 401, code: 'unauthenticated' }, eventBus, showSignedOut));
 
         function showSignedOut(message: string | null, mustChange = false): void {
             els.btnLogin.href = mustChange ? CHANGE_PASSWORD : SIGN_IN;
@@ -91,6 +99,7 @@ export const AdminLoginModule = {
                 operate: p.operate, readOnly: p.readOnly, vpns: [], modules: p.modules,
             });
             signedIn = true;
+            activity.start();
             eventBus.emit('rbac:changed');
             showSession(p.username);
         }
@@ -100,6 +109,7 @@ export const AdminLoginModule = {
             // outcome, so the answer is not awaited.
             void service.logout();
             signedIn = false;
+            activity.stop();
             app.setState('managed', null);
             eventBus.emit('rbac:changed');
             showSignedOut(null);

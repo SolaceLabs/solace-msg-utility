@@ -96,7 +96,7 @@
             <tr><th>Field</th><th>What it does</th><th>Accepts</th><th>Default</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>Idle limit (minutes)</strong></td><td>A session ends after this long without a request.</td><td>A whole number from 1 up to the absolute limit.</td><td>10</td></tr>
+            <tr><td><strong>Idle limit (minutes)</strong></td><td>A session ends after this long without a request. The app sends one while its user types, clicks or scrolls, so this is time away from the page.</td><td>A whole number from 1 up to the absolute limit.</td><td>10</td></tr>
             <tr><td><strong>Absolute limit (minutes)</strong></td><td>A session ends this long after sign-in, however busy it is.</td><td>A whole number from 1 to 1440 (a day).</td><td>30</td></tr>
             <tr><td><strong>Broker connects per user per minute</strong></td><td>How many broker credential requests and messaging sockets one user may open in a minute.</td><td>A whole number from 1 to 1000.</td><td>20</td></tr>
         </tbody>

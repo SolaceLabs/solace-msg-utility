@@ -25,7 +25,7 @@
     <rect x="158.88" y="250" width="30" height="16" fill="#00C895" rx="8"/>
     <circle cx="180.88" cy="258" r="6" fill="#ffffff"/>
     <text x="196.88" y="262" font-size="11" font-weight="700">Choose for this user</text>
-    <text x="40" y="288" font-size="11" fill="#64748b">Deployment default: Queue Browser, Queue Copy, Queue Subscriptions</text>
+    <text x="40" y="288" font-size="11" fill="#64748b">The deployment default gives: Queue Browser, Queue Copy, Queue Subscriptions</text>
     <circle cx="372" cy="258" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="372" y="262" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
     <rect x="40" y="300" width="131" height="24" fill="#f1f5f9" rx="12" stroke="#cbd5e1"/>

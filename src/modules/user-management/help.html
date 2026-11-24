@@ -39,7 +39,7 @@
         <li><strong>Username</strong>. You type it when you add a user. When you edit a user, it is fixed.</li>
         <li><strong>Password</strong>, with a hint after its name: <code>(required)</code> when you add a user, <code>(leave blank to keep current)</code> when you edit one.</li>
         <li>The <strong>Administrator</strong> switch.</li>
-        <li>The switch for the user's modules, between <strong>Deployment default</strong> and <strong>Choose for this user</strong>. The answer in bold is the choice, and the line under it names what the default gives.</li>
+        <li>The switch for the user's modules, between <strong>Deployment default</strong> and <strong>Choose for this user</strong>. The answer in bold is the choice. While <strong>Choose for this user</strong> is on, a line under the switch names what the default gives.</li>
         <li>The modules the user may open, each as a pill.</li>
         <li><strong>+ Add module</strong>, which lists the modules you can still add.</li>
     </ol>
@@ -79,8 +79,8 @@
             <tr><th>Choice</th><th>What it does</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>Deployment default</strong></td><td>The user gets what Gateway Settings give everyone. The modules it gives are named in the line under the switch (or <code>no modules</code>) and shown as pills without a remove button. This is the choice for a user you add. If the settings change, so does what this user gets.</td></tr>
-            <tr><td><strong>Choose for this user</strong></td><td>The user has a list of their own. It starts as what the default gives. Each module is a pill with a remove button, named for screen readers <code>Remove Queue Browser</code> and so on. <strong>+ Add module</strong> opens a menu of the offered modules that are not in the list yet; pick one to add it, and press <kbd>Esc</kbd> to close the menu. The button is disabled when nothing is left to add. An empty list reads <code>No modules.</code></td></tr>
+            <tr><td><strong>Deployment default</strong></td><td>The user gets what Gateway Settings give everyone. The modules it gives are shown as pills without a remove button, or <code>No modules.</code> when it gives none. This is the choice for a user you add. If the settings change, so does what this user gets.</td></tr>
+            <tr><td><strong>Choose for this user</strong></td><td>The user has a list of their own. It starts as what the default gives. A line under the switch still says what the default gives, for example <code>The deployment default gives: Queue Browser, Queue Copy</code> (or <code>no modules</code>). Each module is a pill with a remove button, named for screen readers <code>Remove Queue Browser</code> and so on. <strong>+ Add module</strong> opens a menu of the offered modules that are not in the list yet; pick one to add it, and press <kbd>Esc</kbd> to close the menu. The button is disabled when nothing is left to add. An empty list reads <code>No modules.</code></td></tr>
         </tbody>
     </table>
     <p>A pill marked <code>not offered</code> is a module the gateway does not offer. It has no effect until Gateway Settings offer it, and you can remove it. The gateway never gives a user a module it does not offer.</p>

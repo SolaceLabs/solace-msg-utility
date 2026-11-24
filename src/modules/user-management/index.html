@@ -55,7 +55,8 @@
                 <span class="slide-choice-label" data-choice="choose">Choose for this user</span>
             </div>
         </div>
-        <p class="user-mgmt-hint text-secondary">Deployment default: <span id="user-mgmt-modules-default-hint"></span></p>
+        <!-- Shown while the user has a list of their own: under the default, the pills say it. -->
+        <p id="user-mgmt-modules-default-line" class="user-mgmt-hint text-secondary hidden">The deployment default gives: <span id="user-mgmt-modules-default-hint"></span></p>
         <div id="user-mgmt-modules" class="user-mgmt-pills mt-2"></div>
         <div id="user-mgmt-module-add" class="user-mgmt-menu-wrap mt-2">
             <button type="button" id="btn-user-mgmt-add-module" class="btn btn-secondary btn-compact"
