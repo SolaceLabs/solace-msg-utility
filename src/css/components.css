@@ -331,9 +331,11 @@ input[type='checkbox']:disabled:checked {
     opacity: 0.55;
 }
 
-/* A switch with its text, as one label: a click on the text flips it. */
+/* A switch with its text, as one label: a click on the text flips it. It is
+ * a block as wide as its text, so no line gap is left under the switch. */
 label.switch-field {
-    display: inline-flex;
+    display: flex;
+    width: fit-content;
     align-items: center;
     gap: 0.5rem;
     margin: 0;

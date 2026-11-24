@@ -1,6 +1,7 @@
 <!-- The admin gate is created at install by createGate() (see module.ts). -->
 
-<!-- Every section is its own card, stacked full width. Each .form-group's
+<!-- Every section is its own card, stacked full width. A card's opening
+     paragraph keeps a gap (mb-3) before the controls under it. Each .form-group's
      data-key is its settings key. Fields share a row (.form-cols); an on/off
      setting is a switch on a line of its own. A setting with two answers is a
      segmented button or a slide choice, each answer naming its value in
@@ -50,7 +51,7 @@
 
     <div class="card">
         <h3 class="card-title mb-3">Access</h3>
-        <p id="gw-set-client" class="text-secondary text-body-sm"></p>
+        <p id="gw-set-client" class="text-secondary text-body-sm mb-3"></p>
         <div class="form-cols">
             <div class="form-group" data-key="access.allow">
                 <label for="gw-set-access-allow">Allowed clients: CIDR ranges, one per line (empty admits every client)</label>
@@ -116,7 +117,7 @@
 
     <div class="card">
         <h3 class="card-title mb-3">Passwords and two-factor sign-in</h3>
-        <p class="text-secondary text-body-sm">
+        <p class="text-secondary text-body-sm mb-3">
             A raised minimum length applies at the next password change; passwords already set keep working.
         </p>
         <div class="form-cols">
@@ -173,7 +174,7 @@
 
     <div class="card">
         <h3 class="card-title mb-3">Audit trail</h3>
-        <p class="text-secondary text-body-sm">
+        <p class="text-secondary text-body-sm mb-3">
             The audit trail itself is always written to /data/audit.log on the gateway; these settings only add to it.
         </p>
         <div class="form-group" data-key="audit.stdout">
@@ -200,7 +201,7 @@
 
     <div class="card">
         <h3 class="card-title mb-3">Broker trust</h3>
-        <p class="text-secondary text-body-sm">
+        <p class="text-secondary text-body-sm mb-3">
             Applies on Save. The standard root CAs are the public root CAs the gateway image carries (Mozilla's
             list); with them off, only the CA files are trusted. Certificates lists both.
         </p>
@@ -221,7 +222,7 @@
 
     <div id="gw-set-restart-card" class="card">
         <h3 class="card-title mb-3">Gateway</h3>
-        <p class="text-secondary text-body-sm">
+        <p class="text-secondary text-body-sm mb-3">
             Restart starts the gateway's program again in place, with the same arguments and environment.
             Everyone is signed out and open broker connections close.
         </p>

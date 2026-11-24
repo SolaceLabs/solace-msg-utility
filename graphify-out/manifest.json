@@ -714,8 +714,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide.md": {
-    "mtime": 1795529672.533253,
-    "seen": 1795529888.2110908,
+    "mtime": 1795531113.563394,
+    "seen": 1795531332.4037688,
     "ast_hash": "05e0a481bee8f6a5549675ec4f108e41",
     "semantic_hash": ""
   },
@@ -954,9 +954,9 @@
     "semantic_hash": ""
   },
   "src/modules/user-management/index.html": {
-    "mtime": 1795526603.7836165,
-    "seen": 1795528277.0210598,
-    "ast_hash": "fb2e88fa14bd4315a5ec3f963730130d",
+    "mtime": 1795530968.3461523,
+    "seen": 1795531332.4038093,
+    "ast_hash": "57a37b814297b557032d2e2218f3c8ab",
     "semantic_hash": ""
   },
   "src/variants/all-for-testing-only.ts": {
@@ -1428,9 +1428,9 @@
     "semantic_hash": ""
   },
   "src/modules/gateway-settings/index.html": {
-    "mtime": 1795526464.1974735,
-    "seen": 1795528277.021026,
-    "ast_hash": "c07746b72c06611cd9ef93b201bb9770",
+    "mtime": 1795530968.345254,
+    "seen": 1795531332.4037938,
+    "ast_hash": "e91be3262066fd85408a1fddaba4fe46",
     "semantic_hash": ""
   },
   "go-web-proxy/keyfile.go": {

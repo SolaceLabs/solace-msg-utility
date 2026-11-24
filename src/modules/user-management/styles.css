@@ -2,9 +2,11 @@
  * collide in the shared (inlined) cascade. Shipped only in the managed build
  * (main-admin.css). */
 
+/* Only the top margin is set here, so a spacing class on the line (mb-3)
+ * still gives its own bottom margin. */
 .user-mgmt-hint {
     font-size: 0.85rem;
-    margin: 0.25rem 0 0;
+    margin-top: 0.25rem;
 }
 
 /* The Entitlements card's notice: what the rows do not cover. */
