@@ -40,6 +40,22 @@ describe('createSegmented', () => {
         expect([control.value(), pressed()]).toEqual(['oauth', ['oauth']]);
     });
 
+    // A host that builds its controls in one place and wires its events in
+    // another (queue-copy's Copy to button) subscribes after creation.
+    it('reports a changed choice to a handler added after creation, beside the one given at creation', () => {
+        const given = vi.fn();
+        const added = vi.fn();
+        const control = create(given);
+        control.onChange(added);
+
+        button('oauth').click();
+        button('oauth').click();
+        control.set('basic');
+
+        expect(given).toHaveBeenCalledExactlyOnceWith('oauth');
+        expect(added).toHaveBeenCalledExactlyOnceWith('oauth');
+    });
+
     it('keeps its choice when told to choose a value it does not offer', () => {
         const control = create();
         control.set('oauth');

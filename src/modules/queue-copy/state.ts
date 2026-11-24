@@ -21,6 +21,20 @@ export type DestType = 'queue' | 'topic';
  */
 export type DestCredMode = 'manual' | 'provisioned';
 
+/**
+ * Where the destination is, seen from the source: the three answers of the
+ * Copy to button. They are the three pairs `sameBroker` / `sameVpn` can make,
+ * since the same VPN means nothing on another broker.
+ */
+export const DEST_SCOPES = ['this-vpn', 'another-vpn', 'another-broker'] as const;
+export type DestScope = typeof DEST_SCOPES[number];
+
+/** The Copy to answer a `sameBroker` / `sameVpn` pair amounts to. */
+export function destScopeOf(sameBroker: boolean, sameVpn: boolean): DestScope {
+    if (!sameBroker) return 'another-broker';
+    return sameVpn ? 'this-vpn' : 'another-vpn';
+}
+
 export interface DestForm {
     /** When true, dest reuses primary host + SEMP creds. */
     sameBroker: boolean;
@@ -160,8 +174,8 @@ export interface QueueCopyState {
     destPublisher: SolacePublisher | null;
     /**
      * Publisher tied to the primary session. Created on `client:connected`; disposed
-     * on `client:disconnected`. The publish endpoint whenever the form says Same
-     * broker + Same VPN.
+     * on `client:disconnected`. The publish endpoint whenever the form says This
+     * VPN.
      */
     primaryPublisher: SolacePublisher | null;
 
@@ -243,14 +257,14 @@ export interface DestPrefillSnapshot {
 }
 
 /**
- * Mirror primary-connection values into `state.destForm` whenever the toggles
- * say the destination is reusing the primary. Called from three places:
+ * Mirror primary-connection values into `state.destForm` whenever the Copy to
+ * choice says the destination is reusing the primary. Called from three places:
  *   1. ui-events install — initial sync on module load
- *   2. ui-events sameBroker / sameVpn change handlers
+ *   2. ui-events, when the Copy to choice changes
  *   3. module.ts refreshFromPrimary — primary connect / disconnect / SEMP up/down
  *
  * Without (3), the DOM stays in sync via `applyDestPrefill` but `state.destForm`
- * doesn't, so a later "uncheck Same broker → click Connect without retyping"
+ * doesn't, so a later "choose Another broker → click Connect without retyping"
  * would send empty host/creds to the dest factories.
  */
 export function syncDestFormFromSnapshot(state: QueueCopyState, snap: DestPrefillSnapshot | null): void {

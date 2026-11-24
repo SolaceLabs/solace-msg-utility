@@ -23,11 +23,18 @@ export interface Segmented<T extends string> {
     set(value: T): void;
     /** A disabled control cannot change its choice. */
     setDisabled(disabled: boolean): void;
+    /**
+     * Run `handler` after each click that changed the choice, as the
+     * `onChange` option does: for a host that creates its controls in one
+     * place and wires their events in another.
+     */
+    onChange(handler: (value: T) => void): void;
 }
 
 export function createSegmented<T extends string>(group: HTMLElement, { attr, choices, onChange }: SegmentedOptions<T>): Segmented<T> {
     const buttons = new Map(choices.map(c => [c, required<HTMLButtonElement>(group, `button[${attr}="${c}"]`)] as const));
     let value: T = choices[0];
+    const handlers = onChange ? [onChange] : [];
 
     function render(): void {
         buttons.forEach((button, choice) => button.setAttribute('aria-pressed', String(choice === value)));
@@ -38,7 +45,7 @@ export function createSegmented<T extends string>(group: HTMLElement, { attr, ch
             if (choice === value) return;
             value = choice;
             render();
-            onChange?.(value);
+            handlers.forEach(handler => handler(value));
         });
     });
 
@@ -54,6 +61,9 @@ export function createSegmented<T extends string>(group: HTMLElement, { attr, ch
             buttons.forEach(button => {
                 button.disabled = disabled;
             });
+        },
+        onChange(handler) {
+            handlers.push(handler);
         },
     };
 }

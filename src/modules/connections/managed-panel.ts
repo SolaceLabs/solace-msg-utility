@@ -25,6 +25,14 @@
  * ended (idle or absolute limit, or an admin changed the account) and the
  * panel drops its local state to match.
  *
+ * Only one connection mode is live at a time. While Provisioned is the live
+ * one, the app's profile and `appState.managed` are set and the access rules
+ * apply. A Direct connect makes the session stand by (`standBy()`): this
+ * panel's connection closes and both are cleared, so no rule reaches the
+ * Direct session, but the user stays signed in on the gateway and the card
+ * keeps its brokers. Connect on the card closes the Direct connection and
+ * makes Provisioned the live mode again.
+ *
  * One Connect opens SEMP and messaging as one connection, through the shared
  * sequence in `src/core/services/provisioned-connect.ts`: SEMP first, then
  * messaging every time, and connected only when both are up. While it runs,
@@ -48,8 +56,8 @@ import { createAccountControl } from '../../core/components/account-control';
 import { createServiceSolace, type SolaceConnectionHooks } from '../../core/services/solace-client';
 import { createServiceSemp, type SempConnectionHooks } from '../../core/services/semp-client';
 import { createManagedService, type ManagedProfile } from '../../core/services/managed-service';
-import { managedErrorMessage } from '../../core/services/managed-api';
-import { isSessionEnded } from '../../core/services/managed-profile';
+import { managedErrorMessage, type ManagedError } from '../../core/services/managed-api';
+import { isSessionEnded, provisionedNames } from '../../core/services/managed-profile';
 import { connectProvisioned, gatewayCodeOf, outcomeDetails, outcomeLines, PART_LABEL, type StepResult } from '../../core/services/provisioned-connect';
 import { isQueueVisible } from '../../core/rbac';
 import { logger } from '../../core/logger';
@@ -69,13 +77,21 @@ export interface ManagedPanel {
      */
     restore(): Promise<boolean>;
     /**
-     * Sign out: end the gateway session, disconnect the broker and clear
-     * `appState.managed` (so RBAC stops applying). Called when the Direct tab
-     * takes over the connection (only one mode may be live at a time), and when
-     * another module asks for a sign-out (`rbac:sign-out-requested`, routed here
-     * by the module shell).
+     * Sign out: end the gateway session, disconnect the broker if Provisioned
+     * is the live mode, and clear `appState.managed`. Called when another
+     * module asks for a sign-out (`rbac:sign-out-requested`, routed here by
+     * the module shell); nothing happens without a session.
      */
     logout(): void;
+    /**
+     * A Direct connect is taking over (only one mode may be live at a time):
+     * disconnect this panel's broker and clear the app's profile and
+     * `appState.managed`, so the access rules stop applying, and stay signed
+     * in. Nothing happens unless Provisioned is the live mode.
+     */
+    standBy(): void;
+    /** True while the user is signed in and a Direct connection has taken over. */
+    standingBy(): boolean;
     /** Re-show the panel's own view for the current state (used on tab activate). */
     refreshView(): void;
     /** Cross-module VPN-switch / browse request, routed here for a managed session. */
@@ -117,8 +133,19 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     const account = createAccountControl(() => doLogout());
     app.mountSidebarAccount(account.element);
     profile.attachDialer(service);
-    /** Signed in <=> the profile is set. No second copy of that truth here. */
-    const signedIn = (): boolean => profile.isActive();
+    /**
+     * What the gateway last said of the signed-in user. Set while signed in,
+     * whether Provisioned is the live mode or stands by; the card reads its
+     * broker and VPN names from it.
+     */
+    let session: ManagedProfile | null = null;
+    const signedIn = (): boolean => session !== null;
+    /**
+     * Provisioned is the live mode: the app's profile and `appState.managed`
+     * are set, so the access rules apply. This panel sets and clears the two
+     * together. While the session stands by, both are clear.
+     */
+    const live = (): boolean => profile.isActive();
 
     // --- panel state ---
     // The broker name of the live (or in-progress) connection — set when a
@@ -215,8 +242,10 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             const expected = closing || switching;
             closing = false;
             // One connection: messaging gone takes SEMP with it, except while a
-            // VPN switch reconnects messaging on purpose.
-            if (!switching && appState.isSempConnected) void serviceSemp.disconnect();
+            // VPN switch reconnects messaging on purpose. Not once the session
+            // stands by or is gone: SEMP closed with it, and a SEMP connection
+            // now up belongs to the Direct form.
+            if (!switching && live() && appState.isSempConnected) void serviceSemp.disconnect();
             if (expected) {
                 card.setStatus('disconnected');
             } else {
@@ -333,12 +362,12 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
     /**
      * A VPN switch's reconnect failed: SEMP closes too, since the connection
      * is one connection, the reason goes on the selection view, and the
-     * switch waiting on it ends. Signed out meanwhile: the sign-out closed
-     * SEMP and the sign-in view says why, so only the switch ends.
+     * switch waiting on it ends. Signed out or standing by meanwhile: that
+     * closed SEMP already, so only the switch ends.
      */
     function switchFailed(message: string): void {
         switching = false;
-        if (signedIn()) {
+        if (live()) {
             void serviceSemp.disconnect();
             card.setStatus('error', message);
             showView('select');
@@ -376,7 +405,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         void serviceSemp.disconnect();
     };
     const card = createProvisionedConnectionCard(els.selectView, {
-        profile,
+        profile: provisionedNames(() => session),
         onConnect: doConnect,
         onDisconnect: disconnectBoth,
         headerActions: els.btnRefresh,
@@ -388,22 +417,34 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
 
     // --- session: restore / sign out / refresh ---
     /**
-     * Adopt a profile from the gateway. The profile takes it BEFORE AppState is
-     * published or `rbac:changed` emitted — that event means "state is already
-     * consistent, react now", so no observer can see a half-built session. The
-     * connected broker (if any) is kept, with its provisioned VPNs re-read ([]
-     * if it is no longer provisioned).
+     * Adopt a profile from the gateway: at sign-in, and at each Refresh. A
+     * session that stands by takes the new names and stays standing by.
      */
     function adopt(p: ManagedProfile): void {
-        profile.setProfile(p);
+        const standing = signedIn() && !live();
+        session = p;
         account.show({ username: p.username, admin: p.admin });
+        if (!standing) publish();
+        card.setChoices();
+    }
+
+    /**
+     * Make Provisioned the live mode with the session's profile. The app's
+     * profile takes it BEFORE AppState is published or `rbac:changed` emitted
+     * — that event means "state is already consistent, react now", so no
+     * observer can see a half-built session. The connected broker (if any) is
+     * kept, with its provisioned VPNs re-read ([] if it is no longer
+     * provisioned).
+     */
+    function publish(): void {
+        const p = session!;
+        profile.setProfile(p);
         const broker = appState.managed?.broker ?? '';
         app.setState('managed', {
             admin: p.admin, username: p.username, operate: p.operate, readOnly: p.readOnly,
             modules: p.modules, broker, vpns: broker ? profile.vpnsFor(broker) : [],
         });
         eventBus.emit('rbac:changed');
-        card.setChoices();
     }
 
     /**
@@ -417,18 +458,49 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         showView('login');
     }
 
-    /** Drop every local trace of the session. Profile and AppState are both
-     *  cleared BEFORE the emit, so every observer sees a fully signed-out state. */
-    function clearSession(): void {
+    /** Close this panel's connection. Only while Provisioned is the live mode: otherwise the connection flags are the Direct form's. */
+    function closeLive(): void {
         closing = true;
         heldSemp = null;
         serviceSolace.disconnect();
         if (appState.isSempConnected) void serviceSemp.disconnect();
+    }
+
+    /** Provisioned stops being the live mode. Profile and AppState are both
+     *  cleared BEFORE the emit, so every observer sees a consistent state. */
+    function unpublish(): void {
         profile.clear();
-        account.show(null);
         app.setState('managed', null);
         eventBus.emit('rbac:changed');
         card.setStatus('disconnected');
+    }
+
+    /** Drop every local trace of the session, live or standing by. */
+    function clearSession(): void {
+        if (live()) closeLive();
+        session = null;
+        account.show(null);
+        unpublish();
+    }
+
+    /** A Direct connect takes over: see ManagedPanel.standBy. */
+    function standBy(): void {
+        if (!live()) return;
+        closeLive();
+        unpublish();
+        showView('select');
+    }
+
+    /**
+     * The gateway refused to say who is signed in. True when that ended the
+     * session here (the sign-in view says why); false for any other failure,
+     * which keeps the session as it was.
+     */
+    function sessionGone(res: ManagedError): boolean {
+        if (res.code !== 'unauthenticated' && res.code !== 'password_change_required') return false;
+        clearSession();
+        showSignedOut(managedErrorMessage(res), res.code === 'password_change_required');
+        return true;
     }
 
     async function restore(): Promise<boolean> {
@@ -458,12 +530,7 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
         // dropped here too; any other failure keeps the last-known connections.
         const res = await service.me();
         if (!res.ok) {
-            if (res.code === 'unauthenticated' || res.code === 'password_change_required') {
-                clearSession();
-                showSignedOut(managedErrorMessage(res), res.code === 'password_change_required');
-                return;
-            }
-            card.setStatus('error', managedErrorMessage(res));
+            if (!sessionGone(res)) card.setStatus('error', managedErrorMessage(res));
             return;
         }
         adopt(res.data);
@@ -479,8 +546,26 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             card.setStatus('disconnected');
             return;
         }
-        // Only one connection mode may be live -- drop any Direct session first.
+        if (!live()) {
+            // Standing by: the session may have ended while the Direct
+            // connection was in use, so ask the gateway before closing that
+            // connection for it.
+            const res = await service.me();
+            if (!res.ok) {
+                if (!sessionGone(res)) card.setStatus('error', managedErrorMessage(res));
+                return;
+            }
+            // Signed out while the gateway answered: the sign-in view shows.
+            if (!signedIn()) {
+                card.setStatus('disconnected');
+                return;
+            }
+            adopt(res.data);
+        }
+        // Only one connection mode may be live -- drop any Direct session
+        // first, then bring the access rules back before anything connects.
         opts.tearDownOther();
+        if (!live()) publish();
         // Publish the connected broker's PROVISIONED VPN names so the queue
         // picker (via queueSourceFrom) lists exactly what this panel shows —
         // not the broader entitlement-glob set.
@@ -494,13 +579,13 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
             messaging: () => openMessaging(brokerName, vpnName),
             dropSemp: () => { heldSemp = null; },
             dropMessaging: dropHeldMessaging,
-            onStep: (part) => signedIn() && card.setStatus('connecting', part === 'semp'
+            onStep: (part) => live() && card.setStatus('connecting', part === 'semp'
                 ? `Connecting SEMP (management) to broker "${brokerName}"...`
                 : `Connecting messaging (client) to broker "${brokerName}", VPN "${vpnName}"...`),
         });
-        // Signed out while it ran (the account control, or a relay 401): the
-        // sign-in view says why, and nothing held may be announced.
-        if (!signedIn()) {
+        // Signed out while it ran (the account control, or a relay 401), or
+        // made to stand by by a Direct connect: nothing held may be announced.
+        if (!live()) {
             heldSemp = null;
             if (heldSession) dropHeldMessaging();
             card.setStatus('disconnected');
@@ -576,8 +661,8 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
                 serviceSolace.disconnect();
             },
             showError(message: string): void {
-                // Signed out meanwhile: the sign-in view already says why.
-                if (!signedIn()) return;
+                // Signed out or standing by meanwhile: the switch is over.
+                if (!live()) return;
                 card.setStatus('error', message);
                 showView('select');
             },
@@ -590,10 +675,15 @@ export function createManagedPanel(app: AppContext, opts: ManagedPanelOptions): 
 
     return {
         restore,
-        logout: doLogout,
+        logout(): void {
+            if (signedIn()) doLogout();
+        },
+        standBy,
+        standingBy: () => signedIn() && !live(),
         refreshView(): void {
             if (!signedIn()) showView('login');
-            else if (appState.isConnected) showView('connected');
+            // A connection that is up while the session stands by is the Direct form's.
+            else if (live() && appState.isConnected) showView('connected');
             else showView('select');
         },
         handleCheckConnection: vpnSwitch.request,

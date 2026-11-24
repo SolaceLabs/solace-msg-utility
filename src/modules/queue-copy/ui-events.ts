@@ -7,17 +7,17 @@ import {
 } from '../../core/components/provisioned-connection';
 import * as ui from './ui';
 import type { CopyUiElements, PrimarySnapshot } from './ui';
-import type { QueueCopyState, CopyMode, DestType } from './state';
+import type { QueueCopyState, DestType } from './state';
 import { syncDestFormFromSnapshot } from './state';
 import { openCopyModal, cancelCopyModal } from './ui-modal';
 
 /**
  * Surface provided by `module.ts` so `ui-events` stays free of session /
  * factory details. The primary snapshot is computed fresh each call so the
- * toggle-prefill path always reflects the live primary connection.
+ * prefill path always reflects the live primary connection.
  */
 export interface CopyUiServices {
-    /** Return a snapshot of primary connection fields for toggle prefill, or null. */
+    /** Return a snapshot of primary connection fields for the destination prefill, or null. */
     getPrimarySnapshot: () => PrimarySnapshot | null;
     /** Return the live primary Solace session (used by the modal). */
     getPrimarySession: () => any | null;
@@ -46,7 +46,7 @@ export interface CopyUiServices {
 /** What `wireUiEvents` hands back to module.ts. */
 export interface CopyUiApi {
     /**
-     * Re-derive the controls that choose the destination (the toggles and the
+     * Re-derive the controls that choose the destination (the Copy to button and the
      * provisioned card), locked while `state.destSolPending` names a connect in
      * flight. module.ts locks them when a destination connect starts and calls
      * this whenever one ends.
@@ -100,25 +100,16 @@ export function wireUiEvents(
         }
     });
 
-    // ===== Destination Broker toggles =====
-    // Any change to either toggle disposes BOTH live secondary connections
-    // (dest SEMP + dest Client). Toggling ON makes them redundant; toggling
-    // OFF means the form fields the user is about to edit no longer match
-    // whatever the existing connection was bound to. Either way, drop the
-    // sessions and clear the typed passwords / Connect-button state so the
-    // user starts from a clean slate.
-    els.toggleSameBroker.addEventListener('change', () => {
-        state.destForm.sameBroker = els.toggleSameBroker.checked;
-        if (!state.destForm.sameBroker) {
-            state.destForm.sameVpn = false;
-        }
-        disposeDestSempConnection();
-        disposeDestSolConnection();
-        syncDestFromToggles();
-    });
-
-    els.toggleSameVpn.addEventListener('change', () => {
-        state.destForm.sameVpn = els.toggleSameVpn.checked;
+    // ===== Destination Broker: the Copy to choice =====
+    // Any change of the choice disposes BOTH live secondary connections
+    // (dest SEMP + dest Client). Moving towards the source makes them
+    // redundant; moving away means the form fields the user is about to edit
+    // no longer match whatever the existing connection was bound to. Either
+    // way, drop the sessions and clear the typed passwords / Connect-button
+    // state so the user starts from a clean slate.
+    els.destScope.onChange((scope) => {
+        state.destForm.sameBroker = scope !== 'another-broker';
+        state.destForm.sameVpn = scope === 'this-vpn';
         disposeDestSempConnection();
         disposeDestSolConnection();
         syncDestFromToggles();
@@ -241,17 +232,16 @@ export function wireUiEvents(
 
         // Picking from a different VPN updates the destination form's VPN
         // in-place — destination operates entirely within this module so no
-        // bus handoff is needed. If the user had "Same VPN" on, that toggle
-        // turns off (different VPN by definition) and the dest VPN field
+        // bus handoff is needed. If the choice was This VPN, it becomes
+        // Another VPN (different VPN by definition) and the dest VPN field
         // becomes editable + reflects the picked VPN.
         if (picked.vpn !== state.destForm.solace.vpn) {
             if (state.destForm.sameBroker && state.destForm.sameVpn) {
                 state.destForm.sameVpn = false;
-                els.toggleSameVpn.checked = false;
             }
             state.destForm.solace.vpn = picked.vpn;
             els.destSolVpn.value = picked.vpn;
-            // Re-apply prefill so toggle/disabled state matches the new VPN.
+            // Re-apply prefill so the Copy to button and the disabled state match the new VPN.
             syncDestFromToggles();
         }
         state.dest.name = picked.queue;
@@ -260,10 +250,9 @@ export function wireUiEvents(
     });
 
     // ===== Mode =====
-    els.modeRadios.forEach((radio) => {
-        radio.addEventListener('change', () => {
-            if (radio.checked) state.mode = radio.value as CopyMode;
-        });
+    els.modeToggle.addEventListener('change', () => {
+        state.mode = els.modeToggle.checked ? 'move' : 'copy';
+        ui.applyMode(els, state.mode);
     });
 
     // ===== Footer: Next =====
@@ -294,7 +283,7 @@ export function wireUiEvents(
 
     /**
      * The provisioned destination card. It lists the brokers the account is
-     * provisioned for -- only the primary's own broker while Same broker is on
+     * provisioned for -- only the primary's own broker unless the choice is Another broker
      * -- and the VPNs of the chosen one, straight from the managed profile. Its
      * Connect hands the chosen names to module.ts, which dials inside the
      * callback; the card never sees a credential.
@@ -308,7 +297,7 @@ export function wireUiEvents(
             vpnsFor: (broker) => ctx.managedProfile.vpnsFor(broker),
         },
         title: 'Destination Connection',
-        // Same broker leaves only the Message VPN to choose.
+        // On the source's broker only the Message VPN is left to choose.
         brokerFixed: () => state.destForm.sameBroker,
         onConnect: async (target) => { services.connectDestProvisioned(target); },
         onDisconnect: () => services.disconnectDestProvisioned(),
@@ -353,7 +342,7 @@ export function wireUiEvents(
      * card, a Direct primary the typed Broker, SEMP and Client cards. Runs at
      * install and on rbac:changed, the sign-in lifecycle; a change of mode
      * under a live destination drops it -- it was dialled for the other mode.
-     * A connect that ends or a toggle only re-renders (renderDestMode), so a
+     * A connect that ends or a change of the Copy to choice only re-renders (renderDestMode), so a
      * refusal shown on the card survives the profile going away under it.
      */
     function deriveDestMode(): void {
@@ -400,10 +389,7 @@ export function wireUiEvents(
     function refreshDestTarget(): void {
         ui.setDestTargetLocked(els, false);
         destCard.lock(false);
-        // Hand each unlocked control back to its own rule: Same VPN means
-        // nothing without Same broker (applyDestPrefill), and renderDestMode
-        // re-renders the mode's cards and the card's lists.
-        if (!state.destForm.sameBroker) els.toggleSameVpn.disabled = true;
+        // renderDestMode re-renders the mode's cards and the card's lists.
         renderDestMode();
     }
 

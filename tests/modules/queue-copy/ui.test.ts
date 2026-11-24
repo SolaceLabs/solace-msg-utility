@@ -4,6 +4,7 @@ import {
     cacheElements,
     applyDestPrefill,
     applyDestType,
+    applyMode,
     applySourceReadonly,
     setSourcePickVisible,
     setDestPickVisible,
@@ -20,6 +21,7 @@ import {
     applyDestMode,
     applySourceMode,
     clearDestTypedSecrets,
+    DEST_SCOPE_HINT,
     DEST_TARGET_LOCKED_TITLE,
     renderModalInitial,
     renderDestSummary,
@@ -145,12 +147,23 @@ describe('queue-copy/ui', () => {
             expect(elsHolder.els.destSolPass.disabled).toBe(false);
         });
 
-        it('sameBroker=false: forces sameVpn off + disables that toggle, leaves all fields editable', () => {
+        it('sameBroker=false: the same VPN means nothing, so the button reads Another broker and all fields stay editable', () => {
             applyDestPrefill(elsHolder.els, false, true, PRIMARY);
-            expect(elsHolder.els.toggleSameVpn.checked).toBe(false);
-            expect(elsHolder.els.toggleSameVpn.disabled).toBe(true);
+            expect(elsHolder.els.destScope.value()).toBe('another-broker');
             expect(elsHolder.els.destHost.disabled).toBe(false);
             expect(elsHolder.els.destSolVpn.disabled).toBe(false);
+        });
+
+        it('shows the choice the two facts amount to on the Copy to button', () => {
+            const e = elsHolder.els;
+            const pressed = () => [...e.destScopeGroup.querySelectorAll<HTMLButtonElement>('button')]
+                .filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.textContent);
+            applyDestPrefill(e, true, false, PRIMARY);
+            expect([e.destScope.value(), pressed()]).toEqual(['another-vpn', ['Another VPN']]);
+            applyDestPrefill(e, false, false, PRIMARY);
+            expect([e.destScope.value(), pressed()]).toEqual(['another-broker', ['Another broker']]);
+            applyDestPrefill(e, true, true, PRIMARY);
+            expect([e.destScope.value(), pressed()]).toEqual(['this-vpn', ['This VPN']]);
         });
 
         it('null primary leaves disabled flags applied but does not blank values', () => {
@@ -268,25 +281,26 @@ describe('queue-copy/ui', () => {
     });
 
     describe('setDestTargetLocked', () => {
-        it('locks the toggles that choose the destination, with a title saying why', () => {
+        const parts = (e: typeof elsHolder.els) => [...e.destScopeGroup.querySelectorAll<HTMLButtonElement>('button')];
+
+        it('locks the Copy to button that chooses the destination, with a title saying why', () => {
             const e = elsHolder.els;
             setDestTargetLocked(e, true);
-            for (const el of [e.toggleSameBroker, e.toggleSameVpn]) {
-                expect(el.disabled).toBe(true);
-                expect(el.title).toBe(DEST_TARGET_LOCKED_TITLE);
-            }
+            expect(parts(e).map(b => b.disabled)).toEqual([true, true, true]);
+            expect(e.destScopeGroup.title).toBe(DEST_TARGET_LOCKED_TITLE);
+            // A locked button keeps its choice.
+            parts(e)[2].click();
+            expect(e.destScope.value()).toBe('this-vpn');
         });
 
-        it('unlocking re-enables only what the lock disabled', () => {
+        it('unlocking makes the choice free again and takes the title away', () => {
             const e = elsHolder.els;
-            // Disabled by its own renderer (applyDestPrefill), not by the lock.
-            e.toggleSameVpn.disabled = true;
-            e.toggleSameBroker.disabled = true;
-            e.toggleSameBroker.title = DEST_TARGET_LOCKED_TITLE;
+            setDestTargetLocked(e, true);
             setDestTargetLocked(e, false);
-            expect(e.toggleSameBroker.disabled).toBe(false);
-            expect(e.toggleSameBroker.title).toBe('');
-            expect(e.toggleSameVpn.disabled).toBe(true);
+            expect(parts(e).map(b => b.disabled)).toEqual([false, false, false]);
+            expect(e.destScopeGroup.title).toBe('');
+            parts(e)[2].click();
+            expect(e.destScope.value()).toBe('another-broker');
         });
     });
 
@@ -315,6 +329,38 @@ describe('queue-copy/ui', () => {
             expect(shown(e.destProv)).toBe(true);
             expect(shown(e.destProvCardHost)).toBe(false);
             expect(shown(e.destProvSame)).toBe(true);
+        });
+
+        it('says under the Copy to button what the choice leaves to fill in, in the words of the mode', () => {
+            const e = elsHolder.els;
+            applyDestPrefill(e, true, false, PRIMARY);
+            applyDestMode(e, { provisioned: false, needsSecondary: true });
+            expect(e.destScopeHint.textContent).toBe('Same broker as the source. Give the Message VPN and its login below.');
+            applyDestMode(e, { provisioned: true, needsSecondary: true });
+            expect(e.destScopeHint.textContent).toBe('Same broker as the source. Pick the Message VPN below.');
+
+            applyDestPrefill(e, false, false, PRIMARY);
+            applyDestMode(e, { provisioned: false, needsSecondary: true });
+            expect(e.destScopeHint.textContent).toBe('A different broker. Give its address and both logins below.');
+            applyDestMode(e, { provisioned: true, needsSecondary: true });
+            expect(e.destScopeHint.textContent).toBe('Pick a broker and a Message VPN below.');
+
+            applyDestPrefill(e, true, true, PRIMARY);
+            applyDestMode(e, { provisioned: false, needsSecondary: false });
+            expect(e.destScopeHint.textContent).toBe(DEST_SCOPE_HINT.provisioned['this-vpn']);
+            expect(e.destScopeHint.textContent).toBe('The connection you already have: same broker, same Message VPN. Nothing to fill in.');
+        });
+    });
+
+    describe('applyMode', () => {
+        it('shows the mode on the slide toggle: its position and the highlighted side', () => {
+            const e = elsHolder.els;
+            const state = () => [e.modeToggle.checked, e.modeLabelCopy.classList.contains('active'), e.modeLabelMove.classList.contains('active')];
+            expect(state()).toEqual([false, true, false]);   // the page opens on Copy
+            applyMode(e, 'move');
+            expect(state()).toEqual([true, false, true]);
+            applyMode(e, 'copy');
+            expect(state()).toEqual([false, true, false]);
         });
     });
 
@@ -462,14 +508,14 @@ describe('queue-copy/ui', () => {
         it('locks every control on the page through its fieldset and leaves each control its own state', () => {
             const { els } = elsHolder;
             const controls = [
-                els.sourceInput, els.btnSourcePick, els.toggleSameBroker, els.toggleSameVpn, els.destHost,
+                els.sourceInput, els.btnSourcePick, ...els.destScopeGroup.querySelectorAll('button'), els.destHost,
                 els.destSempPort, els.destSolPort, els.destSolVpn, els.destTypeToggle, els.destInput,
-                els.btnDestPick, els.btnStart, ...els.modeRadios, ...els.sourceEditButtons,
+                els.btnDestPick, els.btnStart, els.modeToggle, ...els.sourceEditButtons,
             ];
             controls.forEach(c => expect(els.content.contains(c)).toBe(true));
             // The modal's own buttons stay usable while the page is locked.
             expect(els.content.contains(els.modal)).toBe(false);
-            els.destHost.disabled = true;       // the Same broker lock
+            els.destHost.disabled = true;       // the same-broker lock
             els.btnStart.disabled = false;      // the Next gate allows a run
             const nextClicked = vi.fn();
             els.btnStart.addEventListener('click', nextClicked);

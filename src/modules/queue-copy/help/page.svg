@@ -10,28 +10,28 @@
     <text x="40" y="148" font-size="15" font-weight="700">Source Broker</text>
     <rect x="204" y="132" width="146" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
     <text x="277" y="148.667" font-size="11" font-weight="700" text-anchor="middle">Edit in Connections</text>
-    <text x="40" y="176" font-size="11" fill="#64748b" font-weight="700">Solace Event Broker Type</text>
-    <rect x="40" y="184" width="220" height="26" fill="#e2e8f0" rx="5" stroke="#e2e8f0"/>
-    <rect x="40" y="184" width="130" height="26" fill="#7fd6bf" rx="5"/>
-    <text x="105" y="201" fill="#ffffff" font-weight="700" text-anchor="middle">Software / Cloud</text>
-    <text x="215" y="201" fill="#64748b" text-anchor="middle">Appliance</text>
+    <text x="40" y="170" font-size="11" fill="#64748b" font-weight="700">Solace Event Broker Type</text>
+    <rect x="40" y="176" width="220" height="22" fill="#e2e8f0" rx="5" stroke="#e2e8f0"/>
+    <rect x="40" y="176" width="130" height="22" fill="#7fd6bf" rx="5"/>
+    <text x="105" y="191" fill="#ffffff" font-weight="700" text-anchor="middle">Software / Cloud</text>
+    <text x="215" y="191" fill="#64748b" text-anchor="middle">Appliance</text>
     <circle cx="184" cy="145" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="184" y="149" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
     <rect x="390" y="120" width="350" height="140" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
     <text x="410" y="148" font-size="15" font-weight="700">Destination Broker</text>
-    <text x="410" y="176" font-size="11" fill="#64748b" font-weight="700">Solace Event Broker Type</text>
-    <rect x="410" y="184" width="220" height="26" fill="#e2e8f0" rx="5" stroke="#e2e8f0"/>
-    <rect x="410" y="184" width="130" height="26" fill="#7fd6bf" rx="5"/>
-    <text x="475" y="201" fill="#ffffff" font-weight="700" text-anchor="middle">Software / Cloud</text>
-    <text x="585" y="201" fill="#64748b" text-anchor="middle">Appliance</text>
-    <rect x="410" y="217" width="30" height="16" fill="#00C895" rx="8"/>
-    <circle cx="432" cy="225" r="6" fill="#ffffff"/>
-    <text x="448" y="229" font-size="11">Same Solace Broker as source</text>
-    <rect x="410" y="237" width="30" height="16" fill="#00C895" rx="8"/>
-    <circle cx="432" cy="245" r="6" fill="#ffffff"/>
-    <text x="448" y="249" font-size="11">Same Message VPN as source</text>
-    <circle cx="710" cy="236" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="710" y="240" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <text x="410" y="170" font-size="11" fill="#64748b" font-weight="700">Solace Event Broker Type</text>
+    <rect x="410" y="176" width="220" height="22" fill="#e2e8f0" rx="5" stroke="#e2e8f0"/>
+    <rect x="410" y="176" width="130" height="22" fill="#7fd6bf" rx="5"/>
+    <text x="475" y="191" fill="#ffffff" font-weight="700" text-anchor="middle">Software / Cloud</text>
+    <text x="585" y="191" fill="#64748b" text-anchor="middle">Appliance</text>
+    <text x="410" y="216" font-size="11" fill="#64748b" font-weight="700">Copy to</text>
+    <rect x="410" y="222" width="306" height="24" fill="#f1f5f9" rx="5" stroke="#e2e8f0"/>
+    <rect x="410" y="222" width="86" height="24" fill="#00C895" rx="5"/>
+    <text x="453" y="238" fill="#ffffff" font-weight="700" text-anchor="middle">This VPN</text>
+    <text x="548" y="238" fill="#64748b" text-anchor="middle">Another VPN</text>
+    <text x="658" y="238" fill="#64748b" text-anchor="middle">Another broker</text>
+    <circle cx="712" cy="194" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="712" y="198" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
     <rect x="20" y="272" width="350" height="58" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
     <text x="40" y="296" font-size="13" font-weight="700">Solace SEMP (Management)</text>
     <text x="40" y="316" font-size="11" fill="#64748b" font-style="italic">Host, Protocol, Port, URL Path, Username, Password</text>
@@ -73,12 +73,11 @@
     <circle cx="704" cy="496" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="704" y="500" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
     <text x="410" y="534" font-size="11" fill="#64748b" font-weight="700">Mode</text>
-    <circle cx="418" cy="556" r="6" fill="#ffffff" stroke="#00C895" stroke-width="1.5"/>
-    <circle cx="418" cy="556" r="3" fill="#00C895"/>
-    <text x="430" y="560" font-size="11">Copy</text>
-    <circle cx="490" cy="556" r="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
-    <text x="502" y="560" font-size="11">Move</text>
-    <text x="430" y="582" font-size="11" fill="#ef4444">(destructive -- removes from source)</text>
+    <text x="410" y="560" font-size="11" font-weight="700">Copy</text>
+    <rect x="446" y="547" width="34" height="18" fill="#cbd5e1" rx="9"/>
+    <circle cx="455" cy="556" r="7" fill="#ffffff"/>
+    <text x="488" y="560" font-size="11" fill="#64748b">Move</text>
+    <text x="410" y="582" font-size="11" fill="#ef4444">(destructive: removes from source)</text>
     <circle cx="712" cy="568" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="712" y="572" font-weight="700" fill="#ffffff" text-anchor="middle">8</text>
     <rect x="670" y="618" width="70" height="30" fill="#00C895" rx="5"/>

@@ -156,7 +156,7 @@ It is attached to every GitHub Release; open it from disk. It starts on the gate
 The passwords are fake. The **Demo controls** panel lists them too: click one to copy it, or use **Sign in as**. The
 panel opens on the first load in a browser tab, as in `demo.html`.
 
-In the Provisioned demo Queue Copy shows one Destination Connection card instead of the typed destination cards: sign in as operator, connect to east-prod / orders, untick Same Message VPN, pick the payments VPN and press Connect; the fake gateway dials the VPN's client credential and the demo broker answers. Operator may only write to `orders.*` on east-prod/orders, so the run gate refuses the other VPN's queues. The Direct demo (`demo.html`) keeps the typed destination cards.
+In the Provisioned demo Queue Copy shows one Destination Connection card instead of the typed destination cards: sign in as operator, connect to east-prod / orders, press Another VPN on the Copy to button, pick the payments VPN and press Connect; the fake gateway dials the VPN's client credential and the demo broker answers. Operator may only write to `orders.*` on east-prod/orders, so the run gate refuses the other VPN's queues. The Direct demo (`demo.html`) keeps the typed destination cards.
 
 ### Trying two-factor sign-in
 

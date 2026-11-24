@@ -24,6 +24,12 @@
  * login (the connections module's Managed panel). Another module that needs the
  * session ended asks that owner via `rbac:sign-out-requested` rather than
  * clearing the profile itself. See docs/architecture.md.
+ *
+ * The profile is set only while Provisioned is the live connection mode, in
+ * step with `AppState.managed`: the panel clears both when a Direct connection
+ * takes over, though the user stays signed in, and sets them again at the next
+ * Provisioned connect. So `isActive()` says the access rules apply, not merely
+ * that a gateway session exists.
  */
 import { generateUuid, sdkClientName } from '../utils';
 import { DEFAULT_MAX_MESSAGES_PER_QUEUE, PROVISIONED_SDK_CONNECT } from '../connections/defaults';
@@ -57,7 +63,7 @@ export interface ManagedProfileStore {
     // --- writer side (the module owning the managed login) ---
     /** Adopt a profile. Called on login AND refresh. */
     setProfile(profile: ManagedProfile): void;
-    /** Drop the profile (logout, or the Direct-connect interlock). */
+    /** Drop the profile (sign-out, or a Direct connection taking over: the panel's session then stands by). */
     clear(): void;
     /** Attach the gateway calls; the managed entry does this once at install. */
     attachDialer(dialer: ManagedDialer): void;
@@ -86,6 +92,23 @@ const SMF_PREFIX = '/managed/smf/';
 /** True when `e` is a dial the gateway refused because its session ended. */
 export function isSessionEnded(e: unknown): boolean {
     return Object(e).code === 'unauthenticated';
+}
+
+/**
+ * The provisioned names of the profile `get` returns (none while it returns
+ * null): what the store answers, and what the connections panel shows while
+ * its session stands by behind a Direct connection.
+ */
+export function provisionedNames(get: () => ManagedProfile | null): Pick<ManagedProfileStore, 'brokers' | 'vpnsFor'> {
+    return {
+        brokers(): string[] {
+            return (get()?.brokers ?? []).map(b => b.broker);
+        },
+        vpnsFor(broker: string): string[] {
+            const conn = get()?.brokers.find(b => b.broker === broker);
+            return conn ? conn.msgVpns.map(v => v.name) : [];
+        },
+    };
 }
 
 export function createManagedProfile(): ManagedProfileStore {
@@ -126,14 +149,7 @@ export function createManagedProfile(): ManagedProfileStore {
             return profile !== null;
         },
 
-        brokers(): string[] {
-            return (profile?.brokers ?? []).map(b => b.broker);
-        },
-
-        vpnsFor(broker: string): string[] {
-            const conn = profile?.brokers.find(b => b.broker === broker);
-            return conn ? conn.msgVpns.map(v => v.name) : [];
-        },
+        ...provisionedNames(() => profile),
 
         async dial(
             target: { broker: string; vpn?: string; kind: 'solace' | 'semp' },

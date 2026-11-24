@@ -405,12 +405,14 @@ describe('user-management — modules', () => {
     const pillIds = (c: HTMLElement) => pills(c).map(p => p.dataset.module);
     const menuIds = (c: HTMLElement) =>
         [...el(c, '#user-mgmt-module-menu').querySelectorAll<HTMLElement>('.user-mgmt-menu-item')].map(i => i.dataset.module);
-    const defaultRadio = (c: HTMLElement) => el<HTMLInputElement>(c, '#user-mgmt-modules-default');
-    const chooseRadio = (c: HTMLElement) => el<HTMLInputElement>(c, '#user-mgmt-modules-choose');
+    // The two parts of the Modules button; the pressed one is the choice.
+    const defaultPart = (c: HTMLElement) => el<HTMLButtonElement>(c, '#user-mgmt-modules-default');
+    const choosePart = (c: HTMLElement) => el<HTMLButtonElement>(c, '#user-mgmt-modules-choose');
+    const pressed = (part: HTMLButtonElement) => part.getAttribute('aria-pressed') === 'true';
     const addBtn = (c: HTMLElement) => el<HTMLButtonElement>(c, '#btn-user-mgmt-add-module');
-    /** Pick "Choose for this user" the way a click does: the radio checks, then change fires. */
+    /** Pick "Choose for this user" with a click. */
     function chooseForUser(c: HTMLElement): void {
-        chooseRadio(c).click();
+        choosePart(c).click();
     }
     function save(c: HTMLElement): void {
         el<HTMLButtonElement>(c, '#btn-user-mgmt-save').click();
@@ -421,8 +423,7 @@ describe('user-management — modules', () => {
     it('a new user starts on the deployment default: its modules named, pills without remove buttons, no Add module', async () => {
         const { container } = await setup();
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
-        expect(defaultRadio(container).checked).toBe(true);
-        expect(chooseRadio(container).checked).toBe(false);
+        expect([pressed(defaultPart(container)), pressed(choosePart(container))]).toEqual([true, false]);
         expect(el(container, '#user-mgmt-modules-default-hint').textContent).toBe('Queue Browser');
         expect(pillIds(container)).toEqual(['queue-browser']);
         expect(el(container, '#user-mgmt-modules').querySelector('.user-mgmt-pill-remove')).toBeNull();
@@ -435,7 +436,7 @@ describe('user-management — modules', () => {
         await UserManagementModule.install(makeCtx(container, ADMIN));
         await vi.waitFor(() => expect(rowCount(container)).toBe(2));
         clickRow(container, 1, '.user-mgmt-edit'); // viewer: ['queue-browser']
-        expect(chooseRadio(container).checked).toBe(true);
+        expect(pressed(choosePart(container))).toBe(true);
         expect(pillIds(container)).toEqual(['queue-browser']);
         expect(el(container, '#user-mgmt-modules').querySelectorAll('.user-mgmt-pill-remove')).toHaveLength(1);
         expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(false);
@@ -523,7 +524,7 @@ describe('user-management — modules', () => {
         svcMock.saveUser.mockResolvedValue(saved());
         clickRow(container, 0, '.user-mgmt-edit'); // admin: default
         chooseForUser(container);
-        expect(chooseRadio(container).checked).toBe(true);
+        expect(pressed(choosePart(container))).toBe(true);
         expect(pillIds(container)).toEqual(['queue-browser']);
         expect(el(container, '#user-mgmt-modules').querySelectorAll('.user-mgmt-pill-remove')).toHaveLength(1);
         expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(false);
@@ -537,7 +538,7 @@ describe('user-management — modules', () => {
         svcMock.saveUser.mockResolvedValue(saved());
         clickRow(container, 1, '.user-mgmt-edit'); // viewer: own list
         el<HTMLButtonElement>(container, '.user-mgmt-pill-remove').click();
-        defaultRadio(container).click();
+        defaultPart(container).click();
         expect(pillIds(container)).toEqual(['queue-browser']);
         expect(el(container, '#user-mgmt-modules').querySelector('.user-mgmt-pill-remove')).toBeNull();
         expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(true);

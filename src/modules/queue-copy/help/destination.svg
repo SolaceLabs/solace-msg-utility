@@ -9,14 +9,14 @@
     <text x="215" y="91" fill="#ffffff" font-weight="700" text-anchor="middle">Appliance</text>
     <circle cx="284" cy="87" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="284" y="91" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
-    <rect x="430" y="77" width="30" height="16" fill="#cbd5e1" rx="8"/>
-    <circle cx="438" cy="85" r="6" fill="#ffffff"/>
-    <text x="468" y="89" font-size="11">Same Solace Broker as source</text>
-    <rect x="430" y="97" width="30" height="16" fill="#e2e8f0" rx="8"/>
-    <circle cx="438" cy="105" r="6" fill="#ffffff"/>
-    <text x="468" y="109" font-size="11" fill="#64748b">Same Message VPN as source</text>
-    <circle cx="660" cy="94" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="660" y="98" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <text x="390" y="66" font-size="11" fill="#64748b" font-weight="700">Copy to</text>
+    <rect x="390" y="74" width="306" height="26" fill="#f1f5f9" rx="5" stroke="#e2e8f0"/>
+    <text x="433" y="91" fill="#64748b" text-anchor="middle">This VPN</text>
+    <text x="528" y="91" fill="#64748b" text-anchor="middle">Another VPN</text>
+    <rect x="580" y="74" width="116" height="26" fill="#00C895" rx="5"/>
+    <text x="638" y="91" fill="#ffffff" font-weight="700" text-anchor="middle">Another broker</text>
+    <circle cx="718" cy="87" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="718" y="91" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
     <rect x="20" y="132" width="720" height="200" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
     <text x="40" y="158" font-size="15" font-weight="700">Solace SEMP (Management)</text>
     <text x="40" y="182" font-size="11" fill="#64748b" font-weight="700">Management Host (IP or Hostname)</text>

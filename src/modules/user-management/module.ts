@@ -47,6 +47,7 @@
 import { required, setError } from '../../core/dom';
 import { createGate, gateOnAdminSession } from '../../core/components/module-gate';
 import { createRowList, renderAdminRows } from '../../core/components/row-list';
+import { createSegmented } from '../../core/segmented';
 import { iconButton } from '../../core/icons';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
@@ -94,9 +95,8 @@ export const UserManagementModule = {
             password: required<HTMLInputElement>(container, '#user-mgmt-password'),
             passwordHint: required<HTMLElement>(container, '#user-mgmt-password-hint'),
             admin: required<HTMLInputElement>(container, '#user-mgmt-admin'),
-            modulesDefault: required<HTMLInputElement>(container, '#user-mgmt-modules-default'),
+            modulesMode: required<HTMLElement>(container, '#user-mgmt-modules-mode'),
             modulesDefaultHint: required<HTMLElement>(container, '#user-mgmt-modules-default-hint'),
-            modulesChoose: required<HTMLInputElement>(container, '#user-mgmt-modules-choose'),
             modules: required<HTMLElement>(container, '#user-mgmt-modules'),
             moduleAdd: required<HTMLElement>(container, '#user-mgmt-module-add'),
             btnAddModule: required<HTMLButtonElement>(container, '#btn-user-mgmt-add-module'),
@@ -196,6 +196,17 @@ export const UserManagementModule = {
 
         // The user's own module list while "Choose for this user" is selected.
         let chosen: string[] = [];
+        // Deployment default, or a list of the user's own. Leaving the default
+        // starts that list from what the default grants; returning to it shows
+        // the default again.
+        const modulesMode = createSegmented<'default' | 'choose'>(els.modulesMode, {
+            attr: 'data-modules-mode',
+            choices: ['default', 'choose'],
+            onChange: (mode) => {
+                if (mode === 'choose') chosen = grantedModules(null, choices);
+                renderModules();
+            },
+        });
 
         function closeMenu(): void {
             els.moduleMenu.classList.add('hidden');
@@ -252,7 +263,7 @@ export const UserManagementModule = {
          * offered modules not yet in it.
          */
         function renderModules(): void {
-            const useDefault = els.modulesDefault.checked;
+            const useDefault = modulesMode.value() === 'default';
             const given = grantedModules(null, choices);
             els.modulesDefaultHint.textContent = given.length ? given.map(moduleLabel).join(', ') : 'no modules';
             const shown = useDefault ? given : chosen;
@@ -274,8 +285,7 @@ export const UserManagementModule = {
         /** Selects the deployment default (own = null) or the user's own list, and draws it. */
         function setModules(own: string[] | null): void {
             chosen = own ?? [];
-            els.modulesDefault.checked = own === null;
-            els.modulesChoose.checked = own !== null;
+            modulesMode.set(own === null ? 'default' : 'choose');
             renderModules();
         }
 
@@ -337,7 +347,7 @@ export const UserManagementModule = {
                 admin: els.admin.checked,
                 operate: operateList.readRows() as unknown as QGlob[],
                 readOnly: readonlyList.readRows() as unknown as QGlob[],
-                modules: els.modulesDefault.checked ? null : [...chosen],
+                modules: modulesMode.value() === 'default' ? null : [...chosen],
                 rev: editingRev,
             };
             els.btnSave.disabled = true;
@@ -435,13 +445,6 @@ export const UserManagementModule = {
         els.btnCancel.addEventListener('click', () => showView('list'));
         els.btnAddOperate.addEventListener('click', () => operateList.addRow());
         els.btnAddReadonly.addEventListener('click', () => readonlyList.addRow());
-        // Leaving the default starts the user's own list from what the
-        // default grants; returning to it shows the default again.
-        els.modulesDefault.addEventListener('change', renderModules);
-        els.modulesChoose.addEventListener('change', () => {
-            chosen = grantedModules(null, choices);
-            renderModules();
-        });
         els.btnAddModule.addEventListener('click', () => {
             const open = els.moduleMenu.classList.toggle('hidden') === false;
             els.btnAddModule.setAttribute('aria-expanded', String(open));

@@ -93,18 +93,14 @@ export const ConnectionsModule = {
 
         // 2. The Direct form first, so its factory pair is created before the
         //    panel's; then the Provisioned panel, only when that tab is offered.
-        //    Only one mode may be live: each tears the other down before it
-        //    connects.
-        const direct = installDirect(app, { onBeforeConnect: tearDownManaged });
+        //    Only one mode may be live: each closes the other's connection
+        //    before it connects. A Direct connect makes the Provisioned session
+        //    stand by, so RBAC (which keys off appState.managed) cannot leak
+        //    onto a Direct session, and the user stays signed in.
+        const direct = installDirect(app, { onBeforeConnect: () => managedPanel?.standBy() });
         const managedPanel = tabs.includes('provisioned')
             ? createManagedPanel(app, { tearDownOther: () => direct.disconnect() })
             : null;
-        /** Drop a managed session before a Direct connect, so RBAC (which keys
-         *  off appState.managed) can't leak onto a direct session. Also the
-         *  answer to `rbac:sign-out-requested` (router below). */
-        function tearDownManaged(): void {
-            if (appState.managed) managedPanel?.logout();
-        }
         // A gateway session survives a page reload (and a sign-in on /login
         // lands here): adopt it and open the Provisioned tab.
         if (managedPanel && await managedPanel.restore()) tabBar.show('provisioned');
@@ -126,8 +122,22 @@ export const ConnectionsModule = {
 
         // End the managed session on request (user-management, after a change
         // to the signed-in admin's own account, or any admin module on a 401).
-        // Same teardown as the Direct-connect interlock; no-op without a session.
-        eventBus.on('rbac:sign-out-requested', tearDownManaged);
+        // No-op without a session.
+        eventBus.on('rbac:sign-out-requested', () => managedPanel?.logout());
+
+        // 4. Each tab says when its Connect will close the other mode's
+        //    connection. The open connection is Provisioned's while
+        //    appState.managed is set, else the Direct form's.
+        const noteDirect = required<HTMLElement>(container, '#conn-note-direct');
+        const noteManaged = required<HTMLElement>(container, '#conn-note-managed');
+        const showNotes = (): void => {
+            const open = appState.isConnected || appState.isSempConnected;
+            noteDirect.classList.toggle('hidden', !open || !appState.managed);
+            noteManaged.classList.toggle('hidden', !open || !managedPanel?.standingBy());
+        };
+        for (const change of ['client:connected', 'client:disconnected', 'semp:connected', 'semp:disconnected', 'rbac:changed'] as const) {
+            eventBus.on(change, showNotes);
+        }
 
         eventBus.on('connection:check-connection', (payload) => {
             if (appState.managed && managedPanel) {

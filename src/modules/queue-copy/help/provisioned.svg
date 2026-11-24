@@ -19,14 +19,14 @@
     <text x="265.28" y="138" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
     <rect x="390" y="16" width="350" height="100" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
     <text x="410" y="44" font-size="15" font-weight="700">Destination Broker</text>
-    <rect x="410" y="58" width="30" height="16" fill="#00C895" rx="8"/>
-    <circle cx="432" cy="66" r="6" fill="#ffffff"/>
-    <text x="448" y="70" font-size="11">Same Solace Broker as source</text>
-    <rect x="410" y="82" width="30" height="16" fill="#cbd5e1" rx="8"/>
-    <circle cx="418" cy="90" r="6" fill="#ffffff"/>
-    <text x="448" y="94" font-size="11">Same Message VPN as source</text>
-    <circle cx="710" cy="76" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="710" y="80" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <text x="410" y="66" font-size="11" fill="#64748b" font-weight="700">Copy to</text>
+    <rect x="410" y="72" width="306" height="26" fill="#f1f5f9" rx="5" stroke="#e2e8f0"/>
+    <text x="453" y="89" fill="#64748b" text-anchor="middle">This VPN</text>
+    <rect x="496" y="72" width="104" height="26" fill="#00C895" rx="5"/>
+    <text x="548" y="89" fill="#ffffff" font-weight="700" text-anchor="middle">Another VPN</text>
+    <text x="658" y="89" fill="#64748b" text-anchor="middle">Another broker</text>
+    <circle cx="712" cy="40" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="712" y="44" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
     <rect x="390" y="128" width="350" height="186" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
     <text x="410" y="156" font-size="15" font-weight="700">Destination Connection</text>
     <text x="410" y="186" font-size="11" fill="#64748b" font-weight="700">Broker</text>

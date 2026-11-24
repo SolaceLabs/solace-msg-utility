@@ -12,12 +12,12 @@
     <ol class="manual-callouts">
         <li><strong>Important Considerations</strong>: what to know before you run a copy. They are listed in full under "Before you move messages".</li>
         <li>The source cards. They show the connection you made on the Connections page and cannot be edited here. Each has an <strong>Edit in Connections</strong> button that takes you back to that page.</li>
-        <li><strong>Destination Broker</strong>, with the broker type and its two shortcuts, each a switch: <strong>Same Solace Broker as source</strong> and <strong>Same Message VPN as source</strong>.</li>
+        <li><strong>Destination Broker</strong>, with the broker type and the <strong>Copy to</strong> button: <strong>This VPN</strong>, <strong>Another VPN</strong> or <strong>Another broker</strong>.</li>
         <li>The destination's <strong>Solace SEMP (Management)</strong> and <strong>Solace Messaging (Client)</strong> cards.</li>
         <li><strong>Source Queue</strong>: the queue to read from. The magnifier button, when it is shown, picks the queue from a list.</li>
         <li>The <strong>Queue</strong> or <strong>Topic</strong> switch: what the messages go to.</li>
         <li>The name of the destination queue or topic. The magnifier button, when it is shown, picks a queue from a list.</li>
-        <li><strong>Mode</strong>: <strong>Copy</strong> or <strong>Move</strong>.</li>
+        <li><strong>Mode</strong>: a switch between <strong>Copy</strong> and <strong>Move</strong>.</li>
         <li><strong>Next</strong>: opens the Confirm Queue Copy dialog.</li>
     </ol>
 
@@ -49,30 +49,30 @@
     <h3>The destination connection</h3>
     <p>The destination is where the messages go. It can be the connection you already have, another Message VPN on the same broker, or another broker. What the page shows for it depends on how you connected.</p>
 
-    <h4>The two shortcuts</h4>
-    <p>The <strong>Destination Broker</strong> card holds the two shortcuts. Each is a switch, and both are on when the page opens.</p>
+    <h4>The Copy to button</h4>
+    <p>The <strong>Destination Broker</strong> card holds the <strong>Copy to</strong> button. It has three parts, and the pressed one is your choice. <strong>This VPN</strong> is pressed when the page opens. A line under the button says what the choice leaves you to fill in.</p>
     <table>
         <thead>
-            <tr><th>Same Solace Broker</th><th>Same Message VPN</th><th>What it means</th></tr>
+            <tr><th>Copy to</th><th>What it means</th></tr>
         </thead>
         <tbody>
-            <tr><td>On</td><td>On</td><td>The destination is your client connection itself. The destination boxes are filled in and locked, and there is nothing to connect.</td></tr>
-            <tr><td>On</td><td>Off</td><td>Another Message VPN on the same broker. The broker and SEMP boxes are filled in and locked, and the destination uses your SEMP connection. The Message VPN, username and password boxes are yours to fill in, and the Messaging card needs its own <strong>Connect</strong>.</td></tr>
-            <tr><td>Off</td><td>Off, locked</td><td>Another broker. Every box is yours to fill in, and both cards need their own <strong>Connect</strong>.</td></tr>
+            <tr><td><strong>This VPN</strong></td><td>The destination is your client connection itself. The destination boxes are filled in and locked, and there is nothing to connect.</td></tr>
+            <tr><td><strong>Another VPN</strong></td><td>Another Message VPN on the same broker. The broker and SEMP boxes are filled in and locked, and the destination uses your SEMP connection. The Message VPN, username and password boxes are yours to fill in, and the Messaging card needs its own <strong>Connect</strong>.</td></tr>
+            <tr><td><strong>Another broker</strong></td><td>Another broker. Every box is yours to fill in, and both cards need their own <strong>Connect</strong>.</td></tr>
         </tbody>
     </table>
-    <p>Changing either shortcut closes any destination connection you opened and empties the destination password boxes, so you start from a clean slate. While the destination's messaging connection is being made, both shortcuts are locked, and their tooltip says <strong>Locked while the destination connects.</strong></p>
+    <p>Changing the choice closes any destination connection you opened and empties the destination password boxes, so you start from a clean slate. While the destination's messaging connection is being made, the button is locked, and its tooltip says <strong>Locked while the destination connects.</strong></p>
     <p>When the page is served over <code>https://</code> without the gateway, the Protocol lists on the destination cards offer only <code>https://</code> and <code>wss://</code>, as on the Connections page.</p>
 
     <h4>Typed details</h4>
     <p>If you connected on the Connections page by typing the broker's details, the destination has the cards below. Fill in the ones the table above says are yours.</p>
     <figure class="manual-figure">
-        <img src="help/destination.svg" width="760" height="558" alt="The destination cards for another broker, an appliance: the broker type and the two shortcuts, the SEMP card with its Management Host and a Connect button, and the Client card with its Messaging Host, showing a live connection.">
+        <img src="help/destination.svg" width="760" height="558" alt="The destination cards for another broker, an appliance: the broker type and the Copy to button, the SEMP card with its Management Host and a Connect button, and the Client card with its Messaging Host, showing a live connection.">
         <figcaption>A destination on another broker, an appliance: SEMP not yet connected, the messaging connection up.</figcaption>
     </figure>
     <ol class="manual-callouts">
         <li><strong>Solace Event Broker Type</strong>: <strong>Software / Cloud</strong> or <strong>Appliance</strong>. Here it is an appliance, so each card has a host of its own.</li>
-        <li>The two shortcuts. Here both are off, so <strong>Same Message VPN as source</strong> is locked.</li>
+        <li>The <strong>Copy to</strong> button. Here <strong>Another broker</strong> is pressed.</li>
         <li><strong>Solace SEMP (Management)</strong>: the host, Protocol, Port, URL Path, Username and Password, with a <strong>Connect</strong> button and a status line.</li>
         <li><strong>Solace Messaging (Client)</strong>: the host, Protocol, Port, URL Path, Message VPN, Username and Password, with a <strong>Connect</strong> button, shown as <strong>Disconnect</strong> while connected, and a status line.</li>
     </ol>
@@ -86,7 +86,7 @@
     <p>The page checks what you typed before it connects. A SEMP username or password the broker would refuse, or a client username with a character the broker does not allow, is refused with the reason on the card. If the broker rejects the details, the card says so in red: <strong>SEMP authentication failed (401).</strong>, <strong>SEMP error:</strong> followed by the reason, or <strong>Connection failed:</strong> followed by the reason.</p>
 
     <h4>The Destination Connection card</h4>
-    <p>If you are signed in to a gateway, you type no addresses and no passwords. On the source side, one card, <strong>Source Connection</strong>, shows the connection you have. On the destination side, the broker type and both cards give way to one card, <strong>Destination Connection</strong>. The two shortcuts stay.</p>
+    <p>If you are signed in to a gateway, you type no addresses and no passwords. On the source side, one card, <strong>Source Connection</strong>, shows the connection you have. On the destination side, the broker type and both cards give way to one card, <strong>Destination Connection</strong>. The <strong>Copy to</strong> button stays.</p>
     <figure class="manual-figure">
         <img src="help/provisioned.svg" width="760" height="330" alt="Queue Copy in a signed-in session: on the left the Source Connection card with a locked Broker list and Message VPN list and an Edit in Connections button; on the right the Destination Broker card with its two switches, and under it the Destination Connection card with a locked Broker list, a Message VPN list, a Disconnect button and a status line.">
         <figcaption>A signed-in session copying to another Message VPN on the same broker, connected.</figcaption>
@@ -94,19 +94,19 @@
     <ol class="manual-callouts">
         <li><strong>Source Connection</strong>: the broker and Message VPN of the connection you made on the Connections page. Both lists are locked, and the line under them names the two.</li>
         <li><strong>Edit in Connections</strong>: takes you to the Connections page, where you change the connection.</li>
-        <li>The two shortcuts. Here <strong>Same Solace Broker as source</strong> is on and <strong>Same Message VPN as source</strong> is off: another Message VPN on the same broker.</li>
-        <li><strong>Broker</strong>: the brokers your account may use. While <strong>Same Solace Broker as source</strong> is on, it shows the source's broker and is locked, so only the Message VPN is yours to choose.</li>
+        <li>The <strong>Copy to</strong> button. Here <strong>Another VPN</strong> is pressed: another Message VPN on the same broker.</li>
+        <li><strong>Broker</strong>: the brokers your account may use. Unless <strong>Another broker</strong> is pressed, it shows the source's broker and is locked, so only the Message VPN is yours to choose.</li>
         <li><strong>Message VPN</strong>: the Message VPNs your account may use on the chosen broker.</li>
         <li><strong>Connect</strong>, which reads <strong>Connecting...</strong> and is off while it works, and <strong>Disconnect</strong> once connected.</li>
         <li>The status line. While connecting it names the step: <strong>Connecting SEMP (management)</strong> or <strong>Connecting messaging (client)</strong>, with the broker and Message VPN. When connected it names the broker and the Message VPN.</li>
     </ol>
     <ol class="manual-steps">
-        <li>Choose a <strong>Broker</strong>, unless <strong>Same Solace Broker as source</strong> is on, and a <strong>Message VPN</strong>.</li>
+        <li>Choose a <strong>Broker</strong>, when <strong>Another broker</strong> is pressed, and a <strong>Message VPN</strong>.</li>
         <li>Press <strong>Connect</strong>. The gateway supplies the credentials. When the broker is not the source's, the card opens a SEMP connection for the destination as well as the messaging connection. When it is the source's, only the messaging connection is opened.</li>
         <li>Wait for the card to show the broker and VPN. The card is connected only when everything it needs is up.</li>
     </ol>
     <p>If the connect fails, the card shows one line for each part that failed, <strong>SEMP (management)</strong> or <strong>Messaging (client)</strong>, and says when a part came up and was closed again because the other failed. Each failure is also added in full to the notification bell. If the destination has no connection available to your account, the card says <strong>No connections are available for your account. Ask an administrator to grant access.</strong></p>
-    <p>While <strong>Same Solace Broker as source</strong> and <strong>Same Message VPN as source</strong> are both on, the card is replaced by a note saying that the destination is the source connection: nothing to connect. While a connect is running, the card's lists and the two shortcuts are locked. If the destination on show changes before the connection comes up, for example because a refresh of your entitlements removes the Message VPN you chose, the late connection is dropped and the card says <strong>The destination changed while connecting. Connect again.</strong></p>
+    <p>While <strong>This VPN</strong> is pressed, the card is replaced by a note saying that the destination is the source connection: nothing to connect. While a connect is running, the card's lists and the <strong>Copy to</strong> button are locked. If the destination on show changes before the connection comes up, for example because a refresh of your entitlements removes the Message VPN you chose, the late connection is dropped and the card says <strong>The destination changed while connecting. Connect again.</strong></p>
     <p>If your sign-in changes to or from a signed-in session while the page is open, any destination connection and the target you chose are dropped. The same happens to the destination queue you chose when a refresh of your entitlements removes the Message VPN of a connected destination: the <strong>Queue name</strong> box is emptied, so you cannot start a run against it.</p>
     <p>The card's connection is one unit: if its messaging connection drops, its SEMP connection is closed with it, and <strong>Disconnect</strong> closes both.</p>
     <aside class="manual-note" data-kind="important">
@@ -118,7 +118,7 @@
     <ol class="manual-steps">
         <li>Use the switch at the top of the card to choose <strong>Queue</strong> or <strong>Topic</strong>. The box under it is labelled <strong>Queue name</strong> or <strong>Topic</strong> to match.</li>
         <li>Type the name. For a queue the magnifier button opens the picker. It is shown only when the page can list the queues of the destination: the SEMP connection is up for the same broker, or the destination's own SEMP connection is up for another one. A topic has no list, so the button is hidden.</li>
-        <li>If you pick a queue from another Message VPN than the destination's, the destination's Message VPN box takes that VPN. If <strong>Same Message VPN as source</strong> was on, it is switched off. You then connect to it as usual.</li>
+        <li>If you pick a queue from another Message VPN than the destination's, the destination's Message VPN box takes that VPN. If <strong>This VPN</strong> was pressed, the choice becomes <strong>Another VPN</strong>. You then connect to it as usual.</li>
     </ol>
     <p>The page checks the name as you type, with the rules the messaging library applies when it publishes. A name that breaks one is marked, the reason appears under the box, and <strong>Next</strong> stays off.</p>
     <table>
@@ -134,7 +134,7 @@
     </table>
 
     <h3>Copy or Move</h3>
-    <p><strong>Mode</strong> sits at the bottom of the <strong>Destination</strong> card.</p>
+    <p><strong>Mode</strong> sits at the bottom of the <strong>Destination</strong> card: a switch with <strong>Copy</strong> on its left and <strong>Move</strong> on its right. The side in bold is the mode.</p>
     <table>
         <thead>
             <tr><th>Mode</th><th>What happens</th></tr>
@@ -150,7 +150,7 @@
     <ul>
         <li>the source queue has a name;</li>
         <li>the destination has a name that passes the rules above;</li>
-        <li>the destination is ready: <strong>Same Message VPN as source</strong> is on, or the destination's Messaging connection is up.</li>
+        <li>the destination is ready: <strong>This VPN</strong> is pressed, or the destination's Messaging connection is up.</li>
     </ul>
     <p>If you disconnect the client connection, the page returns to <strong>Connection Required</strong>.</p>
 

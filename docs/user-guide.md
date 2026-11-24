@@ -666,12 +666,12 @@ The **SEMP connection** is not required, but it helps. With it, the magnifier bu
 
 1. **Important Considerations**: what to know before you run a copy. They are listed in full under "Before you move messages".
 2. The source cards. They show the connection you made on the Connections page and cannot be edited here. Each has an **Edit in Connections** button that takes you back to that page.
-3. **Destination Broker**, with the broker type and its two shortcuts, each a switch: **Same Solace Broker as source** and **Same Message VPN as source**.
+3. **Destination Broker**, with the broker type and the **Copy to** button: **This VPN**, **Another VPN** or **Another broker**.
 4. The destination's **Solace SEMP (Management)** and **Solace Messaging (Client)** cards.
 5. **Source Queue**: the queue to read from. The magnifier button, when it is shown, picks the queue from a list.
 6. The **Queue** or **Topic** switch: what the messages go to.
 7. The name of the destination queue or topic. The magnifier button, when it is shown, picks a queue from a list.
-8. **Mode**: **Copy** or **Move**.
+8. **Mode**: a switch between **Copy** and **Move**.
 9. **Next**: opens the Confirm Queue Copy dialog.
 
 ### The source
@@ -703,17 +703,17 @@ In a signed-in session the lists hold only what you are entitled to see. The des
 
 The destination is where the messages go. It can be the connection you already have, another Message VPN on the same broker, or another broker. What the page shows for it depends on how you connected.
 
-#### The two shortcuts
+#### The Copy to button
 
-The **Destination Broker** card holds the two shortcuts. Each is a switch, and both are on when the page opens.
+The **Destination Broker** card holds the **Copy to** button. It has three parts, and the pressed one is your choice. **This VPN** is pressed when the page opens. A line under the button says what the choice leaves you to fill in.
 
-| Same Solace Broker | Same Message VPN | What it means |
-| --- | --- | --- |
-| On | On | The destination is your client connection itself. The destination boxes are filled in and locked, and there is nothing to connect. |
-| On | Off | Another Message VPN on the same broker. The broker and SEMP boxes are filled in and locked, and the destination uses your SEMP connection. The Message VPN, username and password boxes are yours to fill in, and the Messaging card needs its own **Connect**. |
-| Off | Off, locked | Another broker. Every box is yours to fill in, and both cards need their own **Connect**. |
+| Copy to | What it means |
+| --- | --- |
+| **This VPN** | The destination is your client connection itself. The destination boxes are filled in and locked, and there is nothing to connect. |
+| **Another VPN** | Another Message VPN on the same broker. The broker and SEMP boxes are filled in and locked, and the destination uses your SEMP connection. The Message VPN, username and password boxes are yours to fill in, and the Messaging card needs its own **Connect**. |
+| **Another broker** | Another broker. Every box is yours to fill in, and both cards need their own **Connect**. |
 
-Changing either shortcut closes any destination connection you opened and empties the destination password boxes, so you start from a clean slate. While the destination's messaging connection is being made, both shortcuts are locked, and their tooltip says **Locked while the destination connects.**
+Changing the choice closes any destination connection you opened and empties the destination password boxes, so you start from a clean slate. While the destination's messaging connection is being made, the button is locked, and its tooltip says **Locked while the destination connects.**
 
 When the page is served over `https://` without the gateway, the Protocol lists on the destination cards offer only `https://` and `wss://`, as on the Connections page.
 
@@ -721,12 +721,12 @@ When the page is served over `https://` without the gateway, the Protocol lists 
 
 If you connected on the Connections page by typing the broker's details, the destination has the cards below. Fill in the ones the table above says are yours.
 
-![The destination cards for another broker, an appliance: the broker type and the two shortcuts, the SEMP card with its Management Host and a Connect button, and the Client card with its Messaging Host, showing a live connection.](../src/modules/queue-copy/help/destination.svg)
+![The destination cards for another broker, an appliance: the broker type and the Copy to button, the SEMP card with its Management Host and a Connect button, and the Client card with its Messaging Host, showing a live connection.](../src/modules/queue-copy/help/destination.svg)
 
 *Figure 2. A destination on another broker, an appliance: SEMP not yet connected, the messaging connection up.*
 
 1. **Solace Event Broker Type**: **Software / Cloud** or **Appliance**. Here it is an appliance, so each card has a host of its own.
-2. The two shortcuts. Here both are off, so **Same Message VPN as source** is locked.
+2. The **Copy to** button. Here **Another broker** is pressed.
 3. **Solace SEMP (Management)**: the host, Protocol, Port, URL Path, Username and Password, with a **Connect** button and a status line.
 4. **Solace Messaging (Client)**: the host, Protocol, Port, URL Path, Message VPN, Username and Password, with a **Connect** button, shown as **Disconnect** while connected, and a status line.
 
@@ -742,7 +742,7 @@ The page checks what you typed before it connects. A SEMP username or password t
 
 #### The Destination Connection card
 
-If you are signed in to a gateway, you type no addresses and no passwords. On the source side, one card, **Source Connection**, shows the connection you have. On the destination side, the broker type and both cards give way to one card, **Destination Connection**. The two shortcuts stay.
+If you are signed in to a gateway, you type no addresses and no passwords. On the source side, one card, **Source Connection**, shows the connection you have. On the destination side, the broker type and both cards give way to one card, **Destination Connection**. The **Copy to** button stays.
 
 ![Queue Copy in a signed-in session: on the left the Source Connection card with a locked Broker list and Message VPN list and an Edit in Connections button; on the right the Destination Broker card with its two switches, and under it the Destination Connection card with a locked Broker list, a Message VPN list, a Disconnect button and a status line.](../src/modules/queue-copy/help/provisioned.svg)
 
@@ -750,19 +750,19 @@ If you are signed in to a gateway, you type no addresses and no passwords. On th
 
 1. **Source Connection**: the broker and Message VPN of the connection you made on the Connections page. Both lists are locked, and the line under them names the two.
 2. **Edit in Connections**: takes you to the Connections page, where you change the connection.
-3. The two shortcuts. Here **Same Solace Broker as source** is on and **Same Message VPN as source** is off: another Message VPN on the same broker.
-4. **Broker**: the brokers your account may use. While **Same Solace Broker as source** is on, it shows the source's broker and is locked, so only the Message VPN is yours to choose.
+3. The **Copy to** button. Here **Another VPN** is pressed: another Message VPN on the same broker.
+4. **Broker**: the brokers your account may use. Unless **Another broker** is pressed, it shows the source's broker and is locked, so only the Message VPN is yours to choose.
 5. **Message VPN**: the Message VPNs your account may use on the chosen broker.
 6. **Connect**, which reads **Connecting...** and is off while it works, and **Disconnect** once connected.
 7. The status line. While connecting it names the step: **Connecting SEMP (management)** or **Connecting messaging (client)**, with the broker and Message VPN. When connected it names the broker and the Message VPN.
 
-1. Choose a **Broker**, unless **Same Solace Broker as source** is on, and a **Message VPN**.
+1. Choose a **Broker**, when **Another broker** is pressed, and a **Message VPN**.
 2. Press **Connect**. The gateway supplies the credentials. When the broker is not the source's, the card opens a SEMP connection for the destination as well as the messaging connection. When it is the source's, only the messaging connection is opened.
 3. Wait for the card to show the broker and VPN. The card is connected only when everything it needs is up.
 
 If the connect fails, the card shows one line for each part that failed, **SEMP (management)** or **Messaging (client)**, and says when a part came up and was closed again because the other failed. Each failure is also added in full to the notification bell. If the destination has no connection available to your account, the card says **No connections are available for your account. Ask an administrator to grant access.**
 
-While **Same Solace Broker as source** and **Same Message VPN as source** are both on, the card is replaced by a note saying that the destination is the source connection: nothing to connect. While a connect is running, the card's lists and the two shortcuts are locked. If the destination on show changes before the connection comes up, for example because a refresh of your entitlements removes the Message VPN you chose, the late connection is dropped and the card says **The destination changed while connecting. Connect again.**
+While **This VPN** is pressed, the card is replaced by a note saying that the destination is the source connection: nothing to connect. While a connect is running, the card's lists and the **Copy to** button are locked. If the destination on show changes before the connection comes up, for example because a refresh of your entitlements removes the Message VPN you chose, the late connection is dropped and the card says **The destination changed while connecting. Connect again.**
 
 If your sign-in changes to or from a signed-in session while the page is open, any destination connection and the target you chose are dropped. The same happens to the destination queue you chose when a refresh of your entitlements removes the Message VPN of a connected destination: the **Queue name** box is emptied, so you cannot start a run against it.
 
@@ -777,7 +777,7 @@ The **Destination** card says what the messages go to.
 
 1. Use the switch at the top of the card to choose **Queue** or **Topic**. The box under it is labelled **Queue name** or **Topic** to match.
 2. Type the name. For a queue the magnifier button opens the picker. It is shown only when the page can list the queues of the destination: the SEMP connection is up for the same broker, or the destination's own SEMP connection is up for another one. A topic has no list, so the button is hidden.
-3. If you pick a queue from another Message VPN than the destination's, the destination's Message VPN box takes that VPN. If **Same Message VPN as source** was on, it is switched off. You then connect to it as usual.
+3. If you pick a queue from another Message VPN than the destination's, the destination's Message VPN box takes that VPN. If **This VPN** was pressed, the choice becomes **Another VPN**. You then connect to it as usual.
 
 The page checks the name as you type, with the rules the messaging library applies when it publishes. A name that breaks one is marked, the reason appears under the box, and **Next** stays off.
 
@@ -790,7 +790,7 @@ The page checks the name as you type, with the rules the messaging library appli
 
 ### Copy or Move
 
-**Mode** sits at the bottom of the **Destination** card.
+**Mode** sits at the bottom of the **Destination** card: a switch with **Copy** on its left and **Move** on its right. The side in bold is the mode.
 
 | Mode | What happens |
 | --- | --- |
@@ -803,7 +803,7 @@ The page checks the name as you type, with the rules the messaging library appli
 
 - the source queue has a name;
 - the destination has a name that passes the rules above;
-- the destination is ready: **Same Message VPN as source** is on, or the destination's Messaging connection is up.
+- the destination is ready: **This VPN** is pressed, or the destination's Messaging connection is up.
 
 If you disconnect the client connection, the page returns to **Connection Required**.
 
@@ -1004,7 +1004,9 @@ The tabs appear only when your deployment offers both ways to connect. **Direct*
 The deployment decides which tab opens first. After you sign in, the **Provisioned** tab opens. When the gateway offers only Provisioned connections, opening the app takes you straight to the gateway's sign-in page.
 
 > [!IMPORTANT]
-> Only one way of connecting is live at a time. Connecting on the Direct tab ends your Provisioned session and signs you out. Connecting on the Provisioned tab closes a Direct connection. Moving between the tabs changes nothing: only **Connect** does.
+> Only one way of connecting is live at a time. Connecting on the Direct tab closes your Provisioned connection. You stay signed in, and the Provisioned tab keeps your brokers, but while the Direct connection is in use the rules of your account do not apply: the sidebar and the queue lists are those of a Direct connection. Connecting on the Provisioned tab closes a Direct connection and brings your account's rules back. Moving between the tabs changes nothing: only **Connect** does.
+
+Each tab warns you before its **Connect** closes the other connection. The Direct tab shows `A Provisioned connection is open. Connect here closes it, and you stay signed in.` The Provisioned tab shows `A Direct connection is open. Connect here closes it.` When you press **Connect** on the Provisioned tab then, the gateway is first asked whether your session still stands. If it has ended, the Direct connection is left alone and the tab returns to the **Sign in** card.
 
 If the page cannot tell whether the gateway serves it, it shows **Could not check whether this page is served by the gateway.** in place of the panels. Press **Retry** to ask again.
 
@@ -1520,14 +1522,14 @@ An empty list says `No users.` A search that finds nothing says `No users match 
 
 ### The account card
 
-![The user form for alice: the account card with username, password and Administrator switch, and the Modules card with two radio buttons, two module pills and an Add module button.](../src/modules/user-management/help/form-account.svg)
+![The user form for alice: the account card with username, password and Administrator switch, and the Modules card with its two-part button, two module pills and an Add module button.](../src/modules/user-management/help/form-account.svg)
 
 *Figure 2. The first two cards of the user form, here editing alice with a list of modules of her own.*
 
 1. **Username**. You type it when you add a user. When you edit a user, it is fixed.
 2. **Password**, with a hint after its name: `(required)` when you add a user, `(leave blank to keep current)` when you edit one.
 3. The **Administrator** switch.
-4. The two choices for the user's modules: **Deployment default** and **Choose for this user**.
+4. The button for the user's modules, with two parts: **Deployment default** and **Choose for this user**. The pressed part is the choice, and the line under it names what the default gives.
 5. The modules the user may open, each as a pill.
 6. **+ Add module**, which lists the modules you can still add.
 
@@ -1561,12 +1563,12 @@ The **Modules** card sets which pages of the app a user may open: Queue Browser,
 
 | Choice | What it does |
 | --- | --- |
-| **Deployment default:** | The user gets what Gateway Settings give everyone. The modules it gives are named after the label (or `no modules`) and shown as pills without a remove button. This is the choice for a user you add. If the settings change, so does what this user gets. |
+| **Deployment default** | The user gets what Gateway Settings give everyone. The modules it gives are named in the line under the button (or `no modules`) and shown as pills without a remove button. This is the choice for a user you add. If the settings change, so does what this user gets. |
 | **Choose for this user** | The user has a list of their own. It starts as what the default gives. Each module is a pill with a remove button, named for screen readers `Remove Queue Browser` and so on. **+ Add module** opens a menu of the offered modules that are not in the list yet; pick one to add it, and press <kbd>Esc</kbd> to close the menu. The button is disabled when nothing is left to add. An empty list reads `No modules.` |
 
 A pill marked `not offered` is a module the gateway does not offer. It has no effect until Gateway Settings offer it, and you can remove it. The gateway never gives a user a module it does not offer.
 
-When you select **Deployment default** again, the user's own list is dropped on save.
+When you press **Deployment default** again, the user's own list is dropped on save.
 
 ### Entitlements
 

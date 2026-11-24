@@ -45,15 +45,13 @@
     <div class="card">
         <h2 class="card-title mb-4">Modules</h2>
         <p class="user-mgmt-hint text-secondary mb-2">The app modules this user may open.</p>
-        <div class="flex-col gap-2">
-            <label class="flex-row items-center gap-2 m-0">
-                <input type="radio" name="user-mgmt-modules-mode" id="user-mgmt-modules-default"> Deployment default:
-                <span id="user-mgmt-modules-default-hint" class="text-secondary"></span>
-            </label>
-            <label class="flex-row items-center gap-2 m-0">
-                <input type="radio" name="user-mgmt-modules-mode" id="user-mgmt-modules-choose"> Choose for this user
-            </label>
+        <div>
+            <div class="segmented" id="user-mgmt-modules-mode" role="group" aria-label="Modules">
+                <button type="button" class="segmented-option" id="user-mgmt-modules-default" data-modules-mode="default" aria-pressed="true">Deployment default</button>
+                <button type="button" class="segmented-option" id="user-mgmt-modules-choose" data-modules-mode="choose" aria-pressed="false">Choose for this user</button>
+            </div>
         </div>
+        <p class="user-mgmt-hint text-secondary mt-2">Deployment default: <span id="user-mgmt-modules-default-hint"></span></p>
         <div id="user-mgmt-modules" class="user-mgmt-pills mt-2"></div>
         <div id="user-mgmt-module-add" class="user-mgmt-menu-wrap mt-2">
             <button type="button" id="btn-user-mgmt-add-module" class="btn btn-secondary btn-sm"

@@ -816,7 +816,7 @@ describe('queue-copy/ui-modal', () => {
             const session = createSessionMock();
             (session.createQueueBrowser as any).mockReturnValue(createBrowserMock());
             state.primaryPublisher = createSolacePublisher(session);
-            els.destHost.disabled = true;       // the Same broker lock
+            els.destHost.disabled = true;       // the same-broker lock
             els.btnStart.disabled = false;      // Next opened this modal
 
             openCopyModal(ctx, els, state, () => session);

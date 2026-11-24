@@ -32,14 +32,14 @@
 
     <h3>The account card</h3>
     <figure class="manual-figure">
-        <img src="help/form-account.svg" width="760" height="390" alt="The user form for alice: the account card with username, password and Administrator switch, and the Modules card with two radio buttons, two module pills and an Add module button.">
+        <img src="help/form-account.svg" width="760" height="390" alt="The user form for alice: the account card with username, password and Administrator switch, and the Modules card with its two-part button, two module pills and an Add module button.">
         <figcaption>The first two cards of the user form, here editing alice with a list of modules of her own.</figcaption>
     </figure>
     <ol class="manual-callouts">
         <li><strong>Username</strong>. You type it when you add a user. When you edit a user, it is fixed.</li>
         <li><strong>Password</strong>, with a hint after its name: <code>(required)</code> when you add a user, <code>(leave blank to keep current)</code> when you edit one.</li>
         <li>The <strong>Administrator</strong> switch.</li>
-        <li>The two choices for the user's modules: <strong>Deployment default</strong> and <strong>Choose for this user</strong>.</li>
+        <li>The button for the user's modules, with two parts: <strong>Deployment default</strong> and <strong>Choose for this user</strong>. The pressed part is the choice, and the line under it names what the default gives.</li>
         <li>The modules the user may open, each as a pill.</li>
         <li><strong>+ Add module</strong>, which lists the modules you can still add.</li>
     </ol>
@@ -79,12 +79,12 @@
             <tr><th>Choice</th><th>What it does</th></tr>
         </thead>
         <tbody>
-            <tr><td><strong>Deployment default:</strong></td><td>The user gets what Gateway Settings give everyone. The modules it gives are named after the label (or <code>no modules</code>) and shown as pills without a remove button. This is the choice for a user you add. If the settings change, so does what this user gets.</td></tr>
+            <tr><td><strong>Deployment default</strong></td><td>The user gets what Gateway Settings give everyone. The modules it gives are named in the line under the button (or <code>no modules</code>) and shown as pills without a remove button. This is the choice for a user you add. If the settings change, so does what this user gets.</td></tr>
             <tr><td><strong>Choose for this user</strong></td><td>The user has a list of their own. It starts as what the default gives. Each module is a pill with a remove button, named for screen readers <code>Remove Queue Browser</code> and so on. <strong>+ Add module</strong> opens a menu of the offered modules that are not in the list yet; pick one to add it, and press <kbd>Esc</kbd> to close the menu. The button is disabled when nothing is left to add. An empty list reads <code>No modules.</code></td></tr>
         </tbody>
     </table>
     <p>A pill marked <code>not offered</code> is a module the gateway does not offer. It has no effect until Gateway Settings offer it, and you can remove it. The gateway never gives a user a module it does not offer.</p>
-    <p>When you select <strong>Deployment default</strong> again, the user's own list is dropped on save.</p>
+    <p>When you press <strong>Deployment default</strong> again, the user's own list is dropped on save.</p>
 
     <h3>Entitlements</h3>
     <p>The <strong>Entitlements</strong> card decides which brokers, Message VPNs and queues the user reaches. A user without a row reaches nothing.</p>

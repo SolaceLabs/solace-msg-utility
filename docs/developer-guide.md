@@ -158,8 +158,8 @@ src/
     boot.ts            # Starts the app; the demo build swaps it for mock-broker/boot
     dom.ts             # required() fail-fast required-element assertion, setError(el, msg) error banner,
                        # attachBackdropClose(dialog)
-    segmented.ts       # createSegmented(): wires a .segmented group of joined buttons (the broker type,
-                       # the Direct form's Basic / OAuth2); the pressed button is the choice
+    segmented.ts       # createSegmented(): wires a .segmented group of joined buttons (the broker type, Queue Copy's Copy to,
+                       # the Direct form's Basic / OAuth2, User Management's Modules); the pressed button is the choice
     utils.ts           # Pure utilities (escapeHtml, escapeXml, formatBytes, generateUuid, matchString,
                        # matchContains, topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
                        # solaceErrorText, isValidHost, isValidPort)

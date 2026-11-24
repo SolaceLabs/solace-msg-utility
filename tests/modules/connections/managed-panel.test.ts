@@ -1236,19 +1236,263 @@ describe('connections/managed panel — mode interlock + tab activation', () => 
         expect(directSemp().disconnect).toHaveBeenCalled();
     });
 
-    it('connecting via Direct clears the managed session so RBAC cannot leak onto it', async () => {
-        bothTabs();
-        const { container, ctx } = await signedIn();
-        expect(ctx.appState.managed).not.toBeNull();
-
-        // Fill the minimum valid Direct form and connect.
+    /** Fill the least the Direct form validates and press its messaging Connect. */
+    function directConnect(container: HTMLElement): void {
         el<HTMLInputElement>(container, '#conn-host').value = 'broker.test';
         el<HTMLInputElement>(container, '#solace-port').value = '8080';
         el<HTMLInputElement>(container, '#solace-vpn').value = 'vpn';
         el<HTMLInputElement>(container, '#solace-username').value = 'u';
         el<HTMLButtonElement>(container, '#btn-solace-connect').click();
+    }
+    /** The Direct form's messaging connection comes up: its own hook publishes it. */
+    function directUp(container: HTMLElement): void {
+        directConnect(container);
+        directSolace().hooks.onConnected({ id: 'direct-session' }, 'vpn');
+    }
+    /** Fill the least the Direct form's SEMP card validates and press its Connect. */
+    function directSempConnect(container: HTMLElement): void {
+        el<HTMLInputElement>(container, '#conn-host').value = 'broker.test';
+        el<HTMLInputElement>(container, '#semp-port').value = '943';
+        el<HTMLInputElement>(container, '#semp-username').value = 'semp-user';
+        el<HTMLInputElement>(container, '#semp-password').value = 'semp-pass';
+        el<HTMLButtonElement>(container, '#btn-semp-connect').click();
+    }
+    const brokerChoices = (c: HTMLElement) => [...el<HTMLSelectElement>(c, '#managed-broker-select').options].map(o => o.value);
 
-        expect(ctx.appState.managed).toBeNull();          // session dropped
-        expect(directSolace().connect).toHaveBeenCalled(); // direct connect proceeded
+    it('connecting via Direct makes the session stand by: the access rules go, and the user stays signed in with their brokers', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        expect(ctx.appState.managed).not.toBeNull();
+        const rbac = vi.fn();
+        ctx.eventBus.on('rbac:changed', rbac);
+
+        directConnect(container);
+
+        expect(ctx.appState.managed).toBeNull();                  // no rule can reach the Direct session
+        expect(ctx.managedProfile.isActive()).toBe(false);        // nor can another module dial
+        expect(rbac).toHaveBeenCalledTimes(1);
+        expect(svcMock.logout).not.toHaveBeenCalled();            // the gateway session stays
+        expect(account().classList.contains('hidden')).toBe(false);
+        expect(directSolace().connect).toHaveBeenCalled();        // the Direct connect went ahead
+        el<HTMLButtonElement>(container, '#conn-tab-managed').click();
+        expect(hidden(container, '#managed-select-view')).toBe(false);
+        expect(brokerChoices(container)).toEqual(['b1', 'b2']);
+    });
+
+    it('a Direct connect while a Provisioned connection is open closes it first, from either Direct button', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        await connectToB1Vpn1(container);
+        sempMock.disconnect.mockImplementation(async () => { sempMock.hooks.onDisconnected(); });
+
+        // The flags say connected, but the connection is not the Direct
+        // form's: its boxes stay open, and its button connects, it does not
+        // disconnect.
+        expect(['#conn-host', '#semp-port', '#solace-vpn'].map(sel => el<HTMLInputElement>(container, sel).disabled)).toEqual([false, false, false]);
+        directSempConnect(container);
+
+        expect(solaceMock.disconnect).toHaveBeenCalledTimes(1);   // the Provisioned messaging session
+        expect(sempMock.disconnect).toHaveBeenCalledTimes(1);     // and its SEMP
+        expect(directSemp().disconnect).not.toHaveBeenCalled();
+        expect(directSemp().connect).toHaveBeenCalledTimes(1);
+        expect(ctx.appState.managed).toBeNull();
+        expect(hidden(container, '#managed-select-view')).toBe(false);   // the card again, not the connected view
+
+        // The closed session reports back after the takeover: nothing of the
+        // Direct form's SEMP connection, now up, is touched.
+        directSemp().hooks.onConnected({ fetch: vi.fn(), baseUrl: 'https://broker.test:943' }, { user: 'semp-user', pass: 'semp-pass' });
+        solaceMock.hooks.onDisconnected();
+        expect(sempMock.disconnect).toHaveBeenCalledTimes(1);
+        expect(ctx.appState.isSempConnected).toBe(true);
+    });
+
+    it('the Direct messaging button connects too while the open connection is the Provisioned one', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        await connectToB1Vpn1(container);
+
+        directConnect(container);
+
+        expect(directSolace().disconnect).not.toHaveBeenCalled();
+        expect(directSolace().connect).toHaveBeenCalledTimes(1);
+        expect(solaceMock.disconnect).toHaveBeenCalledTimes(1);
+        expect(ctx.appState.managed).toBeNull();
+    });
+
+    it('a second Direct connect leaves a session that already stands by alone', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        directConnect(container);
+        const rbac = vi.fn();
+        ctx.eventBus.on('rbac:changed', rbac);
+
+        directSempConnect(container);
+
+        expect(directSemp().connect).toHaveBeenCalledTimes(1);
+        expect(rbac).not.toHaveBeenCalled();
+        expect(solaceMock.disconnect).toHaveBeenCalledTimes(1);   // the first takeover's only
+    });
+
+    it('a Direct connect while the Provisioned Connect runs ends that Connect: nothing of it is announced', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        const events = announcements(ctx);
+        const release = semp.pending();
+        clickConnect(container);
+        await vi.waitFor(() => expect(sempMock.connect).toHaveBeenCalled());
+
+        directConnect(container);
+        release();   // the relay answers the probe after the takeover
+        await settle();
+
+        expect(ctx.appState.managed).toBeNull();
+        expect(events).toEqual([]);
+        expect([ctx.appState.isSempConnected, ctx.appState.sempCredentials]).toEqual([false, null]);
+        expect(solaceMock.connect).not.toHaveBeenCalled();
+        expect(hidden(container, '#managed-connect-error')).toBe(true);
+    });
+
+    it('Refresh while standing by takes the new brokers and keeps the access rules off', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        directConnect(container);
+        svcMock.me.mockResolvedValue(OK({ ...PROFILE, brokers: [{ broker: 'b9', msgVpns: [{ name: 'vpn9' }] }] }));
+
+        el<HTMLButtonElement>(container, '#btn-managed-refresh').click();
+
+        await vi.waitFor(() => expect(brokerChoices(container)).toEqual(['b9']));
+        expect(ctx.appState.managed).toBeNull();
+        expect(ctx.managedProfile.isActive()).toBe(false);
+    });
+
+    it('Connect while standing by asks the gateway first, closes the Direct connection and brings the access rules back', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        directUp(container);
+        semp.up();
+        svcMock.me.mockClear();
+
+        clickConnect(container);
+        await messagingStarted();
+
+        expect(svcMock.me).toHaveBeenCalledTimes(1);
+        expect(directSolace().disconnect).toHaveBeenCalledTimes(1);
+        expect(ctx.managedProfile.isActive()).toBe(true);
+        expect(ctx.appState.managed).toMatchObject({ username: 'admin', broker: 'b1', vpns: ['vpn1', 'vpn2'] });
+        solaceMock.hooks.onConnected({ id: 'session' }, 'vpn1');
+        await vi.waitFor(() => expect(hidden(container, '#managed-connected-view')).toBe(false));
+    });
+
+    it('Connect while standing by finds the session ended: the sign-in view says so and the Direct connection stays', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        directUp(container);
+        svcMock.me.mockResolvedValue(NO_SESSION);
+
+        clickConnect(container);
+
+        await vi.waitFor(() => expect(hidden(container, '#managed-login-view')).toBe(false));
+        expect(el(container, '#managed-login-error').textContent).toBe('Your session has ended. Sign in again.');
+        expect(account().classList.contains('hidden')).toBe(true);
+        // Nothing of the Direct connection was closed, by either pair.
+        expect(directSolace().disconnect).not.toHaveBeenCalled();
+        expect(solaceMock.disconnect).toHaveBeenCalledTimes(1);   // the takeover's, before the Direct connect
+        expect(ctx.appState.isConnected).toBe(true);
+        expect(sempMock.connect).not.toHaveBeenCalled();
+    });
+
+    it('Connect while standing by keeps the session and the Direct connection when the gateway cannot be asked', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        directUp(container);
+        svcMock.me.mockResolvedValue({ ok: false, status: 0, code: 'network' });
+
+        clickConnect(container);
+
+        await failed(container);
+        expect(connectError(container)).toBe('The gateway could not be reached.');
+        expect(hidden(container, '#managed-select-view')).toBe(false);
+        expect(directSolace().disconnect).not.toHaveBeenCalled();
+        expect(ctx.appState.isConnected).toBe(true);
+        expect(account().classList.contains('hidden')).toBe(false);
+    });
+
+    it('a sign-out while that Connect asks the gateway: the late answer starts nothing', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        directUp(container);
+        let answer = (_: unknown) => {};
+        svcMock.me.mockImplementation(() => new Promise(resolve => { answer = resolve; }));
+
+        clickConnect(container);
+        signOut();
+        answer(OK());
+        await settle();
+
+        expect(hidden(container, '#managed-login-view')).toBe(false);
+        expect(ctx.appState.managed).toBeNull();
+        expect(account().classList.contains('hidden')).toBe(true);
+        expect(directSolace().disconnect).not.toHaveBeenCalled();
+        expect(sempMock.connect).not.toHaveBeenCalled();
+    });
+
+    it('Sign out while standing by ends the gateway session and touches no connection', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        directUp(container);
+        const closedByTakeover = solaceMock.disconnect.mock.calls.length;
+
+        signOut();
+
+        expect(svcMock.logout).toHaveBeenCalledTimes(1);
+        expect(hidden(container, '#managed-login-view')).toBe(false);
+        expect(account().classList.contains('hidden')).toBe(true);
+        expect(solaceMock.disconnect).toHaveBeenCalledTimes(closedByTakeover);
+        expect(sempMock.disconnect).not.toHaveBeenCalled();
+        expect(directSolace().disconnect).not.toHaveBeenCalled();
+        expect(ctx.appState.isConnected).toBe(true);              // the Direct connection
+    });
+
+    it('a sign-out request while standing by signs out too', async () => {
+        bothTabs();
+        const { container, ctx } = await signedIn();
+        directConnect(container);
+
+        ctx.eventBus.emit('rbac:sign-out-requested');
+
+        expect(svcMock.logout).toHaveBeenCalledTimes(1);
+        expect(hidden(container, '#managed-login-view')).toBe(false);
+    });
+
+    it('each tab says when its Connect closes the other connection', async () => {
+        bothTabs();
+        const { container } = await signedIn();
+        const notes = () => [hidden(container, '#conn-note-direct'), hidden(container, '#conn-note-managed')];
+        expect(notes()).toEqual([true, true]);                    // nothing open
+
+        await connectToB1Vpn1(container);
+        expect(notes()).toEqual([false, true]);                   // Provisioned open: the Direct tab warns
+
+        sempMock.disconnect.mockImplementation(async () => { sempMock.hooks.onDisconnected(); });
+        solaceMock.disconnect.mockImplementation(() => { solaceMock.hooks.onDisconnected(); return { ok: true }; });
+        directUp(container);
+        expect(notes()).toEqual([true, false]);                   // Direct open, session standing by: the Provisioned tab warns
+        // The tab shows the card, not a connected view for a connection that is not its own.
+        el<HTMLButtonElement>(container, '#conn-tab-managed').click();
+        expect([hidden(container, '#managed-select-view'), hidden(container, '#managed-connected-view')]).toEqual([false, true]);
+
+        directSolace().hooks.onDisconnected();
+        expect(notes()).toEqual([true, true]);                    // nothing open again
+
+        directUp(container);
+        signOut();
+        expect(notes()).toEqual([true, true]);                    // signed out: no Connect on the Provisioned tab
+    });
+
+    it('neither note shows where Provisioned is not offered', async () => {
+        hostedMock.probeDeployment.mockResolvedValue({ hosted: true, conn: { connModes: 'direct', defaultConn: 'direct' } });
+        const { container } = await setup();
+        directUp(container);
+        expect([hidden(container, '#conn-note-direct'), hidden(container, '#conn-note-managed')]).toEqual([true, true]);
     });
 });

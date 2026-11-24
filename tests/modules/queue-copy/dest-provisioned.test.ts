@@ -14,7 +14,7 @@ import type { AppContext, AppState, EventBus, ManagedSession } from '../../../sr
  * typed cards stay.
  *
  * One Connect runs the shared sequence of core/services/provisioned-connect.ts:
- * SEMP first (skipped with Same broker), then messaging, both held until both are
+ * SEMP first (skipped on the source's broker), then messaging, both held until both are
  * up. The sequence itself is covered in tests/core/services/provisioned-connect.test.ts;
  * these tests drive it through the module's hooks, as the two clients would.
  *
@@ -161,17 +161,29 @@ async function setupProvisioned(over: Partial<AppState> = {}, signIn = true) {
 
 type El = <T extends HTMLElement>(s: string) => T;
 
+/** One part of the Copy to button. */
+const scopePart = (el: El, scope: string) => el<HTMLButtonElement>(`#copy-dest-scope [data-dest-scope="${scope}"]`);
+/** The Copy to button is locked: every part of it is disabled. */
+const scopeLocked = (el: El) => ['this-vpn', 'another-vpn', 'another-broker'].every(scope => scopePart(el, scope).disabled);
+
 /** Ask for a secondary connection (a different broker), so the destination needs a connection of its own. */
 function needSecondary(el: El): void {
-    const sameBroker = el<HTMLInputElement>('#copy-toggle-same-broker');
-    sameBroker.checked = false;
-    sameBroker.dispatchEvent(new Event('change'));
+    scopePart(el, 'another-broker').click();
 }
 /** Same broker, another Message VPN. */
 function otherVpn(el: El): void {
-    const sameVpn = el<HTMLInputElement>('#copy-toggle-same-vpn');
-    sameVpn.checked = false;
-    sameVpn.dispatchEvent(new Event('change'));
+    scopePart(el, 'another-vpn').click();
+}
+/**
+ * Change the Copy to choice and back while a connect has it locked, with click
+ * events of the test's own (a locked button takes none from the user). Any
+ * change of the choice runs the disconnect the card does; the first one ends
+ * the connect in flight, and the choice ends where it was, on Another broker.
+ */
+function disconnectByChoice(el: El): void {
+    for (const scope of ['another-vpn', 'another-broker']) {
+        scopePart(el, scope).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
 }
 /** The provisioned card's Broker and VPN pickers, by the ids this module gives them. */
 function pick(el: El, broker: string, vpn?: string): void {
@@ -289,7 +301,7 @@ describe('queue-copy -- the destination follows the primary connection mode', ()
         expect(hidden('#copy-dest-prov-same')).toBe(false);
     });
 
-    it('Same broker with another VPN shows the primary\'s own broker, fixed, and leaves the VPN to choose', async () => {
+    it('Another VPN shows the primary\'s own broker, fixed, and leaves the VPN to choose', async () => {
         const { el, hidden } = await setupProvisioned();
         otherVpn(el);
         expect(hidden('#copy-dest-prov-card')).toBe(false);
@@ -298,7 +310,7 @@ describe('queue-copy -- the destination follows the primary connection mode', ()
         expect([el<HTMLSelectElement>('#copy-dest-prov-broker').disabled, el<HTMLSelectElement>('#copy-dest-prov-vpn').disabled]).toEqual([true, false]);
     });
 
-    it('with no primary broker on record, Same broker leaves nothing to pick and the card says so', async () => {
+    it('with no primary broker on record, Another VPN leaves nothing to pick and the card says so', async () => {
         const { el, hidden } = await setupProvisioned({ managed: null });
         otherVpn(el);
         expect(options(el, '#copy-dest-prov-broker')).toEqual([]);
@@ -383,7 +395,7 @@ describe('queue-copy -- provisioned destination: connecting through the profile'
         expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(false);
     });
 
-    it('with Same broker only the messaging session is opened: no SEMP step, the primary\'s SEMP serves the picker', async () => {
+    it('on the source\'s broker only the messaging session is opened: no SEMP step, the primary\'s SEMP serves the picker', async () => {
         const { el } = await setupProvisioned();
         otherVpn(el);
         pick(el, 'b1', 'v2');
@@ -437,7 +449,7 @@ describe('queue-copy -- provisioned destination: connecting through the profile'
         expect(connectBtn(el).textContent).toBe('Connect');
     });
 
-    it('a session that drops with Same broker has no SEMP of its own to close', async () => {
+    it('a session that drops on the source\'s broker has no SEMP of its own to close', async () => {
         const { el } = await setupProvisioned();
         otherVpn(el);
         pick(el, 'b1', 'v2');
@@ -533,7 +545,7 @@ describe('queue-copy -- provisioned destination: a connect that fails', () => {
         expect(connectBtn(el).textContent).toBe('Connect');
         expect(connectBtn(el).disabled).toBe(false);
         expect(el<HTMLSelectElement>('#copy-dest-prov-broker').disabled).toBe(false);
-        expect(el<HTMLInputElement>('#copy-toggle-same-broker').disabled).toBe(false);
+        expect(scopeLocked(el)).toBe(false);
     });
 
     it('an SDK error while connecting fails the messaging side', async () => {
@@ -664,7 +676,7 @@ describe('queue-copy -- provisioned destination: the gateway session ends', () =
         expect(cardStatus(el)).toBe('');
         expect(cardError(el)).toBe('');
         expect(el<HTMLSelectElement>('#copy-dest-prov-broker').disabled).toBe(false);
-        expect(el<HTMLInputElement>('#copy-toggle-same-broker').disabled).toBe(false);
+        expect(scopeLocked(el)).toBe(false);
     }
 
     it('the messaging dial refused because the session ended: the card is released, SEMP is closed and a sign-out is requested', async () => {
@@ -716,7 +728,7 @@ describe('queue-copy -- provisioned destination: the gateway session ends', () =
         expect(el<HTMLSelectElement>('#copy-dest-prov-broker').options).toHaveLength(0);
         expect(cardStatus(el)).toBe('');
         expect(cardError(el)).toBe('');
-        expect(el<HTMLInputElement>('#copy-toggle-same-broker').disabled).toBe(false);
+        expect(scopeLocked(el)).toBe(false);
         expect(destSempConnect).not.toHaveBeenCalled();
         expect(destSolConnect).not.toHaveBeenCalled();
     });
@@ -731,9 +743,7 @@ describe('queue-copy -- provisioned destination: a connect cancelled or overtake
         connectBtn(el).click();
         await messagingStarted();
 
-        // Changing the destination's toggles runs the same disconnect the card does.
-        const sameVpn = el<HTMLInputElement>('#copy-toggle-same-vpn');
-        sameVpn.dispatchEvent(new Event('change'));
+        disconnectByChoice(el);
         expect(destSolDisconnect).toHaveBeenCalledTimes(1);
         expect(connectBtn(el).textContent).toBe('Connect');
 
@@ -756,7 +766,7 @@ describe('queue-copy -- provisioned destination: a connect cancelled or overtake
         needSecondary(el);
         connectBtn(el).click();
         await messagingStarted();
-        el<HTMLInputElement>('#copy-toggle-same-vpn').dispatchEvent(new Event('change'));
+        disconnectByChoice(el);
 
         destSolHooks.current.onConnectFailed({ infoStr: 'refused' });
         // Let the sequence settle, as the cancelled run would have.
@@ -776,7 +786,7 @@ describe('queue-copy -- provisioned destination: a connect cancelled or overtake
         connectBtn(el).click();
         await vi.waitFor(() => expect(destSempConnect).toHaveBeenCalled());
 
-        el<HTMLInputElement>('#copy-toggle-same-vpn').dispatchEvent(new Event('change'));
+        disconnectByChoice(el);
         expect(connectBtn(el).textContent).toBe('Connect');
         release();
         await new Promise(r => setTimeout(r, 0));
@@ -795,7 +805,7 @@ describe('queue-copy -- provisioned destination: a connect cancelled or overtake
         needSecondary(el);
         connectBtn(el).click();
         await messagingStarted();
-        el<HTMLInputElement>('#copy-toggle-same-vpn').dispatchEvent(new Event('change'));   // Disconnect
+        disconnectByChoice(el);   // Disconnect
         expect(destSolDisconnect).toHaveBeenCalledTimes(1);
 
         destSempConnect.mockImplementationOnce(() => new Promise<void>(() => {}));   // the newer run waits at SEMP
@@ -843,17 +853,15 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
         return { ...h, answerDial: (v: any) => answer(v) };
     }
 
-    it('locks the card and the toggles while dialling; a refused dial unlocks them and shows why', async () => {
+    it('locks the card and the Copy to button while dialling; a refused dial unlocks them and shows why', async () => {
         vi.spyOn(logger, 'error').mockImplementation(() => {});
         const { el, answerDial } = await dialling();
         for (const sel of ['#copy-dest-prov-broker', '#copy-dest-prov-vpn', '#copy-btn-dest-prov-connect']) {
             expect(el<HTMLInputElement>(sel).disabled).toBe(true);
         }
         expect(connectBtn(el).textContent).toBe('Connecting...');
-        for (const sel of ['#copy-toggle-same-broker', '#copy-toggle-same-vpn']) {
-            expect(el<HTMLInputElement>(sel).disabled).toBe(true);
-            expect(el<HTMLInputElement>(sel).title).toBe(DEST_TARGET_LOCKED_TITLE);
-        }
+        expect(scopeLocked(el)).toBe(true);
+        expect(el('#copy-dest-scope').title).toBe(DEST_TARGET_LOCKED_TITLE);
 
         answerDial({ ok: false, status: 503, code: 'upstream_unavailable' });
         await vi.waitFor(() => expect(connectBtn(el).textContent).toBe('Connect'));
@@ -862,9 +870,8 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
         expect(el<HTMLSelectElement>('#copy-dest-prov-broker').disabled).toBe(false);
         expect(el<HTMLSelectElement>('#copy-dest-prov-vpn').disabled).toBe(false);
         expect(connectBtn(el).disabled).toBe(false);
-        expect(el<HTMLInputElement>('#copy-toggle-same-broker').disabled).toBe(false);
-        // Same VPN keeps its own rule: it means nothing without Same broker.
-        expect(el<HTMLInputElement>('#copy-toggle-same-vpn').disabled).toBe(true);
+        expect(scopeLocked(el)).toBe(false);
+        expect(el('#copy-dest-scope').title).toBe('');
         expect(destSolConnect).not.toHaveBeenCalled();
     });
 
@@ -890,7 +897,7 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
 
     it('Disconnect then a new Connect while the first dial is in flight: the first dial starts no SDK session and the second run installs its own', async () => {
         const { el, answerDial } = await dialling();
-        el<HTMLInputElement>('#copy-toggle-same-vpn').dispatchEvent(new Event('change'));   // Disconnect
+        disconnectByChoice(el);   // Disconnect
         expect(connectBtn(el).textContent).toBe('Connect');
 
         connectBtn(el).click();
@@ -909,7 +916,7 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
 
     it('Disconnect then a new Connect while the first dial is in flight: the first dial refused late does not fail the second run', async () => {
         const { ctx, el, answerDial } = await dialling();
-        el<HTMLInputElement>('#copy-toggle-same-vpn').dispatchEvent(new Event('change'));   // Disconnect
+        disconnectByChoice(el);   // Disconnect
         connectBtn(el).click();
         await messagingStarted();
 
@@ -930,7 +937,7 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
         eventBus.emit('rbac:changed');
         expect(el<HTMLSelectElement>('#copy-dest-prov-vpn').disabled).toBe(true);
         expect(el<HTMLSelectElement>('#copy-dest-prov-broker').disabled).toBe(true);
-        expect(el<HTMLInputElement>('#copy-toggle-same-broker').disabled).toBe(true);
+        expect(scopeLocked(el)).toBe(true);
     });
 
     it('the VPN withdrawn during the dial: the connect is cancelled, the late session is closed and nothing can start', async () => {
@@ -975,7 +982,7 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
         expect(el<HTMLButtonElement>('#copy-btn-start').disabled).toBe(true);
     });
 
-    it('switching a toggle on a connected destination drops it and the card reads Connect again', async () => {
+    it('changing the Copy to choice on a connected destination drops it and the card reads Connect again', async () => {
         const { el, answerDial } = await dialling();
         answerDial(DIALLED_V1);
         await messagingStarted();
@@ -992,7 +999,7 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
 describe('queue-copy -- provisioned destination: topic availability', () => {
     it('blocks Topic while the publish path uses provisioned credentials', async () => {
         const { el, hidden } = await setupProvisioned();
-        // sameBroker+sameVpn => publishes through the managed primary.
+        // This VPN => publishes through the managed primary.
         expect(el<HTMLInputElement>('#copy-dest-type-toggle').disabled).toBe(true);
         expect(hidden('#copy-dest-topic-blocked')).toBe(false);
     });
@@ -1176,7 +1183,7 @@ describe('queue-copy -- provisioned destination: rbac:changed lifecycle', () => 
         expect(captured.state.job.cancelRequested).toBe(false);
     });
 
-    it('a run on the primary itself (Same broker, Same VPN) is not halted by a refresh that changes nothing', async () => {
+    it('a run on the primary itself (This VPN) is not halted by a refresh that changes nothing', async () => {
         const { ctx } = await startRun();
         ctx.managedProfile.setProfile(PROFILE);
         eventBus.emit('rbac:changed');

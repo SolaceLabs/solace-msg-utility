@@ -92,10 +92,10 @@
     }
 }
 
-/* Destination Queue / Topic slide toggle. Sits in the Destination card's
-   top-right header. Two static labels on either side; the slider in between
-   reflects checkbox state. */
-.copy-dest-type-switch {
+/* A choice between two named answers as a slide toggle: Queue / Topic in the
+   Destination card's top-right header, Copy / Move under Mode. Two static
+   labels on either side; the slider in between reflects checkbox state. */
+.copy-slide-choice {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
@@ -103,7 +103,7 @@
     color: var(--text-secondary);
     user-select: none;
 }
-.copy-dest-type-switch .copy-dest-type-label.active {
+.copy-slide-choice .copy-slide-label.active {
     color: var(--text-primary);
     font-weight: 600;
 }

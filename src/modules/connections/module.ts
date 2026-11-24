@@ -105,10 +105,19 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         onTypeChange: () => [els.elHost, els.elSolHost].forEach((el: HTMLElement) => ui.showError(el, false)),
     });
 
-    /** Lock the fields of each live connection; the broker type and a host stay as they are while their side is up. */
+    // The connection flags are the app's, and in the managed entry a
+    // Provisioned connection sets the same ones. They speak of this form's own
+    // connection only while no Provisioned session is the live mode: otherwise
+    // the form stays open for typing, and a click on Connect connects, which
+    // closes that connection first (onBeforeConnect).
+    const provisionedLive = (): boolean => !!appState.managed;
+
+    /** Lock the fields of each live connection of this form; the broker type and a host stay as they are while their side is up. */
     function updateInputState(): void {
-        ui.updateInputState(appState);
-        hosts.lock({ management: appState.isSempConnected, messaging: appState.isConnected });
+        const own = !provisionedLive();
+        const live = { isSempConnected: own && appState.isSempConnected, isConnected: own && appState.isConnected };
+        ui.updateInputState(live);
+        hosts.lock({ management: live.isSempConnected, messaging: live.isConnected });
     }
 
     /**
@@ -586,7 +595,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
 
     // Connect Solace
     els.btnSolace.addEventListener('click', () => {
-        if (appState.isConnected) {
+        if (appState.isConnected && !provisionedLive()) {
             serviceSolace.disconnect();
         } else {
             connectSolace();
@@ -610,7 +619,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
 
     // Connect SEMP
     els.btnSemp.addEventListener('click', async () => {
-        if (appState.isSempConnected) {
+        if (appState.isSempConnected && !provisionedLive()) {
             await serviceSemp.disconnect();
         } else {
             if (!validateSemp()) return;

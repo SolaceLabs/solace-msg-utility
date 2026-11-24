@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { wireUiEvents } from '../../../src/modules/queue-copy/ui-events';
 import { cacheElements } from '../../../src/modules/queue-copy/ui';
-import type { PrimarySnapshot } from '../../../src/modules/queue-copy/ui';
-import { createInitialState } from '../../../src/modules/queue-copy/state';
+import type { CopyUiElements, PrimarySnapshot } from '../../../src/modules/queue-copy/ui';
+import { createInitialState, type DestScope } from '../../../src/modules/queue-copy/state';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { createSessionMock, createBrowserMock } from '../../setup';
 import type { AppContext } from '../../../src/core/types';
@@ -11,6 +11,11 @@ import { createManagedProfile } from '../../../src/core/services/managed-profile
 import { completeContext } from '../../helpers/appContext';
 
 /** The context's queue picker: `ctx.queuePicker.pick`. */
+/** Press one part of the Copy to button. */
+function pickScope(els: CopyUiElements, scope: DestScope): void {
+    els.destScopeGroup.querySelector<HTMLButtonElement>(`[data-dest-scope="${scope}"]`)!.click();
+}
+
 const pickQueue = vi.fn(async (..._args: unknown[]): Promise<{ vpn: string; queue: string } | null> => ({ vpn: 'default', queue: 'picked-q' }));
 
 const PRIMARY: PrimarySnapshot = {
@@ -186,44 +191,55 @@ describe('queue-copy/ui-events', () => {
         });
     });
 
-    describe('toggle prefill behavior', () => {
-        it('unchecking sameBroker re-enables every dest field', () => {
+    describe('Copy to prefill behavior', () => {
+        it('Another broker re-enables every dest field', () => {
             const { els, state } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             expect(state.destForm.sameBroker).toBe(false);
             expect(state.destForm.sameVpn).toBe(false);
             expect(els.destHost.disabled).toBe(false);
             expect(els.destSolVpn.disabled).toBe(false);
-            expect(els.toggleSameVpn.disabled).toBe(true);
+            expect(els.destScope.value()).toBe('another-broker');
         });
 
-        it('re-checking sameBroker re-locks all fields', () => {
-            const { els } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
-            els.toggleSameBroker.checked = true;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+        it('back on the source\'s broker, the broker fields lock again', () => {
+            const { els, state } = setup();
+            pickScope(els, 'another-broker');
+            pickScope(els, 'another-vpn');
+            expect([state.destForm.sameBroker, state.destForm.sameVpn]).toEqual([true, false]);
             expect(els.destHost.disabled).toBe(true);
         });
 
-        it('unchecking sameVpn unlocks just the VPN/user/pass fields', () => {
+        it('Another VPN unlocks just the VPN/user/pass fields', () => {
             const { els, state } = setup();
-            els.toggleSameVpn.checked = false;
-            els.toggleSameVpn.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-vpn');
             expect(state.destForm.sameVpn).toBe(false);
             expect(els.destSolVpn.disabled).toBe(false);
             expect(els.destSolUser.disabled).toBe(false);
             expect(els.destSolPass.disabled).toBe(false);
             expect(els.destHost.disabled).toBe(true); // broker still locked
         });
+
+        it('This VPN, straight from Another broker, locks everything again', () => {
+            const { els, state } = setup();
+            pickScope(els, 'another-broker');
+            pickScope(els, 'this-vpn');
+            expect([state.destForm.sameBroker, state.destForm.sameVpn]).toEqual([true, true]);
+            expect([els.destHost.disabled, els.destSolVpn.disabled]).toEqual([true, true]);
+        });
+
+        it('says under the button what the choice leaves to fill in', () => {
+            const { els } = setup();
+            expect(els.destScopeHint.textContent).toBe('The connection you already have: same broker, same Message VPN. Nothing to fill in.');
+            pickScope(els, 'another-broker');
+            expect(els.destScopeHint.textContent).toBe('A different broker. Give its address and both logins below.');
+        });
     });
 
     describe('field mirroring', () => {
         it('host', () => {
             const { els, state } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             els.destHost.value = 'h';
             els.destHost.dispatchEvent(new Event('input'));
             expect(state.destForm.host).toBe('h');
@@ -231,8 +247,7 @@ describe('queue-copy/ui-events', () => {
 
         it('an appliance\'s two hosts, and one host again once the type is back on Software / Cloud', () => {
             const { els, state } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             const typeButton = (type: string) => els.destBrokerType.querySelector<HTMLButtonElement>(`[data-broker-type="${type}"]`)!;
 
             typeButton('appliance').click();
@@ -248,8 +263,7 @@ describe('queue-copy/ui-events', () => {
 
         it('SEMP fields', () => {
             const { els, state } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
 
             els.destSempProtocol.value = 'http';
             els.destSempProtocol.dispatchEvent(new Event('change'));
@@ -268,8 +282,7 @@ describe('queue-copy/ui-events', () => {
 
         it('Solace fields', () => {
             const { els, state } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
 
             els.destSolProtocol.value = 'ws';
             els.destSolProtocol.dispatchEvent(new Event('change'));
@@ -327,8 +340,7 @@ describe('queue-copy/ui-events', () => {
 
         it('dest pick uses destSempCtx when cross-broker', async () => {
             const { els, state } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             state.destSempCtx = { fetch: async () => new Response(), baseUrl: 'http://d' };
             // cross-broker reveals the icon now that destSempCtx is set; force the
             // slide toggle change once more to trigger refreshDestPickVisible
@@ -343,8 +355,7 @@ describe('queue-copy/ui-events', () => {
 
         it('dest pick is a no-op when no SempContext is resolvable', async () => {
             const { els, state } = setup({ ctx: { isSempConnected: false, sempCredentials: null } });
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             state.destSempCtx = null;
             els.btnDestPick.click();
             await Promise.resolve();
@@ -379,8 +390,7 @@ describe('queue-copy/ui-events', () => {
 
         it('dest pick defaultVpn: cross-broker uses destForm.solace.vpn', async () => {
             const { els, state } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             state.destSempCtx = { fetch: async () => new Response(), baseUrl: 'http://d' };
             state.destForm.solace.vpn = 'destVpn';
             els.destTypeToggle.checked = false;
@@ -400,13 +410,13 @@ describe('queue-copy/ui-events', () => {
             await Promise.resolve();
 
             expect(state.destForm.sameVpn).toBe(false);
-            expect(els.toggleSameVpn.checked).toBe(false);
+            expect(els.destScope.value()).toBe('another-vpn');
             expect(state.destForm.solace.vpn).toBe('altVpn');
             expect(els.destSolVpn.value).toBe('altVpn');
             expect(state.dest.name).toBe('q-cross');
         });
 
-        it('dest pick with matching VPN leaves toggles untouched', async () => {
+        it('dest pick with matching VPN leaves the Copy to choice untouched', async () => {
             (pickQueue as any).mockResolvedValueOnce({ vpn: 'default', queue: 'q-same' });
             const { els, state } = setup();
             els.btnDestPick.click();
@@ -418,8 +428,7 @@ describe('queue-copy/ui-events', () => {
 
         it('dest pick defaultVpn: cross-broker with empty form vpn falls back to undefined', async () => {
             const { els, state } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             state.destSempCtx = { fetch: async () => new Response(), baseUrl: 'http://d' };
             state.destForm.solace.vpn = '';
             els.destTypeToggle.checked = false;
@@ -431,21 +440,25 @@ describe('queue-copy/ui-events', () => {
         });
     });
 
-    describe('mode radios', () => {
-        it('selecting Move updates state.mode', () => {
+    describe('mode slide toggle', () => {
+        const slide = (els: CopyUiElements, on: boolean) => {
+            els.modeToggle.checked = on;
+            els.modeToggle.dispatchEvent(new Event('change'));
+        };
+
+        it('sliding to Move updates state.mode and highlights that side', () => {
             const { els, state } = setup();
-            const move = Array.from(els.modeRadios).find(r => r.value === 'move')!;
-            move.checked = true;
-            move.dispatchEvent(new Event('change'));
+            slide(els, true);
             expect(state.mode).toBe('move');
+            expect([els.modeLabelCopy.classList.contains('active'), els.modeLabelMove.classList.contains('active')]).toEqual([false, true]);
         });
 
-        it('non-checked radio change is a no-op', () => {
+        it('sliding back makes it a copy again', () => {
             const { els, state } = setup();
-            const copy = Array.from(els.modeRadios).find(r => r.value === 'copy')!;
-            copy.checked = false;
-            copy.dispatchEvent(new Event('change'));
+            slide(els, true);
+            slide(els, false);
             expect(state.mode).toBe('copy');
+            expect([els.modeLabelCopy.classList.contains('active'), els.modeLabelMove.classList.contains('active')]).toEqual([true, false]);
         });
     });
 
@@ -506,7 +519,7 @@ describe('queue-copy/ui-events', () => {
     });
 
     describe('dest picker visibility', () => {
-        it('shows immediately when primary SEMP is connected (Same broker default)', () => {
+        it('shows immediately when primary SEMP is connected (the source\'s broker by default)', () => {
             const { els } = setup();
             // Same-broker default + primary SEMP available → picker visible
             // right away. The previous "wait for user interaction" gate has
@@ -521,8 +534,7 @@ describe('queue-copy/ui-events', () => {
 
         it('hides when cross-broker without a destSempCtx and shows when one is set', () => {
             const { els, state, services } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             // Cross-broker with no destSempCtx → hidden.
             expect(els.btnDestPick.classList.contains('hidden')).toBe(true);
             // Once dest SEMP context lands, the next refresh shows it.
@@ -545,34 +557,30 @@ describe('queue-copy/ui-events', () => {
         });
     });
 
-    describe('toggle-dispose: checking Same VPN disposes a live dest Client connection', () => {
-        it('disconnects dest Client + clears Sol pass + resets status when sameVpn flips to true', () => {
+    describe('a change of the Copy to choice disposes the live destination connections', () => {
+        it('disconnects dest Client + clears Sol pass + resets status when the choice becomes This VPN', () => {
             const { els, state, services } = setup();
-            // Pre-condition: Same VPN was off and the user has connected dest Client.
-            els.toggleSameVpn.checked = false;
-            els.toggleSameVpn.dispatchEvent(new Event('change'));
+            // Pre-condition: the choice was Another VPN and the user has connected dest Client.
+            pickScope(els, 'another-vpn');
             state.destSession = { _live: true };
             state.destSolacePass = 'secret';
             els.destSolPass.value = 'secret';
-            // Now flip Same VPN ON — engine should dispose the dest Client.
-            els.toggleSameVpn.checked = true;
-            els.toggleSameVpn.dispatchEvent(new Event('change'));
+            // Now choose This VPN — engine should dispose the dest Client.
+            pickScope(els, 'this-vpn');
             expect(services.disconnectDestSol).toHaveBeenCalledTimes(1);
             expect(state.destSolacePass).toBe('');
             expect(els.destSolPass.value).toBe('');
         });
 
-        it('disconnects dest SEMP + clears SEMP pass + resets status when sameBroker flips to true', () => {
+        it('disconnects dest SEMP + clears SEMP pass + resets status when the choice comes back to the source\'s broker', () => {
             const { els, state, services } = setup();
-            // Pre-condition: Same broker was off and the user has connected dest SEMP.
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            // Pre-condition: the choice was Another broker and the user has connected dest SEMP.
+            pickScope(els, 'another-broker');
             state.destSempCtx = { fetch: async () => new Response(), baseUrl: 'http://d' };
             state.destSempPass = 'semp-secret';
             els.destSempPass.value = 'semp-secret';
-            // Flip Same broker ON — dispose helper should call disconnectDestSemp.
-            els.toggleSameBroker.checked = true;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            // Back on the source's broker — dispose helper should call disconnectDestSemp.
+            pickScope(els, 'another-vpn');
             expect(services.disconnectDestSemp).toHaveBeenCalledTimes(1);
             expect(state.destSempPass).toBe('');
             expect(els.destSempPass.value).toBe('');
@@ -580,42 +588,37 @@ describe('queue-copy/ui-events', () => {
 
         it('does not call disconnectDestSemp when there is no live destSempCtx', () => {
             const { els, state, services } = setup();
-            // sameBroker starts true. Toggle it false (cross-broker) and back
-            // true again with NO destSempCtx ever set. The dispose helper
+            // The choice starts on the source's broker. Go to Another broker and
+            // back with NO destSempCtx ever set. The dispose helper
             // should clear pass + reset status without calling the disconnect
             // service (no live SEMP to dispose).
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             state.destSempCtx = null;
-            els.toggleSameBroker.checked = true;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-vpn');
             expect(services.disconnectDestSemp).not.toHaveBeenCalled();
         });
 
         it('does not call disconnectDestSol when there is no live dest Client session', () => {
             const { els, state, services } = setup();
-            // sameVpn starts at true; toggle through false→true with no destSession.
-            els.toggleSameVpn.checked = false;
-            els.toggleSameVpn.dispatchEvent(new Event('change'));
+            // The choice starts on This VPN; go to Another VPN and back with no destSession.
+            pickScope(els, 'another-vpn');
             state.destSession = null; // no live session
-            els.toggleSameVpn.checked = true;
-            els.toggleSameVpn.dispatchEvent(new Event('change'));
+            pickScope(els, 'this-vpn');
             expect(services.disconnectDestSol).not.toHaveBeenCalled();
         });
 
-        it('unchecking Same broker disposes both live dest SEMP and dest Client connections', () => {
+        it('Another broker disposes both live dest SEMP and dest Client connections', () => {
             const { els, state, services } = setup();
-            // Pre-condition: a previous unchecked-sameBroker pass left both
-            // secondary connections live. Simulate by seeding state directly.
+            // Pre-condition: both secondary connections are live. Simulate by
+            // seeding state directly.
             state.destSempCtx = { fetch: async () => new Response(), baseUrl: 'http://d' };
             state.destSession = { _live: true };
             state.destSempPass = 'semp-secret';
             state.destSolacePass = 'sol-secret';
             els.destSempPass.value = 'semp-secret';
             els.destSolPass.value = 'sol-secret';
-            // Now uncheck Same broker — both connections must be disposed.
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            // Now choose Another broker — both connections must be disposed.
+            pickScope(els, 'another-broker');
             expect(services.disconnectDestSemp).toHaveBeenCalledTimes(1);
             expect(services.disconnectDestSol).toHaveBeenCalledTimes(1);
             expect(state.destSempPass).toBe('');
@@ -624,12 +627,11 @@ describe('queue-copy/ui-events', () => {
             expect(els.destSolPass.value).toBe('');
         });
 
-        it('unchecking Same VPN disposes both live dest SEMP and dest Client connections', () => {
+        it('Another VPN disposes both live dest SEMP and dest Client connections', () => {
             const { els, state, services } = setup();
             state.destSempCtx = { fetch: async () => new Response(), baseUrl: 'http://d' };
             state.destSession = { _live: true };
-            els.toggleSameVpn.checked = false;
-            els.toggleSameVpn.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-vpn');
             expect(services.disconnectDestSemp).toHaveBeenCalledTimes(1);
             expect(services.disconnectDestSol).toHaveBeenCalledTimes(1);
         });
@@ -643,25 +645,22 @@ describe('queue-copy/ui-events', () => {
 
         it('Enter in destSempPort triggers SEMP Connect', () => {
             const { els, services } = setup();
-            // SEMP Connect-row needs to be visible (Same broker unchecked).
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            // SEMP Connect-row needs to be visible (Another broker).
+            pickScope(els, 'another-broker');
             fireEnter(els.destSempPort);
             expect(services.connectDestSemp).toHaveBeenCalledTimes(1);
         });
 
         it('Enter in destHost triggers SEMP Connect (the host sits in the SEMP card)', () => {
             const { els, services } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             fireEnter(els.destHost);
             expect(services.connectDestSemp).toHaveBeenCalledTimes(1);
         });
 
         it('Enter in an appliance\'s destSolHost triggers the Client Connect', () => {
             const { els, services } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             fireEnter(els.destSolHost);
             expect(services.connectDestSol).toHaveBeenCalledTimes(1);
             expect(services.connectDestSemp).not.toHaveBeenCalled();
@@ -669,33 +668,29 @@ describe('queue-copy/ui-events', () => {
 
         it('Enter in destSempPass triggers SEMP Connect', () => {
             const { els, services } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             fireEnter(els.destSempPass);
             expect(services.connectDestSemp).toHaveBeenCalledTimes(1);
         });
 
         it('Enter in destSolVpn triggers Client Connect', () => {
             const { els, services } = setup();
-            // Client Connect-row needs to be visible (sameVpn unchecked).
-            els.toggleSameVpn.checked = false;
-            els.toggleSameVpn.dispatchEvent(new Event('change'));
+            // Client Connect-row needs to be visible (Another VPN).
+            pickScope(els, 'another-vpn');
             fireEnter(els.destSolVpn);
             expect(services.connectDestSol).toHaveBeenCalledTimes(1);
         });
 
         it('Enter in destSolPass triggers Client Connect', () => {
             const { els, services } = setup();
-            els.toggleSameVpn.checked = false;
-            els.toggleSameVpn.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-vpn');
             fireEnter(els.destSolPass);
             expect(services.connectDestSol).toHaveBeenCalledTimes(1);
         });
 
         it('non-Enter key in dest fields is a no-op', () => {
             const { els, services } = setup();
-            els.toggleSameBroker.checked = false;
-            els.toggleSameBroker.dispatchEvent(new Event('change'));
+            pickScope(els, 'another-broker');
             const e = new KeyboardEvent('keydown', { key: 'a', bubbles: true });
             els.destSempPort.dispatchEvent(e);
             expect(services.connectDestSemp).not.toHaveBeenCalled();

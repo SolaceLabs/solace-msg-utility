@@ -7,7 +7,7 @@
  *     Connections" button jumps to the connections module for credential
  *     changes. A Provisioned primary shows one read-only connection card
  *     (its Broker and Message VPN) in place of the three.
- *   - Destination (right): Broker (with Same-broker / Same-VPN toggles), SEMP,
+ *   - Destination (right): Broker (with the Copy to button), SEMP,
  *     Client, Destination target (queue/topic + mode). The destination
  *     follows the primary connection's mode: a Direct primary keeps the typed
  *     Broker host, SEMP and Client cards; a Provisioned primary replaces them
@@ -111,7 +111,7 @@ export const QueueCopyModule = {
         /**
          * Pull a snapshot of the primary connection. Used for both
          * (a) populating the read-only source cards and
-         * (b) prefilling disabled destination fields when toggles are on.
+         * (b) prefilling the destination fields the Copy to choice locks.
          * Returns null only when neither Solace nor SEMP is connected.
          */
         function getPrimarySnapshot(): PrimarySnapshot | null {
@@ -153,7 +153,7 @@ export const QueueCopyModule = {
         /** Re-apply both the source readonly mirror AND the destination prefill
          *  whenever the primary connection state changes. Also re-derives the
          *  Next-button + dest-picker gates because primary connection state
-         *  feeds into them (Same-VPN reuse path / Same-broker SEMP path). */
+         *  feeds into them (the same-VPN reuse path / the same-broker SEMP path). */
         function refreshFromPrimary(): void {
             const snap = getPrimarySnapshot();
             applySourceReadonly(els, snap);
@@ -264,7 +264,7 @@ export const QueueCopyModule = {
                 setDestSolStatus(els, 'disconnected');
                 mirrorProv('disconnected');
                 setDestSolFormLocked(els, false);
-                // Re-derive broker-host lock from toggle state — Same-broker
+                // Re-derive broker-host lock from the Copy to choice — same broker
                 // dictates whether the host stays locked even with no live
                 // dest connection.
                 applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, getPrimarySnapshot());

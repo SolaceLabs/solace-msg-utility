@@ -110,6 +110,11 @@ function makeSolaceConnection(overrides: Partial<NonNullable<AppState['solaceCon
 }
 
 /** Type the destination SEMP password, as the user does before Connect. */
+/** Press one part of the Copy to button. */
+function pickScope(container: HTMLElement, scope: 'this-vpn' | 'another-vpn' | 'another-broker'): void {
+    container.querySelector<HTMLButtonElement>(`#copy-dest-scope [data-dest-scope="${scope}"]`)!.click();
+}
+
 function typeDestSempPass(container: HTMLElement, value: string): void {
     const input = container.querySelector<HTMLInputElement>('#copy-dest-semp-pass')!;
     input.value = value;
@@ -416,9 +421,9 @@ describe('queue-copy/module', () => {
     describe('refreshFromPrimary state sync', () => {
         // Repro: install with primary connection populated. The DOM gets
         // prefilled via applyDestPrefill, but state.destForm.host must also
-        // be synced — otherwise unchecking "Same broker" and clicking Connect
+        // be synced — otherwise choosing Another broker and clicking Connect
         // (without retyping) sends an empty host to the dest factories.
-        it('Connect SEMP after toggling Same broker off uses prefilled host (no retyping)', async () => {
+        it('Connect SEMP after choosing Another broker uses prefilled host (no retyping)', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const ctx = makeCtx(eventBus, container, {
                 isConnected: true,
@@ -428,10 +433,8 @@ describe('queue-copy/module', () => {
             });
             await QueueCopyModule.install(ctx);
 
-            // Toggle Same broker off so the SEMP Connect button becomes active.
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
-            toggle.checked = false;
-            toggle.dispatchEvent(new Event('change'));
+            // Choose Another broker so the SEMP Connect button becomes active.
+            pickScope(container, 'another-broker');
 
             // Click Connect on the SEMP card. The factory mock captures the
             // host arg; without the state-sync fix this would be ''.
@@ -454,9 +457,7 @@ describe('queue-copy/module', () => {
                 sempCredentials: sempCreds('https://b1.example:1943/SEMP/v2'),
             });
             await QueueCopyModule.install(ctx);
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
-            toggle.checked = false;
-            toggle.dispatchEvent(new Event('change'));
+            pickScope(container, 'another-broker');
             const btnSemp = container.querySelector<HTMLButtonElement>('#copy-btn-dest-semp-connect')!;
             const error = container.querySelector('#copy-dest-semp-error')!;
 
@@ -477,7 +478,7 @@ describe('queue-copy/module', () => {
             expect(destSempConnect).toHaveBeenCalledTimes(1);
         });
 
-        it('Connect Client after unchecking Same broker uses prefilled host', async () => {
+        it('Connect Client after choosing Another broker uses prefilled host', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const ctx = makeCtx(eventBus, container, {
                 isConnected: true,
@@ -487,9 +488,7 @@ describe('queue-copy/module', () => {
             });
             await QueueCopyModule.install(ctx);
 
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
-            toggle.checked = false;
-            toggle.dispatchEvent(new Event('change'));
+            pickScope(container, 'another-broker');
 
             const btnSol = container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!;
             btnSol.click();
@@ -516,10 +515,8 @@ describe('queue-copy/module', () => {
             expect([val('#copy-source-host'), val('#copy-source-sol-host')]).toEqual(['mgmt.example', 'msg.example']);
             expect([val('#copy-dest-host'), val('#copy-dest-sol-host')]).toEqual(['mgmt.example', 'msg.example']);
 
-            // Same broker off and nothing retyped: the destination keeps both hosts.
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
-            toggle.checked = false;
-            toggle.dispatchEvent(new Event('change'));
+            // Another broker and nothing retyped: the destination keeps both hosts.
+            pickScope(container, 'another-broker');
             typeDestSempPass(container, 'p');
             container.querySelector<HTMLButtonElement>('#copy-btn-dest-semp-connect')!.click();
             expect(destSempConnect).toHaveBeenCalledWith(expect.anything(), 'mgmt.example', 'p');
@@ -537,9 +534,7 @@ describe('queue-copy/module', () => {
                 sempCredentials: sempCreds('https://b2.example:1943/SEMP/v2'),
             });
             await QueueCopyModule.install(ctx);
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
-            toggle.checked = false;
-            toggle.dispatchEvent(new Event('change'));
+            pickScope(container, 'another-broker');
             const user = container.querySelector<HTMLInputElement>('#copy-dest-sol-user')!;
             user.value = 'who?';
             user.dispatchEvent(new Event('input'));
@@ -569,9 +564,7 @@ describe('queue-copy/module', () => {
             });
             await QueueCopyModule.install(ctx);
 
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
-            toggle.checked = false;
-            toggle.dispatchEvent(new Event('change'));
+            pickScope(container, 'another-broker');
 
             typeDestSempPass(container, 'p');
             container.querySelector<HTMLButtonElement>('#copy-btn-dest-semp-connect')!.click();
@@ -592,8 +585,7 @@ describe('queue-copy/module', () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const ctx = makeCtx(eventBus, container, { isConnected: true });
             await QueueCopyModule.install(ctx);
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-vpn')!;
-            toggle.checked = false; toggle.dispatchEvent(new Event('change'));
+            pickScope(container, 'another-vpn');
             container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!.click();
             const fakeSession = { _live: true, on: vi.fn() };
             capturedSolHooks.current.onConnected(fakeSession, 'vpn-x');
@@ -609,8 +601,7 @@ describe('queue-copy/module', () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const ctx = makeCtx(eventBus, container, { isConnected: true });
             await QueueCopyModule.install(ctx);
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-vpn')!;
-            toggle.checked = false; toggle.dispatchEvent(new Event('change'));
+            pickScope(container, 'another-vpn');
             container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!.click();
             capturedSolHooks.current.onConnected({ on: vi.fn() }, 'vpn-x');
             capturedSolHooks.current.onDisconnected();
@@ -644,8 +635,7 @@ describe('queue-copy/module', () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const ctx = makeCtx(eventBus, container, { isConnected: true });
             await QueueCopyModule.install(ctx);
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
-            toggle.checked = false; toggle.dispatchEvent(new Event('change'));
+            pickScope(container, 'another-broker');
             capturedSempHooks.current.onConnected({ fetch: () => Promise.resolve(new Response()), baseUrl: 'http://d' });
             expect(container.querySelector<HTMLInputElement>('#copy-dest-semp-port')!.disabled).toBe(true);
             expect(container.querySelector<HTMLInputElement>('#copy-dest-host')!.disabled).toBe(true);
@@ -656,8 +646,7 @@ describe('queue-copy/module', () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const ctx = makeCtx(eventBus, container, { isConnected: true });
             await QueueCopyModule.install(ctx);
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
-            toggle.checked = false; toggle.dispatchEvent(new Event('change'));
+            pickScope(container, 'another-broker');
             capturedSempHooks.current.onConnected({ fetch: () => Promise.resolve(new Response()), baseUrl: 'http://d' });
             capturedSempHooks.current.onDisconnected();
             expect(container.querySelector<HTMLInputElement>('#copy-dest-semp-port')!.disabled).toBe(false);
@@ -684,7 +673,7 @@ describe('queue-copy/module', () => {
     });
 
     describe('destination Client connect in flight (target lock + late-session guard)', () => {
-        /** Same broker, a typed destination VPN, and Connect Client clicked: the connect is in flight. */
+        /** Another VPN, a typed destination VPN, and Connect Client clicked: the connect is in flight. */
         async function connectingManual() {
             await QueueCopyModule.install(makeCtx(eventBus, container, {
                 isConnected: true,
@@ -693,37 +682,35 @@ describe('queue-copy/module', () => {
                 sempCredentials: sempCreds('https://broker.solace.com:1943/SEMP/v2'),
             }));
             const el = <T extends HTMLElement>(sel: string): T => container.querySelector(sel) as T;
-            const sameVpn = el<HTMLInputElement>('#copy-toggle-same-vpn');
-            sameVpn.checked = false;
-            sameVpn.dispatchEvent(new Event('change'));
+            pickScope(container, 'another-vpn');
             const vpn = el<HTMLInputElement>('#copy-dest-sol-vpn');
             vpn.value = 'vpn-b';
             vpn.dispatchEvent(new Event('input'));
             el<HTMLButtonElement>('#copy-btn-dest-sol-connect').click();
-            return { el, sameVpn, vpn, sameBroker: el<HTMLInputElement>('#copy-toggle-same-broker') };
+            const scope = el('#copy-dest-scope');
+            /** Whether each part of the Copy to button is disabled. */
+            const scopeLocks = () => [...scope.querySelectorAll<HTMLButtonElement>('button')].map(b => b.disabled);
+            return { el, vpn, scope, scopeLocks };
         }
 
-        it('locks the destination toggles while connecting, with a title, and unlocks them once UP lands', async () => {
-            const { el, sameVpn, sameBroker } = await connectingManual();
+        it('locks the Copy to button while connecting, with a title, and unlocks it once UP lands', async () => {
+            const { el, scope, scopeLocks } = await connectingManual();
             expect(destSolConnect).toHaveBeenCalledWith(
                 expect.objectContaining({ vpn: 'vpn-b' }), 'broker.solace.com', expect.any(String));
-            expect(sameBroker.disabled).toBe(true);
-            expect(sameVpn.disabled).toBe(true);
-            expect(sameVpn.title).toBe(DEST_TARGET_LOCKED_TITLE);
+            expect(scopeLocks()).toEqual([true, true, true]);
+            expect(scope.title).toBe(DEST_TARGET_LOCKED_TITLE);
 
             capturedSolHooks.current.onConnected({ on: vi.fn() }, 'vpn-b');
 
             expect(el('#copy-dest-sol-status').textContent).toBe('Connected (vpn-b)');
-            expect(sameBroker.disabled).toBe(false);
-            expect(sameVpn.disabled).toBe(false);
-            expect(sameVpn.title).toBe('');
+            expect(scopeLocks()).toEqual([false, false, false]);
+            expect(scope.title).toBe('');
         });
 
-        it('a failed connect unlocks the toggles again', async () => {
-            const { sameVpn, sameBroker } = await connectingManual();
+        it('a failed connect unlocks the Copy to button again', async () => {
+            const { scopeLocks } = await connectingManual();
             capturedSolHooks.current.onConnectFailed({ infoStr: 'auth fail' });
-            expect(sameVpn.disabled).toBe(false);
-            expect(sameBroker.disabled).toBe(false);
+            expect(scopeLocks()).toEqual([false, false, false]);
         });
 
         it('disables the manual Connect button while connecting, so a second click starts nothing; a failure re-enables it', async () => {
@@ -739,11 +726,11 @@ describe('queue-copy/module', () => {
             expect(btn.textContent).toBe('Connect');
         });
 
-        it('switching Same VPN on mid-connect cancels it: the late session is discarded, not installed', async () => {
-            const { el, sameVpn } = await connectingManual();
-            // The toggle is locked; dispatching the change models the race the lock closes.
-            sameVpn.checked = true;
-            sameVpn.dispatchEvent(new Event('change'));
+        it('choosing This VPN mid-connect cancels it: the late session is discarded, not installed', async () => {
+            const { el, scope } = await connectingManual();
+            // The button is locked, so it takes no click from the user; a click
+            // event of the test's own models the race the lock closes.
+            scope.querySelector('[data-dest-scope="this-vpn"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
             expect(destSolDisconnect).toHaveBeenCalledTimes(1);
 
             capturedSolHooks.current.onConnected({ on: vi.fn() }, 'vpn-b');
@@ -811,8 +798,7 @@ describe('queue-copy/module', () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const ctx = makeCtx(eventBus, container, { isConnected: true });
             await QueueCopyModule.install(ctx);
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-broker')!;
-            toggle.checked = false; toggle.dispatchEvent(new Event('change'));
+            pickScope(container, 'another-broker');
             // Drive into Connected state so the button reads "Disconnect".
             capturedSempHooks.current.onConnected({ fetch: () => Promise.resolve(new Response()), baseUrl: 'http://d' });
             const btn = container.querySelector<HTMLButtonElement>('#copy-btn-dest-semp-connect')!;
@@ -829,8 +815,7 @@ describe('queue-copy/module', () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const ctx = makeCtx(eventBus, container, { isConnected: true });
             await QueueCopyModule.install(ctx);
-            const toggle = container.querySelector<HTMLInputElement>('#copy-toggle-same-vpn')!;
-            toggle.checked = false; toggle.dispatchEvent(new Event('change'));
+            pickScope(container, 'another-vpn');
             const btn = container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!;
             btn.click();
             capturedSolHooks.current.onConnected({ on: vi.fn() }, 'v');

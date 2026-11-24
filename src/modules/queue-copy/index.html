@@ -12,7 +12,7 @@
       sits in the same grid row. Default `align-items: stretch` makes every
       pair equal height — the taller card defines the row, the shorter
       stretches to match. Pairs in order:
-        1. Broker        (Source Broker     | Destination Broker + toggles)
+        1. Broker        (Source Broker     | Destination Broker + Copy to)
         2. SEMP          (Source SEMP       | Destination SEMP)
         3. Client        (Source Client     | Destination Client)
         4. Target        (Source Queue      | Destination type/name/mode)
@@ -79,13 +79,18 @@
                     <span id="copy-dest-broker-type-hint" class="text-secondary text-body-sm"></span>
                 </div>
             </div>
-            <div class="form-group flex-row gap-4 items-center">
-                <label class="switch-field">
-                    <span class="switch"><input type="checkbox" id="copy-toggle-same-broker" checked><span class="switch-slider"></span></span> Same Solace Broker as source
-                </label>
-                <label class="switch-field">
-                    <span class="switch"><input type="checkbox" id="copy-toggle-same-vpn" checked><span class="switch-slider"></span></span> Same Message VPN as source
-                </label>
+            <!-- Where the destination is, seen from the source: this connection,
+                 another Message VPN on its broker, or another broker. -->
+            <div class="form-group">
+                <label id="copy-dest-scope-label">Copy to</label>
+                <div>
+                    <div class="segmented" id="copy-dest-scope" role="group" aria-labelledby="copy-dest-scope-label">
+                        <button type="button" class="segmented-option" data-dest-scope="this-vpn" aria-pressed="true">This VPN</button>
+                        <button type="button" class="segmented-option" data-dest-scope="another-vpn" aria-pressed="false">Another VPN</button>
+                        <button type="button" class="segmented-option" data-dest-scope="another-broker" aria-pressed="false">Another broker</button>
+                    </div>
+                </div>
+                <p id="copy-dest-scope-hint" class="text-secondary text-body-sm mt-2 m-0" role="status"></p>
             </div>
         </div>
 
@@ -169,7 +174,7 @@
                     <div class="invalid-feedback">Password is required.</div>
                 </div>
             </div>
-            <!-- Visible only when "Same Solace Broker as source" is unchecked. -->
+            <!-- Visible only when Copy to is Another broker. -->
             <div class="copy-dest-connect-row hidden" id="copy-dest-semp-connect-row">
                 <button id="copy-btn-dest-semp-connect" type="button" class="btn btn-primary">Connect</button>
                 <span id="copy-dest-semp-status" class="copy-dest-connect-status">Not connected</span>
@@ -276,7 +281,7 @@
                     <input type="password" id="copy-dest-sol-pass" class="form-control">
                 </div>
             </div>
-            <!-- Visible only when either "Same Solace Broker" or "Same Message VPN" is unchecked. -->
+            <!-- Visible unless Copy to is This VPN. -->
             <div class="copy-dest-connect-row hidden" id="copy-dest-sol-connect-row">
                 <button id="copy-btn-dest-sol-connect" type="button" class="btn btn-primary">Connect</button>
                 <span id="copy-dest-sol-status" class="copy-dest-connect-status">Not connected</span>
@@ -309,13 +314,13 @@
                 <h2 class="card-title">Destination</h2>
                 <!-- Queue / Topic slide toggle. Unchecked = Queue, Checked = Topic.
                      Sits in the card's top-right corner per design. -->
-                <div class="copy-dest-type-switch" id="copy-dest-type-switch">
-                    <span class="copy-dest-type-label active" id="copy-dest-type-label-queue">Queue</span>
+                <div class="copy-slide-choice" id="copy-dest-type-switch">
+                    <span class="copy-slide-label active" id="copy-dest-type-label-queue">Queue</span>
                     <label class="switch" title="Toggle between Queue and Topic">
                         <input type="checkbox" id="copy-dest-type-toggle" aria-label="Destination type">
                         <span class="switch-slider"></span>
                     </label>
-                    <span class="copy-dest-type-label" id="copy-dest-type-label-topic">Topic</span>
+                    <span class="copy-slide-label" id="copy-dest-type-label-topic">Topic</span>
                 </div>
                 <div class="text-secondary hidden copy-topic-blocked" id="copy-dest-topic-blocked">
                     Topic destinations are unavailable with provisioned connections -- entitlements are defined per queue.
@@ -338,14 +343,14 @@
             </div>
             <div class="form-group">
                 <label>Mode</label>
-                <div class="flex-row gap-4 text-body-sm">
-                    <label class="flex-row items-center font-normal cursor-pointer gap-1">
-                        <input type="radio" name="copy-mode" value="copy" checked> Copy
+                <!-- Copy / Move slide toggle. Unchecked = Copy, Checked = Move. -->
+                <div class="copy-slide-choice" id="copy-mode-switch">
+                    <span class="copy-slide-label active" id="copy-mode-label-copy">Copy</span>
+                    <label class="switch" title="Toggle between Copy and Move">
+                        <input type="checkbox" id="copy-mode-toggle" aria-label="Move the messages">
+                        <span class="switch-slider"></span>
                     </label>
-                    <label class="flex-row items-center font-normal cursor-pointer gap-1">
-                        <input type="radio" name="copy-mode" value="move"> Move <span class="text-error">(destructive —
-                            removes from source)</span>
-                    </label>
+                    <span class="copy-slide-label" id="copy-mode-label-move">Move <span class="text-error">(destructive: removes from source)</span></span>
                 </div>
             </div>
         </div>

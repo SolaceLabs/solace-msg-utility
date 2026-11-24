@@ -58,7 +58,7 @@ export interface CopyHooks {
 }
 
 /**
- * The publisher the form names. Same broker + Same VPN publishes through the
+ * The publisher the form names. This VPN (the source's own) publishes through the
  * primary session; any other destination only through a destination session
  * connected for the destination the form names now -- never through whichever
  * session happens to exist, such as one whose connect landed after the user

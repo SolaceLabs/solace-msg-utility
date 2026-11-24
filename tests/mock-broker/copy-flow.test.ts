@@ -66,7 +66,7 @@ async function run(session: any, opts: { vpn: string; from: string; to: string; 
     state.sourceQueue = opts.from;
     state.dest = { type: 'queue', name: opts.to };
     state.mode = opts.mode;
-    // Same broker, Same VPN (the initial form): the primary session publishes.
+    // This VPN (the initial form): the primary session publishes.
     const publisher = createSolacePublisher(session);
     publishers.push(publisher);
     state.primaryPublisher = publisher;

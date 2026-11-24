@@ -1,11 +1,13 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { createInitialState, resetTransientState, syncDestFormFromSnapshot, destTargetKey, destMessagingHost } from '../../../src/modules/queue-copy/state';
+import {
+    createInitialState, resetTransientState, syncDestFormFromSnapshot, destTargetKey, destMessagingHost, destScopeOf, DEST_SCOPES,
+} from '../../../src/modules/queue-copy/state';
 import type { DestPrefillSnapshot } from '../../../src/modules/queue-copy/state';
 
 describe('queue-copy/state', () => {
     describe('createInitialState', () => {
-        it('returns default form values with both toggles checked', () => {
+        it('returns default form values, with the destination on the source\'s own VPN', () => {
             const s = createInitialState();
             expect(s.destForm.sameBroker).toBe(true);
             expect(s.destForm.sameVpn).toBe(true);
@@ -63,11 +65,22 @@ describe('queue-copy/state', () => {
             expect(s.destForm.solace.vpn).toBe('');
         });
 
-        it('null snapshot: no-op even with toggles checked', () => {
+        it('null snapshot: no-op even on the source\'s own VPN', () => {
             const s = createInitialState();
             syncDestFormFromSnapshot(s, null);
             expect(s.destForm.host).toBe('');
             expect(s.destForm.solace.vpn).toBe('');
+        });
+    });
+
+    describe('destScopeOf', () => {
+        it('names the Copy to answer of each pair, and the same VPN means nothing on another broker', () => {
+            expect(destScopeOf(true, true)).toBe('this-vpn');
+            expect(destScopeOf(true, false)).toBe('another-vpn');
+            expect(destScopeOf(false, false)).toBe('another-broker');
+            expect(destScopeOf(false, true)).toBe('another-broker');
+            // The button offers exactly these three, nearest the source first.
+            expect(DEST_SCOPES).toEqual(['this-vpn', 'another-vpn', 'another-broker']);
         });
     });
 

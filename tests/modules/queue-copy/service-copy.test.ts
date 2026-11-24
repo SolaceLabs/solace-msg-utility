@@ -1081,7 +1081,7 @@ describe('queue-copy/service-copy', () => {
             expect(session.send).not.toHaveBeenCalled();
         });
 
-        it('Same broker + Same VPN publishes through the primary even while a destination session exists', () => {
+        it('This VPN publishes through the primary even while a destination session exists', () => {
             const { state } = setup();
             connectedDest(state);
             state.destForm.sameBroker = true;

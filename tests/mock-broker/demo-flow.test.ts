@@ -219,10 +219,8 @@ describe('managed demo end to end', () => {
         await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
         await connect('east-prod', 'orders');
 
-        // The typed destination cards give way to the shared card (Same broker, so its Broker list is east-prod alone).
-        const toggle = q<HTMLInputElement>('#copy-toggle-same-vpn');
-        toggle.checked = false;
-        toggle.dispatchEvent(new Event('change'));
+        // The typed destination cards give way to the shared card (Another VPN, so its Broker list is east-prod alone).
+        q<HTMLButtonElement>('#copy-dest-scope [data-dest-scope="another-vpn"]').click();
         expect(shown('#copy-dest-prov-card')).toBe(true);
         expect(q('#copy-dest-semp-card').classList.contains('hidden')).toBe(true);
         expect(q('#copy-dest-sol-card').classList.contains('hidden')).toBe(true);
@@ -243,9 +241,7 @@ describe('managed demo end to end', () => {
     async function pointDestinationAtLab(): Promise<void> {
         await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
         await connect('east-prod', 'orders');
-        const sameBroker = q<HTMLInputElement>('#copy-toggle-same-broker');
-        sameBroker.checked = false;
-        sameBroker.dispatchEvent(new Event('change'));
+        q<HTMLButtonElement>('#copy-dest-scope [data-dest-scope="another-broker"]').click();
         expect(Array.from(q<HTMLSelectElement>('#copy-dest-prov-broker').options, o => o.value)).toEqual(['east-prod', 'lab']);
         q<HTMLSelectElement>('#copy-dest-prov-broker').value = 'lab';
         q('#copy-dest-prov-broker').dispatchEvent(new Event('change'));

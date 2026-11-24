@@ -10,6 +10,10 @@
     <button id="conn-tab-managed" class="tab hidden" type="button" role="tab" data-conn-mode="provisioned" aria-selected="false">Provisioned</button>
 </div>
 <div id="conn-panel-direct" role="tabpanel">
+    <!-- Shown by module.managed.ts while a Provisioned connection is open. -->
+    <div id="conn-note-direct" class="card hidden" role="status">
+        <div class="banner-warning m-0">A Provisioned connection is open. Connect here closes it, and you stay signed in.</div>
+    </div>
 <!-- @module-base -->
 </div>
 <!-- Provisioned connection panel: the gateway session's entitled broker/VPN
@@ -26,6 +30,11 @@
         </p>
         <div id="managed-login-error" class="text-error mb-4 hidden text-body-sm"></div>
         <a id="btn-managed-login" class="btn btn-primary" href="/login">Sign in</a>
+    </div>
+
+    <!-- Shown by module.managed.ts while the user is signed in and a Direct connection is open. -->
+    <div id="conn-note-managed" class="card hidden" role="status">
+        <div class="banner-warning m-0">A Direct connection is open. Connect here closes it.</div>
     </div>
 
     <!-- Selection view: hosts the shared provisioned connection card
