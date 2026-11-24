@@ -1333,9 +1333,9 @@ describe('queue-copy/ui-modal — entitlement gates', () => {
                 .toMatch(/not entitled to write to queue "ro.dest"/);
         });
 
-        it('refuses a topic destination outright — entitlements are per queue', () => {
-            expect(destinationRefusal(provisionedState('topic', 'some/topic'), mAccess()))
-                .toMatch(/Topic destinations are unavailable with provisioned connections/);
+        // The name is one the queue rows refuse, so only the type lets it pass.
+        it('lets a topic destination through: entitlements cover queues only', () => {
+            expect(destinationRefusal(provisionedState('topic', 'ro.dest'), mAccess())).toBeNull();
         });
 
         it('allows a queue destination the user may write to', () => {
@@ -1343,14 +1343,14 @@ describe('queue-copy/ui-modal — entitlement gates', () => {
         });
 
         it('does not apply to a manual-credential destination (the documented bypass)', () => {
-            const state = provisionedState('topic', 'some/topic');
+            const state = provisionedState('queue', 'ro.dest');
             state.destForm.sameBroker = false;   // manual credentials
             state.destForm.sameVpn = false;
             expect(destinationRefusal(state, mAccess())).toBeNull();
         });
 
         it('does not apply in direct mode', () => {
-            expect(destinationRefusal(provisionedState('topic', 'some/topic'), DIRECT)).toBeNull();
+            expect(destinationRefusal(provisionedState('queue', 'ro.dest'), DIRECT)).toBeNull();
         });
 
         // Wiring: the Start handler must consult the gate and surface its reason
@@ -1360,7 +1360,7 @@ describe('queue-copy/ui-modal — entitlement gates', () => {
             const copyMod = await import('../../../src/modules/queue-copy/service-copy');
             const copySpy = vi.spyOn(copyMod, 'runCopyJob').mockResolvedValue(undefined);
             try {
-                const state = provisionedState('topic', 'some/topic');
+                const state = provisionedState('queue', 'ro.dest');
                 const session = createSessionMock();
                 state.primaryPublisher = createSolacePublisher(session);
                 const ctx = makeCtx({ selectedVpn: 'vpn1', managed: managed() });
@@ -1370,7 +1370,7 @@ describe('queue-copy/ui-modal — entitlement gates', () => {
                 state.verify!.inProgress = false;
                 els.btnModalStart.disabled = false;
                 els.btnModalStart.click();
-                expect(els.modalRunError.textContent).toMatch(/Topic destinations/);
+                expect(els.modalRunError.textContent).toBe('Error: You are not entitled to write to queue "ro.dest".');
                 expect(copySpy).not.toHaveBeenCalled();
                 expect(state.job).toBeNull();
                 expect(els.content.disabled).toBe(false);

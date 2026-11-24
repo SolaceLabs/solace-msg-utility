@@ -312,21 +312,21 @@
     "semantic_hash": ""
   },
   "src/modules/queue-copy/ui-events.ts": {
-    "mtime": 1795526361.8141687,
-    "seen": 1795528277.0207345,
-    "ast_hash": "dd9f229f8b93ac313a3d6a8a3e483b2a",
+    "mtime": 1795529317.9785848,
+    "seen": 1795529888.2106488,
+    "ast_hash": "c00a9f129741c09b6c63893263471f5e",
     "semantic_hash": ""
   },
   "src/modules/queue-copy/ui-modal.ts": {
-    "mtime": 1795196770.123029,
-    "seen": 1795210659.5994658,
-    "ast_hash": "dafabc7c28a914e131809173dd75c7ea",
+    "mtime": 1795529317.9790502,
+    "seen": 1795529888.2106526,
+    "ast_hash": "368bafcc08f83a10118aa465f2c2b549",
     "semantic_hash": ""
   },
   "src/modules/queue-copy/ui.ts": {
-    "mtime": 1795526347.745011,
-    "seen": 1795528277.0207384,
-    "ast_hash": "80df31371eac0207961a5161278923ab",
+    "mtime": 1795529317.9783607,
+    "seen": 1795529888.2106547,
+    "ast_hash": "3be164b2a6d2673b223c51344ab1a819",
     "semantic_hash": ""
   },
   "src/modules/queue-discovery/module.ts": {
@@ -618,9 +618,9 @@
     "semantic_hash": ""
   },
   "tests/modules/queue-copy/ui-modal.test.ts": {
-    "mtime": 1795518611.2296865,
-    "seen": 1795524739.8732371,
-    "ast_hash": "767d87db0663044d35905c7097368ab9",
+    "mtime": 1795529604.0454857,
+    "seen": 1795529888.2109802,
+    "ast_hash": "27f6b0a8051b66e1e1db0b6e577504fe",
     "semantic_hash": ""
   },
   "tests/modules/queue-copy/ui.test.ts": {
@@ -684,9 +684,9 @@
     "semantic_hash": ""
   },
   "docs/architecture.md": {
-    "mtime": 1795526715.8862507,
-    "seen": 1795528277.0209954,
-    "ast_hash": "fc31622220c506372aa5c101d9571be0",
+    "mtime": 1795529395.8035018,
+    "seen": 1795529888.2110734,
+    "ast_hash": "5d63be1c2eba7cdef719ddff91652654",
     "semantic_hash": ""
   },
   "docs/contributing.md": {
@@ -714,9 +714,9 @@
     "semantic_hash": ""
   },
   "docs/user-guide.md": {
-    "mtime": 1795528057.9101672,
-    "seen": 1795528277.0210052,
-    "ast_hash": "8ced8f8ab1b86239b902b46e9f5796e9",
+    "mtime": 1795529672.533253,
+    "seen": 1795529888.2110908,
+    "ast_hash": "05e0a481bee8f6a5549675ec4f108e41",
     "semantic_hash": ""
   },
   "src/index.html": {
@@ -738,9 +738,9 @@
     "semantic_hash": ""
   },
   "src/modules/queue-copy/index.html": {
-    "mtime": 1795526326.0801718,
-    "seen": 1795528277.0210314,
-    "ast_hash": "f209c3e45aa0d470b0fd54a4c5d2d3f3",
+    "mtime": 1795529317.97775,
+    "seen": 1795529888.2111363,
+    "ast_hash": "950389af8ceeda28208de07fa8bff068",
     "semantic_hash": ""
   },
   "src/modules/queue-discovery/index.html": {
@@ -1056,9 +1056,9 @@
     "semantic_hash": ""
   },
   "tests/modules/queue-copy/dest-provisioned.test.ts": {
-    "mtime": 1795518441.3038251,
-    "seen": 1795524739.8732255,
-    "ast_hash": "50337c4e887c6613ffd5337a857d810b",
+    "mtime": 1795529373.3849418,
+    "seen": 1795529888.2109652,
+    "ast_hash": "80bfe383f038630db84b783c85670fff",
     "semantic_hash": ""
   },
   "src/modules/admin-login/index.html": {
@@ -1788,9 +1788,9 @@
     "semantic_hash": ""
   },
   "docs/provisioned-mode.md": {
-    "mtime": 1795526704.6008306,
-    "seen": 1795528277.0210025,
-    "ast_hash": "5deef2dd03817b24af285db22fc16242",
+    "mtime": 1795529395.8037982,
+    "seen": 1795529888.211086,
+    "ast_hash": "a3bbd66123f9492af1cd9e4936338777",
     "semantic_hash": ""
   },
   "src/core/icons.ts": {
@@ -2442,9 +2442,9 @@
     "semantic_hash": ""
   },
   "src/modules/connections/help.managed.html": {
-    "mtime": 1795516853.8307283,
-    "seen": 1795524739.873348,
-    "ast_hash": "294aa71f9b12f2716660ae648bf540ac",
+    "mtime": 1795529395.8027275,
+    "seen": 1795529888.2111175,
+    "ast_hash": "dfc1f3d04e8c5a8904ed333722d95e1c",
     "semantic_hash": ""
   },
   "src/modules/gateway-settings/help.html": {
@@ -2454,9 +2454,9 @@
     "semantic_hash": ""
   },
   "src/modules/queue-copy/help.html": {
-    "mtime": 1795526693.8548105,
-    "seen": 1795528277.02103,
-    "ast_hash": "b195834718ea3c95c324c3e12a6f4ea3",
+    "mtime": 1795529395.8021588,
+    "seen": 1795529888.2111342,
+    "ast_hash": "d59e715b054d86ee379edab9f386553a",
     "semantic_hash": ""
   },
   "src/modules/tls-certificates/help.html": {

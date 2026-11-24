@@ -700,7 +700,7 @@ These hold across the code; changing one is a design change, not a refactor.
 - **Modules that cannot be filtered are hidden, not trusted.** See [RBAC state + matchers](#rbac-state--matchers).
 - **Provisioned is a convenience unless the deployment makes it exclusive.** Under `connModes: both` a user can use the Direct tab and type any credentials they know, so every entitlement guarantee holds only under `connModes: provisioned`. `both` is supported for mixed audiences and is a documented bypass.
 - **The profile is core-owned and injected.** Broker and VPN names live in [managed-profile.ts](../src/core/services/managed-profile.ts), reached through `AppContext.managedProfile`; `AppState.managed` carries matcher inputs only. A second module opens a provisioned connection by asking the profile to dial a target it names, without importing the connections module and without credential-bearing state.
-- **Writes are gated where they happen.** Copying into a queue is a write: the destination picker lists at `operate` scope, and topic destinations are refused on any provisioned publish path (see [Enforcement points](#enforcement-points)).
+- **Writes are gated where they happen.** Copying into a queue is a write: the destination picker lists at `operate` scope, and a destination queue outside it is refused on any provisioned publish path (see [Enforcement points](#enforcement-points)). A topic destination is not gated: entitlements cover queues only, and the ACL profile of the VPN's client username decides where a session may publish.
 
 ### Connection modes
 
@@ -879,7 +879,7 @@ The name is a warning, not a description: **only those two SEMP v2 monitor list 
 | Source gate | `runVerify`, **before** the probe is spawned | a source queue failing `isQueueVisible` -- otherwise a signed-in user could type any queue name and read back its depth, size and message IDs over v1 RPC |
 | Verify | `service-verify` | broker truth, unchanged |
 | Start gate | `evaluateStartGate` | intersects the broker's verdict with RBAC: `effectiveSourceAccess` downgrades read-write -> read-only when `canOperate` is false, and -> no-access when `isQueueVisible` is false, so **move** on a browse-only queue is blocked |
-| Destination gate | `destinationRefusal`, last check before any publish | a **topic** on a provisioned publish path (entitlements are per queue; a topic fans out to every queue subscribed to it, so it cannot be checked), and a destination queue failing `canOperate` |
+| Destination gate | `destinationRefusal`, last check before any publish | a destination queue failing `canOperate` on a provisioned publish path. A **topic** passes: entitlements cover queues only, so the broker's ACL profile decides |
 | Run | engine | -- |
 
 `destinationRefusal` resolves *where the publish will actually land* -- the primary's broker/VPN when the destination reuses it, or `destForm.provisioned` when a secondary was dialled with provisioned credentials -- and checks that. A **typed-credential** destination is ungated, which is the documented bypass; it is reachable only with a Direct primary connection, where no managed session governs the publish, so the gate does not apply.

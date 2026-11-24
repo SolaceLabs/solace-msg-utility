@@ -997,41 +997,28 @@ describe('queue-copy -- provisioned destination: a connect in flight', () => {
 });
 
 describe('queue-copy -- provisioned destination: topic availability', () => {
-    it('blocks Topic while the publish path uses provisioned credentials', async () => {
-        const { el, hidden } = await setupProvisioned();
-        // This VPN => publishes through the managed primary.
-        expect(el<HTMLInputElement>('#copy-dest-type-toggle').disabled).toBe(true);
-        expect(hidden('#copy-dest-topic-blocked')).toBe(false);
-    });
-
-    it('blocks Topic on a provisioned secondary too', async () => {
+    it('offers Topic on the managed primary and on a provisioned secondary', async () => {
         const { el } = await setupProvisioned();
+        const toggle = el<HTMLInputElement>('#copy-dest-type-toggle');
+        // This VPN => publishes through the managed primary.
+        expect(toggle.disabled).toBe(false);
         needSecondary(el);
-        expect(el<HTMLInputElement>('#copy-dest-type-toggle').disabled).toBe(true);
+        expect(toggle.disabled).toBe(false);
     });
 
-    it('resets an already-chosen Topic back to Queue when a sign-in makes the path provisioned', async () => {
+    it('keeps a chosen Topic when a sign-in makes the path provisioned', async () => {
         const { ctx, appState, el } = await setupProvisioned({ managed: null }, false);
-        needSecondary(el);                       // Direct => topic allowed
+        needSecondary(el);
         const toggle = el<HTMLInputElement>('#copy-dest-type-toggle');
         toggle.checked = true;
         toggle.dispatchEvent(new Event('change'));
-        el<HTMLInputElement>('#copy-dest-input').value = 'some/topic';
-        el<HTMLInputElement>('#copy-dest-input').dispatchEvent(new Event('input'));
 
         ctx.managedProfile.setProfile(PROFILE);
         appState.managed = SESSION;
-        eventBus.emit('rbac:changed');           // => topic no longer expressible
+        eventBus.emit('rbac:changed');
 
-        expect(toggle.disabled).toBe(true);
-        expect(el<HTMLInputElement>('#copy-dest-input').value).toBe('');
-    });
-
-    it('allows Topic with a Direct primary and its own destination', async () => {
-        const { el, hidden } = await setupProvisioned({ managed: null }, false);
-        needSecondary(el);
-        expect(el<HTMLInputElement>('#copy-dest-type-toggle').disabled).toBe(false);
-        expect(hidden('#copy-dest-topic-blocked')).toBe(true);
+        expect([toggle.checked, toggle.disabled]).toEqual([true, false]);
+        expect(el('#copy-dest-name-label').textContent).toBe('Topic');
     });
 });
 
@@ -1108,10 +1095,12 @@ describe('queue-copy -- provisioned destination: the destination gate', () => {
             .toMatch(/not entitled to write/i);
     });
 
-    it('refuses a topic on a provisioned secondary', () => {
-        const state = provisionedSecondary('some/topic');
+    // Entitlements cover queues only: a topic is the broker's ACL profile's to decide.
+    it('lets a topic through on a provisioned secondary, whatever the queue patterns say', () => {
+        const state = provisionedSecondary('other.dest');
+        expect(destinationRefusal(state, access)).toMatch(/not entitled to write/i);
         state.dest.type = 'topic';
-        expect(destinationRefusal(state, access)).toMatch(/Topic destinations are unavailable/i);
+        expect(destinationRefusal(state, access)).toBeNull();
     });
 
     it('leaves a typed-credential secondary ungated -- the documented bypass', () => {

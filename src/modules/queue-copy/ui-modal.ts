@@ -303,11 +303,9 @@ export function destinationRefusal(state: QueueCopyState, access: SourceAccess):
         : df.credMode === 'provisioned' ? df.provisioned : null;
     if (!target) return null;
     const { broker, vpn } = target;
-    if (state.dest.type === 'topic') {
-        // Entitlements are expressed per queue; a topic fans out to every queue
-        // subscribed to it, so it cannot be checked. Blocked rather than guessed.
-        return 'Topic destinations are unavailable with provisioned connections -- entitlements are defined per queue.';
-    }
+    // Entitlements cover queues only. Where a session may publish is for the
+    // ACL profile of the VPN's client username to decide, so a topic passes.
+    if (state.dest.type === 'topic') return null;
     if (!canOperate(session, broker, vpn, state.dest.name)) {
         return `You are not entitled to write to queue "${state.dest.name}".`;
     }

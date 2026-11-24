@@ -95,7 +95,6 @@ export interface CopyUiElements {
 
     // Destination target: a slide choice (core/slide-choice.ts), Queue or Topic.
     destType: SlideChoice<DestType>;
-    destTopicBlocked: HTMLElement;
     destNameLabel: HTMLElement;
     destInput: HTMLInputElement;
     btnDestPick: HTMLButtonElement;
@@ -244,7 +243,6 @@ export function cacheElements(container: HTMLElement): CopyUiElements {
         destSolError: required(container, '#copy-dest-sol-error'),
 
         destType: createSlideChoice<DestType>(required(container, '#copy-dest-type-switch'), { choices: ['queue', 'topic'] }),
-        destTopicBlocked: required(container, '#copy-dest-topic-blocked'),
         destNameLabel: required(container, '#copy-dest-name-label'),
         destInput: required<HTMLInputElement>(container, '#copy-dest-input'),
         btnDestPick: required<HTMLButtonElement>(container, '#copy-btn-dest-pick'),
@@ -563,18 +561,6 @@ function setErrorPane(el: HTMLElement, message: string | null): void {
         el.textContent = '';
         el.classList.add('hidden');
     }
-}
-
-/**
- * Disable the Topic option when the publish path uses provisioned managed
- * credentials. `QGlob` has no topic vocabulary — a topic fans out to whichever
- * queues subscribe to it — so entitlement cannot be expressed for one. The
- * run-start gate refuses topics on that path regardless; this keeps the control
- * from offering something that would only fail later.
- */
-export function setDestTopicBlocked(els: CopyUiElements, blocked: boolean): void {
-    els.destType.setDisabled(blocked);
-    els.destTopicBlocked.classList.toggle('hidden', !blocked);
 }
 
 /** Show the destination type: on its slide choice, and in the name field's label and placeholder. */

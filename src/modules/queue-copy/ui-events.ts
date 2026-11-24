@@ -371,10 +371,6 @@ export function wireUiEvents(
             state.destSolacePass = '';
             ui.clearDestTypedSecrets(els);
         }
-        // A managed session publishing provisioned credentials cannot express
-        // topic entitlement, so the type is forced to Queue (the run-start gate
-        // refuses topics on that path regardless -- this keeps the UI honest).
-        refreshDestTypeAvailability();
         // The renders above re-enable what they own; a connect in flight keeps
         // the destination locked until it ends.
         if (state.destSolPending !== null) {
@@ -388,24 +384,6 @@ export function wireUiEvents(
         destCard.lock(false);
         // renderDestMode re-renders the mode's cards and the card's lists.
         renderDestMode();
-    }
-
-    /** True when the publish path will use provisioned managed credentials. */
-    function publishesProvisioned(): boolean {
-        if (!ctx.appState.managed) return false;
-        return needsSecondary() ? state.destForm.credMode === 'provisioned' : true;
-    }
-
-    function refreshDestTypeAvailability(): void {
-        const topicBlocked = publishesProvisioned();
-        ui.setDestTopicBlocked(els, topicBlocked);
-        if (topicBlocked && state.dest.type === 'topic') {
-            state.dest.type = 'queue';
-            ui.applyDestType(els, 'queue');
-            state.dest.name = '';
-            els.destInput.value = '';
-            services.refreshStartEnabled();
-        }
     }
 
     // ===== Helpers =====

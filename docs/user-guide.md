@@ -769,7 +769,7 @@ If your sign-in changes to or from a signed-in session while the page is open, a
 The card's connection is one unit: if its messaging connection drops, its SEMP connection is closed with it, and **Disconnect** closes both.
 
 > [!IMPORTANT]
-> In a signed-in session you can copy only into queues you are entitled to operate on, and the **Topic** choice is not available: the switch is locked, and the page explains that entitlements are defined per queue. A topic delivers to every queue that subscribes to it, so it cannot be checked. The page says so with `Topic destinations are unavailable with provisioned connections -- entitlements are defined per queue.` A run that would break either rule is refused before anything is read. Outside a signed-in session there is no such rule: the destination may be a topic.
+> In a signed-in session you can copy only into queues you are entitled to operate on. A run into any other queue is refused before anything is read. Your entitlements cover queues only, so a **Topic** destination is not checked against them: the broker decides whether the connection may publish to the topic, and a topic delivers to every queue that subscribes to it. Outside a signed-in session the page checks neither.
 
 ### The destination target
 
@@ -901,7 +901,7 @@ The errors you may see:
 - The broker's own reason for refusing a message, such as a full queue, a missing permission or a message that is too large for the destination. The run stops on the first one.
 - A reason from the source, such as **Browser disconnected**, **Browser connect failed** or **Could not open the source queue.**
 - **Publisher unavailable**, or **The destination connection does not match the destination selected. Connect the destination again.** The run is refused before it reads anything. This happens when the destination connection is not the one the form names, for example after you changed the target. The title still reads **Copying...** or **Moving...**: press **Cancel copy** or **Cancel move** to close the dialog, then connect the destination again.
-- In a signed-in session, **You are not entitled to write to queue** followed by the queue's name, or the message that topics are unavailable. These too refuse the run before it reads anything.
+- In a signed-in session, **You are not entitled to write to queue** followed by the queue's name. This too refuses the run before it reads anything.
 
 ### Before you move messages
 
@@ -1183,7 +1183,7 @@ The gateway shows you only what an administrator granted you. Each grant names b
 - In Queue Copy, the queue lists of the destination hold only queues on which you hold Operate, because copying into a queue changes it.
 - The page applies the queue limits itself: the gateway checks that you were granted the broker, and the page then narrows each list to the queues you were granted.
 - Queue Subscriptions lists only subscriptions on queues you may see, as the Queue Subscriptions chapter says.
-- Queue Copy does not copy to a topic: it says `Topic destinations are unavailable with provisioned connections -- entitlements are defined per queue.` A destination queue you may not write to gives `You are not entitled to write to queue "orders.archive".`
+- In Queue Copy, a destination queue you may not write to gives `You are not entitled to write to queue "orders.archive".` A topic destination is not checked against your grants: the broker decides where the connection may publish.
 - The sidebar shows Connections and About, and then only the pages your administrator gave you, out of Queue Browser, Queue Copy and Queue Subscriptions. A page you were not given is not listed. A change shows after you press **Refresh** or reload the page.
 
 If an administrator takes away something you were using while you work, whatever depended on it stops. The gateway also closes your messaging connection when you sign out, in this tab or another, when your password or administrator status changes, and when an administrator removes your access to that broker or Message VPN. SEMP is closed with it, as in "The connected view" above.

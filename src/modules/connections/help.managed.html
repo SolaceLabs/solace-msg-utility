@@ -197,7 +197,7 @@
         <li>In Queue Copy, the queue lists of the destination hold only queues on which you hold Operate, because copying into a queue changes it.</li>
         <li>The page applies the queue limits itself: the gateway checks that you were granted the broker, and the page then narrows each list to the queues you were granted.</li>
         <li>Queue Subscriptions lists only subscriptions on queues you may see, as the Queue Subscriptions chapter says.</li>
-        <li>Queue Copy does not copy to a topic: it says <code>Topic destinations are unavailable with provisioned connections -- entitlements are defined per queue.</code> A destination queue you may not write to gives <code>You are not entitled to write to queue "orders.archive".</code></li>
+        <li>In Queue Copy, a destination queue you may not write to gives <code>You are not entitled to write to queue "orders.archive".</code> A topic destination is not checked against your grants: the broker decides where the connection may publish.</li>
         <li>The sidebar shows Connections and About, and then only the pages your administrator gave you, out of Queue Browser, Queue Copy and Queue Subscriptions. A page you were not given is not listed. A change shows after you press <strong>Refresh</strong> or reload the page.</li>
     </ul>
     <p>If an administrator takes away something you were using while you work, whatever depended on it stops. The gateway also closes your messaging connection when you sign out, in this tab or another, when your password or administrator status changes, and when an administrator removes your access to that broker or Message VPN. SEMP is closed with it, as in "The connected view" above.</p>

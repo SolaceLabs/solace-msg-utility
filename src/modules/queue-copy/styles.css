@@ -193,7 +193,3 @@
     0%   { transform: translateX(-100%); }
     100% { transform: translateX(330%); }
 }
-
-.copy-topic-blocked {
-    font-size: 0.85rem;
-}

@@ -110,7 +110,7 @@
     <p>If your sign-in changes to or from a signed-in session while the page is open, any destination connection and the target you chose are dropped. The same happens to the destination queue you chose when a refresh of your entitlements removes the Message VPN of a connected destination: the <strong>Queue name</strong> box is emptied, so you cannot start a run against it.</p>
     <p>The card's connection is one unit: if its messaging connection drops, its SEMP connection is closed with it, and <strong>Disconnect</strong> closes both.</p>
     <aside class="manual-note" data-kind="important">
-        <p>In a signed-in session you can copy only into queues you are entitled to operate on, and the <strong>Topic</strong> choice is not available: the switch is locked, and the page explains that entitlements are defined per queue. A topic delivers to every queue that subscribes to it, so it cannot be checked. The page says so with <code>Topic destinations are unavailable with provisioned connections -- entitlements are defined per queue.</code> A run that would break either rule is refused before anything is read. Outside a signed-in session there is no such rule: the destination may be a topic.</p>
+        <p>In a signed-in session you can copy only into queues you are entitled to operate on. A run into any other queue is refused before anything is read. Your entitlements cover queues only, so a <strong>Topic</strong> destination is not checked against them: the broker decides whether the connection may publish to the topic, and a topic delivers to every queue that subscribes to it. Outside a signed-in session the page checks neither.</p>
     </aside>
 
     <h3>The destination target</h3>
@@ -251,7 +251,7 @@
         <li>The broker's own reason for refusing a message, such as a full queue, a missing permission or a message that is too large for the destination. The run stops on the first one.</li>
         <li>A reason from the source, such as <strong>Browser disconnected</strong>, <strong>Browser connect failed</strong> or <strong>Could not open the source queue.</strong></li>
         <li><strong>Publisher unavailable</strong>, or <strong>The destination connection does not match the destination selected. Connect the destination again.</strong> The run is refused before it reads anything. This happens when the destination connection is not the one the form names, for example after you changed the target. The title still reads <strong>Copying...</strong> or <strong>Moving...</strong>: press <strong>Cancel copy</strong> or <strong>Cancel move</strong> to close the dialog, then connect the destination again.</li>
-        <li>In a signed-in session, <strong>You are not entitled to write to queue</strong> followed by the queue's name, or the message that topics are unavailable. These too refuse the run before it reads anything.</li>
+        <li>In a signed-in session, <strong>You are not entitled to write to queue</strong> followed by the queue's name. This too refuses the run before it reads anything.</li>
     </ul>
 
     <h3>Before you move messages</h3>
