@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -133,6 +134,7 @@ func setAppPageHeaders(h http.Header) {
 type pwaHandler struct {
 	root   string
 	index  string // the bundle served at /
+	files  fs.FS  // the app folder, confined: it opens no name that is not a plain path inside it
 	fs     http.Handler
 	logger *slog.Logger
 }
@@ -154,7 +156,8 @@ func newPWAHandler(appDir, index string, logger *slog.Logger) (*pwaHandler, erro
 	if err := h.ready(); err != nil {
 		return nil, fmt.Errorf("%w. The gateway serves the app from %s: run the image's own files, or mount a build that holds %s there", err, appDir, index)
 	}
-	h.fs = http.FileServer(http.FS(os.DirFS(appDir)))
+	h.files = os.DirFS(appDir)
+	h.fs = http.FileServer(http.FS(h.files))
 	return h, nil
 }
 
@@ -198,7 +201,7 @@ func (h *pwaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveIndex(w, r)
 		return
 	}
-	if !fileResolvable(h.root, clean) {
+	if !fileResolvable(h.files, clean) {
 		http.NotFound(w, r)
 		return
 	}
@@ -220,14 +223,18 @@ func (h *pwaHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-func fileResolvable(root, p string) bool {
-	full := root + p
-	info, err := os.Stat(full)
+// fileResolvable reports whether a cleaned request path names a file of the
+// app folder, or a folder of it that holds an index.html. It asks the folder
+// the files are served from, which refuses any name that is not a plain path
+// inside it, so no path is joined by hand and none can leave the folder.
+func fileResolvable(files fs.FS, clean string) bool {
+	name := strings.TrimPrefix(clean, "/")
+	info, err := fs.Stat(files, name)
 	if err != nil {
 		return false
 	}
 	if info.IsDir() {
-		_, err := os.Stat(full + "/index.html")
+		_, err := fs.Stat(files, name+"/index.html")
 		return err == nil
 	}
 	return true

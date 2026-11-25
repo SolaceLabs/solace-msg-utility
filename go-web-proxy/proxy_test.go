@@ -1021,6 +1021,36 @@ func TestPWAHandler_FilesAndDirectories(t *testing.T) {
 	}
 }
 
+// A request cannot reach a file outside the app folder, however its path is
+// written: with dot segments, with them escaped, or with no leading slash.
+func TestPWAHandler_NeverServesAFileOutsideTheAppFolder(t *testing.T) {
+	base := t.TempDir()
+	writeFile(t, filepath.Join(base, "outside.txt"), "outside the app folder")
+	dir := filepath.Join(base, "app")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, directIndexFile), "<html>direct</html>")
+	h := mustPWA(t, dir, directIndexFile)
+
+	requests := map[string]*http.Request{}
+	for _, target := range []string{"/../outside.txt", "/a/../../outside.txt", "/%2e%2e/outside.txt", "/..%2foutside.txt"} {
+		requests[target] = httptest.NewRequest(http.MethodGet, target, nil)
+	}
+	// A path a client cannot send over HTTP, as a handler in front could hand on.
+	bare := httptest.NewRequest(http.MethodGet, "/", nil)
+	bare.URL.Path = "../outside.txt"
+	requests["../outside.txt (no leading slash)"] = bare
+
+	for name, req := range requests {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "outside the app folder") {
+			t.Errorf("%s: want 404 and nothing of the file, got %d %q", name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 // The relay streams through the access log: a flush reaches the client.
 func TestAccessLog_PassesFlushThrough(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

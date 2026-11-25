@@ -42,15 +42,15 @@
     "semantic_hash": ""
   },
   "go-web-proxy/proxy.go": {
-    "mtime": 1795575170.829248,
-    "seen": 1795575603.6294634,
-    "ast_hash": "86ce888ea01bf1b5b1ecf0d2000f597b",
+    "mtime": 1795619576.098784,
+    "seen": 1795619851.2211893,
+    "ast_hash": "49d699a3da7b58af591e3e692cc302bc",
     "semantic_hash": ""
   },
   "go-web-proxy/proxy_test.go": {
-    "mtime": 1795575210.8209457,
-    "seen": 1795575603.629466,
-    "ast_hash": "e2754dd027b714b7c4e66c77cceed0e1",
+    "mtime": 1795619576.0996625,
+    "seen": 1795619851.2211924,
+    "ast_hash": "88214cb9b48db0365a14bc6b02b4cd49",
     "semantic_hash": ""
   },
   "go-web-proxy/tls.go": {
@@ -696,9 +696,9 @@
     "semantic_hash": ""
   },
   "docs/deployment.md": {
-    "mtime": 1795575210.823287,
-    "seen": 1795575603.6299655,
-    "ast_hash": "af9cb36b9367210d6393fca0fc543e39",
+    "mtime": 1795617551.0795982,
+    "seen": 1795618771.3888488,
+    "ast_hash": "38d151d030877d22ff20d0ee73ca7e69",
     "semantic_hash": ""
   },
   "docs/developer-guide.md": {
@@ -714,8 +714,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide.md": {
-    "mtime": 1795615886.4429522,
-    "seen": 1795616096.440055,
+    "mtime": 1795619613.595701,
+    "seen": 1795619851.2217577,
     "ast_hash": "e5d9359e1f0897df0a8c5f06a17b283a",
     "semantic_hash": ""
   },
@@ -1284,9 +1284,9 @@
     "semantic_hash": ""
   },
   "go-web-proxy/pages.go": {
-    "mtime": 1794932015.9723911,
-    "seen": 1794932771.3784115,
-    "ast_hash": "c8b0f4d881279402d27e0ecf93ef6684",
+    "mtime": 1795618487.569088,
+    "seen": 1795618771.3881936,
+    "ast_hash": "74645e537b266b5ec12cc71b62b80c17",
     "semantic_hash": ""
   },
   "go-web-proxy/pages_test.go": {
@@ -1734,21 +1734,21 @@
     "semantic_hash": ""
   },
   "docker/compose.gateway.yaml": {
-    "mtime": 1794823743.2875571,
-    "seen": 1794824342.2885022,
-    "ast_hash": "d3768cb97b050cbe2d9f995606cdae7f",
+    "mtime": 1795617549.6905828,
+    "seen": 1795618771.3888383,
+    "ast_hash": "0cc207639bf6f4045a3384c896c98a11",
     "semantic_hash": ""
   },
   "docker/compose.provisioned.yaml": {
-    "mtime": 1795600049.2045562,
-    "seen": 1795601458.9278567,
-    "ast_hash": "8996cb5332cd2f418cee5b7fd69180c3",
+    "mtime": 1795617549.905585,
+    "seen": 1795618771.3888404,
+    "ast_hash": "48df08b467f2715e476d741e58b921b9",
     "semantic_hash": ""
   },
   "docs/provisioned-mode.md": {
-    "mtime": 1795613439.7663198,
-    "seen": 1795614129.8705175,
-    "ast_hash": "c6811631b9d2f721a82c05a3303a7736",
+    "mtime": 1795617550.5045917,
+    "seen": 1795618771.3888526,
+    "ast_hash": "971dd07654f1dfad15f7b65c75eb63b0",
     "semantic_hash": ""
   },
   "src/core/icons.ts": {

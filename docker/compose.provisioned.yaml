@@ -11,7 +11,7 @@
 #   2. Make the backup directory next to this file, writable by the gateway's
 #      UID only (left to Docker, it would be root's and take no backups):
 #      mkdir -p backup && chmod 700 backup && sudo chown 65532 backup
-#   3. SMU_VERSION=3.6.0 docker compose -f compose.provisioned.yaml up -d
+#   3. SMU_VERSION=4.0.0 docker compose -f compose.provisioned.yaml up -d
 #   4. Open https://<host>:9443/ and sign in as admin with that password. It
 #      stays the administrator's until someone changes it (Change password in
 #      the sidebar); a generated one must be changed at the first sign-in.
@@ -36,7 +36,7 @@
 name: solace-msg-utility
 services:
   gateway:
-    image: ghcr.io/solacelabs/solace-msg-utility:${SMU_VERSION:?set SMU_VERSION to a release, e.g. 3.6.0}
+    image: ghcr.io/solacelabs/solace-msg-utility:${SMU_VERSION:?set SMU_VERSION to a release, e.g. 4.0.0}
     user: "65532:65532"
     privileged: false
     read_only: true
