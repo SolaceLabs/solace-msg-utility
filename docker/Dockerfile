@@ -85,7 +85,7 @@
 # Base images and the syntax frontend are pinned tag@digest (the multi-arch
 # index digest), so a re-pushed tag cannot change the build; Dependabot's
 # docker entry moves the digest.
-FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS gateway-builder
+FROM golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS gateway-builder
 WORKDIR /src
 # pages/ holds the sign-in page the binary embeds (go:embed).
 COPY go-web-proxy/go.mod go-web-proxy/go.sum ./
@@ -133,7 +133,7 @@ RUN mkdir -p /staging/licenses/go /staging/licenses/gopkg.in-yaml.v3 /staging/li
 # ---- Stage 2: build the PWA bundle ------------------------------------------
 # Builds every dist/*.html variant from source so the runtime image doesn't
 # depend on whatever happens to be in the host's dist/ at `docker build` time.
-FROM node:26.8.1-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3 AS pwa-builder
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS pwa-builder
 WORKDIR /pwa
 # Copy lockfile + manifest first so `npm ci` layer caches when source changes.
 COPY package.json package-lock.json ./
