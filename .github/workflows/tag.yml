@@ -197,10 +197,10 @@ jobs:
       - id: name
         run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -231,7 +231,7 @@ jobs:
       # until trivy passes below and `publish` names this digest. Keep `push:`
       # and `tags:` off this step -- either one publishes tags before the scan.
       - id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ${{ env.DOCKERFILE }}
@@ -319,7 +319,7 @@ jobs:
           jq -n --arg image "$IMAGE" --arg digest "$DIGEST" --argjson meta "$META" \
             '{image: $image, digest: $digest, tags: $meta.tags}' > "imgref-$LEG.json"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: imgref-image
           path: |
@@ -347,7 +347,7 @@ jobs:
 
       # Deviation 6: `build` emits the PWA too, so this job needs the same Node
       # pin the gates job takes from ci.yml.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .tool-versions
           cache: npm
@@ -381,7 +381,7 @@ jobs:
           done
 
       # Handed to the release job, since the release does not exist yet.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bundles-${{ matrix.target.os }}-${{ matrix.target.arch }}
           path: release-bundles/
@@ -414,13 +414,13 @@ jobs:
       contents: read
       packages: write # move tags on GHCR
     steps:
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: imgref-*
           merge-multiple: true
@@ -431,7 +431,7 @@ jobs:
       # must hold the same bytes, before any tag moves. `docker create` pulls
       # a platform's image without running it, so no emulation is needed.
       # Skipped only when `binaries` was, as then there is no Release bundle.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: needs.binaries.result == 'success'
         with:
           pattern: bundles-*
@@ -512,14 +512,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: needs.binaries.result == 'success'
         with:
           pattern: bundles-*
           merge-multiple: true
           path: dist/
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: needs.publish.result == 'success'
         with:
           pattern: imgref-*
@@ -620,7 +620,7 @@ jobs:
 
       # Any leg's bundle would do -- they are identical -- but naming one keeps
       # the step deterministic.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: bundles-linux-amd64
           path: _bundle
