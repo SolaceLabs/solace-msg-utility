@@ -159,8 +159,11 @@ export async function relay(
     }
     const t = target(p.broker);
     if (!t) return refuse(404, 'not_found');
-    const url = `${t.scheme}://${t.host}:${t.port}${p.rawTail}${req.query ? `?${req.query}` : ''}`;
-    if (upstream) return forward(upstream({ method, url, body: p.v1 ? req.body : '' }));
+    // The connection's URL path stands in front of the path asked for. The demo
+    // broker has no proxy in front of it and answers whatever the path is.
+    const at = `${t.scheme}://${t.host}:${t.port}`;
+    const asked = `${p.rawTail}${req.query ? `?${req.query}` : ''}`;
+    if (upstream) return forward(upstream({ method, url: `${at}${t.path}${asked}`, body: p.v1 ? req.body : '' }));
 
     await delay();
     // What the broker would answer, mapped as the gateway maps it.
@@ -169,6 +172,6 @@ export async function relay(
     if (scenario.fault === FAULT.SEMP_ERROR) return { status: 500, text: 'Internal error', contentType: 'text/plain' };
 
     if (p.v1) return { status: 200, text: handleSempV1(req.body, p.broker), contentType: 'application/xml' };
-    const page = handleSempV2(new URL(url), p.broker) ?? { data: [], meta: {} };
+    const page = handleSempV2(new URL(`${at}${asked}`), p.broker) ?? { data: [], meta: {} };
     return method === 'HEAD' ? { status: 200, contentType: 'application/json' } : { status: 200, json: page };
 }

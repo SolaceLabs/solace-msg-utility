@@ -549,20 +549,24 @@ type vpnJSON struct {
 
 // sempJSON and clientJSON carry the scheme the gateway reaches the broker
 // with. A list always names it (https or http, wss or ws); on a save it may
-// be left out, which means TLS.
+// be left out, which means TLS. Each may name a URL path, the path the
+// broker's own paths sit under (validURLPath): left out, there is none.
 type sempJSON struct {
-	Scheme string `json:"scheme"`
-	Port   string `json:"port"`
-	User   string `json:"user"`
-	Pass   string `json:"pass"` // plaintext over TLS; "" = keep on edit; never listed
+	Scheme  string `json:"scheme"`
+	Port    string `json:"port"`
+	URLPath string `json:"urlPath,omitempty"`
+	User    string `json:"user"`
+	Pass    string `json:"pass"` // plaintext over TLS; "" = keep on edit; never listed
 }
 
 // clientJSON names a hostname only for an appliance, whose messaging answers
-// on another host than its SEMP: left out, messaging uses the connection's.
+// on a host of its own: left out, the broker has one host and messaging uses
+// the connection's. An appliance may name the connection's hostname there.
 type clientJSON struct {
 	Hostname string    `json:"hostname,omitempty"`
 	Scheme   string    `json:"scheme"`
 	Port     string    `json:"port"`
+	URLPath  string    `json:"urlPath,omitempty"`
 	MsgVpns  []vpnJSON `json:"msgVpns"`
 }
 
@@ -615,11 +619,15 @@ func (c connSaveJSON) toRec(broker string) connRec {
 	return connRec{
 		Broker:   broker,
 		Hostname: c.Hostname,
-		Semp:     sempRec{Scheme: canonScheme(c.Semp.Scheme, sempTLS), Port: flexStr(c.Semp.Port), Username: c.Semp.User, Password: c.Semp.Pass},
+		Semp: sempRec{
+			Scheme: canonScheme(c.Semp.Scheme, sempTLS), Port: flexStr(c.Semp.Port), URLPath: c.Semp.URLPath,
+			Username: c.Semp.User, Password: c.Semp.Pass,
+		},
 		Client: clientRec{
-			Hostname: canonClientHost(c.Client.Hostname, c.Hostname),
+			Hostname: c.Client.Hostname,
 			Scheme:   canonScheme(c.Client.Scheme, clientTLS),
 			Port:     flexStr(c.Client.Port),
+			URLPath:  c.Client.URLPath,
 			MsgVpns:  vpns,
 		},
 	}
@@ -637,10 +645,12 @@ func connToOutput(c connRec) connJSON {
 	out := connJSON{Broker: c.Broker, Hostname: c.Hostname}
 	out.Semp.Scheme = orTLS(c.Semp.Scheme, sempTLS)
 	out.Semp.Port = string(c.Semp.Port)
+	out.Semp.URLPath = c.Semp.URLPath
 	out.Semp.User = c.Semp.Username
-	out.Client.Hostname = canonClientHost(c.Client.Hostname, c.Hostname)
+	out.Client.Hostname = c.Client.Hostname
 	out.Client.Scheme = orTLS(c.Client.Scheme, clientTLS)
 	out.Client.Port = string(c.Client.Port)
+	out.Client.URLPath = c.Client.URLPath
 	// Initialise so a VPN-less connection serialises "msgVpns":[] (not null),
 	// matching the non-nullable client type the frontend declares.
 	out.Client.MsgVpns = make([]vpnJSON, 0, len(c.Client.MsgVpns))
@@ -882,8 +892,9 @@ func (h *managedHandler) saveConnection(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	h.log(r).Info("connection saved", "target", rec.Broker, "created", rev == 0, "hostname", rec.Hostname,
-		"semp_scheme", orTLS(rec.Semp.Scheme, sempTLS), "semp_port", string(rec.Semp.Port), "semp_password_set", body.Semp.Pass != "",
-		"client_hostname", rec.clientHost(), "client_scheme", orTLS(rec.Client.Scheme, clientTLS), "client_port", string(rec.Client.Port),
+		"semp_scheme", orTLS(rec.Semp.Scheme, sempTLS), "semp_port", string(rec.Semp.Port), "semp_path", rec.Semp.URLPath, "semp_password_set", body.Semp.Pass != "",
+		"appliance", rec.Client.Hostname != "", "client_hostname", rec.clientHost(), "client_scheme", orTLS(rec.Client.Scheme, clientTLS),
+		"client_port", string(rec.Client.Port), "client_path", rec.Client.URLPath,
 		"vpns", vpns, "vpn_passwords_set", newPasswords, "rev", got.rev)
 	writeJSON(w, http.StatusOK, map[string]int{"rev": got.rev})
 }
@@ -906,10 +917,12 @@ func connChanges(old, next connRec) []string {
 	if old.Hostname != next.Hostname {
 		out = append(out, "hostname")
 	}
-	if old.Semp.Scheme != next.Semp.Scheme || old.Semp.Port != next.Semp.Port || old.Semp.Username != next.Semp.Username || next.Semp.Password != "" {
+	if old.Semp.Scheme != next.Semp.Scheme || old.Semp.Port != next.Semp.Port || old.Semp.URLPath != next.Semp.URLPath ||
+		old.Semp.Username != next.Semp.Username || next.Semp.Password != "" {
 		out = append(out, "semp")
 	}
-	if old.clientHost() != next.clientHost() || old.Client.Scheme != next.Client.Scheme || old.Client.Port != next.Client.Port {
+	if old.Client.Hostname != next.Client.Hostname || old.Client.Scheme != next.Client.Scheme || old.Client.Port != next.Client.Port ||
+		old.Client.URLPath != next.Client.URLPath {
 		out = append(out, "client")
 	}
 	named := func(vpns []vpnRec, name string) int {

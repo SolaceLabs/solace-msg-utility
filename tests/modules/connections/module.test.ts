@@ -1101,6 +1101,8 @@ describe('ConnectionsModule', () => {
                 vpn: 'default',
                 pass: expect.any(String),
             }));
+            // A software or cloud broker: nothing marks the session as an appliance's.
+            expect(appState.solaceConnection).not.toHaveProperty('appliance');
             expect(appState.isConnected).toBe(true);
             expect(connectedHandler).toHaveBeenCalledWith(expect.objectContaining({ session: expect.any(Object) }));
             expect(btnSolace.textContent).toBe('Disconnect');
@@ -1905,6 +1907,8 @@ describe('ConnectionsModule', () => {
             expect(createSession().mock.calls[0][0].url).toBe('wss://msg.test:8080');
             sessionHandler('UP_NOTICE')();
             expect(appState.solaceConnection!.host).toBe('msg.test');
+            // Other modules learn the type from the session: the two hosts may be the same.
+            expect(appState.solaceConnection!.appliance).toBe(true);
 
             button('#btn-semp-connect').click();
             await vi.waitFor(() => expect(appState.sempCredentials?.host).toBe('mgmt.test'));
@@ -2017,29 +2021,16 @@ describe('ConnectionsModule', () => {
             expect(createSession().mock.calls[0][0].url).toBe('wss://msg.test:8080');
         });
 
-        // One host: the link opens the SEMP address, as
-        // "onConnectFailed with \"Connection error\" surfaces a helpUrl link to the SEMP base" above holds.
-        it('sends an appliance\'s Trust Certificate link to its messaging address: the management host may hold another certificate', async () => {
-            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-            createSession().mockImplementation(() => { throw new Error('Certificate Not Trusted'); });
+        // The link opens the SEMP address whatever the broker type, as
+        // "onConnectFailed with \"Connection error\" surfaces a helpUrl link to the SEMP base" above holds for one host.
+        it('sends an appliance\'s Trust Certificate link to its management address, not its messaging one', async () => {
             const { ctx } = createTestContext(container);
             await ConnectionsModule.install(ctx);
             fillAppliance();
-
-            button('#btn-solace-connect').click();
-            expect(trustUrl()).toBe('https://msg.test:8080');
-            consoleSpy.mockRestore();
-        });
-
-        it('sends it to the plain address of an appliance reached over ws://', async () => {
-            const { ctx } = createTestContext(container);
-            await ConnectionsModule.install(ctx);
-            fillAppliance();
-            (container.querySelector('#solace-protocol') as HTMLSelectElement).value = 'ws';
 
             button('#btn-solace-connect').click();
             sessionHandler('CONNECT_FAILED_ERROR')({ infoStr: 'Connection error to host' });
-            expect(trustUrl()).toBe('http://msg.test:8080');
+            expect(trustUrl()).toBe('https://mgmt.test:943');
         });
     });
 

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { createGateway } from '../../../src/mock-broker/gateway';
-import { DEMO_ACCOUNTS, DEMO_TOPOLOGY, demoSeed } from '../../../src/mock-broker/gateway/seed';
+import { DEMO_ACCOUNTS, DEMO_APPLIANCE_MESSAGING_HOST, DEMO_TOPOLOGY, demoSeed } from '../../../src/mock-broker/gateway/seed';
 import { connectionProblem, passwordOk, validUsername } from '../../../src/mock-broker/gateway/validate';
 
 /**
@@ -21,6 +21,14 @@ describe('mock-broker/gateway/seed', () => {
         for (const c of seed['msg-utility-connections']) expect(connectionProblem(c)).toBeNull();
         // Hosts that can never resolve.
         expect(seed['msg-utility-connections'].every(c => c.hostname.endsWith('.demo.invalid'))).toBe(true);
+    });
+
+    it('holds one appliance, lab, whose messaging host is its own and never resolves either', () => {
+        expect(seed['msg-utility-connections'].map(c => [c.broker, c.client.hostname]))
+            .toEqual([['east-prod', undefined], ['west-dr', undefined], ['lab', DEMO_APPLIANCE_MESSAGING_HOST]]);
+        expect(DEMO_APPLIANCE_MESSAGING_HOST.endsWith('.demo.invalid')).toBe(true);
+        expect(gw.store.smfTarget('admin', 'lab', 'sandbox')?.host).toBe(DEMO_APPLIANCE_MESSAGING_HOST);
+        expect(gw.store.sempTarget('admin', 'lab')?.host).toBe('lab.demo.invalid');
     });
 
     it('gives every provisioned VPN queues in the demo broker, and no more', () => {

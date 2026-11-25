@@ -82,7 +82,7 @@
         <li>If you want to pick the destination queue from a list, fill in the <strong>Solace SEMP (Management)</strong> card too and press <strong>Connect</strong>. The status line reads <strong>Connected</strong>. The destination's SEMP connection serves only the list. A copy does not need it.</li>
         <li>To close a connection, press <strong>Disconnect</strong> on its card. The boxes unlock again.</li>
     </ol>
-    <p>Pressing <kbd>Enter</kbd> in a box presses the <strong>Connect</strong> button of its card. While a connection is up, its boxes are locked, and so are the broker type and both hosts.</p>
+    <p>Pressing <kbd>Enter</kbd> in a box presses the <strong>Connect</strong> button of its card. While a connection is up, the boxes of its card are locked, and so is the broker type. The hosts lock as they do on the Connections page: the one host of a software or cloud broker while either connection is up, and each host of an appliance with its own connection. So with an appliance's SEMP connected you can still correct its Messaging Host. A connection that closes unlocks only its own card.</p>
     <p>The page checks what you typed before it connects. A SEMP username or password the broker would refuse, or a client username with a character the broker does not allow, is refused with the reason on the card. If the broker rejects the details, the card says so in red: <strong>SEMP authentication failed (401).</strong>, <strong>SEMP error:</strong> followed by the reason, or <strong>Connection failed:</strong> followed by the reason.</p>
 
     <h4>The Destination Connection card</h4>

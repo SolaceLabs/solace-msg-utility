@@ -85,6 +85,23 @@ describe('mock-broker/gateway/relay -- through to the demo broker', () => {
         expect(page.meta.paging.nextPageUri).toBe('https://host1:1943/SEMP/v2/monitor/msgVpns/v1/queues?count=3&cursor=3');
     });
 
+    it('reaches a broker under its connection\'s URL paths, and the demo broker answers as it does without one', async () => {
+        const saved = await gw.handle({
+            method: 'PUT', path: '/managed/connections/b1', query: '', session: gw.openSession('admin', false),
+            body: JSON.stringify({
+                rev: 1, hostname: 'host1',
+                semp: { port: '1943', urlPath: '/proxy/b1', user: 'mon', pass: '' },
+                client: { port: '1443', urlPath: '/smf/b1', msgVpns: [{ name: 'v1', user: 'u1', pass: '' }, { name: 'v2', user: 'u2', pass: '' }] },
+            }),
+        });
+        expect(saved.status).toBe(200);
+        expect(gw.store.sempTarget('viewer', 'b1')?.path).toBe('/proxy/b1');
+        expect(gw.store.smfTarget('viewer', 'b1', 'v1')?.path).toBe('/smf/b1');
+
+        const vpns: any = (await get('/SEMP/v2/monitor/msgVpns')).json;
+        expect(vpns.data).toEqual([{ msgVpnName: 'v1' }, { msgVpnName: 'v2' }]);
+    });
+
     it('answers a v1 show from the broker\'s store', async () => {
         const res = await get('/SEMP', '', 'POST',
             '<rpc><show><queue><name>q1</name><vpn-name>v1</vpn-name><detail/></queue></show></rpc>');

@@ -155,11 +155,13 @@ func (rl *sempRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rl.inFlight.release(user)
 
+	// The connection's URL path holds nothing an escape would change, so it
+	// stands in front of the decoded and the escaped tail alike.
 	u := &url.URL{
 		Scheme:   target.scheme,
 		Host:     net.JoinHostPort(target.host, target.port),
-		Path:     p.tail,
-		RawPath:  p.rawTail,
+		Path:     target.under(p.tail),
+		RawPath:  target.under(p.rawTail),
 		RawQuery: r.URL.RawQuery,
 	}
 	out := (&http.Request{

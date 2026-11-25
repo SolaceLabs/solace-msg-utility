@@ -2095,14 +2095,16 @@ func TestStore_ConnectionSchemes(t *testing.T) {
 	}
 }
 
-// An appliance answers messaging on another host than its SEMP: the client
-// part names it. Left blank, messaging uses the record's hostname.
+// An appliance answers messaging on a host of its own: the client part names
+// it, and it may be the record's hostname. Left blank, the broker has one host
+// and messaging uses the record's.
 func TestStore_ClientHostname(t *testing.T) {
 	cases := []struct {
 		name, client, wantSMF string
 	}{
 		{"blank is the record's hostname", "", "host1"},
 		{"an appliance's own", "msg1", "msg1"},
+		{"an appliance naming the record's hostname", "host1", "host1"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -2127,15 +2129,79 @@ func TestStore_ClientHostname(t *testing.T) {
 	if want := `broker "b1": client.hostname "bad host" ` + hostRule; err == nil || err.Error() != want {
 		t.Errorf("want %q, got %v", want, err)
 	}
-	if canonClientHost("host1", "host1") != "" || canonClientHost("", "host1") != "" || canonClientHost("msg1", "host1") != "msg1" {
-		t.Error("a save stores a client hostname equal to the record's as blank and keeps another")
-	}
-	// What an admin sees of a record: a blank client hostname is the record's own.
+	// What an admin sees of a record: its client hostname as stored. One equal
+	// to the record's is an appliance, so it is not the record without one.
 	base := connRec{Broker: "b1", Hostname: "host1"}
 	same, other := base, base
 	same.Client.Hostname, other.Client.Hostname = "host1", "msg1"
-	if !sameConnView(base, same) || sameConnView(base, other) {
-		t.Error("a blank client hostname shows as the record's hostname, and another host as a change")
+	if sameConnView(base, same) || sameConnView(base, other) || !sameConnView(same, same) {
+		t.Error("a client hostname is part of what an admin sees, whichever host it names")
+	}
+}
+
+// A connection may name a URL path for SEMP and one for messaging: the prefix
+// a reverse proxy serves the broker under. Each reaches its target, and only
+// a path the gateway can join into a URL as it is may be stored.
+func TestStore_URLPath(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{"", true}, {"/broker1", true}, {"/a/b-c/d_e.f~g", true}, {"/...", true}, {"/" + strings.Repeat("a", maxURLPath-1), true},
+		{"broker1", false}, {"/", false}, {"/broker1/", false}, {"//broker1", false}, {"/a//b", false},
+		{"/a/../b", false}, {"/./a", false}, {"/a/..", false},
+		{"/a b", false}, {"/a%2Fb", false}, {"/a?x=1", false}, {"/a#b", false}, {"/a;b", false}, {`/a\b`, false}, {"/a\x07", false},
+		{"/" + strings.Repeat("a", maxURLPath), false},
+	} {
+		if got := validURLPath(tc.path); got != tc.want {
+			t.Errorf("validURLPath(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+
+	s := newStoreWithFixtures(t)
+	rec := connRec{Broker: "b1", Hostname: "host1",
+		Semp:   sempRec{Port: "8080", URLPath: "/semp/b1", Username: "mon"},
+		Client: clientRec{Port: "8008", URLPath: "/smf/b1", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}},
+	}
+	if err := validateConn(rec); err != nil {
+		t.Fatal(err)
+	}
+	putConn(t, s, rec)
+	st, ok := s.sempTarget("viewer", "b1")
+	if !ok || st.path != "/semp/b1" {
+		t.Errorf("SEMP target: %+v %v, want path /semp/b1", st, ok)
+	}
+	mt, ok := s.smfTarget("viewer", "b1", "v1")
+	if !ok || mt.path != "/smf/b1" {
+		t.Errorf("SMF target: %+v %v, want path /smf/b1", mt, ok)
+	}
+	// The broker's own path goes under the URL path; "/" alone asks for the URL path itself.
+	if got := st.under("/SEMP/v2/about"); got != "/semp/b1/SEMP/v2/about" {
+		t.Errorf("under a URL path: %s", got)
+	}
+	if got := mt.under("/"); got != "/smf/b1" {
+		t.Errorf("the URL path itself: %s", got)
+	}
+	if got := (brokerTarget{}).under("/"); got != "/" {
+		t.Errorf("no URL path: %s", got)
+	}
+
+	for key, bad := range map[string]connRec{
+		"semp.urlPath":   {Broker: "b1", Hostname: "host1", Semp: sempRec{URLPath: "/a/../b"}},
+		"client.urlPath": {Broker: "b1", Hostname: "host1", Client: clientRec{URLPath: "/a/../b"}},
+	} {
+		err := validateConn(bad)
+		if want := fmt.Sprintf(`broker "b1": %s "/a/../b" %s`, key, urlPathRule); err == nil || err.Error() != want {
+			t.Errorf("want %q, got %v", want, err)
+		}
+	}
+
+	// Each path is part of what an admin sees of a record.
+	base := connRec{Broker: "b1", Hostname: "host1"}
+	semp, client := base, base
+	semp.Semp.URLPath, client.Client.URLPath = "/a", "/a"
+	if sameConnView(base, semp) || sameConnView(base, client) || sameConnView(semp, client) {
+		t.Error("a URL path is part of what an admin sees, each on its own part")
 	}
 }
 

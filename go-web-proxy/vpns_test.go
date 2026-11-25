@@ -99,11 +99,46 @@ func TestVPNLookup_BlankPasswordIsTheStoredOneOnlyForTheUnchangedSavedConnection
 		"another port":     lookupBody("b1", host, "1", "mon", ""),
 		"another hostname": lookupBody("b1", "elsewhere.example", port, "mon", ""),
 		"another scheme":   strings.Replace(lookupBody("b1", host, port, "mon", ""), `"https"`, `"http"`, 1),
+		"another URL path": strings.Replace(lookupBody("b1", host, port, "mon", ""), `"port"`, `"urlPath":"/other","port"`, 1),
 	} {
 		rec := e.do("POST", vpnLookupRoute, body, c)
 		expect(t, rec, http.StatusUnprocessableEntity, "invalid")
 		if got := errorCode(t, rec); got.Field != "semp.pass" || got.Reason != vpnLookupNeedsPassword {
 			t.Errorf("%s: field %q, reason %q", name, got.Field, got.Reason)
+		}
+	}
+	if fb.hits() != 1 {
+		t.Errorf("a refused lookup reached the broker: %d requests", fb.hits())
+	}
+}
+
+// The lookup asks under the form's SEMP URL path, and the stored password
+// stands in only while that path is the saved one.
+func TestVPNLookup_GoesUnderTheURLPath(t *testing.T) {
+	e, fb := newRelayEnv(t, answerJSON)
+	host, port := brokerAddr(t, fb)
+	c := e.cookie("admin", false)
+	putConn(t, e.api.store, connRec{
+		Broker: "b1", Hostname: host,
+		Semp:   sempRec{Port: flexStr(port), URLPath: "/proxy/b1", Username: "mon", Password: "semp-pw"},
+		Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v1", Username: "u1", Password: "vpn-pw"}}},
+	})
+	withPath := func(path string) string {
+		return strings.Replace(lookupBody("b1", host, port, "mon", ""), `"port"`, fmt.Sprintf(`"urlPath":%q,"port"`, path), 1)
+	}
+	expect(t, e.do("POST", vpnLookupRoute, withPath("/proxy/b1"), c), http.StatusOK, "")
+	last := fb.last(t)
+	if last.uri != "/proxy/b1/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName" || last.header.Get("Authorization") != basicAuth("mon", "semp-pw") {
+		t.Errorf("upstream request: %s with %q", last.uri, last.header.Get("Authorization"))
+	}
+	if logLine(e.log.String(), "level=INFO", "vpn lookup", "address="+net.JoinHostPort(host, port)+"/proxy/b1") == "" {
+		t.Errorf("want the lookup logged with the URL path in its address, got:\n%s", e.log.String())
+	}
+	for _, path := range []string{"", "/proxy/b2"} {
+		rec := e.do("POST", vpnLookupRoute, withPath(path), c)
+		expect(t, rec, http.StatusUnprocessableEntity, "invalid")
+		if got := errorCode(t, rec); got.Field != "semp.pass" || got.Reason != vpnLookupNeedsPassword {
+			t.Errorf("URL path %q: field %q, reason %q", path, got.Field, got.Reason)
 		}
 	}
 	if fb.hits() != 1 {
@@ -122,6 +157,8 @@ func TestVPNLookup_RefusesWhatASaveWouldRefuse(t *testing.T) {
 		{"an unknown scheme", body("h", "ftp", "943", "mon", "pw"), "semp.scheme", `semp.scheme "ftp" must be "https" or "http"`},
 		{"no port", body("h", "https", "", "mon", "pw"), "semp.port", "A SEMP port is required to read the Message VPNs."},
 		{"a port out of range", body("h", "https", "0", "mon", "pw"), "semp.port", `semp.port "0" is not a port (1 to 65535)`},
+		{"a URL path that is not one", strings.Replace(body("h", "https", "943", "mon", "pw"), `"port"`, `"urlPath":"semp/","port"`, 1),
+			"semp.urlPath", `semp.urlPath "semp/" ` + urlPathRule},
 		{"no username", body("h", "https", "943", "", "pw"), "semp.user", "A SEMP username is required to read the Message VPNs."},
 		{"a username the broker has none of", body("h", "https", "943", "a:b", "pw"), "semp.user", "The SEMP username " + sempUserRule + "."},
 		{"a control character in the password", body("h", "https", "943", "mon", `a\u0007b`), "semp.pass", "The SEMP password must not contain control characters."},

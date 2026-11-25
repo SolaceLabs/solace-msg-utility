@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
-    DEMO_CREDENTIALS, DIRECT_BANNER, DIRECT_PANEL_SEEN_KEY, fillDirectForm, firstVisit, mountControlPanel,
+    DEMO_CREDENTIALS, DEMO_MESSAGING_HOST, DIRECT_BANNER, DIRECT_PANEL_SEEN_KEY, fillDirectForm, firstVisit, mountControlPanel,
 } from '../../src/mock-broker/controls/panel';
 import { seed, getQueue } from '../../src/mock-broker/broker/store';
 import {
@@ -91,6 +91,8 @@ describe('mock-broker/panel -- guidance', () => {
         const changed: string[] = [];
         form.addEventListener('input', e => typed.push((e.target as HTMLElement).id));
         form.addEventListener('change', e => changed.push((e.target as HTMLElement).id));
+        const pressed: (string | undefined)[] = [];
+        form.addEventListener('click', e => pressed.push((e.target as HTMLElement).dataset.brokerType));
         const vpnPick = selectWith(VPNS[0].name);
         vpnPick.value = 'vpn-prod';
         vpnPick.dispatchEvent(new Event('change'));
@@ -102,6 +104,26 @@ describe('mock-broker/panel -- guidance', () => {
         expect(ids.map(id => form.querySelector<HTMLInputElement>(`#${id}`)!.value))
             .toEqual([MOCK_HOST.OK, username, password, 'vpn-prod', username, password]);
         expect([typed, changed]).toEqual([ids, ids]);
+        expect(pressed).toEqual(['software']);
+    });
+
+    it('fills an appliance: it presses Appliance and types a messaging host of its own, one the demo connects to', () => {
+        const form = loadModuleDOM('connections');
+        document.body.appendChild(form);
+        const typed: string[] = [];
+        form.addEventListener('input', e => typed.push((e.target as HTMLElement).id));
+        const pressed: (string | undefined)[] = [];
+        form.addEventListener('click', e => pressed.push((e.target as HTMLElement).dataset.brokerType));
+
+        button('Fill as an appliance').click();
+
+        expect(pressed).toEqual(['appliance']);
+        expect(typed.slice(0, 2)).toEqual(['conn-host', 'solace-host']);
+        expect(['conn-host', 'solace-host'].map(id => form.querySelector<HTMLInputElement>(`#${id}`)!.value))
+            .toEqual([MOCK_HOST.OK, DEMO_MESSAGING_HOST]);
+        // The emulator's messaging connection takes any name that holds the demo host.
+        expect(DEMO_MESSAGING_HOST).toContain(MOCK_HOST.OK);
+        expect(DEMO_MESSAGING_HOST).not.toBe(MOCK_HOST.OK);
     });
 
     it('fails loudly when the Direct form is not on the page', () => {

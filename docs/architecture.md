@@ -34,6 +34,7 @@ This document is for developers who work on the code, in the web app (`src/`) or
   - [Locked decisions](#locked-decisions)
   - [Connection modes](#connection-modes)
   - [Broker type: one host or two](#broker-type-one-host-or-two)
+  - [A connection's URL path](#a-connections-url-path)
   - [The connections module: two entries, one owner](#the-connections-module-two-entries-one-owner)
   - [Managed profile (core-owned, names only)](#managed-profile-core-owned-names-only)
   - [RBAC state + matchers](#rbac-state--matchers)
@@ -718,19 +719,30 @@ The resolved config is published once to `AppState.connConfig` by the connection
 
 A software or cloud broker answers SEMP and messaging on one host. A Solace appliance answers SEMP on its management address and messaging on another, so a connection may carry a second host. Three forms take it: the Direct form (connections), Queue Copy's typed destination, and the broker form of Conn. Mgmt.
 
-Each form holds a type control (**Software / Cloud** or **Appliance**), a host box in its SEMP part and one in its Messaging part. [src/core/connections/broker-hosts.ts](../src/core/connections/broker-hosts.ts) wires them (`createBrokerHosts`): for Software / Cloud the Messaging part's box is locked and shows the one host; for Appliance it is free. The markup is each form's own template (the line of text by the control is optional: Conn. Mgmt has none), and the control is the shared `.segmented` primitive of `components.css`, wired by `createSegmented` ([src/core/segmented.ts](../src/core/segmented.ts)), which the Direct form's Basic / OAuth2 choice uses too. A form locks the parts through `lock({ management, messaging })`; the type cannot change while either is locked.
+Each form holds a type control (**Software / Cloud** or **Appliance**), a host box in its SEMP part and one in its Messaging part. [src/core/connections/broker-hosts.ts](../src/core/connections/broker-hosts.ts) wires them (`createBrokerHosts`): for Software / Cloud the Messaging part's box is locked and shows the one host; for Appliance it is free. The markup is each form's own template (the line of text by the control is optional: Conn. Mgmt has none), and the control is the shared `.segmented` primitive of `components.css`, wired by `createSegmented` ([src/core/segmented.ts](../src/core/segmented.ts)), which the Direct form's Basic / OAuth2 choice uses too. A form locks the parts through `lock({ management, messaging })`; the type cannot change while either is locked. The Direct form and Queue Copy's typed destination lock each host of an appliance with its own connection (the management host with SEMP, the messaging host with the messaging session) and the one host of a Software / Cloud broker while either is up. Queue Copy derives every lock of its destination from the Copy to choice and from what is still up (`applyDestPrefill` and `setDestBrokerLocked` in [src/modules/queue-copy/ui.ts](../src/modules/queue-copy/ui.ts), with `destLive` of its state), so a connection that closes frees only its own card and host.
 
-A record names the second host only when it is another host, so a broker with one host has one spelling and opens as Software / Cloud:
+A record names a second host for an appliance and only for one, also when its two hosts are the same. So what was saved as an appliance opens as an appliance, and a record without a second host opens as Software / Cloud:
 
 | Where | The one host, or the management host | The messaging host of an appliance |
 | --- | --- | --- |
 | Saved Direct config (`ConnectionConfig`) | `host` | `messagingHost` |
-| `AppState` of a live Direct connection | `sempCredentials.host` | `solaceConnection.host` |
+| `AppState` of a live Direct connection | `sempCredentials.host` | `solaceConnection.host`, with `solaceConnection.appliance` |
 | Queue Copy's typed destination (`DestForm`) | `host` | `messagingHost` (`destMessagingHost`) |
 | Admin API (`/managed/connections`) | `hostname` | `client.hostname` |
 | `connections.yaml` (`connRec`) | `hostname` | `client.hostname` (`clientHost()`) |
 
-`AppState` keeps one host per connection, so Queue Copy learns that its primary is an appliance from the two differing (`getPrimarySnapshot`). In the gateway, `sempTarget` uses the record's hostname and `smfTarget` the client part's own when it has one; a save stores a client hostname equal to the record's as blank (`canonClientHost`), as it stores the TLS scheme.
+`AppState` keeps one host per connection, and `solaceConnection.appliance` says that the form which connected was an appliance. Queue Copy reads its primary's type from those (`getPrimarySnapshot`): an appliance is a messaging session that says so, or one on another host than SEMP. In the gateway, `sempTarget` uses the record's hostname and `smfTarget` the client part's own when it has one. A save stores the client hostname as it is sent, so one equal to the record's hostname is kept, and it is what marks the appliance.
+
+After a failed messaging connect, the Direct form's Certificate Trust Helper opens the SEMP address of the form for either broker type: the management address for an appliance.
+
+### A connection's URL path
+
+A broker reached through a reverse proxy sits under a path, as in `https://proxy.example.com/broker1/SEMP/v2/...`. Every connection form holds one path for SEMP and one for messaging.
+
+- **Direct.** The Direct form and Queue Copy's typed destination keep them in `SempConfig.urlPath` and `SolaceConfig.urlPath`. `normalizeUrlPath` ([src/core/utils.ts](../src/core/utils.ts)) gives each a leading slash and no trailing one, and `buildBrokerUrl` joins it after the port.
+- **Provisioned.** A saved connection holds `semp.urlPath` and `client.urlPath`, in the admin API and in `connections.yaml`; a part without one leaves the key out. Conn. Mgmt's form normalises a path as the Direct form does before it sends it. A browser never learns the path: it asks the gateway's own `/managed/relay/` and `/managed/smf/` paths.
+- **Where the gateway joins it.** `brokerTarget.under` ([store.go](../go-web-proxy/store.go)) puts the path in front of what is asked of the broker. The relay asks for `<urlPath>/SEMP/...`, the SMF gate dials `<urlPath>` (the browser's socket asks for no path of its own), and the Message VPN lookup reads `<urlPath>/SEMP/v2/monitor/msgVpns`.
+- **What a path may hold.** `validURLPath` holds it to what a URL carries as it is: it starts with `/`, does not end with one, each part holds only `A-Z a-z 0-9 . _ ~ -` and is not `.` or `..`, and the whole is at most 255 characters. So a path cannot add a query, a fragment or an escape, and cannot leave its own prefix. A save, a load, an import and a lookup all apply the rule, and the fake gateway mirrors it (`validUrlPath` in [validate.ts](../src/mock-broker/gateway/validate.ts)).
 
 ### The connections module: two entries, one owner
 
@@ -815,7 +827,7 @@ Broker credentials live in the gateway only, and the browser never holds one lon
 
 - **At rest.** `users.yaml` and `connections.yaml` are sealed whole with AES-256-GCM ([storecrypt.go](../go-web-proxy/storecrypt.go)): a 6-byte header, `SMUS`, a format version and a role byte (users, connections, the backup schedule, or a backup file's data), is the associated data, so a file cannot be swapped for another store or replayed under another version, and every write takes a fresh random nonce. The 32-byte key is the file `/data/store.key` (64 hex characters, a fixed path; [keyfile.go](../go-web-proxy/keyfile.go)), generated only on a fresh volume; a store the gateway cannot open stops the start. Inside the sealed connections file the broker passwords are plaintext, so the admin app sends them as typed, over TLS.
 - **SEMP.** The read-only relay ([relay.go](../go-web-proxy/relay.go), below) adds the broker's stored SEMP account to each request; the browser never sees it.
-- **The Message VPN lookup.** `POST /managed/connections/vpns` ([vpns.go](../go-web-proxy/vpns.go)), administrators only, is the one request the gateway sends to a broker that need not be saved: the connection form's **Retrieve VPNs**. The body carries the form's hostname and SEMP scheme, port and account, held to the rules a save applies. A blank password stands for the stored one only for the saved connection the body names, and only while its hostname, scheme, port and username are the stored ones. The gateway reads `/SEMP/v2/monitor/msgVpns` page by page on the relay's transport, under the relay's in-flight cap and with a time limit, follows no redirect, takes only the cursor of the broker's `nextPageUri`, and answers `{ "vpns": [...] }`: names only, sorted. A failure is the relay's `502` (`upstream_auth`, `upstream_unavailable`), and each lookup is an `access` audit entry (`vpns.lookup`).
+- **The Message VPN lookup.** `POST /managed/connections/vpns` ([vpns.go](../go-web-proxy/vpns.go)), administrators only, is the one request the gateway sends to a broker that need not be saved: the connection form's **Retrieve VPNs**. The body carries the form's hostname and SEMP scheme, port, URL path and account, held to the rules a save applies. A blank password stands for the stored one only for the saved connection the body names, and only while its hostname, scheme, port, URL path and username are the stored ones. The gateway reads `/SEMP/v2/monitor/msgVpns`, under the URL path when there is one, page by page on the relay's transport, under the relay's in-flight cap and with a time limit, follows no redirect, takes only the cursor of the broker's `nextPageUri`, and answers `{ "vpns": [...] }`: names only, sorted. A failure is the relay's `502` (`upstream_auth`, `upstream_unavailable`), and each lookup is an `access` audit entry (`vpns.lookup`).
 - **SMF.** `POST /managed/dial` ([dial.go](../go-web-proxy/dial.go)) returns one VPN's client username and password to an entitled user, and the SMF gate ([smf.go](../go-web-proxy/smf.go)) carries the SDK's WebSocket to the broker; open sockets close on revocation ([sockets.go](../go-web-proxy/sockets.go)). A user's dials and socket opens together draw from one window of `session.connectsPerMinute`; beyond that, the registry caps what stays open at 20 sockets per user and 1000 in all (`maxSocketsPerUser`, `maxSocketsTotal`; `socketRegistry.add` returns `(remove, ok)` and refuses without registering when a ceiling is met), and the SMF gate answers `429 rate_limited` with `Retry-After` and logs a warning. The dialled password is the one broker credential the browser ever receives.
 - **Direct relay.** Under `SMU_CONN_MODES=provisioned` the open Direct relay (`/{scheme}/{port}/{host}/...`) answers `404`, read live, so a Provisioned-only deployment offers no path to a broker that skips the session; under `both` it stays for the Direct tab.
 
@@ -848,7 +860,7 @@ msg-utility-connections:
     client: { port: 1443, msgVpns: [ { name: vpn-name, username: default, password: <password> } ] }   # handed out by dial
 ```
 
-A blank `scheme` on `semp` or `client` means TLS (https and wss); an administrator may choose `http` or `ws` per connection. `client` may also hold a `hostname`: an appliance's messaging address, used in place of the record's `hostname` for messaging ([Broker type: one host or two](#broker-type-one-host-or-two)); it is left out for a broker with one host. How `seq` and `rev` work is in [The single writer](#the-single-writer).
+A blank `scheme` on `semp` or `client` means TLS (https and wss); an administrator may choose `http` or `ws` per connection. `client` may also hold a `hostname`: an appliance's messaging address, used in place of the record's `hostname` for messaging ([Broker type: one host or two](#broker-type-one-host-or-two)). It is left out for a broker with one host, and an appliance whose two addresses are the same holds the record's `hostname` there. `semp` and `client` may each hold a `urlPath`, for a broker behind a reverse proxy ([A connection's URL path](#a-connections-url-path)). How `seq` and `rev` work is in [The single writer](#the-single-writer).
 
 A save (`PUT /managed/connections/{broker}`) also holds the usernames to what a broker accepts (`checkBrokerUsernames` in [store.go](../go-web-proxy/store.go)): `semp.username` up to 32 characters from `A-Z a-z 0-9 _ -`, and each VPN's `username` up to 189 printable ASCII characters without `?` or `*`. Load and import check `validateConn` only, so a stored or restored record with another name loads as it is, and its next save asks for a valid one. The app's forms apply the same rules (`sempUsernameOk` and `clientUsernameError` in [src/core/utils.ts](../src/core/utils.ts)), and `validation.json` holds both sides to them.
 
@@ -968,7 +980,8 @@ installs three things before any module installs:
 3. **The demo control panel**, which drives queue state, connection faults, and latency/volume. It opens on the tab's
    first load (a sessionStorage flag per demo), says at its top that nothing leaves the page, and in demo.html
    offers **Fill the connection form**, which types the demo host, a chosen VPN and demo credentials into the Direct
-   form with the events typing raises.
+   form with the events typing raises, and **Fill as an appliance**, which also presses Appliance and types a
+   messaging host of its own.
 
 Both boots also call `blockNetworkApis`, which makes `WebSocket`, `EventSource`, `XMLHttpRequest.open` and
 `sendBeacon` throw: the app uses none of them, and the SDK emulator replaces the one WebSocket user.

@@ -98,19 +98,25 @@ type vpnRec struct {
 //
 // A broker's SEMP and messaging share the record's hostname, unless the client
 // part names one of its own: an appliance, which answers SEMP on its
-// management address and messaging on another. A save stores a client
-// hostname equal to the record's as blank (canonClientHost), so a broker with
-// one host has one spelling too.
+// management address and messaging on another. A client hostname marks the
+// record as an appliance even when it equals the record's hostname, so a form
+// opens the record as the type it was saved with.
+//
+// Either part may name a URL path: what sits between the port and the
+// broker's own paths when the broker is reached through a reverse proxy
+// (validURLPath). Blank is none.
 type clientRec struct {
 	Hostname string   `yaml:"hostname,omitempty"`
 	Scheme   string   `yaml:"scheme,omitempty"`
 	Port     flexStr  `yaml:"port"`
+	URLPath  string   `yaml:"urlPath,omitempty"`
 	MsgVpns  []vpnRec `yaml:"msgVpns"`
 }
 
 type sempRec struct {
 	Scheme   string  `yaml:"scheme,omitempty"`
 	Port     flexStr `yaml:"port"`
+	URLPath  string  `yaml:"urlPath,omitempty"`
 	Username string  `yaml:"username"`
 	Password string  `yaml:"password"` // inside the sealed file; never reaches a browser
 }
@@ -158,15 +164,6 @@ func (c connRec) clientHost() string {
 		return c.Client.Hostname
 	}
 	return c.Hostname
-}
-
-// canonClientHost is how a save stores a client hostname: one equal to the
-// record's hostname as blank.
-func canonClientHost(client, hostname string) string {
-	if client == hostname {
-		return ""
-	}
-	return client
 }
 
 // connsDoc is connections.yaml, with a seq as usersDoc has.
@@ -444,9 +441,10 @@ func validateConnRevs(conns []connRec, seq int) error {
 }
 
 // validateConn checks one record. The gateway builds broker URLs and a Basic
-// header from these values, so the hostname must be a bare host, a port must
-// be given wherever it is used (blank never means a default), and credentials
-// hold no control characters. Errors never echo a credential.
+// header from these values, so the hostname must be a bare host, a URL path
+// only what validURLPath lets through, a port must be given wherever it is
+// used (blank never means a default), and credentials hold no control
+// characters. Errors never echo a credential.
 func validateConn(c connRec) error {
 	if !validName(brokerPattern, c.Broker) {
 		return fmt.Errorf("broker %q %s", c.Broker, brokerRule)
@@ -479,6 +477,11 @@ func validateConn(c connRec) error {
 	}
 	if c.Client.Hostname != "" && !validHost(c.Client.Hostname) {
 		return fmt.Errorf("broker %q: client.hostname %q %s", c.Broker, c.Client.Hostname, hostRule)
+	}
+	for _, p := range []struct{ key, got string }{{"semp.urlPath", c.Semp.URLPath}, {"client.urlPath", c.Client.URLPath}} {
+		if !validURLPath(p.got) {
+			return fmt.Errorf("broker %q: %s %q %s", c.Broker, p.key, p.got, urlPathRule)
+		}
 	}
 	if c.Semp.Username != "" && c.Semp.Port == "" {
 		return fmt.Errorf("broker %q: semp.port is required when a SEMP username is set", c.Broker)
@@ -549,6 +552,34 @@ const hostRule = "must be a host name (A-Z a-z 0-9 . _ -) or an IP address, with
 
 func validHost(h string) bool {
 	return net.ParseIP(h) != nil || hostPattern.MatchString(h)
+}
+
+// A connection's URL path sits between a broker's port and the broker's own
+// paths (/SEMP/v2/..., the messaging socket): the prefix a reverse proxy
+// serves the broker under. The gateway joins it into every URL it builds for
+// that broker, so it holds only characters a URL path carries as they are,
+// and no empty, "." or ".." part: it cannot name a query, a fragment, an
+// escape or a way out of its own prefix.
+const (
+	maxURLPath  = 255
+	urlPathRule = "must be blank, or a path such as /proxy/broker1: it starts with '/', does not end with one, and each part holds only A-Z a-z 0-9 . _ ~ - and is not '.' or '..'"
+)
+
+var urlPathPattern = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)
+
+func validURLPath(p string) bool {
+	if p == "" {
+		return true
+	}
+	if len(p) > maxURLPath || !urlPathPattern.MatchString(p) {
+		return false
+	}
+	for _, part := range strings.Split(p[1:], "/") {
+		if part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // hasControl reports a C0 control character or DEL, which must never reach a
@@ -623,10 +654,20 @@ func entitledVPNs(u *userRec, c connRec) []vpnRec {
 }
 
 // brokerTarget is a broker address, the scheme to reach it with (https or
-// http for SEMP, wss or ws for SMF) and the credential the gateway uses or
-// hands out there. A copy: the store may change while a request runs.
+// http for SEMP, wss or ws for SMF), the URL path its own paths sit under
+// (blank for none) and the credential the gateway uses or hands out there. A
+// copy: the store may change while a request runs.
 type brokerTarget struct {
-	scheme, host, port, user, pass string
+	scheme, host, port, path, user, pass string
+}
+
+// under is the path of a URL on the target: its URL path, then tail, the path
+// asked for on the broker. A tail of "/" alone asks for the URL path itself.
+func (t brokerTarget) under(tail string) string {
+	if t.path != "" && tail == "/" {
+		return t.path
+	}
+	return t.path + tail
 }
 
 // sempTarget returns the broker's SEMP address and credential when the user
@@ -643,7 +684,7 @@ func (s *store) sempTarget(username, broker string) (brokerTarget, bool) {
 	}
 	for _, c := range s.conns {
 		if c.Broker == broker && c.Semp.Port != "" && len(entitledVPNs(&u, c)) > 0 {
-			return brokerTarget{scheme: orTLS(c.Semp.Scheme, sempTLS), host: c.Hostname, port: string(c.Semp.Port), user: c.Semp.Username, pass: c.Semp.Password}, true
+			return brokerTarget{scheme: orTLS(c.Semp.Scheme, sempTLS), host: c.Hostname, port: string(c.Semp.Port), path: c.Semp.URLPath, user: c.Semp.Username, pass: c.Semp.Password}, true
 		}
 	}
 	return brokerTarget{}, false
@@ -666,7 +707,7 @@ func (s *store) smfTarget(username, broker, vpn string) (brokerTarget, bool) {
 		}
 		for _, v := range entitledVPNs(&u, c) {
 			if v.Name == vpn {
-				return brokerTarget{scheme: orTLS(c.Client.Scheme, clientTLS), host: c.clientHost(), port: string(c.Client.Port), user: v.Username, pass: v.Password}, true
+				return brokerTarget{scheme: orTLS(c.Client.Scheme, clientTLS), host: c.clientHost(), port: string(c.Client.Port), path: c.Client.URLPath, user: v.Username, pass: v.Password}, true
 			}
 		}
 	}
@@ -934,12 +975,14 @@ func sameUserView(a, b userRec) bool {
 }
 
 // sameConnView is sameUserView for a connection: what connToOutput shows,
-// which leaves every password out. A blank scheme is TLS either way, and a
-// blank client hostname is the record's.
+// which leaves every password out. A blank scheme is TLS either way. A client
+// hostname is shown as it is stored: one equal to the record's is an
+// appliance, a blank one is not.
 func sameConnView(a, b connRec) bool {
-	return a.Broker == b.Broker && a.Hostname == b.Hostname && a.clientHost() == b.clientHost() &&
-		orTLS(a.Semp.Scheme, sempTLS) == orTLS(b.Semp.Scheme, sempTLS) && a.Semp.Port == b.Semp.Port && a.Semp.Username == b.Semp.Username &&
-		orTLS(a.Client.Scheme, clientTLS) == orTLS(b.Client.Scheme, clientTLS) && a.Client.Port == b.Client.Port &&
+	return a.Broker == b.Broker && a.Hostname == b.Hostname && a.Client.Hostname == b.Client.Hostname &&
+		orTLS(a.Semp.Scheme, sempTLS) == orTLS(b.Semp.Scheme, sempTLS) && a.Semp.Port == b.Semp.Port && a.Semp.URLPath == b.Semp.URLPath &&
+		a.Semp.Username == b.Semp.Username &&
+		orTLS(a.Client.Scheme, clientTLS) == orTLS(b.Client.Scheme, clientTLS) && a.Client.Port == b.Client.Port && a.Client.URLPath == b.Client.URLPath &&
 		slices.EqualFunc(a.Client.MsgVpns, b.Client.MsgVpns, func(x, y vpnRec) bool { return x.Name == y.Name && x.Username == y.Username })
 }
 

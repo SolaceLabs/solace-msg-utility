@@ -691,29 +691,29 @@ func TestManagedAPI_ConnectionSchemes(t *testing.T) {
 }
 
 // An appliance's messaging hostname is saved with the client part and listed
-// there. One equal to the connection's hostname is a broker with one host: it
-// is stored and listed without it. A change to it is a change to "client".
+// there, also when it is the connection's hostname: the record stays an
+// appliance. A change to it is a change to "client".
 func TestManagedAPI_ConnectionClientHostname(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	c := e.cookie("admin", false)
 	appliance := `{"hostname":"mgmt3","semp":{"port":"443","user":"","pass":""},"client":{"hostname":"msg3","port":"443","msgVpns":[]}}`
-	oneHost := `{"hostname":"h4","semp":{"port":"1943","user":"","pass":""},"client":{"hostname":"h4","port":"1443","msgVpns":[]}}`
+	sameHost := `{"hostname":"h4","semp":{"port":"1943","user":"","pass":""},"client":{"hostname":"h4","port":"1443","msgVpns":[]}}`
 	expect(t, e.putConnAs(c, "b3", appliance), http.StatusOK, "")
-	expect(t, e.putConnAs(c, "b4", oneHost), http.StatusOK, "")
+	expect(t, e.putConnAs(c, "b4", sameHost), http.StatusOK, "")
 	rec := e.do("GET", "/managed/connections", "", c)
 	expect(t, rec, http.StatusOK, "")
 	var list struct{ Connections []connJSON }
 	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"b1": "", "b2": "", "b3": "msg3", "b4": ""}
+	want := map[string]string{"b1": "", "b2": "", "b3": "msg3", "b4": "h4"}
 	for _, conn := range list.Connections {
 		if conn.Client.Hostname != want[conn.Broker] {
 			t.Errorf("%s: client hostname %q, want %q", conn.Broker, conn.Client.Hostname, want[conn.Broker])
 		}
 	}
-	if got := strings.Count(rec.Body.String(), `"hostname"`); got != len(list.Connections)+1 {
-		t.Errorf("only the appliance's client part names a hostname, got %d in %s", got, rec.Body.String())
+	if got := strings.Count(rec.Body.String(), `"hostname"`); got != len(list.Connections)+2 {
+		t.Errorf("only the client parts of the two appliances name a hostname, got %d in %s", got, rec.Body.String())
 	}
 	bad := e.do("PUT", "/managed/connections/b5", `{"hostname":"h5","semp":{},"client":{"hostname":"not a host"}}`, c)
 	expect(t, bad, http.StatusUnprocessableEntity, "invalid")
@@ -721,10 +721,56 @@ func TestManagedAPI_ConnectionClientHostname(t *testing.T) {
 		t.Errorf("want the field and reason, got %+v", r)
 	}
 	old := connRec{Broker: "b3", Hostname: "mgmt3"}
-	next := old
-	next.Client.Hostname = "msg3"
-	if got := strings.Join(connChanges(old, next), ","); got != "client" {
-		t.Errorf("a new messaging hostname changes the client part, got %q", got)
+	for _, messaging := range []string{"msg3", "mgmt3"} {
+		next := old
+		next.Client.Hostname = messaging
+		if got := strings.Join(connChanges(old, next), ","); got != "client" {
+			t.Errorf("messaging hostname %q changes the client part, got %q", messaging, got)
+		}
+	}
+}
+
+// A connection's URL paths are saved with their parts and listed there; a
+// connection without one lists none. A path the gateway cannot join into a
+// URL as it is refuses the save, and a change to one is a change to its part.
+func TestManagedAPI_ConnectionURLPath(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	c := e.cookie("admin", false)
+	withPaths := `{"hostname":"proxy3","semp":{"port":"443","urlPath":"/semp/b3","user":"","pass":""},"client":{"port":"443","urlPath":"/smf/b3","msgVpns":[]}}`
+	expect(t, e.putConnAs(c, "b3", withPaths), http.StatusOK, "")
+	rec := e.do("GET", "/managed/connections", "", c)
+	expect(t, rec, http.StatusOK, "")
+	var list struct{ Connections []connJSON }
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][2]string{"b3": {"/semp/b3", "/smf/b3"}}
+	for _, conn := range list.Connections {
+		if got := [2]string{conn.Semp.URLPath, conn.Client.URLPath}; got != want[conn.Broker] {
+			t.Errorf("%s: URL paths %q, want %q", conn.Broker, got, want[conn.Broker])
+		}
+	}
+	if got := strings.Count(rec.Body.String(), `"urlPath"`); got != 2 {
+		t.Errorf("only the connection with URL paths names them, got %d in %s", got, rec.Body.String())
+	}
+	for key, body := range map[string]string{
+		"semp.urlPath":   `{"hostname":"h5","semp":{"urlPath":"semp/b5"},"client":{}}`,
+		"client.urlPath": `{"hostname":"h5","semp":{},"client":{"urlPath":"semp/b5"}}`,
+	} {
+		bad := e.do("PUT", "/managed/connections/b5", body, c)
+		expect(t, bad, http.StatusUnprocessableEntity, "invalid")
+		if r := errorCode(t, bad); r.Field != "connection" || r.Reason != `broker "b5": `+key+` "semp/b5" `+urlPathRule {
+			t.Errorf("%s: want the field and reason, got %+v", key, r)
+		}
+	}
+	old := connRec{Broker: "b3", Hostname: "proxy3"}
+	semp, client := old, old
+	semp.Semp.URLPath, client.Client.URLPath = "/a", "/a"
+	if got := strings.Join(connChanges(old, semp), ","); got != "semp" {
+		t.Errorf("a new SEMP URL path changes the semp part, got %q", got)
+	}
+	if got := strings.Join(connChanges(old, client), ","); got != "client" {
+		t.Errorf("a new messaging URL path changes the client part, got %q", got)
 	}
 }
 

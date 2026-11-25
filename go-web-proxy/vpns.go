@@ -18,14 +18,14 @@ import (
 // its list. Administrators only (managedHandler mounts it behind adminOnly).
 //
 // The broker is the one the form describes, saved or not: its hostname and
-// its SEMP scheme, port and account come in the body and are held to the
-// rules a save applies. A blank password stands for the stored one, and only
-// for the saved connection the body names while its hostname, scheme, port
-// and username are the stored ones: a stored credential never goes to an
-// address or an account the form changed.
+// its SEMP scheme, port, URL path and account come in the body and are held
+// to the rules a save applies. A blank password stands for the stored one,
+// and only for the saved connection the body names while its hostname,
+// scheme, port, URL path and username are the stored ones: a stored
+// credential never goes to an address or an account the form changed.
 //
-// The gateway sends GETs for /SEMP/v2/monitor/msgVpns on the shared upstream
-// transport, one page at a time. Like the relay it follows no redirect and
+// The gateway sends GETs for /SEMP/v2/monitor/msgVpns, under the URL path
+// when there is one, on the shared upstream transport, one page at a time. Like the relay it follows no redirect and
 // answers a failure as a generic 502 (upstream_unavailable, upstream_auth)
 // with the cause in the log. Of the broker's answer only names reach the
 // browser, and of its paging only the cursor is used: the address and path of
@@ -40,7 +40,7 @@ const (
 
 // vpnLookupNeedsPassword is the reason of the 422 a lookup without a password
 // gets when no stored one applies.
-const vpnLookupNeedsPassword = "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."
+const vpnLookupNeedsPassword = "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port, URL path and username are unchanged."
 
 // vpnLookupTimeout bounds one lookup, every page included. A variable so
 // tests can shorten it.
@@ -82,7 +82,7 @@ func (rl *sempRelay) lookupVpns(w http.ResponseWriter, r *http.Request) {
 		writeInvalid(w, field, reason)
 		return
 	}
-	address := net.JoinHostPort(target.host, target.port)
+	address := net.JoinHostPort(target.host, target.port) + target.path
 	if !rl.inFlight.acquire(user) {
 		rl.logger.Warn("vpn lookup limited: too many requests in flight", "user", user, "address", address, "max_in_flight", relayMaxInFlight)
 		writeRateLimited(w, time.Second)
@@ -120,6 +120,9 @@ func (rl *sempRelay) lookupTarget(b vpnLookupJSON) (t brokerTarget, field, reaso
 	if err := validatePort(b.Semp.Port); err != nil {
 		return t, "semp.port", "semp.port " + err.Error()
 	}
+	if !validURLPath(b.Semp.URLPath) {
+		return t, "semp.urlPath", fmt.Sprintf("semp.urlPath %q %s", b.Semp.URLPath, urlPathRule)
+	}
 	if b.Semp.User == "" {
 		return t, "semp.user", "A SEMP username is required to read the Message VPNs."
 	}
@@ -133,12 +136,12 @@ func (rl *sempRelay) lookupTarget(b vpnLookupJSON) (t brokerTarget, field, reaso
 	if pass == "" {
 		c, found := connectionNamed(rl.store.listConnections(), b.Broker)
 		if !found || c.Hostname != b.Hostname || orTLS(c.Semp.Scheme, sempTLS) != scheme ||
-			string(c.Semp.Port) != b.Semp.Port || c.Semp.Username != b.Semp.User {
+			string(c.Semp.Port) != b.Semp.Port || c.Semp.URLPath != b.Semp.URLPath || c.Semp.Username != b.Semp.User {
 			return t, "semp.pass", vpnLookupNeedsPassword
 		}
 		pass = c.Semp.Password
 	}
-	return brokerTarget{scheme: scheme, host: b.Hostname, port: b.Semp.Port, user: b.Semp.User, pass: pass}, "", ""
+	return brokerTarget{scheme: scheme, host: b.Hostname, port: b.Semp.Port, path: b.Semp.URLPath, user: b.Semp.User, pass: pass}, "", ""
 }
 
 // fetchVpns reads the broker's Message VPN list, page by page, and returns the
@@ -159,7 +162,7 @@ func (rl *sempRelay) fetchVpns(ctx context.Context, w http.ResponseWriter, r *ht
 		if cursor != "" {
 			q.Set("cursor", cursor)
 		}
-		u := &url.URL{Scheme: t.scheme, Host: host, Path: vpnLookupPath, RawQuery: q.Encode()}
+		u := &url.URL{Scheme: t.scheme, Host: host, Path: t.under(vpnLookupPath), RawQuery: q.Encode()}
 		header := http.Header{}
 		header.Set("Accept", "application/json")
 		header.Set("User-Agent", relayUserAgent)

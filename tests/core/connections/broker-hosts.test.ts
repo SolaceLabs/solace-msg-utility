@@ -92,11 +92,11 @@ describe('createBrokerHosts', () => {
         expect(hosts.values()).toEqual({ host: 'mgmt.test' });
     });
 
-    it('saves one host for an appliance whose messaging box holds the same host, or nothing', () => {
+    it('saves an appliance whose messaging box holds the same host as an appliance, and one with an empty box as one host', () => {
         const hosts = create();
         type(host(), 'one.test');
         button('appliance').click();
-        expect(hosts.values()).toEqual({ host: 'one.test' });
+        expect(hosts.values()).toEqual({ host: 'one.test', messagingHost: 'one.test' });
 
         type(messagingHost(), '');
         expect(hosts.values()).toEqual({ host: 'one.test' });
@@ -126,6 +126,11 @@ describe('createBrokerHosts', () => {
         hosts.write({ host: 'one.test' });
         expect(hosts.type()).toBe('software');
         expect([host().value, messagingHost().value]).toEqual(['one.test', 'one.test']);
+
+        // The same host twice is still what was saved as an appliance.
+        hosts.write({ host: 'one.test', messagingHost: 'one.test' });
+        expect(hosts.type()).toBe('appliance');
+        expect(hosts.values()).toEqual({ host: 'one.test', messagingHost: 'one.test' });
     });
 
     it('locks the one host and the control while either part is locked', () => {

@@ -214,6 +214,13 @@ export function createInitialState(): QueueCopyState {
     };
 }
 
+/** Which of the destination's own connections are up: its SEMP context and its messaging session. */
+export interface DestLive { semp: boolean; messaging: boolean }
+
+export function destLive(state: Pick<QueueCopyState, 'destSempCtx' | 'destSession'>): DestLive {
+    return { semp: state.destSempCtx !== null, messaging: state.destSession !== null };
+}
+
 /** The host a typed destination's messaging connects to: its own for an appliance, else the one host. */
 export function destMessagingHost(f: Pick<DestForm, 'host' | 'messagingHost'>): string {
     return f.messagingHost || f.host;

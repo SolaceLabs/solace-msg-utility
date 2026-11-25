@@ -2,8 +2,8 @@
  * never collide in the shared (inlined) cascade. Shipped only in the managed
  * build (main-admin.css). */
 
-/* An address on one row, read as a URL: the scheme and the port keep their
- * width, and the hostname takes the rest. */
+/* An address on one row, read as a URL: the scheme, the port and the URL
+ * path keep their width, and the hostname takes the rest. */
 .conn-mgmt-scheme {
     flex: 0 0 150px;
 }
@@ -22,4 +22,8 @@
 
 .conn-mgmt-port {
     flex: 0 0 100px;
+}
+
+.conn-mgmt-path {
+    flex: 0 0 170px;
 }

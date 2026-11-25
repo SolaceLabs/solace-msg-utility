@@ -8,7 +8,7 @@ import {
 import * as ui from './ui';
 import type { CopyUiElements, PrimarySnapshot } from './ui';
 import type { QueueCopyState } from './state';
-import { syncDestFormFromSnapshot } from './state';
+import { destLive, syncDestFormFromSnapshot } from './state';
 import { openCopyModal, cancelCopyModal } from './ui-modal';
 
 /**
@@ -389,7 +389,7 @@ export function wireUiEvents(
     // ===== Helpers =====
     function syncDestFromToggles(): void {
         const snap = services.getPrimarySnapshot();
-        ui.applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, snap);
+        ui.applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, snap, destLive(state));
         // Prefill also needs to flow back into state so the modal summary +
         // any downstream consumer see the values that now live in the inputs.
         syncDestFormFromSnapshot(state, snap);
@@ -403,7 +403,7 @@ export function wireUiEvents(
     // returns; the initial call from module.ts after wireUiEvents() handles it.
     {
         const snap = services.getPrimarySnapshot();
-        ui.applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, snap);
+        ui.applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, snap, destLive(state));
         syncDestFormFromSnapshot(state, snap);
     }
     // The provisioned set and the session itself can both change under us; this

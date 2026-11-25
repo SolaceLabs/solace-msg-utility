@@ -373,6 +373,27 @@ func TestRelay_UsesTheConnectionsScheme(t *testing.T) {
 	}
 }
 
+// A connection's SEMP URL path stands in front of the path the browser asked
+// for, with the tail's escapes and the query as they came.
+func TestRelay_GoesUnderTheConnectionsURLPath(t *testing.T) {
+	up := &urlRecorder{}
+	e := newManagedEnvWith(t, nil, up)
+	putConn(t, e.api.store, connRec{
+		Broker: "b1", Hostname: "host1",
+		Semp:   sempRec{Port: "8080", URLPath: "/proxy/b1", Username: "mon"},
+		Client: clientRec{Port: "1443", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}},
+	})
+	for _, tc := range []struct{ path, want string }{
+		{"/managed/relay/b1/SEMP/v2/monitor/msgVpns?count=10", "https://host1:8080/proxy/b1/SEMP/v2/monitor/msgVpns?count=10"},
+		{"/managed/relay/b1/SEMP/v2/monitor/msgVpns/v1/queues/a%2Fb", "https://host1:8080/proxy/b1/SEMP/v2/monitor/msgVpns/v1/queues/a%2Fb"},
+	} {
+		expect(t, e.do("GET", tc.path, "", e.cookie("viewer", false)), http.StatusBadGateway, "upstream_unavailable")
+		if got := up.last(t); got != tc.want {
+			t.Errorf("the relay asked for %s, want %s", got, tc.want)
+		}
+	}
+}
+
 func TestRelay_RefusesCrossSiteUpgradesAndForcedChange(t *testing.T) {
 	e, fb := newRelayEnv(t, answerJSON)
 	path := "/managed/relay/b1/SEMP/v2/monitor/about"

@@ -13,9 +13,10 @@
  *     Messaging part's box is free. It starts from the host already typed.
  *
  * The markup is each form's own (its template); this file wires it. A form's
- * hosts are saved as `BrokerHostValues`: `messagingHost` is there only for an
- * appliance whose messaging host is another host, so a record with one host
- * has one spelling and opens as Software / Cloud.
+ * hosts are saved as `BrokerHostValues`: `messagingHost` is there for an
+ * appliance and only for one, also when it names the management host. So what
+ * was saved as an appliance opens as an appliance, and a record without a
+ * messaging host opens as Software / Cloud.
  */
 import { createSegmented, type Segmented } from '../segmented';
 
@@ -25,7 +26,7 @@ export type BrokerType = 'software' | 'appliance';
 export interface BrokerHostValues {
     /** The one host, or the management (SEMP) host of an appliance. */
     host: string;
-    /** An appliance's messaging host, when it is typed and is not `host`. */
+    /** An appliance's messaging host, when one is typed: it may be `host`. Its presence is what marks an appliance. */
     messagingHost?: string;
 }
 
@@ -127,7 +128,7 @@ export function createBrokerHosts(els: BrokerHostsElements, opts: BrokerHostsOpt
         values() {
             const host = els.host.value;
             const messagingHost = els.messagingHost.value;
-            return control.value() === 'appliance' && messagingHost && messagingHost !== host ? { host, messagingHost } : { host };
+            return control.value() === 'appliance' && messagingHost ? { host, messagingHost } : { host };
         },
         write({ host, messagingHost }) {
             els.host.value = host;

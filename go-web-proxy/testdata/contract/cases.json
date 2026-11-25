@@ -1773,7 +1773,7 @@
       ]
     },
     {
-      "name": "connections: an appliance's messaging hostname is kept, and one equal to the hostname is left out",
+      "name": "connections: an appliance's messaging hostname is kept, also when it is the connection's hostname",
       "steps": [
         {
           "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
@@ -1812,10 +1812,108 @@
               {
                 "broker": "b5", "rev": 3, "hostname": "host5",
                 "semp": { "scheme": "https", "port": "1943", "user": "", "pass": "" },
-                "client": { "scheme": "wss", "port": "1443", "msgVpns": [] }
+                "client": { "hostname": "host5", "scheme": "wss", "port": "1443", "msgVpns": [] }
               }
             ]
           }
+        }
+      ]
+    },
+    {
+      "name": "connections: a URL path is kept on its part, and one the gateway cannot join into a URL is refused",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b4",
+          "body": { "rev": 0, "hostname": "proxy4", "semp": { "port": "443", "urlPath": "/semp/b4", "user": "mon", "pass": "p" }, "client": { "port": "443", "urlPath": "/smf/b4", "msgVpns": [{ "name": "v4", "user": "u4", "pass": "p4" }] } },
+          "status": 200, "response": { "rev": 2 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b5",
+          "body": { "rev": 0, "hostname": "host5", "semp": { "port": "443", "urlPath": "semp/b5", "user": "", "pass": "" }, "client": { "port": "443", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b5\": semp.urlPath \"semp/b5\" must be blank, or a path such as /proxy/broker1: it starts with '/', does not end with one, and each part holds only A-Z a-z 0-9 . _ ~ - and is not '.' or '..'" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b5",
+          "body": { "rev": 0, "hostname": "host5", "semp": { "port": "443", "user": "", "pass": "" }, "client": { "port": "443", "urlPath": "/smf/../b5", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b5\": client.urlPath \"/smf/../b5\" must be blank, or a path such as /proxy/broker1: it starts with '/', does not end with one, and each part holds only A-Z a-z 0-9 . _ ~ - and is not '.' or '..'" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b5",
+          "body": { "rev": 0, "hostname": "host5", "semp": { "port": "443", "urlPath": "/semp/b5/", "user": "", "pass": "" }, "client": { "port": "443", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b5\": semp.urlPath \"/semp/b5/\" must be blank, or a path such as /proxy/broker1: it starts with '/', does not end with one, and each part holds only A-Z a-z 0-9 . _ ~ - and is not '.' or '..'" }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b5",
+          "body": { "rev": 0, "hostname": "host5", "semp": { "port": "443", "user": "", "pass": "" }, "client": { "port": "443", "urlPath": "/smf/b5?x=1", "msgVpns": [] } },
+          "status": 422, "response": { "error": "invalid", "field": "connection", "reason": "broker \"b5\": client.urlPath \"/smf/b5?x=1\" must be blank, or a path such as /proxy/broker1: it starts with '/', does not end with one, and each part holds only A-Z a-z 0-9 . _ ~ - and is not '.' or '..'" }
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/connections", "status": 200,
+          "response": {
+            "connections": [
+              {
+                "broker": "b1", "rev": 1, "hostname": "host1",
+                "semp": { "scheme": "https", "port": "1943", "user": "mon", "pass": "" },
+                "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] }
+              },
+              {
+                "broker": "b2", "rev": 1, "hostname": "host2",
+                "semp": { "scheme": "http", "port": "1943", "user": "mon", "pass": "" },
+                "client": { "scheme": "wss", "port": "1443", "msgVpns": [{ "name": "v9", "user": "u9", "pass": "" }] }
+              },
+              {
+                "broker": "b3", "rev": 1, "hostname": "host3",
+                "semp": { "scheme": "https", "port": "", "user": "", "pass": "" },
+                "client": { "scheme": "ws", "port": "1443", "msgVpns": [{ "name": "v3", "user": "u3", "pass": "" }] }
+              },
+              {
+                "broker": "b4", "rev": 2, "hostname": "proxy4",
+                "semp": { "scheme": "https", "port": "443", "urlPath": "/semp/b4", "user": "mon", "pass": "" },
+                "client": { "scheme": "wss", "port": "443", "urlPath": "/smf/b4", "msgVpns": [{ "name": "v4", "user": "u4", "pass": "" }] }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "relay: a connection's URL path stands in front of the path asked for",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/connections/b1",
+          "body": { "rev": 1, "hostname": "host1", "semp": { "port": "1943", "urlPath": "/proxy/b1", "user": "mon", "pass": "" }, "client": { "port": "1443", "msgVpns": [{ "name": "v1", "user": "u1", "pass": "" }, { "name": "v2", "user": "u2", "pass": "" }] } },
+          "status": 200, "response": { "rev": 2 }
+        },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/relay/b1/SEMP/v2/monitor/msgVpns?count=10",
+          "upstream": { "url": "https://host1:1943/proxy/b1/SEMP/v2/monitor/msgVpns?count=10", "status": 200, "headers": { "Content-Type": "application/json" }, "body": "{\"data\":[],\"meta\":{\"responseCode\":200}}" },
+          "status": 200, "response": { "data": [], "meta": { "responseCode": 200 } }
+        },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/relay/b1/SEMP/v2/monitor/msgVpns/v1/queues/a%2Fb",
+          "upstream": { "url": "https://host1:1943/proxy/b1/SEMP/v2/monitor/msgVpns/v1/queues/a%2Fb", "status": 200, "headers": { "Content-Type": "application/json" }, "body": "{\"data\":{},\"meta\":{\"responseCode\":200}}" },
+          "status": 200, "response": { "data": {}, "meta": { "responseCode": 200 } }
+        },
+        {
+          "as": "viewer", "method": "POST", "path": "/managed/relay/b1/SEMP", "raw": "<rpc><show><queue><name>q</name></queue></show></rpc>",
+          "upstream": { "url": "https://host1:1943/proxy/b1/SEMP", "status": 204 },
+          "status": 204, "headers": { "Content-Type": "" }, "response": null
+        },
+        {
+          "as": "admin", "method": "POST", "path": "/managed/connections/vpns",
+          "body": { "broker": "b1", "hostname": "host1", "semp": { "scheme": "https", "port": "1943", "urlPath": "/proxy/b1", "user": "mon", "pass": "" } },
+          "upstream": { "url": "https://host1:1943/proxy/b1/SEMP/v2/monitor/msgVpns?count=100&select=msgVpnName", "status": 200, "headers": { "Content-Type": "application/json" }, "body": "{\"data\":[{\"msgVpnName\":\"v1\"}]}" },
+          "status": 200, "response": { "vpns": ["v1"] }
+        },
+        {
+          "as": "admin", "method": "POST", "path": "/managed/connections/vpns",
+          "body": { "broker": "b1", "hostname": "host1", "semp": { "scheme": "https", "port": "1943", "user": "mon", "pass": "" } },
+          "status": 422, "response": { "error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port, URL path and username are unchanged." }
+        },
+        {
+          "as": "admin", "method": "POST", "path": "/managed/connections/vpns",
+          "body": { "broker": "", "hostname": "host9", "semp": { "scheme": "https", "port": "943", "urlPath": "proxy/", "user": "reader", "pass": "typed-pw" } },
+          "status": 422, "response": { "error": "invalid", "field": "semp.urlPath", "reason": "semp.urlPath \"proxy/\" must be blank, or a path such as /proxy/broker1: it starts with '/', does not end with one, and each part holds only A-Z a-z 0-9 . _ ~ - and is not '.' or '..'" }
         }
       ]
     },
@@ -2420,12 +2518,12 @@
     {
       "name": "vpns: a blank password stands for the stored one only for the saved connection, unchanged",
       "steps": [
-        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host1", "semp": {"scheme": "https", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}},
-        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b9", "hostname": "host1", "semp": {"scheme": "https", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}},
-        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host9", "semp": {"scheme": "https", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}},
-        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host1", "semp": {"scheme": "http", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}},
-        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host1", "semp": {"scheme": "https", "port": "1944", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}},
-        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host1", "semp": {"scheme": "https", "port": "1943", "user": "other", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged."}}
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "", "hostname": "host1", "semp": {"scheme": "https", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port, URL path and username are unchanged."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b9", "hostname": "host1", "semp": {"scheme": "https", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port, URL path and username are unchanged."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host9", "semp": {"scheme": "https", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port, URL path and username are unchanged."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host1", "semp": {"scheme": "http", "port": "1943", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port, URL path and username are unchanged."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host1", "semp": {"scheme": "https", "port": "1944", "user": "mon", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port, URL path and username are unchanged."}},
+        {"as": "admin", "method": "POST", "path": "/managed/connections/vpns", "body": {"broker": "b1", "hostname": "host1", "semp": {"scheme": "https", "port": "1943", "user": "other", "pass": ""}}, "status": 422, "response": {"error": "invalid", "field": "semp.pass", "reason": "Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port, URL path and username are unchanged."}}
       ]
     },
     {

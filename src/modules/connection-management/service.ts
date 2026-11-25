@@ -24,16 +24,18 @@ export interface ManagedConnVpn {
 
 /**
  * A blank or missing scheme is TLS: https for SEMP, wss for SMF. `hostname`
- * serves SEMP and messaging alike unless `client.hostname` names another host
- * for messaging: an appliance, whose management and messaging addresses differ.
+ * serves SEMP and messaging alike unless the record is an appliance: then
+ * `client.hostname` names the messaging host, which may be the same host.
+ * A `urlPath` is the path a broker behind a reverse proxy sits under, between
+ * the port and the broker's own paths; left out, there is none.
  */
 export interface ManagedConnRecord {
     /** The record's version, as listed; a save sends it back (0 = a new connection). */
     rev: number;
     broker: string;
     hostname: string;
-    semp: { scheme?: 'https' | 'http'; port: string; user: string; pass: string };
-    client: { hostname?: string; scheme?: 'wss' | 'ws'; port: string; msgVpns: ManagedConnVpn[] };
+    semp: { scheme?: 'https' | 'http'; port: string; urlPath?: string; user: string; pass: string };
+    client: { hostname?: string; scheme?: 'wss' | 'ws'; port: string; urlPath?: string; msgVpns: ManagedConnVpn[] };
 }
 
 /** What a Message VPN lookup sends: the SEMP details in the form, saved or not. */
@@ -41,7 +43,7 @@ export interface VpnLookup {
     /** The saved connection the form edits, '' for a new one: a blank password stands for its stored one. */
     broker: string;
     hostname: string;
-    semp: { scheme: 'https' | 'http'; port: string; user: string; pass: string };
+    semp: { scheme: 'https' | 'http'; port: string; urlPath?: string; user: string; pass: string };
 }
 
 export interface ConnMgmtService {

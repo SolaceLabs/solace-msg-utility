@@ -4,7 +4,7 @@ import { formatBytes } from '../../core/utils';
 import { createSegmented, type Segmented } from '../../core/segmented';
 import { createSlideChoice, type SlideChoice } from '../../core/slide-choice';
 import { DEST_SCOPES, destScopeOf } from './state';
-import type { CopyJob, VerifyResult, DestType, CopyMode, DestScope } from './state';
+import type { CopyJob, VerifyResult, DestType, CopyMode, DestScope, DestLive } from './state';
 
 export interface CopyUiElements {
     container: HTMLElement;
@@ -333,12 +333,18 @@ export function applySourceReadonly(els: CopyUiElements, primary: PrimarySnapsho
  * surface the primary password in a visible field). On its Message VPN too
  * (`sameVpn`, only meaningful with `sameBroker`), the Client-side
  * VPN/user/pass fields are also disabled-and-synced.
+ *
+ * A field the choice leaves free is still locked while its own connection is
+ * up (`live`): the SEMP card with the destination's SEMP, the Client card with
+ * its messaging session. So this may run after one of them closed without
+ * freeing the fields of the one still up.
  */
 export function applyDestPrefill(
     els: CopyUiElements,
     sameBroker: boolean,
     sameVpn: boolean,
     primary: PrimarySnapshot | null,
+    live: DestLive = { semp: false, messaging: false },
 ): void {
     els.destScope.set(destScopeOf(sameBroker, sameVpn));
 
@@ -358,15 +364,11 @@ export function applyDestPrefill(
         setVal(els.destSolPort, primary.solace.port);
         setVal(els.destSolUrlPath, primary.solace.urlPath);
     }
-    els.destHosts.lock({ management: lockBroker, messaging: lockBroker });
-    els.destSempProtocol.disabled = lockBroker;
-    els.destSempPort.disabled = lockBroker;
-    els.destSempUrlPath.disabled = lockBroker;
-    els.destSempUser.disabled = lockBroker;
-    els.destSempPass.disabled = lockBroker;
-    els.destSolProtocol.disabled = lockBroker;
-    els.destSolPort.disabled = lockBroker;
-    els.destSolUrlPath.disabled = lockBroker;
+    setDestBrokerLocked(els, lockBroker, live);
+    setDestSempFormLocked(els, lockBroker || live.semp);
+    els.destSolProtocol.disabled = lockBroker || live.messaging;
+    els.destSolPort.disabled = lockBroker || live.messaging;
+    els.destSolUrlPath.disabled = lockBroker || live.messaging;
 
     // VPN-level fields, locked on the source's Message VPN
     const lockVpn = sameBroker && sameVpn;
@@ -374,9 +376,9 @@ export function applyDestPrefill(
         setVal(els.destSolVpn, primary.solace.vpn);
         setVal(els.destSolUser, primary.solace.user);
     }
-    els.destSolVpn.disabled = lockVpn;
-    els.destSolUser.disabled = lockVpn;
-    els.destSolPass.disabled = lockVpn;
+    els.destSolVpn.disabled = lockVpn || live.messaging;
+    els.destSolUser.disabled = lockVpn || live.messaging;
+    els.destSolPass.disabled = lockVpn || live.messaging;
 
     // Connect-row visibility:
     //   - SEMP needs its own Connect on another broker. On the source's
@@ -454,8 +456,8 @@ export function clearDestTypedSecrets(els: CopyUiElements): void {
  * `onError` -> unlock. Mirrors the connections module's "fields disabled while
  * bound" pattern so the user can't change creds out from under a live session.
  *
- * The hosts stay under the broker-level lock -- see `setDestBrokerLocked` --
- * because the broker type decides both of them.
+ * The management host has its own lock -- see `setDestBrokerLocked` -- because
+ * the broker type decides what it is.
  */
 export function setDestSempFormLocked(els: CopyUiElements, locked: boolean): void {
     els.destSempProtocol.disabled = locked;
@@ -481,17 +483,15 @@ export function setDestSolFormLocked(els: CopyUiElements, locked: boolean): void
 }
 
 /**
- * Lock the destination's broker type and its hosts. The type decides both
- * hosts, so they are locked whenever EITHER connection is live.
- * Pass `eitherConnected` = (destSempCtx !== null) || (destSession !== null).
+ * Lock the destination's broker type and its hosts, as the Direct form locks
+ * its own. On the source's broker (`sameBroker`) both hosts are the primary's
+ * and stay locked. Otherwise each host locks with its own connection: the
+ * management host while the destination's SEMP is up, the messaging host
+ * while its messaging session is. The type, and the one host of a Software /
+ * Cloud broker, lock while either is up (`core/connections/broker-hosts.ts`).
  */
-export function setDestBrokerLocked(els: CopyUiElements, eitherConnected: boolean): void {
-    if (eitherConnected) {
-        els.destHosts.lock({ management: true, messaging: true });
-    }
-    // Note: when both disconnect, the unlock decision is owned by
-    // applyDestPrefill (which considers the Copy to choice). We don't
-    // unlock here — applyDestPrefill is called from the hook side too.
+export function setDestBrokerLocked(els: CopyUiElements, sameBroker: boolean, live: DestLive): void {
+    els.destHosts.lock({ management: sameBroker || live.semp, messaging: sameBroker || live.messaging });
 }
 
 /** Tooltip on the destination-choosing controls while they are locked. */

@@ -273,14 +273,74 @@ describe('queue-copy/ui', () => {
             expect(elsHolder.els.destSolVpn.disabled).toBe(false);
         });
 
-        it('broker host lock disables host when either dest connection is live; no-op when neither', () => {
-            // Start with host enabled.
-            elsHolder.els.destHost.disabled = false;
-            setDestBrokerLocked(elsHolder.els, true);
-            expect(elsHolder.els.destHost.disabled).toBe(true);
-            // Calling with `false` is a no-op — applyDestPrefill owns the unlock decision.
-            setDestBrokerLocked(elsHolder.els, false);
-            expect(elsHolder.els.destHost.disabled).toBe(true);
+        /** The destination's management host, messaging host and type control, each locked or not. */
+        const brokerLocks = (e: typeof elsHolder.els) => [
+            e.destHost.disabled,
+            e.destSolHost.disabled,
+            Array.from(e.destBrokerType.querySelectorAll<HTMLButtonElement>('button')).every(b => b.disabled),
+        ];
+
+        it('broker lock holds each host of an appliance with its own connection, and the type with either', () => {
+            const e = elsHolder.els;
+            e.destHosts.setType('appliance');
+            setDestBrokerLocked(e, false, { semp: true, messaging: false });
+            expect(brokerLocks(e)).toEqual([true, false, true]);
+            setDestBrokerLocked(e, false, { semp: false, messaging: true });
+            expect(brokerLocks(e)).toEqual([false, true, true]);
+            setDestBrokerLocked(e, false, { semp: true, messaging: true });
+            expect(brokerLocks(e)).toEqual([true, true, true]);
+            setDestBrokerLocked(e, false, { semp: false, messaging: false });
+            expect(brokerLocks(e)).toEqual([false, false, false]);
+        });
+
+        it('broker lock holds the one host of a Software / Cloud broker while either connection is up', () => {
+            const e = elsHolder.els;
+            e.destHosts.setType('software');
+            // The messaging box of one host only shows it: it is never the user's to type in.
+            setDestBrokerLocked(e, false, { semp: false, messaging: true });
+            expect(brokerLocks(e)).toEqual([true, true, true]);
+            setDestBrokerLocked(e, false, { semp: false, messaging: false });
+            expect(brokerLocks(e)).toEqual([false, true, false]);
+        });
+
+        it('broker lock holds both hosts on the source\'s broker, with no destination connection at all', () => {
+            const e = elsHolder.els;
+            e.destHosts.setType('appliance');
+            setDestBrokerLocked(e, true, { semp: false, messaging: false });
+            expect(brokerLocks(e)).toEqual([true, true, true]);
+        });
+    });
+
+    describe('applyDestPrefill -- a destination connection that is up', () => {
+        const sempFields = (e: typeof elsHolder.els) => [e.destSempProtocol, e.destSempPort, e.destSempUrlPath, e.destSempUser, e.destSempPass].map(f => f.disabled);
+        const clientFields = (e: typeof elsHolder.els) =>
+            [e.destSolProtocol, e.destSolPort, e.destSolUrlPath, e.destSolVpn, e.destSolUser, e.destSolPass].map(f => f.disabled);
+        const all = (n: number, locked: boolean) => Array.from({ length: n }, () => locked);
+
+        it('keeps the SEMP card and the management host locked while the destination SEMP is up, and frees the Client card', () => {
+            const e = elsHolder.els;
+            e.destHosts.setType('appliance');
+            applyDestPrefill(e, false, false, PRIMARY, { semp: true, messaging: false });
+            expect(sempFields(e)).toEqual(all(5, true));
+            expect(clientFields(e)).toEqual(all(6, false));
+            expect([e.destHost.disabled, e.destSolHost.disabled]).toEqual([true, false]);
+        });
+
+        it('keeps the Client card and the messaging host locked while the messaging session is up, and frees the SEMP card', () => {
+            const e = elsHolder.els;
+            e.destHosts.setType('appliance');
+            applyDestPrefill(e, false, false, PRIMARY, { semp: false, messaging: true });
+            expect(sempFields(e)).toEqual(all(5, false));
+            expect(clientFields(e)).toEqual(all(6, true));
+            expect([e.destHost.disabled, e.destSolHost.disabled]).toEqual([false, true]);
+        });
+
+        it('keeps the VPN, username and password of another VPN on the source\'s broker locked while its session is up', () => {
+            const e = elsHolder.els;
+            applyDestPrefill(e, true, false, PRIMARY, { semp: false, messaging: true });
+            expect(clientFields(e)).toEqual(all(6, true));
+            applyDestPrefill(e, true, false, PRIMARY, { semp: false, messaging: false });
+            expect([e.destSolVpn.disabled, e.destSolUser.disabled, e.destSolPass.disabled]).toEqual([false, false, false]);
         });
     });
 

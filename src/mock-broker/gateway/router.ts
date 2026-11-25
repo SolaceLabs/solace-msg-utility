@@ -198,25 +198,34 @@ export function createRouter({ store, sessions, settings, faults, anonymous, con
     const listConnections: Handler = () => ok({ connections: store.listConnections() });
 
     /**
-     * saveConnection: a scheme left out, or the TLS one, is stored as the default (canonScheme),
-     * and a client hostname equal to the connection's is stored as none (canonClientHost).
+     * saveConnection: a scheme left out, or the TLS one, is stored as the default (canonScheme).
+     * A client hostname is stored as sent: it marks an appliance, also when it is the connection's.
      */
     const saveConnection: Handler = (req, _s, _sid, [broker]) => {
         const b = object(parseBody(req.body), ['hostname', 'semp', 'client', 'rev']);
-        const semp = object(b.semp, ['scheme', 'port', 'user', 'pass']);
-        const cl = object(b.client, ['hostname', 'scheme', 'port', 'msgVpns']);
+        const semp = object(b.semp, ['scheme', 'port', 'urlPath', 'user', 'pass']);
+        const cl = object(b.client, ['hostname', 'scheme', 'port', 'urlPath', 'msgVpns']);
         const hostname = string(b.hostname);
         const clientHostname = string(cl.hostname);
+        const sempPath = string(semp.urlPath);
+        const clientPath = string(cl.urlPath);
         const sempScheme = canonScheme(string(semp.scheme), 'https');
         const clientScheme = canonScheme(string(cl.scheme), 'wss');
         const rec: ConnRec = {
             broker,
             hostname,
-            semp: { ...(sempScheme ? { scheme: sempScheme } : {}), port: string(semp.port), username: string(semp.user), password: string(semp.pass) },
+            semp: {
+                ...(sempScheme ? { scheme: sempScheme } : {}),
+                port: string(semp.port),
+                ...(sempPath ? { urlPath: sempPath } : {}),
+                username: string(semp.user),
+                password: string(semp.pass),
+            },
             client: {
-                ...(clientHostname && clientHostname !== hostname ? { hostname: clientHostname } : {}),
+                ...(clientHostname ? { hostname: clientHostname } : {}),
                 ...(clientScheme ? { scheme: clientScheme } : {}),
                 port: string(cl.port),
+                ...(clientPath ? { urlPath: clientPath } : {}),
                 msgVpns: list(cl.msgVpns, x => {
                     const v = object(x, ['name', 'user', 'pass']);
                     return { name: string(v.name), username: string(v.user), password: string(v.pass) };
@@ -243,11 +252,11 @@ export function createRouter({ store, sessions, settings, faults, anonymous, con
     /** `POST /managed/connections/vpns`: the Message VPN names of the broker the connection form describes (vpns.ts). */
     const connectionVpns: Handler = (req) => {
         const b = object(parseBody(req.body), ['broker', 'hostname', 'semp']);
-        const semp = object(b.semp, ['scheme', 'port', 'user', 'pass']);
+        const semp = object(b.semp, ['scheme', 'port', 'urlPath', 'user', 'pass']);
         return lookupVpns({
             broker: string(b.broker),
             hostname: string(b.hostname),
-            semp: { scheme: string(semp.scheme), port: string(semp.port), user: string(semp.user), pass: string(semp.pass) },
+            semp: { scheme: string(semp.scheme), port: string(semp.port), urlPath: string(semp.urlPath), user: string(semp.user), pass: string(semp.pass) },
         }, store, faults().relayUnreachable, upstream);
     };
 

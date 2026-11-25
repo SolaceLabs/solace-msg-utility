@@ -1,11 +1,22 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import {
-    createInitialState, resetTransientState, syncDestFormFromSnapshot, destTargetKey, destMessagingHost, destScopeOf, DEST_SCOPES,
+    createInitialState, resetTransientState, syncDestFormFromSnapshot, destTargetKey, destMessagingHost, destLive, destScopeOf, DEST_SCOPES,
 } from '../../../src/modules/queue-copy/state';
 import type { DestPrefillSnapshot } from '../../../src/modules/queue-copy/state';
 
 describe('queue-copy/state', () => {
+    describe('destLive', () => {
+        it('names the destination connections that are up: its SEMP context and its messaging session', () => {
+            const s = createInitialState();
+            expect(destLive(s)).toEqual({ semp: false, messaging: false });
+            s.destSempCtx = { fetch: () => Promise.resolve(new Response()), baseUrl: 'https://dest.example:943/SEMP/v2' };
+            expect(destLive(s)).toEqual({ semp: true, messaging: false });
+            s.destSession = {};
+            expect(destLive(s)).toEqual({ semp: true, messaging: true });
+        });
+    });
+
     describe('createInitialState', () => {
         it('returns default form values, with the destination on the source\'s own VPN', () => {
             const s = createInitialState();

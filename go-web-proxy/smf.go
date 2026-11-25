@@ -127,8 +127,8 @@ func (g *smfGate) connect(ctx context.Context, w http.ResponseWriter, r *http.Re
 	u := &url.URL{
 		Scheme:   upgradeScheme(target.scheme),
 		Host:     net.JoinHostPort(target.host, target.port),
-		Path:     p.tail,
-		RawPath:  p.rawTail,
+		Path:     target.under(p.tail),
+		RawPath:  target.under(p.rawTail),
 		RawQuery: r.URL.RawQuery,
 	}
 	out := (&http.Request{Method: http.MethodGet, URL: u, Host: u.Host, Header: header, Body: http.NoBody}).WithContext(ctx)

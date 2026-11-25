@@ -589,8 +589,9 @@ describe('connection-management -- versions', () => {
 });
 
 // A software or cloud broker has one hostname. An appliance answers SEMP on
-// its management hostname and messaging on another (client.hostname);
-// tests/core/connections/broker-hosts.test.ts covers the type control itself.
+// its management hostname and messaging on one of its own (client.hostname),
+// which may be the same host; tests/core/connections/broker-hosts.test.ts
+// covers the type control itself.
 describe('connection-management -- an appliance\'s two hostnames', () => {
     const APPLIANCE = {
         rev: 3, broker: 'ap1', hostname: 'mgmt1',
@@ -668,13 +669,31 @@ describe('connection-management -- an appliance\'s two hostnames', () => {
         expect([sent.hostname, sent.client.hostname]).toEqual(['mgmt2', 'msg2']);
     });
 
-    it('sends one hostname for an appliance whose two are the same host', async () => {
+    it('keeps an appliance whose two hostnames are the same host an appliance: saved with both, listed and opened as one', async () => {
         const { container } = await setup();
         svcMock.saveConnection.mockResolvedValue(saved());
         saveAppliance(container, 'ap3', 'same', 'same');
         await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
         const sent = svcMock.saveConnection.mock.calls[0][0];
-        expect(sent.hostname).toBe('same');
+        expect([sent.hostname, sent.client.hostname]).toEqual(['same', 'same']);
+
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [{ ...APPLIANCE, hostname: 'same', client: { ...APPLIANCE.client, hostname: 'same' } }] } });
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-refresh').click();
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').textContent).toContain('same (messaging: same)'));
+        editRow(container, 0);
+        expect(hostnames(container)).toEqual(['true', 'Management hostname', 'same', 'same', false]);
+    });
+
+    it('sends no messaging hostname for Software / Cloud, whatever the messaging box shows', async () => {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue(saved());
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'sw1';
+        el<HTMLInputElement>(container, '#conn-mgmt-hostname').value = 'one';
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
+        const sent = svcMock.saveConnection.mock.calls[0][0];
+        expect(sent.hostname).toBe('one');
         expect('hostname' in sent.client).toBe(false);
     });
 
@@ -684,6 +703,80 @@ describe('connection-management -- an appliance\'s two hostnames', () => {
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-form-error').textContent)
             .toBe('Messaging hostname is required for an appliance. Choose Software / Cloud for a broker with one hostname.'));
         expect(svcMock.saveConnection).not.toHaveBeenCalled();
+    });
+});
+
+// Each address may end in a URL path, for a broker a reverse proxy serves
+// under one. What the gateway accepts as a path is its own check
+// (go-web-proxy/store_test.go > "TestStore_URLPath").
+describe('connection-management -- the URL path of each address', () => {
+    const WITH_PATHS = {
+        rev: 5, broker: 'px1', hostname: 'proxy1',
+        semp: { port: '443', urlPath: '/semp/px1', user: 'mon', pass: '' },
+        client: { port: '443', urlPath: '/smf/px1', msgVpns: [] },
+    };
+    const paths = (c: HTMLElement) => [
+        el<HTMLInputElement>(c, '#conn-mgmt-semp-path').value,
+        el<HTMLInputElement>(c, '#conn-mgmt-client-path').value,
+    ];
+    const editRow = (c: HTMLElement, n: number) =>
+        el(c, '#conn-mgmt-rows').querySelectorAll('tr')[n].querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
+
+    /** Type a new connection with the two URL paths as given, press Save, and return what was sent. */
+    async function saveWithPaths(sempPath: string, clientPath: string) {
+        const { container } = await setup();
+        svcMock.saveConnection.mockResolvedValue(saved());
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        el<HTMLInputElement>(container, '#conn-mgmt-broker').value = 'px2';
+        el<HTMLInputElement>(container, '#conn-mgmt-hostname').value = 'proxy2';
+        el<HTMLInputElement>(container, '#conn-mgmt-semp-path').value = sempPath;
+        el<HTMLInputElement>(container, '#conn-mgmt-client-path').value = clientPath;
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
+        return svcMock.saveConnection.mock.calls[0][0];
+    }
+
+    it('saves each path with its part, with a leading slash and no trailing one', async () => {
+        const sent = await saveWithPaths(' semp/px2/ ', '/smf/px2');
+        expect([sent.semp.urlPath, sent.client.urlPath]).toEqual(['/semp/px2', '/smf/px2']);
+    });
+
+    it('leaves a blank path out of what it sends', async () => {
+        const sent = await saveWithPaths('', '  ');
+        expect(['urlPath' in sent.semp, 'urlPath' in sent.client]).toEqual([false, false]);
+    });
+
+    it('opens a connection with its paths, one without them with the boxes empty, and a new one empty', async () => {
+        const { container } = await setup();
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [CONNS[0], WITH_PATHS] } });
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-refresh').click();
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').textContent).toContain('px1'));
+        editRow(container, 1);
+        expect(paths(container)).toEqual(['/semp/px1', '/smf/px1']);
+
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
+        editRow(container, 0);
+        expect(paths(container)).toEqual(['', '']);
+
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
+        editRow(container, 1);
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        expect(paths(container)).toEqual(['', '']);
+    });
+
+    it('sends the SEMP path with a Retrieve VPNs, so the gateway asks the broker under it', async () => {
+        const { container } = await setup();
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [WITH_PATHS] } });
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-refresh').click();
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').textContent).toContain('px1'));
+        editRow(container, 0);
+        svcMock.lookupVpns.mockResolvedValue({ ok: true, data: { vpns: [] } });
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-retrieve-vpns').click();
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalled());
+        expect(svcMock.lookupVpns).toHaveBeenCalledExactlyOnceWith({
+            broker: 'px1', hostname: 'proxy1', semp: { scheme: 'https', port: '443', urlPath: '/semp/px1', user: 'mon', pass: '' },
+        });
     });
 });
 

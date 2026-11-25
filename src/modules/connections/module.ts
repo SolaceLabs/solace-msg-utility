@@ -120,17 +120,6 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         hosts.lock({ management: live.isSempConnected, messaging: live.isConnected });
     }
 
-    /**
-     * The page the Certificate Trust Helper opens after a failed messaging
-     * connect, for the user to accept the broker's certificate. One host: the
-     * SEMP address (`sempUrl`). An appliance: the messaging address itself,
-     * since its management host may hold another certificate.
-     */
-    function trustUrl(sempUrl: string): string {
-        if (hosts.type() !== 'appliance') return sempUrl;
-        return `${els.elSolProtocol.value === 'ws' ? 'http' : 'https'}://${hosts.messagingHost()}:${els.elSolPort.value}`;
-    }
-
     // 2. Build broker-side service clients with bridging hooks.
     //    These hooks ARE the primary-specific behavior: writes to global
     //    AppState, emits global bus events, mutates the connections form UI.
@@ -191,6 +180,8 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
                 vpn: cfg.vpn,
                 user: cfg.user,
                 pass,
+                // An appliance's messaging host may be its management host too.
+                ...(hosts.type() === 'appliance' ? { appliance: true } : {}),
             });
             eventBus.emit('client:connected', { session });
         },
@@ -209,7 +200,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
             // suppress the link.
             let helpUrl: string | null = null;
             if (infoStr && infoStr.includes('Connection error') && !hosted) {
-                helpUrl = trustUrl(`${els.elSempProtocol.value}://${els.elHost.value}:${els.elSempPort.value}${normalizeUrlPath(els.elSempUrlPath.value)}`);
+                helpUrl = `${els.elSempProtocol.value}://${els.elHost.value}:${els.elSempPort.value}${normalizeUrlPath(els.elSempUrlPath.value)}`;
             }
             ui.showConnectError(els.elSolError, `Connection Failed: ${infoStr}`, helpUrl);
             resetSolaceButton();
@@ -218,7 +209,7 @@ export function installDirect(app: AppContext, opts: DirectConnectionOptions = {
         onError: (err) => {
             let helpUrl: string | null = null;
             if (err.message && err.message.includes('Certificate') && !hosted) {
-                helpUrl = trustUrl(`${els.elSempProtocol.value}://${els.elHost.value}:${els.elSempPort.value}`);
+                helpUrl = `${els.elSempProtocol.value}://${els.elHost.value}:${els.elSempPort.value}`;
             }
             ui.showConnectError(els.elSolError, err.message, helpUrl);
             resetSolaceButton();

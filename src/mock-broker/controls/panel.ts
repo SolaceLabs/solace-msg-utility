@@ -98,13 +98,19 @@ export function kv(label: string, values: string[]): HTMLElement {
 /** The credentials "Fill the connection form" types; the emulator accepts any. */
 export const DEMO_CREDENTIALS = { username: 'demo', password: 'demo' };
 
+/** The messaging host "Fill as an appliance" types: the emulator connects to any name that holds the demo host. */
+export const DEMO_MESSAGING_HOST = `msg.${MOCK_HOST.OK}`;
+
 /**
  * Type the demo's values into the Direct form, as a visitor would: the host,
  * both cards' credentials and `vpn`. Each field gets the input and change
  * events typing raises, so the form reacts as it does to the keyboard. Ports,
  * protocols and URL paths keep what they hold; the emulator ignores them.
+ *
+ * The broker type is pressed as well: Software / Cloud, or with `appliance`
+ * the Appliance button, after which the messaging card gets a host of its own.
  */
-export function fillDirectForm(vpn: string, root: ParentNode = document): void {
+export function fillDirectForm(vpn: string, root: ParentNode = document, appliance = false): void {
     const type = (selector: string, value: string) => {
         const input = required<HTMLInputElement>(root, selector);
         input.value = value;
@@ -112,6 +118,8 @@ export function fillDirectForm(vpn: string, root: ParentNode = document): void {
         input.dispatchEvent(new Event('change', { bubbles: true }));
     };
     type('#conn-host', MOCK_HOST.OK);
+    required<HTMLButtonElement>(root, `#conn-broker-type [data-broker-type="${appliance ? 'appliance' : 'software'}"]`).click();
+    if (appliance) type('#solace-host', DEMO_MESSAGING_HOST);
     type('#semp-username', DEMO_CREDENTIALS.username);
     type('#semp-password', DEMO_CREDENTIALS.password);
     type('#solace-vpn', vpn);
@@ -131,10 +139,13 @@ function connectionReference(): HTMLElement {
     wrap.appendChild(kv('Cert error', [MOCK_HOST.UNTRUSTED]));
     let fillVpn = VPNS[0].name;
     const vpnPick = select(VPNS.map(v => ({ value: v.name, label: `VPN ${v.name}` })), v => { fillVpn = v; });
-    wrap.append(vpnPick, button('Fill the connection form', () => fillDirectForm(fillVpn)));
+    wrap.append(vpnPick,
+        button('Fill the connection form', () => fillDirectForm(fillVpn)),
+        button('Fill as an appliance', () => fillDirectForm(fillVpn, document, true)));
     wrap.appendChild(el('p', 'mockctl-hint',
         'Fill writes the host, that VPN and a demo username and password into the form; '
-        + 'then press Connect on each card.'));
+        + 'then press Connect on each card. Fill as an appliance does the same for a broker '
+        + 'with two hosts: it chooses Appliance and gives the Messaging card a host of its own.'));
     wrap.appendChild(el('p', 'mockctl-hint',
         'Username, password, ports and URL paths are all accepted as typed; only the host '
         + 'is checked. Any other host is refused, never reached, and a host containing '

@@ -84,7 +84,7 @@
     <ul>
         <li>The type cannot be changed while either connection is up.</li>
         <li>Changing back to <strong>Software / Cloud</strong> drops the messaging host you typed.</li>
-        <li><strong>Appliance</strong> with the same host in both boxes is a broker with one host. It is saved, and loads again, as <strong>Software / Cloud</strong>.</li>
+        <li><strong>Appliance</strong> with the same host in both boxes stays an appliance: it is saved, and loads again, as <strong>Appliance</strong>.</li>
     </ul>
 
     <h3>Connecting the Solace client</h3>
@@ -249,7 +249,7 @@
         <li>The address that button opens.</li>
     </ol>
     <ol class="manual-steps">
-        <li>Press <strong>Open Broker URL</strong>. The address opens in another tab. It is built from the Broker Host and the Protocol and Port of the SEMP card (with its URL Path, if you set one), so fill those in first. After a failed Messaging connect to an appliance it is the Messaging Host and the Port of the Messaging card, since the appliance's two addresses may hold different certificates.</li>
+        <li>Press <strong>Open Broker URL</strong>. The address opens in another tab. It is built from the Broker Host and the Protocol and Port of the SEMP card (with its URL Path, if you set one), so fill those in first. For an appliance that is its Management Host, after a failed Messaging connect too.</li>
         <li>If the browser shows a privacy warning, press <strong>Advanced</strong>, then <strong>Proceed</strong> (or Accept).</li>
         <li>Close that tab, come back and press <strong>Connect</strong> again.</li>
     </ol>

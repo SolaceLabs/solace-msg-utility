@@ -61,9 +61,10 @@ Use host **`broker.solace.com`** with any non-empty credentials, or let **Fill t
 controls type them for you. Any other hostname is refused on both cards, and a hostname containing `untrust.com`
 simulates an untrusted certificate on the messaging connection, so the error paths are demoable too.
 
-To try a broker with two addresses, choose **Appliance** in the **Solace Event Broker Type** card. Keep
-`broker.solace.com` as the Management Host and give the Messaging Host a name that contains it, such as
-`msg.broker.solace.com`: the demo's messaging connection accepts any such name.
+To try a broker with two addresses, press **Fill as an appliance** in the Demo controls. It chooses **Appliance** in
+the **Solace Event Broker Type** card, keeps `broker.solace.com` as the Management Host and types
+`msg.broker.solace.com` as the Messaging Host. The demo's messaging connection accepts any name that contains
+`broker.solace.com`, so you can type another such name yourself.
 
 `demo.html` is Direct-only. To try the Provisioned sign-in without a gateway, open [`provisioned-demo.html`](#provisioned-demo-provisioned-demohtml).
 
@@ -116,7 +117,7 @@ The map and stream messages are the one place the demo is not exact. A real brok
 
 A **Demo controls** panel sits at the bottom-right. It opens on the first load in a browser tab and stays collapsed after that; click its header to open or close it. Its first line says that nothing leaves the page. It both tells you what the demo accepts and drives the broker live:
 
-- **Connection values** -- the accepted host, every Message VPN, and the host that simulates a certificate error. Click any value to copy it. Usernames, passwords, ports and URL paths are accepted as typed -- only the host is checked -- and the list is generated from the broker's own topology, so it can never disagree with what the pickers show. Pick a VPN and press **Fill the connection form** to type the host, that VPN and a demo username and password (`demo` / `demo`) into the form; then press **Connect** on each card.
+- **Connection values** -- the accepted host, every Message VPN, and the host that simulates a certificate error. Click any value to copy it. Usernames, passwords, ports and URL paths are accepted as typed -- only the host is checked -- and the list is generated from the broker's own topology, so it can never disagree with what the pickers show. Pick a VPN and press **Fill the connection form** to type the host, that VPN and a demo username and password (`demo` / `demo`) into the form; then press **Connect** on each card. **Fill as an appliance** does the same for a broker with two hosts: it chooses **Appliance** and gives the Messaging card a host of its own.
 - **Queue state** -- switch any queue between normal, read-only, bind-denied, empty and publish-rejected. Applies on the next bind. **Publish rejected** keeps the queue browsable but refuses every publish to it, including a topic publish that fans out to it, with `REJECTED_MESSAGE_ERROR` on the publishing session and nothing spooled. It stays set until you switch the queue back. Use it to show a Queue Copy or Move stopping at the broker rejection with the source untouched.
 - **Connection faults** -- fail the next connect, simulate SEMP `401` or `500`, or drop a live session to show the
   disconnect path. The connect failure is one-shot; the SEMP faults stay armed until you clear them.
@@ -179,7 +180,7 @@ With the setting at *Administrators must use it* or *Everyone must use it*, a si
 | `west-dr` | `orders-dr` | `orders.new`, `orders.replay` (empty) |
 | `lab` | `sandbox` | `sandbox.scratch`, `sandbox.bulk` (300 messages) |
 
-Their hosts end in `.demo.invalid`, a name that never resolves.
+Their hosts end in `.demo.invalid`, a name that never resolves. `lab` is saved as an appliance: Conn. Mgmt lists it with a messaging host of its own (`lab-msg.demo.invalid`) and opens it with **Appliance** chosen.
 
 `payload-samples` is the same set of messages as `demo/payload-samples` in the Direct demo (see [The payload samples queue](#the-payload-samples-queue)). Every account that may browse `east-prod` / `orders` can open it; it is not a queue the operator can write to, because the operator's write rights are `orders.*` only.
 

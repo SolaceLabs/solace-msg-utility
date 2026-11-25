@@ -81,8 +81,12 @@ describe('mock-broker/gateway/backup -- the file format', () => {
 
     it('seals and opens a document, carrying every user and connection field', async () => {
         const original = doc();
-        // An appliance: its messaging answers on a host of its own.
-        original.connections.push({ broker: 'ap1', hostname: 'mgmt1', semp: { port: '443', username: 'mon', password: 's' }, client: { hostname: 'msg1', port: '443', msgVpns: [] } });
+        // An appliance behind a reverse proxy: its messaging answers on a host of its own, and each address has a URL path.
+        original.connections.push({
+            broker: 'ap1', hostname: 'mgmt1',
+            semp: { port: '443', urlPath: '/semp/ap1', username: 'mon', password: 's' },
+            client: { hostname: 'msg1', port: '443', urlPath: '/smf/ap1', msgVpns: [] },
+        });
         const file = await sealBackup(await newBackupKey(PASS, 1000), original);
         expect(file).not.toContain('admin-password-1');
         expect(JSON.parse(file).kdf).toEqual({ name: 'pbkdf2-sha256', iter: 1000, salt: expect.any(String) });
@@ -356,6 +360,31 @@ describe('mock-broker/gateway/backup -- the routes', () => {
             expect(preview.json.connections).toEqual({ added: [], changed: [gw.store.listConnections()[0].broker], removed: [] });
             expect((await imp(gw, f, 'skip', 'replace', 'skip')).json).toEqual({ signedOut: false });
             expect(gw.store.listConnections()[0].client.hostname).toBe('msg1');
+        });
+
+        it('brings in a connection\'s URL paths: either one makes the connection changed, and the list shows both after', async () => {
+            const gw = gateway();
+            const broker = gw.store.listConnections()[0].broker;
+            for (const part of ['semp', 'client'] as const) {
+                const one = await file(gw, d => { d.connections[0][part].urlPath = '/proxy/a'; });
+                expect((await call(gw, 'POST', '/managed/backup/preview', { file: one, passphrase: PASS })).json.connections)
+                    .toEqual({ added: [], changed: [broker], removed: [] });
+            }
+            const f = await file(gw, d => {
+                d.connections[0].semp.urlPath = '/semp/a';
+                d.connections[0].client.urlPath = '/smf/a';
+            });
+            expect((await imp(gw, f, 'skip', 'replace', 'skip')).json).toEqual({ signedOut: false });
+            const listed = gw.store.listConnections()[0];
+            expect([listed.semp.urlPath, listed.client.urlPath]).toEqual(['/semp/a', '/smf/a']);
+        });
+
+        it('refuses a backup whose connection holds a URL path the gateway cannot use', async () => {
+            const gw = gateway();
+            const f = await file(gw, d => { d.connections[0].semp.urlPath = '/a/../b'; });
+            const res = await imp(gw, f, 'skip', 'replace', 'skip');
+            expect(res.status).toBe(422);
+            expect(res.json.reason).toContain('semp.urlPath "/a/../b" must be blank, or a path such as /proxy/broker1');
         });
 
         it('refuses a missing source, a missing saved backup and a file it cannot open', async () => {

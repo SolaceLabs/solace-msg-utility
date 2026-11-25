@@ -45,7 +45,7 @@ import {
 import type { PrimarySnapshot } from './ui';
 import { wireUiEvents } from './ui-events';
 import { destNameProblem } from './service';
-import { createInitialState, syncDestFormFromSnapshot, destTargetKey, destMessagingHost } from './state';
+import { createInitialState, syncDestFormFromSnapshot, destTargetKey, destMessagingHost, destLive } from './state';
 import {
     createServiceSolace,
     type SolaceConnectionHooks,
@@ -119,12 +119,13 @@ export const QueueCopyModule = {
             const sempCreds = appState.sempCredentials;
             if (!sol && !sempCreds) return null;
 
-            // The SEMP host names the broker; messaging on another host is an appliance.
+            // The SEMP host names the broker. An appliance is a messaging
+            // session that says so, or one on another host than SEMP.
             const solHost = sol?.host ?? '';
             const host = sempCreds?.host ?? solHost;
             const snap: PrimarySnapshot = {
                 host,
-                ...(sol && solHost !== host ? { messagingHost: solHost } : {}),
+                ...(sol && (sol.appliance || solHost !== host) ? { messagingHost: solHost } : {}),
                 solace: {
                     protocol: sol?.protocol ?? 'wss',
                     port: sol?.port ?? '',
@@ -157,7 +158,7 @@ export const QueueCopyModule = {
         function refreshFromPrimary(): void {
             const snap = getPrimarySnapshot();
             applySourceReadonly(els, snap);
-            applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, snap);
+            applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, snap, destLive(state));
             // Mirror prefilled DOM values into state so a later "uncheck Same
             // broker → click Connect without retyping" sends the right host
             // and credentials to the dest factories.
@@ -228,7 +229,7 @@ export const QueueCopyModule = {
             mirrorProv('connected', provDetail());
             destUi.refreshDestTarget();
             setDestSolFormLocked(els, true);
-            setDestBrokerLocked(els, true);
+            setDestBrokerLocked(els, state.destForm.sameBroker, destLive(state));
             refreshStartEnabled();
             refreshDestPickVisible();
             return true;
@@ -264,10 +265,11 @@ export const QueueCopyModule = {
                 setDestSolStatus(els, 'disconnected');
                 mirrorProv('disconnected');
                 setDestSolFormLocked(els, false);
-                // Re-derive broker-host lock from the Copy to choice — same broker
-                // dictates whether the host stays locked even with no live
-                // dest connection.
-                applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, getPrimarySnapshot());
+                // Re-derive the locks from the Copy to choice and from what is
+                // still up: the source's broker keeps its hosts locked with no
+                // destination connection at all, and a destination SEMP that is
+                // still up keeps its own card and host locked.
+                applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, getPrimarySnapshot(), destLive(state));
                 destUi.refreshDestTarget();
                 refreshStartEnabled();
                 refreshDestPickVisible();
@@ -298,7 +300,7 @@ export const QueueCopyModule = {
             setDestSempStatus(els, 'connected');
             setDestSempError(els, null);
             setDestSempFormLocked(els, true);
-            setDestBrokerLocked(els, true);
+            setDestBrokerLocked(els, state.destForm.sameBroker, destLive(state));
             refreshDestPickVisible();
         }
 
@@ -315,7 +317,7 @@ export const QueueCopyModule = {
                 state.destSempCtx = null;
                 setDestSempStatus(els, 'disconnected');
                 setDestSempFormLocked(els, false);
-                applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, getPrimarySnapshot());
+                applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, getPrimarySnapshot(), destLive(state));
                 refreshDestPickVisible();
             },
             onAuthFailed: () => {

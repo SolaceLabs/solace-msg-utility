@@ -42,7 +42,10 @@
         </div>
     </div>
 
-    <!-- Each address is one row, read as a URL: scheme, hostname, port. -->
+    <!-- Each address is one row, read as a URL: scheme, hostname, port, then
+         the path the broker sits under when a reverse proxy serves it. A line
+         sets each section off from the one above. -->
+    <hr class="divider">
     <h3 class="card-subtitle">SEMP (management)</h3>
     <div class="form-group flex-row">
         <div class="conn-mgmt-scheme">
@@ -60,6 +63,11 @@
             <label for="conn-mgmt-semp-port">Port</label>
             <input type="text" id="conn-mgmt-semp-port" class="form-control" autocomplete="off">
         </div>
+        <div class="conn-mgmt-path">
+            <label for="conn-mgmt-semp-path">URL path</label>
+            <input type="text" id="conn-mgmt-semp-path" class="form-control" autocomplete="off" placeholder="optional"
+                title="A path after the port, before /SEMP (for a broker behind a reverse proxy)">
+        </div>
     </div>
     <div class="form-group flex-row">
         <div class="w-full">
@@ -72,6 +80,7 @@
         </div>
     </div>
 
+    <hr class="divider">
     <h3 class="card-subtitle">Client (messaging)</h3>
     <div class="form-group flex-row">
         <div class="conn-mgmt-scheme">
@@ -90,7 +99,13 @@
             <label for="conn-mgmt-client-port">Port</label>
             <input type="text" id="conn-mgmt-client-port" class="form-control" autocomplete="off">
         </div>
+        <div class="conn-mgmt-path">
+            <label for="conn-mgmt-client-path">URL path</label>
+            <input type="text" id="conn-mgmt-client-path" class="form-control" autocomplete="off" placeholder="optional"
+                title="A path after the port, where the messaging socket is served (for a broker behind a reverse proxy)">
+        </div>
     </div>
+    <hr class="divider">
     <div class="form-group">
         <!-- Retrieve VPNs asks the gateway to read the broker's Message VPNs over
              SEMP, with the SEMP details above, and adds a row for each one the

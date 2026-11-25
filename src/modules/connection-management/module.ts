@@ -13,8 +13,11 @@
  * on broker or either hostname: contains, case-insensitive, `*` = any run),
  * from the last load without a refetch. The form's broker type decides whether
  * a connection has one hostname or, for an appliance, a messaging hostname of
- * its own (`src/core/connections/broker-hosts.ts`). Imports only from
- * `src/core/*` and its own service.
+ * its own (`src/core/connections/broker-hosts.ts`): a connection saved as an
+ * appliance opens as one, also when both hostnames are the same. Each address
+ * may end in a URL path, for a broker behind a reverse proxy: it is sent with
+ * a leading slash and no trailing one (`normalizeUrlPath`), and left out when
+ * blank. Imports only from `src/core/*` and its own service.
  *
  * Retrieve VPNs fills the Message VPN list from the broker: the gateway reads
  * the broker's Message VPN names over SEMP with the form's SEMP details
@@ -34,7 +37,7 @@ import { createGate, gateOnAdminSession } from '../../core/components/module-gat
 import { createRowList, renderAdminRows } from '../../core/components/row-list';
 import { confirmDialog } from '../../core/components/confirm-dialog';
 import { showToast } from '../../core/toast';
-import { escapeHtml, matchContains, sempUsernameOk, clientUsernameError } from '../../core/utils';
+import { escapeHtml, matchContains, normalizeUrlPath, sempUsernameOk, clientUsernameError } from '../../core/utils';
 import { logger } from '../../core/logger';
 import { handleConflict } from '../../core/admin-conflict';
 import { reportManagedFailure } from '../../core/services/managed-api';
@@ -103,11 +106,13 @@ export const ConnectionManagementModule = {
             clientHostnameHint: required<HTMLElement>(container, '#conn-mgmt-client-hostname-hint'),
             sempScheme: required<HTMLElement>(container, '#conn-mgmt-semp-scheme'),
             sempPort: required<HTMLInputElement>(container, '#conn-mgmt-semp-port'),
+            sempPath: required<HTMLInputElement>(container, '#conn-mgmt-semp-path'),
             sempUser: required<HTMLInputElement>(container, '#conn-mgmt-semp-user'),
             sempPass: required<HTMLInputElement>(container, '#conn-mgmt-semp-pass'),
             sempPassHint: required<HTMLElement>(container, '#conn-mgmt-semp-pass-hint'),
             clientScheme: required<HTMLElement>(container, '#conn-mgmt-client-scheme'),
             clientPort: required<HTMLInputElement>(container, '#conn-mgmt-client-port'),
+            clientPath: required<HTMLInputElement>(container, '#conn-mgmt-client-path'),
             vpnRows: required<HTMLElement>(container, '#conn-mgmt-vpn-rows'),
             btnAddVpn: required<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn'),
             btnRetrieveVpns: required<HTMLButtonElement>(container, '#btn-conn-mgmt-retrieve-vpns'),
@@ -214,11 +219,13 @@ export const ConnectionManagementModule = {
             hosts.write({ host: '' });
             sempScheme.set('https');
             els.sempPort.value = '';
+            els.sempPath.value = '';
             els.sempUser.value = '';
             els.sempPass.value = '';
             els.sempPassHint.textContent = '';
             clientScheme.set('wss');
             els.clientPort.value = '';
+            els.clientPath.value = '';
             vpnList.clear();
             setError(els.formError, null);
             showView('form');
@@ -234,17 +241,25 @@ export const ConnectionManagementModule = {
             hosts.write({ host: c.hostname, messagingHost: c.client.hostname });
             sempScheme.set(c.semp.scheme === 'http' ? 'http' : 'https');
             els.sempPort.value = c.semp.port;
+            els.sempPath.value = c.semp.urlPath ?? '';
             els.sempUser.value = c.semp.user;
             els.sempPass.value = '';
             els.sempPassHint.textContent = '(leave blank to keep current)';
             clientScheme.set(c.client.scheme === 'ws' ? 'ws' : 'wss');
             els.clientPort.value = c.client.port;
+            els.clientPath.value = c.client.urlPath ?? '';
             vpnList.clear();
             c.client.msgVpns.forEach(v =>
                 vpnList.addRow({ name: v.name, user: v.user, pass: '' }),
             );
             setError(els.formError, null);
             showView('form');
+        }
+
+        /** The SEMP URL path as a save and a lookup send it: with its leading slash, left out when there is none. */
+        function sempPathPart(): { urlPath?: string } {
+            const urlPath = normalizeUrlPath(els.sempPath.value);
+            return urlPath ? { urlPath } : {};
         }
 
         async function saveForm(): Promise<void> {
@@ -294,6 +309,9 @@ export const ConnectionManagementModule = {
             els.btnSave.disabled = true;
             setError(els.formError, null);
             try {
+                // A URL path is sent with its leading slash and no trailing one;
+                // the gateway checks what it holds.
+                const clientPath = normalizeUrlPath(els.clientPath.value);
                 // A blank password is sent blank: the gateway keeps the stored one.
                 const connection: ManagedConnRecord = {
                     rev: editingRev,
@@ -302,14 +320,16 @@ export const ConnectionManagementModule = {
                     semp: {
                         scheme: sempScheme.value(),
                         port: els.sempPort.value.trim(),
+                        ...sempPathPart(),
                         user: sempUser,
                         pass: els.sempPass.value,
                     },
                     client: {
-                        // The same hostname twice is one hostname: the gateway stores it so too.
-                        ...(clientHostname && clientHostname !== hostname ? { hostname: clientHostname } : {}),
+                        // A messaging hostname marks an appliance, also when it is the management one.
+                        ...(clientHostname ? { hostname: clientHostname } : {}),
                         scheme: clientScheme.value(),
                         port: els.clientPort.value.trim(),
+                        ...(clientPath ? { urlPath: clientPath } : {}),
                         msgVpns: rows.map(r => ({ name: r.name, user: r.user, pass: r.pass })),
                     },
                 };
@@ -336,8 +356,8 @@ export const ConnectionManagementModule = {
          * form describes, over SEMP, and each one the list does not name yet
          * gets a row with its name. Rows already there stay as they are. A
          * blank SEMP password stands for the stored one, which the gateway
-         * uses only for a saved connection whose address and account are
-         * unchanged; otherwise it asks for the password.
+         * uses only for a saved connection whose address, URL path and
+         * account are unchanged; otherwise it asks for the password.
          */
         async function retrieveVpns(): Promise<void> {
             const shown = formShown;
@@ -346,7 +366,10 @@ export const ConnectionManagementModule = {
             const res = await service.lookupVpns({
                 broker: editing ?? '',
                 hostname: els.hostname.value.trim(),
-                semp: { scheme: sempScheme.value(), port: els.sempPort.value.trim(), user: els.sempUser.value.trim(), pass: els.sempPass.value },
+                semp: {
+                    scheme: sempScheme.value(), port: els.sempPort.value.trim(), ...sempPathPart(),
+                    user: els.sempUser.value.trim(), pass: els.sempPass.value,
+                },
             });
             els.btnRetrieveVpns.disabled = false;
             if (shown !== formShown) return; // the form was closed meanwhile

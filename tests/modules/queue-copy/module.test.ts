@@ -232,6 +232,30 @@ describe('queue-copy/module', () => {
     });
 
     describe('primary snapshot derivation', () => {
+        /** The pressed button of the source's broker type, and its two host boxes. */
+        const sourceBroker = () => [
+            Array.from(container.querySelectorAll<HTMLButtonElement>('#copy-source-broker-type button'))
+                .find(b => b.getAttribute('aria-pressed') === 'true')!.dataset.brokerType,
+            ...['#copy-source-host', '#copy-source-sol-host'].map(sel => container.querySelector<HTMLInputElement>(sel)!.value),
+        ];
+        const installOn = (solaceConnection: NonNullable<AppState['solaceConnection']>) => QueueCopyModule.install(makeCtx(eventBus, container, {
+            isConnected: true, solaceConnection, sempCredentials: sempCreds('https://b1.example:1943/SEMP/v2'),
+        }));
+
+        it('shows the source as an appliance when its messaging session says so, also with one host for both', async () => {
+            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            await installOn(makeSolaceConnection({ host: 'b1.example', appliance: true }));
+            expect(sourceBroker()).toEqual(['appliance', 'b1.example', 'b1.example']);
+            consoleSpy.mockRestore();
+        });
+
+        it('shows the source as Software / Cloud when one host serves a session that is no appliance\'s', async () => {
+            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            await installOn(makeSolaceConnection({ host: 'b1.example' }));
+            expect(sourceBroker()).toEqual(['software', 'b1.example', 'b1.example']);
+            consoleSpy.mockRestore();
+        });
+
         it('uses solaceConnection.urlPath when non-root', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const ctx = makeCtx(eventBus, container, {
@@ -650,6 +674,39 @@ describe('queue-copy/module', () => {
             capturedSempHooks.current.onConnected({ fetch: () => Promise.resolve(new Response()), baseUrl: 'http://d' });
             capturedSempHooks.current.onDisconnected();
             expect(container.querySelector<HTMLInputElement>('#copy-dest-semp-port')!.disabled).toBe(false);
+            consoleSpy.mockRestore();
+        });
+
+        it('another broker, an appliance: each host and card locks with its own connection, and a closed one frees only its own side', async () => {
+            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            const ctx = makeCtx(eventBus, container, {
+                isConnected: true,
+                selectedVpn: 'default',
+                solaceConnection: makeSolaceConnection({ host: 'b1.example' }),
+                sempCredentials: sempCreds('https://b1.example:1943/SEMP/v2'),
+            });
+            await QueueCopyModule.install(ctx);
+            pickScope(container, 'another-broker');
+            container.querySelector<HTMLButtonElement>('#copy-dest-broker-type [data-broker-type="appliance"]')!.click();
+            /** Management host, a SEMP field, messaging host, a Client field: locked or not. */
+            const locked = () => ['#copy-dest-host', '#copy-dest-semp-port', '#copy-dest-sol-host', '#copy-dest-sol-port']
+                .map(sel => container.querySelector<HTMLInputElement>(sel)!.disabled);
+            expect(locked()).toEqual([false, false, false, false]);
+
+            // SEMP up: a mistyped messaging host can still be corrected.
+            capturedSempHooks.current.onConnected({ fetch: () => Promise.resolve(new Response()), baseUrl: 'http://d' });
+            expect(locked()).toEqual([true, true, false, false]);
+
+            container.querySelector<HTMLButtonElement>('#copy-btn-dest-sol-connect')!.click();
+            capturedSolHooks.current.onConnected({ on: vi.fn() }, 'default');
+            expect(locked()).toEqual([true, true, true, true]);
+
+            // The messaging session closes: the SEMP side is still up and stays locked.
+            capturedSolHooks.current.onDisconnected();
+            expect(locked()).toEqual([true, true, false, false]);
+
+            capturedSempHooks.current.onDisconnected();
+            expect(locked()).toEqual([false, false, false, false]);
             consoleSpy.mockRestore();
         });
 

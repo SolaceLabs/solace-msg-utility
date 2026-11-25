@@ -403,6 +403,24 @@ func TestSMF_DialsTheClientHostname(t *testing.T) {
 	}
 }
 
+// A connection's messaging URL path is the path the gate dials: the socket the
+// browser opens asks for no path of its own.
+func TestSMF_DialsTheConnectionsURLPath(t *testing.T) {
+	up := &urlRecorder{}
+	e := newManagedEnvWith(t, nil, up)
+	putConn(t, e.api.store, connRec{
+		Broker: "b1", Hostname: "host1",
+		Client: clientRec{Port: "8008", URLPath: "/proxy/b1", MsgVpns: []vpnRec{{Name: "v1", Username: "u1"}}},
+	})
+	for _, path := range []string{"/managed/smf/b1/v1", "/managed/smf/b1/v1/"} {
+		expect(t, e.do("GET", path, "", e.cookie("viewer", false), wsHeaders("https://gw.example")...),
+			http.StatusBadGateway, "upstream_unavailable")
+		if got, want := up.last(t), "https://host1:8008/proxy/b1"; got != want {
+			t.Errorf("%s: the gate dialled %s, want %s", path, got, want)
+		}
+	}
+}
+
 // A connection that cannot be taken over (here a recorder) is a 500, and the
 // broker side that already upgraded is closed.
 func TestSMF_NoTakeoverClosesTheBrokerSide(t *testing.T) {

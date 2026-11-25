@@ -1,6 +1,7 @@
 /**
- * The managed demo's fixed, fake assets: three brokers, their queues in the
- * demo broker, and four accounts that show the differences between roles.
+ * The managed demo's fixed, fake assets: three brokers (one of them, `lab`, an
+ * appliance with a messaging host of its own), their queues in the demo
+ * broker, and four accounts that show the differences between roles.
  * Every password here is a demo value the control panel lists; none is a
  * credential for anything.
  *
@@ -64,12 +65,20 @@ export const DEMO_ACCOUNTS = [
 const everything = [{ brokers: '*', msgVpns: '*', queues: '*' }];
 const pw = (user: string) => DEMO_ACCOUNTS.find(a => a.username === user)!.password;
 
-const connection = (broker: string, vpns: string[]) => ({
+/** A saved connection; with `messagingHost`, an appliance whose messaging answers on that host. */
+const connection = (broker: string, vpns: string[], messagingHost?: string) => ({
     broker,
     hostname: `${broker}.demo.invalid`,
     semp: { port: '1943', username: 'demo-monitor', password: 'demo-semp-password' },
-    client: { port: '1443', msgVpns: vpns.map(name => ({ name, username: `${name}-client`, password: `demo-${name}-password` })) },
+    client: {
+        ...(messagingHost ? { hostname: messagingHost } : {}),
+        port: '1443',
+        msgVpns: vpns.map(name => ({ name, username: `${name}-client`, password: `demo-${name}-password` })),
+    },
 });
+
+/** The messaging host of the demo's one appliance, `lab`. */
+export const DEMO_APPLIANCE_MESSAGING_HOST = 'lab-msg.demo.invalid';
 
 /** A standard root CA as the demo describes it: fixed demo values, since the demo cannot read X.509. */
 const demoRoot = (subject: string, sha256: string) => ({
@@ -107,7 +116,7 @@ export function demoSeed(): GatewaySeed {
         'msg-utility-connections': [
             connection('east-prod', ['orders', 'payments']),
             connection('west-dr', ['orders-dr']),
-            connection('lab', ['sandbox']),
+            connection('lab', ['sandbox'], DEMO_APPLIANCE_MESSAGING_HOST),
         ],
         settings: {
             hosted: true,

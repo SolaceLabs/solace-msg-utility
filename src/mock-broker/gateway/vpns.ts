@@ -4,16 +4,17 @@
  * broker holds, read over SEMP v2 with the SEMP details the form sends. Same
  * refusals in the same order: the address and the account as a save checks
  * them, then the password (a blank one stands for the stored one, and only
- * for the saved connection the body names while its hostname, scheme, port
- * and username are the stored ones), then the broker. A broker that cannot be
+ * for the saved connection the body names while its hostname, scheme, port,
+ * URL path and username are the stored ones), then the broker. A broker that cannot be
  * reached or answers anything but a list is a `502 upstream_unavailable`; one
  * that refuses the account is a `502 upstream_auth`.
  *
  * When a test scripts the broker (`upstream`, the gateway contract does), its
- * answers are read page by page as vpns.go reads them. Otherwise the demo
- * broker answers: it holds only the brokers of the saved connections, so the
- * address must be a saved connection's hostname and the account that
- * connection's.
+ * answers are read page by page as vpns.go reads them, under the URL path the
+ * body names. Otherwise the demo broker answers: it holds only the brokers of
+ * the saved connections, so the address must be a saved connection's hostname
+ * and the account that connection's. It has no proxy in front of it, so it
+ * answers whatever the URL path is.
  *
  * Not simulated: the in-flight cap, the lookup's time limit and the body cap
  * of a page. Not mirrored: an answer that is JSON but not a msgVpns page (the
@@ -24,14 +25,14 @@
 import { delay, FAULT, scenario } from '../fixtures';
 import { handleSempV2 } from '../server/semp-v2';
 import { sempUsernameOk } from '../../core/utils';
-import { hasControl, HOST_RULE, portProblem, quote, schemeOk, SEMP_SCHEMES, SEMP_USER_RULE, validHost } from './validate';
+import { hasControl, HOST_RULE, portProblem, quote, schemeOk, SEMP_SCHEMES, SEMP_USER_RULE, URL_PATH_RULE, validHost, validUrlPath } from './validate';
 import type { Upstream } from './relay';
 import type { BrokerTarget, GatewayStore } from './store';
 import type { GatewayResponse } from './types';
 
 /** vpnLookupNeedsPassword: the reason a lookup without a password gets when no stored one applies. */
 const VPN_LOOKUP_NEEDS_PASSWORD =
-    'Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port and username are unchanged.';
+    'Type the SEMP password. The stored one is used only for a saved connection whose hostname, scheme, port, URL path and username are unchanged.';
 
 const PAGE_SIZE = 100;
 const MAX_PAGES = 20;
@@ -42,7 +43,7 @@ const MAX_NAME = 32;
 export interface VpnLookupBody {
     broker: string;
     hostname: string;
-    semp: { scheme: string; port: string; user: string; pass: string };
+    semp: { scheme: string; port: string; urlPath: string; user: string; pass: string };
 }
 
 const refuse = (status: number, error: string): GatewayResponse => ({ status, json: { error } });
@@ -58,6 +59,8 @@ function lookupTarget(b: VpnLookupBody, store: GatewayStore): BrokerTarget | Gat
     if (b.semp.port === '') return invalid('semp.port', 'A SEMP port is required to read the Message VPNs.');
     const port = portProblem(b.semp.port);
     if (port) return invalid('semp.port', `semp.port ${port}`);
+    const path = b.semp.urlPath;
+    if (!validUrlPath(path)) return invalid('semp.urlPath', `semp.urlPath ${quote(path)} ${URL_PATH_RULE}`);
     if (b.semp.user === '') return invalid('semp.user', 'A SEMP username is required to read the Message VPNs.');
     if (!sempUsernameOk(b.semp.user)) return invalid('semp.user', `The SEMP username ${SEMP_USER_RULE}.`);
     if (hasControl(b.semp.pass)) return invalid('semp.pass', 'The SEMP password must not contain control characters.');
@@ -65,12 +68,13 @@ function lookupTarget(b: VpnLookupBody, store: GatewayStore): BrokerTarget | Gat
     let pass = b.semp.pass;
     if (pass === '') {
         const stored = store.sempOf(b.broker);
-        if (!stored || stored.host !== b.hostname || stored.scheme !== scheme || stored.port !== b.semp.port || stored.user !== b.semp.user) {
+        if (!stored || stored.host !== b.hostname || stored.scheme !== scheme || stored.port !== b.semp.port || stored.path !== path
+            || stored.user !== b.semp.user) {
             return invalid('semp.pass', VPN_LOOKUP_NEEDS_PASSWORD);
         }
         pass = stored.pass;
     }
-    return { scheme, host: b.hostname, port: b.semp.port, user: b.semp.user, pass };
+    return { scheme, host: b.hostname, port: b.semp.port, path, user: b.semp.user, pass };
 }
 
 /** nextCursor: of a broker's nextPageUri only the cursor is used, never its address or path. */
@@ -122,15 +126,15 @@ export async function lookupVpns(body: VpnLookupBody, store: GatewayStore, unrea
         const query = new URLSearchParams({ count: String(PAGE_SIZE) });
         if (cursor) query.set('cursor', cursor);
         query.set('select', 'msgVpnName');
-        const url = `${t.scheme}://${hostPort(t)}/SEMP/v2/monitor/msgVpns?${query.toString()}`;
+        const asked = `/SEMP/v2/monitor/msgVpns?${query.toString()}`;
         let got: Page | null;
         if (upstream) {
-            const a = upstream({ method: 'GET', url, body: '' });
+            const a = upstream({ method: 'GET', url: `${t.scheme}://${hostPort(t)}${t.path}${asked}`, body: '' });
             if (a.error !== undefined) return refuse(502, 'upstream_unavailable');
             if (a.status === 401 || a.status === 403 || a.status === 407) return refuse(502, 'upstream_auth');
             got = a.status === 200 ? readPage(a.body ?? '') : null;
         } else {
-            got = readPage(JSON.stringify(handleSempV2(new URL(url), broker)));
+            got = readPage(JSON.stringify(handleSempV2(new URL(`${t.scheme}://${hostPort(t)}${asked}`), broker)));
         }
         if (!got) return refuse(502, 'upstream_unavailable');
         for (const n of got.names) {

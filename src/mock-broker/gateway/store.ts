@@ -67,15 +67,20 @@ const cloneTotp = (u: UserRec): { totp?: UserTotp } =>
 /** clientHost: the host the broker's messaging answers on, the client part's own or the record's. */
 const clientHost = (c: ConnRec): string => c.client.hostname || c.hostname;
 
+/** A record's SEMP address and credential. */
+const sempAddress = (c: ConnRec): BrokerTarget =>
+    ({ scheme: c.semp.scheme || 'https', host: c.hostname, port: c.semp.port, path: c.semp.urlPath ?? '', user: c.semp.username, pass: c.semp.password });
+
 /** What `GET /managed/connections` shows of a record, but its rev: no password, both schemes named. */
 const connView = (c: ConnRec): Omit<ListedConn, 'rev'> => ({
     broker: c.broker,
     hostname: c.hostname,
-    semp: { scheme: c.semp.scheme || 'https', port: c.semp.port, user: c.semp.username, pass: '' },
+    semp: { scheme: c.semp.scheme || 'https', port: c.semp.port, ...(c.semp.urlPath ? { urlPath: c.semp.urlPath } : {}), user: c.semp.username, pass: '' },
     client: {
-        ...(clientHost(c) === c.hostname ? {} : { hostname: clientHost(c) }),
+        ...(c.client.hostname ? { hostname: c.client.hostname } : {}),
         scheme: c.client.scheme || 'wss',
         port: c.client.port,
+        ...(c.client.urlPath ? { urlPath: c.client.urlPath } : {}),
         msgVpns: c.client.msgVpns.map(v => ({ name: v.name, user: v.username, pass: '' })),
     },
 });
@@ -103,8 +108,8 @@ export interface ListVersions { seq: number; revs: Record<string, number> }
 /** Everything the store holds, for the snapshot a reload restores. */
 export interface StoreDump { users: UserRec[]; conns: ConnRec[]; versions: { users: ListVersions; connections: ListVersions } }
 
-/** A broker address, the scheme to reach it with (https or http, wss or ws) and the credential. */
-export interface BrokerTarget { scheme: string; host: string; port: string; user: string; pass: string }
+/** A broker address, the scheme to reach it with (https or http, wss or ws), the URL path its own paths sit under ('' for none) and the credential. */
+export interface BrokerTarget { scheme: string; host: string; port: string; path: string; user: string; pass: string }
 
 export function createStore(seed: GatewaySeed, onChange: () => void) {
     let users: UserRec[] = seed['msg-utility-users'].map(u => ({
@@ -151,13 +156,13 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
             const u = findUser(name);
             const c = conns.find(x => x.broker === broker);
             if (!u || !c || c.semp.port === '' || entitledVpns(u, c).length === 0) return null;
-            return { scheme: c.semp.scheme || 'https', host: c.hostname, port: c.semp.port, user: c.semp.username, pass: c.semp.password };
+            return sempAddress(c);
         },
 
         /** A saved connection's SEMP address and credential, whoever asks: what the Message VPN lookup compares a form with (vpns.ts). */
         sempOf(broker: string): BrokerTarget | null {
             const c = conns.find(x => x.broker === broker);
-            return c ? { scheme: c.semp.scheme || 'https', host: c.hostname, port: c.semp.port, user: c.semp.username, pass: c.semp.password } : null;
+            return c ? sempAddress(c) : null;
         },
 
         /** smfTarget: the VPN's client credential when the user may reach it. */
@@ -165,7 +170,9 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
             const u = findUser(name);
             const c = conns.find(x => x.broker === broker);
             const v = u && c ? entitledVpns(u, c).find(x => x.name === vpn) : undefined;
-            return c && v ? { scheme: c.client.scheme || 'wss', host: clientHost(c), port: c.client.port, user: v.username, pass: v.password } : null;
+            return c && v
+                ? { scheme: c.client.scheme || 'wss', host: clientHost(c), port: c.client.port, path: c.client.urlPath ?? '', user: v.username, pass: v.password }
+                : null;
         },
 
         /** isAdmin: null for a deleted user. */

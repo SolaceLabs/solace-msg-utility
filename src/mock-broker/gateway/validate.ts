@@ -70,6 +70,19 @@ export function validHost(h: string): boolean {
     return isIPv4(h) || isIPv6(h) || HOST.test(h);
 }
 
+/** urlPathRule: what a refused URL path is told. */
+export const URL_PATH_RULE =
+    "must be blank, or a path such as /proxy/broker1: it starts with '/', does not end with one, and each part holds only A-Z a-z 0-9 . _ ~ - and is not '.' or '..'";
+const MAX_URL_PATH = 255;
+const URL_PATH = /^(\/[A-Za-z0-9._~-]+)+$/;
+
+/** validURLPath: blank, or a path the gateway can join into a broker URL as it is. */
+export function validUrlPath(p: string): boolean {
+    if (p === '') return true;
+    if (p.length > MAX_URL_PATH || !URL_PATH.test(p)) return false;
+    return !p.slice(1).split('/').some(part => part === '.' || part === '..');
+}
+
 /** validatePort: blank, or digits only within 1 to 65535. */
 export function portProblem(p: string): string | null {
     if (p === '') return null;
@@ -129,6 +142,9 @@ export function connectionProblem(c: ConnRec): string | null {
     if (!validHost(c.hostname)) return `broker ${b}: hostname ${quote(c.hostname)} ${HOST_RULE}`;
     if (c.client.hostname && !validHost(c.client.hostname)) {
         return `broker ${b}: client.hostname ${quote(c.client.hostname)} ${HOST_RULE}`;
+    }
+    for (const [key, got] of [['semp.urlPath', c.semp.urlPath ?? ''], ['client.urlPath', c.client.urlPath ?? '']] as const) {
+        if (!validUrlPath(got)) return `broker ${b}: ${key} ${quote(got)} ${URL_PATH_RULE}`;
     }
     if (c.semp.username !== '' && c.semp.port === '') {
         return `broker ${b}: semp.port is required when a SEMP username is set`;

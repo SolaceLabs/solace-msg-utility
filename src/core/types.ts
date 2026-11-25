@@ -100,7 +100,9 @@ export interface AppState {
      * does not expose these properties back from the session object itself,
      * so the connections module captures them at click time and publishes
      * here. Parallel to `sempCredentials` which has been doing the same for
-     * the SEMP side since day one.
+     * the SEMP side since day one. `appliance` is set when the form that
+     * connected was an appliance, whose `host` is its messaging host: it may
+     * equal the SEMP host, so the two hosts alone do not tell the type.
      */
     solaceConnection: {
         host: string;
@@ -110,6 +112,7 @@ export interface AppState {
         vpn: string;
         user: string;
         pass: string;
+        appliance?: boolean;
     } | null;
     /**
      * Live primary SEMP connection info. `baseUrl` is the wire URL the

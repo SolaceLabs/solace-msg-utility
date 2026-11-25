@@ -197,18 +197,27 @@ function docOf(raw: unknown): BackupDoc {
         }),
         connections: list(o['msg-utility-connections'], x => {
             const c = object(x, ['broker', 'hostname', 'semp', 'client', 'rev']);
-            const semp = object(c.semp, ['scheme', 'port', 'username', 'password']);
-            const client = object(c.client, ['hostname', 'scheme', 'port', 'msgVpns']);
+            const semp = object(c.semp, ['scheme', 'port', 'urlPath', 'username', 'password']);
+            const client = object(c.client, ['hostname', 'scheme', 'port', 'urlPath', 'msgVpns']);
             const sempScheme = string(semp.scheme);
+            const sempPath = string(semp.urlPath);
             const clientHostname = string(client.hostname);
             const clientScheme = string(client.scheme);
+            const clientPath = string(client.urlPath);
             return {
                 broker: string(c.broker), hostname: string(c.hostname),
-                semp: { ...(sempScheme ? { scheme: sempScheme } : {}), port: port(semp.port), username: string(semp.username), password: string(semp.password) },
+                semp: {
+                    ...(sempScheme ? { scheme: sempScheme } : {}),
+                    port: port(semp.port),
+                    ...(sempPath ? { urlPath: sempPath } : {}),
+                    username: string(semp.username),
+                    password: string(semp.password),
+                },
                 client: {
                     ...(clientHostname ? { hostname: clientHostname } : {}),
                     ...(clientScheme ? { scheme: clientScheme } : {}),
                     port: port(client.port),
+                    ...(clientPath ? { urlPath: clientPath } : {}),
                     msgVpns: list(client.msgVpns, v => {
                         const r = object(v, ['name', 'username', 'password']);
                         return { name: string(r.name), username: string(r.username), password: string(r.password) };
@@ -261,8 +270,8 @@ export interface NameDiff { added: string[]; changed: string[]; removed: string[
 const canonRows = (rs: QGlob[]) => rs.map(r => [r.brokers, r.msgVpns, r.queues]);
 const canonUser = (u: UserRec) => JSON.stringify([u.username, u.password, u.mustChangePassword, u.admin, canonRows(u.operate), canonRows(u.readOnly), u.modules,
     u.totp ? [u.totp.secret, u.totp.recovery] : null]);
-const canonConn = (c: ConnRec) => JSON.stringify([c.broker, c.hostname, c.semp.scheme ?? '', c.semp.port, c.semp.username, c.semp.password,
-    c.client.hostname ?? '', c.client.scheme ?? '', c.client.port, c.client.msgVpns.map(v => [v.name, v.username, v.password])]);
+const canonConn = (c: ConnRec) => JSON.stringify([c.broker, c.hostname, c.semp.scheme ?? '', c.semp.port, c.semp.urlPath ?? '', c.semp.username, c.semp.password,
+    c.client.hostname ?? '', c.client.scheme ?? '', c.client.port, c.client.urlPath ?? '', c.client.msgVpns.map(v => [v.name, v.username, v.password])]);
 
 /** diffByName with sameRecord: the records as the store file holds them. */
 export function diffByName<T>(cur: T[], next: T[], name: (x: T) => string, canon: (x: T) => string): NameDiff {
