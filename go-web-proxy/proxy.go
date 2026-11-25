@@ -414,7 +414,7 @@ func dropSessionSetCookie(h http.Header) {
 type targetURLKey struct{}
 
 func (p *reverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	target, err := parseProxyPath(r.URL.Path)
+	target, err := parseProxyPath(r.URL.EscapedPath())
 	if err != nil {
 		http.Error(w, fmt.Sprintf("400 bad request: %s\n", err.Error()), http.StatusBadRequest)
 		return
@@ -453,28 +453,44 @@ func firstSegment(p string) string {
 	return p
 }
 
-// parseProxyPath converts an incoming gateway path into an upstream URL.
+// parseProxyPath converts an incoming gateway path into an upstream URL. The
+// path comes escaped as the browser sent it (URL.EscapedPath).
 //
 //	/{http|https}/{port}/{host}/{rest...}
 //	/{ws|wss}/{port}/{host}/{rest...}
+//
+// The scheme, port and host are read decoded. The rest keeps its escapes: a
+// name that holds a "/" arrives as %2F (the Message VPN a/b in
+// /SEMP/v2/monitor/msgVpns/a%2Fb/queues) and must reach the broker so, or it
+// would name another path there.
 //
 // IPv6 hosts may be bare ("2001:db8::1") or bracketed ("[2001:db8::1]") and are
 // normalised to the bracketed form for URL construction. WebSocket schemes map
 // to their HTTP equivalents on the upstream URL so net/http's Transport can
 // dial: ws→http (TCP), wss→https (TCP+TLS). httputil.ReverseProxy detects the
 // Upgrade header on its own and hijacks the connection.
-func parseProxyPath(p string) (*url.URL, error) {
-	rest := strings.TrimPrefix(p, "/")
+func parseProxyPath(escaped string) (*url.URL, error) {
+	rest := strings.TrimPrefix(escaped, "/")
 	parts := strings.SplitN(rest, "/", 4)
 	if len(parts) < 3 {
 		return nil, errors.New("path must be /{scheme}/{port}/{host}[/rest]")
 	}
-	scheme := parts[0]
-	portStr := parts[1]
-	host := parts[2]
-	tail := ""
+	var head [3]string
+	for i := range head {
+		s, err := url.PathUnescape(parts[i])
+		if err != nil {
+			return nil, fmt.Errorf("invalid escape in %q", parts[i])
+		}
+		head[i] = s
+	}
+	scheme, portStr, host := head[0], head[1], head[2]
+	rawTail := ""
 	if len(parts) == 4 {
-		tail = parts[3]
+		rawTail = parts[3]
+	}
+	tail, err := url.PathUnescape(rawTail)
+	if err != nil {
+		return nil, errors.New("invalid escape in the path after the host")
 	}
 
 	var upstreamScheme string
@@ -510,11 +526,13 @@ func parseProxyPath(p string) (*url.URL, error) {
 	}
 	hostPort := joinHostPort(host, port)
 
-	upath := "/" + tail
+	// RawPath carries the escapes as they came: url.URL sends it while it
+	// is a valid encoding of Path, which the browser's own escaping is.
 	u := &url.URL{
-		Scheme: upstreamScheme,
-		Host:   hostPort,
-		Path:   upath,
+		Scheme:  upstreamScheme,
+		Host:    hostPort,
+		Path:    "/" + tail,
+		RawPath: "/" + rawTail,
 	}
 	return u, nil
 }

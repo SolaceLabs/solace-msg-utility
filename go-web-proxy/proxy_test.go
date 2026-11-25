@@ -120,10 +120,39 @@ func TestParseProxyPath_BadInput(t *testing.T) {
 		{"/http/8080/host:9/x", `invalid host "host:9"`},
 		{"/http/8080/[example.com]/x", "brackets hold an IPv6 address only"},
 		{"/http/8080/[::1/x", `invalid host "[::1"`},
+		// An escaped "/" does not move the host's end: it is part of the host, and no host holds one.
+		{"/http/8080/a%2Fb/x", `invalid host "a/b"`},
+		{"/http/8080/h%zz/x", `invalid escape in "h%zz"`},
+		{"/http/8080/h/x%zz", "invalid escape in the path after the host"},
 	}
 	for _, c := range bad {
 		if _, err := parseProxyPath(c.in); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("parseProxyPath(%q): want an error containing %q, got %v", c.in, c.want, err)
+		}
+	}
+}
+
+// The path after the host keeps the escapes it came with, so a name that holds
+// a "/" is still one segment at the broker. The scheme, port and host are read
+// decoded.
+func TestParseProxyPath_KeepsTheEscapesAfterTheHost(t *testing.T) {
+	cases := []struct{ in, wantHost, wantPath, wantEscaped string }{
+		{"/https/1943/h/SEMP/v2/monitor/msgVpns/a%2Fb/queues", "h:1943", "/SEMP/v2/monitor/msgVpns/a/b/queues", "/SEMP/v2/monitor/msgVpns/a%2Fb/queues"},
+		{"/https/1943/h/SEMP/v2/monitor/msgVpns/a%20b%3Fc/queues", "h:1943", "/SEMP/v2/monitor/msgVpns/a b?c/queues", "/SEMP/v2/monitor/msgVpns/a%20b%3Fc/queues"},
+		// A name that holds the text "%2F" keeps its own escape.
+		{"/https/1943/h/x%252Fy", "h:1943", "/x%2Fy", "/x%252Fy"},
+		{"/%68ttps/19%343/%68/x", "h:1943", "/x", "/x"},
+		{"/wss/1443/h", "h:1443", "/", "/"},
+	}
+	for _, c := range cases {
+		got, err := parseProxyPath(c.in)
+		if err != nil {
+			t.Errorf("parseProxyPath(%q): unexpected error %v", c.in, err)
+			continue
+		}
+		if got.Host != c.wantHost || got.Path != c.wantPath || got.EscapedPath() != c.wantEscaped {
+			t.Errorf("parseProxyPath(%q): got host %s, path %q, sent as %q; want %s, %q, %q",
+				c.in, got.Host, got.Path, got.EscapedPath(), c.wantHost, c.wantPath, c.wantEscaped)
 		}
 	}
 }
@@ -513,6 +542,34 @@ func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
 	}
 	if v := captured.Header.Get("X-Forwarded-Host"); v != "" {
 		t.Errorf("the client's X-Forwarded-Host reached the upstream: %q", v)
+	}
+}
+
+// A Message VPN or queue whose name holds a "/" is one path segment (%2F) in a
+// SEMP request. The relay sends the path after the host, and the query, with
+// the escapes the browser sent, so the broker is asked for that name.
+func TestReverseProxy_KeepsAnEncodedSlashInAName(t *testing.T) {
+	asked := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked <- r.RequestURI
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	upURL, _ := url.Parse(upstream.URL)
+	gw := httptest.NewServer(withClient(liveWith(nil), newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger())))
+	defer gw.Close()
+
+	const tail = "/SEMP/v2/monitor/msgVpns/a%2Fb/queues?count=10&where=queueName%3D%3Dq%2F1"
+	resp, err := http.Get(gw.URL + "/http/" + upURL.Port() + "/" + upURL.Hostname() + tail)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if got := <-asked; got != tail {
+		t.Errorf("the broker was asked for %q, want %q", got, tail)
 	}
 }
 
