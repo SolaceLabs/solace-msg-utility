@@ -78,11 +78,16 @@
     font-weight: 600;
 }
 
-/* A warning inside a card: what stands in the way, or what a choice costs. */
+/* A warning box: what stands in the way, or what a choice costs. The one look
+ * of every warning on a page, and that of the manual's Warning note: a bar of
+ * the warning colour on the left, a pale ground and black text. */
 .banner-warning {
-    border-left: 3px solid var(--status-warning);
     padding: 0.5rem 0.75rem;
     margin-bottom: 1rem;
+    border-left: 4px solid var(--status-warning);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    background-color: #fffbeb;
+    color: #000;
     font-size: 0.9rem;
 }
 

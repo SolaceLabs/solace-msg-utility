@@ -96,7 +96,7 @@
         <figcaption>The Entitlements card with two operate rows and one read-only row.</figcaption>
     </figure>
     <ol class="manual-callouts">
-        <li>The notice at the top of the card. It begins <code>These entitlements cover queues only.</code> and says that the broker's own ACL profile decides where messages may go.</li>
+        <li>The notice at the top of the card. It begins <code>These entitlements cover queues only.</code> It says that sending messages depends on the ACL profile of the client username on the broker, and asks you to give those client usernames the least access they need.</li>
         <li><strong>Operate entitlements (read + write)</strong>, and its <strong>+ Add</strong> button, which adds an empty row.</li>
         <li>A row: three boxes under the headings <strong>Brokers</strong>, <strong>Message VPNs</strong> and <strong>Queues</strong>. An empty box shows the hint <code>brokers (e.g. *)</code>, <code>msgVpns (e.g. *)</code> or <code>queues (e.g. *)</code>.</li>
         <li>The remove button of a row. Its tooltip is <code>Remove row</code>.</li>

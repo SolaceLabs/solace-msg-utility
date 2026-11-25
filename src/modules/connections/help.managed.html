@@ -10,13 +10,44 @@
         <figcaption>The Provisioned tab of the Connections page, signed in and not yet connected.</figcaption>
     </figure>
     <ol class="manual-callouts">
-        <li>The account control at the top of the sidebar: <strong>Change password</strong>, <strong>Two-factor sign-in</strong> and <strong>Sign out</strong>, then your username.</li>
+        <li>The account control at the top of the sidebar: <strong>Change password</strong>, <strong>Two-factor sign-in</strong> and <strong>Sign out</strong>, then your username. See "The sidebar in Provisioned mode" below.</li>
         <li>The <strong>Direct</strong> and <strong>Provisioned</strong> tabs.</li>
         <li><strong>Refresh</strong> reads your list of brokers and Message VPNs from the gateway again.</li>
         <li><strong>Broker</strong>: the brokers granted to you.</li>
         <li><strong>Message VPN</strong>: the Message VPNs granted to you on that broker.</li>
         <li><strong>Connect</strong> opens the connection. While you are connected it reads <strong>Disconnect</strong>.</li>
     </ol>
+
+    <h3>The sidebar in Provisioned mode</h3>
+    <aside class="manual-note" data-kind="important">
+        <p>This section is for Provisioned mode only, where you sign in to a gateway. Standalone mode (the app opened as a file, or from a web server) and Gateway mode (a gateway serves the app, with no sign-in) have no accounts. Their sidebar has no account control and always lists every page, as "Finding your way around" in the Connections chapter above shows.</p>
+    </aside>
+    <p>Signing in changes the sidebar in two ways. An account control appears at the top, above the page list, and stays there on every page. The page list shrinks to the pages your administrator gave you.</p>
+    <figure class="manual-figure">
+        <img src="help/provisioned-sidebar.svg" width="640" height="420" alt="The sidebar of a signed-in user, open and collapsed. Open: three account icons and the username alice above a divider, then the pages Connections, Queue Browser, Queue Copy and About, and the Client and SEMP indicators, both green. Collapsed: the three account icons stacked, the page icons and the two indicators.">
+        <figcaption>The sidebar while you are signed in and connected: open on the left, collapsed on the right.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Change password</strong>, the key. It opens the gateway's page for a new password. See "Changing your password" below.</li>
+        <li><strong>Two-factor sign-in</strong>, the padlock. It opens the gateway's page where you set two-factor sign-in up, or set it up again. See "Two-factor sign-in" below.</li>
+        <li><strong>Sign out</strong>, the arrow leaving a box. It closes your connection and ends your session on the gateway.</li>
+        <li>Your username. An administrator's name is followed by a small <code>admin</code> tag. A long name is cut short: rest the pointer on it to read <code>Signed in as alice</code>.</li>
+        <li>The page list. It holds Connections and About, and then only the pages your administrator gave you, out of Queue Browser, Queue Copy and Queue Subscriptions. Here Queue Subscriptions was not given, so it is not listed.</li>
+        <li>The Client and SEMP indicators. A Provisioned connection is both connections, so both are green while you are connected, and both are red after <strong>Disconnect</strong>.</li>
+        <li>The collapsed sidebar. The three icons stack and your username is hidden. Rest the pointer on an icon to read its name.</li>
+    </ol>
+    <p>What the sidebar shows follows where you stand:</p>
+    <table>
+        <thead>
+            <tr><th>Where you stand</th><th>Account control</th><th>Page list</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Signed out</td><td>Not shown.</td><td>Every page. Each page other than Connections and About shows <strong>Connection Required</strong>.</td></tr>
+            <tr><td>Signed in, connected on the Provisioned tab or not yet connected</td><td>Shown.</td><td>Connections, About and the pages you were given.</td></tr>
+            <tr><td>Signed in, after <strong>Connect</strong> on the Direct tab</td><td>Shown: you are still signed in.</td><td>Every page, as for any Direct connection. Your own list returns when you press <strong>Connect</strong> on the Provisioned tab.</td></tr>
+        </tbody>
+    </table>
+    <p>When an administrator changes your pages, the list changes after you press <strong>Refresh</strong> on the Connect card or reload the page. If the page you are on is taken away, the app opens the first page you still have.</p>
 
     <h3>The two tabs</h3>
     <p>The tabs appear only when your deployment offers both ways to connect. <strong>Direct</strong> is the form of the Connections chapter above, where you type the broker's details yourself. <strong>Provisioned</strong> is where you sign in. When a deployment offers one way only, there are no tabs and you see that one panel.</p>
@@ -198,7 +229,7 @@
         <li>The page applies the queue limits itself: the gateway checks that you were granted the broker, and the page then narrows each list to the queues you were granted.</li>
         <li>Queue Subscriptions lists only subscriptions on queues you may see, as the Queue Subscriptions chapter says.</li>
         <li>In Queue Copy, a destination queue you may not write to gives <code>You are not entitled to write to queue "orders.archive".</code> A topic destination is not checked against your grants: the broker decides where the connection may publish.</li>
-        <li>The sidebar shows Connections and About, and then only the pages your administrator gave you, out of Queue Browser, Queue Copy and Queue Subscriptions. A page you were not given is not listed. A change shows after you press <strong>Refresh</strong> or reload the page.</li>
+        <li>The sidebar lists only the pages your administrator gave you, as "The sidebar in Provisioned mode" above says.</li>
     </ul>
     <p>If an administrator takes away something you were using while you work, whatever depended on it stops. The gateway also closes your messaging connection when you sign out, in this tab or another, when your password or administrator status changes, and when an administrator removes your access to that broker or Message VPN. SEMP is closed with it, as in "The connected view" above.</p>
 

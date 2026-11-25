@@ -53,13 +53,6 @@
     color: var(--status-warning);
 }
 
-.tls-banner {
-    border-left: 3px solid var(--status-warning);
-    padding: 0.5rem 0.75rem;
-    margin: 0 0 1rem;
-    font-size: 0.9rem;
-}
-
 .tls-pair {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

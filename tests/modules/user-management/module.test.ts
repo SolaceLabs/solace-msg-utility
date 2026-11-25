@@ -422,7 +422,7 @@ describe('user-management — create / edit form', () => {
         expect(el<HTMLInputElement>(container, '#user-mgmt-password').value).toBe('');
     });
 
-    it('warns on the Entitlements card that the rows cover queues only and the broker decides sending', async () => {
+    it("warns on the Entitlements card that the rows cover queues only and that sending depends on the client's ACL profile, with both key phrases in bold", async () => {
         const { container } = await setup();
         el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
         const notice = el(container, '#user-mgmt-grants-notice');
@@ -430,10 +430,9 @@ describe('user-management — create / edit form', () => {
         expect(hidden(container, '#user-mgmt-form-view')).toBe(false);
         expect(notice.getAttribute('role')).toBe('note');
         expect(notice.textContent!.replace(/\s+/g, ' ').trim()).toBe(
-            'These entitlements cover queues only. Sending and forwarding messages depend on the broker: the ACL '
-            + "profile of the Message VPN's client username decides where messages may go, whatever the rows say. "
-            + "Give the gateway's broker accounts the least access they need, through their client profile and "
-            + 'ACL profile on the broker.');
+            "These entitlements cover queues only. Sending messages depends on configured Client's ACL Profile. "
+            + 'Please make sure to provision minimum access required for actual client usernames as much as possible.');
+        expect(Array.from(notice.querySelectorAll('strong'), s => s.textContent)).toEqual(['cover queues only', 'provision minimum access']);
     });
 
     it('says what each empty entitlement list means, and names the columns once a row is added', async () => {

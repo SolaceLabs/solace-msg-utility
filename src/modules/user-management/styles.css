@@ -16,16 +16,6 @@
     gap: 0.5rem 2rem;
 }
 
-/* The Entitlements card's notice: what the rows do not cover. */
-.user-mgmt-notice {
-    padding: 0.5rem 0.75rem;
-    margin: 0 0 1rem;
-    font-size: 0.85rem;
-    background: rgba(252, 171, 41, 0.12);
-    color: var(--status-warning);
-    border-radius: var(--radius-md);
-}
-
 .user-mgmt-test-result {
     margin-bottom: 0.75rem;
 }

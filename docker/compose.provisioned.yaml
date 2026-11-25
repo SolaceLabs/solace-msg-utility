@@ -12,7 +12,9 @@
 #      UID only (left to Docker, it would be root's and take no backups):
 #      mkdir -p backup && chmod 700 backup && sudo chown 65532 backup
 #   3. SMU_VERSION=3.6.0 docker compose -f compose.provisioned.yaml up -d
-#   4. Open https://<host>:9443/, sign in as admin and change the password.
+#   4. Open https://<host>:9443/ and sign in as admin with that password. It
+#      stays the administrator's until someone changes it (Change password in
+#      the sidebar); a generated one must be changed at the first sign-in.
 #      The admin console is at https://<host>:9443/solAdmin.
 #   5. On the admin console's Backup & Restore page, set a backup schedule and
 #      its passphrase. A backup restores the users and connections on any

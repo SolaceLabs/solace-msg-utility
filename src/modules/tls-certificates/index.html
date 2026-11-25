@@ -20,7 +20,7 @@
             This certificate is self-signed (the gateway makes one for itself at first start). Browsers warn about it
             until it is replaced with one they trust.
         </p>
-        <p id="tls-cert-readonly" class="tls-banner hidden">
+        <p id="tls-cert-readonly" class="banner-warning hidden">
             The certificate files are read-only on the gateway host, so the certificate cannot be replaced here.
         </p>
 
@@ -57,7 +57,7 @@
             The gateway trusts the certificates in these files when it checks a broker, and the standard root CAs
             below while they are on.
         </p>
-        <p id="tls-trust-readonly" class="tls-banner hidden">
+        <p id="tls-trust-readonly" class="banner-warning hidden">
             The trust files are read-only on the gateway host, so CA certificates cannot be added or deleted here.
         </p>
         <div id="tls-trust-error" class="text-error hidden" role="alert"></div>

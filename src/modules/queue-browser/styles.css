@@ -167,16 +167,6 @@
     resize: none;
 }
 
-/* Snapshot notice above the message list. */
-.browser-snapshot-notice {
-    padding: 0.4rem 0.6rem;
-    margin-bottom: 0.6rem;
-    font-size: 0.8rem;
-    background: rgba(252, 171, 41, 0.12);
-    color: var(--status-warning);
-    border-radius: var(--radius-md);
-}
-
 /* "vpn :: queue" title, scrolled as one unit. */
 .browser-title-scroll {
     overflow-x: auto;

@@ -61,6 +61,7 @@ The app runs in one of three modes. [deployment.md](deployment.md#choosing-a-mod
 
 - [Provisioned connections](#provisioned-connections)
   - [The page at a glance](#the-page-at-a-glance-3)
+  - [The sidebar in Provisioned mode](#the-sidebar-in-provisioned-mode)
   - [The two tabs](#the-two-tabs)
   - [Signing in](#signing-in)
   - [Connecting to a broker](#connecting-to-a-broker)
@@ -990,12 +991,41 @@ Provisioned connections need a gateway in Provisioned mode: the gateway serves t
 
 *Figure 1. The Provisioned tab of the Connections page, signed in and not yet connected.*
 
-1. The account control at the top of the sidebar: **Change password**, **Two-factor sign-in** and **Sign out**, then your username.
+1. The account control at the top of the sidebar: **Change password**, **Two-factor sign-in** and **Sign out**, then your username. See "The sidebar in Provisioned mode" below.
 2. The **Direct** and **Provisioned** tabs.
 3. **Refresh** reads your list of brokers and Message VPNs from the gateway again.
 4. **Broker**: the brokers granted to you.
 5. **Message VPN**: the Message VPNs granted to you on that broker.
 6. **Connect** opens the connection. While you are connected it reads **Disconnect**.
+
+### The sidebar in Provisioned mode
+
+> [!IMPORTANT]
+> This section is for Provisioned mode only, where you sign in to a gateway. Standalone mode (the app opened as a file, or from a web server) and Gateway mode (a gateway serves the app, with no sign-in) have no accounts. Their sidebar has no account control and always lists every page, as "Finding your way around" in the Connections chapter above shows.
+
+Signing in changes the sidebar in two ways. An account control appears at the top, above the page list, and stays there on every page. The page list shrinks to the pages your administrator gave you.
+
+![The sidebar of a signed-in user, open and collapsed. Open: three account icons and the username alice above a divider, then the pages Connections, Queue Browser, Queue Copy and About, and the Client and SEMP indicators, both green. Collapsed: the three account icons stacked, the page icons and the two indicators.](../src/modules/connections/help/provisioned-sidebar.svg)
+
+*Figure 2. The sidebar while you are signed in and connected: open on the left, collapsed on the right.*
+
+1. **Change password**, the key. It opens the gateway's page for a new password. See "Changing your password" below.
+2. **Two-factor sign-in**, the padlock. It opens the gateway's page where you set two-factor sign-in up, or set it up again. See "Two-factor sign-in" below.
+3. **Sign out**, the arrow leaving a box. It closes your connection and ends your session on the gateway.
+4. Your username. An administrator's name is followed by a small `admin` tag. A long name is cut short: rest the pointer on it to read `Signed in as alice`.
+5. The page list. It holds Connections and About, and then only the pages your administrator gave you, out of Queue Browser, Queue Copy and Queue Subscriptions. Here Queue Subscriptions was not given, so it is not listed.
+6. The Client and SEMP indicators. A Provisioned connection is both connections, so both are green while you are connected, and both are red after **Disconnect**.
+7. The collapsed sidebar. The three icons stack and your username is hidden. Rest the pointer on an icon to read its name.
+
+What the sidebar shows follows where you stand:
+
+| Where you stand | Account control | Page list |
+| --- | --- | --- |
+| Signed out | Not shown. | Every page. Each page other than Connections and About shows **Connection Required**. |
+| Signed in, connected on the Provisioned tab or not yet connected | Shown. | Connections, About and the pages you were given. |
+| Signed in, after **Connect** on the Direct tab | Shown: you are still signed in. | Every page, as for any Direct connection. Your own list returns when you press **Connect** on the Provisioned tab. |
+
+When an administrator changes your pages, the list changes after you press **Refresh** on the Connect card or reload the page. If the page you are on is taken away, the app opens the first page you still have.
 
 ### The two tabs
 
@@ -1016,7 +1046,7 @@ While you are signed out, the Provisioned tab shows a **Sign in** card. The butt
 
 ![The Sign in card of the Provisioned tab on the left, and the gateway's sign-in page on the right, with Username, Password and a Sign in button.](../src/modules/connections/help/provisioned-signin.svg)
 
-*Figure 2. The Sign in card, and the gateway's page it leads to.*
+*Figure 3. The Sign in card, and the gateway's page it leads to.*
 
 1. **Sign in** on the card opens the gateway's page.
 2. **Username** and **Password**: the account your administrator gave you.
@@ -1051,7 +1081,7 @@ The card says which of the two connections failed and why, one line for each. A 
 
 ![The Connect to a broker card after a failed attempt, with two red lines under the Connect button: the SEMP connection could not reach the broker, and the messaging connection is closed because of it.](../src/modules/connections/help/provisioned-failed.svg)
 
-*Figure 3. A failed attempt: SEMP could not reach the broker, so the messaging connection is closed again.*
+*Figure 4. A failed attempt: SEMP could not reach the broker, so the messaging connection is closed again.*
 
 1. **Connect** is on again: you can try once more.
 2. One line for each connection: its name, then a short reason.
@@ -1077,7 +1107,7 @@ If your session has ended while you connect, you return to the **Sign in** card,
 
 ![The Connected card: a Disconnect button at the right and a line naming the broker and the Message VPN.](../src/modules/connections/help/provisioned-connected.svg)
 
-*Figure 4. The connected view.*
+*Figure 5. The connected view.*
 
 1. **Disconnect** closes both connections.
 2. The broker and the Message VPN you are connected to.
@@ -1184,7 +1214,7 @@ The gateway shows you only what an administrator granted you. Each grant names b
 - The page applies the queue limits itself: the gateway checks that you were granted the broker, and the page then narrows each list to the queues you were granted.
 - Queue Subscriptions lists only subscriptions on queues you may see, as the Queue Subscriptions chapter says.
 - In Queue Copy, a destination queue you may not write to gives `You are not entitled to write to queue "orders.archive".` A topic destination is not checked against your grants: the broker decides where the connection may publish.
-- The sidebar shows Connections and About, and then only the pages your administrator gave you, out of Queue Browser, Queue Copy and Queue Subscriptions. A page you were not given is not listed. A change shows after you press **Refresh** or reload the page.
+- The sidebar lists only the pages your administrator gave you, as "The sidebar in Provisioned mode" above says.
 
 If an administrator takes away something you were using while you work, whatever depended on it stops. The gateway also closes your messaging connection when you sign out, in this tab or another, when your password or administrator status changes, and when an administrator removes your access to that broker or Message VPN. SEMP is closed with it, as in "The connected view" above.
 
@@ -1581,7 +1611,7 @@ The **Entitlements** card decides which brokers, Message VPNs and queues the use
 
 *Figure 3. The Entitlements card with two operate rows and one read-only row.*
 
-1. The notice at the top of the card. It begins `These entitlements cover queues only.` and says that the broker's own ACL profile decides where messages may go.
+1. The notice at the top of the card. It begins `These entitlements cover queues only.` It says that sending messages depends on the ACL profile of the client username on the broker, and asks you to give those client usernames the least access they need.
 2. **Operate entitlements (read + write)**, and its **+ Add** button, which adds an empty row.
 3. A row: three boxes under the headings **Brokers**, **Message VPNs** and **Queues**. An empty box shows the hint `brokers (e.g. *)`, `msgVpns (e.g. *)` or `queues (e.g. *)`.
 4. The remove button of a row. Its tooltip is `Remove row`.

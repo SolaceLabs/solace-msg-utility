@@ -702,9 +702,9 @@
     "semantic_hash": ""
   },
   "docs/developer-guide.md": {
-    "mtime": 1795539123.6037376,
-    "seen": 1795539792.4664967,
-    "ast_hash": "a2b6b8cca9fbf07770aae201c2b7cc3c",
+    "mtime": 1795600790.895782,
+    "seen": 1795601458.9278657,
+    "ast_hash": "9e43c8f05205935e769e4ad4ae72b70e",
     "semantic_hash": ""
   },
   "docs/git.md": {
@@ -714,9 +714,9 @@
     "semantic_hash": ""
   },
   "docs/user-guide.md": {
-    "mtime": 1795589157.0545511,
-    "seen": 1795589439.5660567,
-    "ast_hash": "7cfff7806060fc02df7d024511cca4a2",
+    "mtime": 1795601248.0979853,
+    "seen": 1795601458.927871,
+    "ast_hash": "63d2b6dc7e6418b4b91863fcc3325d3d",
     "semantic_hash": ""
   },
   "src/index.html": {
@@ -732,9 +732,9 @@
     "semantic_hash": ""
   },
   "src/modules/queue-browser/index.html": {
-    "mtime": 1795482377.4392736,
-    "seen": 1795487814.5510056,
-    "ast_hash": "4cef3bad43004ef349ceba989d0cf49f",
+    "mtime": 1795600790.8953433,
+    "seen": 1795601458.9278955,
+    "ast_hash": "f58fd959ac44bef23d4ed4df7b93f2ca",
     "semantic_hash": ""
   },
   "src/modules/queue-copy/index.html": {
@@ -936,9 +936,9 @@
     "semantic_hash": ""
   },
   "tests/modules/user-management/module.test.ts": {
-    "mtime": 1795584524.9716542,
-    "seen": 1795589439.5659878,
-    "ast_hash": "d6adb2f1c45e3b8aadbaf0903e7f05a6",
+    "mtime": 1795600694.3353064,
+    "seen": 1795601458.9278293,
+    "ast_hash": "72005b3f873a4227c6515264ad308d19",
     "semantic_hash": ""
   },
   "tests/modules/user-management/service.test.ts": {
@@ -954,9 +954,9 @@
     "semantic_hash": ""
   },
   "src/modules/user-management/index.html": {
-    "mtime": 1795584405.0181224,
-    "seen": 1795589439.566109,
-    "ast_hash": "a6f086ef09e69c464f643992d44a8438",
+    "mtime": 1795600790.8948212,
+    "seen": 1795601458.9279075,
+    "ast_hash": "354966db444acc3fb52abd6654bc9e2a",
     "semantic_hash": ""
   },
   "src/variants/all-for-testing-only.ts": {
@@ -1782,9 +1782,9 @@
     "semantic_hash": ""
   },
   "docker/compose.provisioned.yaml": {
-    "mtime": 1794822924.898388,
-    "seen": 1794824342.288504,
-    "ast_hash": "39e6e3f8cd3026fe567bfb312a78a02d",
+    "mtime": 1795600049.2045562,
+    "seen": 1795601458.9278567,
+    "ast_hash": "8996cb5332cd2f418cee5b7fd69180c3",
     "semantic_hash": ""
   },
   "docs/provisioned-mode.md": {
@@ -2250,9 +2250,9 @@
     "semantic_hash": ""
   },
   "src/modules/tls-certificates/index.html": {
-    "mtime": 1795536621.8115277,
-    "seen": 1795538968.4553685,
-    "ast_hash": "c61e34963ae2bfcfe34d87ec78131cff",
+    "mtime": 1795600790.893864,
+    "seen": 1795601458.927905,
+    "ast_hash": "05edf784dc2531d14c652414d3b6d5d5",
     "semantic_hash": ""
   },
   "docs/testing.md": {
@@ -2442,9 +2442,9 @@
     "semantic_hash": ""
   },
   "src/modules/connections/help.managed.html": {
-    "mtime": 1795539123.6039302,
-    "seen": 1795539792.4665277,
-    "ast_hash": "ad89b55c0e693ff3e0fe83a8f805c0d5",
+    "mtime": 1795600650.4396727,
+    "seen": 1795601458.927887,
+    "ast_hash": "ca943f44939fe2fdbb40c1cb15064884",
     "semantic_hash": ""
   },
   "src/modules/gateway-settings/help.html": {
@@ -2466,9 +2466,9 @@
     "semantic_hash": ""
   },
   "src/modules/user-management/help.html": {
-    "mtime": 1795584583.300336,
-    "seen": 1795589439.566107,
-    "ast_hash": "47fa0deb37979dd4266f2141777a3bf7",
+    "mtime": 1795600694.335526,
+    "seen": 1795601458.9279063,
+    "ast_hash": "acbb08679bf2928e7394361ab9d4bfd3",
     "semantic_hash": ""
   },
   "src/modules/admin-login/help/conflict.svg": {
@@ -2550,26 +2550,26 @@
     "semantic_hash": ""
   },
   "src/modules/connections/help/provisioned-connected.svg": {
-    "mtime": 1795483008.3402722,
-    "seen": 1795487814.5510979,
+    "mtime": 1795600611.9941463,
+    "seen": 1795601458.9279346,
     "ast_hash": "d7d38d6dea4ef3bc645a1f731fbf56ce",
     "semantic_hash": ""
   },
   "src/modules/connections/help/provisioned-failed.svg": {
-    "mtime": 1795483008.3405235,
-    "seen": 1795487814.5511003,
+    "mtime": 1795600611.9943454,
+    "seen": 1795601458.927936,
     "ast_hash": "7c6b42cde643ed739b300e0398a7859b",
     "semantic_hash": ""
   },
   "src/modules/connections/help/provisioned-page.svg": {
-    "mtime": 1795483008.3397264,
-    "seen": 1795487814.5511022,
+    "mtime": 1795600611.9934578,
+    "seen": 1795601458.9279375,
     "ast_hash": "8cc5aa9116c85947a6b6d18c830ae344",
     "semantic_hash": ""
   },
   "src/modules/connections/help/provisioned-signin.svg": {
-    "mtime": 1795483008.340013,
-    "seen": 1795487814.5511043,
+    "mtime": 1795600611.9939566,
+    "seen": 1795601458.9279408,
     "ast_hash": "dfd4f0cd3617ccff195513c1fd0257e3",
     "semantic_hash": ""
   },
@@ -2664,26 +2664,26 @@
     "semantic_hash": ""
   },
   "src/modules/user-management/help/form-account.svg": {
-    "mtime": 1795584552.1849792,
-    "seen": 1795589439.566193,
+    "mtime": 1795600694.3611484,
+    "seen": 1795601458.9279695,
     "ast_hash": "cac680290ff3f827dbbdb07655b6888f",
     "semantic_hash": ""
   },
   "src/modules/user-management/help/form-entitlements.svg": {
-    "mtime": 1795584552.185342,
-    "seen": 1795589439.5661948,
-    "ast_hash": "556e825d776a2dffce82b920d3f0aa2d",
+    "mtime": 1795600694.3614895,
+    "seen": 1795601458.927971,
+    "ast_hash": "cc4005517c1d8dba038be501ec036f20",
     "semantic_hash": ""
   },
   "src/modules/user-management/help/list.svg": {
-    "mtime": 1795584552.1846411,
-    "seen": 1795589439.5661967,
+    "mtime": 1795600694.360831,
+    "seen": 1795601458.9279718,
     "ast_hash": "0620ee66d683157b379cb0717dada22c",
     "semantic_hash": ""
   },
   "src/modules/user-management/help/permission-test.svg": {
-    "mtime": 1795584552.1856024,
-    "seen": 1795589439.5661986,
+    "mtime": 1795600694.3616998,
+    "seen": 1795601458.927973,
     "ast_hash": "bf82a53cddcd2164e1b8f082703738eb",
     "semantic_hash": ""
   },
@@ -2769,6 +2769,12 @@
     "mtime": 1795572689.0841167,
     "seen": 1795573249.1738124,
     "ast_hash": "fe2abd11537b8e77c9eb1fd56d67a4ab",
+    "semantic_hash": ""
+  },
+  "src/modules/connections/help/provisioned-sidebar.svg": {
+    "mtime": 1795600611.9937818,
+    "seen": 1795601458.9279392,
+    "ast_hash": "c48a8fc7607c25ed951b9d49b0ff96c7",
     "semantic_hash": ""
   }
 }
