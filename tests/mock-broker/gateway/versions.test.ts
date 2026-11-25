@@ -103,7 +103,15 @@ describe('mock-broker/gateway/versions -- users', () => {
         expect(gw.signIn('viewer', 'viewer-password-2').ok).toBe(true);
     });
 
-    it('moves the rev when the forced password change is cleared, by the user or by an admin reset', async () => {
+    it('stores the forced password change as sent: it moves the rev and holds the next sign-in to the change, and a save without it clears it', async () => {
+        const gw = gateway();
+        expect(await put(gw, 'viewer', { mustChangePassword: true, rev: 1 })).toEqual({ status: 200, json: { rev: 2 } });
+        expect(gw.signIn('viewer', 'viewer-password-1')).toEqual({ ok: true, mustChange: true });
+        expect(await put(gw, 'viewer', { rev: 2 })).toEqual({ status: 200, json: { rev: 3 } });
+        expect(gw.signIn('viewer', 'viewer-password-1')).toEqual({ ok: true, mustChange: false });
+    });
+
+    it('moves the rev when the forced password change is cleared, by the user or by an admin save that leaves it out', async () => {
         const gw = gateway(demoSeed());
         const before = await revs(gw);
         gw.setCookie(gw.openSession('newadmin', true));

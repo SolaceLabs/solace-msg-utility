@@ -50,7 +50,9 @@ type userRec struct {
 	Rev      int    `yaml:"rev"`
 	Password string `yaml:"password"` // pbkdf2-sha256 hash (password.go)
 	// MustChangePassword limits the user's session to the password page until
-	// they set a new one. Set for the bootstrap admin.
+	// they set a new one. An administrator's save stores it as sent, and the
+	// bootstrap admin starts with it unless its password came from the file
+	// SMU_ADMIN_PASSWORD_FILE names.
 	MustChangePassword bool      `yaml:"mustChangePassword,omitempty"`
 	Admin              bool      `yaml:"admin"`
 	Operate            []permRow `yaml:"operate"`
@@ -1010,12 +1012,14 @@ func (s *store) listUsers() []userRec {
 
 // saveUser creates (rev 0) or edits (rev above 0) the user u.Username.
 // caller is the requesting admin, re-checked inside the lock ("" skips it).
-// password is plaintext: blank on an EXISTING user keeps the stored hash and
-// change flag as they are NOW (inside the lock, so a password the user set
-// meanwhile survives), blank on a NEW user is errBlankNewUserPassword. The
-// hash is computed before the lock. Order of refusals once inside: caller
-// (errCallerGone, errCallerNotAdmin), disk (*changedOnDiskError), existence
-// (errExists, errNotFound), rev (a stale error naming the current rev), then
+// password is plaintext: blank on an EXISTING user keeps the stored hash as
+// it is NOW (inside the lock, so a password the user set meanwhile survives),
+// blank on a NEW user is errBlankNewUserPassword. u.MustChangePassword is
+// stored as given, with or without a password, and applies from the user's
+// next sign-in. The hash is computed before the lock. Order of refusals once
+// inside: caller (errCallerGone, errCallerNotAdmin), disk
+// (*changedOnDiskError), existence (errExists, errNotFound), rev (a stale
+// error naming the current rev), then
 // errBlankNewUserPassword and errLastAdmin (demoting the only admin). Like a
 // blank password, the save never carries or clears two-factor: an existing
 // record keeps the TOTP stored now and a new one has none. A write
@@ -1057,7 +1061,7 @@ func (s *store) saveUser(ctx context.Context, caller string, u userRec, password
 				return errLastAdmin
 			}
 			if password == "" {
-				rec.Password, rec.MustChangePassword = old.Password, old.MustChangePassword
+				rec.Password = old.Password
 			}
 			drop = password != "" || old.Admin != u.Admin
 			rec.Rev = old.Rev
@@ -1546,12 +1550,15 @@ func adminSeed(getenv func(string) string) (password, source string, err error) 
 	return password, source, nil
 }
 
-// bootstrapUsers writes the first users file: one admin who must change the
-// password at first sign-in. The password comes from the environment, or is
-// generated and logged once (the operator's only way to read it). A supplied
-// password that fails the policy is set aside with a warning naming the
-// variable, never the value, and a generated one takes its place: the admin
-// still has to change it at first sign-in, so the start need not stop.
+// bootstrapUsers writes the first users file: one admin. The password comes
+// from the environment, or is generated and logged once (the operator's only
+// way to read it). A password from the file SMU_ADMIN_PASSWORD_FILE names is
+// the admin's own until someone changes it; one from SMU_ADMIN_PASSWORD (which
+// anyone who can inspect the process reads) or a generated one must be changed
+// at first sign-in. A supplied password that fails the policy is set aside
+// with a warning naming the variable, never the value, and a generated one
+// takes its place: the admin has to change that one at first sign-in, so the
+// start need not stop.
 func bootstrapUsers(opts storeOptions, sl *sealer, logger *slog.Logger) (usersDoc, error) {
 	password, source, err := adminSeed(opts.getenv)
 	if err != nil {
@@ -1568,6 +1575,7 @@ func bootstrapUsers(opts storeOptions, sl *sealer, logger *slog.Logger) (usersDo
 	if generated {
 		password = rand.Text()
 	}
+	mustChange := source != envAdminPasswordFile
 	hash, err := opts.hasher.hash(context.Background(), password)
 	if err != nil {
 		return usersDoc{}, err
@@ -1576,7 +1584,7 @@ func bootstrapUsers(opts storeOptions, sl *sealer, logger *slog.Logger) (usersDo
 		Username:           bootstrapAdminName,
 		Rev:                1,
 		Password:           hash,
-		MustChangePassword: true,
+		MustChangePassword: mustChange,
 		Admin:              true,
 		Operate:            []permRow{},
 		ReadOnly:           []permRow{},
@@ -1584,11 +1592,15 @@ func bootstrapUsers(opts storeOptions, sl *sealer, logger *slog.Logger) (usersDo
 	if err := sl.writeDoc(roleUsers, opts.usersPath, doc); err != nil {
 		return usersDoc{}, err
 	}
-	if generated {
+	switch {
+	case generated:
 		logger.Warn("users file missing: bootstrap admin created with a generated password; sign in and change it now (shown once; delete the users file to bootstrap again)",
 			"path", opts.usersPath, "username", bootstrapAdminName, "password", password)
-	} else {
+	case mustChange:
 		logger.Warn("users file missing: bootstrap admin created; the password must be changed at first sign-in",
+			"path", opts.usersPath, "username", bootstrapAdminName, "source", source)
+	default:
+		logger.Warn("users file missing: bootstrap admin created with the password from the secret file; no change is forced at sign-in",
 			"path", opts.usersPath, "username", bootstrapAdminName, "source", source)
 	}
 	return doc, nil

@@ -18,6 +18,8 @@ import type { QGlob } from '../../core/types';
 export interface ManagedUser {
     username: string;
     admin: boolean;
+    /** The user's next sign-in reaches only the password page until they set a new password. A save stores it as sent. */
+    mustChangePassword: boolean;
     operate: QGlob[];
     readOnly: QGlob[];
     /** App modules this user may open; null = the deployment default. */

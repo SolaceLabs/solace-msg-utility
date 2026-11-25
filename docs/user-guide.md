@@ -1516,28 +1516,31 @@ An empty list says `No users.` A search that finds nothing says `No users match 
 1. Press **Add user**. The form opens under the title **Add user**.
 2. Type the **Username** and the **Password**. The rules are in the table below.
 3. Switch on **Administrator** only if this person is to manage the gateway.
-4. In **Modules**, leave **Deployment default** selected, or choose the modules for this user (see below).
-5. In **Entitlements**, add the rows that give the user their brokers, Message VPNs and queues (see below).
-6. Press **Save**. The toast `User saved` appears and the list returns with the user in it. **Cancel** returns to the list and keeps nothing.
+4. Leave **Must change password at next sign-in** on, so that the person replaces the password you chose with one only they know.
+5. In **Modules**, leave **Deployment default** selected, or choose the modules for this user (see below).
+6. In **Entitlements**, add the rows that give the user their brokers, Message VPNs and queues (see below).
+7. Press **Save**. The toast `User saved` appears and the list returns with the user in it. **Cancel** returns to the list and keeps nothing.
 
 ### The account card
 
-![The user form for alice: the account card with username, password and Administrator switch, and the Modules card with its switch between two answers, two module pills and an Add module button.](../src/modules/user-management/help/form-account.svg)
+![The user form for alice: the account card with username, password, the Administrator switch and the Must change password at next sign-in switch, and the Modules card with its switch between two answers, two module pills and an Add module button.](../src/modules/user-management/help/form-account.svg)
 
 *Figure 2. The first two cards of the user form, here editing alice with a list of modules of her own.*
 
 1. **Username**. You type it when you add a user. When you edit a user, it is fixed.
 2. **Password**, with a hint after its name: `(required)` when you add a user, `(leave blank to keep current)` when you edit one.
 3. The **Administrator** switch.
-4. The switch for the user's modules, between **Deployment default** and **Choose for this user**. The answer in bold is the choice. While **Choose for this user** is on, a line under the switch names what the default gives.
-5. The modules the user may open, each as a pill.
-6. **+ Add module**, which lists the modules you can still add.
+4. The **Must change password at next sign-in** switch.
+5. The switch for the user's modules, between **Deployment default** and **Choose for this user**. The answer in bold is the choice. While **Choose for this user** is on, a line under the switch names what the default gives.
+6. The modules the user may open, each as a pill.
+7. **+ Add module**, which lists the modules you can still add.
 
 | Field | What it accepts | Default |
 | --- | --- | --- |
 | **Username** | 1 to 64 characters from `A-Z a-z 0-9 . _ @ -`, and not only dots. Spaces around it are removed. It cannot be changed once the user exists: to rename someone, add the name you want and delete the old one. | Empty |
 | **Password** | 12 to 128 characters. The lower limit is the **Minimum password length** of Gateway Settings when that is higher than 12. The page sends the password over TLS and the gateway stores only a hash of it. It is never shown again. When you edit a user, leave the box empty to keep the stored password. | Empty |
 | **Administrator** | A switch. It lets the user open `/solAdmin`. It gives no access to any broker by itself: an administrator needs entitlement rows like anybody else. | Off |
+| **Must change password at next sign-in** | A switch. While it is on, the user's next sign-in leads only to the gateway's password page until they set a new password. See "Forcing a password change" below. | On for a new user. What is saved, when you edit one. |
 
 > [!TIP]
 > The password box forgets what you typed when you press **Cancel**, save, sign out or lose your session. Nothing you typed there stays in the page.
@@ -1548,7 +1551,7 @@ An empty list says `No users.` A search that finds nothing says `No users match 
 2. Change what you need. Leave **Password** empty unless you are setting a password.
 3. Press **Save**.
 
-The page sends the whole user each time, so a save replaces the user's flag, modules and both lists of entitlements with what the form shows.
+The page sends the whole user each time, so a save replaces the user's two switches, modules and both lists of entitlements with what the form shows.
 
 ### Deleting a user
 
@@ -1649,7 +1652,16 @@ The reset ends the user's sessions. It leaves the password as it is. What the us
 
 ### Forcing a password change
 
-An account can be marked so that its owner may use only the password page until they change it. This page has no control for it and the list does not show it. The gateway marks the first administrator it creates, named `admin`, this way, and that person changes the password at the first sign-in ([Start it](provisioned-mode.md#start-it)). A password you save here clears the mark. To change only your own password, use **Change password** in the account control of the sidebar.
+The **Must change password at next sign-in** switch marks an account so that its owner may use only the gateway's password page until they set a new password. A password you choose for someone is one you know, and the switch makes it last for one sign-in only.
+
+- **A new user:** the switch starts on.
+- **A user you edit:** the switch shows what is saved. When you type a new password for someone else, it turns on at the first character. Turn it off again if the person is to keep the password you typed.
+- **Your own account:** typing a password for yourself leaves the switch as it is.
+- **With no new password:** you can turn the switch on by itself. The user keeps their password for one more sign-in and must then replace it.
+
+The switch takes effect at the user's next sign-in: a session that is already open goes on. Once the user has set a new password, the gateway turns the switch off. The list does not show it; open the user to see it.
+
+The gateway also marks the first administrator it creates, named `admin`, unless that password came from a secret file ([Start it](provisioned-mode.md#start-it)). To change only your own password, use **Change password** in the account control of the sidebar.
 
 ### What a change does to a user who is signed in
 
@@ -1658,6 +1670,7 @@ An account can be marked so that its owner may use only the password page until 
 | The password, the **Administrator** switch, or you delete the user | All their sessions end and their open broker connections close. They sign in again, with the password you set if you changed it. |
 | You reset two-factor | All their sessions end and their open broker connections close. They sign in again. |
 | The entitlements | They stay signed in. The gateway applies the rows to their next request, and closes any broker connection to a Message VPN they may not reach. |
+| Only the **Must change password at next sign-in** switch | They stay signed in. Their next sign-in leads to the password page first. |
 
 #### Your own account
 

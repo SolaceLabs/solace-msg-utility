@@ -16,6 +16,13 @@
  * (`rbac:sign-out-requested`) instead of patching a session that no longer
  * exists.
  *
+ * The "Must change password at next sign-in" switch is the record's forced
+ * password change, sent with every save. It is on for a new user and shows
+ * the stored value on an edit; typing a new password for someone else turns
+ * it on, since the administrator knows that password, and it can be turned
+ * off again. It ends no session: the user's next sign-in is held to the
+ * password page until they set a new one.
+ *
  * The modules editor sets which app modules the user may open: the
  * deployment default (config.yaml's `modules.userDefault`, named in its
  * label), or "Choose for this user". Modules show as pills; with a list of
@@ -95,6 +102,7 @@ export const UserManagementModule = {
             password: required<HTMLInputElement>(container, '#user-mgmt-password'),
             passwordHint: required<HTMLElement>(container, '#user-mgmt-password-hint'),
             admin: required<HTMLInputElement>(container, '#user-mgmt-admin'),
+            mustChange: required<HTMLInputElement>(container, '#user-mgmt-must-change'),
             modulesMode: required<HTMLElement>(container, '#user-mgmt-modules-mode'),
             modulesDefaultLine: required<HTMLElement>(container, '#user-mgmt-modules-default-line'),
             modulesDefaultHint: required<HTMLElement>(container, '#user-mgmt-modules-default-hint'),
@@ -125,6 +133,8 @@ export const UserManagementModule = {
         let editing: string | null = null;
         // The rev of the record the form opened: 0 when creating.
         let editingRev = 0;
+        // The password box held nothing at its last input: its first character is what follows.
+        let passwordWasBlank = true;
         // From the last list load; empty until then.
         let choices: ModuleChoices = { catalog: [], offered: [], userDefault: 'all' };
         let users: ManagedUser[] = [];
@@ -143,9 +153,10 @@ export const UserManagementModule = {
             els.formView.classList.add('hidden');
             gate.show();
         }
-        /** A hidden form keeps no typed password: Cancel, a save, a sign-out or a 401. */
+        /** A hidden form keeps no typed password: Cancel, a save, a sign-out or a 401. A form opens with none. */
         function forgetPassword(): void {
             els.password.value = '';
+            passwordWasBlank = true;
         }
         /** The loaded users the search box matches (by username), or a row saying why there are none. */
         function renderList(): void {
@@ -298,9 +309,10 @@ export const UserManagementModule = {
             els.formTitle.textContent = 'Add user';
             els.username.value = '';
             els.username.disabled = false;
-            els.password.value = '';
+            forgetPassword();
             els.passwordHint.textContent = '(required)';
             els.admin.checked = false;
+            els.mustChange.checked = true;
             setModules(null);
             operateList.clear();
             readonlyList.clear();
@@ -314,9 +326,10 @@ export const UserManagementModule = {
             els.formTitle.textContent = `Edit user "${u.username}"`;
             els.username.value = u.username;
             els.username.disabled = true; // username is the key; rename = delete + recreate
-            els.password.value = '';
+            forgetPassword();
             els.passwordHint.textContent = '(leave blank to keep current)';
             els.admin.checked = u.admin;
+            els.mustChange.checked = u.mustChangePassword;
             setModules(u.modules);
             operateList.clear();
             u.operate.forEach(r => operateList.addRow(r as unknown as Record<string, string>));
@@ -348,6 +361,7 @@ export const UserManagementModule = {
                 username,
                 password: pw,
                 admin: els.admin.checked,
+                mustChangePassword: els.mustChange.checked,
                 operate: operateList.readRows() as unknown as QGlob[],
                 readOnly: readonlyList.readRows() as unknown as QGlob[],
                 modules: modulesMode.value() === 'default' ? null : [...chosen],
@@ -440,6 +454,16 @@ export const UserManagementModule = {
             showToast('Two-factor sign-in reset', 'ok');
             await loadList();
         }
+
+        // A new password an administrator types for someone else is one they know,
+        // so its first character turns the forced change on. A new user starts with
+        // it on, and the administrator's own password is theirs to keep.
+        els.password.addEventListener('input', () => {
+            const blank = els.password.value === '';
+            const someoneElse = editing !== null && editing !== appState.managed?.username;
+            if (passwordWasBlank && !blank && someoneElse) els.mustChange.checked = true;
+            passwordWasBlank = blank;
+        });
 
         els.btnAdd.addEventListener('click', openCreate);
         els.btnRefresh.addEventListener('click', () => applyGate());

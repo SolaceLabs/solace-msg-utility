@@ -67,7 +67,11 @@ export function managedSections({ gateway, navigate }: ManagedPanelDeps): HTMLEl
         button('Expire my session', mine(id => gateway.sessions.expire(id))),
         button('Revoke my VPN access', () => {
             const u = gateway.store.findUser(gateway.session()?.user ?? '');
-            if (u) gateway.store.upsertUser({ username: u.username, admin: u.admin, operate: [], readOnly: [], modules: u.modules }, '');
+            if (u) {
+                gateway.store.upsertUser({
+                    username: u.username, admin: u.admin, mustChangePassword: u.mustChangePassword, operate: [], readOnly: [], modules: u.modules,
+                }, '');
+            }
         }),
         button('Clear the sign-in lockout', () => gateway.throttle.clear()),
     );

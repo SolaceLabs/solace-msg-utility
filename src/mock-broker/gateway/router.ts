@@ -149,10 +149,13 @@ export function createRouter({ store, sessions, settings, faults, anonymous, con
 
     /** The user's PUT: 200 with the record's rev after the save. */
     const saveUser: Handler = (req, _s, _sid, [name]) => {
-        const b = object(parseBody(req.body), ['password', 'admin', 'operate', 'readOnly', 'modules', 'rev']);
+        const b = object(parseBody(req.body), ['password', 'admin', 'mustChangePassword', 'operate', 'readOnly', 'modules', 'rev']);
         const password = string(b.password);
         const modules = nullableList(b.modules, string);
-        const rec = { username: name, admin: boolean(b.admin), operate: list(b.operate, glob), readOnly: list(b.readOnly, glob), modules };
+        const rec = {
+            username: name, admin: boolean(b.admin), mustChangePassword: boolean(b.mustChangePassword),
+            operate: list(b.operate, glob), readOnly: list(b.readOnly, glob), modules,
+        };
         if (!validUsername(name)) return invalid('username', `Username ${USERNAME_RULE}.`);
         const least = settings.current().login.passwordMinLength;
         if (password !== '' && !passwordOk(password, least)) {

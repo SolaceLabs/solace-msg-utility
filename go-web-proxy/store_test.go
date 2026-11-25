@@ -344,31 +344,39 @@ func TestLoadStore_BootstrapGeneratedPasswordIsLoggedOnceAndMustChange(t *testin
 	}
 }
 
+// A supplied password is never logged, and the log names the variable it came
+// from. One from the variable itself must be changed at first sign-in; one
+// from the secret file is the admin's own until someone changes it.
 func TestLoadStore_BootstrapFromEnvironmentIsNeverLogged(t *testing.T) {
 	const pw = "operator-chosen-pw"
 	secretFile := filepath.Join(t.TempDir(), "admin.pw")
 	writeFile(t, secretFile, pw+"\r\n") // a trailing newline from `echo` is not part of it
-	for _, env := range []map[string]string{
-		{envAdminPassword: pw},
-		{envAdminPasswordFile: secretFile},
+	for _, tc := range []struct {
+		env, value string
+		mustChange bool
+		says       string
+	}{
+		{envAdminPassword, pw, true, "the password must be changed at first sign-in"},
+		{envAdminPasswordFile, secretFile, false, "no change is forced at sign-in"},
 	} {
 		f := bootstrapFixture(t)
 		var buf strings.Builder
-		s, err := loadStore(f.opts(envOf(env)), newCapturingLogger(&buf))
+		s, err := loadStore(f.opts(envOf(map[string]string{tc.env: tc.value})), newCapturingLogger(&buf))
 		if err != nil {
-			t.Fatalf("%v: %v", env, err)
+			t.Fatalf("%s: %v", tc.env, err)
 		}
 		if strings.Contains(buf.String(), pw) {
-			t.Errorf("%v: a supplied password must never be logged: %s", env, buf.String())
+			t.Errorf("%s: a supplied password must never be logged: %s", tc.env, buf.String())
 		}
-		for name := range env {
-			if !strings.Contains(buf.String(), "source="+name) {
-				t.Errorf("log must name the source %s: %s", name, buf.String())
-			}
+		if !strings.Contains(buf.String(), "source="+tc.env) || !strings.Contains(buf.String(), tc.says) {
+			t.Errorf("%s: the log must name the source and say %q: %s", tc.env, tc.says, buf.String())
 		}
 		mustChange, ok, _ := s.checkPassword(context.Background(), "admin", pw)
-		if !ok || !mustChange {
-			t.Errorf("%v: admin must sign in with the supplied password and still change it (ok=%v mustChange=%v)", env, ok, mustChange)
+		if !ok || mustChange != tc.mustChange {
+			t.Errorf("%s: admin must sign in with the supplied password, forced change %v (ok=%v mustChange=%v)", tc.env, tc.mustChange, ok, mustChange)
+		}
+		if got := strings.Contains(f.readUsers(t), "mustChangePassword: true"); got != tc.mustChange {
+			t.Errorf("%s: the users file holds the change flag: got %v, want %v", tc.env, got, tc.mustChange)
 		}
 	}
 }
@@ -895,20 +903,30 @@ func TestStore_SaveUser_RevMovesOnlyWhenTheConsoleViewChanges(t *testing.T) {
 	}
 }
 
-// A forced-change flag that an admin's new password clears is a change the
-// console shows, so the rev moves; a blank password keeps the flag.
-func TestStore_SaveUser_AdminResetClearsTheChangeFlagAndMovesRev(t *testing.T) {
+// The forced-change flag is stored as the save gives it, with or without a
+// password. It is a part of the record the console shows, so a save that flips
+// it moves the rev and one that leaves it keeps the rev. The flag alone ends no
+// session: it applies from the next sign-in.
+func TestStore_SaveUser_ChangeFlagIsStoredAsGiven(t *testing.T) {
 	s := newStoreWithFixtures(t)
-	s.users[1].MustChangePassword = true
-	keep := putUser(t, s, currentUser(t, s, "viewer"), "")
-	if keep.rev != 2 || !currentUser(t, s, "viewer").MustChangePassword {
-		t.Fatalf("a blank password keeps the flag and the rev: %+v", keep)
-	}
 	asked := currentUser(t, s, "viewer")
-	asked.MustChangePassword = false // the console's form never sends the flag
-	reset := putUser(t, s, asked, "reset-by-admin-1")
-	if reset.rev != reset.seq || currentUser(t, s, "viewer").MustChangePassword {
-		t.Errorf("a new password clears the flag, which moves the rev to the new seq: %+v", reset)
+	asked.MustChangePassword = true
+	on := putUser(t, s, asked, "")
+	if on.rev != on.seq || on.dropSessions || !currentUser(t, s, "viewer").MustChangePassword {
+		t.Fatalf("a blank password with the flag sets it, moves the rev and ends no session: %+v", on)
+	}
+	if mustChange, ok, _ := s.checkPassword(context.Background(), "viewer", viewerPW); !ok || !mustChange {
+		t.Errorf("the stored password still signs in, now into the forced change: ok=%v mustChange=%v", ok, mustChange)
+	}
+	same := putUser(t, s, currentUser(t, s, "viewer"), "reset-by-admin-1")
+	if same.rev != on.rev || !same.dropSessions || !currentUser(t, s, "viewer").MustChangePassword {
+		t.Errorf("a new password with the flag as it was keeps the flag and the rev: %+v", same)
+	}
+	asked = currentUser(t, s, "viewer")
+	asked.MustChangePassword = false
+	off := putUser(t, s, asked, "")
+	if off.rev != off.seq || off.dropSessions || currentUser(t, s, "viewer").MustChangePassword {
+		t.Errorf("a save without the flag clears it and moves the rev: %+v", off)
 	}
 }
 

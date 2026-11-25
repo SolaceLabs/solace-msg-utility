@@ -24,8 +24,8 @@ const ADMIN: ManagedSession = {
     admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
 };
 const USERS = [
-    { username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null, rev: 3, twoFactor: false },
-    { username: 'viewer', admin: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'v1', queues: '*' }], modules: ['queue-browser'], rev: 5, twoFactor: true },
+    { username: 'admin', admin: true, mustChangePassword: false, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null, rev: 3, twoFactor: false },
+    { username: 'viewer', admin: false, mustChangePassword: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'v1', queues: '*' }], modules: ['queue-browser'], rev: 5, twoFactor: true },
 ];
 /** The gateway's 200 answer to a save: the record's new rev. */
 const saved = (rev = 6) => ({ ok: true, data: { rev } });
@@ -287,7 +287,7 @@ describe('user-management — create / edit form', () => {
         // (the saveUser call, the toast) has necessarily already run.
         await vi.waitFor(() => expect(hidden(container, '#user-mgmt-list-view')).toBe(false));
         expect(svcMock.saveUser).toHaveBeenCalledWith({
-            username: 'newbie', password: 'pw', admin: true,
+            username: 'newbie', password: 'pw', admin: true, mustChangePassword: true,
             operate: [{ brokers: '*', msgVpns: '*', queues: 'orders.*' }], readOnly: [], modules: null, rev: 0,
         });
         expect(toastMock.showToast).toHaveBeenCalledWith('User saved', 'ok');
@@ -329,6 +329,77 @@ describe('user-management — create / edit form', () => {
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
         await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
         expect(svcMock.saveUser.mock.calls[0][0].password).toBe('');
+    });
+
+    it('the forced-change switch is on for a new user and shows the stored value on an edit; a save sends it as it stands', async () => {
+        const { container } = await setup();
+        svcMock.listUsers.mockResolvedValue(listed([...USERS, { ...USERS[1], username: 'flagged', mustChangePassword: true }]));
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-refresh').click();
+        await vi.waitFor(() => expect(rowCount(container)).toBe(3));
+        const mustChange = el<HTMLInputElement>(container, '#user-mgmt-must-change');
+        svcMock.saveUser.mockResolvedValue(saved());
+
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        expect(mustChange.checked).toBe(true);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-cancel').click();
+
+        clickRow(container, 1, '.user-mgmt-edit');   // viewer: not stored
+        expect(mustChange.checked).toBe(false);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-cancel').click();
+
+        clickRow(container, 2, '.user-mgmt-edit');   // flagged: stored
+        expect(mustChange.checked).toBe(true);
+        mustChange.checked = false;
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0]).toMatchObject({ username: 'flagged', password: '', mustChangePassword: false });
+    });
+
+    it("the first character of a new password for someone else turns the forced change on, and it can be turned off again", async () => {
+        const { container } = await setup();
+        const mustChange = el<HTMLInputElement>(container, '#user-mgmt-must-change');
+        const password = el<HTMLInputElement>(container, '#user-mgmt-password');
+        const type = (value: string) => {
+            password.value = value;
+            password.dispatchEvent(new Event('input'));
+        };
+        svcMock.saveUser.mockResolvedValue(saved());
+
+        clickRow(container, 1, '.user-mgmt-edit');   // viewer
+        expect(mustChange.checked).toBe(false);
+        type('n');
+        expect(mustChange.checked).toBe(true);
+        // The administrator's own choice stands while they go on typing.
+        mustChange.checked = false;
+        type('new-password-1');
+        expect(mustChange.checked).toBe(false);
+        // An emptied box starts again.
+        type('');
+        type('other-password-1');
+        expect(mustChange.checked).toBe(true);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0]).toMatchObject({ username: 'viewer', password: 'other-password-1', mustChangePassword: true });
+    });
+
+    it('typing a password leaves the switch alone for a new user and for your own account', async () => {
+        const { container } = await setup();
+        const mustChange = el<HTMLInputElement>(container, '#user-mgmt-must-change');
+        const password = el<HTMLInputElement>(container, '#user-mgmt-password');
+        const type = (value: string) => {
+            password.value = value;
+            password.dispatchEvent(new Event('input'));
+        };
+
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        mustChange.checked = false;
+        type('a-new-users-password');
+        expect(mustChange.checked).toBe(false);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-cancel').click();
+
+        clickRow(container, 0, '.user-mgmt-edit');   // admin, the session's own account
+        type('my-own-new-password');
+        expect(mustChange.checked).toBe(false);
     });
 
     it('Cancel returns to the list and forgets the typed password', async () => {

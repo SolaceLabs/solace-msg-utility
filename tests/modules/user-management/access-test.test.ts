@@ -4,7 +4,7 @@ import { ACCESS_PROMPT, createAccessTest } from '../../../src/modules/user-manag
 import type { ManagedUser, ModuleChoices } from '../../../src/modules/user-management/service';
 
 const OPS: ManagedUser = {
-    username: 'ops', admin: false,
+    username: 'ops', admin: false, mustChangePassword: false,
     operate: [{ brokers: 'prod', msgVpns: 'vpn-*', queues: 'orders.*' }],
     readOnly: [{ brokers: 'prod', msgVpns: 'vpn-a', queues: '*' }],
     modules: ['queue-browser', 'queue-copy'],
@@ -12,7 +12,7 @@ const OPS: ManagedUser = {
     twoFactor: false,
 };
 const READER: ManagedUser = {
-    username: 'reader', admin: false,
+    username: 'reader', admin: false, mustChangePassword: false,
     operate: [],
     readOnly: [{ brokers: '*', msgVpns: 'vpn-a', queues: 'audit.*' }],
     modules: null,

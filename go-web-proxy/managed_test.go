@@ -497,6 +497,44 @@ func TestManagedAPI_SaveUser_Modules(t *testing.T) {
 	}
 }
 
+// mustChangePassword is stored as sent, on a create and on an edit, and the
+// list shows it. Setting it ends no session: the user's next sign-in is the
+// one held to the password page. A body without it clears it.
+func TestManagedAPI_SaveUser_MustChangePassword(t *testing.T) {
+	e := newManagedEnv(t, nil)
+	admin, viewer := e.cookie("admin", false), e.cookie("viewer", false)
+	listed := func(name string) bool {
+		var out struct{ Users []userListJSON }
+		rec := e.do("GET", "/managed/users", "", admin)
+		expect(t, rec, http.StatusOK, "")
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		u, found := userNamed(e.api.store.listUsers(), name)
+		i := slices.IndexFunc(out.Users, func(l userListJSON) bool { return l.Username == name })
+		if !found || i < 0 || out.Users[i].MustChangePassword != u.MustChangePassword {
+			t.Fatalf("the list must show %s as stored: %s", name, rec.Body.String())
+		}
+		return u.MustChangePassword
+	}
+
+	expect(t, e.do("PUT", "/managed/users/bob", `{"rev":0,"password":"bob-password-1","mustChangePassword":true}`, admin), http.StatusOK, "")
+	if mustChange, ok, _ := e.api.store.checkPassword(context.Background(), "bob", "bob-password-1"); !ok || !mustChange || !listed("bob") {
+		t.Errorf("a user created with the flag signs in into the forced change: ok=%v mustChange=%v", ok, mustChange)
+	}
+
+	expect(t, e.putUserAs(admin, "viewer", `{"mustChangePassword":true,"readOnly":[]}`), http.StatusOK, "")
+	if !listed("viewer") {
+		t.Error("an edit with the flag and no password sets it")
+	}
+	expect(t, e.do("GET", "/managed/me", "", viewer), http.StatusOK, "")
+
+	expect(t, e.putUserAs(admin, "viewer", `{"readOnly":[]}`), http.StatusOK, "")
+	if listed("viewer") {
+		t.Error("an edit without the flag clears it")
+	}
+}
+
 func TestManagedAPI_SaveUser_SessionsEndOnPasswordOrRoleChange(t *testing.T) {
 	e := newManagedEnv(t, nil)
 	admin := e.cookie("admin", false)
@@ -815,7 +853,7 @@ func TestManagedAPI_UserChangesAreAudited(t *testing.T) {
 	put := func(name, body string) { e.putUserAs(c, name, body) }
 
 	put("bob", `{"password":"bob-password-1","readOnly":[{"brokers":"b1","msgVpns":"*","queues":"*"}]}`)
-	put("bob", `{"password":"bob-password-2","admin":true,"readOnly":[],"modules":["queue-browser"]}`)
+	put("bob", `{"password":"bob-password-2","admin":true,"mustChangePassword":true,"readOnly":[],"modules":["queue-browser"]}`)
 	put("viewer", `{"modules":["queue-browser"],"readOnly":[{"brokers":"b1","msgVpns":"v1","queues":"*"}]}`)
 	put("admin", `{"admin":true,"operate":[{"brokers":"*","msgVpns":"*","queues":"*"}]}`)
 	put("carol", `{"password":"short"}`)
@@ -827,8 +865,8 @@ func TestManagedAPI_UserChangesAreAudited(t *testing.T) {
 
 	au.expect(t,
 		auditEntry{Actor: "admin", Action: "user.create", Target: "bob", Outcome: "ok", Wrote: usersWrote(3), Msg: "admin created user bob"},
-		auditEntry{Actor: "admin", Action: "user.update", Target: "bob", Outcome: "ok", Changed: []string{"password", "admin", "grants", "modules"}, Wrote: usersWrote(4),
-			Msg: "admin updated user bob: password, admin, grants, modules"},
+		auditEntry{Actor: "admin", Action: "user.update", Target: "bob", Outcome: "ok", Changed: []string{"password", "admin", "forced change", "grants", "modules"}, Wrote: usersWrote(4),
+			Msg: "admin updated user bob: password, admin, forced change, grants, modules"},
 		auditEntry{Actor: "admin", Action: "user.update", Target: "viewer", Outcome: "ok", Wrote: usersWrote(5), Msg: "admin updated user viewer"},
 		auditEntry{Actor: "admin", Action: "user.update", Target: "admin", Outcome: "ok", Wrote: usersWrote(6), Msg: "admin updated user admin"},
 		auditEntry{Actor: "admin", Action: "user.create", Target: "carol", Outcome: "refused", Code: "invalid", Msg: "admin could not create user carol: invalid"},

@@ -25,6 +25,7 @@
         <li>Press <strong>Add user</strong>. The form opens under the title <strong>Add user</strong>.</li>
         <li>Type the <strong>Username</strong> and the <strong>Password</strong>. The rules are in the table below.</li>
         <li>Switch on <strong>Administrator</strong> only if this person is to manage the gateway.</li>
+        <li>Leave <strong>Must change password at next sign-in</strong> on, so that the person replaces the password you chose with one only they know.</li>
         <li>In <strong>Modules</strong>, leave <strong>Deployment default</strong> selected, or choose the modules for this user (see below).</li>
         <li>In <strong>Entitlements</strong>, add the rows that give the user their brokers, Message VPNs and queues (see below).</li>
         <li>Press <strong>Save</strong>. The toast <code>User saved</code> appears and the list returns with the user in it. <strong>Cancel</strong> returns to the list and keeps nothing.</li>
@@ -32,13 +33,14 @@
 
     <h3>The account card</h3>
     <figure class="manual-figure">
-        <img src="help/form-account.svg" width="760" height="390" alt="The user form for alice: the account card with username, password and Administrator switch, and the Modules card with its switch between two answers, two module pills and an Add module button.">
+        <img src="help/form-account.svg" width="760" height="390" alt="The user form for alice: the account card with username, password, the Administrator switch and the Must change password at next sign-in switch, and the Modules card with its switch between two answers, two module pills and an Add module button.">
         <figcaption>The first two cards of the user form, here editing alice with a list of modules of her own.</figcaption>
     </figure>
     <ol class="manual-callouts">
         <li><strong>Username</strong>. You type it when you add a user. When you edit a user, it is fixed.</li>
         <li><strong>Password</strong>, with a hint after its name: <code>(required)</code> when you add a user, <code>(leave blank to keep current)</code> when you edit one.</li>
         <li>The <strong>Administrator</strong> switch.</li>
+        <li>The <strong>Must change password at next sign-in</strong> switch.</li>
         <li>The switch for the user's modules, between <strong>Deployment default</strong> and <strong>Choose for this user</strong>. The answer in bold is the choice. While <strong>Choose for this user</strong> is on, a line under the switch names what the default gives.</li>
         <li>The modules the user may open, each as a pill.</li>
         <li><strong>+ Add module</strong>, which lists the modules you can still add.</li>
@@ -51,6 +53,7 @@
             <tr><td><strong>Username</strong></td><td>1 to 64 characters from <code>A-Z a-z 0-9 . _ @ -</code>, and not only dots. Spaces around it are removed. It cannot be changed once the user exists: to rename someone, add the name you want and delete the old one.</td><td>Empty</td></tr>
             <tr><td><strong>Password</strong></td><td>12 to 128 characters. The lower limit is the <strong>Minimum password length</strong> of Gateway Settings when that is higher than 12. The page sends the password over TLS and the gateway stores only a hash of it. It is never shown again. When you edit a user, leave the box empty to keep the stored password.</td><td>Empty</td></tr>
             <tr><td><strong>Administrator</strong></td><td>A switch. It lets the user open <code>/solAdmin</code>. It gives no access to any broker by itself: an administrator needs entitlement rows like anybody else.</td><td>Off</td></tr>
+            <tr><td><strong>Must change password at next sign-in</strong></td><td>A switch. While it is on, the user's next sign-in leads only to the gateway's password page until they set a new password. See "Forcing a password change" below.</td><td>On for a new user. What is saved, when you edit one.</td></tr>
         </tbody>
     </table>
     <aside class="manual-note" data-kind="tip">
@@ -63,7 +66,7 @@
         <li>Change what you need. Leave <strong>Password</strong> empty unless you are setting a password.</li>
         <li>Press <strong>Save</strong>.</li>
     </ol>
-    <p>The page sends the whole user each time, so a save replaces the user's flag, modules and both lists of entitlements with what the form shows.</p>
+    <p>The page sends the whole user each time, so a save replaces the user's two switches, modules and both lists of entitlements with what the form shows.</p>
 
     <h3>Deleting a user</h3>
     <ol class="manual-steps">
@@ -171,7 +174,15 @@
     <p>The reset ends the user's sessions. It leaves the password as it is. What the user must do at the next sign-in depends on the gateway's two-factor mode (<a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#a-lost-phone">A lost phone</a>). A save of the user form never changes two-factor, in either direction.</p>
 
     <h3>Forcing a password change</h3>
-    <p>An account can be marked so that its owner may use only the password page until they change it. This page has no control for it and the list does not show it. The gateway marks the first administrator it creates, named <code>admin</code>, this way, and that person changes the password at the first sign-in (<a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#start-it">Start it</a>). A password you save here clears the mark. To change only your own password, use <strong>Change password</strong> in the account control of the sidebar.</p>
+    <p>The <strong>Must change password at next sign-in</strong> switch marks an account so that its owner may use only the gateway's password page until they set a new password. A password you choose for someone is one you know, and the switch makes it last for one sign-in only.</p>
+    <ul>
+        <li><strong>A new user:</strong> the switch starts on.</li>
+        <li><strong>A user you edit:</strong> the switch shows what is saved. When you type a new password for someone else, it turns on at the first character. Turn it off again if the person is to keep the password you typed.</li>
+        <li><strong>Your own account:</strong> typing a password for yourself leaves the switch as it is.</li>
+        <li><strong>With no new password:</strong> you can turn the switch on by itself. The user keeps their password for one more sign-in and must then replace it.</li>
+    </ul>
+    <p>The switch takes effect at the user's next sign-in: a session that is already open goes on. Once the user has set a new password, the gateway turns the switch off. The list does not show it; open the user to see it.</p>
+    <p>The gateway also marks the first administrator it creates, named <code>admin</code>, unless that password came from a secret file (<a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#start-it">Start it</a>). To change only your own password, use <strong>Change password</strong> in the account control of the sidebar.</p>
 
     <h3>What a change does to a user who is signed in</h3>
     <table>
@@ -182,6 +193,7 @@
             <tr><td>The password, the <strong>Administrator</strong> switch, or you delete the user</td><td>All their sessions end and their open broker connections close. They sign in again, with the password you set if you changed it.</td></tr>
             <tr><td>You reset two-factor</td><td>All their sessions end and their open broker connections close. They sign in again.</td></tr>
             <tr><td>The entitlements</td><td>They stay signed in. The gateway applies the rows to their next request, and closes any broker connection to a Message VPN they may not reach.</td></tr>
+            <tr><td>Only the <strong>Must change password at next sign-in</strong> switch</td><td>They stay signed in. Their next sign-in leads to the password page first.</td></tr>
         </tbody>
     </table>
     <h4>Your own account</h4>

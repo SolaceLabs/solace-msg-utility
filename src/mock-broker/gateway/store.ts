@@ -190,11 +190,12 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
 
         /**
          * upsertUser: a blank password keeps the stored one on an edit and refuses a new user.
+         * The forced password change is stored as given (off when absent), with or without a password.
          * With a `rev` (the gateway's PUT): 0 creates and refuses a taken name, above 0 updates
          * and refuses a missing name or any rev but the current one, in that order, before the
          * rules about the record. Without one, an unconditional edit.
          */
-        upsertUser(rec: Omit<UserRec, 'password' | 'mustChangePassword' | 'totp'>, password: string, rev?: number): UpsertUserResult {
+        upsertUser(rec: Omit<UserRec, 'password' | 'mustChangePassword' | 'totp'> & { mustChangePassword?: boolean }, password: string, rev?: number): UpsertUserResult {
             const old = findUser(rec.username);
             if (rev !== undefined) {
                 if (old && rev === 0) return { ok: false, error: 'exists' };
@@ -206,7 +207,7 @@ export function createStore(seed: GatewaySeed, onChange: () => void) {
             const next: UserRec = {
                 ...rec,
                 password: password !== '' ? password : old!.password,
-                mustChangePassword: password !== '' ? false : (old?.mustChangePassword ?? false),
+                mustChangePassword: rec.mustChangePassword ?? false,
                 ...(old ? cloneTotp(old) : {}),
             };
             users = old ? users.map(u => (u === old ? next : u)) : [...users, next];

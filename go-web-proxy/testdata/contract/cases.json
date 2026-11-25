@@ -360,6 +360,69 @@
       ]
     },
     {
+      "name": "users: the forced password change is stored as sent, on an edit and on a create, and ends no session",
+      "steps": [
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "rev": 1, "password": "", "admin": false, "mustChangePassword": true, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"] },
+          "status": 200, "response": { "rev": 2 }
+        },
+        {
+          "as": "viewer", "method": "GET", "path": "/managed/me", "status": 200,
+          "response": {
+            "username": "viewer", "admin": false, "twoFactor": { "mode": "optional", "enrolled": false },
+            "operate": [],
+            "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }],
+            "brokers": [{ "broker": "b1", "msgVpns": [{ "name": "v1" }] }],
+            "modules": ["queue-browser"]
+          }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/operator",
+          "body": {
+            "rev": 1, "password": "", "admin": false, "mustChangePassword": true,
+            "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }], "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }], "modules": null
+          },
+          "status": 200, "response": { "rev": 3 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/viewer",
+          "body": { "rev": 2, "password": "", "admin": false, "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"] },
+          "status": 200, "response": { "rev": 4 }
+        },
+        {
+          "as": "admin", "method": "PUT", "path": "/managed/users/newbie",
+          "body": { "rev": 0, "password": "newbie-password-1", "admin": false, "mustChangePassword": true, "operate": [], "readOnly": [], "modules": null },
+          "status": 200, "response": { "rev": 5 }
+        },
+        {
+          "as": "admin", "method": "GET", "path": "/managed/users", "status": 200,
+          "response": {
+            "users": [
+              {
+                "username": "admin", "rev": 1, "admin": true, "mustChangePassword": false, "twoFactor": false,
+                "operate": [{ "brokers": "*", "msgVpns": "*", "queues": "*" }], "readOnly": [], "modules": null
+              },
+              {
+                "username": "viewer", "rev": 4, "admin": false, "mustChangePassword": false, "twoFactor": false,
+                "operate": [], "readOnly": [{ "brokers": "b1", "msgVpns": "v1", "queues": "*" }], "modules": ["queue-browser"]
+              },
+              {
+                "username": "operator", "rev": 3, "admin": false, "mustChangePassword": true, "twoFactor": false,
+                "operate": [{ "brokers": "b1", "msgVpns": "v2", "queues": "orders.*" }],
+                "readOnly": [{ "brokers": "b2", "msgVpns": "*", "queues": "*" }], "modules": null
+              },
+              {
+                "username": "newbie", "rev": 5, "admin": false, "mustChangePassword": true, "twoFactor": false,
+                "operate": [], "readOnly": [], "modules": null
+              }
+            ],
+            "modules": { "catalog": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "offered": ["queue-browser", "queue-copy", "queue-subscription-explorer"], "userDefault": "all" }
+          }
+        }
+      ]
+    },
+    {
       "name": "users: a new password ends that user's sessions",
       "steps": [
         {

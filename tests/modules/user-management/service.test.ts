@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { createUserMgmtService, type UserPayload } from '../../../src/modules/user-management/service';
 
 const PAYLOAD: UserPayload = {
-    username: 'bob', password: 'bob-password-1', admin: false, operate: [], readOnly: [], modules: null, rev: 0,
+    username: 'bob', password: 'bob-password-1', admin: false, mustChangePassword: true, operate: [], readOnly: [], modules: null, rev: 0,
 };
 
 const fetchMock = () => globalThis.fetch as any;
@@ -11,7 +11,7 @@ const fetchMock = () => globalThis.fetch as any;
 describe('user-management/service', () => {
     it('listUsers GETs /managed/users: the users and the module choices', async () => {
         const body = {
-            users: [{ username: 'a', admin: true, operate: [], readOnly: [], modules: null, rev: 1, twoFactor: false }],
+            users: [{ username: 'a', admin: true, mustChangePassword: false, operate: [], readOnly: [], modules: null, rev: 1, twoFactor: false }],
             modules: { catalog: ['queue-browser'], offered: [], userDefault: 'none' },
         };
         fetchMock().mockResolvedValue({ ok: true, status: 200, json: async () => body });
@@ -25,7 +25,7 @@ describe('user-management/service', () => {
         expect(await createUserMgmtService().saveUser({ ...PAYLOAD, rev: 3 })).toEqual({ ok: true, data: { rev: 4 } });
         expect(fetchMock()).toHaveBeenCalledWith('/managed/users/bob', expect.objectContaining({
             method: 'PUT',
-            body: JSON.stringify({ password: 'bob-password-1', admin: false, operate: [], readOnly: [], modules: null, rev: 3 }),
+            body: JSON.stringify({ password: 'bob-password-1', admin: false, mustChangePassword: true, operate: [], readOnly: [], modules: null, rev: 3 }),
         }));
     });
 

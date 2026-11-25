@@ -53,7 +53,7 @@
 // or that refuses either credential, ends the run there with a line naming the
 // details to check: the Provisioned gateway and the browser never start.
 //
-// Every check prints PASS or FAIL with its id: 1-31, B1-B9 in the browser and
+// Every check prints PASS or FAIL with its id: 1-32, B1-B9 in the browser and
 // D1-D4 in Gateway mode. Any FAIL, or a setup step that cannot complete, exits
 // 1. The gateway's passwords and its TLS material are generated
 // per run, written only under scripts/logs/e2e/ (git-ignored, deleted at the
@@ -790,12 +790,15 @@ async function startGateway() {
     await waitFor('the gateway', 60, async () => (await request('GET', '/hosted')).status === 200, 'gateway');
 }
 
-/** Signs the bootstrap admin in, changes its password, adds both connections and the user. */
+/**
+ * Signs the bootstrap admin in, changes its password, adds both connections and the user.
+ * The password came from the file SMU_ADMIN_PASSWORD_FILE names, so the gateway forces no change.
+ */
 async function configureGateway() {
     const admin = createCookieJar();
     const first = await signIn(admin, 'admin', secrets.bootstrapPassword);
-    expect(first.status === 303 && first.headers.location === '/login/password',
-        `bootstrap sign-in: want 303 to /login/password, got ${first.status} ${first.headers.location ?? ''}`);
+    expect(first.status === 303 && first.headers.location === '/',
+        `bootstrap sign-in with the secret file's password: want 303 to /, got ${first.status} ${first.headers.location ?? ''}`);
     const changed = await request('POST', '/login/password', {
         jar: admin, form: { current: secrets.bootstrapPassword, new: secrets.adminPassword, confirm: secrets.adminPassword },
     });
@@ -1212,6 +1215,36 @@ async function runChecks(admin) {
                 expect(back.status === 303, `the new password after the admin's save: want 303, got ${back.status}`);
                 const old = await signIn(createCookieJar(), SCRATCH, secrets.scratchPassword);
                 expect(old.status === 401, `the old password after the admin's save: want 401, got ${old.status}`);
+            } finally {
+                await removeScratch(admin);
+            }
+        });
+
+        await check(32, 'a user saved with mustChangePassword is sent to /login/password at sign-in, reaches nothing under /managed until they set a new password, and is then listed without the flag', async () => {
+            const person = createCookieJar();
+            const flag = async () => {
+                const list = await request('GET', '/managed/users', { jar: admin });
+                expect(list.status === 200, `GET /managed/users: want 200, got ${list.status} ${list.body.slice(0, 200)}`);
+                return JSON.parse(list.body).users.find((u) => u.username === SCRATCH)?.mustChangePassword;
+            };
+            try {
+                const made = await request('PUT', `/managed/users/${SCRATCH}`, {
+                    jar: admin, json: { password: secrets.scratchPassword, ...userRecord(false), mustChangePassword: true, rev: 0 },
+                });
+                expect(made.status === 200, `creating ${SCRATCH} with the flag: want 200, got ${made.status} ${made.body}`);
+                expect(await flag() === true, 'the list must show the flag after the save');
+                const s = await signIn(person, SCRATCH, secrets.scratchPassword);
+                expect(s.status === 303 && s.headers.location === '/login/password',
+                    `the sign-in: want 303 to /login/password, got ${s.status} ${s.headers.location ?? ''}`);
+                const held = refusalProblem(await request('GET', '/managed/me', { jar: person }), { status: 403, error: 'password_change_required' });
+                expect(held === '', `/managed/me before the change: ${held}`);
+                const changed = await request('POST', '/login/password', {
+                    jar: person, form: { current: secrets.scratchPassword, new: secrets.scratchNewPassword, confirm: secrets.scratchNewPassword },
+                });
+                expect(changed.status === 303, `the forced change: want 303, got ${changed.status}`);
+                const me = await request('GET', '/managed/me', { jar: person });
+                expect(me.status === 200, `/managed/me after the change: want 200, got ${me.status} ${me.body.slice(0, 200)}`);
+                expect(await flag() === false, 'the list must show no flag after the change');
             } finally {
                 await removeScratch(admin);
             }

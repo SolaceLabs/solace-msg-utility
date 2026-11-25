@@ -9,6 +9,13 @@
     margin-top: 0.25rem;
 }
 
+/* The account's switches sit side by side, and wrap on a narrow card. */
+.user-mgmt-switches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 2rem;
+}
+
 /* The Entitlements card's notice: what the rows do not cover. */
 .user-mgmt-notice {
     padding: 0.5rem 0.75rem;

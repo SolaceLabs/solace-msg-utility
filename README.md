@@ -70,7 +70,7 @@ mkdir -p backup && chmod 700 backup && sudo chown 65532 backup
 SMU_VERSION=<release> docker compose -f compose.provisioned.yaml up -d
 ```
 
-Then open `https://<host>:9443/`, sign in as `admin`, change the password and add brokers and users at `/solAdmin`. The password rules, settings, recommended values, two-factor sign-in, certificates and backups are in [provisioned-mode.md](docs/provisioned-mode.md#start-it).
+Then open `https://<host>:9443/`, sign in as `admin` with that password, and add brokers and users at `/solAdmin`. The password rules, settings, recommended values, two-factor sign-in, certificates and backups are in [provisioned-mode.md](docs/provisioned-mode.md#start-it).
 
 ## Features
 

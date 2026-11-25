@@ -129,7 +129,7 @@ const ROWS: { key: string; route: string; call: () => Promise<Outcome> }[] = [
             const list = await users.listUsers();
             if (!list.ok) return list;
             return users.saveUser({
-                username: 'viewer', password: '', admin: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: '*', queues: '*' }], modules: null,
+                username: 'viewer', password: '', admin: false, mustChangePassword: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: '*', queues: '*' }], modules: null,
                 rev: list.data.users.find(u => u.username === 'viewer')!.rev,
             });
         },

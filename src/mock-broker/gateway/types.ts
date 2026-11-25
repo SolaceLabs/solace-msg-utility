@@ -45,8 +45,8 @@ interface LoginLimitKeys {
     twoFactorMinutes: number;
 }
 
-/** A user as `GET /managed/users` lists one (the gateway adds the flag, the two-factor state and the record's rev). */
-export type ListedUser = ManagedUser & { mustChangePassword: boolean; twoFactor: boolean; rev: number };
+/** A user as `GET /managed/users` lists one: the record with its forced password change, its two-factor state and its rev. */
+export type ListedUser = ManagedUser;
 
 /** A user's two-factor record (store.go `userTOTP`): the base32 secret and the SHA-256 hex of each unused recovery code. */
 export interface UserTotp { secret: string; recovery: string[] }

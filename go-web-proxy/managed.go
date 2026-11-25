@@ -523,15 +523,17 @@ func queryRev(r *http.Request) (rev int, ok bool) {
 
 // userSaveJSON is the PUT /managed/users/{name} body. The username comes from
 // the path. Password is plaintext over TLS, hashed here; "" keeps it on edit.
-// Modules null or absent means the deployment default. Rev is the rev the
-// admin read the user at, 0 for a new user.
+// Modules null or absent means the deployment default. MustChangePassword is
+// stored as sent; absent means false. Rev is the rev the admin read the user
+// at, 0 for a new user.
 type userSaveJSON struct {
-	Rev      bodyRev    `json:"rev"`
-	Password string     `json:"password"`
-	Admin    bool       `json:"admin"`
-	Operate  []permJSON `json:"operate"`
-	ReadOnly []permJSON `json:"readOnly"`
-	Modules  *[]string  `json:"modules"`
+	Rev                bodyRev    `json:"rev"`
+	Password           string     `json:"password"`
+	Admin              bool       `json:"admin"`
+	MustChangePassword bool       `json:"mustChangePassword"`
+	Operate            []permJSON `json:"operate"`
+	ReadOnly           []permJSON `json:"readOnly"`
+	Modules            *[]string  `json:"modules"`
 }
 
 // modulesJSON is what the user editor needs to offer module choices.
@@ -704,7 +706,9 @@ func (h *managedHandler) storeFailed(w http.ResponseWriter, r *http.Request, op 
 // saveUser creates (rev 0) or edits (rev above 0) a user and answers 200 with
 // the user's rev. A new password, a changed admin flag or a deletion ends the
 // target's sessions, the requester's own included: an admin who changes their
-// own password signs in again.
+// own password signs in again. mustChangePassword is stored as sent (absent
+// means false) and ends no session: it limits the user's next sign-in to the
+// password page.
 //
 // What needs no store state comes first (422 invalid, 400 rev_required), and
 // the password is policy-checked and hashed before the writer lock. Inside it
@@ -739,7 +743,8 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request, call *
 	}
 	rev := body.Rev.n
 	call.action = userSaveAction(rev > 0)
-	rec := userRec{Username: name, Admin: body.Admin, Operate: permsToRows(body.Operate), ReadOnly: permsToRows(body.ReadOnly), Modules: body.Modules}
+	rec := userRec{Username: name, Admin: body.Admin, MustChangePassword: body.MustChangePassword,
+		Operate: permsToRows(body.Operate), ReadOnly: permsToRows(body.ReadOnly), Modules: body.Modules}
 	if old, found := userNamed(h.store.listUsers(), name); rev > 0 && found {
 		// Read outside the lock, for the audit entry's list of parts only. An
 		// accepted save means the user's rev has not moved since the admin
@@ -756,7 +761,8 @@ func (h *managedHandler) saveUser(w http.ResponseWriter, r *http.Request, call *
 		h.sessions.dropUser(name)
 	}
 	h.log(r).Info("user saved", "target", name, "created", rev == 0, "admin", body.Admin,
-		"password_set", body.Password != "", "operate_rows", len(body.Operate), "read_only_rows", len(body.ReadOnly),
+		"password_set", body.Password != "", "must_change_password", body.MustChangePassword,
+		"operate_rows", len(body.Operate), "read_only_rows", len(body.ReadOnly),
 		"modules", modulesAttr(body.Modules), "sessions_ended", got.dropSessions, "rev", got.rev)
 	writeJSON(w, http.StatusOK, map[string]int{"rev": got.rev})
 }
@@ -779,6 +785,9 @@ func userChanges(old, next userRec, newPassword bool) []string {
 	}
 	if old.Admin != next.Admin {
 		out = append(out, "admin")
+	}
+	if old.MustChangePassword != next.MustChangePassword {
+		out = append(out, "forced change")
 	}
 	if !slices.Equal(old.Operate, next.Operate) || !slices.Equal(old.ReadOnly, next.ReadOnly) {
 		out = append(out, "grants")
