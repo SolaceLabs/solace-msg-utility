@@ -104,7 +104,7 @@ describe('compose files -- reading a service', () => {
 });
 
 describe('compose files -- the ready-made deployments', () => {
-    const IMAGE = '    image: ghcr.io/solacelabs/solace-msg-utility:${SMU_VERSION:?set SMU_VERSION to a release, e.g. 3.6.0}';
+    const IMAGE = '    image: ghcr.io/solacelabs/solace-msg-utility:${SMU_VERSION:?set SMU_VERSION to a release, e.g. 4.0.0}';
 
     it.each(['docker/compose.gateway.yaml', 'docker/compose.provisioned.yaml'])('%s pins a release the deployer names, never latest', (file) => {
         const text = read(file);

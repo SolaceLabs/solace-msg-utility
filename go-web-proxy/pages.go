@@ -790,7 +790,9 @@ func (p *authPages) submitSetup(w http.ResponseWriter, r *http.Request, next str
 		return
 	}
 	pw, code := r.PostFormValue("password"), r.PostFormValue("code")
-	secret, enrolled := p.store.totpSecret(as.user)
+	// Only whether two-factor is set up, for the form a refused turn shows:
+	// the secret is read under the turn.
+	_, enrolled := p.store.totpSecret(as.user)
 	page := pageData{Mode: "setup", Title: twoFactorTitle, Next: next, Enrolled: enrolled}
 	client, resolved := clientOf(r)
 	log := requestLogger(p.logger, r)
@@ -814,7 +816,7 @@ func (p *authPages) submitSetup(w http.ResponseWriter, r *http.Request, next str
 	defer release()
 	// Read again under the turn: a set-up that finished while this request
 	// waited makes the current code required.
-	secret, enrolled = p.store.totpSecret(as.user)
+	secret, enrolled := p.store.totpSecret(as.user)
 	page.Enrolled = enrolled
 	check, err := p.store.verifyPassword(r.Context(), as.user, pw)
 	if err != nil {

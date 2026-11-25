@@ -90,7 +90,7 @@ You need Docker with Compose, and a host your users' browsers can reach on port 
 3. Start it, pinning the release:
 
    ```bash
-   SMU_VERSION=3.6.0 docker compose -f compose.provisioned.yaml up -d
+   SMU_VERSION=4.0.0 docker compose -f compose.provisioned.yaml up -d
    ```
 
 4. Open `https://<host>:9443/` and sign in as `admin` with that password. A password from the file stays the administrator's until someone changes it (**Change password** in the sidebar), so keep the file as you would any credential.
@@ -109,7 +109,7 @@ docker run -d -p 9443:9443 \
   -v "$PWD/admin-password:/run/secrets/admin-password:ro" \
   -v "$PWD/backup:/backup" \
   -v solace-tls:/tls \
-  ghcr.io/solacelabs/solace-msg-utility:3.6.0
+  ghcr.io/solacelabs/solace-msg-utility:4.0.0
 ```
 
 ---

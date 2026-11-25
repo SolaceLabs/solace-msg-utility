@@ -128,7 +128,7 @@ The image serves the app over HTTPS and connects to your brokers for it: browser
 [`compose.gateway.yaml`](../docker/compose.gateway.yaml) is a ready-made deployment, locked down (non-root, read-only, no capabilities). Download it from the [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) you deploy (`SHA256SUMS.txt` on the same Release verifies it), or use `docker/` in a checkout of that release's tag, and run it from its folder:
 
 ```bash
-SMU_VERSION=3.6.0 docker compose -f compose.gateway.yaml up -d
+SMU_VERSION=4.0.0 docker compose -f compose.gateway.yaml up -d
 ```
 
 Or with `docker run`:
@@ -136,7 +136,7 @@ Or with `docker run`:
 ```bash
 docker run --rm -p 9443:9443 \
   -v solace-tls:/tls \
-  ghcr.io/solacelabs/solace-msg-utility:3.6.0
+  ghcr.io/solacelabs/solace-msg-utility:4.0.0
 ```
 
 Then open <https://localhost:9443/>.
@@ -201,7 +201,7 @@ With `docker run`, use `--mount`: it stops with an error when the host file does
 docker run --rm -p 9443:9443 \
   -v solace-tls:/tls \
   --mount type=bind,src=/etc/ssl/certs/ca-certificates.crt,dst=/etc/ssl/certs/ca-certificates.crt,readonly \
-  ghcr.io/solacelabs/solace-msg-utility:3.6.0
+  ghcr.io/solacelabs/solace-msg-utility:4.0.0
 ```
 
 With `compose.gateway.yaml` or `compose.provisioned.yaml`, add an entry to the gateway service's `volumes:`:
@@ -389,8 +389,8 @@ Connection profiles are stored in the browser's `localStorage`. They persist acr
 - **Container:** change the tag and recreate the container:
 
   ```bash
-  SMU_VERSION=3.6.1 docker compose -f docker/compose.gateway.yaml up -d
+  SMU_VERSION=4.0.1 docker compose -f docker/compose.gateway.yaml up -d
   ```
 
-  Pin a full version (`:3.6.0`) in production rather than `:3.6`, `:3` or `:latest`. Provisioned mode uses the same tags. A restart signs every Provisioned user out. Before you update a deployment that carries older variable or key names, check [Variables and keys the gateway refuses or ignores](#variables-and-keys-the-gateway-refuses-or-ignores). A container with no `SMU_HOSTED` connects to brokers for the browsers, so put your brokers' CAs in `/tls/trust/` first, or set `SMU_HOSTED=false` to serve the files only.
+  Pin a full version (`:4.0.0`) in production rather than `:4.0`, `:4` or `:latest`. Provisioned mode uses the same tags. A restart signs every Provisioned user out. Before you update a deployment that carries older variable or key names, check [Variables and keys the gateway refuses or ignores](#variables-and-keys-the-gateway-refuses-or-ignores). A container with no `SMU_HOSTED` connects to brokers for the browsers, so put your brokers' CAs in `/tls/trust/` first, or set `SMU_HOSTED=false` to serve the files only.
 - **Self-host:** download the new `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) and replace the file on your server; `SHA256SUMS.txt` on the same Release verifies it. `solclient.js` and `jszip.min.js` come from the `dist` branch and need updating only if you want a newer version of those libraries.

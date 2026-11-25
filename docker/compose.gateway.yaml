@@ -4,7 +4,7 @@
 # browsers reach and trust only the gateway, and users type their broker's
 # details. See docs/deployment.md (Gateway mode).
 #
-#   SMU_VERSION=3.6.0 docker compose -f compose.gateway.yaml up -d
+#   SMU_VERSION=4.0.0 docker compose -f compose.gateway.yaml up -d
 #
 # Then open https://<host>:9443/. SMU_VERSION is required: pin a release, never
 # `latest`, so an upgrade is a deliberate change of this one value.
@@ -16,7 +16,7 @@
 name: solace-msg-utility
 services:
   gateway:
-    image: ghcr.io/solacelabs/solace-msg-utility:${SMU_VERSION:?set SMU_VERSION to a release, e.g. 3.6.0}
+    image: ghcr.io/solacelabs/solace-msg-utility:${SMU_VERSION:?set SMU_VERSION to a release, e.g. 4.0.0}
     user: "65532:65532"
     privileged: false
     read_only: true

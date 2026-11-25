@@ -74,7 +74,7 @@
 # USERS_FILE, CONNECTIONS_FILE and STORE_KEY_FILE are ignored.
 #
 # Build args:
-#   APP_VERSION The release tag (e.g. v3.6.0), stamped into the gateway binary's
+#   APP_VERSION The release tag (e.g. v4.0.0), stamped into the gateway binary's
 #               `version` var and the PWA's `__APP_VERSION__`. Git is not
 #               available inside the build, so the value has to arrive this way;
 #               scripts/dev.sh and .github/workflows/tag.yml both pass it. The
