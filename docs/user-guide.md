@@ -1685,8 +1685,7 @@ The reset ends the user's sessions. It leaves the password as it is. What the us
 The **Must change password at next sign-in** switch marks an account so that its owner may use only the gateway's password page until they set a new password. A password you choose for someone is one you know, and the switch makes it last for one sign-in only.
 
 - **A new user:** the switch starts on.
-- **A user you edit:** the switch shows what is saved. When you type a new password for someone else, it turns on at the first character. Turn it off again if the person is to keep the password you typed.
-- **Your own account:** typing a password for yourself leaves the switch as it is.
+- **A user you edit:** the switch shows what is saved, and only you move it. Typing a new password does not turn it on: turn it on yourself when you set a password for someone else, unless the person is to keep the password you typed.
 - **With no new password:** you can turn the switch on by itself. The user keeps their password for one more sign-in and must then replace it.
 
 The switch takes effect at the user's next sign-in: a session that is already open goes on. Once the user has set a new password, the gateway turns the switch off. The list does not show it; open the user to see it.
@@ -1779,16 +1778,16 @@ Press **Refresh** to load the list again, for example after another administrato
 
 The form is the same one you use to edit a connection, so Figure 2 shows it with a connection open.
 
-![The connection form open on east-prod: broker name and broker type, a line, the SEMP part with its scheme button, hostname, port and URL path on one row and the account below, a line, the Client part with its scheme button, messaging hostname, port and URL path on one row, a line, the Message VPN list with its + Add and Retrieve VPNs buttons and two rows, Save and Cancel, and a red message under the form.](../src/modules/connection-management/help/form.svg)
+![The connection form open on east-prod: broker name and broker type, a line, the SEMP part with its scheme button, hostname and port on one row, a small + URL path button above the end of the row, and the account below, a line, the Client part with its scheme button, messaging hostname and port on one row and its own + URL path button, a line, the Message VPN list with its + Add and Retrieve VPNs buttons and two rows, Save and Cancel, and a red message under the form.](../src/modules/connection-management/help/form.svg)
 
 *Figure 2. The form, editing the connection east-prod.*
 
 1. **Broker name**: the name users and the gateway call this broker by.
 2. **Solace Event Broker Type**: **Software / Cloud** for a broker with one hostname, **Appliance** for one with two.
-3. The SEMP address on one row, read as a URL: **Scheme**, **Hostname** (where the broker is), **Port** and **URL path**.
+3. The SEMP address on one row, read as a URL: **Scheme**, **Hostname** (where the broker is) and **Port**. The small **+ URL path** button above the end of the row adds the optional **URL path** box.
 4. The SEMP **Username**.
 5. The SEMP **Password**. While you edit, its hint reads `(leave blank to keep current)`.
-6. The messaging address on one row: **Scheme**, **Messaging hostname**, **Port** and **URL path**. The hostname is locked for a software or cloud broker, where it shows the hostname above.
+6. The messaging address on one row: **Scheme**, **Messaging hostname** and **Port**, with a **+ URL path** button of its own. The hostname is locked for a software or cloud broker, where it shows the hostname above.
 7. **+ Add** adds a row to the Message VPN list. **Retrieve VPNs**, beside it, adds a row for each Message VPN the broker holds.
 8. One row for each Message VPN: its name, the client username and the client password. The cross at the end of a row removes it.
 9. **Save** stores the connection. **Cancel** returns to the list and keeps nothing.
@@ -1813,7 +1812,7 @@ SEMP is how the gateway reads a broker's configuration for its users: queues, su
 | --- | --- | --- |
 | **Scheme** | A button with two parts: `https` (TLS) or `http` (plain). Choose `http` only for a broker whose SEMP port does not serve TLS, on a network you trust: the gateway then reaches it unencrypted, and the account's password crosses that hop in clear text. | `https` |
 | **Port** | A whole number from 1 to 65535, in digits only. A blank port is never taken to mean a default. Required when a SEMP username is set. A connection with no SEMP port gives users no management access to the broker. | Blank |
-| **URL path** | Only for a broker behind a reverse proxy: the path the proxy serves this broker's SEMP under, such as `/proxy/east-prod`. The gateway puts it in front of every SEMP request it sends to the broker. Each part of the path holds letters, digits and `. _ ~ -` only. The form adds a missing `/` at the start and drops one at the end. | Blank: no path |
+| **URL path** | Only for a broker behind a reverse proxy: the path the proxy serves this broker's SEMP under, such as `/proxy/east-prod`. The box is hidden until you press the small **+ URL path** button above the end of the row; the cross in the box removes the path and hides the box again. A connection saved with a path opens with the box on show. The gateway puts the path in front of every SEMP request it sends to the broker. Each part of the path holds letters, digits and `. _ ~ -` only. The form adds a missing `/` at the start and drops one at the end. | Hidden: no path |
 | **Username** | Up to 32 characters from `A-Z a-z 0-9 _ -`. It may be left blank. | Blank |
 | **Password** | The account's password, typed with its characters hidden. The gateway refuses control characters in it and applies no other rule of its own. | Blank |
 
@@ -1828,7 +1827,7 @@ Messaging is how a user's browser connects to the broker, through the gateway, t
 | --- | --- | --- |
 | **Scheme** | A button with two parts: `wss` (TLS) or `ws` (plain). Choose `ws` only for a broker that does not serve TLS on its messaging port, on a network you trust: the credentials of the Message VPNs then cross that hop in clear text. | `wss` |
 | **Port** | As the SEMP port: digits, 1 to 65535. Required once a Message VPN is listed. | Blank |
-| **URL path** | As the SEMP URL path, for the messaging socket: the path a reverse proxy serves this broker's messaging under. The two paths are separate, since a proxy may serve SEMP and messaging under different ones. | Blank: no path |
+| **URL path** | As the SEMP URL path, for the messaging socket: the path a reverse proxy serves this broker's messaging under, behind a **+ URL path** button of its own. The two paths are separate, since a proxy may serve SEMP and messaging under different ones. | Hidden: no path |
 
 The two schemes are chosen separately. A connection stored with no scheme shows `https` and `wss`.
 
@@ -1850,7 +1849,7 @@ A row in which every box is empty is ignored when you save.
 
 **Retrieve VPNs** fills the list from the broker. The gateway asks the broker for its Message VPNs over SEMP, with the SEMP details the form holds at that moment, and the page adds a row for each Message VPN the list does not name yet. It works before the connection is saved, and nothing is stored until you press **Save**.
 
-1. Fill in the SEMP part of the form: **Scheme**, **Hostname**, **Port**, **Username** and **Password**, and the **URL path** if the broker is behind a reverse proxy.
+1. Fill in the SEMP part of the form: **Scheme**, **Hostname**, **Port**, **Username** and **Password**. If the broker is behind a reverse proxy, press **+ URL path** and type the path.
 2. Press **Retrieve VPNs**. The button is off until the gateway answers.
 3. Each row it adds carries the Message VPN's name only. Type its client username and password, and remove the rows of Message VPNs users should not reach.
 

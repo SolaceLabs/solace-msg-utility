@@ -493,7 +493,7 @@ describe('ConnectionsModule', () => {
         vi.useRealTimers();
     });
 
-    /** Whether each card's URL Path field is open (optional-field.ts). */
+    /** Whether each card's URL Path field is open (core/optional-field.ts). */
     const urlPathOpen = () => ({
         solace: container.querySelector('#solace-url-path-field')!.classList.contains('is-open'),
         semp: container.querySelector('#semp-url-path-field')!.classList.contains('is-open'),

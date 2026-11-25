@@ -43,8 +43,10 @@
     </div>
 
     <!-- Each address is one row, read as a URL: scheme, hostname, port, then
-         the path the broker sits under when a reverse proxy serves it. A line
-         sets each section off from the one above. -->
+         the path the broker sits under when a reverse proxy serves it: a small
+         "+ URL path" button on the labels' line until a path is added
+         (core/optional-field.ts). A line sets each section off from the one
+         above. -->
     <hr class="divider">
     <h3 class="card-subtitle">SEMP (management)</h3>
     <div class="form-group flex-row">
@@ -63,10 +65,15 @@
             <label for="conn-mgmt-semp-port">Port</label>
             <input type="text" id="conn-mgmt-semp-port" class="form-control" autocomplete="off">
         </div>
-        <div class="conn-mgmt-path">
+        <div id="conn-mgmt-semp-path-field" class="optional-field">
             <label for="conn-mgmt-semp-path">URL path</label>
-            <input type="text" id="conn-mgmt-semp-path" class="form-control" autocomplete="off" placeholder="optional"
-                title="A path after the port, before /SEMP (for a broker behind a reverse proxy)">
+            <div class="optional-field-input">
+                <input type="text" id="conn-mgmt-semp-path" class="form-control" autocomplete="off">
+                <button type="button" id="btn-conn-mgmt-semp-path-clear" class="btn-icon optional-field-clear"
+                    title="Remove the URL path" aria-label="Remove the SEMP URL path">&#x2715;</button>
+            </div>
+            <button type="button" id="btn-conn-mgmt-semp-path-add" class="btn btn-secondary btn-sm optional-field-add"
+                title="Add a path after the port, before /SEMP (for a broker behind a reverse proxy)">+ URL path</button>
         </div>
     </div>
     <div class="form-group flex-row">
@@ -99,10 +106,15 @@
             <label for="conn-mgmt-client-port">Port</label>
             <input type="text" id="conn-mgmt-client-port" class="form-control" autocomplete="off">
         </div>
-        <div class="conn-mgmt-path">
+        <div id="conn-mgmt-client-path-field" class="optional-field">
             <label for="conn-mgmt-client-path">URL path</label>
-            <input type="text" id="conn-mgmt-client-path" class="form-control" autocomplete="off" placeholder="optional"
-                title="A path after the port, where the messaging socket is served (for a broker behind a reverse proxy)">
+            <div class="optional-field-input">
+                <input type="text" id="conn-mgmt-client-path" class="form-control" autocomplete="off">
+                <button type="button" id="btn-conn-mgmt-client-path-clear" class="btn-icon optional-field-clear"
+                    title="Remove the URL path" aria-label="Remove the messaging URL path">&#x2715;</button>
+            </div>
+            <button type="button" id="btn-conn-mgmt-client-path-add" class="btn btn-secondary btn-sm optional-field-add"
+                title="Add a path after the port, where the messaging socket is served (for a broker behind a reverse proxy)">+ URL path</button>
         </div>
     </div>
     <hr class="divider">

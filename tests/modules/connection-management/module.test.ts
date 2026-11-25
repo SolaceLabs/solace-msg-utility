@@ -719,6 +719,11 @@ describe('connection-management -- the URL path of each address', () => {
         el<HTMLInputElement>(c, '#conn-mgmt-semp-path').value,
         el<HTMLInputElement>(c, '#conn-mgmt-client-path').value,
     ];
+    /** Whether each row's URL path box is on show (core/optional-field.ts): SEMP, then messaging. */
+    const pathsOpen = (c: HTMLElement) => [
+        el(c, '#conn-mgmt-semp-path-field').classList.contains('is-open'),
+        el(c, '#conn-mgmt-client-path-field').classList.contains('is-open'),
+    ];
     const editRow = (c: HTMLElement, n: number) =>
         el(c, '#conn-mgmt-rows').querySelectorAll('tr')[n].querySelector<HTMLButtonElement>('.conn-mgmt-edit')!.click();
 
@@ -746,23 +751,47 @@ describe('connection-management -- the URL path of each address', () => {
         expect(['urlPath' in sent.semp, 'urlPath' in sent.client]).toEqual([false, false]);
     });
 
-    it('opens a connection with its paths, one without them with the boxes empty, and a new one empty', async () => {
+    it('opens a connection with its paths on show, one without them with the boxes empty and closed, and a new one the same', async () => {
         const { container } = await setup();
         svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [CONNS[0], WITH_PATHS] } });
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-refresh').click();
         await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').textContent).toContain('px1'));
         editRow(container, 1);
         expect(paths(container)).toEqual(['/semp/px1', '/smf/px1']);
+        expect(pathsOpen(container)).toEqual([true, true]);
 
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
         editRow(container, 0);
         expect(paths(container)).toEqual(['', '']);
+        expect(pathsOpen(container)).toEqual([false, false]);
 
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
         editRow(container, 1);
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
         el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
         expect(paths(container)).toEqual(['', '']);
+        expect(pathsOpen(container)).toEqual([false, false]);
+    });
+
+    it('"+ URL path" opens the box of its own row only; removing a saved path closes the box and the save leaves the path out', async () => {
+        const { container } = await setup();
+        svcMock.listConnections.mockResolvedValue({ ok: true, data: { connections: [WITH_PATHS] } });
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-refresh').click();
+        await vi.waitFor(() => expect(el(container, '#conn-mgmt-rows').textContent).toContain('px1'));
+        svcMock.saveConnection.mockResolvedValue(saved());
+
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-add').click();
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-client-path-add').click();
+        expect(pathsOpen(container)).toEqual([false, true]);
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-cancel').click();
+
+        editRow(container, 0);
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-semp-path-clear').click();
+        expect(pathsOpen(container)).toEqual([false, true]);
+        el<HTMLButtonElement>(container, '#btn-conn-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveConnection).toHaveBeenCalled());
+        const sent = svcMock.saveConnection.mock.calls[0][0];
+        expect(['urlPath' in sent.semp, sent.client.urlPath]).toEqual([false, '/smf/px1']);
     });
 
     it('sends the SEMP path with a Retrieve VPNs, so the gateway asks the broker under it', async () => {

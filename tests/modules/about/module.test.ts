@@ -182,6 +182,14 @@ describe('About module', () => {
         expect(readingLines[0].box.root).toBeNull();
     });
 
+    // Without the blank, a short last section ends at the foot of the pane with
+    // its heading still below the line, and the section before it stays marked.
+    it('ends the sheet in blank paper as tall as the part of the window below the reading line, so a short last section can be scrolled past it', async () => {
+        await install();
+        const below = /-(\d+)% 0px$/.exec(String(readingLines[0].box.rootMargin))![1];
+        expect(q('#manual-sheet').style.paddingBottom).toBe(`${below}vh`);
+    });
+
     it('opens a link out of a chapter in a tab of its own, which cannot reach back into the app', async () => {
         await install();
         const links = all<HTMLAnchorElement>('.manual-chapter a');

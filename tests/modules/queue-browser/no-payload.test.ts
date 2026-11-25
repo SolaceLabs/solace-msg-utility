@@ -232,7 +232,7 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
         });
     });
 
-    describe('ui-core.ts resetQueueSelection', () => {
+    describe('ui-core.js resetQueueSelection', () => {
         it('resets the queue and filters with the body input removed', () => {
             state.currentQueue = 'q1';
             els.inputFilterId.value = 'm1';
@@ -244,7 +244,7 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
         });
     });
 
-    describe('ui-forward.ts renderForwardList', () => {
+    describe('ui-forward.js renderForwardList', () => {
         it('renders the message id with an empty body preview', () => {
             state.forwardQueue = [{
                 originalMsg: { id: 'm1', content: 'secret body' },   // never set in the no-payload flavor; seeded to prove it is not rendered

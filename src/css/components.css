@@ -540,6 +540,45 @@ a.btn {
     font-size: 0.875rem;
 }
 
+/* An optional field of a row of boxes (core/optional-field.ts): the URL path
+ * of a broker address. Closed (no `is-open`): the column holds only the small
+ * add button, on the labels' line, and takes its width. Open: the label and
+ * the input with its clear button, 150px wide. */
+.optional-field:not(.is-open) {
+    flex-shrink: 0;
+}
+
+.optional-field.is-open {
+    width: 150px;
+}
+
+.optional-field:not(.is-open) > label,
+.optional-field:not(.is-open) > .optional-field-input,
+.optional-field.is-open > .optional-field-add {
+    display: none;
+}
+
+.optional-field-input {
+    position: relative;
+}
+
+.optional-field-input > .form-control {
+    padding-right: 1.75rem;
+}
+
+.optional-field-clear {
+    position: absolute;
+    top: 50%;
+    right: 0.25rem;
+    transform: translateY(-50%);
+    font-size: 0.75rem;
+    line-height: 1;
+}
+
+.optional-field-add {
+    white-space: nowrap;
+}
+
 /* A choice between a few options, as joined buttons: the pressed one
  * (aria-pressed) is the choice. */
 .segmented {

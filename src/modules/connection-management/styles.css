@@ -3,7 +3,8 @@
  * build (main-admin.css). */
 
 /* An address on one row, read as a URL: the scheme, the port and the URL
- * path keep their width, and the hostname takes the rest. */
+ * path (the design system's .optional-field) keep their width, and the
+ * hostname takes the rest. */
 .conn-mgmt-scheme {
     flex: 0 0 150px;
 }
@@ -22,8 +23,4 @@
 
 .conn-mgmt-port {
     flex: 0 0 100px;
-}
-
-.conn-mgmt-path {
-    flex: 0 0 170px;
 }

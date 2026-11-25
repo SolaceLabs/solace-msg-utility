@@ -65,7 +65,7 @@ function injectModuleTemplates(variant: string | undefined, demo: boolean): Plug
  * `./variants/<variant>.ts`. The default re-export inside `_active.ts` (which
  * points at `./standard`) handles the no-flag case so dev/prod builds Just Work.
  *
- * Driven from `defineConfig` via the `--variant` CLI flag — see `readCliFlag`.
+ * Driven from `defineConfig` via the `--variant` CLI flag — see `readBuildInput`.
  * The named variant file must exist under `src/variants/`.
  */
 function variantRedirect(variant: string | undefined): PluginOption {

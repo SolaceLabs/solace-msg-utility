@@ -17,7 +17,9 @@
  * appliance opens as one, also when both hostnames are the same. Each address
  * may end in a URL path, for a broker behind a reverse proxy: it is sent with
  * a leading slash and no trailing one (`normalizeUrlPath`), and left out when
- * blank. Imports only from `src/core/*` and its own service.
+ * blank. Its box shows only for a path: until one is added the row ends in a
+ * small "+ URL path" button (`src/core/optional-field.ts`). Imports only from
+ * `src/core/*` and its own service.
  *
  * Retrieve VPNs fills the Message VPN list from the broker: the gateway reads
  * the broker's Message VPN names over SEMP with the form's SEMP details
@@ -43,6 +45,7 @@ import { handleConflict } from '../../core/admin-conflict';
 import { reportManagedFailure } from '../../core/services/managed-api';
 import { createBrokerHosts, BROKER_HOSTS_TEXT } from '../../core/connections/broker-hosts';
 import { createSegmented } from '../../core/segmented';
+import { createOptionalField } from '../../core/optional-field';
 import { createConnMgmtService, type ManagedConnRecord } from './service';
 import type { AppContext } from '../../core/types';
 
@@ -107,12 +110,18 @@ export const ConnectionManagementModule = {
             sempScheme: required<HTMLElement>(container, '#conn-mgmt-semp-scheme'),
             sempPort: required<HTMLInputElement>(container, '#conn-mgmt-semp-port'),
             sempPath: required<HTMLInputElement>(container, '#conn-mgmt-semp-path'),
+            sempPathField: required<HTMLElement>(container, '#conn-mgmt-semp-path-field'),
+            btnSempPathAdd: required<HTMLButtonElement>(container, '#btn-conn-mgmt-semp-path-add'),
+            btnSempPathClear: required<HTMLButtonElement>(container, '#btn-conn-mgmt-semp-path-clear'),
             sempUser: required<HTMLInputElement>(container, '#conn-mgmt-semp-user'),
             sempPass: required<HTMLInputElement>(container, '#conn-mgmt-semp-pass'),
             sempPassHint: required<HTMLElement>(container, '#conn-mgmt-semp-pass-hint'),
             clientScheme: required<HTMLElement>(container, '#conn-mgmt-client-scheme'),
             clientPort: required<HTMLInputElement>(container, '#conn-mgmt-client-port'),
             clientPath: required<HTMLInputElement>(container, '#conn-mgmt-client-path'),
+            clientPathField: required<HTMLElement>(container, '#conn-mgmt-client-path-field'),
+            btnClientPathAdd: required<HTMLButtonElement>(container, '#btn-conn-mgmt-client-path-add'),
+            btnClientPathClear: required<HTMLButtonElement>(container, '#btn-conn-mgmt-client-path-clear'),
             vpnRows: required<HTMLElement>(container, '#conn-mgmt-vpn-rows'),
             btnAddVpn: required<HTMLButtonElement>(container, '#btn-conn-mgmt-add-vpn'),
             btnRetrieveVpns: required<HTMLButtonElement>(container, '#btn-conn-mgmt-retrieve-vpns'),
@@ -125,6 +134,12 @@ export const ConnectionManagementModule = {
         // TLS is the first choice of each scheme, so it is the one an empty form starts on.
         const sempScheme = createSegmented<'https' | 'http'>(els.sempScheme, { attr: 'data-scheme', choices: ['https', 'http'] });
         const clientScheme = createSegmented<'wss' | 'ws'>(els.clientScheme, { attr: 'data-scheme', choices: ['wss', 'ws'] });
+        // Each address row's URL path opens on demand; sync after any write in code.
+        const urlPaths = [
+            createOptionalField({ wrap: els.sempPathField, input: els.sempPath, add: els.btnSempPathAdd, clear: els.btnSempPathClear }),
+            createOptionalField({ wrap: els.clientPathField, input: els.clientPath, add: els.btnClientPathAdd, clear: els.btnClientPathClear }),
+        ];
+        const syncUrlPaths = () => urlPaths.forEach(f => f.sync());
         const hosts = createBrokerHosts({
             typeGroup: els.brokerType,
             host: els.hostname,
@@ -226,6 +241,7 @@ export const ConnectionManagementModule = {
             clientScheme.set('wss');
             els.clientPort.value = '';
             els.clientPath.value = '';
+            syncUrlPaths();
             vpnList.clear();
             setError(els.formError, null);
             showView('form');
@@ -248,6 +264,7 @@ export const ConnectionManagementModule = {
             clientScheme.set(c.client.scheme === 'ws' ? 'ws' : 'wss');
             els.clientPort.value = c.client.port;
             els.clientPath.value = c.client.urlPath ?? '';
+            syncUrlPaths();
             vpnList.clear();
             c.client.msgVpns.forEach(v =>
                 vpnList.addRow({ name: v.name, user: v.user, pass: '' }),

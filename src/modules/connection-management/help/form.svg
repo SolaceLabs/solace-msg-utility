@@ -22,14 +22,13 @@
     <text x="91" y="218" fill="#ffffff" font-weight="700" text-anchor="middle">https</text>
     <text x="150" y="218" fill="#64748b" text-anchor="middle">http</text>
     <text x="200" y="192" font-size="11" fill="#64748b" font-weight="700">Hostname</text>
-    <rect x="200" y="200" width="270" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <rect x="200" y="200" width="320" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
     <text x="210" y="218">east.example.com</text>
-    <text x="480" y="192" font-size="11" fill="#64748b" font-weight="700">Port</text>
-    <rect x="480" y="200" width="80" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="490" y="218">943</text>
-    <text x="570" y="192" font-size="11" fill="#64748b" font-weight="700">URL path</text>
-    <rect x="570" y="200" width="120" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="580" y="218" fill="#94a3b8">optional</text>
+    <text x="530" y="192" font-size="11" fill="#64748b" font-weight="700">Port</text>
+    <rect x="530" y="200" width="80" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="540" y="218">943</text>
+    <rect x="620" y="180" width="70" height="16" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="655" y="191" font-size="9" font-weight="700" text-anchor="middle">+ URL path</text>
     <circle cx="730" cy="214" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="730" y="218" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
     <text x="60" y="242" font-size="11" fill="#64748b" font-weight="700">Username</text>
@@ -50,14 +49,13 @@
     <text x="88" y="366" fill="#ffffff" font-weight="700" text-anchor="middle">wss</text>
     <text x="140" y="366" fill="#64748b" text-anchor="middle">ws</text>
     <text x="200" y="340" font-size="11" fill="#64748b" font-weight="700">Messaging hostname</text>
-    <rect x="200" y="348" width="270" height="28" fill="#e2e8f0" rx="4" stroke="#e2e8f0"/>
+    <rect x="200" y="348" width="320" height="28" fill="#e2e8f0" rx="4" stroke="#e2e8f0"/>
     <text x="210" y="366" fill="#94a3b8">east.example.com</text>
-    <text x="480" y="340" font-size="11" fill="#64748b" font-weight="700">Port</text>
-    <rect x="480" y="348" width="80" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="490" y="366">443</text>
-    <text x="570" y="340" font-size="11" fill="#64748b" font-weight="700">URL path</text>
-    <rect x="570" y="348" width="120" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-    <text x="580" y="366" fill="#94a3b8">optional</text>
+    <text x="530" y="340" font-size="11" fill="#64748b" font-weight="700">Port</text>
+    <rect x="530" y="348" width="80" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="540" y="366">443</text>
+    <rect x="620" y="328" width="70" height="16" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="655" y="339" font-size="9" font-weight="700" text-anchor="middle">+ URL path</text>
     <text x="200" y="390" font-size="10" fill="#64748b">Follows the hostname above. Choose Appliance to set its own.</text>
     <circle cx="730" cy="362" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="730" y="366" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>

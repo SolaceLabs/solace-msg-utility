@@ -355,51 +355,19 @@ describe('user-management — create / edit form', () => {
         expect(svcMock.saveUser.mock.calls[0][0]).toMatchObject({ username: 'flagged', password: '', mustChangePassword: false });
     });
 
-    it("the first character of a new password for someone else turns the forced change on, and it can be turned off again", async () => {
+    it('a new password typed for someone else leaves the forced-change switch where the administrator set it', async () => {
         const { container } = await setup();
         const mustChange = el<HTMLInputElement>(container, '#user-mgmt-must-change');
         const password = el<HTMLInputElement>(container, '#user-mgmt-password');
-        const type = (value: string) => {
-            password.value = value;
-            password.dispatchEvent(new Event('input'));
-        };
         svcMock.saveUser.mockResolvedValue(saved());
 
-        clickRow(container, 1, '.user-mgmt-edit');   // viewer
+        clickRow(container, 1, '.user-mgmt-edit');   // viewer: stored off
+        password.value = 'new-password-1';
+        password.dispatchEvent(new Event('input'));
         expect(mustChange.checked).toBe(false);
-        type('n');
-        expect(mustChange.checked).toBe(true);
-        // The administrator's own choice stands while they go on typing.
-        mustChange.checked = false;
-        type('new-password-1');
-        expect(mustChange.checked).toBe(false);
-        // An emptied box starts again.
-        type('');
-        type('other-password-1');
-        expect(mustChange.checked).toBe(true);
         el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
         await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
-        expect(svcMock.saveUser.mock.calls[0][0]).toMatchObject({ username: 'viewer', password: 'other-password-1', mustChangePassword: true });
-    });
-
-    it('typing a password leaves the switch alone for a new user and for your own account', async () => {
-        const { container } = await setup();
-        const mustChange = el<HTMLInputElement>(container, '#user-mgmt-must-change');
-        const password = el<HTMLInputElement>(container, '#user-mgmt-password');
-        const type = (value: string) => {
-            password.value = value;
-            password.dispatchEvent(new Event('input'));
-        };
-
-        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
-        mustChange.checked = false;
-        type('a-new-users-password');
-        expect(mustChange.checked).toBe(false);
-        el<HTMLButtonElement>(container, '#btn-user-mgmt-cancel').click();
-
-        clickRow(container, 0, '.user-mgmt-edit');   // admin, the session's own account
-        type('my-own-new-password');
-        expect(mustChange.checked).toBe(false);
+        expect(svcMock.saveUser.mock.calls[0][0]).toMatchObject({ username: 'viewer', password: 'new-password-1', mustChangePassword: false });
     });
 
     it('Cancel returns to the list and forgets the typed password', async () => {

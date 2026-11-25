@@ -126,6 +126,8 @@
     font-weight: 600;
 }
 
+/* The bottom padding is the least the sheet has: module.ts sets the blank the
+ * sheet ends in, as tall as the part of the window below the reading line. */
 .manual-sheet {
     padding: 3.5rem 4rem 3rem;
     border: 1px solid var(--border-color);

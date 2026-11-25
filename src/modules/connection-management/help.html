@@ -32,16 +32,16 @@
     </ol>
     <p>The form is the same one you use to edit a connection, so Figure 2 shows it with a connection open.</p>
     <figure class="manual-figure">
-        <img src="help/form.svg" width="760" height="658" alt="The connection form open on east-prod: broker name and broker type, a line, the SEMP part with its scheme button, hostname, port and URL path on one row and the account below, a line, the Client part with its scheme button, messaging hostname, port and URL path on one row, a line, the Message VPN list with its + Add and Retrieve VPNs buttons and two rows, Save and Cancel, and a red message under the form.">
+        <img src="help/form.svg" width="760" height="658" alt="The connection form open on east-prod: broker name and broker type, a line, the SEMP part with its scheme button, hostname and port on one row, a small + URL path button above the end of the row, and the account below, a line, the Client part with its scheme button, messaging hostname and port on one row and its own + URL path button, a line, the Message VPN list with its + Add and Retrieve VPNs buttons and two rows, Save and Cancel, and a red message under the form.">
         <figcaption>The form, editing the connection east-prod.</figcaption>
     </figure>
     <ol class="manual-callouts">
         <li><strong>Broker name</strong>: the name users and the gateway call this broker by.</li>
         <li><strong>Solace Event Broker Type</strong>: <strong>Software / Cloud</strong> for a broker with one hostname, <strong>Appliance</strong> for one with two.</li>
-        <li>The SEMP address on one row, read as a URL: <strong>Scheme</strong>, <strong>Hostname</strong> (where the broker is), <strong>Port</strong> and <strong>URL path</strong>.</li>
+        <li>The SEMP address on one row, read as a URL: <strong>Scheme</strong>, <strong>Hostname</strong> (where the broker is) and <strong>Port</strong>. The small <strong>+ URL path</strong> button above the end of the row adds the optional <strong>URL path</strong> box.</li>
         <li>The SEMP <strong>Username</strong>.</li>
         <li>The SEMP <strong>Password</strong>. While you edit, its hint reads <code>(leave blank to keep current)</code>.</li>
-        <li>The messaging address on one row: <strong>Scheme</strong>, <strong>Messaging hostname</strong>, <strong>Port</strong> and <strong>URL path</strong>. The hostname is locked for a software or cloud broker, where it shows the hostname above.</li>
+        <li>The messaging address on one row: <strong>Scheme</strong>, <strong>Messaging hostname</strong> and <strong>Port</strong>, with a <strong>+ URL path</strong> button of its own. The hostname is locked for a software or cloud broker, where it shows the hostname above.</li>
         <li><strong>+ Add</strong> adds a row to the Message VPN list. <strong>Retrieve VPNs</strong>, beside it, adds a row for each Message VPN the broker holds.</li>
         <li>One row for each Message VPN: its name, the client username and the client password. The cross at the end of a row removes it.</li>
         <li><strong>Save</strong> stores the connection. <strong>Cancel</strong> returns to the list and keeps nothing.</li>
@@ -70,7 +70,7 @@
         <tbody>
             <tr><td><strong>Scheme</strong></td><td>A button with two parts: <code>https</code> (TLS) or <code>http</code> (plain). Choose <code>http</code> only for a broker whose SEMP port does not serve TLS, on a network you trust: the gateway then reaches it unencrypted, and the account's password crosses that hop in clear text.</td><td><code>https</code></td></tr>
             <tr><td><strong>Port</strong></td><td>A whole number from 1 to 65535, in digits only. A blank port is never taken to mean a default. Required when a SEMP username is set. A connection with no SEMP port gives users no management access to the broker.</td><td>Blank</td></tr>
-            <tr><td><strong>URL path</strong></td><td>Only for a broker behind a reverse proxy: the path the proxy serves this broker's SEMP under, such as <code>/proxy/east-prod</code>. The gateway puts it in front of every SEMP request it sends to the broker. Each part of the path holds letters, digits and <code>. _ ~ -</code> only. The form adds a missing <code>/</code> at the start and drops one at the end.</td><td>Blank: no path</td></tr>
+            <tr><td><strong>URL path</strong></td><td>Only for a broker behind a reverse proxy: the path the proxy serves this broker's SEMP under, such as <code>/proxy/east-prod</code>. The box is hidden until you press the small <strong>+ URL path</strong> button above the end of the row; the cross in the box removes the path and hides the box again. A connection saved with a path opens with the box on show. The gateway puts the path in front of every SEMP request it sends to the broker. Each part of the path holds letters, digits and <code>. _ ~ -</code> only. The form adds a missing <code>/</code> at the start and drops one at the end.</td><td>Hidden: no path</td></tr>
             <tr><td><strong>Username</strong></td><td>Up to 32 characters from <code>A-Z a-z 0-9 _ -</code>. It may be left blank.</td><td>Blank</td></tr>
             <tr><td><strong>Password</strong></td><td>The account's password, typed with its characters hidden. The gateway refuses control characters in it and applies no other rule of its own.</td><td>Blank</td></tr>
         </tbody>
@@ -87,7 +87,7 @@
         <tbody>
             <tr><td><strong>Scheme</strong></td><td>A button with two parts: <code>wss</code> (TLS) or <code>ws</code> (plain). Choose <code>ws</code> only for a broker that does not serve TLS on its messaging port, on a network you trust: the credentials of the Message VPNs then cross that hop in clear text.</td><td><code>wss</code></td></tr>
             <tr><td><strong>Port</strong></td><td>As the SEMP port: digits, 1 to 65535. Required once a Message VPN is listed.</td><td>Blank</td></tr>
-            <tr><td><strong>URL path</strong></td><td>As the SEMP URL path, for the messaging socket: the path a reverse proxy serves this broker's messaging under. The two paths are separate, since a proxy may serve SEMP and messaging under different ones.</td><td>Blank: no path</td></tr>
+            <tr><td><strong>URL path</strong></td><td>As the SEMP URL path, for the messaging socket: the path a reverse proxy serves this broker's messaging under, behind a <strong>+ URL path</strong> button of its own. The two paths are separate, since a proxy may serve SEMP and messaging under different ones.</td><td>Hidden: no path</td></tr>
         </tbody>
     </table>
     <p>The two schemes are chosen separately. A connection stored with no scheme shows <code>https</code> and <code>wss</code>.</p>
@@ -110,7 +110,7 @@
     <h4>Retrieve VPNs</h4>
     <p><strong>Retrieve VPNs</strong> fills the list from the broker. The gateway asks the broker for its Message VPNs over SEMP, with the SEMP details the form holds at that moment, and the page adds a row for each Message VPN the list does not name yet. It works before the connection is saved, and nothing is stored until you press <strong>Save</strong>.</p>
     <ol class="manual-steps">
-        <li>Fill in the SEMP part of the form: <strong>Scheme</strong>, <strong>Hostname</strong>, <strong>Port</strong>, <strong>Username</strong> and <strong>Password</strong>, and the <strong>URL path</strong> if the broker is behind a reverse proxy.</li>
+        <li>Fill in the SEMP part of the form: <strong>Scheme</strong>, <strong>Hostname</strong>, <strong>Port</strong>, <strong>Username</strong> and <strong>Password</strong>. If the broker is behind a reverse proxy, press <strong>+ URL path</strong> and type the path.</li>
         <li>Press <strong>Retrieve VPNs</strong>. The button is off until the gateway answers.</li>
         <li>Each row it adds carries the Message VPN's name only. Type its client username and password, and remove the rows of Message VPNs users should not reach.</li>
     </ol>

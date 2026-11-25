@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createOptionalField, type OptionalFieldElements } from '../../../src/modules/connections/optional-field';
-import { loadModuleDOM } from '../../helpers/loadModuleDOM';
+import { createOptionalField, type OptionalFieldElements } from '../../src/core/optional-field';
+import { loadModuleDOM } from '../helpers/loadModuleDOM';
 
 /**
  * The URL Path column of the Direct form's SEMP card, from the real template.
- * tests/modules/connections/module.test.ts > "URL Path on demand" covers both
- * cards through the module.
+ * tests/modules/connections/module.test.ts > "URL Path persistence" covers both
+ * cards through the module, and tests/modules/connection-management/module.test.ts
+ * > "connection-management -- the URL path of each address" the two address
+ * rows of Conn. Mgmt.
  */
 let els: OptionalFieldElements;
 
@@ -23,7 +25,7 @@ beforeEach(() => {
 
 const open = () => els.wrap.classList.contains('is-open');
 
-describe('connections/optional-field', () => {
+describe('core/optional-field', () => {
     it('starts closed over an empty input, and open over a value already there', () => {
         createOptionalField(els);
         expect(open()).toBe(false);

@@ -42,15 +42,15 @@
             <input type="text" id="semp-port" class="form-control">
             <div class="invalid-feedback">Invalid port.</div>
         </div>
-        <!-- Optional: a small "+ URL path" button on the labels' line until it is added (optional-field.ts). -->
-        <div id="semp-url-path-field" class="conn-optional">
+        <!-- Optional: a small "+ URL path" button on the labels' line until it is added (core/optional-field.ts). -->
+        <div id="semp-url-path-field" class="optional-field">
             <label for="semp-url-path">URL Path</label>
-            <div class="conn-optional-input">
+            <div class="optional-field-input">
                 <input type="text" id="semp-url-path" class="form-control">
-                <button type="button" id="btn-semp-url-path-clear" class="btn-icon conn-optional-clear"
+                <button type="button" id="btn-semp-url-path-clear" class="btn-icon optional-field-clear"
                     title="Remove the URL path" aria-label="Remove the URL path">&#x2715;</button>
             </div>
-            <button type="button" id="btn-semp-url-path-add" class="btn btn-secondary btn-sm conn-optional-add"
+            <button type="button" id="btn-semp-url-path-add" class="btn btn-secondary btn-sm optional-field-add"
                 title="Add a path after the port, before /SEMP (e.g. behind a reverse proxy)">+ URL path</button>
         </div>
     </div>
@@ -114,15 +114,15 @@
             <input type="text" id="solace-port" class="form-control">
             <div class="invalid-feedback">Invalid port.</div>
         </div>
-        <!-- Optional: a small "+ URL path" button on the labels' line until it is added (optional-field.ts). -->
-        <div id="solace-url-path-field" class="conn-optional">
+        <!-- Optional: a small "+ URL path" button on the labels' line until it is added (core/optional-field.ts). -->
+        <div id="solace-url-path-field" class="optional-field">
             <label for="solace-url-path">URL Path</label>
-            <div class="conn-optional-input">
+            <div class="optional-field-input">
                 <input type="text" id="solace-url-path" class="form-control">
-                <button type="button" id="btn-solace-url-path-clear" class="btn-icon conn-optional-clear"
+                <button type="button" id="btn-solace-url-path-clear" class="btn-icon optional-field-clear"
                     title="Remove the URL path" aria-label="Remove the URL path">&#x2715;</button>
             </div>
-            <button type="button" id="btn-solace-url-path-add" class="btn btn-secondary btn-sm conn-optional-add"
+            <button type="button" id="btn-solace-url-path-add" class="btn btn-secondary btn-sm optional-field-add"
                 title="Add a path after the port (e.g. behind a reverse proxy)">+ URL path</button>
         </div>
     </div>

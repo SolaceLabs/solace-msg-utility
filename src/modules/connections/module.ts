@@ -27,7 +27,7 @@ import { INPUT_DEBOUNCE_MS } from '../../core/timing';
 import { logger } from '../../core/logger';
 import { required } from '../../core/dom';
 import { normalizeUrlPath, generateUuid, sdkClientName, sempAccountError, clientUsernameError } from '../../core/utils';
-import { createOptionalField } from './optional-field';
+import { createOptionalField } from '../../core/optional-field';
 import { createBrokerHosts } from '../../core/connections/broker-hosts';
 import { isHostedDeployment, limitSchemeOptions, probeDeployment, usableScheme } from '../../core/hosted';
 import { DEFAULT_CONN_CONFIG } from '../../core/connections/conn-modes';

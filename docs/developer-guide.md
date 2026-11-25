@@ -120,7 +120,7 @@ A **flavor** is a build-time toggle of *how a module behaves*, orthogonal to whi
 
 ### Build internals
 
-`vite.config.ts` uses [vite-plugin-singlefile](https://github.com/nicolo-ribaudo/vite-plugin-singlefile) to inline all JS and CSS into a single HTML per variant. Settings of note:
+`vite.config.ts` uses [vite-plugin-singlefile](https://github.com/richardtallent/vite-plugin-singlefile) to inline all JS and CSS into a single HTML per variant. Settings of note:
 
 - **Target**: ESNext
 - **CSS**: inlined (no code splitting)
@@ -162,6 +162,8 @@ src/
                        # the Direct form's Basic / OAuth2, Conn. Mgmt's schemes); the pressed button is the choice
     slide-choice.ts    # createSlideChoice(): wires a .slide-choice, a switch with an answer on either side (Queue Copy's
                        # Queue / Topic and Copy / Move, User Management's Modules); off is the first answer, on the second
+    optional-field.ts  # createOptionalField(): wires an .optional-field, a box that shows only a small add button until
+                       # it is needed (the URL path of the Direct form's cards and of Conn. Mgmt's address rows)
     utils.ts           # Pure utilities (escapeHtml, escapeXml, formatBytes, generateUuid, matchString,
                        # matchContains, topicsIntersect, topicFilterMatches, normalizeUrlPath, errMessage,
                        # solaceErrorText, isValidHost, isValidPort)
@@ -233,7 +235,6 @@ src/
       module.managed.ts # Provisioned entry (the managed variant): tab bar + installDirect + panel
       managed-panel.ts # The Provisioned tab -- gateway session restore, provisioned dropdowns, browser guardrails
       vpn-switch.ts    # The VPN switch both modes share (connection:check-connection)
-      optional-field.ts # The URL Path of a card: a small "+ URL path" button until a path is added
       config.js        # localStorage persistence (values obfuscated at rest)
       ui.js            # Element caching, auth mode, visual feedback
       styles.css       # Module-scoped styles
@@ -648,6 +649,7 @@ Styles are split by responsibility ([architecture.md -> CSS Organization](archit
   - `.form-cols` for fields side by side, `.input-with-search` and `.input-search-btn` for a text box with a pick button, `.banner-warning` for a warning box, in a card or above one: every warning on a page has this one look.
   - `.btn` with `.btn-primary`, `.btn-secondary` or `.btn-danger`; `.btn-compact` for a button beside a sub-title or under a short list.
   - `.tabs` and `.tab` (the open one is `is-active`) for a strip of tabs, `.segmented` for a choice between a few options (wired by `createSegmented`).
+  - `.optional-field` for a box of a row that few people need, with `.optional-field-input`, `.optional-field-clear` and `.optional-field-add` inside it (wired by `createOptionalField`): the row shows only a small add button until the box is opened, and a box that holds a value is always on show.
   - A choice between exactly two named answers can be a `.segmented` or a `.slide-choice` (a switch with an answer on either side, wired by `createSlideChoice`); the admin pages use one of the two for every such setting. Both helpers give the same `value()`, `set()`, `setDisabled()` and `onChange()`. Inside a `.form-group` the switch of a slide choice is a `span.switch`, not a `label`, so the field's label rule leaves it alone.
   - An on/off setting is a `.switch` (inside a `label.switch-field` when it has text). A tick box is for a row of a table and a radio for one choice of a few; both are styled by element, so they need no class. A `select.form-control` draws the queue picker's chevron.
   - `.data-table`, `.data-table-frame` and `.data-table-actions` (the column of a row's buttons).

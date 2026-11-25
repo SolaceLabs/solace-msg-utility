@@ -10,9 +10,10 @@
  * by the build (`readModuleView` in scripts/module-registry-plugin.mjs). One
  * chapter shows at a time, like a manual opened at a chapter; the Contents
  * list beside it turns to a chapter or to one of its sections, and marks the
- * section being read as the reader scrolls. A demo build,
- * and a bundle none of whose modules has a chapter, ships no Help tab: the
- * template then holds the About card alone.
+ * section being read as the reader scrolls; the sheet ends in blank paper so
+ * that the last section of a chapter can be scrolled far enough to be marked.
+ * A demo build, and a bundle none of whose modules has a chapter, ships no Help
+ * tab: the template then holds the About card alone.
  */
 import { required } from '../../core/dom';
 import type { AppContext } from '../../core/types';
@@ -31,9 +32,10 @@ function contentsButton(label: string, className: string, onClick: () => void): 
 
 /**
  * How far down the pane the reading line sits, as the share of the pane below
- * it: a section counts as being read once its heading is above the line.
+ * it, in percent: a section counts as being read once its heading is above the
+ * line.
  */
-const BELOW_READING_LINE = '60%';
+const BELOW_READING_LINE = 60;
 
 /**
  * The pane an element is read in: its nearest ancestor that scrolls its
@@ -69,7 +71,7 @@ function followReading(sheet: HTMLElement, entries: Map<Element, HTMLElement>): 
         }
         const reading = headings.filter(heading => passed.has(heading)).at(-1);
         entries.forEach((entry, heading) => entry.classList.toggle('is-reading', heading === reading));
-    }, { root: scrollPaneOf(sheet), rootMargin: `100000px 0px -${BELOW_READING_LINE} 0px` });
+    }, { root: scrollPaneOf(sheet), rootMargin: `100000px 0px -${BELOW_READING_LINE}% 0px` });
     headings.forEach(heading => observer.observe(heading));
 }
 
@@ -141,6 +143,12 @@ function installManual(container: HTMLElement): void {
 
     prev.addEventListener('click', () => turnTo(current - 1));
     next.addEventListener('click', () => turnTo(current + 1));
+
+    // The sheet ends in blank paper as tall as the part of the window below the
+    // reading line, so the last heading of a chapter can always be scrolled past
+    // the line and marked, however short its section. The pane is never taller
+    // than the window, so the blank is never too short.
+    sheet.style.paddingBottom = `${BELOW_READING_LINE}vh`;
 
     // Opened at the first chapter without scrolling: the page is not on screen yet.
     show(0);

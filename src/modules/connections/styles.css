@@ -1,45 +1,6 @@
 /* Connections module — mostly relies on shell + generic components.
- * Add module-specific selectors (e.g. `.conn-optional`, `.conn-ssl-*`) here if/when
+ * Add module-specific selectors (e.g. `.conn-probe-*`, `.conn-ssl-*`) here if/when
  * they need styling beyond what the design system provides. */
-
-/* The URL Path columns (optional-field.ts). Closed (no `is-open`): the column
- * holds only the small add button, on the labels' line, and takes its width.
- * Open: the label and the input with its clear button, as wide as the
- * protocol box. */
-.conn-optional:not(.is-open) {
-    flex-shrink: 0;
-}
-
-.conn-optional.is-open {
-    width: 150px;
-}
-
-.conn-optional:not(.is-open) > label,
-.conn-optional:not(.is-open) > .conn-optional-input,
-.conn-optional.is-open > .conn-optional-add {
-    display: none;
-}
-
-.conn-optional-input {
-    position: relative;
-}
-
-.conn-optional-input > .form-control {
-    padding-right: 1.75rem;
-}
-
-.conn-optional-clear {
-    position: absolute;
-    top: 50%;
-    right: 0.25rem;
-    transform: translateY(-50%);
-    font-size: 0.75rem;
-    line-height: 1;
-}
-
-.conn-optional-add {
-    white-space: nowrap;
-}
 
 /* The inconclusive-/hosted notice (module.ts, module.managed.ts): the message
  * with its Retry button beside it. */
