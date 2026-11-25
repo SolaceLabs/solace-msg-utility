@@ -524,10 +524,10 @@ Press the filter button (4 in Figure 1) to open **Filter Messages**. A filter ch
 
 *Figure 3. Filter Messages, set to find messages for one topic branch or one correlation ID.*
 
-1. **Search Criteria**. **Match ANY (OR)** shows a message that passes at least one of the rules you filled in. **Match ALL (AND)** shows only a message that passes every one.
+1. **Search Criteria**, a switch with an answer on either side. **Match ANY (OR)**, where it starts, shows a message that passes at least one of the rules you filled in. **Match ALL (AND)** shows only a message that passes every one.
 2. **Message ID** and **Message Type** (Any, Text, Binary, Map or Stream).
 3. **Destination Name** and its **Type** (Any, Topic or Queue).
-4. **Properties Filter**. Press **+ Add** for each property to test. The key is the name of a standard or an application property, in any letter case; the key box suggests the standard ones: App Msg Id, Cache Id, Corr Id, Delivery Count, Delivery Mode, HTTP Encoding, HTTP Type, Priority, Reply To, Sender Id, SeqNumber, TTL and TopicSeqNum.
+4. **Properties Filter**. Press the small **+ Add** button beside the title for each property to test. The key is the name of a standard or an application property, in any letter case; the key box suggests the standard ones: App Msg Id, Cache Id, Corr Id, Delivery Count, Delivery Mode, HTTP Encoding, HTTP Type, Priority, Reply To, Sender Id, SeqNumber, TTL and TopicSeqNum.
 5. **Body Content**: text the payload must contain, in any letter case. A binary payload that is not text never matches.
 6. **Search Time Range**: the sender's timestamp must be at or after **Newer than**, and at or before **Older than**. Fill in either or both. A message without a timestamp is left out once either is set.
 7. **Apply Filter** filters the table. **Clear Filter** removes every rule and shows all messages. **Cancel** closes the dialog and changes nothing.

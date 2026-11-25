@@ -211,15 +211,17 @@
 <dialog id="browser-filter-modal" class="modal-lg" aria-labelledby="browser-filter-modal-title">
     <h3 id="browser-filter-modal-title" class="mb-4">Filter Messages</h3>
 
-        <!-- Criteria Selection -->
+        <!-- Criteria Selection: a slide choice (core/slide-choice.ts). Unchecked = Match ANY (OR), checked = Match ALL (AND). -->
         <div class="form-group flex-row items-center gap-4">
-            <label class="font-bold m-0">Search Criteria:</label>
-            <label class="flex-row items-center gap-2 font-normal cursor-pointer m-0">
-                <input type="radio" name="filter-criteria" value="OR" checked> Match ANY (OR)
-            </label>
-            <label class="flex-row items-center gap-2 font-normal cursor-pointer m-0">
-                <input type="radio" name="filter-criteria" value="AND"> Match ALL (AND)
-            </label>
+            <label id="filter-criteria-label" class="font-bold m-0">Search Criteria:</label>
+            <div class="slide-choice" id="filter-criteria" role="group" aria-labelledby="filter-criteria-label">
+                <span class="slide-choice-label active" data-choice="OR">Match ANY (OR)</span>
+                <span class="switch" title="Toggle between Match ANY (OR) and Match ALL (AND)">
+                    <input type="checkbox" id="filter-criteria-toggle" aria-label="Match ALL (AND)">
+                    <span class="switch-slider"></span>
+                </span>
+                <span class="slide-choice-label" data-choice="AND">Match ALL (AND)</span>
+            </div>
         </div>
 
         <!-- Message ID & Type -->
@@ -256,9 +258,9 @@
             </div>
         </div>
 
-        <!-- Properties Filter -->
+        <!-- Properties Filter: its + Add button sits right after the title. -->
         <div class="form-group">
-            <div class="flex-row justify-between items-center mb-2">
+            <div class="flex-row items-center gap-2 mb-2">
                 <label class="m-0">Properties Filter (Key / Value)</label>
                 <button id="btn-add-prop-filter" class="btn btn-secondary btn-sm">+ Add</button>
             </div>

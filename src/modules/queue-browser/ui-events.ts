@@ -204,8 +204,8 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         els.inputFilterDest.value = '';
         els.inputFilterType.value = 'ANY';
         els.inputFilterMsgType.value = 'ANY';
-        // Reset Radio (Default OR) — NodeList from querySelectorAll, never null.
-        els.radFilterCriteria.forEach((r: HTMLInputElement) => r.checked = (r.value === 'OR'));
+        // The match choice starts again at Match ANY (OR).
+        els.filterCriteria.set('OR');
 
         state.displayedMessages = state.allMessages;
 
@@ -230,7 +230,7 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         els.inputFilterMsgType.value = 'ANY';
         els.inputFilterNewerThan.value = '';
         els.inputFilterOlderThan.value = '';
-        els.radFilterCriteria.forEach((r: HTMLInputElement) => r.checked = (r.value === 'OR'));
+        els.filterCriteria.set('OR');
 
         // Clear Properties — installed by initDetails (which initElements depends on at install time).
         ui.clearPropertyFilters();
@@ -270,9 +270,7 @@ export function createUiEvents(ctx: AppContext, service: ReturnType<typeof creat
         state.activeFilters.properties = ui.getPropertyFilters();
 
         // Logic
-        els.radFilterCriteria.forEach((r: HTMLInputElement) => {
-            if (r.checked) state.activeFilters.criteria = r.value;
-        });
+        state.activeFilters.criteria = els.filterCriteria.value();
 
         // Use shared filter logic
         state.displayedMessages = state.allMessages.filter(shouldShowMessage);

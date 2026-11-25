@@ -2,8 +2,8 @@
  * Add module-specific selectors (e.g. `.conn-probe-*`, `.conn-ssl-*`) here if/when
  * they need styling beyond what the design system provides. */
 
-/* The inconclusive-/hosted notice (module.ts, module.managed.ts): the message
- * with its Retry button beside it. */
+/* The inconclusive-/hosted notice (module.ts, module.managed.ts), a warning
+ * box above the cards: the message with its Retry button beside it. */
 .conn-probe-notice {
     display: flex;
     flex-wrap: wrap;

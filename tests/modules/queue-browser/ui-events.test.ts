@@ -597,15 +597,13 @@ describe('queue-browser/ui-events', () => {
             expect(els.btnFilter.classList.contains('filter-active')).toBe(false);
         });
 
-        it('resets radio buttons to OR', () => {
-            const radios = els.radFilterCriteria;
-            radios[1].checked = true; // AND
-            radios[0].checked = false;
+        it('resets the match choice to Match ANY (OR)', () => {
+            els.filterCriteria.set('AND');
 
             els.selectBound.value = 'q1';
             uiEvents.handleDropdownChange();
 
-            expect(radios[0].checked).toBe(true); // OR
+            expect(els.filterCriteria.value()).toBe('OR');
         });
 
         it('initializes empty allMessages when no messageStore entry and not mocks', () => {
@@ -669,13 +667,11 @@ describe('queue-browser/ui-events', () => {
             expect(els.modalFilter.open).toBe(true);
         });
 
-        it('resets radio buttons to OR', () => {
-            const radios = els.radFilterCriteria;
-            radios[1].checked = true;
-            radios[0].checked = false;
+        it('resets the match choice to Match ANY (OR)', () => {
+            els.filterCriteria.set('AND');
 
             uiEvents.clearFilters();
-            expect(radios[0].checked).toBe(true);
+            expect(els.filterCriteria.value()).toBe('OR');
         });
 
         it('removes the property filter rows', () => {
@@ -799,14 +795,17 @@ describe('queue-browser/ui-events', () => {
             expect(els.btnFilter.classList.contains('filter-active')).toBe(true);
         });
 
-        it('reads criteria from radio buttons', () => {
-            const radios = els.radFilterCriteria;
-            radios[0].checked = false;
-            radios[1].checked = true; // AND
-
+        it('reads the match choice from its slide switch: off is OR, on is AND', () => {
+            const toggle = ctx.container.querySelector<HTMLInputElement>('#filter-criteria-toggle')!;
             state.allMessages = [];
             uiEvents.applyFilters();
+            expect(state.activeFilters.criteria).toBe('OR');
+
+            toggle.click();
+            uiEvents.applyFilters();
             expect(state.activeFilters.criteria).toBe('AND');
+            // The answer in use is the one marked.
+            expect(ctx.container.querySelector('#filter-criteria .slide-choice-label.active')!.textContent).toBe('Match ALL (AND)');
         });
 
         it('hides filter modal after apply', () => {

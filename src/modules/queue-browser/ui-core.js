@@ -1,6 +1,7 @@
 import { state, defaultActiveFilters } from './state.js';
 import { formatBytes, generateUuid } from '../../core/utils';
 import { required } from '../../core/dom';
+import { createSlideChoice } from '../../core/slide-choice';
 import { showPayload } from './features.js';
 
 /** @type {any} */
@@ -106,7 +107,8 @@ ui.initElements = function (container) {
     els.inputFilterType = container.querySelector('#filter-destination-type');
     els.inputFilterNewerThan = required(container, '#filter-newer-than');
     els.inputFilterOlderThan = required(container, '#filter-older-than');
-    els.radFilterCriteria = container.querySelectorAll('input[name="filter-criteria"]');
+    // The match choice is a control, not an element: value() and set() are 'OR' or 'AND'.
+    els.filterCriteria = createSlideChoice(required(container, '#filter-criteria'), { choices: ['OR', 'AND'] });
     els.btnAddPropFilter = container.querySelector('#btn-add-prop-filter');
     els.filterPropsRows = container.querySelector('#filter-properties-rows');
 
@@ -204,7 +206,7 @@ ui.resetQueueSelection = function () {
     els.inputFilterMsgType.value = 'ANY';
     els.inputFilterNewerThan.value = '';
     els.inputFilterOlderThan.value = '';
-    els.radFilterCriteria.forEach((/** @type {HTMLInputElement} */ r) => r.checked = (r.value === 'OR'));
+    els.filterCriteria.set('OR');
 
     els.btnFilter.classList.remove('filter-active');
     els.btnFilter.disabled = true;

@@ -80,14 +80,17 @@
 
 /* A warning box: what stands in the way, or what a choice costs. The one look
  * of every warning on a page, and that of the manual's Warning note: a bar of
- * the warning colour on the left, a pale ground and black text. */
+ * the warning colour on the left, a pale ground and the manual's ink. Above a
+ * card it is as wide as the card at most, so the two line up on a very wide
+ * screen. */
 .banner-warning {
+    max-width: 2048px;
     padding: 0.5rem 0.75rem;
     margin-bottom: 1rem;
     border-left: 4px solid var(--status-warning);
     border-radius: 0 var(--radius-md) var(--radius-md) 0;
     background-color: #fffbeb;
-    color: #000;
+    color: #1f2937;
     font-size: 0.9rem;
 }
 
@@ -528,13 +531,15 @@ a.btn {
     color: var(--status-disconnected);
 }
 
+/* The smallest button: on the line of a title or of a row's labels (a list's
+ * + Add, + URL path), and the actions above the message details. */
 .btn-sm {
     padding: 0.25rem 0.5rem;
     font-size: 0.5rem;
 }
 
-/* A button beside a sub-title or under a short list: smaller than .btn, its
- * text the size of a field's label. */
+/* A button under a short list: smaller than .btn, its text the size of a
+ * field's label. */
 .btn-compact {
     padding: 0.375rem 0.875rem;
     font-size: 0.875rem;

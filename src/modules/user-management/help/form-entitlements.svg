@@ -9,10 +9,10 @@
     <circle cx="730" cy="67" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="730" y="71" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
     <text x="40" y="112" font-weight="700">Operate entitlements (read + write)</text>
-    <rect x="304" y="96" width="64" height="24" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
-    <text x="336" y="111.667" font-size="11" font-weight="700" text-anchor="middle">+ Add</text>
-    <circle cx="392" cy="108" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="392" y="112" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <rect x="304" y="100" width="44" height="16" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="326" y="111" font-size="9" font-weight="700" text-anchor="middle">+ Add</text>
+    <circle cx="372" cy="108" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="372" y="112" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
     <text x="40" y="134" font-size="11" fill="#64748b" font-weight="700">Brokers</text>
     <text x="240" y="134" font-size="11" fill="#64748b" font-weight="700">Message VPNs</text>
     <text x="440" y="134" font-size="11" fill="#64748b" font-weight="700">Queues</text>
@@ -37,10 +37,10 @@
     <circle cx="685" cy="188" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
     <text x="685" y="192" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
     <text x="40" y="238" font-weight="700">Read-only entitlements</text>
-    <rect x="210" y="222" width="64" height="24" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
-    <text x="242" y="237.667" font-size="11" font-weight="700" text-anchor="middle">+ Add</text>
-    <circle cx="298" cy="234" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="298" y="238" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+    <rect x="210" y="226" width="44" height="16" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="232" y="237" font-size="9" font-weight="700" text-anchor="middle">+ Add</text>
+    <circle cx="278" cy="234" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="278" y="238" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
     <text x="40" y="260" font-size="11" fill="#64748b" font-weight="700">Brokers</text>
     <text x="240" y="260" font-size="11" fill="#64748b" font-weight="700">Message VPNs</text>
     <text x="440" y="260" font-size="11" fill="#64748b" font-weight="700">Queues</text>

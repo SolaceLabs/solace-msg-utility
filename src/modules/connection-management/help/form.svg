@@ -61,12 +61,12 @@
     <text x="730" y="366" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
     <line x1="60" y1="403" x2="690" y2="403" stroke="#e2e8f0"/>
     <text x="60" y="430" font-weight="700">Message VPNs (name / user / password)</text>
-    <rect x="340" y="415" width="60" height="22" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
-    <text x="370" y="429.667" font-size="11" font-weight="700" text-anchor="middle">+ Add</text>
-    <rect x="408" y="415" width="110" height="22" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
-    <text x="463" y="429.667" font-size="11" font-weight="700" text-anchor="middle">Retrieve VPNs</text>
-    <circle cx="542" cy="426" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
-    <text x="542" y="430" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
+    <rect x="340" y="418" width="44" height="16" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="362" y="429" font-size="9" font-weight="700" text-anchor="middle">+ Add</text>
+    <rect x="390" y="418" width="86" height="16" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="433" y="429" font-size="9" font-weight="700" text-anchor="middle">Retrieve VPNs</text>
+    <circle cx="500" cy="426" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="500" y="430" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
     <text x="60" y="458" font-size="11" fill="#64748b" font-weight="700">Message VPN</text>
     <text x="258" y="458" font-size="11" fill="#64748b" font-weight="700">Client username</text>
     <text x="456" y="458" font-size="11" fill="#64748b" font-weight="700">Client password</text>
